@@ -260,6 +260,10 @@ message ExportRecord {
   // Original write timestamp. Populated during cross-node migration to
   // preserve chunk ordering on the destination node.
   google.protobuf.Timestamp write_ts = 8;
+
+  // EventID fields for record identity and deduplication.
+  uint32 ingest_seq = 9;   // Per-ingester rolling sequence counter
+  bytes ingester_id = 10;  // 16-byte UUID
 }
 
 // ImportRecords appends a batch of records to a vault.

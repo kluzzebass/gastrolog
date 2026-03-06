@@ -220,7 +220,7 @@ func applyOperator(op PipeOp, fields fieldSet) fieldSet {
 		}
 		return result
 
-	case *WhereOp, *SortOp, *HeadOp, *TailOp, *SliceOp, *RawOp:
+	case *WhereOp, *SortOp, *HeadOp, *TailOp, *SliceOp, *DedupOp, *RawOp:
 		// Pass-through operators don't change the field set.
 		return fields
 

@@ -1,6 +1,7 @@
 package query
 
 import (
+	"context"
 	"time"
 
 	"github.com/google/uuid"
@@ -8,20 +9,21 @@ import (
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.
 type HistogramBucket struct {
-	TimestampMs int64              // Bucket start (milliseconds since epoch)
-	Count       int64              // Total records in this bucket
-	GroupCounts map[string]int64   // Level → count; records without level → "other"
+	TimestampMs int64            // Bucket start (milliseconds since epoch)
+	Count       int64            // Total records in this bucket
+	GroupCounts map[string]int64 // Level → count; records without level → "other"
 }
 
 const histogramGroupField = "level"
 
 // ComputeHistogram returns an approximate volume histogram grouped by level
-// for the given query's time range. Uses the fast binary-search path for totals
-// and per-bucket attr sampling for the level breakdown.
+// for the given query's time range.
 //
-// This is intentionally lightweight: it's designed to piggyback on every search
-// response as a heatmap signal, not as an exact analytical result.
-func (e *Engine) ComputeHistogram(q Query, numBuckets int) []HistogramBucket {
+// When the query has no filter expression, uses the fast binary-search path
+// for totals and per-bucket attr sampling for the level breakdown.
+// When a filter is present, falls back to a record scan so the histogram
+// reflects the filtered result set.
+func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) []HistogramBucket {
 	numBuckets = clampBuckets(numBuckets)
 	selectedVaults := e.timechartVaults(q)
 
@@ -48,15 +50,18 @@ func (e *Engine) ComputeHistogram(q Query, numBuckets int) []HistogramBucket {
 		groupCounts[i] = make(map[string]int64)
 	}
 
-	e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts)
-	e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, histogramGroupField, groupCounts)
+	hasFilter := q.BoolExpr != nil
+	_, _ = e.runTimechartStrategy(ctx, q, nil, selectedVaults,
+		start, end, bucketWidth, numBuckets,
+		hasFilter, false, true, histogramGroupField,
+		counts, groupCounts)
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts)
 }
 
 // ComputeHistogramForVaults computes a histogram for specific vaults only.
 // Used by the forward search handler to compute a per-node histogram.
-func (e *Engine) ComputeHistogramForVaults(q Query, numBuckets int, vaultIDs []uuid.UUID) []HistogramBucket {
+func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuckets int, vaultIDs []uuid.UUID) []HistogramBucket {
 	numBuckets = clampBuckets(numBuckets)
 
 	if q.Start.IsZero() || q.End.IsZero() {
@@ -82,8 +87,11 @@ func (e *Engine) ComputeHistogramForVaults(q Query, numBuckets int, vaultIDs []u
 		groupCounts[i] = make(map[string]int64)
 	}
 
-	e.timechartFastPath(vaultIDs, start, end, bucketWidth, numBuckets, counts)
-	e.timechartAttrScanGroups(vaultIDs, start, end, bucketWidth, numBuckets, histogramGroupField, groupCounts)
+	hasFilter := q.BoolExpr != nil
+	_, _ = e.runTimechartStrategy(ctx, q, nil, vaultIDs,
+		start, end, bucketWidth, numBuckets,
+		hasFilter, false, true, histogramGroupField,
+		counts, groupCounts)
 
 	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts)
 }

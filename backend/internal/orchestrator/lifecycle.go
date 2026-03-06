@@ -161,17 +161,13 @@ func (o *Orchestrator) digestLoop(ctx context.Context) {
 
 // digestAndForward digests a single message and sends the result to digestedCh.
 func (o *Orchestrator) digestAndForward(msg IngestMessage) {
-	// Stamp identity attrs so records are traceable to the ingesting node and ingester.
-	if o.localNodeID != "" || msg.IngesterID != "" {
+	// Stamp node_id attr so records are traceable to the ingesting node.
+	// IngesterID is now a first-class field on EventID, not an attribute.
+	if o.localNodeID != "" {
 		if msg.Attrs == nil {
-			msg.Attrs = make(map[string]string, 2)
+			msg.Attrs = make(map[string]string, 1)
 		}
-		if o.localNodeID != "" {
-			msg.Attrs["node_id"] = o.localNodeID
-		}
-		if msg.IngesterID != "" {
-			msg.Attrs["ingester_id"] = msg.IngesterID
-		}
+		msg.Attrs["node_id"] = o.localNodeID
 	}
 
 	// Apply digester pipeline (enriches attrs based on message content).
@@ -189,6 +185,20 @@ func (o *Orchestrator) digestAndForward(msg IngestMessage) {
 		IngestTS: msg.IngestTS,
 		Attrs:    msg.Attrs,
 		Raw:      msg.Raw,
+	}
+
+	// Assign EventID when ingester identity is available.
+	if msg.IngesterID != "" {
+		seq := o.ingestSeqs[msg.IngesterID]
+		o.ingestSeqs[msg.IngesterID] = seq + 1
+		ingesterUUID, err := uuid.Parse(msg.IngesterID)
+		if err == nil {
+			rec.EventID = chunk.EventID{
+				IngesterID: ingesterUUID,
+				IngestTS:   msg.IngestTS,
+				IngestSeq:  seq,
+			}
+		}
 	}
 
 	o.digestedCh <- digestedRecord{

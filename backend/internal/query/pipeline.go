@@ -186,7 +186,7 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 			headN = o.N
 		case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
 			return 0 // sort, tail, and slice require all records
-		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp, *querylang.LookupOp:
+		case *querylang.WhereOp, *querylang.EvalOp, *querylang.RenameOp, *querylang.FieldsOp, *querylang.LookupOp, *querylang.DedupOp:
 			// these are fine
 		default:
 			return 0
@@ -265,6 +265,8 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 		switch o := op.(type) {
 		case *querylang.WhereOp:
 			records = applyRecordWhere(records, o)
+		case *querylang.DedupOp:
+			records = applyRecordDedup(records, parseDedupWindow(o.Window))
 		case *querylang.EvalOp:
 			records, err = applyRecordEval(records, o, eval)
 		case *querylang.SortOp:
@@ -303,8 +305,8 @@ func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *qu
 }
 
 // recordsToTable converts a slice of records into a flat TableResult.
-// Columns are: _write_ts, _ingest_ts, _source_ts, then all field keys
-// (extracted KV/JSON + attributes, sorted), then _raw.
+// Columns are: write_ts, ingest_ts, source_ts, then all field keys
+// (extracted KV/JSON + attributes, sorted), then raw.
 func recordsToTable(records []chunk.Record) *TableResult {
 	// Materialize extracted fields so they appear as columns.
 	materializeFields(records)
@@ -320,9 +322,9 @@ func recordsToTable(records []chunk.Record) *TableResult {
 
 	// Build column list: timestamps, attrs, raw.
 	columns := make([]string, 0, 3+len(attrKeys)+1)
-	columns = append(columns, "_write_ts", "_ingest_ts", "_source_ts")
+	columns = append(columns, "write_ts", "ingest_ts", "source_ts")
 	columns = append(columns, attrKeys...)
-	columns = append(columns, "_raw")
+	columns = append(columns, "raw")
 
 	rows := make([][]string, len(records))
 	for i, rec := range records {

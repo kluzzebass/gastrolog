@@ -117,6 +117,12 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 			rec.Attrs = make(chunk.Attributes, len(exportRec.GetAttrs()))
 			maps.Copy(rec.Attrs, exportRec.GetAttrs())
 		}
+		// Populate EventID from proto fields.
+		rec.EventID.IngestSeq = exportRec.GetIngestSeq()
+		if len(exportRec.GetIngesterId()) == 16 {
+			copy(rec.EventID.IngesterID[:], exportRec.GetIngesterId())
+		}
+		rec.EventID.IngestTS = rec.IngestTS
 
 		if err := s.recordAppender(ctx, vaultID, rec); err != nil {
 			return nil, status.Errorf(codes.Internal, "append record: %v", err)
@@ -143,6 +149,12 @@ func exportRecordToChunk(er *gastrologv1.ExportRecord) chunk.Record {
 		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
 		maps.Copy(rec.Attrs, er.GetAttrs())
 	}
+	// Populate EventID from proto fields.
+	rec.EventID.IngestSeq = er.GetIngestSeq()
+	if len(er.GetIngesterId()) == 16 {
+		copy(rec.EventID.IngesterID[:], er.GetIngesterId())
+	}
+	rec.EventID.IngestTS = rec.IngestTS
 	return rec
 }
 
@@ -260,16 +272,21 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 // search executor in main.go.
 func RecordToExportRecord(rec chunk.Record) *gastrologv1.ExportRecord {
 	er := &gastrologv1.ExportRecord{
-		Raw:     rec.Raw,
-		VaultId: rec.VaultID.String(),
-		ChunkId: rec.Ref.ChunkID.String(),
-		Pos:     rec.Ref.Pos,
+		Raw:        rec.Raw,
+		VaultId:    rec.VaultID.String(),
+		ChunkId:    rec.Ref.ChunkID.String(),
+		Pos:        rec.Ref.Pos,
+		IngestSeq:  rec.EventID.IngestSeq,
+		IngesterId: rec.EventID.IngesterID[:],
 	}
 	if !rec.SourceTS.IsZero() {
 		er.SourceTs = timestamppb.New(rec.SourceTS)
 	}
 	if !rec.IngestTS.IsZero() {
 		er.IngestTs = timestamppb.New(rec.IngestTS)
+	}
+	if !rec.WriteTS.IsZero() {
+		er.WriteTs = timestamppb.New(rec.WriteTS)
 	}
 	if len(rec.Attrs) > 0 {
 		er.Attrs = make(map[string]string, len(rec.Attrs))

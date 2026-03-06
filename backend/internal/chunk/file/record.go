@@ -7,31 +7,37 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
+
+	"github.com/google/uuid"
 )
 
-// idx.log entry layout (38 bytes):
+// idx.log entry layout (58 bytes):
 //
-//	sourceTS   (8 bytes, int64, Unix nanoseconds, 0 if not available)
-//	ingestTS   (8 bytes, int64, Unix nanoseconds)
-//	writeTS    (8 bytes, int64, Unix nanoseconds)
-//	rawOffset  (4 bytes, uint32, byte offset into raw.log data section)
-//	rawSize    (4 bytes, uint32, length of raw data)
-//	attrOffset (4 bytes, uint32, byte offset into attr.log data section)
-//	attrSize   (2 bytes, uint16, length of encoded attributes)
+//	sourceTS    (8 bytes, int64, Unix nanoseconds, 0 if not available)
+//	ingestTS    (8 bytes, int64, Unix nanoseconds)
+//	writeTS     (8 bytes, int64, Unix nanoseconds)
+//	rawOffset   (4 bytes, uint32, byte offset into raw.log data section)
+//	rawSize     (4 bytes, uint32, length of raw data)
+//	attrOffset  (4 bytes, uint32, byte offset into attr.log data section)
+//	attrSize    (2 bytes, uint16, length of encoded attributes)
+//	ingestSeq   (4 bytes, uint32, per-ingester rolling counter)
+//	ingesterID  (16 bytes, UUID binary)
 const (
-	IdxEntrySize = 38
+	IdxEntrySize = 58
 
-	idxSourceTSOffset   = 0
-	idxIngestTSOffset   = 8
-	idxWriteTSOffset    = 16
-	idxRawOffsetOffset  = 24
-	idxRawSizeOffset    = 28
-	idxAttrOffsetOffset = 32
-	idxAttrSizeOffset   = 36
+	idxSourceTSOffset    = 0
+	idxIngestTSOffset    = 8
+	idxWriteTSOffset     = 16
+	idxRawOffsetOffset   = 24
+	idxRawSizeOffset     = 28
+	idxAttrOffsetOffset  = 32
+	idxAttrSizeOffset    = 36
+	idxIngestSeqOffset   = 38
+	idxIngesterIDOffset  = 42
 
 	// File versions.
 	RawLogVersion    = 0x01
-	IdxLogVersion    = 0x01
+	IdxLogVersion    = 0x02
 	AttrLogVersion   = 0x01
 	AttrDictVersion  = 0x01
 
@@ -60,13 +66,15 @@ type IdxEntry struct {
 	SourceTS   time.Time // When the log was generated (zero if not available)
 	IngestTS   time.Time
 	WriteTS    time.Time
-	RawOffset  uint32 // Byte offset into raw.log (after header)
+	RawOffset  uint32    // Byte offset into raw.log (after header)
 	RawSize    uint32
-	AttrOffset uint32 // Byte offset into attr.log (after header)
-	AttrSize   uint16 // Length of encoded attributes
+	AttrOffset uint32    // Byte offset into attr.log (after header)
+	AttrSize   uint16    // Length of encoded attributes
+	IngestSeq  uint32    // Per-ingester rolling sequence counter
+	IngesterID uuid.UUID // Ingester identity (16-byte UUID)
 }
 
-// EncodeIdxEntry encodes an idx.log entry into a 38-byte buffer.
+// EncodeIdxEntry encodes an idx.log entry into a 58-byte buffer.
 // Timestamps are stored as Unix nanoseconds.
 func EncodeIdxEntry(e IdxEntry, buf []byte) {
 	binary.LittleEndian.PutUint64(buf[idxSourceTSOffset:], uint64(e.SourceTS.UnixNano()))
@@ -76,15 +84,19 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 	binary.LittleEndian.PutUint32(buf[idxRawSizeOffset:], e.RawSize)
 	binary.LittleEndian.PutUint32(buf[idxAttrOffsetOffset:], e.AttrOffset)
 	binary.LittleEndian.PutUint16(buf[idxAttrSizeOffset:], e.AttrSize)
+	binary.LittleEndian.PutUint32(buf[idxIngestSeqOffset:], e.IngestSeq)
+	copy(buf[idxIngesterIDOffset:idxIngesterIDOffset+16], e.IngesterID[:])
 }
 
-// DecodeIdxEntry decodes an idx.log entry from a 38-byte buffer.
+// DecodeIdxEntry decodes an idx.log entry from a 58-byte buffer.
 // Timestamps are stored as Unix nanoseconds.
 func DecodeIdxEntry(buf []byte) IdxEntry {
 	var sourceTS time.Time
 	if ns := int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:])); ns > 0 { //nolint:gosec // G115: nanosecond timestamps fit in int64
 		sourceTS = time.Unix(0, ns)
 	}
+	var ingesterID uuid.UUID
+	copy(ingesterID[:], buf[idxIngesterIDOffset:idxIngesterIDOffset+16])
 	return IdxEntry{
 		SourceTS:   sourceTS,
 		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
@@ -93,6 +105,8 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 		RawSize:    binary.LittleEndian.Uint32(buf[idxRawSizeOffset:]),
 		AttrOffset: binary.LittleEndian.Uint32(buf[idxAttrOffsetOffset:]),
 		AttrSize:   binary.LittleEndian.Uint16(buf[idxAttrSizeOffset:]),
+		IngestSeq:  binary.LittleEndian.Uint32(buf[idxIngestSeqOffset:]),
+		IngesterID: ingesterID,
 	}
 }
 
@@ -121,8 +135,13 @@ func BuildRecord(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.Recor
 		SourceTS: entry.SourceTS,
 		IngestTS: entry.IngestTS,
 		WriteTS:  entry.WriteTS,
-		Attrs:    attrs,
-		Raw:      raw,
+		EventID: chunk.EventID{
+			IngesterID: entry.IngesterID,
+			IngestTS:   entry.IngestTS,
+			IngestSeq:  entry.IngestSeq,
+		},
+		Attrs: attrs,
+		Raw:   raw,
 	}
 }
 
@@ -135,7 +154,12 @@ func BuildRecordCopy(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.R
 		SourceTS: entry.SourceTS,
 		IngestTS: entry.IngestTS,
 		WriteTS:  entry.WriteTS,
-		Attrs:    attrs.Copy(),
-		Raw:      rawCopy,
+		EventID: chunk.EventID{
+			IngesterID: entry.IngesterID,
+			IngestTS:   entry.IngestTS,
+			IngestSeq:  entry.IngestSeq,
+		},
+		Attrs: attrs.Copy(),
+		Raw:   rawCopy,
 	}
 }

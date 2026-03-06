@@ -218,8 +218,10 @@ func (rf *RecordForwarder) sendBatch(nodeID string, nf *nodeForwarder, entries [
 	byVault := make(map[uuid.UUID][]*gastrologv1.ExportRecord)
 	for _, e := range entries {
 		rec := &gastrologv1.ExportRecord{
-			Raw:   e.record.Raw,
-			Attrs: e.record.Attrs,
+			Raw:        e.record.Raw,
+			Attrs:      e.record.Attrs,
+			IngestSeq:  e.record.EventID.IngestSeq,
+			IngesterId: e.record.EventID.IngesterID[:],
 		}
 		if !e.record.SourceTS.IsZero() {
 			rec.SourceTs = timestamppb.New(e.record.SourceTS)

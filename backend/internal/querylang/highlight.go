@@ -44,8 +44,8 @@ type rawToken struct {
 var pipeKeywordSet = map[string]bool{
 	"stats": true, "where": true, "eval": true, "sort": true,
 	"head": true, "tail": true, "slice": true, "rename": true,
-	"fields": true, "timechart": true, "raw": true, "lookup": true,
-	"barchart": true, "donut": true, "map": true,
+	"fields": true, "timechart": true, "dedup": true, "raw": true,
+	"lookup": true, "barchart": true, "donut": true, "map": true,
 }
 
 // aggFuncSet contains aggregation function names.

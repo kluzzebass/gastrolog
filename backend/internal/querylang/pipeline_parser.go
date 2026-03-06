@@ -12,8 +12,9 @@ import (
 //	pipeline      = filter_expr ( "|" pipe_op )*
 //	pipe_op       = stats_op | where_op | eval_op | sort_op | head_op
 //	              | tail_op | slice_op | rename_op | fields_op
-//	              | timechart_op | raw_op | lookup_op
+//	              | timechart_op | dedup_op | raw_op | lookup_op
 //	              | barchart_op | donut_op | map_op
+//	dedup_op      = "dedup" [ duration ]
 //	stats_op      = "stats" agg_list ( "by" group_list )?
 //	agg_list      = agg_expr ( "," agg_expr )*
 //	agg_expr      = "count" ( "as" IDENT )?
@@ -120,6 +121,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseFieldsOp()
 	case "timechart":
 		return p.parseTimechartOp()
+	case "dedup":
+		return p.parseDedupOp()
 	case "raw":
 		return p.parseRawOp()
 	case "lookup":
@@ -976,6 +979,45 @@ func (p *parser) parseFieldsOp() (*FieldsOp, error) {
 	}
 
 	return &FieldsOp{Names: names, Drop: drop}, nil
+}
+
+// parseDedupOp parses: "dedup" [ duration ]
+// The optional duration (e.g. "3s", "50ms") sets the dedup time window.
+func (p *parser) parseDedupOp() (*DedupOp, error) {
+	if err := p.advance(); err != nil { // consume "dedup"
+		return nil, err
+	}
+	op := &DedupOp{}
+	// Check for optional duration argument (e.g. "3s", "50ms", "1m").
+	if p.cur.Kind == TokWord && p.cur.Kind != TokPipe && p.cur.Kind != TokEOF {
+		// Try to parse as duration — if it looks like a duration, consume it.
+		if isDurationLiteral(p.cur.Lit) {
+			op.Window = p.cur.Lit
+			if err := p.advance(); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return op, nil
+}
+
+// isDurationLiteral checks if a string looks like a Go time.Duration literal
+// (e.g. "1s", "50ms", "3m", "500us").
+func isDurationLiteral(s string) bool {
+	if len(s) < 2 {
+		return false
+	}
+	// Must start with a digit.
+	if s[0] < '0' || s[0] > '9' {
+		return false
+	}
+	// Must end with a known duration suffix.
+	for _, suffix := range []string{"ns", "us", "ms", "s", "m", "h"} {
+		if strings.HasSuffix(s, suffix) {
+			return true
+		}
+	}
+	return false
 }
 
 // parseRawOp parses: "raw" (no arguments).

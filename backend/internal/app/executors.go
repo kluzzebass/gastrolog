@@ -91,7 +91,7 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		eng := o.MultiVaultQueryEngine()
 
 		// Compute volume histogram for this vault.
-		histogram := histogramBucketsToProto(eng.ComputeHistogramForVaults(q, 50, []uuid.UUID{vaultID}))
+		histogram := histogramBucketsToProto(eng.ComputeHistogramForVaults(ctx, q, 50, []uuid.UUID{vaultID}))
 
 		// Pipeline query: run aggregation locally and return table result.
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {

@@ -1883,7 +1883,10 @@ type ExportRecord struct {
 	Pos     uint64 `protobuf:"varint,7,opt,name=pos,proto3" json:"pos,omitempty"`
 	// Original write timestamp. Populated during cross-node migration to
 	// preserve chunk ordering on the destination node.
-	WriteTs       *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=write_ts,json=writeTs,proto3" json:"write_ts,omitempty"`
+	WriteTs *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=write_ts,json=writeTs,proto3" json:"write_ts,omitempty"`
+	// EventID fields for record identity and deduplication.
+	IngestSeq     uint32 `protobuf:"varint,9,opt,name=ingest_seq,json=ingestSeq,proto3" json:"ingest_seq,omitempty"`    // Per-ingester rolling sequence counter
+	IngesterId    []byte `protobuf:"bytes,10,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte UUID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1970,6 +1973,20 @@ func (x *ExportRecord) GetPos() uint64 {
 func (x *ExportRecord) GetWriteTs() *timestamppb.Timestamp {
 	if x != nil {
 		return x.WriteTs
+	}
+	return nil
+}
+
+func (x *ExportRecord) GetIngestSeq() uint32 {
+	if x != nil {
+		return x.IngestSeq
+	}
+	return 0
+}
+
+func (x *ExportRecord) GetIngesterId() []byte {
+	if x != nil {
+		return x.IngesterId
 	}
 	return nil
 }
@@ -2397,7 +2414,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"f\n" +
 	"\x13ExportVaultResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\x88\x03\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xc8\x03\n" +
 	"\fExportRecord\x127\n" +
 	"\tsource_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x127\n" +
 	"\tingest_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x12;\n" +
@@ -2406,7 +2423,12 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\bvault_id\x18\x05 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x06 \x01(\tR\achunkId\x12\x10\n" +
 	"\x03pos\x18\a \x01(\x04R\x03pos\x125\n" +
-	"\bwrite_ts\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\awriteTs\x1a8\n" +
+	"\bwrite_ts\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\awriteTs\x12\x1d\n" +
+	"\n" +
+	"ingest_seq\x18\t \x01(\rR\tingestSeq\x12\x1f\n" +
+	"\vingester_id\x18\n" +
+	" \x01(\fR\n" +
+	"ingesterId\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

@@ -99,8 +99,9 @@ func TestMultiVaultSearch(t *testing.T) {
 	}
 }
 
-// TestMultiVaultDedup verifies that records with the same (ingest_ts, ingester_id)
-// across multiple vaults are deduplicated, returning each record exactly once.
+// TestMultiVaultDedup verifies that the | dedup pipeline operator removes
+// duplicate records from multi-vault routing, while plain Search returns all
+// copies (dedup is now opt-in, not automatic).
 func TestMultiVaultDedup(t *testing.T) {
 	reg := &testRegistry{
 		vaults: make(map[uuid.UUID]struct {
@@ -110,11 +111,14 @@ func TestMultiVaultDedup(t *testing.T) {
 	}
 
 	// Create 3 vaults with identical records (simulating route fan-out).
+	// Each record has a distinct EventID so dedup can identify duplicates
+	// across vaults while keeping unique records.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	ingesterID := uuid.Must(uuid.NewV7())
 	records := []chunk.Record{
-		{IngestTS: t0, Attrs: chunk.Attributes{"ingester_id": "syslog-1"}, Raw: []byte("line A")},
-		{IngestTS: t0.Add(1 * time.Second), Attrs: chunk.Attributes{"ingester_id": "syslog-1"}, Raw: []byte("line B")},
-		{IngestTS: t0.Add(2 * time.Second), Attrs: chunk.Attributes{"ingester_id": "syslog-1"}, Raw: []byte("line C")},
+		{IngestTS: t0, EventID: chunk.EventID{IngesterID: ingesterID, IngestTS: t0, IngestSeq: 0}, Raw: []byte("line A")},
+		{IngestTS: t0.Add(1 * time.Second), EventID: chunk.EventID{IngesterID: ingesterID, IngestTS: t0.Add(1 * time.Second), IngestSeq: 1}, Raw: []byte("line B")},
+		{IngestTS: t0.Add(2 * time.Second), EventID: chunk.EventID{IngesterID: ingesterID, IngestTS: t0.Add(2 * time.Second), IngestSeq: 2}, Raw: []byte("line C")},
 	}
 
 	for range 3 {
@@ -135,7 +139,7 @@ func TestMultiVaultDedup(t *testing.T) {
 
 	eng := query.NewWithRegistry(reg, nil)
 
-	// Forward search.
+	// Without dedup: all 9 records come back (3 records × 3 vaults).
 	iter, _ := eng.Search(context.Background(), query.Query{}, nil)
 	count := 0
 	for _, err := range iter {
@@ -144,21 +148,20 @@ func TestMultiVaultDedup(t *testing.T) {
 		}
 		count++
 	}
-	if count != 3 {
-		t.Errorf("forward: expected 3 unique records, got %d", count)
+	if count != 9 {
+		t.Errorf("forward without dedup: expected 9 records, got %d", count)
 	}
 
-	// Reverse search.
-	iter, _ = eng.Search(context.Background(), query.Query{IsReverse: true}, nil)
-	count = 0
-	for _, err := range iter {
-		if err != nil {
-			t.Fatalf("Error: %v", err)
-		}
-		count++
+	// With | dedup pipeline: only 3 unique records.
+	pipeline := &querylang.Pipeline{
+		Pipes: []querylang.PipeOp{&querylang.DedupOp{}},
 	}
-	if count != 3 {
-		t.Errorf("reverse: expected 3 unique records, got %d", count)
+	result, err := eng.RunPipeline(context.Background(), query.Query{}, pipeline)
+	if err != nil {
+		t.Fatalf("RunPipeline error: %v", err)
+	}
+	if len(result.Records) != 3 {
+		t.Errorf("forward with | dedup: expected 3 unique records, got %d", len(result.Records))
 	}
 }
 

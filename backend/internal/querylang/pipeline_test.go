@@ -1174,6 +1174,45 @@ func TestParsePipelineTimechartBy(t *testing.T) {
 
 // TimechartByMissingField is covered by TestParsePipelineNewOpsErrors.
 
+func TestParsePipelineDedup(t *testing.T) {
+	p, err := ParsePipeline("error | dedup")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*DedupOp); !ok {
+		t.Fatalf("expected DedupOp, got %T", p.Pipes[0])
+	}
+}
+
+func TestParsePipelineDedupString(t *testing.T) {
+	p, err := ParsePipeline("| dedup")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if got := p.String(); got != "dedup" {
+		t.Errorf("String() = %q, want %q", got, "dedup")
+	}
+}
+
+func TestParsePipelineDedupWithHead(t *testing.T) {
+	p, err := ParsePipeline("| dedup | head 100")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*DedupOp); !ok {
+		t.Fatalf("expected DedupOp, got %T", p.Pipes[0])
+	}
+	if _, ok := p.Pipes[1].(*HeadOp); !ok {
+		t.Fatalf("expected HeadOp, got %T", p.Pipes[1])
+	}
+}
+
 func TestParsePipelineRaw(t *testing.T) {
 	p, err := ParsePipeline("error | raw")
 	if err != nil {
@@ -1801,6 +1840,8 @@ func pipeOpName(op PipeOp) string {
 		return "FieldsOp"
 	case *TimechartOp:
 		return "TimechartOp"
+	case *DedupOp:
+		return "DedupOp"
 	case *RawOp:
 		return "RawOp"
 	case *LookupOp:

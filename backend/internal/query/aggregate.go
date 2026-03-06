@@ -10,10 +10,11 @@ import (
 	"strings"
 	"time"
 
-
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
+
+	"github.com/google/uuid"
 )
 
 // MaxGroupCardinality limits the number of distinct groups to prevent memory exhaustion.
@@ -31,7 +32,7 @@ var extractors = tokenizer.DefaultExtractors()
 
 // RecordToRow converts a chunk.Record to a querylang.Row for expression evaluation.
 // It extracts fields from the raw message using both KV and JSON extractors,
-// then overlays record attributes (which take precedence), and adds _raw.
+// then overlays record attributes (which take precedence), and adds raw.
 func RecordToRow(rec chunk.Record) querylang.Row {
 	// Extract fields from raw text (KV, logfmt, access log + JSON).
 	kvs := tokenizer.CombinedExtract(rec.Raw, extractors)
@@ -49,7 +50,12 @@ func RecordToRow(rec chunk.Record) querylang.Row {
 		row[kv.Key] = kv.Value
 	}
 	maps.Copy(row, rec.Attrs) // attrs take precedence over extracted fields
-	row["_raw"] = string(rec.Raw)
+	row["raw"] = string(rec.Raw)
+	// Expose EventID fields for expressions and stats grouping.
+	if rec.EventID.IngesterID != (uuid.UUID{}) {
+		row["ingester_id"] = rec.EventID.IngesterID.String()
+	}
+	row["ingest_seq"] = strconv.FormatUint(uint64(rec.EventID.IngestSeq), 10)
 	return row
 }
 
@@ -284,11 +290,11 @@ func (a *Aggregator) makeAccumulators() ([]accumulator, error) {
 
 func (a *Aggregator) getTimestamp(rec chunk.Record) (time.Time, bool) {
 	switch a.binField {
-	case "", "_write_ts":
+	case "", "write_ts":
 		return rec.WriteTS, true
-	case "_ingest_ts":
+	case "ingest_ts":
 		return rec.IngestTS, true
-	case "_source_ts":
+	case "source_ts":
 		if rec.SourceTS.IsZero() {
 			return time.Time{}, false
 		}

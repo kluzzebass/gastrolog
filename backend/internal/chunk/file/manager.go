@@ -282,6 +282,8 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 		RawSize:    uint32(len(record.Raw)),      //nolint:gosec // G115: individual record size bounded by protocol
 		AttrOffset: uint32(m.active.attrOffset),  //nolint:gosec // G115: offsets bounded by chunk rotation policy
 		AttrSize:   uint16(len(attrBytes)),       //nolint:gosec // G115: attribute size bounded by protocol
+		IngestSeq:  record.EventID.IngestSeq,
+		IngesterID: record.EventID.IngesterID,
 	}, idxBuf[:])
 
 	// Snapshot file handles and compute WriteAt positions.

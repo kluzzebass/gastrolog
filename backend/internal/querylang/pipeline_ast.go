@@ -273,6 +273,22 @@ func (t *TimechartOp) String() string {
 	return fmt.Sprintf("timechart %d", t.N)
 }
 
+// DedupOp represents: dedup [duration]
+// Removes duplicate records keyed on EventID (IngesterID, IngestTS, IngestSeq)
+// within a time window. Records from multi-vault routing share the same EventID.
+type DedupOp struct {
+	Window string // raw duration, e.g. "1s", "50ms". Empty = default (1s).
+}
+
+func (DedupOp) pipeOp() {}
+
+func (d *DedupOp) String() string {
+	if d.Window != "" {
+		return "dedup " + d.Window
+	}
+	return "dedup"
+}
+
 // RawOp represents: raw
 // Forces the pipeline result into a flat table — no charts, no single-value display.
 // For non-aggregating pipelines, converts records to a table.

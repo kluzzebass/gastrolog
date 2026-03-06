@@ -201,6 +201,17 @@ type ChunkMeta struct {
 	SourceEnd   time.Time // max SourceTS in chunk
 }
 
+// EventID uniquely identifies a record across the cluster.
+// Composed of the ingester's UUID, the ingestion timestamp, and a per-ingester
+// rolling sequence number. Entirely derivable from idx.log fields.
+// All fields are fixed-size value types, so EventID is comparable and usable
+// as a map key.
+type EventID struct {
+	IngesterID uuid.UUID
+	IngestTS   time.Time
+	IngestSeq  uint32
+}
+
 // Record is a single log entry.
 //
 // Timestamps:
@@ -218,6 +229,7 @@ type Record struct {
 	SourceTS time.Time
 	IngestTS time.Time
 	WriteTS  time.Time
+	EventID  EventID
 	Attrs    Attributes
 	Raw      []byte
 	Ref      RecordRef
@@ -233,6 +245,7 @@ func (r Record) Copy() Record {
 		SourceTS: r.SourceTS,
 		IngestTS: r.IngestTS,
 		WriteTS:  r.WriteTS,
+		EventID:  r.EventID,
 		Attrs:    r.Attrs.Copy(),
 		Raw:      raw,
 		Ref:      r.Ref,

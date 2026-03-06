@@ -75,10 +75,10 @@ Combining `bin()` with field grouping produces a multi-series chart — one line
 By default, `bin()` uses the record's write timestamp. To bucket by a different timestamp, pass it as a second argument:
 
 ```
-* | stats count by bin(5m, _source_ts)
+* | stats count by bin(5m, source_ts)
 ```
 
-Built-in timestamp fields: `_write_ts`, `_ingest_ts`, `_source_ts`.
+Built-in timestamp fields: `write_ts`, `ingest_ts`, `source_ts`.
 
 ## Expressions
 
@@ -216,6 +216,32 @@ The `timechart` operator counts records per time bucket with severity breakdown.
 The argument is the number of buckets. Bin width is computed automatically from the query's time range. Results include per-bucket severity counts (error, warn, info, debug, trace) when severity information is available.
 
 Timechart cannot be combined with `stats` and is not supported in follow mode.
+
+## Dedup Operator
+
+The `dedup` operator removes duplicate records using a time-windowed set keyed on EventID (ingester identity + ingest timestamp + sequence number). This is useful when records are routed to multiple vaults — each copy shares the same EventID but arrives at different times.
+
+```
+* | dedup
+```
+
+By default, the dedup window is 1 second. Records with the same EventID that arrive within the window are considered duplicates. You can specify a custom window:
+
+```
+* | dedup 3s
+* | dedup 50ms
+* | dedup 5m
+```
+
+Supported duration units: `ns`, `us`, `ms`, `s`, `m`, `h`.
+
+Use dedup when your deployment routes records to multiple vaults and you want to eliminate the resulting duplicates.
+
+```
+level=error | dedup | head 100
+```
+
+Dedup is not supported in follow mode.
 
 ## Lookup Operator
 

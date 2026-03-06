@@ -790,13 +790,16 @@ func (x *KVPredicate) GetValue() string {
 }
 
 type Record struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	IngestTs      *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=ingest_ts,json=ingestTs,proto3" json:"ingest_ts,omitempty"`
-	WriteTs       *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=write_ts,json=writeTs,proto3" json:"write_ts,omitempty"`
-	Attrs         map[string]string      `protobuf:"bytes,3,rep,name=attrs,proto3" json:"attrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Raw           []byte                 `protobuf:"bytes,4,opt,name=raw,proto3" json:"raw,omitempty"`
-	Ref           *RecordRef             `protobuf:"bytes,5,opt,name=ref,proto3" json:"ref,omitempty"`
-	SourceTs      *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=source_ts,json=sourceTs,proto3" json:"source_ts,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	IngestTs *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=ingest_ts,json=ingestTs,proto3" json:"ingest_ts,omitempty"`
+	WriteTs  *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=write_ts,json=writeTs,proto3" json:"write_ts,omitempty"`
+	Attrs    map[string]string      `protobuf:"bytes,3,rep,name=attrs,proto3" json:"attrs,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Raw      []byte                 `protobuf:"bytes,4,opt,name=raw,proto3" json:"raw,omitempty"`
+	Ref      *RecordRef             `protobuf:"bytes,5,opt,name=ref,proto3" json:"ref,omitempty"`
+	SourceTs *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=source_ts,json=sourceTs,proto3" json:"source_ts,omitempty"`
+	// EventID fields for record identity and deduplication.
+	IngestSeq     uint32 `protobuf:"varint,7,opt,name=ingest_seq,json=ingestSeq,proto3" json:"ingest_seq,omitempty"`   // Per-ingester rolling sequence counter
+	IngesterId    []byte `protobuf:"bytes,8,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte UUID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -869,6 +872,20 @@ func (x *Record) GetRef() *RecordRef {
 func (x *Record) GetSourceTs() *timestamppb.Timestamp {
 	if x != nil {
 		return x.SourceTs
+	}
+	return nil
+}
+
+func (x *Record) GetIngestSeq() uint32 {
+	if x != nil {
+		return x.IngestSeq
+	}
+	return 0
+}
+
+func (x *Record) GetIngesterId() []byte {
+	if x != nil {
+		return x.IngesterId
 	}
 	return nil
 }
@@ -1623,6 +1640,7 @@ type ValidateQueryResponse struct {
 	Spans         []*HighlightSpan       `protobuf:"bytes,4,rep,name=spans,proto3" json:"spans,omitempty"`                                   // syntax highlighting spans (concatenation reproduces input)
 	Expression    string                 `protobuf:"bytes,5,opt,name=expression,proto3" json:"expression,omitempty"`                         // echo back input for staleness detection
 	HasPipeline   bool                   `protobuf:"varint,6,opt,name=has_pipeline,json=hasPipeline,proto3" json:"has_pipeline,omitempty"`   // whether query contains pipe operators
+	CanFollow     bool                   `protobuf:"varint,7,opt,name=can_follow,json=canFollow,proto3" json:"can_follow,omitempty"`         // whether query is compatible with follow mode
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1695,6 +1713,13 @@ func (x *ValidateQueryResponse) GetExpression() string {
 func (x *ValidateQueryResponse) GetHasPipeline() bool {
 	if x != nil {
 		return x.HasPipeline
+	}
+	return false
+}
+
+func (x *ValidateQueryResponse) GetCanFollow() bool {
+	if x != nil {
+		return x.CanFollow
 	}
 	return false
 }
@@ -1928,14 +1953,18 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"expression\"5\n" +
 	"\vKVPredicate\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\xdf\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\x9f\x03\n" +
 	"\x06Record\x127\n" +
 	"\tingest_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x125\n" +
 	"\bwrite_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\awriteTs\x125\n" +
 	"\x05attrs\x18\x03 \x03(\v2\x1f.gastrolog.v1.Record.AttrsEntryR\x05attrs\x12\x10\n" +
 	"\x03raw\x18\x04 \x01(\fR\x03raw\x12)\n" +
 	"\x03ref\x18\x05 \x01(\v2\x17.gastrolog.v1.RecordRefR\x03ref\x127\n" +
-	"\tsource_ts\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x1a8\n" +
+	"\tsource_ts\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x12\x1d\n" +
+	"\n" +
+	"ingest_seq\x18\a \x01(\rR\tingestSeq\x12\x1f\n" +
+	"\vingester_id\x18\b \x01(\fR\n" +
+	"ingesterId\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
@@ -2003,7 +2032,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x14ValidateQueryRequest\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\"\xeb\x01\n" +
+	"expression\"\x8a\x02\n" +
 	"\x15ValidateQueryResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12!\n" +
@@ -2012,7 +2041,9 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"expression\x18\x05 \x01(\tR\n" +
 	"expression\x12!\n" +
-	"\fhas_pipeline\x18\x06 \x01(\bR\vhasPipeline\"7\n" +
+	"\fhas_pipeline\x18\x06 \x01(\bR\vhasPipeline\x12\x1d\n" +
+	"\n" +
+	"can_follow\x18\a \x01(\bR\tcanFollow\"7\n" +
 	"\rHighlightSpan\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\"s\n" +

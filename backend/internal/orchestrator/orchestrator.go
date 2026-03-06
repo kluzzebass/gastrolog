@@ -157,6 +157,10 @@ type Orchestrator struct {
 	// Local node identity for multi-node filtering.
 	localNodeID string
 
+	// Per-ingester rolling sequence counter for EventID assignment.
+	// Only accessed from digestLoop (single goroutine), no lock needed.
+	ingestSeqs map[string]uint32
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -231,6 +235,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingestSize:      cfg.IngestChannelSize,
 		cfgLoader:       cfg.ConfigLoader,
 		localNodeID:     cfg.LocalNodeID,
+		ingestSeqs:      make(map[string]uint32),
 		now:             cfg.Now,
 		logger:          logger,
 	}

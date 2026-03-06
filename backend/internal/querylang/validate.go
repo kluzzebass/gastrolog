@@ -62,6 +62,23 @@ func ValidateExpression(expr string) (bool, string, int) {
 	return true, "", -1
 }
 
+// ParseExpressionPipeline parses the pipeline from an expression string,
+// stripping directives and comments first. Returns nil if the expression
+// has no pipeline or is unparseable.
+func ParseExpressionPipeline(expr string) *Pipeline {
+	stripped, _ := stripCommentsWithRanges(expr)
+	stripped, _ = stripDirectives(stripped)
+	stripped = strings.TrimSpace(stripped)
+	if stripped == "" {
+		return nil
+	}
+	pipeline, err := ParsePipeline(stripped)
+	if err != nil {
+		return nil
+	}
+	return pipeline
+}
+
 // stripDirectives removes directive tokens (key=value) from the expression,
 // recording their positions for offset mapping. Non-directive key=value pairs
 // (like level=error) are kept. Returns the stripped string and removed ranges.

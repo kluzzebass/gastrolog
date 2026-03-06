@@ -14,14 +14,14 @@ type cursorEntry struct {
 	ref     chunk.RecordRef
 }
 
-// mergeHeap is a min-heap of cursor entries ordered by IngestTS.
+// mergeHeap is a min-heap of cursor entries ordered by WriteTS.
 // For reverse queries, use mergeHeapReverse instead.
 type mergeHeap []*cursorEntry
 
 func (h mergeHeap) Len() int { return len(h) }
 
 func (h mergeHeap) Less(i, j int) bool {
-	return h[i].rec.IngestTS.Before(h[j].rec.IngestTS)
+	return h[i].rec.WriteTS.Before(h[j].rec.WriteTS)
 }
 
 func (h mergeHeap) Swap(i, j int) {
@@ -41,13 +41,13 @@ func (h *mergeHeap) Pop() any {
 	return x
 }
 
-// mergeHeapReverse is a max-heap of cursor entries ordered by IngestTS (for reverse queries).
+// mergeHeapReverse is a max-heap of cursor entries ordered by WriteTS (for reverse queries).
 type mergeHeapReverse []*cursorEntry
 
 func (h mergeHeapReverse) Len() int { return len(h) }
 
 func (h mergeHeapReverse) Less(i, j int) bool {
-	return h[i].rec.IngestTS.After(h[j].rec.IngestTS)
+	return h[i].rec.WriteTS.After(h[j].rec.WriteTS)
 }
 
 func (h mergeHeapReverse) Swap(i, j int) {

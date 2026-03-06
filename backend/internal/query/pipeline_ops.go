@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lookup"
@@ -35,6 +36,8 @@ func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops 
 		switch o := op.(type) {
 		case *querylang.WhereOp:
 			records = applyRecordWhere(records, o)
+		case *querylang.DedupOp:
+			records = applyRecordDedup(records, parseDedupWindow(o.Window))
 		case *querylang.EvalOp:
 			records, err = applyRecordEval(records, o, eval)
 		case *querylang.SortOp:
@@ -59,6 +62,41 @@ func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops 
 		}
 	}
 	return records, nil
+}
+
+const defaultDedupWindow = time.Second
+
+// parseDedupWindow parses the window string from DedupOp, falling back to the default.
+func parseDedupWindow(raw string) time.Duration {
+	if raw == "" {
+		return defaultDedupWindow
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return defaultDedupWindow
+	}
+	return d
+}
+
+// applyRecordDedup removes duplicate records keyed on EventID within a time window.
+// Records routed to multiple vaults share the same EventID but have different
+// WriteTS values. The window parameter controls how far apart WriteTSes can be
+// and still be considered duplicates.
+func applyRecordDedup(records []chunk.Record, window time.Duration) []chunk.Record {
+	if len(records) == 0 {
+		return records
+	}
+	seen := make(map[chunk.EventID]time.Time, len(records))
+	return slices.DeleteFunc(records, func(r chunk.Record) bool {
+		eid := r.EventID
+		if firstWriteTS, exists := seen[eid]; exists {
+			if r.WriteTS.Sub(firstWriteTS) <= window {
+				return true // duplicate within window
+			}
+		}
+		seen[eid] = r.WriteTS
+		return false
+	})
 }
 
 // applyRecordWhere filters records using a compiled boolean expression.
@@ -454,7 +492,7 @@ func materializeFields(records []chunk.Record) {
 			records[i].Attrs = make(chunk.Attributes, len(row))
 		}
 		for k, v := range row {
-			if k == "_raw" {
+			if k == "raw" {
 				continue
 			}
 			if _, exists := records[i].Attrs[k]; !exists {
@@ -545,6 +583,7 @@ type transformStep struct {
 	fields  *querylang.FieldsOp
 	lookupT lookup.LookupTable
 	lookupF string // lookup field name
+
 }
 
 type stepKind int
@@ -584,6 +623,8 @@ func NewRecordTransform(ops []querylang.PipeOp, resolve lookup.Resolver) *Record
 				lookupT: lt,
 				lookupF: o.Field,
 			})
+		case *querylang.DedupOp:
+			// Dedup is not streamable — handled by batch path only.
 		case *querylang.HeadOp:
 			rt.headN = o.N
 		}

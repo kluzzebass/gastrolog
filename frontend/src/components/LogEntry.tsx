@@ -29,7 +29,7 @@ export function detectSeverity(
 }
 
 function entryRowCls(isSelected: boolean, dark: boolean): string {
-  if (isSelected) return dark ? "bg-ink-hover" : "bg-light-hover";
+  if (isSelected) return dark ? "bg-ink-hover border-b-ink-border-subtle" : "bg-light-hover border-b-light-border-subtle";
   return dark
     ? "hover:bg-ink-surface border-b-ink-border-subtle"
     : "hover:bg-light-hover border-b-light-border-subtle";
@@ -74,7 +74,6 @@ export const LogEntry = forwardRef<
     <article
       ref={ref}
       onClick={onSelect}
-      {...clickableProps(onSelect)}
       className={`group grid grid-cols-[3.5ch_1fr_auto] lg:grid-cols-[10ch_3.5ch_1fr_auto] px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
         entryRowCls(isSelected, dark)
       }`}

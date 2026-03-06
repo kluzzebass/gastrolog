@@ -14,6 +14,13 @@ import { useDetailPanel } from "../hooks/useDetailPanel";
 
 const MAX_DISPLAY_LINES = 100;
 
+/** Format a 16-byte Uint8Array as a UUID string. */
+function formatUUID(bytes: Uint8Array): string {
+  if (bytes.length !== 16) return "";
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 
 export function DetailPanelContent({
   record,
@@ -24,6 +31,7 @@ export function DetailPanelContent({
 }>) {
   const {
     onFieldSelect,
+    onMultiFieldSelect,
     onSpanClick,
     onChunkSelect,
     onVaultSelect,
@@ -64,7 +72,7 @@ export function DetailPanelContent({
     { label: "Source", date: record.sourceTs ? record.sourceTs.toDate() : null },
   ];
 
-  const headerCls = `pt-4 pb-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`;
+  const headerCls = `pt-4 pb-1.5 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`;
   const keyCls = `py-1 pr-2 w-[1%] text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-ghost", "text-light-text-ghost")}`;
   const borderCls = `border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`;
 
@@ -99,7 +107,7 @@ export function DetailPanelContent({
         <tbody>
           {/* — Timestamps — */}
           <tr>
-            <td colSpan={2} className={headerCls}>Timestamps</td>
+            <th colSpan={2} className={headerCls}>Timestamps</th>
           </tr>
           {tsRows.map(({ label, date }) => (
             <tr key={label}>
@@ -125,12 +133,12 @@ export function DetailPanelContent({
 
           {/* — Message — */}
           <tr>
-            <td colSpan={2} className={headerCls}>
+            <th colSpan={2} className={headerCls}>
               <span className="flex items-center gap-2">
                 {`Message (${formatBytes(rawBytes)})`}
                 <CopyButton text={rawText} dark={dark} />
               </span>
-            </td>
+            </th>
           </tr>
           <tr>
             <td colSpan={2} className={`pb-1 max-w-0 ${borderCls}`}>
@@ -207,7 +215,7 @@ export function DetailPanelContent({
           {Object.keys(record.attrs).length > 0 && (
             <>
               <tr>
-                <td colSpan={2} className={headerCls}>Attributes</td>
+                <th colSpan={2} className={headerCls}>Attributes</th>
               </tr>
               {Object.entries(record.attrs).map(([k, v]) => (
                 <tr key={k}>
@@ -222,7 +230,7 @@ export function DetailPanelContent({
           {kvPairs.length > 0 && (
             <>
               <tr>
-                <td colSpan={2} className={headerCls}>Extracted Fields</td>
+                <th colSpan={2} className={headerCls}>Extracted Fields</th>
               </tr>
               {kvPairs.map(({ key, value }) => (
                 <tr key={`kv-${key}-${value}`}>
@@ -235,24 +243,24 @@ export function DetailPanelContent({
 
           {/* — Reference — */}
           <tr>
-            <td colSpan={2} className={headerCls}>Reference</td>
+            <th colSpan={2} className={headerCls}>Reference</th>
           </tr>
           <tr>
-            <td className={`${keyCls} ${borderCls}`}>Vault</td>
+            <td className={`${keyCls} ${borderCls}`}>vault</td>
             {valueCell(
               record.ref?.vaultId ?? "N/A",
               record.ref?.vaultId ? () => onVaultSelect?.(record.ref!.vaultId) : undefined,
             )}
           </tr>
           <tr>
-            <td className={`${keyCls} ${borderCls}`}>Chunk</td>
+            <td className={`${keyCls} ${borderCls}`}>chunk</td>
             {valueCell(
               record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A",
               record.ref?.chunkId ? () => onChunkSelect?.(record.ref!.chunkId) : undefined,
             )}
           </tr>
           <tr>
-            <td className={`${keyCls} ${borderCls}`}>Position</td>
+            <td className={`${keyCls} ${borderCls}`}>pos</td>
             {valueCell(
               record.ref?.pos.toString() ?? "N/A",
               record.ref?.chunkId
@@ -261,9 +269,51 @@ export function DetailPanelContent({
             )}
           </tr>
 
+          {/* — Event Identity — */}
+          {record.ingesterId.length === 16 && !record.ingesterId.every((b) => b === 0) && (
+            <>
+              <tr>
+                <th colSpan={2} className={headerCls}>
+                  {onMultiFieldSelect ? (
+                    <button
+                      type="button"
+                      title="Filter by this event identity"
+                      className={`cursor-pointer uppercase transition-colors ${c("hover:text-copper", "hover:text-copper")}`}
+                      onClick={() => {
+                        onMultiFieldSelect([
+                          ["ingester_id", formatUUID(record.ingesterId)],
+                          ["ingest_seq", record.ingestSeq.toString()],
+                          ["ingest_ts", record.ingestTs!.toDate().toISOString()],
+                        ]);
+                      }}
+                    >
+                      Event Identity
+                    </button>
+                  ) : (
+                    "Event Identity"
+                  )}
+                </th>
+              </tr>
+              <tr>
+                <td className={`${keyCls} ${borderCls}`}>ingester_id</td>
+                {valueCell(
+                  formatUUID(record.ingesterId),
+                  onFieldSelect ? () => onFieldSelect("ingester_id", formatUUID(record.ingesterId)) : undefined,
+                )}
+              </tr>
+              <tr>
+                <td className={`${keyCls} ${borderCls}`}>ingest_seq</td>
+                {valueCell(
+                  record.ingestSeq.toString(),
+                  onFieldSelect ? () => onFieldSelect("ingest_seq", record.ingestSeq.toString()) : undefined,
+                )}
+              </tr>
+            </>
+          )}
+
           {/* — Context — */}
           <tr>
-            <td colSpan={2} className={headerCls}>Context</td>
+            <th colSpan={2} className={headerCls}>Context</th>
           </tr>
           <tr>
             <td colSpan={2} className="pb-1">

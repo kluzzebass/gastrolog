@@ -1606,6 +1606,22 @@ export class ExportRecord extends Message<ExportRecord> {
    */
   writeTs?: Timestamp;
 
+  /**
+   * EventID fields for record identity and deduplication.
+   *
+   * Per-ingester rolling sequence counter
+   *
+   * @generated from field: uint32 ingest_seq = 9;
+   */
+  ingestSeq = 0;
+
+  /**
+   * 16-byte UUID
+   *
+   * @generated from field: bytes ingester_id = 10;
+   */
+  ingesterId = new Uint8Array(0);
+
   constructor(data?: PartialMessage<ExportRecord>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1622,6 +1638,8 @@ export class ExportRecord extends Message<ExportRecord> {
     { no: 6, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 8, name: "write_ts", kind: "message", T: Timestamp },
+    { no: 9, name: "ingest_seq", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 10, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportRecord {

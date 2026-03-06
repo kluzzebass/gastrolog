@@ -4,6 +4,7 @@ import type { HighlightMode } from "../syntax";
 
 interface DetailPanelContextValue {
   onFieldSelect: (key: string, value: string) => void;
+  onMultiFieldSelect?: (fields: [string, string][]) => void;
   onSpanClick: (value: string) => void;
   onChunkSelect: (chunkId: string) => void;
   onVaultSelect: (vaultId: string) => void;

@@ -3,10 +3,13 @@ package query
 import (
 	"context"
 	"testing"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
+
+	"github.com/google/uuid"
 )
 
 func TestApplyRecordEval(t *testing.T) {
@@ -495,6 +498,86 @@ func TestApplyTableLookupMissingColumn(t *testing.T) {
 	// Should be unchanged — src_ip column doesn't exist.
 	if len(result.Columns) != 2 {
 		t.Errorf("expected 2 columns (unchanged), got %d", len(result.Columns))
+	}
+}
+
+func TestApplyRecordDedup(t *testing.T) {
+	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idB := uuid.MustParse("00000000-0000-0000-0000-00000000000b")
+	t0 := baseTime
+	t1 := baseTime.Add(time.Second)
+	t2 := baseTime.Add(2 * time.Second)
+
+	records := []chunk.Record{
+		{IngestTS: t0, WriteTS: t0, EventID: chunk.EventID{IngesterID: idA, IngestTS: t0, IngestSeq: 0}, Raw: []byte("first")},
+		{IngestTS: t0, WriteTS: t0.Add(100 * time.Millisecond), EventID: chunk.EventID{IngesterID: idA, IngestTS: t0, IngestSeq: 0}, Raw: []byte("dup")},
+		{IngestTS: t1, WriteTS: t1, EventID: chunk.EventID{IngesterID: idB, IngestTS: t1, IngestSeq: 0}, Raw: []byte("second")},
+		{IngestTS: t2, WriteTS: t2, EventID: chunk.EventID{IngesterID: idA, IngestTS: t2, IngestSeq: 1}, Raw: []byte("third")},
+		{IngestTS: t2, WriteTS: t2.Add(50 * time.Millisecond), EventID: chunk.EventID{IngesterID: idA, IngestTS: t2, IngestSeq: 1}, Raw: []byte("dup2")},
+	}
+
+	result := applyRecordDedup(records, defaultDedupWindow)
+	if len(result) != 3 {
+		t.Fatalf("expected 3 records after dedup, got %d", len(result))
+	}
+	if string(result[0].Raw) != "first" {
+		t.Errorf("record 0 = %q, want 'first'", result[0].Raw)
+	}
+	if string(result[1].Raw) != "second" {
+		t.Errorf("record 1 = %q, want 'second'", result[1].Raw)
+	}
+	if string(result[2].Raw) != "third" {
+		t.Errorf("record 2 = %q, want 'third'", result[2].Raw)
+	}
+}
+
+func TestApplyRecordDedupNoDups(t *testing.T) {
+	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idB := uuid.MustParse("00000000-0000-0000-0000-00000000000b")
+	records := []chunk.Record{
+		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idA, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("one")},
+		{IngestTS: baseTime.Add(time.Second), WriteTS: baseTime.Add(time.Second), EventID: chunk.EventID{IngesterID: idB, IngestTS: baseTime.Add(time.Second), IngestSeq: 0}, Raw: []byte("two")},
+	}
+
+	result := applyRecordDedup(records, defaultDedupWindow)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 records (no dups), got %d", len(result))
+	}
+}
+
+func TestApplyRecordDedupEmpty(t *testing.T) {
+	result := applyRecordDedup(nil, defaultDedupWindow)
+	if len(result) != 0 {
+		t.Fatalf("expected 0 records for nil input, got %d", len(result))
+	}
+}
+
+func TestApplyRecordDedupSameTimeDiffIngester(t *testing.T) {
+	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idB := uuid.MustParse("00000000-0000-0000-0000-00000000000b")
+	records := []chunk.Record{
+		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idA, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("one")},
+		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idB, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("two")},
+	}
+
+	result := applyRecordDedup(records, defaultDedupWindow)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 records (different ingester_id), got %d", len(result))
+	}
+}
+
+func TestApplyRecordDedupWindowExpiry(t *testing.T) {
+	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
+	t0 := baseTime
+	// Same EventID, but WriteTS is more than 1s apart — should NOT be deduped.
+	records := []chunk.Record{
+		{IngestTS: t0, WriteTS: t0, EventID: chunk.EventID{IngesterID: idA, IngestTS: t0, IngestSeq: 0}, Raw: []byte("first")},
+		{IngestTS: t0, WriteTS: t0.Add(2 * time.Second), EventID: chunk.EventID{IngesterID: idA, IngestTS: t0, IngestSeq: 0}, Raw: []byte("late-dup")},
+	}
+
+	result := applyRecordDedup(records, defaultDedupWindow)
+	if len(result) != 2 {
+		t.Fatalf("expected 2 records (window expired), got %d", len(result))
 	}
 }
 

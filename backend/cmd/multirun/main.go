@@ -43,7 +43,7 @@ type lineWriter struct {
 
 func (lw *lineWriter) writeTo(w *os.File, prefix, color, line string) {
 	lw.mu.Lock()
-	_, _ = fmt.Fprintf(w, "%s[%s]%s %s\n", color, prefix, reset, line)
+	_, _ = io.WriteString(w, color+"["+prefix+"]"+reset+" "+line+"\n") //#nosec G705 -- terminal output only
 	lw.mu.Unlock()
 }
 

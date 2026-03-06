@@ -101,7 +101,7 @@ interface QueryBarProps {
   startFollow: () => void;
   stopFollowMode: () => void;
   draftHasErrors: boolean;
-  draftIsPipeline: boolean;
+  draftCanFollow: boolean;
   showPlan: boolean;
   handleShowPlan: () => void;
   highlightSpans?: Array<{ text: string; role: string }>;
@@ -133,7 +133,7 @@ export function QueryBar({
   startFollow,
   stopFollowMode,
   draftHasErrors,
-  draftIsPipeline,
+  draftCanFollow,
   showPlan,
   handleShowPlan,
   highlightSpans,
@@ -179,9 +179,37 @@ export function QueryBar({
     ? resolveSpans(firstLine, highlightSpans, highlightExpression)
     : [];
 
-  const expand = () => {
+  const expand = (e?: React.MouseEvent) => {
+    let offset = draft.length;
+    if (e && document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+      if (range) {
+        // Walk text nodes inside the truncate span to compute the absolute offset.
+        const container = (e.currentTarget as HTMLElement).querySelector(".truncate");
+        if (container) {
+          let pos = 0;
+          const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+          let node: Text | null;
+          while ((node = walker.nextNode() as Text | null)) {
+            if (node === range.startContainer) {
+              offset = pos + range.startOffset;
+              break;
+            }
+            pos += node.length;
+          }
+        }
+      }
+    }
     setFocused(true);
-    requestAnimationFrame(() => queryInputRef.current?.focus());
+    requestAnimationFrame(() => {
+      const ta = queryInputRef.current;
+      if (ta) {
+        ta.focus();
+        ta.selectionStart = offset;
+        ta.selectionEnd = offset;
+        cursorRef.current = offset;
+      }
+    });
   };
 
   return (
@@ -197,7 +225,7 @@ export function QueryBar({
               "bg-ink-well border-ink-border text-text-secondary hover:border-copper-dim",
               "bg-light-input border-light-border text-light-text-secondary hover:border-copper",
             )}`}
-            onClick={expand}
+            onMouseDown={expand}
             role="button"
             tabIndex={0}
             onKeyDown={(e) => {
@@ -420,7 +448,7 @@ export function QueryBar({
           startFollow={startFollow}
           stopFollowMode={stopFollowMode}
           draftHasErrors={draftHasErrors}
-          draftIsPipeline={draftIsPipeline}
+          draftCanFollow={draftCanFollow}
           showPlan={showPlan}
           handleShowPlan={handleShowPlan}
         />
@@ -429,9 +457,9 @@ export function QueryBar({
   );
 }
 
-function followButtonTitle(isFollowMode: boolean, draftIsPipeline: boolean): string {
+function followButtonTitle(isFollowMode: boolean, canFollow: boolean): string {
   if (isFollowMode) return "Stop following";
-  if (draftIsPipeline) return "Pipeline queries cannot be followed";
+  if (!canFollow) return "This query cannot be followed";
   return "Follow";
 }
 
@@ -444,7 +472,7 @@ function QueryActionButtons({
   startFollow,
   stopFollowMode,
   draftHasErrors,
-  draftIsPipeline,
+  draftCanFollow,
   showPlan,
   handleShowPlan,
 }: Readonly<{
@@ -456,7 +484,7 @@ function QueryActionButtons({
   startFollow: () => void;
   stopFollowMode: () => void;
   draftHasErrors: boolean;
-  draftIsPipeline: boolean;
+  draftCanFollow: boolean;
   showPlan: boolean;
   handleShowPlan: () => void;
 }>) {
@@ -485,9 +513,9 @@ function QueryActionButtons({
       )}
       <button
         onClick={isFollowMode ? stopFollowMode : startFollow}
-        disabled={!isFollowMode && (draftHasErrors || draftIsPipeline)}
+        disabled={!isFollowMode && (draftHasErrors || !draftCanFollow)}
         aria-label={isFollowMode ? "Stop following" : "Follow"}
-        title={followButtonTitle(isFollowMode, draftIsPipeline)}
+        title={followButtonTitle(isFollowMode, draftCanFollow)}
         className={`px-2 py-2.5 rounded border transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed ${
           isFollowMode
             ? "bg-severity-error/15 border-severity-error text-severity-error hover:bg-severity-error/25"

@@ -101,7 +101,7 @@ export function SearchView() {
             startFollow={sv.startFollow}
             stopFollowMode={sv.stopFollowMode}
             draftHasErrors={sv.draftHasErrors}
-            draftIsPipeline={sv.draftIsPipeline}
+            draftCanFollow={sv.draftCanFollow}
             showPlan={sv.showPlan}
             handleShowPlan={sv.handleShowPlan}
             highlightSpans={sv.validation.spans}
@@ -286,6 +286,7 @@ export function SearchView() {
 
         <DetailPanelProvider value={{
           onFieldSelect: sv.handleFieldSelect,
+          onMultiFieldSelect: sv.handleMultiFieldSelect,
           onSpanClick: sv.handleSpanClick,
           onChunkSelect: sv.handleChunkSelect,
           onVaultSelect: sv.handleVaultSelect,

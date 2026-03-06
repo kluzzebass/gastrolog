@@ -716,6 +716,22 @@ export class Record extends Message<Record> {
    */
   sourceTs?: Timestamp;
 
+  /**
+   * EventID fields for record identity and deduplication.
+   *
+   * Per-ingester rolling sequence counter
+   *
+   * @generated from field: uint32 ingest_seq = 7;
+   */
+  ingestSeq = 0;
+
+  /**
+   * 16-byte UUID
+   *
+   * @generated from field: bytes ingester_id = 8;
+   */
+  ingesterId = new Uint8Array(0);
+
   constructor(data?: PartialMessage<Record>) {
     super();
     proto3.util.initPartial(data, this);
@@ -730,6 +746,8 @@ export class Record extends Message<Record> {
     { no: 4, name: "raw", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "ref", kind: "message", T: RecordRef },
     { no: 6, name: "source_ts", kind: "message", T: Timestamp },
+    { no: 7, name: "ingest_seq", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 8, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Record {
@@ -1429,6 +1447,13 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
    */
   hasPipeline = false;
 
+  /**
+   * whether query is compatible with follow mode
+   *
+   * @generated from field: bool can_follow = 7;
+   */
+  canFollow = false;
+
   constructor(data?: PartialMessage<ValidateQueryResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1443,6 +1468,7 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
     { no: 4, name: "spans", kind: "message", T: HighlightSpan, repeated: true },
     { no: 5, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "has_pipeline", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "can_follow", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateQueryResponse {

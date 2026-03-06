@@ -144,6 +144,10 @@ message Record {
   bytes raw = 4;
   RecordRef ref = 5;
   google.protobuf.Timestamp source_ts = 6;
+
+  // EventID fields for record identity and deduplication.
+  uint32 ingest_seq = 7;   // Per-ingester rolling sequence counter
+  bytes ingester_id = 8;   // 16-byte UUID
 }
 
 message RecordRef {
@@ -230,6 +234,7 @@ message ValidateQueryResponse {
   repeated HighlightSpan spans = 4;   // syntax highlighting spans (concatenation reproduces input)
   string expression = 5;              // echo back input for staleness detection
   bool has_pipeline = 6;              // whether query contains pipe operators
+  bool can_follow = 7;               // whether query is compatible with follow mode
 }
 
 message HighlightSpan {

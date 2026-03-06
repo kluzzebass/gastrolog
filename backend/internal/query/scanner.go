@@ -468,7 +468,7 @@ func matchesTokens(raw []byte, queryTokens []string) bool {
 // are found in either the record's attributes OR the message body.
 func keyValueFilter(filters []KeyValueFilter) recordFilter {
 	return func(rec chunk.Record) bool {
-		return matchesKeyValue(rec.Attrs, rec.Raw, filters)
+		return matchesKeyValue(rec, filters)
 	}
 }
 
@@ -516,28 +516,73 @@ func (c *msgPairCache) values() map[string]struct{} {
 }
 
 // matchesKeyValue checks if all query key=value pairs are found in either
-// the record's attributes or the message body (OR semantics per pair, AND across pairs).
-//
-// Supports wildcard patterns:
-//   - Key="foo", Value="bar" - exact match for foo=bar
-//   - Key="foo", Value=""    - match if key "foo" exists (any value)
-//   - Key="", Value="bar"    - match if any key has value "bar"
-func matchesKeyValue(recAttrs chunk.Attributes, raw []byte, queryFilters []KeyValueFilter) bool {
+// the record's attributes, message body, or first-class fields
+// (ingester_id, ingest_seq, ingest_ts, write_ts, source_ts).
+// Each filter must match. A filter with Key="" and Value="" is skipped.
+func matchesKeyValue(rec chunk.Record, queryFilters []KeyValueFilter) bool {
 	if len(queryFilters) == 0 {
 		return true
 	}
 
-	cache := newMsgPairCache(raw)
+	cache := newMsgPairCache(rec.Raw)
 
 	for _, f := range queryFilters {
 		if f.Key == "" && f.Value == "" {
 			continue
 		}
-		if !matchesSingleKVFilter(recAttrs, raw, &cache, f) {
+		if v, ok := firstClassFieldValue(f.Key, rec); ok {
+			if !matchFirstClassFilter(v, f) {
+				return false
+			}
+			continue
+		}
+		if !matchesSingleKVFilter(rec.Attrs, rec.Raw, &cache, f) {
 			return false
 		}
 	}
 	return true
+}
+
+// matchFirstClassFilter checks if a first-class field value matches a filter.
+func matchFirstClassFilter(v string, f KeyValueFilter) bool {
+	if f.Value == "" || f.Value == "*" {
+		return true // key-exists check
+	}
+	if f.Op != querylang.OpEq {
+		return compareValues(v, f.Value, f.Op)
+	}
+	return matchStringOrPat(v, f.Value, f.ValuePat)
+}
+
+// firstClassFieldValue returns the string value and true for first-class
+// record fields that are queryable via key=value syntax.
+func firstClassFieldValue(key string, rec chunk.Record) (string, bool) {
+	switch strings.ToLower(key) {
+	case "ingester_id":
+		if rec.EventID.IngesterID != (uuid.UUID{}) {
+			return rec.EventID.IngesterID.String(), true
+		}
+		return "", false
+	case "ingest_seq":
+		return strconv.FormatUint(uint64(rec.EventID.IngestSeq), 10), true
+	case "ingest_ts":
+		if !rec.IngestTS.IsZero() {
+			return rec.IngestTS.Format(time.RFC3339Nano), true
+		}
+		return "", false
+	case "write_ts":
+		if !rec.WriteTS.IsZero() {
+			return rec.WriteTS.Format(time.RFC3339Nano), true
+		}
+		return "", false
+	case "source_ts":
+		if !rec.SourceTS.IsZero() {
+			return rec.SourceTS.Format(time.RFC3339Nano), true
+		}
+		return "", false
+	default:
+		return "", false
+	}
 }
 
 // matchesSingleKVFilter dispatches a single KeyValueFilter to the appropriate
@@ -1175,10 +1220,10 @@ func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 		return matchesSingleToken(rec.Raw, pred.Value)
 
 	case querylang.PredKV:
-		return matchesSingleKV(rec.Attrs, rec.Raw, pred)
+		return matchesSingleKV(rec, pred)
 
 	case querylang.PredKeyExists:
-		return matchesKeyExists(rec.Attrs, rec.Raw, pred)
+		return matchesKeyExists(rec, pred)
 
 	case querylang.PredValueExists:
 		return matchesValueExists(rec.Attrs, rec.Raw, pred)
@@ -1233,7 +1278,7 @@ func matchesSingleToken(raw []byte, token string) bool {
 //     status>=500 from matching status=sent via lexicographic comparison.
 //   - If the query value is non-numeric, use case-insensitive lexicographic comparison.
 func compareValues(a, b string, op querylang.CompareOp) bool {
-	switch op { //nolint:exhaustive // ordering ops handled below after numeric parsing
+	switch op { //nolint:exhaustive // ordering ops handled below
 	case querylang.OpEq:
 		return strings.EqualFold(a, b)
 	case querylang.OpNe:
@@ -1244,7 +1289,7 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 	af, aErr := strconv.ParseFloat(a, 64)
 	bf, bErr := strconv.ParseFloat(b, 64)
 	if aErr == nil && bErr == nil {
-		switch op { //nolint:exhaustive // OpEq/OpNe handled above
+		switch op { //nolint:exhaustive // eq/ne handled above
 		case querylang.OpGt:
 			return af > bf
 		case querylang.OpGte:
@@ -1264,7 +1309,7 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 	// Both non-numeric (or record numeric, query non-numeric):
 	// case-insensitive lexicographic comparison.
 	cmp := strings.Compare(strings.ToLower(a), strings.ToLower(b))
-	switch op { //nolint:exhaustive // OpEq/OpNe handled above
+	switch op { //nolint:exhaustive // eq/ne handled above
 	case querylang.OpGt:
 		return cmp > 0
 	case querylang.OpGte:
@@ -1278,12 +1323,22 @@ func compareValues(a, b string, op querylang.CompareOp) bool {
 }
 
 // matchesSingleKV checks if a record contains a specific key=value pair
-// in either attributes or extracted message body pairs.
+// in either first-class fields, attributes, or extracted message body pairs.
 // Supports glob patterns via keyPat/valPat (from PredicateExpr.KeyPat/ValuePat)
 // and comparison operators via pred.Op.
-func matchesSingleKV(attrs chunk.Attributes, raw []byte, pred *querylang.PredicateExpr) bool {
+func matchesSingleKV(rec chunk.Record, pred *querylang.PredicateExpr) bool {
 	keyLower := strings.ToLower(pred.Key)
 	valueLower := strings.ToLower(pred.Value)
+	attrs := rec.Attrs
+	raw := rec.Raw
+
+	// First-class fields (ingester_id, ingest_seq, timestamps).
+	if v, ok := firstClassFieldValue(keyLower, rec); ok {
+		if pred.Op != querylang.OpEq {
+			return compareValues(v, pred.Value, pred.Op)
+		}
+		return matchStringOrPat(v, pred.Value, pred.ValuePat)
+	}
 
 	// For comparison operators other than eq, use compareValues.
 	if pred.Op != querylang.OpEq {
@@ -1333,10 +1388,17 @@ func matchesSingleKV(attrs chunk.Attributes, raw []byte, pred *querylang.Predica
 	return false
 }
 
-// matchesKeyExists checks if a record has a key (any value) in attrs or message body.
-// Supports glob patterns via keyPat (from PredicateExpr.KeyPat).
-func matchesKeyExists(attrs chunk.Attributes, raw []byte, pred *querylang.PredicateExpr) bool {
+// matchesKeyExists checks if a record has a key (any value) in first-class fields,
+// attrs, or message body. Supports glob patterns via keyPat (from PredicateExpr.KeyPat).
+func matchesKeyExists(rec chunk.Record, pred *querylang.PredicateExpr) bool {
 	keyLower := strings.ToLower(pred.Key)
+	attrs := rec.Attrs
+	raw := rec.Raw
+
+	// First-class fields.
+	if _, ok := firstClassFieldValue(keyLower, rec); ok {
+		return true
+	}
 
 	// Check attributes.
 	for k := range attrs {

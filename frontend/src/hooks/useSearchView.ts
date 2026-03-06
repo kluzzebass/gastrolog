@@ -91,7 +91,7 @@ function recordsToRawTable(records: ProtoRecord[]): TableResult {
     for (const k of Object.keys(rec.attrs)) keySet.add(k);
   }
   const attrKeys = [...keySet].sort();
-  const columns = ["_write_ts", "_ingest_ts", "_source_ts", ...attrKeys, "_raw"];
+  const columns = ["write_ts", "ingest_ts", "source_ts", ...attrKeys, "raw"];
   const decoder = new TextDecoder();
   const rows = records.map((rec) => {
     const values: string[] = Array.from({ length: columns.length }, () => "");
@@ -175,6 +175,8 @@ export function useSearchView() {
   };
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(null);
+  const selectedRecordRef = useRef<ProtoRecord | null>(null);
+  selectedRecordRef.current = selectedRecord;
   const { theme, setTheme, dark, highlightMode, setHighlightMode, palette, setPalette } = useThemeSync();
 
   const {
@@ -184,17 +186,23 @@ export function useSearchView() {
     detailResizeProps, resizing,
   } = usePanelLayout();
 
-  // Auto-expand detail panel and fetch context when a record is selected.
+  // Auto-expand detail panel, fetch context, and scroll into view when a record is selected.
   useEffect(() => {
     if (selectedRecord && detailCollapsed) setDetailCollapsed(false);
+    if (!selectedRecord && !detailPinned) setDetailCollapsed(true);
     if (selectedRecord?.ref) {
       fetchContext(selectedRecord.ref);
     } else {
       resetContext();
     }
+    if (selectedRecord) {
+      requestAnimationFrame(() => {
+        selectedRowRef.current?.scrollIntoView({ block: "nearest" });
+      });
+    }
   }, [selectedRecord]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Escape key: deselect record and collapse detail panel.
+  // Global keyboard shortcuts: Escape to deselect, Arrow keys to navigate records.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -204,11 +212,39 @@ export function useSearchView() {
         }
         setSelectedRecord(null);
         if (!detailPinned) setDetailCollapsed(true);
+        return;
+      }
+
+      // Arrow key navigation — skip when focus is in an input/textarea.
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const list = isFollowMode ? followRecordsRef.current : recordsRef.current;
+      if (!list || list.length === 0) return;
+
+      e.preventDefault();
+      const dir = e.key === "ArrowUp" ? -1 : 1;
+      const sel = selectedRecordRef.current;
+      if (!sel) {
+        // Nothing selected — select first or last depending on direction.
+        setSelectedRecord(dir === 1 ? list[0]! : list[list.length - 1]!);
+        return;
+      }
+      const idx = list.findIndex((r) => sameRecord(r, sel));
+      if (idx === -1) {
+        // Selected record not in current list — select first/last.
+        setSelectedRecord(dir === 1 ? list[0]! : list[list.length - 1]!);
+        return;
+      }
+      const next = idx + dir;
+      if (next >= 0 && next < list.length) {
+        setSelectedRecord(list[next]!);
       }
     };
     globalThis.addEventListener("keydown", handler);
     return () => globalThis.removeEventListener("keydown", handler);
-  }, [detailPinned, showPlan, setDetailCollapsed, setShowPlan]);
+  }, [detailPinned, showPlan, isFollowMode, setDetailCollapsed, setShowPlan]);
 
   const queryHistory = useQueryHistory();
   const savedQueries = useSavedQueries();
@@ -250,6 +286,10 @@ export function useSearchView() {
     reset: resetFollow,
     resetNewCount: resetFollowNewCount,
   } = useFollow({ onError: toastError, maxRecords: followBufferSize });
+  const recordsRef = useRef(records);
+  recordsRef.current = records;
+  const followRecordsRef = useRef(followRecords);
+  followRecordsRef.current = followRecords;
   const {
     chunks: explainChunks,
     direction: explainDirection,
@@ -597,6 +637,9 @@ export function useSearchView() {
   const draftIsPipeline = validation.expression === deferredDraft
     ? validation.hasPipeline
     : hasPipeOutsideQuotes(deferredDraft);
+  const draftCanFollow = validation.expression === deferredDraft
+    ? validation.canFollow
+    : !hasPipeOutsideQuotes(deferredDraft);
   const isRawQuery = queryHasRaw(q);
   const rawTableResult = isRawQuery && !tableResult && records.length > 0
     ? recordsToRawTable(records)
@@ -641,6 +684,21 @@ export function useSearchView() {
       const newQuery = q.trim() ? `${q.trim()} ${token}` : token;
       setUrlQuery(newQuery);
     }
+  };
+
+  const handleMultiFieldSelect = (fields: [string, string][]) => {
+    const tokens = fields.map(([key, value]) => {
+      const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
+      return needsQuotes ? `${key}="${value}"` : `${key}=${value}`;
+    });
+    // Add any tokens not already present.
+    let current = q.trim();
+    for (const token of tokens) {
+      if (!current.includes(token)) {
+        current = current ? `${current} ${token}` : token;
+      }
+    }
+    setUrlQuery(current);
   };
 
   const handleSpanClick = (value: string) => {
@@ -744,7 +802,7 @@ export function useSearchView() {
 
     // Draft / input
     draft, setDraft, cursorRef, queryInputRef,
-    draftHasErrors, draftIsPipeline,
+    draftHasErrors, draftIsPipeline, draftCanFollow,
     autocomplete, validation,
 
     // Theme
@@ -795,7 +853,7 @@ export function useSearchView() {
     toggleReverse, handleShowPlan, handleZoomOut,
     handleVaultSelect, handleChunkSelect, handlePosSelect,
     handleContextRecordSelect, handleFieldSelect,
-    handleSpanClick, handleTokenToggle,
+    handleSpanClick, handleMultiFieldSelect, handleTokenToggle,
     toggleSeverity,
 
     // Sidebar data

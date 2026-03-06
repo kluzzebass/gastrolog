@@ -67,16 +67,16 @@ func TestRecordToRow(t *testing.T) {
 	if row["method"] != "GET" {
 		t.Errorf("method = %q, want GET", row["method"])
 	}
-	if row["_raw"] != "GET /api/test 200" {
-		t.Errorf("_raw = %q, want 'GET /api/test 200'", row["_raw"])
+	if row["raw"] != "GET /api/test 200" {
+		t.Errorf("raw = %q, want 'GET /api/test 200'", row["raw"])
 	}
 }
 
 func TestRecordToRowNilAttrs(t *testing.T) {
 	rec := chunk.Record{Raw: []byte("hello")}
 	row := RecordToRow(rec)
-	if row["_raw"] != "hello" {
-		t.Errorf("_raw = %q, want hello", row["_raw"])
+	if row["raw"] != "hello" {
+		t.Errorf("raw = %q, want hello", row["raw"])
 	}
 }
 
@@ -338,7 +338,7 @@ func TestAggregatorBinWithCustomField(t *testing.T) {
 		Groups: []querylang.GroupExpr{{
 			Bin: &querylang.BinExpr{
 				Duration: "1h",
-				Field:    &querylang.FieldRef{Name: "_ingest_ts"},
+				Field:    &querylang.FieldRef{Name: "ingest_ts"},
 			},
 		}},
 	}
@@ -720,7 +720,7 @@ func TestAggregatorSourceTSBin(t *testing.T) {
 		Groups: []querylang.GroupExpr{{
 			Bin: &querylang.BinExpr{
 				Duration: "5m",
-				Field:    &querylang.FieldRef{Name: "_source_ts"},
+				Field:    &querylang.FieldRef{Name: "source_ts"},
 			},
 		}},
 	}
@@ -754,7 +754,7 @@ func TestAggregatorMissingSourceTS(t *testing.T) {
 		Groups: []querylang.GroupExpr{{
 			Bin: &querylang.BinExpr{
 				Duration: "5m",
-				Field:    &querylang.FieldRef{Name: "_source_ts"},
+				Field:    &querylang.FieldRef{Name: "source_ts"},
 			},
 		}},
 	}

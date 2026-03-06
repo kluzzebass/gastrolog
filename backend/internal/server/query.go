@@ -117,7 +117,7 @@ func (s *QueryServer) searchPipeline(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	// Compute local histogram to include alongside pipeline results.
-	histogram := histogramToProto(eng.ComputeHistogram(q, 50))
+	histogram := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
 
 	if result.Table != nil {
 		// Fan out to remote nodes and merge table results.
@@ -174,7 +174,7 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// Compute and merge histogram.
-	localHist := histogramToProto(eng.ComputeHistogram(q, 50))
+	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
 	histogram := mergeHistogramBuckets(localHist, remoteRes.histogram)
 
 	if result.Table != nil {
@@ -230,7 +230,7 @@ func (s *QueryServer) searchDirect(
 	}
 
 	// Compute local histogram and merge with remote.
-	localHist := histogramToProto(eng.ComputeHistogram(q, 50))
+	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
 	histogram := mergeHistogramBuckets(localHist, remoteRes.histogram)
 
 	iter, getToken := eng.Search(ctx, q, resume)
@@ -278,9 +278,12 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context) map[string][]uuid.
 
 func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 	rec := &apiv1.Record{
-		Raw:      er.Raw,
-		SourceTs: er.SourceTs,
-		IngestTs: er.IngestTs,
+		Raw:        er.Raw,
+		SourceTs:   er.SourceTs,
+		IngestTs:   er.IngestTs,
+		WriteTs:    er.WriteTs,
+		IngestSeq:  er.IngestSeq,
+		IngesterId: er.IngesterId,
 	}
 	if len(er.Attrs) > 0 {
 		rec.Attrs = make(map[string]string, len(er.Attrs))
@@ -315,22 +318,19 @@ func drainRemoteUntil(
 	ri int,
 	cutoff time.Time,
 	isBefore func(a, b time.Time) bool,
-	dedup *ingestDedup,
 	transform *query.RecordTransform,
 ) (int, bool, error) {
 	for ri < len(remote) {
-		ts := remote[ri].GetIngestTs().AsTime()
+		ts := remote[ri].GetWriteTs().AsTime()
 		if !cutoff.IsZero() && !isBefore(ts, cutoff) {
 			break
 		}
-		if !dedup.seen(ts, remote[ri].GetAttrs()["ingester_id"]) {
-			done, err := emitRemoteRecord(ctx, sb, remote[ri], transform)
-			if err != nil {
-				return ri, false, err
-			}
-			if done {
-				return ri, true, nil
-			}
+		done, err := emitRemoteRecord(ctx, sb, remote[ri], transform)
+		if err != nil {
+			return ri, false, err
+		}
+		if done {
+			return ri, true, nil
 		}
 		ri++
 	}
@@ -338,10 +338,9 @@ func drainRemoteUntil(
 }
 
 // mergeAndStream interleaves the local engine iterator with pre-fetched remote
-// results in timestamp order, deduplicates by (ingest_ts, ingester_id), applies
-// optional per-record transforms, and streams batches to the client.
-// When remote is empty (single-node or resume page), the merge is a no-op
-// passthrough with zero overhead.
+// results in timestamp order, applies optional per-record transforms, and
+// streams batches to the client. When remote is empty (single-node or resume
+// page), the merge is a no-op passthrough with zero overhead.
 func (s *QueryServer) mergeAndStream(
 	ctx context.Context,
 	localIter iter.Seq2[chunk.Record, error],
@@ -360,7 +359,6 @@ func (s *QueryServer) mergeAndStream(
 	}
 
 	sb := newStreamBatcher(stream, 100)
-	var dedup ingestDedup
 	ri := 0
 
 	for rec, err := range localIter {
@@ -369,16 +367,12 @@ func (s *QueryServer) mergeAndStream(
 		}
 
 		var done bool
-		ri, done, err = drainRemoteUntil(ctx, sb, remote, ri, rec.IngestTS, isBefore, &dedup, transform)
+		ri, done, err = drainRemoteUntil(ctx, sb, remote, ri, rec.WriteTS, isBefore, transform)
 		if err != nil {
 			return err
 		}
 		if done {
 			break
-		}
-
-		if dedup.seen(rec.IngestTS, rec.Attrs["ingester_id"]) {
-			continue
 		}
 
 		done, err = emitRecord(ctx, sb, rec, transform)
@@ -391,7 +385,7 @@ func (s *QueryServer) mergeAndStream(
 	}
 
 	// Drain remaining remote records (zero cutoff = drain all).
-	if _, _, err := drainRemoteUntil(ctx, sb, remote, ri, time.Time{}, isBefore, &dedup, transform); err != nil {
+	if _, _, err := drainRemoteUntil(ctx, sb, remote, ri, time.Time{}, isBefore, transform); err != nil {
 		return err
 	}
 
@@ -452,27 +446,6 @@ func (b *streamBatcher) add(rec *apiv1.Record) error {
 
 func (b *streamBatcher) pending() []*apiv1.Record { return b.batch }
 
-// ingestDedup tracks the last yielded (ingest_ts, ingester_id) pair to skip
-// adjacent duplicates in a sorted record stream. Records routed to multiple
-// vaults share the same identity; since results are sorted by ingest_ts,
-// duplicates are always adjacent.
-type ingestDedup struct {
-	ts      time.Time
-	ingID   string
-	started bool
-}
-
-// seen returns true if this (ts, ingesterID) was already yielded.
-func (d *ingestDedup) seen(ts time.Time, ingesterID string) bool {
-	if d.started && ts.Equal(d.ts) && ingesterID == d.ingID {
-		return true
-	}
-	d.ts = ts
-	d.ingID = ingesterID
-	d.started = true
-	return false
-}
-
 // remoteResult holds records and histogram from remote vault queries.
 type remoteResult struct {
 	records   []*apiv1.Record
@@ -506,10 +479,10 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) remoteRe
 		}
 	}
 
-	// Sort so mergeRecordsByIngestTS can merge correctly regardless of
-	// how many remote vaults contributed.
+	// Sort by WriteTS so the merge interleaving is consistent with chunk
+	// scan order and the user's calendar time range selection.
 	slices.SortFunc(all, func(a, b *apiv1.Record) int {
-		ta, tb := a.GetIngestTs().AsTime(), b.GetIngestTs().AsTime()
+		ta, tb := a.GetWriteTs().AsTime(), b.GetWriteTs().AsTime()
 		if reverse {
 			return tb.Compare(ta) // descending (newest first)
 		}
@@ -883,6 +856,8 @@ func pipeOpName(op querylang.PipeOp) string {
 		return "barchart"
 	case *querylang.DonutOp:
 		return "donut"
+	case *querylang.DedupOp:
+		return "dedup"
 	case *querylang.MapOp:
 		return "map"
 	default:
@@ -971,6 +946,11 @@ func pipeOpNote(op querylang.PipeOp) string {
 			return fmt.Sprintf("Drops fields: %s. Applied per-record.", strings.Join(o.Names, ", "))
 		}
 		return fmt.Sprintf("Keeps only fields: %s. Applied per-record.", strings.Join(o.Names, ", "))
+	case *querylang.DedupOp:
+		if o.Window != "" {
+			return fmt.Sprintf("Removes duplicate records keyed on EventID within a %s window.", o.Window)
+		}
+		return "Removes duplicate records keyed on EventID within a 1s window."
 	case *querylang.LookupOp:
 		return fmt.Sprintf("Enriches each record by looking up %s in the %s table.", o.Field, o.Table)
 	case *querylang.RawOp:
@@ -1057,7 +1037,7 @@ func (s *QueryServer) GetContext(
 			rec.Ref.Pos == ref.Pos
 	}
 
-	anchorTS := anchor.GetIngestTs().AsTime()
+	anchorTS := anchor.GetWriteTs().AsTime()
 
 	beforeRecs, err := s.searchContext(ctx, query.Query{
 		End:       anchorTS,
@@ -1131,7 +1111,6 @@ func (s *QueryServer) searchContext(
 		return a.Before(b)
 	}
 
-	var dedup ingestDedup
 	var result []*apiv1.Record
 
 	for rec, err := range localIter {
@@ -1139,17 +1118,14 @@ func (s *QueryServer) searchContext(
 			return result, err
 		}
 		// Drain remote records that sort before this local record.
-		for ri < len(remote) && isBefore(remote[ri].GetIngestTs().AsTime(), rec.IngestTS) {
-			if !dedup.seen(remote[ri].GetIngestTs().AsTime(), remote[ri].GetAttrs()["ingester_id"]) && !isAnchor(remote[ri]) {
+		for ri < len(remote) && isBefore(remote[ri].GetWriteTs().AsTime(), rec.WriteTS) {
+			if !isAnchor(remote[ri]) {
 				result = append(result, remote[ri])
 				if len(result) >= n {
 					return result, nil
 				}
 			}
 			ri++
-		}
-		if dedup.seen(rec.IngestTS, rec.Attrs["ingester_id"]) {
-			continue
 		}
 		proto := recordToProto(rec)
 		if isAnchor(proto) {
@@ -1163,7 +1139,7 @@ func (s *QueryServer) searchContext(
 
 	// Drain remaining remote records.
 	for ri < len(remote) {
-		if !dedup.seen(remote[ri].GetIngestTs().AsTime(), remote[ri].GetAttrs()["ingester_id"]) && !isAnchor(remote[ri]) {
+		if !isAnchor(remote[ri]) {
 			result = append(result, remote[ri])
 			if len(result) >= n {
 				return result, nil
@@ -1212,7 +1188,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "raw", "lookup", "barchart", "donut", "map"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "barchart", "donut", "map"},
 		PipeFunctions: funcs,
 		LookupTables:  s.lookupNames,
 	}), nil
@@ -1232,6 +1208,8 @@ func (s *QueryServer) ValidateQuery(
 		protoSpans[i] = &apiv1.HighlightSpan{Text: sp.Text, Role: string(sp.Role)}
 	}
 
+	canFollow := valid && (!hasPipeline || canFollowPipeline(expr))
+
 	return connect.NewResponse(&apiv1.ValidateQueryResponse{
 		Valid:        valid,
 		ErrorMessage: msg,
@@ -1239,7 +1217,18 @@ func (s *QueryServer) ValidateQuery(
 		Spans:        protoSpans,
 		Expression:   expr,
 		HasPipeline:  hasPipeline,
+		CanFollow:    canFollow,
 	}), nil
+}
+
+// canFollowPipeline parses the expression and checks whether its pipeline
+// operators are all streamable (compatible with follow mode).
+func canFollowPipeline(expr string) bool {
+	pipeline := querylang.ParseExpressionPipeline(expr)
+	if pipeline == nil {
+		return true // no pipeline — follow is fine
+	}
+	return query.CanStreamPipeline(pipeline)
 }
 
 // GetPipelineFields returns available fields and completions at cursor position.
@@ -1563,16 +1552,24 @@ func protoToChunkRecord(r *apiv1.Record) chunk.Record {
 		rec.Ref.ChunkID, _ = chunk.ParseChunkID(ref.ChunkId)
 		rec.Ref.Pos = ref.Pos
 	}
+	// Populate EventID from proto fields.
+	rec.EventID.IngestSeq = r.GetIngestSeq()
+	if len(r.GetIngesterId()) == 16 {
+		copy(rec.EventID.IngesterID[:], r.GetIngesterId())
+	}
+	rec.EventID.IngestTS = rec.IngestTS
 	return rec
 }
 
 // recordToProto converts an internal Record to the proto type.
 func recordToProto(rec chunk.Record) *apiv1.Record {
 	r := &apiv1.Record{
-		IngestTs: timestamppb.New(rec.IngestTS),
-		WriteTs:  timestamppb.New(rec.WriteTS),
-		Attrs:    rec.Attrs,
-		Raw:      rec.Raw,
+		IngestTs:   timestamppb.New(rec.IngestTS),
+		WriteTs:    timestamppb.New(rec.WriteTS),
+		Attrs:      rec.Attrs,
+		Raw:        rec.Raw,
+		IngestSeq:  rec.EventID.IngestSeq,
+		IngesterId: rec.EventID.IngesterID[:],
 		Ref: &apiv1.RecordRef{
 			ChunkId: rec.Ref.ChunkID.String(),
 			Pos:     rec.Ref.Pos,

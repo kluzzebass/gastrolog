@@ -8,6 +8,7 @@ export interface ValidationResult {
   spans: Array<{ text: string; role: string }>; // empty = no response yet
   expression: string; // what expression these spans are for
   hasPipeline: boolean;
+  canFollow: boolean;
 }
 
 const VALID: ValidationResult = {
@@ -17,6 +18,7 @@ const VALID: ValidationResult = {
   spans: [],
   expression: "",
   hasPipeline: false,
+  canFollow: true,
 };
 
 /**
@@ -61,6 +63,7 @@ export function useValidation(expression: string): ValidationResult {
               spans: resp.spans.map((s) => ({ text: s.text, role: s.role })),
               expression: resp.expression,
               hasPipeline: resp.hasPipeline,
+              canFollow: resp.canFollow,
             });
           });
         }
