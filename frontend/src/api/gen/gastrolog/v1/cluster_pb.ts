@@ -496,6 +496,22 @@ export class NodeStats extends Message<NodeStats> {
    */
   raftFsmPending = protoInt64.zero;
 
+  /**
+   * Addresses (advertised via broadcast so peers know each other's endpoints)
+   *
+   * HTTP API address (e.g. ":4564")
+   *
+   * @generated from field: string api_address = 26;
+   */
+  apiAddress = "";
+
+  /**
+   * pprof HTTP address, empty if disabled
+   *
+   * @generated from field: string pprof_address = 27;
+   */
+  pprofAddress = "";
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -529,6 +545,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 23, name: "raft_applied_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 24, name: "raft_last_contact", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 25, name: "raft_fsm_pending", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 26, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 27, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

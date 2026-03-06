@@ -640,11 +640,13 @@ type ClusterNode struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"` // cluster/Raft address (e.g. ":4566")
 	Role          ClusterNodeRole        `protobuf:"varint,4,opt,name=role,proto3,enum=gastrolog.v1.ClusterNodeRole" json:"role,omitempty"`
 	Suffrage      ClusterNodeSuffrage    `protobuf:"varint,5,opt,name=suffrage,proto3,enum=gastrolog.v1.ClusterNodeSuffrage" json:"suffrage,omitempty"`
 	IsLeader      bool                   `protobuf:"varint,6,opt,name=is_leader,json=isLeader,proto3" json:"is_leader,omitempty"`
 	Stats         *NodeStats             `protobuf:"bytes,7,opt,name=stats,proto3" json:"stats,omitempty"`
+	ApiAddress    string                 `protobuf:"bytes,8,opt,name=api_address,json=apiAddress,proto3" json:"api_address,omitempty"`       // HTTP API address (e.g. ":4564")
+	PprofAddress  string                 `protobuf:"bytes,9,opt,name=pprof_address,json=pprofAddress,proto3" json:"pprof_address,omitempty"` // pprof HTTP address (e.g. "localhost:6060"), empty if disabled
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -726,6 +728,20 @@ func (x *ClusterNode) GetStats() *NodeStats {
 		return x.Stats
 	}
 	return nil
+}
+
+func (x *ClusterNode) GetApiAddress() string {
+	if x != nil {
+		return x.ApiAddress
+	}
+	return ""
+}
+
+func (x *ClusterNode) GetPprofAddress() string {
+	if x != nil {
+		return x.PprofAddress
+	}
+	return ""
 }
 
 type SetNodeSuffrageRequest struct {
@@ -1025,7 +1041,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\flast_contact\x18\n" +
 	" \x01(\tR\vlastContact\x12\x1b\n" +
 	"\tnum_peers\x18\v \x01(\rR\bnumPeers\x12)\n" +
-	"\x10protocol_version\x18\f \x01(\rR\x0fprotocolVersion\"\x89\x02\n" +
+	"\x10protocol_version\x18\f \x01(\rR\x0fprotocolVersion\"\xcf\x02\n" +
 	"\vClusterNode\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -1033,7 +1049,10 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x04role\x18\x04 \x01(\x0e2\x1d.gastrolog.v1.ClusterNodeRoleR\x04role\x12=\n" +
 	"\bsuffrage\x18\x05 \x01(\x0e2!.gastrolog.v1.ClusterNodeSuffrageR\bsuffrage\x12\x1b\n" +
 	"\tis_leader\x18\x06 \x01(\bR\bisLeader\x12-\n" +
-	"\x05stats\x18\a \x01(\v2\x17.gastrolog.v1.NodeStatsR\x05stats\"G\n" +
+	"\x05stats\x18\a \x01(\v2\x17.gastrolog.v1.NodeStatsR\x05stats\x12\x1f\n" +
+	"\vapi_address\x18\b \x01(\tR\n" +
+	"apiAddress\x12#\n" +
+	"\rpprof_address\x18\t \x01(\tR\fpprofAddress\"G\n" +
 	"\x16SetNodeSuffrageRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x14\n" +
 	"\x05voter\x18\x02 \x01(\bR\x05voter\"\x19\n" +

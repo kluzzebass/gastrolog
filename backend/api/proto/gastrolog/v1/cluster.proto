@@ -90,6 +90,10 @@ message NodeStats {
   uint64 raft_applied_index = 23;
   string raft_last_contact = 24;
   uint64 raft_fsm_pending = 25;
+
+  // Addresses (advertised via broadcast so peers know each other's endpoints)
+  string api_address = 26;        // HTTP API address (e.g. ":4564")
+  string pprof_address = 27;      // pprof HTTP address, empty if disabled
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

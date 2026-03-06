@@ -179,6 +179,12 @@ func (s *LifecycleServer) GetClusterStatus(
 			node.Stats = s.peerStats.Get(srv.ID)
 		}
 
+		// Copy advertised addresses from stats onto the ClusterNode.
+		if node.Stats != nil {
+			node.ApiAddress = node.Stats.ApiAddress
+			node.PprofAddress = node.Stats.PprofAddress
+		}
+
 		nodes = append(nodes, node)
 	}
 

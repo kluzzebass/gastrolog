@@ -57,6 +57,8 @@ type StatsCollectorConfig struct {
 	Version           string
 	StartTime         time.Time
 	Interval          time.Duration
+	ApiAddress        string // HTTP API listen address (e.g. ":4564")
+	PprofAddress      string // pprof listen address, empty if disabled
 	Logger            *slog.Logger
 }
 
@@ -117,6 +119,8 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 		MemoryStackInuse:    uint64(mem.StackInuse),      //nolint:gosec // always positive
 		MemoryHeapObjects:   mem.HeapObjects,
 		NumGc:               mem.NumGC,
+		ApiAddress:          c.cfg.ApiAddress,
+		PprofAddress:        c.cfg.PprofAddress,
 	}
 
 	// Queue stats.

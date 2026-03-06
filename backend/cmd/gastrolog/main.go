@@ -86,6 +86,7 @@ func main() {
 				JoinAddr:    mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
 				Voteless:    mustBool(cmd, "voteless"),
+				PprofAddr:   mustString(cmd, "pprof"),
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
 			}

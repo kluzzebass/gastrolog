@@ -65,6 +65,10 @@ type RunConfig struct {
 	JoinToken   string
 	Voteless    bool
 
+	// PprofAddr is the pprof HTTP server address (e.g. "localhost:6060").
+	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
+	PprofAddr string
+
 	// SlogCapture receives copies of slog records for the "self" ingester.
 	// Created by main and shared with the CaptureHandler. Nil disables capture.
 	SlogCapture <-chan logging.CapturedRecord
@@ -161,7 +165,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, nodeID)
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, nodeID, cfg.ServerAddr, cfg.PprofAddr)
 
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
@@ -285,7 +289,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string, apiAddr string, pprofAddr string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
@@ -324,10 +328,12 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config
 			}
 			return n.Name
 		},
-		Version:   Version,
-		StartTime: time.Now(),
-		Interval:  broadcastInterval,
-		Logger:    logger.With("component", "stats-collector"),
+		Version:      Version,
+		StartTime:    time.Now(),
+		Interval:     broadcastInterval,
+		ApiAddress:   apiAddr,
+		PprofAddress: pprofAddr,
+		Logger:       logger.With("component", "stats-collector"),
 	})
 
 	orch.Scheduler().SetOnJobChange(func() {

@@ -123,6 +123,22 @@ function CompactView({
         </div>
       </section>
 
+      {/* Addresses */}
+      {(stats.apiAddress || stats.pprofAddress) && (
+        <section>
+          <CompactDivider dark={dark} />
+          <CompactSectionLabel label="Addresses" dark={dark} />
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+            {stats.apiAddress && (
+              <CompactStatRow label="API" value={stats.apiAddress} mono dark={dark} />
+            )}
+            {stats.pprofAddress && (
+              <CompactStatRow label="pprof" value={stats.pprofAddress} mono dark={dark} />
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Queue */}
       {stats.ingestQueueCapacity > 0 && (
         <section>

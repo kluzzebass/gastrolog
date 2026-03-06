@@ -85,11 +85,13 @@ message RaftStats {
 message ClusterNode {
   string id = 1;
   string name = 2;
-  string address = 3;
+  string address = 3;            // cluster/Raft address (e.g. ":4566")
   ClusterNodeRole role = 4;
   ClusterNodeSuffrage suffrage = 5;
   bool is_leader = 6;
   NodeStats stats = 7;
+  string api_address = 8;        // HTTP API address (e.g. ":4564")
+  string pprof_address = 9;      // pprof HTTP address (e.g. "localhost:6060"), empty if disabled
 }
 
 enum ClusterNodeRole {

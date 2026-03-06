@@ -486,8 +486,11 @@ type NodeStats struct {
 	RaftAppliedIndex uint64 `protobuf:"varint,23,opt,name=raft_applied_index,json=raftAppliedIndex,proto3" json:"raft_applied_index,omitempty"`
 	RaftLastContact  string `protobuf:"bytes,24,opt,name=raft_last_contact,json=raftLastContact,proto3" json:"raft_last_contact,omitempty"`
 	RaftFsmPending   uint64 `protobuf:"varint,25,opt,name=raft_fsm_pending,json=raftFsmPending,proto3" json:"raft_fsm_pending,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Addresses (advertised via broadcast so peers know each other's endpoints)
+	ApiAddress    string `protobuf:"bytes,26,opt,name=api_address,json=apiAddress,proto3" json:"api_address,omitempty"`       // HTTP API address (e.g. ":4564")
+	PprofAddress  string `protobuf:"bytes,27,opt,name=pprof_address,json=pprofAddress,proto3" json:"pprof_address,omitempty"` // pprof HTTP address, empty if disabled
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -693,6 +696,20 @@ func (x *NodeStats) GetRaftFsmPending() uint64 {
 		return x.RaftFsmPending
 	}
 	return 0
+}
+
+func (x *NodeStats) GetApiAddress() string {
+	if x != nil {
+		return x.ApiAddress
+	}
+	return ""
+}
+
+func (x *NodeStats) GetPprofAddress() string {
+	if x != nil {
+		return x.PprofAddress
+	}
+	return ""
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
@@ -1901,7 +1918,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tnode_jobs\x18\v \x01(\v2\x16.gastrolog.v1.NodeJobsH\x00R\bnodeJobsB\t\n" +
 	"\apayload\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xe3\a\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xa9\b\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -1934,7 +1951,10 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x11raft_commit_index\x18\x16 \x01(\x04R\x0fraftCommitIndex\x12,\n" +
 	"\x12raft_applied_index\x18\x17 \x01(\x04R\x10raftAppliedIndex\x12*\n" +
 	"\x11raft_last_contact\x18\x18 \x01(\tR\x0fraftLastContact\x12(\n" +
-	"\x10raft_fsm_pending\x18\x19 \x01(\x04R\x0eraftFsmPending\"\xbd\x01\n" +
+	"\x10raft_fsm_pending\x18\x19 \x01(\x04R\x0eraftFsmPending\x12\x1f\n" +
+	"\vapi_address\x18\x1a \x01(\tR\n" +
+	"apiAddress\x12#\n" +
+	"\rpprof_address\x18\x1b \x01(\tR\fpprofAddress\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +

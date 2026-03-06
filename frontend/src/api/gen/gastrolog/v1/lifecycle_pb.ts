@@ -494,6 +494,8 @@ export class ClusterNode extends Message<ClusterNode> {
   name = "";
 
   /**
+   * cluster/Raft address (e.g. ":4566")
+   *
    * @generated from field: string address = 3;
    */
   address = "";
@@ -518,6 +520,20 @@ export class ClusterNode extends Message<ClusterNode> {
    */
   stats?: NodeStats;
 
+  /**
+   * HTTP API address (e.g. ":4564")
+   *
+   * @generated from field: string api_address = 8;
+   */
+  apiAddress = "";
+
+  /**
+   * pprof HTTP address (e.g. "localhost:6060"), empty if disabled
+   *
+   * @generated from field: string pprof_address = 9;
+   */
+  pprofAddress = "";
+
   constructor(data?: PartialMessage<ClusterNode>) {
     super();
     proto3.util.initPartial(data, this);
@@ -533,6 +549,8 @@ export class ClusterNode extends Message<ClusterNode> {
     { no: 5, name: "suffrage", kind: "enum", T: proto3.getEnumType(ClusterNodeSuffrage) },
     { no: 6, name: "is_leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "stats", kind: "message", T: NodeStats },
+    { no: 8, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ClusterNode {
