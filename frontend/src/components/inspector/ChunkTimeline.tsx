@@ -20,8 +20,8 @@ export function ChunkTimeline({
   const c = useThemeClass(dark);
   const [hoveredChunk, setHoveredChunk] = useState<string | null>(null);
 
-  const { bars, ticks } = (() => {
-    if (chunks.length === 0) return { bars: [], ticks: [] };
+  const { bars, ticks, laneCount } = (() => {
+    if (chunks.length === 0) return { bars: [], ticks: [], laneCount: 1 };
 
     let globalMin = Infinity;
     let globalMax = -Infinity;
@@ -53,7 +53,7 @@ export function ChunkTimeline({
       diskBytes: bigint;
     }[];
 
-    if (parsed.length === 0) return { bars: [], ticks: [] };
+    if (parsed.length === 0) return { bars: [], ticks: [], laneCount: 1 };
 
     for (const p of parsed) {
       if (p.start < globalMin) globalMin = p.start;
@@ -83,20 +83,28 @@ export function ChunkTimeline({
         }
       }
 
-      return { ...p, x, w };
+      return { ...p, x, w, lane: 0 };
     });
+
+    // Gantt layout: each chunk gets its own row.
+    for (let i = 0; i < bars.length; i++) {
+      bars[i]!.lane = i;
+    }
 
     const ticks = generateTicks(min, min + span, 6);
 
-    return { bars, ticks };
+    return { bars, ticks, laneCount: bars.length || 1 };
   })();
 
   if (bars.length === 0) return null;
 
-  const barHeight = 24;
+  const laneBarHeight = laneCount <= 1 ? 12 : laneCount <= 8 ? 7 : 4;
+  const laneGap = 2;
+  const totalBarHeight =
+    laneCount * laneBarHeight + Math.max(0, laneCount - 1) * laneGap;
   const tickMarkHeight = 4;
   const topPad = 2;
-  const svgHeight = topPad + barHeight + tickMarkHeight;
+  const svgHeight = topPad + totalBarHeight + tickMarkHeight;
 
   // Precompute theme-dependent colors outside the map callback.
   const sealedHi = dark ? "#d4a070" : "#c8875c";
@@ -125,7 +133,7 @@ export function ChunkTimeline({
               x1={tick.x * 1000}
               y1={topPad}
               x2={tick.x * 1000}
-              y2={topPad + barHeight}
+              y2={topPad + totalBarHeight}
               stroke={dark ? "#222838" : "#e4ddd4"}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
@@ -162,9 +170,9 @@ export function ChunkTimeline({
               >
                 <rect
                   x={bar.x * 1000}
-                  y={topPad}
+                  y={topPad + bar.lane * (laneBarHeight + laneGap)}
                   width={bar.w * 1000}
-                  height={barHeight}
+                  height={laneBarHeight}
                   rx="2"
                   ry="2"
                   fill={fill}
@@ -178,7 +186,7 @@ export function ChunkTimeline({
                 {!bar.sealed && (
                   <circle
                     cx={bar.x * 1000 + bar.w * 1000 - 4}
-                    cy={topPad + barHeight / 2}
+                    cy={topPad + bar.lane * (laneBarHeight + laneGap) + laneBarHeight / 2}
                     r="3"
                     fill="#5a9a6a"
                     vectorEffect="non-scaling-stroke"
@@ -198,9 +206,9 @@ export function ChunkTimeline({
           {/* Time axis line + tick marks */}
           <line
             x1="0"
-            y1={topPad + barHeight}
+            y1={topPad + totalBarHeight}
             x2="1000"
-            y2={topPad + barHeight}
+            y2={topPad + totalBarHeight}
             stroke={dark ? "#2a3040" : "#d8d0c4"}
             strokeWidth="1"
             vectorEffect="non-scaling-stroke"
@@ -209,9 +217,9 @@ export function ChunkTimeline({
             <line
               key={`tick-${tick.x}`}
               x1={tick.x * 1000}
-              y1={topPad + barHeight}
+              y1={topPad + totalBarHeight}
               x2={tick.x * 1000}
-              y2={topPad + barHeight + tickMarkHeight}
+              y2={topPad + totalBarHeight + tickMarkHeight}
               stroke={dark ? "#2a3040" : "#d8d0c4"}
               strokeWidth="1"
               vectorEffect="non-scaling-stroke"
