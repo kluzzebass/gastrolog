@@ -416,27 +416,28 @@ func tokenFilter(tokens []string) recordFilter {
 }
 
 // matchesTokens checks if the record's raw data contains all query tokens.
-// Indexable tokens are matched against the tokenized record; non-indexable tokens
-// (containing dots, etc.) fall back to case-insensitive substring search.
+// Indexable tokens are matched via IterTokens with a countdown set to avoid
+// allocating a full token slice. Non-indexable tokens (containing dots, etc.)
+// fall back to case-insensitive substring search.
 func matchesTokens(raw []byte, queryTokens []string) bool {
 	if len(queryTokens) == 0 {
 		return true
 	}
 
-	var recordTokens []string
+	// Partition query tokens into indexable and non-indexable.
+	var needIndexable map[string]struct{}
 	var rawLower []byte
 
 	for _, qt := range queryTokens {
 		qtLower := strings.ToLower(qt)
 		if tokenizer.IsIndexable(qtLower) {
-			if recordTokens == nil {
-				recordTokens = tokenizer.Tokens(raw)
+			if needIndexable == nil {
+				needIndexable = make(map[string]struct{})
 			}
-			if !slices.Contains(recordTokens, qtLower) {
-				return false
-			}
+			needIndexable[qtLower] = struct{}{}
 			continue
 		}
+		// Non-indexable: substring search.
 		if rawLower == nil {
 			rawLower = bytes.ToLower(raw)
 		}
@@ -444,7 +445,23 @@ func matchesTokens(raw []byte, queryTokens []string) bool {
 			return false
 		}
 	}
-	return true
+
+	if len(needIndexable) == 0 {
+		return true
+	}
+
+	// Scan record tokens, removing matches from the set. Stop early when all found.
+	remaining := len(needIndexable)
+	tokenizer.IterTokens(raw, nil, tokenizer.DefaultMaxTokenLen, func(tok []byte) bool {
+		if _, ok := needIndexable[string(tok)]; ok {
+			remaining--
+			if remaining == 0 {
+				return false // all found, stop
+			}
+		}
+		return true
+	})
+	return remaining == 0
 }
 
 // keyValueFilter returns a filter that matches records where all key=value pairs
@@ -1186,14 +1203,23 @@ func evalPredicate(pred *querylang.PredicateExpr, rec chunk.Record) bool {
 }
 
 // matchesSingleToken checks if a record contains a specific token.
-// If the token is indexable (pure token-alphabet characters), it uses tokenized
-// matching. Otherwise (e.g. IP addresses, dotted names) it falls back to
+// If the token is indexable (pure token-alphabet characters), it uses
+// IterTokens with early exit to avoid allocating a full token slice.
+// Otherwise (e.g. IP addresses, dotted names) it falls back to
 // case-insensitive substring search on the raw record data.
 func matchesSingleToken(raw []byte, token string) bool {
 	tokenLower := strings.ToLower(token)
 	if tokenizer.IsIndexable(tokenLower) {
-		recordTokens := tokenizer.Tokens(raw)
-		return slices.Contains(recordTokens, tokenLower)
+		target := []byte(tokenLower)
+		found := false
+		tokenizer.IterTokens(raw, nil, tokenizer.DefaultMaxTokenLen, func(tok []byte) bool {
+			if bytes.Equal(tok, target) {
+				found = true
+				return false // stop iteration
+			}
+			return true
+		})
+		return found
 	}
 	return bytes.Contains(bytes.ToLower(raw), []byte(tokenLower))
 }
