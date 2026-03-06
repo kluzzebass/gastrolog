@@ -10,6 +10,7 @@ import (
 // =============================================================================
 
 func TestActiveChunkStateIsValueType(t *testing.T) {
+	t.Parallel()
 	// Verify that ActiveChunkState can be copied by value
 	state1 := ActiveChunkState{
 		ChunkID:     NewChunkID(),
@@ -36,6 +37,7 @@ func TestActiveChunkStateIsValueType(t *testing.T) {
 }
 
 func TestActiveChunkStateZeroValue(t *testing.T) {
+	t.Parallel()
 	var state ActiveChunkState
 
 	// Zero value should be valid and represent an empty/new chunk
@@ -61,6 +63,7 @@ func TestActiveChunkStateZeroValue(t *testing.T) {
 // =============================================================================
 
 func TestSizePolicyBasic(t *testing.T) {
+	t.Parallel()
 	policy := NewSizePolicy(1000) // 1000 bytes max
 
 	testCases := []struct {
@@ -80,6 +83,7 @@ func TestSizePolicyBasic(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			state := ActiveChunkState{Bytes: tc.stateBytes}
 			record := Record{Raw: make([]byte, tc.rawLen)}
 
@@ -92,6 +96,7 @@ func TestSizePolicyBasic(t *testing.T) {
 }
 
 func TestSizePolicyTriggerName(t *testing.T) {
+	t.Parallel()
 	policy := NewSizePolicy(100)
 	state := ActiveChunkState{Bytes: 200}
 	record := Record{Raw: []byte("x")}
@@ -103,6 +108,7 @@ func TestSizePolicyTriggerName(t *testing.T) {
 }
 
 func TestSizePolicyZeroMaxBytes(t *testing.T) {
+	t.Parallel()
 	policy := NewSizePolicy(0) // No limit
 
 	state := ActiveChunkState{Bytes: 1000000000} // 1GB already written
@@ -114,6 +120,7 @@ func TestSizePolicyZeroMaxBytes(t *testing.T) {
 }
 
 func TestSizePolicyIncludesOverhead(t *testing.T) {
+	t.Parallel()
 	// The policy should account for total on-disk size, not just raw bytes
 	policy := NewSizePolicy(100)
 

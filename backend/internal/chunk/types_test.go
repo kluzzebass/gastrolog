@@ -6,6 +6,7 @@ import (
 )
 
 func TestNewChunkIDUnique(t *testing.T) {
+	t.Parallel()
 	a := NewChunkID()
 	b := NewChunkID()
 	if a == b {
@@ -14,6 +15,7 @@ func TestNewChunkIDUnique(t *testing.T) {
 }
 
 func TestChunkIDStringRoundTrip(t *testing.T) {
+	t.Parallel()
 	id := NewChunkID()
 	s := id.String()
 	parsed, err := ParseChunkID(s)
@@ -26,6 +28,7 @@ func TestChunkIDStringRoundTrip(t *testing.T) {
 }
 
 func TestChunkIDStringLength(t *testing.T) {
+	t.Parallel()
 	id := NewChunkID()
 	s := id.String()
 	if len(s) != 26 {
@@ -34,6 +37,7 @@ func TestChunkIDStringLength(t *testing.T) {
 }
 
 func TestChunkIDMonotonicity(t *testing.T) {
+	t.Parallel()
 	// UUIDv7 IDs should be monotonically increasing.
 	ids := make([]ChunkID, 100)
 	for i := range ids {
@@ -47,6 +51,7 @@ func TestChunkIDMonotonicity(t *testing.T) {
 }
 
 func TestChunkIDTimeExtraction(t *testing.T) {
+	t.Parallel()
 	before := time.Now().Truncate(time.Millisecond)
 	id := NewChunkID()
 	after := time.Now().Truncate(time.Millisecond).Add(time.Millisecond)
@@ -58,6 +63,7 @@ func TestChunkIDTimeExtraction(t *testing.T) {
 }
 
 func TestParseChunkIDValid(t *testing.T) {
+	t.Parallel()
 	known := NewChunkID()
 	s := known.String()
 	parsed, err := ParseChunkID(s)
@@ -70,6 +76,7 @@ func TestParseChunkIDValid(t *testing.T) {
 }
 
 func TestParseChunkIDInvalid(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"",
 		"short",
@@ -85,6 +92,7 @@ func TestParseChunkIDInvalid(t *testing.T) {
 }
 
 func TestChunkIDZero(t *testing.T) {
+	t.Parallel()
 	zero := ChunkID{}
 	s := zero.String()
 	if len(s) != 26 {
@@ -100,6 +108,7 @@ func TestChunkIDZero(t *testing.T) {
 }
 
 func TestChunkIDBase32HexCharset(t *testing.T) {
+	t.Parallel()
 	id := NewChunkID()
 	s := id.String()
 	for _, c := range s {
