@@ -135,6 +135,7 @@ func addVoter(t *testing.T, leaderAddr, voterID, voterAddr string) {
 }
 
 func TestSingleNodeForwardApply(t *testing.T) {
+	t.Parallel()
 	node := newTestNode(t, "node-1", true)
 	defer node.close()
 
@@ -166,6 +167,7 @@ func TestSingleNodeForwardApply(t *testing.T) {
 }
 
 func TestThreeNodeCluster(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping multi-node cluster test in short mode")
 	}

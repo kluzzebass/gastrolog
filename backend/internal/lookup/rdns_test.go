@@ -65,6 +65,7 @@ func (m *mockRDNS) Lookup(ctx context.Context, value string) map[string]string {
 }
 
 func TestRDNSSuffixes(t *testing.T) {
+	t.Parallel()
 	r := NewRDNS()
 	suffixes := r.Suffixes()
 	if len(suffixes) != 1 || suffixes[0] != "hostname" {
@@ -73,6 +74,7 @@ func TestRDNSSuffixes(t *testing.T) {
 }
 
 func TestRDNSLookupHit(t *testing.T) {
+	t.Parallel()
 	m := newMockRDNS(map[string]string{
 		"8.8.8.8": "dns.google",
 	})
@@ -87,6 +89,7 @@ func TestRDNSLookupHit(t *testing.T) {
 }
 
 func TestRDNSLookupMiss(t *testing.T) {
+	t.Parallel()
 	m := newMockRDNS(map[string]string{})
 
 	result := m.Lookup(context.Background(), "192.168.1.1")
@@ -96,6 +99,7 @@ func TestRDNSLookupMiss(t *testing.T) {
 }
 
 func TestRDNSLookupEmpty(t *testing.T) {
+	t.Parallel()
 	m := newMockRDNS(map[string]string{})
 
 	result := m.Lookup(context.Background(), "")
@@ -105,6 +109,7 @@ func TestRDNSLookupEmpty(t *testing.T) {
 }
 
 func TestRDNSCacheHit(t *testing.T) {
+	t.Parallel()
 	callCount := 0
 	responses := map[string]string{"1.2.3.4": "host.example.com"}
 	m := newMockRDNS(responses)
@@ -128,6 +133,7 @@ func TestRDNSCacheHit(t *testing.T) {
 }
 
 func TestRDNSCacheNegative(t *testing.T) {
+	t.Parallel()
 	m := newMockRDNS(map[string]string{})
 
 	// First call caches negative.
@@ -143,6 +149,7 @@ func TestRDNSCacheNegative(t *testing.T) {
 }
 
 func TestRDNSCacheEviction(t *testing.T) {
+	t.Parallel()
 	m := newMockRDNS(map[string]string{
 		"1.1.1.1": "one.one.one.one",
 		"2.2.2.2": "two.two.two.two",
@@ -164,6 +171,7 @@ func TestRDNSCacheEviction(t *testing.T) {
 }
 
 func TestRDNSCacheExpiry(t *testing.T) {
+	t.Parallel()
 	m := newMockRDNS(map[string]string{
 		"4.4.4.4": "four.example.com",
 	}, WithTTL(1*time.Millisecond, 1*time.Millisecond))
@@ -183,11 +191,13 @@ func TestRDNSCacheExpiry(t *testing.T) {
 }
 
 func TestRDNSLookupTableInterface(t *testing.T) {
+	t.Parallel()
 	// Verify RDNS implements LookupTable.
 	var _ LookupTable = (*RDNS)(nil)
 }
 
 func TestRegistryResolve(t *testing.T) {
+	t.Parallel()
 	r := Registry{
 		"rdns": NewRDNS(),
 	}
@@ -201,6 +211,7 @@ func TestRegistryResolve(t *testing.T) {
 }
 
 func TestNewRDNSDefaults(t *testing.T) {
+	t.Parallel()
 	r := NewRDNS()
 	if r.resolver != net.DefaultResolver {
 		t.Error("default resolver should be net.DefaultResolver")

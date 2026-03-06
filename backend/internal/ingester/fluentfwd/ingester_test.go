@@ -516,6 +516,7 @@ func TestEventTimeInvalidLength(t *testing.T) {
 // --- Factory Tests ---
 
 func TestFluentFwdFactory(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	// Default addr.
@@ -546,6 +547,7 @@ func TestFluentFwdFactory(t *testing.T) {
 // --- Helper Tests ---
 
 func TestIsArrayCode(t *testing.T) {
+	t.Parallel()
 	// fixarray: 0x90-0x9f
 	for i := byte(0x90); i <= 0x9f; i++ {
 		if !isArrayCode(i) {
@@ -569,6 +571,7 @@ func TestIsArrayCode(t *testing.T) {
 }
 
 func TestIsCompressed(t *testing.T) {
+	t.Parallel()
 	if isCompressed(nil) {
 		t.Error("nil should not be compressed")
 	}

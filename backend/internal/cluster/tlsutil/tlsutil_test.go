@@ -10,6 +10,7 @@ import (
 )
 
 func TestGenerateCA(t *testing.T) {
+	t.Parallel()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
@@ -37,6 +38,7 @@ func TestGenerateCA(t *testing.T) {
 }
 
 func TestGenerateClusterCert(t *testing.T) {
+	t.Parallel()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
@@ -129,6 +131,7 @@ func TestGenerateClusterCert(t *testing.T) {
 }
 
 func TestJoinTokenRoundTrip(t *testing.T) {
+	t.Parallel()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
@@ -171,6 +174,7 @@ func TestJoinTokenRoundTrip(t *testing.T) {
 }
 
 func TestParseJoinTokenInvalid(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		token string
@@ -182,6 +186,7 @@ func TestParseJoinTokenInvalid(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, _, err := tlsutil.ParseJoinToken(tt.token)
 			if err == nil {
 				t.Error("expected error for invalid token")

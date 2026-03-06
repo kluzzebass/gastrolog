@@ -10,6 +10,7 @@ import (
 )
 
 func TestDiscard(t *testing.T) {
+	t.Parallel()
 	logger := Discard()
 	if logger == nil {
 		t.Fatal("Discard() returned nil")
@@ -21,7 +22,9 @@ func TestDiscard(t *testing.T) {
 }
 
 func TestDefault(t *testing.T) {
+	t.Parallel()
 	t.Run("nil returns discard", func(t *testing.T) {
+		t.Parallel()
 		logger := Default(nil)
 		if logger == nil {
 			t.Fatal("Default(nil) returned nil")
@@ -33,6 +36,7 @@ func TestDefault(t *testing.T) {
 	})
 
 	t.Run("non-nil returns same logger", func(t *testing.T) {
+		t.Parallel()
 		var buf bytes.Buffer
 		original := slog.New(slog.NewTextHandler(&buf, nil))
 		result := Default(original)
@@ -90,6 +94,7 @@ func (h *captureHandler) count() int {
 }
 
 func TestComponentFilterHandler_BasicFiltering(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 	logger := slog.New(filter)
@@ -114,6 +119,7 @@ func TestComponentFilterHandler_BasicFiltering(t *testing.T) {
 }
 
 func TestComponentFilterHandler_SetLevel(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 	logger := slog.New(filter)
@@ -141,6 +147,7 @@ func TestComponentFilterHandler_SetLevel(t *testing.T) {
 }
 
 func TestComponentFilterHandler_ClearLevel(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 	logger := slog.New(filter)
@@ -165,6 +172,7 @@ func TestComponentFilterHandler_ClearLevel(t *testing.T) {
 }
 
 func TestComponentFilterHandler_Level(t *testing.T) {
+	t.Parallel()
 	filter := NewComponentFilterHandler(nil, slog.LevelInfo)
 
 	// Default level for unknown component.
@@ -185,6 +193,7 @@ func TestComponentFilterHandler_Level(t *testing.T) {
 }
 
 func TestComponentFilterHandler_WithAttrs(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 
@@ -202,6 +211,7 @@ func TestComponentFilterHandler_WithAttrs(t *testing.T) {
 }
 
 func TestComponentFilterHandler_NoComponent(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 	logger := slog.New(filter)
@@ -219,6 +229,7 @@ func TestComponentFilterHandler_NoComponent(t *testing.T) {
 }
 
 func TestComponentFilterHandler_Concurrent(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 	logger := slog.New(filter)
@@ -255,6 +266,7 @@ func TestComponentFilterHandler_Concurrent(t *testing.T) {
 }
 
 func TestComponentFilterHandler_Integration(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	base := slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	filter := NewComponentFilterHandler(base, slog.LevelInfo)
@@ -287,6 +299,7 @@ func TestComponentFilterHandler_Integration(t *testing.T) {
 }
 
 func TestComponentFilterHandler_WithGroup(t *testing.T) {
+	t.Parallel()
 	capture := newCaptureHandler()
 	filter := NewComponentFilterHandler(capture, slog.LevelInfo)
 
@@ -306,6 +319,7 @@ func TestComponentFilterHandler_WithGroup(t *testing.T) {
 }
 
 func TestComponentFilterHandler_ClearLevelNonExistent(t *testing.T) {
+	t.Parallel()
 	filter := NewComponentFilterHandler(nil, slog.LevelInfo)
 
 	// Should not panic when clearing non-existent level.

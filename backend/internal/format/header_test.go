@@ -5,6 +5,7 @@ import (
 )
 
 func TestHeaderEncode(t *testing.T) {
+	t.Parallel()
 	h := Header{Type: TypeTimeIndex, Version: 1, Flags: 0}
 	buf := h.Encode()
 
@@ -23,6 +24,7 @@ func TestHeaderEncode(t *testing.T) {
 }
 
 func TestHeaderEncodeInto(t *testing.T) {
+	t.Parallel()
 	h := Header{Type: TypeSourceIndex, Version: 2, Flags: 0x0F}
 	buf := make([]byte, 10)
 	n := h.EncodeInto(buf)
@@ -45,6 +47,7 @@ func TestHeaderEncodeInto(t *testing.T) {
 }
 
 func TestDecode(t *testing.T) {
+	t.Parallel()
 	buf := []byte{Signature, TypeTokenIndex, 3, 0x10}
 	h, err := Decode(buf)
 	if err != nil {
@@ -62,6 +65,7 @@ func TestDecode(t *testing.T) {
 }
 
 func TestDecodeHeaderTooSmall(t *testing.T) {
+	t.Parallel()
 	buf := []byte{Signature, TypeTimeIndex, 1} // only 3 bytes
 	_, err := Decode(buf)
 	if err != ErrHeaderTooSmall {
@@ -70,6 +74,7 @@ func TestDecodeHeaderTooSmall(t *testing.T) {
 }
 
 func TestDecodeSignatureMismatch(t *testing.T) {
+	t.Parallel()
 	buf := []byte{'x', TypeTimeIndex, 1, 0}
 	_, err := Decode(buf)
 	if err != ErrSignatureMismatch {
@@ -78,6 +83,7 @@ func TestDecodeSignatureMismatch(t *testing.T) {
 }
 
 func TestDecodeAndValidate(t *testing.T) {
+	t.Parallel()
 	buf := []byte{Signature, TypeChunkMeta, 1, 0}
 	h, err := DecodeAndValidate(buf, TypeChunkMeta, 1)
 	if err != nil {
@@ -89,6 +95,7 @@ func TestDecodeAndValidate(t *testing.T) {
 }
 
 func TestDecodeAndValidateTypeMismatch(t *testing.T) {
+	t.Parallel()
 	buf := []byte{Signature, TypeTimeIndex, 1, 0}
 	_, err := DecodeAndValidate(buf, TypeSourceIndex, 1)
 	if err != ErrTypeMismatch {
@@ -97,6 +104,7 @@ func TestDecodeAndValidateTypeMismatch(t *testing.T) {
 }
 
 func TestDecodeAndValidateVersionMismatch(t *testing.T) {
+	t.Parallel()
 	buf := []byte{Signature, TypeTimeIndex, 1, 0}
 	_, err := DecodeAndValidate(buf, TypeTimeIndex, 2)
 	if err != ErrVersionMismatch {
@@ -105,6 +113,7 @@ func TestDecodeAndValidateVersionMismatch(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
+	t.Parallel()
 	original := Header{Type: TypeSourceRegistry, Version: 5, Flags: 0xAB}
 	buf := original.Encode()
 	decoded, err := Decode(buf[:])

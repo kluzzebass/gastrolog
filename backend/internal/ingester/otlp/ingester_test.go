@@ -154,6 +154,7 @@ func recv(t *testing.T, out chan orchestrator.IngestMessage) orchestrator.Ingest
 // --- HTTP Tests ---
 
 func TestOTLPHTTPJSON(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now().Truncate(time.Microsecond)
@@ -193,6 +194,7 @@ func TestOTLPHTTPJSON(t *testing.T) {
 }
 
 func TestOTLPHTTPProtobuf(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now().Truncate(time.Microsecond)
@@ -213,6 +215,7 @@ func TestOTLPHTTPProtobuf(t *testing.T) {
 }
 
 func TestOTLPHTTPGzip(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now().Truncate(time.Microsecond)
@@ -246,6 +249,7 @@ func TestOTLPHTTPGzip(t *testing.T) {
 }
 
 func TestOTLPHTTPInvalidJSON(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, _ := listenAndStartOTLP(t, 10)
 
 	resp, err := http.Post("http://"+httpAddr+"/v1/logs", "application/json", bytes.NewReader([]byte("{not valid")))
@@ -260,6 +264,7 @@ func TestOTLPHTTPInvalidJSON(t *testing.T) {
 }
 
 func TestOTLPHTTPInvalidProtobuf(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, _ := listenAndStartOTLP(t, 10)
 
 	resp, err := http.Post("http://"+httpAddr+"/v1/logs", "application/x-protobuf", bytes.NewReader([]byte("not proto")))
@@ -274,6 +279,7 @@ func TestOTLPHTTPInvalidProtobuf(t *testing.T) {
 }
 
 func TestOTLPHTTPReadyEndpoint(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, _ := listenAndStartOTLP(t, 10)
 
 	resp, err := http.Get("http://" + httpAddr + "/ready")
@@ -290,6 +296,7 @@ func TestOTLPHTTPReadyEndpoint(t *testing.T) {
 // --- gRPC Tests ---
 
 func TestOTLPGRPC(t *testing.T) {
+	t.Parallel()
 	_, grpcAddr, out := listenAndStartOTLP(t, 10)
 
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -325,6 +332,7 @@ func TestOTLPGRPC(t *testing.T) {
 }
 
 func TestOTLPGRPCMultipleRecords(t *testing.T) {
+	t.Parallel()
 	_, grpcAddr, out := listenAndStartOTLP(t, 10)
 
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -358,6 +366,7 @@ func TestOTLPGRPCMultipleRecords(t *testing.T) {
 // --- Attribute Precedence Tests ---
 
 func TestOTLPAttributePrecedence(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	// Resource, scope, and record all set "env" — record should win.
@@ -392,6 +401,7 @@ func TestOTLPAttributePrecedence(t *testing.T) {
 // --- Severity Tests ---
 
 func TestOTLPSeverity(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now()
@@ -413,6 +423,7 @@ func TestOTLPSeverity(t *testing.T) {
 }
 
 func TestOTLPNoSeverity(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now()
@@ -432,6 +443,7 @@ func TestOTLPNoSeverity(t *testing.T) {
 // --- Trace/Span ID Tests ---
 
 func TestOTLPTraceSpanIDs(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now()
@@ -459,6 +471,7 @@ func TestOTLPTraceSpanIDs(t *testing.T) {
 }
 
 func TestOTLPNoTraceSpanIDs(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	ts := time.Now()
@@ -478,6 +491,7 @@ func TestOTLPNoTraceSpanIDs(t *testing.T) {
 // --- Timestamp Tests ---
 
 func TestOTLPObservedTimeFallback(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 
 	observed := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
@@ -500,6 +514,7 @@ func TestOTLPObservedTimeFallback(t *testing.T) {
 // --- AnyValue Type Tests ---
 
 func TestOTLPBodyTypes(t *testing.T) {
+	t.Parallel()
 	httpAddr, _, out := listenAndStartOTLP(t, 10)
 	ts := time.Now()
 

@@ -16,6 +16,7 @@ import (
 )
 
 func TestMultiVaultSearchActiveChunks(t *testing.T) {
+	t.Parallel()
 	reg := &testRegistry{
 		vaults: make(map[uuid.UUID]struct {
 			cm chunk.ChunkManager

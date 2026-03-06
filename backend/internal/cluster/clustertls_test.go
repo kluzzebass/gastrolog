@@ -8,6 +8,7 @@ import (
 )
 
 func TestClusterTLSLoadAndState(t *testing.T) {
+	t.Parallel()
 	ca, err := tlsutil.GenerateCA()
 	if err != nil {
 		t.Fatalf("GenerateCA: %v", err)
@@ -43,6 +44,7 @@ func TestClusterTLSLoadAndState(t *testing.T) {
 }
 
 func TestClusterTLSServerConfig(t *testing.T) {
+	t.Parallel()
 	ca, _ := tlsutil.GenerateCA()
 	cert, _ := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
 
@@ -64,6 +66,7 @@ func TestClusterTLSServerConfig(t *testing.T) {
 }
 
 func TestClusterTLSClientConfig(t *testing.T) {
+	t.Parallel()
 	ca, _ := tlsutil.GenerateCA()
 	cert, _ := tlsutil.GenerateClusterCert(ca.CertPEM, ca.KeyPEM, nil)
 
@@ -85,6 +88,7 @@ func TestClusterTLSClientConfig(t *testing.T) {
 }
 
 func TestClusterTLSAtomicReload(t *testing.T) {
+	t.Parallel()
 	ca1, _ := tlsutil.GenerateCA()
 	cert1, _ := tlsutil.GenerateClusterCert(ca1.CertPEM, ca1.KeyPEM, nil)
 
@@ -112,6 +116,7 @@ func TestClusterTLSAtomicReload(t *testing.T) {
 }
 
 func TestClusterTLSNilState(t *testing.T) {
+	t.Parallel()
 	ctls := cluster.NewClusterTLS()
 
 	// ClientTLSConfig should return nil when state is nil.

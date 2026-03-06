@@ -14,6 +14,7 @@ import (
 )
 
 func TestBatching(t *testing.T) {
+	t.Parallel()
 	var mu sync.Mutex
 	var batches []int
 
@@ -63,6 +64,7 @@ func TestBatching(t *testing.T) {
 }
 
 func TestBufferOverflow(t *testing.T) {
+	t.Parallel()
 	nf := &nodeForwarder{
 		ch:   make(chan forwardEntry, forwardChanCap),
 		done: make(chan struct{}),
@@ -112,6 +114,7 @@ func TestFlushTimerDrains(t *testing.T) {
 }
 
 func TestForwardEnqueuesAndCloses(t *testing.T) {
+	t.Parallel()
 	rf := &RecordForwarder{
 		logger: discardLogger(),
 		nodes:  make(map[string]*nodeForwarder),
@@ -147,6 +150,7 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 }
 
 func TestForwardClosedReturnsError(t *testing.T) {
+	t.Parallel()
 	rf := &RecordForwarder{
 		logger: discardLogger(),
 		nodes:  make(map[string]*nodeForwarder),

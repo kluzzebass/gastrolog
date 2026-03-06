@@ -13,6 +13,7 @@ import (
 )
 
 func TestDownloadDB(t *testing.T) {
+	t.Parallel()
 	// Build a minimal tar.gz containing a fake .mmdb file.
 	mmdbContent := []byte("fake-mmdb-content-for-testing")
 	archive := buildTarGz(t, "GeoLite2-City_20240101/GeoLite2-City.mmdb", mmdbContent)

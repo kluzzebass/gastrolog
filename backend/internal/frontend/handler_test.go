@@ -37,6 +37,7 @@ func testFS(t *testing.T) fstest.MapFS {
 }
 
 func TestBrotliServing(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -65,6 +66,7 @@ func TestBrotliServing(t *testing.T) {
 }
 
 func TestGzipFallback(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/assets/app-abc123.js", nil)
@@ -93,6 +95,7 @@ func TestGzipFallback(t *testing.T) {
 }
 
 func TestPlainFallback(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	req := httptest.NewRequest(http.MethodGet, "/assets/style-def456.css", nil)
@@ -112,6 +115,7 @@ func TestPlainFallback(t *testing.T) {
 }
 
 func TestCacheHeaders(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	tests := []struct {
@@ -136,6 +140,7 @@ func TestCacheHeaders(t *testing.T) {
 }
 
 func TestSPAFallback(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	// Request a path that doesn't exist — should serve index.html.
@@ -156,6 +161,7 @@ func TestSPAFallback(t *testing.T) {
 }
 
 func TestMIMETypes(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	tests := []struct {
@@ -180,6 +186,7 @@ func TestMIMETypes(t *testing.T) {
 }
 
 func TestMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	req := httptest.NewRequest(http.MethodPost, "/", nil)
@@ -192,6 +199,7 @@ func TestMethodNotAllowed(t *testing.T) {
 }
 
 func TestHEADRequest(t *testing.T) {
+	t.Parallel()
 	h := newStaticHandler(testFS(t))
 
 	req := httptest.NewRequest(http.MethodHead, "/", nil)
@@ -211,6 +219,7 @@ func TestHEADRequest(t *testing.T) {
 }
 
 func TestDevModeNilHandler(t *testing.T) {
+	t.Parallel()
 	// When dist only has .gitignore, newStaticHandler builds an empty file set.
 	emptyFS := fstest.MapFS{
 		".gitignore": {Data: []byte("*\n!.gitignore\n")},

@@ -7,6 +7,7 @@ import (
 )
 
 func TestValidateBarchart(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		table   *TableResult
@@ -56,6 +57,7 @@ func TestValidateBarchart(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ValidateVizOp(&querylang.BarchartOp{}, tt.table)
 			got := result != ""
 			if got != tt.wantOK {
@@ -69,6 +71,7 @@ func TestValidateBarchart(t *testing.T) {
 }
 
 func TestValidateDonut(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		table  *TableResult
@@ -110,6 +113,7 @@ func TestValidateDonut(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ValidateVizOp(&querylang.DonutOp{}, tt.table)
 			got := result != ""
 			if got != tt.wantOK {
@@ -123,6 +127,7 @@ func TestValidateDonut(t *testing.T) {
 }
 
 func TestValidateMapChoropleth(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		op     *querylang.MapOp
@@ -178,6 +183,7 @@ func TestValidateMapChoropleth(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ValidateVizOp(tt.op, tt.table)
 			got := result != ""
 			if got != tt.wantOK {
@@ -191,6 +197,7 @@ func TestValidateMapChoropleth(t *testing.T) {
 }
 
 func TestValidateMapScatter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		op     *querylang.MapOp
@@ -268,6 +275,7 @@ func TestValidateMapScatter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ValidateVizOp(tt.op, tt.table)
 			got := result != ""
 			if got != tt.wantOK {

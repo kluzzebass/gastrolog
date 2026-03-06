@@ -129,6 +129,7 @@ func setupWithActive(t *testing.T, sealed [][]chunk.Record, active []chunk.Recor
 }
 
 func TestSearchNoChunks(t *testing.T) {
+	t.Parallel()
 	eng := setup(t)
 
 	results, err := collect(search(eng, context.Background(), query.Query{}))
@@ -141,6 +142,7 @@ func TestSearchNoChunks(t *testing.T) {
 }
 
 func TestSearchActiveChunkNoFilters(t *testing.T) {
+	t.Parallel()
 	active := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 		{IngestTS: t2, Attrs: attrsB, Raw: []byte("two")},
@@ -164,6 +166,7 @@ func TestSearchActiveChunkNoFilters(t *testing.T) {
 }
 
 func TestSearchActiveChunkWithTimeFilter(t *testing.T) {
+	t.Parallel()
 	active := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
@@ -189,6 +192,7 @@ func TestSearchActiveChunkWithTimeFilter(t *testing.T) {
 }
 
 func TestSearchSealedAndActiveChunks(t *testing.T) {
+	t.Parallel()
 	sealed := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("s1")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("s2")},
@@ -216,6 +220,7 @@ func TestSearchSealedAndActiveChunks(t *testing.T) {
 }
 
 func TestSearchSingleChunkNoFilters(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
@@ -239,6 +244,7 @@ func TestSearchSingleChunkNoFilters(t *testing.T) {
 }
 
 func TestSearchTimeRangeFilter(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
 		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},

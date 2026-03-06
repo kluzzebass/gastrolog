@@ -12,6 +12,7 @@ import (
 )
 
 func TestASN_Suffixes(t *testing.T) {
+	t.Parallel()
 	a := NewASN()
 	defer a.Close()
 
@@ -28,6 +29,7 @@ func TestASN_Suffixes(t *testing.T) {
 }
 
 func TestASN_LookupNilReader(t *testing.T) {
+	t.Parallel()
 	a := NewASN()
 	defer a.Close()
 
@@ -37,6 +39,7 @@ func TestASN_LookupNilReader(t *testing.T) {
 }
 
 func TestASN_LookupInvalidIP(t *testing.T) {
+	t.Parallel()
 	a := NewASN()
 	defer a.Close()
 
@@ -49,6 +52,7 @@ func TestASN_LookupInvalidIP(t *testing.T) {
 }
 
 func TestASN_LoadBadPath(t *testing.T) {
+	t.Parallel()
 	a := NewASN()
 	defer a.Close()
 
@@ -58,6 +62,7 @@ func TestASN_LoadBadPath(t *testing.T) {
 }
 
 func TestASN_LoadBadFile(t *testing.T) {
+	t.Parallel()
 	tmp := filepath.Join(t.TempDir(), "bad.mmdb")
 	if err := os.WriteFile(tmp, []byte("not a valid mmdb"), 0o644); err != nil {
 		t.Fatal(err)
@@ -117,6 +122,7 @@ func generateTestASNDB(t *testing.T) string {
 }
 
 func TestASN_LoadAndLookup(t *testing.T) {
+	t.Parallel()
 	path := generateTestASNDB(t)
 
 	a := NewASN()
@@ -158,6 +164,7 @@ func TestASN_LoadAndLookup(t *testing.T) {
 }
 
 func TestASN_ReaderSwap(t *testing.T) {
+	t.Parallel()
 	path := generateTestASNDB(t)
 
 	a := NewASN()
@@ -179,6 +186,7 @@ func TestASN_ReaderSwap(t *testing.T) {
 }
 
 func TestASN_Miss(t *testing.T) {
+	t.Parallel()
 	path := generateTestASNDB(t)
 
 	a := NewASN()

@@ -12,6 +12,7 @@ import (
 )
 
 func TestGeoIP_Suffixes(t *testing.T) {
+	t.Parallel()
 	g := NewGeoIP()
 	defer g.Close()
 
@@ -28,6 +29,7 @@ func TestGeoIP_Suffixes(t *testing.T) {
 }
 
 func TestGeoIP_LookupNilReader(t *testing.T) {
+	t.Parallel()
 	g := NewGeoIP()
 	defer g.Close()
 
@@ -38,6 +40,7 @@ func TestGeoIP_LookupNilReader(t *testing.T) {
 }
 
 func TestGeoIP_LookupInvalidIP(t *testing.T) {
+	t.Parallel()
 	g := NewGeoIP()
 	defer g.Close()
 
@@ -50,6 +53,7 @@ func TestGeoIP_LookupInvalidIP(t *testing.T) {
 }
 
 func TestGeoIP_LoadBadPath(t *testing.T) {
+	t.Parallel()
 	g := NewGeoIP()
 	defer g.Close()
 
@@ -59,6 +63,7 @@ func TestGeoIP_LoadBadPath(t *testing.T) {
 }
 
 func TestGeoIP_LoadBadFile(t *testing.T) {
+	t.Parallel()
 	// Create a temp file that is not a valid MMDB.
 	tmp := filepath.Join(t.TempDir(), "bad.mmdb")
 	if err := os.WriteFile(tmp, []byte("not a valid mmdb"), 0o644); err != nil {
@@ -142,6 +147,7 @@ func generateTestMMDB(t *testing.T) string {
 }
 
 func TestGeoIP_LoadAndLookup(t *testing.T) {
+	t.Parallel()
 	path := generateTestMMDB(t)
 
 	g := NewGeoIP()
@@ -187,6 +193,7 @@ func TestGeoIP_LoadAndLookup(t *testing.T) {
 }
 
 func TestGeoIP_ReaderSwap(t *testing.T) {
+	t.Parallel()
 	path := generateTestMMDB(t)
 
 	g := NewGeoIP()
@@ -208,6 +215,7 @@ func TestGeoIP_ReaderSwap(t *testing.T) {
 }
 
 func TestGeoIP_PartialAndMiss(t *testing.T) {
+	t.Parallel()
 	path := generateTestMMDB(t)
 
 	g := NewGeoIP()

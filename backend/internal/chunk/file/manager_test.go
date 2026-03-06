@@ -56,6 +56,7 @@ func TestFileChunkManagerNanosecondPrecision(t *testing.T) {
 }
 
 func TestFileChunkManagerIngestSourceTSBounds(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -115,6 +116,7 @@ func TestFileChunkManagerIngestSourceTSBounds(t *testing.T) {
 }
 
 func TestFileChunkManagerDirectoryLayout(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -201,6 +203,7 @@ func TestFileChunkManagerDirectoryLayout(t *testing.T) {
 }
 
 func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -274,6 +277,7 @@ func TestFileChunkManagerAppendSealOpenReader(t *testing.T) {
 }
 
 func TestFileChunkManagerReverseReader(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -345,6 +349,7 @@ func TestFileChunkManagerReverseReader(t *testing.T) {
 }
 
 func TestFileChunkManagerCursorSeek(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -437,6 +442,7 @@ func TestFileChunkManagerCursorSeek(t *testing.T) {
 }
 
 func TestFileChunkManagerCursorMixedNextPrev(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -525,6 +531,7 @@ func TestFileChunkManagerCursorMixedNextPrev(t *testing.T) {
 }
 
 func TestFileChunkManagerEmptyChunk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -569,6 +576,7 @@ func TestFileChunkManagerEmptyChunk(t *testing.T) {
 // TestMissingDirectoryWarning verifies that a warning is logged when a previously
 // existing store's directory is missing and gets recreated empty.
 func TestMissingDirectoryWarning(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	storeDir := filepath.Join(root, "mystore")
 
@@ -625,6 +633,7 @@ func TestMissingDirectoryWarning(t *testing.T) {
 // TestNewDirectoryNoWarning verifies that creating a brand-new store (directory
 // never existed) does NOT emit a spurious warning.
 func TestNewDirectoryNoWarning(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	storeDir := filepath.Join(root, "brand-new-store")
 
@@ -684,6 +693,7 @@ func searchString(s, substr string) bool {
 }
 
 func TestChunkDir(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
