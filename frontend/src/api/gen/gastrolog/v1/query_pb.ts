@@ -368,6 +368,13 @@ export class ExplainResponse extends Message<ExplainResponse> {
    */
   queryEnd?: Timestamp;
 
+  /**
+   * Pipeline operators after the filter
+   *
+   * @generated from field: repeated gastrolog.v1.QueryPipelineStage pipeline_stages = 7;
+   */
+  pipelineStages: QueryPipelineStage[] = [];
+
   constructor(data?: PartialMessage<ExplainResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -382,6 +389,7 @@ export class ExplainResponse extends Message<ExplainResponse> {
     { no: 4, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "query_start", kind: "message", T: Timestamp },
     { no: 6, name: "query_end", kind: "message", T: Timestamp },
+    { no: 7, name: "pipeline_stages", kind: "message", T: QueryPipelineStage, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExplainResponse {
@@ -398,6 +406,79 @@ export class ExplainResponse extends Message<ExplainResponse> {
 
   static equals(a: ExplainResponse | PlainMessage<ExplainResponse> | undefined, b: ExplainResponse | PlainMessage<ExplainResponse> | undefined): boolean {
     return proto3.util.equals(ExplainResponse, a, b);
+  }
+}
+
+/**
+ * QueryPipelineStage describes a single pipeline operator in the query.
+ *
+ * @generated from message gastrolog.v1.QueryPipelineStage
+ */
+export class QueryPipelineStage extends Message<QueryPipelineStage> {
+  /**
+   * "stats", "where", "eval", "sort", etc.
+   *
+   * @generated from field: string operator = 1;
+   */
+  operator = "";
+
+  /**
+   * PipeOp.String() output
+   *
+   * @generated from field: string description = 2;
+   */
+  description = "";
+
+  /**
+   * requires full materialization (stats, sort, tail, etc.)
+   *
+   * @generated from field: bool materializing = 3;
+   */
+  materializing = false;
+
+  /**
+   * human-readable explanation of execution behavior
+   *
+   * @generated from field: string note = 4;
+   */
+  note = "";
+
+  /**
+   * "streaming", "materializing", "short-circuit", "coordinator-only", "render-hint"
+   *
+   * @generated from field: string execution = 5;
+   */
+  execution = "";
+
+  constructor(data?: PartialMessage<QueryPipelineStage>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.QueryPipelineStage";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "operator", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "materializing", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "note", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "execution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): QueryPipelineStage {
+    return new QueryPipelineStage().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): QueryPipelineStage {
+    return new QueryPipelineStage().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): QueryPipelineStage {
+    return new QueryPipelineStage().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: QueryPipelineStage | PlainMessage<QueryPipelineStage> | undefined, b: QueryPipelineStage | PlainMessage<QueryPipelineStage> | undefined): boolean {
+    return proto3.util.equals(QueryPipelineStage, a, b);
   }
 }
 

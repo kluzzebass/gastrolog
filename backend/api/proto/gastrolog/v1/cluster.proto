@@ -206,6 +206,18 @@ message ForwardSetNodeSuffrageRequest {
 
 message ForwardSetNodeSuffrageResponse {}
 
+// ForwardExplainRequest asks a remote node to return the explain plan for
+// one or more of its local vaults.
+message ForwardExplainRequest {
+  string query = 1;
+  repeated string vault_ids = 2;  // batch all vaults for this node in one RPC
+}
+
+message ForwardExplainResponse {
+  repeated ChunkPlan chunks = 1;  // reuses existing ChunkPlan from query.proto
+  int32 total_chunks = 2;
+}
+
 // ImportRecordMessage carries a single record for client-streaming import.
 // vault_id is set on every message; the server validates consistency.
 message ImportRecordMessage {

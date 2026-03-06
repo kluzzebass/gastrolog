@@ -149,7 +149,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	var searchForwarder *cluster.SearchForwarder
 	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
-		searchForwarder = wireClusterForwarding(clusterSrv, orch, logger)
+		searchForwarder = wireClusterForwarding(clusterSrv, orch, nodeID, logger)
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -218,10 +218,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	})
 }
 
-// wireClusterForwarding sets up cross-node record, search, context, and vault
-// forwarding on the cluster server. Returns the search forwarder for the HTTP
-// server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, logger *slog.Logger) *cluster.SearchForwarder {
+// wireClusterForwarding sets up cross-node record, search, context, vault,
+// and explain forwarding on the cluster server. Returns the search forwarder
+// for the HTTP server to use.
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string, logger *slog.Logger) *cluster.SearchForwarder {
 	peerConns := clusterSrv.PeerConns()
 
 	recordForwarder := cluster.NewRecordForwarder(
@@ -249,6 +249,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetListChunksExecutor(newListChunksExecutor(orch))
 	clusterSrv.SetGetIndexesExecutor(newGetIndexesExecutor(orch))
 	clusterSrv.SetValidateVaultExecutor(newValidateVaultExecutor(orch))
+	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 
 	return searchForwarder
 }

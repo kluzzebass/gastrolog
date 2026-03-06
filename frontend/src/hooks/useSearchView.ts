@@ -254,6 +254,7 @@ export function useSearchView() {
     direction: explainDirection,
     totalChunks: explainTotalChunks,
     expression: explainExpression,
+    pipelineStages: explainPipelineStages,
     isLoading: isExplaining,
     explain,
   } = useExplain({ onError: toastError });
@@ -846,7 +847,7 @@ export function useSearchView() {
 
     // Explain
     explainChunks, explainDirection, explainTotalChunks,
-    explainExpression, isExplaining,
+    explainExpression, explainPipelineStages, isExplaining,
 
     // Context (for detail panel)
     contextBefore, contextAfter, contextLoading,

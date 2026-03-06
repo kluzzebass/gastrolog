@@ -90,6 +90,16 @@ message ExplainResponse {
   string expression = 4;   // Parsed boolean expression (from BoolExpr.String())
   google.protobuf.Timestamp query_start = 5; // Resolved query start time
   google.protobuf.Timestamp query_end = 6;   // Resolved query end time
+  repeated QueryPipelineStage pipeline_stages = 7; // Pipeline operators after the filter
+}
+
+// QueryPipelineStage describes a single pipeline operator in the query.
+message QueryPipelineStage {
+  string operator = 1;     // "stats", "where", "eval", "sort", etc.
+  string description = 2;  // PipeOp.String() output
+  bool materializing = 3;  // requires full materialization (stats, sort, tail, etc.)
+  string note = 4;         // human-readable explanation of execution behavior
+  string execution = 5;    // "streaming", "materializing", "short-circuit", "coordinator-only", "render-hint"
 }
 
 message Query {

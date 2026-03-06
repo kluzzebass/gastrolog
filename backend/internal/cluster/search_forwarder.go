@@ -89,5 +89,19 @@ func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req
 	return resp, nil
 }
 
+// Explain sends a ForwardExplain RPC to the given node and returns the response.
+func (sf *SearchForwarder) Explain(ctx context.Context, nodeID string, req *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardExplainResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardExplain", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward explain to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
 // Close is a no-op — connection lifecycle is managed by PeerConns.
 func (sf *SearchForwarder) Close() error { return nil }

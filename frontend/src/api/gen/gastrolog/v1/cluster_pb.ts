@@ -7,7 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
-import { TableResult } from "./query_pb.js";
+import { ChunkPlan, TableResult } from "./query_pb.js";
 
 /**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -1396,6 +1396,99 @@ export class ForwardSetNodeSuffrageResponse extends Message<ForwardSetNodeSuffra
 
   static equals(a: ForwardSetNodeSuffrageResponse | PlainMessage<ForwardSetNodeSuffrageResponse> | undefined, b: ForwardSetNodeSuffrageResponse | PlainMessage<ForwardSetNodeSuffrageResponse> | undefined): boolean {
     return proto3.util.equals(ForwardSetNodeSuffrageResponse, a, b);
+  }
+}
+
+/**
+ * ForwardExplainRequest asks a remote node to return the explain plan for
+ * one or more of its local vaults.
+ *
+ * @generated from message gastrolog.v1.ForwardExplainRequest
+ */
+export class ForwardExplainRequest extends Message<ForwardExplainRequest> {
+  /**
+   * @generated from field: string query = 1;
+   */
+  query = "";
+
+  /**
+   * batch all vaults for this node in one RPC
+   *
+   * @generated from field: repeated string vault_ids = 2;
+   */
+  vaultIds: string[] = [];
+
+  constructor(data?: PartialMessage<ForwardExplainRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardExplainRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "vault_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExplainRequest {
+    return new ForwardExplainRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardExplainRequest {
+    return new ForwardExplainRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardExplainRequest {
+    return new ForwardExplainRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardExplainRequest | PlainMessage<ForwardExplainRequest> | undefined, b: ForwardExplainRequest | PlainMessage<ForwardExplainRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardExplainRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardExplainResponse
+ */
+export class ForwardExplainResponse extends Message<ForwardExplainResponse> {
+  /**
+   * reuses existing ChunkPlan from query.proto
+   *
+   * @generated from field: repeated gastrolog.v1.ChunkPlan chunks = 1;
+   */
+  chunks: ChunkPlan[] = [];
+
+  /**
+   * @generated from field: int32 total_chunks = 2;
+   */
+  totalChunks = 0;
+
+  constructor(data?: PartialMessage<ForwardExplainResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardExplainResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunks", kind: "message", T: ChunkPlan, repeated: true },
+    { no: 2, name: "total_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExplainResponse {
+    return new ForwardExplainResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardExplainResponse {
+    return new ForwardExplainResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardExplainResponse {
+    return new ForwardExplainResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardExplainResponse | PlainMessage<ForwardExplainResponse> | undefined, b: ForwardExplainResponse | PlainMessage<ForwardExplainResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardExplainResponse, a, b);
   }
 }
 

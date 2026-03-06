@@ -116,6 +116,9 @@ type Server struct {
 	// validateVaultExecutor validates a local vault for remote ValidateVault requests.
 	validateVaultExecutor ValidateVaultExecutor
 
+	// explainExecutor returns explain plans for local vaults for remote Explain requests.
+	explainExecutor ExplainExecutor
+
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns

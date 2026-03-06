@@ -40,6 +40,10 @@ type GetIndexesExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chu
 // ValidateVaultExecutor validates a local vault and returns the result.
 type ValidateVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (*gastrologv1.ValidateVaultResponse, error)
 
+// ExplainExecutor returns the explain plan for local vaults matching the query.
+// Used by the ForwardExplain handler to serve remote explain requests.
+type ExplainExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error)
+
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
@@ -79,6 +83,11 @@ func (s *Server) SetGetIndexesExecutor(fn GetIndexesExecutor) {
 // SetValidateVaultExecutor injects the callback for handling remote ValidateVault requests.
 func (s *Server) SetValidateVaultExecutor(fn ValidateVaultExecutor) {
 	s.validateVaultExecutor = fn
+}
+
+// SetExplainExecutor injects the callback for handling remote Explain requests.
+func (s *Server) SetExplainExecutor(fn ExplainExecutor) {
+	s.explainExecutor = fn
 }
 
 // forwardRecords handles the ForwardRecords RPC. Converts proto ExportRecords
@@ -328,6 +337,30 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 	}, nil
 }
 
+// forwardExplain handles the ForwardExplain RPC. Returns the explain plan
+// for the requested local vaults.
+func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error) {
+	if s.explainExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "explain executor not configured")
+	}
+	vaultIDs := make([]uuid.UUID, 0, len(req.GetVaultIds()))
+	for _, vs := range req.GetVaultIds() {
+		vid, err := uuid.Parse(vs)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id %q: %v", vs, err)
+		}
+		vaultIDs = append(vaultIDs, vid)
+	}
+	chunks, totalChunks, err := s.explainExecutor(ctx, vaultIDs, req.GetQuery())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "explain: %v", err)
+	}
+	return &gastrologv1.ForwardExplainResponse{
+		Chunks:      chunks,
+		TotalChunks: totalChunks,
+	}, nil
+}
+
 // forwardApply handles the ForwardApply RPC on the leader.
 // Followers call this to proxy config writes through the leader's raft.Apply().
 func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApplyRequest) (*gastrologv1.ForwardApplyResponse, error) {
@@ -431,6 +464,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardSetNodeSuffrage",
 			Handler:    forwardSetNodeSuffrageHandler,
 		},
+		{
+			MethodName: "ForwardExplain",
+			Handler:    forwardExplainHandler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -455,6 +492,7 @@ type clusterServiceServer interface {
 	notifyEviction(context.Context, *gastrologv1.NotifyEvictionRequest) (*gastrologv1.NotifyEvictionResponse, error)
 	forwardRemoveNode(context.Context, *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error)
 	forwardSetNodeSuffrage(context.Context, *gastrologv1.ForwardSetNodeSuffrageRequest) (*gastrologv1.ForwardSetNodeSuffrageResponse, error)
+	forwardExplain(context.Context, *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -624,6 +662,25 @@ func forwardSetNodeSuffrageHandler(srv any, ctx context.Context, dec func(any) e
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardSetNodeSuffrage(ctx, req.(*gastrologv1.ForwardSetNodeSuffrageRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardExplainHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardExplainRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardExplain(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardExplain",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardExplain(ctx, req.(*gastrologv1.ForwardExplainRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

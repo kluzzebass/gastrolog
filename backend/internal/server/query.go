@@ -32,6 +32,7 @@ import (
 type RemoteSearcher interface {
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
+	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
 }
 
 // QueryServer implements the QueryService.
@@ -567,7 +568,7 @@ func (s *QueryServer) Explain(
 ) (*connect.Response[apiv1.ExplainResponse], error) {
 	eng := s.orch.MultiVaultQueryEngine()
 
-	q, _, err := protoToQuery(req.Msg.Query)
+	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
@@ -588,6 +589,11 @@ func (s *QueryServer) Explain(
 	}
 	if !plan.Query.End.IsZero() {
 		resp.QueryEnd = timestamppb.New(plan.Query.End)
+	}
+
+	// Append pipeline stages if the query has pipe operators.
+	if pipeline != nil {
+		resp.PipelineStages = buildPipelineStages(pipeline)
 	}
 
 	// Cache vault→nodeID lookups to avoid repeated config reads.
@@ -615,7 +621,7 @@ func (s *QueryServer) Explain(
 			ScanMode:         cp.ScanMode,
 			EstimatedRecords: int64(cp.EstimatedScan),
 			RuntimeFilters:   []string{cp.RuntimeFilter},
-			Steps:            pipelineStepsToProto(cp.Pipeline),
+			Steps:            PipelineStepsToProto(cp.Pipeline),
 			SkipReason:       cp.SkipReason,
 			NodeId:           vaultNodeID(cp.VaultID),
 		}
@@ -629,7 +635,7 @@ func (s *QueryServer) Explain(
 		for _, bp := range cp.BranchPlans {
 			chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &apiv1.BranchPlan{
 				Expression:       bp.BranchExpr,
-				Steps:            pipelineStepsToProto(bp.Pipeline),
+				Steps:            PipelineStepsToProto(bp.Pipeline),
 				Skipped:          bp.Skipped,
 				SkipReason:       bp.SkipReason,
 				EstimatedRecords: int64(bp.EstimatedScan),
@@ -639,7 +645,205 @@ func (s *QueryServer) Explain(
 		resp.Chunks = append(resp.Chunks, chunkPlan)
 	}
 
+	// Fan out to remote nodes to collect their chunk plans.
+	s.collectRemoteExplain(ctx, q, resp)
+
 	return connect.NewResponse(resp), nil
+}
+
+// buildPipelineStages converts parsed pipeline operators into proto stages
+// with execution metadata and human-readable notes.
+func buildPipelineStages(pipeline *querylang.Pipeline) []*apiv1.QueryPipelineStage {
+	stages := make([]*apiv1.QueryPipelineStage, 0, len(pipeline.Pipes))
+	for _, op := range pipeline.Pipes {
+		stages = append(stages, &apiv1.QueryPipelineStage{
+			Operator:      pipeOpName(op),
+			Description:   op.String(),
+			Materializing: isMaterializing(op),
+			Note:          pipeOpNote(op),
+			Execution:     pipeOpExecution(op),
+		})
+	}
+	return stages
+}
+
+// collectRemoteExplain fans out ForwardExplain RPCs to remote nodes and
+// merges their chunk plans into the response.
+func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, resp *apiv1.ExplainResponse) {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return
+	}
+	byNode := s.remoteVaultsByNode(ctx)
+	queryExpr := q.String()
+	for nodeID, vaultIDs := range byNode {
+		vaultStrs := make([]string, len(vaultIDs))
+		for i, v := range vaultIDs {
+			vaultStrs[i] = v.String()
+		}
+		remote, err := s.remoteSearcher.Explain(ctx, nodeID, &apiv1.ForwardExplainRequest{
+			Query:    queryExpr,
+			VaultIds: vaultStrs,
+		})
+		if err != nil {
+			s.logger.Warn("explain: remote node failed", "node", nodeID, "err", err)
+			continue
+		}
+		resp.Chunks = append(resp.Chunks, remote.GetChunks()...)
+		resp.TotalChunks += remote.GetTotalChunks()
+	}
+}
+
+// pipeOpName returns the operator name for a PipeOp.
+func pipeOpName(op querylang.PipeOp) string {
+	switch op.(type) {
+	case *querylang.StatsOp:
+		return "stats"
+	case *querylang.WhereOp:
+		return "where"
+	case *querylang.EvalOp:
+		return "eval"
+	case *querylang.SortOp:
+		return "sort"
+	case *querylang.HeadOp:
+		return "head"
+	case *querylang.TailOp:
+		return "tail"
+	case *querylang.SliceOp:
+		return "slice"
+	case *querylang.RenameOp:
+		return "rename"
+	case *querylang.FieldsOp:
+		return "fields"
+	case *querylang.TimechartOp:
+		return "timechart"
+	case *querylang.RawOp:
+		return "raw"
+	case *querylang.LookupOp:
+		return "lookup"
+	case *querylang.BarchartOp:
+		return "barchart"
+	case *querylang.DonutOp:
+		return "donut"
+	case *querylang.MapOp:
+		return "map"
+	default:
+		return "unknown"
+	}
+}
+
+// isMaterializing returns true for pipeline operators that require full
+// result materialization before producing output.
+func isMaterializing(op querylang.PipeOp) bool {
+	switch op.(type) {
+	case *querylang.StatsOp, *querylang.TimechartOp, *querylang.SortOp,
+		*querylang.TailOp, *querylang.SliceOp, *querylang.RawOp:
+		return true
+	default:
+		return false
+	}
+}
+
+// pipeOpExecution returns a short execution mode label for a pipeline operator.
+func pipeOpExecution(op querylang.PipeOp) string {
+	switch op.(type) {
+	case *querylang.StatsOp, *querylang.TimechartOp:
+		return "materializing" // runs on each node, merged on coordinator
+	case *querylang.SortOp, *querylang.TailOp, *querylang.SliceOp:
+		return "coordinator-only" // buffers all records on the coordinating node
+	case *querylang.HeadOp:
+		return "short-circuit" // stops iteration early
+	case *querylang.BarchartOp, *querylang.DonutOp, *querylang.MapOp, *querylang.RawOp:
+		return "render-hint" // affects presentation, not data flow
+	default:
+		return "streaming" // per-record, no buffering
+	}
+}
+
+// pipeOpNote generates a human-readable explanation of what a pipeline operator
+// does and how the engine will execute it.
+func pipeOpNote(op querylang.PipeOp) string {
+	switch o := op.(type) {
+	case *querylang.StatsOp:
+		n := fmt.Sprintf("Aggregates all matching records (%s)", aggList(o.Aggs))
+		if len(o.Groups) > 0 {
+			n += ", grouped by " + groupList(o.Groups)
+		}
+		n += ". All records must be scanned before results are produced. In a cluster, each node aggregates locally and results are merged."
+		return n
+	case *querylang.TimechartOp:
+		n := fmt.Sprintf("Buckets records into %d time intervals", o.N)
+		if o.By != "" {
+			n += ", split by " + o.By
+		}
+		n += ". All records must be scanned. Each node runs independently, results merged on coordinator."
+		return n
+	case *querylang.WhereOp:
+		return fmt.Sprintf("Filters records matching: %s. Applied per-record with no buffering.", o.Expr.String())
+	case *querylang.EvalOp:
+		fields := make([]string, len(o.Assignments))
+		for i, a := range o.Assignments {
+			fields[i] = a.Field
+		}
+		return fmt.Sprintf("Computes new fields: %s. Applied per-record.", strings.Join(fields, ", "))
+	case *querylang.SortOp:
+		fields := make([]string, len(o.Fields))
+		for i, f := range o.Fields {
+			if f.Desc {
+				fields[i] = f.Name + " (desc)"
+			} else {
+				fields[i] = f.Name + " (asc)"
+			}
+		}
+		return fmt.Sprintf("Sorts all results by %s. Buffers all records in memory on the coordinator.", strings.Join(fields, ", "))
+	case *querylang.HeadOp:
+		return fmt.Sprintf("Returns only the first %d records. Stops scanning early once the limit is reached.", o.N)
+	case *querylang.TailOp:
+		return fmt.Sprintf("Returns only the last %d records. All records must be scanned to find the tail.", o.N)
+	case *querylang.SliceOp:
+		return fmt.Sprintf("Returns records %d through %d. All records must be buffered to extract the slice.", o.Start, o.End)
+	case *querylang.RenameOp:
+		pairs := make([]string, len(o.Renames))
+		for i, r := range o.Renames {
+			pairs[i] = r.Old + " \u2192 " + r.New
+		}
+		return fmt.Sprintf("Renames fields: %s. Applied per-record.", strings.Join(pairs, ", "))
+	case *querylang.FieldsOp:
+		if o.Drop {
+			return fmt.Sprintf("Drops fields: %s. Applied per-record.", strings.Join(o.Names, ", "))
+		}
+		return fmt.Sprintf("Keeps only fields: %s. Applied per-record.", strings.Join(o.Names, ", "))
+	case *querylang.LookupOp:
+		return fmt.Sprintf("Enriches each record by looking up %s in the %s table.", o.Field, o.Table)
+	case *querylang.RawOp:
+		return "Forces table output format. No data transformation."
+	case *querylang.BarchartOp:
+		return "Renders results as a bar chart. No data transformation."
+	case *querylang.DonutOp:
+		return "Renders results as a donut chart. No data transformation."
+	case *querylang.MapOp:
+		if o.Mode == querylang.MapChoropleth {
+			return fmt.Sprintf("Renders a choropleth map by %s. No data transformation.", o.CountryField)
+		}
+		return fmt.Sprintf("Renders a scatter map using %s/%s coordinates. No data transformation.", o.LatField, o.LonField)
+	default:
+		return ""
+	}
+}
+
+func aggList(aggs []querylang.AggExpr) string {
+	names := make([]string, len(aggs))
+	for i, a := range aggs {
+		names[i] = a.DefaultAlias()
+	}
+	return strings.Join(names, ", ")
+}
+
+func groupList(groups []querylang.GroupExpr) string {
+	names := make([]string, len(groups))
+	for i, g := range groups {
+		names[i] = g.String()
+	}
+	return strings.Join(names, ", ")
 }
 
 // GetContext returns records surrounding a specific record, searching across
@@ -1108,8 +1312,9 @@ func parseTime(s string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid time format: %s (use RFC3339 or Unix timestamp)", s)
 }
 
-// pipelineStepsToProto converts internal PipelineSteps to proto.
-func pipelineStepsToProto(steps []query.PipelineStep) []*apiv1.PipelineStep {
+// PipelineStepsToProto converts internal PipelineSteps to proto.
+// Exported for use by the explain executor in cluster forwarding.
+func PipelineStepsToProto(steps []query.PipelineStep) []*apiv1.PipelineStep {
 	out := make([]*apiv1.PipelineStep, len(steps))
 	for i, step := range steps {
 		out[i] = &apiv1.PipelineStep{

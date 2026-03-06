@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
-import { ChunkPlan, BranchPlan, PipelineStep } from "../api/client";
+import { ChunkPlan, BranchPlan, PipelineStep, QueryPipelineStage } from "../api/client";
 import { formatChunkId } from "../utils";
 import { NodeBadge } from "./settings/NodeBadge";
 import {
@@ -16,12 +16,14 @@ export function ExplainPanel({
   direction,
   totalChunks,
   expression,
+  pipelineStages,
   dark,
 }: Readonly<{
   chunks: ChunkPlan[];
   direction: string;
   totalChunks: number;
   expression: string;
+  pipelineStages: QueryPipelineStage[];
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
@@ -80,6 +82,11 @@ export function ExplainPanel({
         )}
       </div>
 
+      {/* Pipeline stages */}
+      {pipelineStages.length > 0 && (
+        <PipelineStagesBar stages={pipelineStages} dark={dark} />
+      )}
+
       {/* Cost summary */}
       {chunks.length > 0 && <CostSummary chunks={chunks} dark={dark} />}
 
@@ -98,6 +105,81 @@ export function ExplainPanel({
             />
           ))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+const executionLabel: Record<string, string> = {
+  streaming: "Streaming",
+  materializing: "Materializing",
+  "short-circuit": "Short-circuit",
+  "coordinator-only": "Coordinator only",
+  "render-hint": "Render hint",
+};
+
+const executionColor: Record<string, string> = {
+  streaming: "bg-severity-info/15 text-severity-info border-severity-info/25",
+  materializing: "bg-severity-warn/15 text-severity-warn border-severity-warn/25",
+  "short-circuit": "bg-copper/15 text-copper border-copper/25",
+  "coordinator-only": "bg-severity-warn/15 text-severity-warn border-severity-warn/25",
+  "render-hint": "bg-ink-border-subtle/40 text-text-muted border-ink-border-subtle",
+};
+
+function PipelineStagesBar({
+  stages,
+  dark,
+}: Readonly<{
+  stages: QueryPipelineStage[];
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+
+  return (
+    <div
+      className={`shrink-0 rounded border px-3.5 py-2.5 mb-3 ${c("bg-ink-surface border-ink-border-subtle", "bg-light-surface border-light-border-subtle")}`}
+    >
+      <div className="flex items-center gap-2 mb-2">
+        <span
+          className={`text-xs font-semibold uppercase tracking-wider ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          Pipeline
+        </span>
+        <span className={`font-mono text-xs ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          {stages.length} {stages.length === 1 ? "stage" : "stages"}
+        </span>
+      </div>
+      <div className="flex flex-col gap-2">
+        {stages.map((stage, i) => (
+          <div
+            key={`stage-${i}-${stage.operator}`}
+            className={`flex items-start gap-3 text-[0.8em] ${i > 0 ? `pt-2 border-t ${c("border-ink-border-subtle/50", "border-light-border-subtle/50")}` : ""}`}
+          >
+            {/* Stage number + operator */}
+            <div className="flex items-center gap-2 shrink-0 w-32">
+              <span className={`font-mono text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
+                {i + 1}
+              </span>
+              <span className={`font-mono font-semibold ${c("text-text-bright", "text-light-text-bright")}`}>
+                {stage.operator}
+              </span>
+            </div>
+
+            {/* Execution badge */}
+            <span
+              className={`text-xs px-1.5 py-0.5 rounded border uppercase tracking-wider font-semibold shrink-0 ${
+                executionColor[stage.execution] ?? executionColor.streaming
+              }`}
+            >
+              {executionLabel[stage.execution] ?? stage.execution}
+            </span>
+
+            {/* Note */}
+            <span className={`font-mono text-xs leading-relaxed ${c("text-text-normal", "text-light-text-normal")}`}>
+              {stage.note}
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   );

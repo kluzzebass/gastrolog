@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -121,6 +122,63 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			records = append(records, cluster.RecordToExportRecord(rec))
 		}
 		return records, nil, nil, false, nil
+	}
+}
+
+// newExplainExecutor creates a cluster.ExplainExecutor that runs explain on
+// local vaults for ForwardExplain RPCs received from peer nodes. Scopes the
+// query to the requested vault IDs and sets the node_id on each ChunkPlan.
+func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluster.ExplainExecutor {
+	return func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error) {
+		var allChunks []*gastrologv1.ChunkPlan
+		var totalChunks int32
+
+		for _, vid := range vaultIDs {
+			scopedExpr := fmt.Sprintf("vault=%s %s", vid, queryExpr)
+			q, _, err := server.ParseExpression(scopedExpr)
+			if err != nil {
+				return nil, 0, fmt.Errorf("parse query for vault %s: %w", vid, err)
+			}
+
+			eng := o.MultiVaultQueryEngine()
+			plan, err := eng.Explain(ctx, q)
+			if err != nil {
+				return nil, 0, fmt.Errorf("explain vault %s: %w", vid, err)
+			}
+
+			totalChunks += int32(plan.TotalChunks) //nolint:gosec // G115: chunk count fits in int32
+			for _, cp := range plan.ChunkPlans {
+				chunkPlan := &gastrologv1.ChunkPlan{
+					VaultId:          cp.VaultID.String(),
+					ChunkId:          cp.ChunkID.String(),
+					Sealed:           cp.Sealed,
+					RecordCount:      int64(cp.RecordCount),
+					ScanMode:         cp.ScanMode,
+					EstimatedRecords: int64(cp.EstimatedScan),
+					RuntimeFilters:   []string{cp.RuntimeFilter},
+					Steps:            server.PipelineStepsToProto(cp.Pipeline),
+					SkipReason:       cp.SkipReason,
+					NodeId:           localNodeID,
+				}
+				if !cp.StartTS.IsZero() {
+					chunkPlan.StartTs = timestamppb.New(cp.StartTS)
+				}
+				if !cp.EndTS.IsZero() {
+					chunkPlan.EndTs = timestamppb.New(cp.EndTS)
+				}
+				for _, bp := range cp.BranchPlans {
+					chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &gastrologv1.BranchPlan{
+						Expression:       bp.BranchExpr,
+						Steps:            server.PipelineStepsToProto(bp.Pipeline),
+						Skipped:          bp.Skipped,
+						SkipReason:       bp.SkipReason,
+						EstimatedRecords: int64(bp.EstimatedScan),
+					})
+				}
+				allChunks = append(allChunks, chunkPlan)
+			}
+		}
+		return allChunks, totalChunks, nil
 	}
 }
 

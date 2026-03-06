@@ -133,6 +133,7 @@ export function SearchView() {
                   direction={sv.explainDirection}
                   totalChunks={sv.explainTotalChunks}
                   expression={sv.explainExpression}
+                  pipelineStages={sv.explainPipelineStages}
                   dark={sv.dark}
                 />
               )}

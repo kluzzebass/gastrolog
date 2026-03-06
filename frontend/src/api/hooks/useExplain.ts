@@ -1,11 +1,12 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
-import { queryClient, Query, ChunkPlan } from "../client";
+import { queryClient, Query, ChunkPlan, QueryPipelineStage } from "../client";
 
 export interface ExplainState {
   chunks: ChunkPlan[];
   direction: string;
   totalChunks: number;
   expression: string;
+  pipelineStages: QueryPipelineStage[];
   isLoading: boolean;
   error: Error | null;
 }
@@ -19,6 +20,7 @@ export function useExplain(options?: { onError?: (err: Error) => void }) {
     direction: "",
     totalChunks: 0,
     expression: "",
+    pipelineStages: [],
     isLoading: false,
     error: null,
   });
@@ -41,6 +43,7 @@ export function useExplain(options?: { onError?: (err: Error) => void }) {
         direction: response.direction,
         totalChunks: response.totalChunks,
         expression: response.expression,
+        pipelineStages: response.pipelineStages,
         isLoading: false,
         error: null,
       });
@@ -51,6 +54,7 @@ export function useExplain(options?: { onError?: (err: Error) => void }) {
         direction: "",
         totalChunks: 0,
         expression: "",
+        pipelineStages: [],
         isLoading: false,
         error,
       });
@@ -64,6 +68,7 @@ export function useExplain(options?: { onError?: (err: Error) => void }) {
       direction: "",
       totalChunks: 0,
       expression: "",
+      pipelineStages: [],
       isLoading: false,
       error: null,
     });
