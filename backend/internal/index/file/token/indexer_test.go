@@ -42,6 +42,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1000), Attrs: attrs, Raw: []byte("connecting to server")},
@@ -90,6 +91,7 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), Attrs: attrs, Raw: []byte("alpha beta")},
@@ -123,6 +125,7 @@ func TestIndexerIdempotent(t *testing.T) {
 }
 
 func TestIndexerCancelledContext(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), Attrs: attrs, Raw: []byte("data")},
@@ -145,6 +148,7 @@ func TestIndexerCancelledContext(t *testing.T) {
 }
 
 func TestIndexerBuildEmptyChunk(t *testing.T) {
+	t.Parallel()
 	manager, chunkID := setupChunkManager(t, nil)
 	indexDir := t.TempDir()
 	indexer := NewIndexer(indexDir, manager, nil)
@@ -170,6 +174,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildSingleToken(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(10), Attrs: attrs, Raw: []byte("hello")},
@@ -208,6 +213,7 @@ func TestIndexerBuildSingleToken(t *testing.T) {
 }
 
 func TestIndexerBuildSingleRecord(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(42), Attrs: attrs, Raw: []byte("only")},
@@ -244,6 +250,7 @@ func TestIndexerBuildSingleRecord(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("test")},
@@ -261,6 +268,7 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerBuildReadOnlyDir(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("test")},
@@ -281,6 +289,7 @@ func TestIndexerBuildReadOnlyDir(t *testing.T) {
 }
 
 func TestSignature(t *testing.T) {
+	t.Parallel()
 	entries := []index.TokenIndexEntry{
 		{Token: "test", Positions: []uint64{0}},
 	}
@@ -295,6 +304,7 @@ func TestSignature(t *testing.T) {
 }
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
+	t.Parallel()
 	entries := []index.TokenIndexEntry{
 		{Token: "alpha", Positions: []uint64{0, 128, 256}},
 		{Token: "beta", Positions: []uint64{64, 192}},
@@ -326,6 +336,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 }
 
 func TestEncodeDecodeEmpty(t *testing.T) {
+	t.Parallel()
 	data := encodeIndex(nil)
 	got, err := decodeIndex(data)
 	if err != nil {
@@ -337,6 +348,7 @@ func TestEncodeDecodeEmpty(t *testing.T) {
 }
 
 func TestDecodeErrors(t *testing.T) {
+	t.Parallel()
 	// Too small.
 	if _, err := decodeIndex([]byte{'i'}); err != ErrIndexTooSmall {
 		t.Fatalf("expected ErrIndexTooSmall, got %v", err)
@@ -391,6 +403,7 @@ func TestDecodeErrors(t *testing.T) {
 }
 
 func TestIndexerConcurrentBuild(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("alpha beta")},
@@ -431,6 +444,7 @@ func TestIndexerConcurrentBuild(t *testing.T) {
 }
 
 func TestIndexerBuildLargePostingList(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	const numRecords = 1000
 	records := make([]chunk.Record, numRecords)
@@ -479,6 +493,7 @@ func TestIndexerBuildLargePostingList(t *testing.T) {
 }
 
 func TestIndexerPositionsAscending(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("word aaa")},
@@ -517,6 +532,7 @@ func TestIndexerPositionsAscending(t *testing.T) {
 }
 
 func TestDecodeExtraTrailingBytes(t *testing.T) {
+	t.Parallel()
 	entries := []index.TokenIndexEntry{
 		{Token: "test", Positions: []uint64{0, 64}},
 	}
@@ -538,6 +554,7 @@ func TestDecodeExtraTrailingBytes(t *testing.T) {
 }
 
 func TestIndexerTokensSorted(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("zebra alpha mango")},
@@ -574,6 +591,7 @@ func TestIndexerTokensSorted(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := chunkfile.NewManager(chunkfile.Config{Dir: dir})
 	if err != nil {
@@ -599,6 +617,7 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestLoadIndex(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("one two")},
@@ -639,6 +658,7 @@ func TestLoadIndex(t *testing.T) {
 }
 
 func TestLoadIndexNotFound(t *testing.T) {
+	t.Parallel()
 	indexDir := t.TempDir()
 	bogusID := chunk.NewChunkID()
 
@@ -649,6 +669,7 @@ func TestLoadIndexNotFound(t *testing.T) {
 }
 
 func TestIndexerTokenDeduplication(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("error error error")},
@@ -683,6 +704,7 @@ func TestIndexerTokenDeduplication(t *testing.T) {
 }
 
 func TestIndexerCaseFolding(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("ERROR Error error")},
@@ -716,6 +738,7 @@ func TestIndexerCaseFolding(t *testing.T) {
 }
 
 func TestIndexerShortTokensSkipped(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		// "a" is 1 char (skipped), "zz" and "zzz" are 2+ chars and not hex
@@ -748,6 +771,7 @@ func TestIndexerShortTokensSkipped(t *testing.T) {
 }
 
 func TestOpenReader(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("alpha beta gamma")},
@@ -781,6 +805,7 @@ func TestOpenReader(t *testing.T) {
 }
 
 func TestIndexerHighBytesAreDelimiters(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	// High bytes (UTF-8) are now delimiters, so "über" becomes "ber" and "größe" becomes "gr" and "e"
 	// Only ASCII alphanumeric, underscore, and hyphen are token characters
@@ -825,6 +850,7 @@ func TestIndexerHighBytesAreDelimiters(t *testing.T) {
 }
 
 func TestIndexerLongTokenTruncated(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	// Create a long token (200 chars) using 'z' (not hex)
 	// Max token length is 16, so it should be truncated
@@ -859,6 +885,7 @@ func TestIndexerLongTokenTruncated(t *testing.T) {
 }
 
 func TestOpenReaderLookupFirstLast(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: attrs, Raw: []byte("aardvark middle zebra")},

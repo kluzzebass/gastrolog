@@ -33,6 +33,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"env": "prod", "host": "server1"}, Raw: []byte("log1")},
 		{Attrs: chunk.Attributes{"env": "dev", "host": "server2"}, Raw: []byte("log2")},
@@ -130,6 +131,7 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerCaseFolding(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"ENV": "PROD"}, Raw: []byte("log1")},
 		{Attrs: chunk.Attributes{"env": "prod"}, Raw: []byte("log2")},
@@ -187,6 +189,7 @@ func TestIndexerCaseFolding(t *testing.T) {
 }
 
 func TestIndexerDeduplication(t *testing.T) {
+	t.Parallel()
 	// Record with duplicate key-value pairs (shouldn't happen, but test dedup).
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"env": "prod", "environment": "prod"}, Raw: []byte("log1")},
@@ -219,6 +222,7 @@ func TestIndexerDeduplication(t *testing.T) {
 }
 
 func TestIndexerBuildEmptyChunk(t *testing.T) {
+	t.Parallel()
 	manager, chunkID := setupChunkManager(t, nil)
 	indexer := NewIndexer(manager)
 
@@ -252,6 +256,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildNoAttrs(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: nil, Raw: []byte("log without attrs")},
 		{Attrs: chunk.Attributes{}, Raw: []byte("log with empty attrs")},
@@ -274,6 +279,7 @@ func TestIndexerBuildNoAttrs(t *testing.T) {
 }
 
 func TestIndexerBuildSorted(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"zebra": "z", "apple": "a", "mango": "m"}, Raw: []byte("log")},
 	}
@@ -339,6 +345,7 @@ func TestIndexerBuildSorted(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -361,6 +368,7 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestIndexerBuildCancelledContext(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("test")},
 	}
@@ -381,6 +389,7 @@ func TestIndexerBuildCancelledContext(t *testing.T) {
 }
 
 func TestIndexerGetUnbuilt(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("test")},
 	}
@@ -400,6 +409,7 @@ func TestIndexerGetUnbuilt(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("test")},
 	}
@@ -415,6 +425,7 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("test")},
 	}

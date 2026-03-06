@@ -28,6 +28,7 @@ func (f *fakeConfigLoader) Load(_ context.Context) (*config.Config, error) {
 }
 
 func TestReloadFilters(t *testing.T) {
+	t.Parallel()
 	loader := &fakeConfigLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
@@ -101,6 +102,7 @@ func TestReloadFilters(t *testing.T) {
 }
 
 func TestReloadFiltersInvalidExpression(t *testing.T) {
+	t.Parallel()
 	loader := &fakeConfigLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
@@ -121,6 +123,7 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 }
 
 func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
+	t.Parallel()
 	loader := &fakeConfigLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
@@ -145,6 +148,7 @@ func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 }
 
 func TestAddVault(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -201,6 +205,7 @@ func TestAddVault(t *testing.T) {
 }
 
 func TestAddVaultDuplicate(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -243,6 +248,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 }
 
 func TestRemoveVaultEmpty(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -289,6 +295,7 @@ func TestRemoveVaultEmpty(t *testing.T) {
 }
 
 func TestRemoveVaultNotEmpty(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -341,6 +348,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 }
 
 func TestRemoveVaultNotFound(t *testing.T) {
+	t.Parallel()
 	loader := &fakeConfigLoader{cfg: &config.Config{}}
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 	if err != nil {
@@ -354,6 +362,7 @@ func TestRemoveVaultNotFound(t *testing.T) {
 }
 
 func TestForceRemoveVault(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -429,6 +438,7 @@ func TestForceRemoveVault(t *testing.T) {
 }
 
 func TestForceRemoveVaultNotFound(t *testing.T) {
+	t.Parallel()
 	loader := &fakeConfigLoader{cfg: &config.Config{}}
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 	if err != nil {
@@ -442,6 +452,7 @@ func TestForceRemoveVaultNotFound(t *testing.T) {
 }
 
 func TestForceRemoveEmptyVault(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -531,6 +542,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 }
 
 func TestAddIngesterDuplicate(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -551,6 +563,7 @@ func TestAddIngesterDuplicate(t *testing.T) {
 }
 
 func TestRemoveIngesterNotRunning(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -625,6 +638,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 }
 
 func TestRemoveIngesterNotFound(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -637,6 +651,7 @@ func TestRemoveIngesterNotFound(t *testing.T) {
 }
 
 func TestVaultConfig(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -683,6 +698,7 @@ func TestVaultConfig(t *testing.T) {
 }
 
 func TestVaultConfigNotFound(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -695,6 +711,7 @@ func TestVaultConfigNotFound(t *testing.T) {
 }
 
 func TestUpdateVaultFilter(t *testing.T) {
+	t.Parallel()
 	orch, vaults := newFilteredTestSetup(t)
 
 	// Set initial filter: prod gets env=prod.
@@ -744,6 +761,7 @@ func TestUpdateVaultFilter(t *testing.T) {
 }
 
 func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -806,6 +824,7 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 }
 
 func TestPauseVault(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -879,6 +898,7 @@ func TestPauseVault(t *testing.T) {
 }
 
 func TestResumeVault(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -941,6 +961,7 @@ func TestResumeVault(t *testing.T) {
 }
 
 func TestDisableVaultNotFound(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -955,6 +976,7 @@ func TestDisableVaultNotFound(t *testing.T) {
 }
 
 func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
@@ -1022,6 +1044,7 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 }
 
 func TestReloadRetentionCreatesRunner(t *testing.T) {
+	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
@@ -1083,6 +1106,7 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 }
 
 func TestReloadRetentionRemovesRunner(t *testing.T) {
+	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
@@ -1140,6 +1164,7 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 }
 
 func TestUpdateVaultFilterNotFound(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -1154,6 +1179,7 @@ func TestUpdateVaultFilterNotFound(t *testing.T) {
 func strPtr(s string) *string { return &s }
 
 func TestUpdateVaultFilterInvalid(t *testing.T) {
+	t.Parallel()
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 

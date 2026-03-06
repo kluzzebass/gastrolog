@@ -19,6 +19,7 @@ func ptr[T any](v T) *T { return &v }
 // ---------------------------------------------------------------------------
 
 func TestPutFilter(t *testing.T) {
+	t.Parallel()
 	want := config.FilterConfig{
 		ID:         uuid.Must(uuid.NewV7()),
 		Name:       "prod-errors",
@@ -47,6 +48,7 @@ func TestPutFilter(t *testing.T) {
 }
 
 func TestDeleteFilter(t *testing.T) {
+	t.Parallel()
 	want := uuid.Must(uuid.NewV7())
 	cmd := NewDeleteFilter(want)
 	b, err := Marshal(cmd)
@@ -67,6 +69,7 @@ func TestDeleteFilter(t *testing.T) {
 }
 
 func TestPutRotationPolicy(t *testing.T) {
+	t.Parallel()
 	want := config.RotationPolicyConfig{
 		ID:         uuid.Must(uuid.NewV7()),
 		Name:       "default-rotation",
@@ -84,6 +87,7 @@ func TestPutRotationPolicy(t *testing.T) {
 }
 
 func TestPutRotationPolicyNilOptionals(t *testing.T) {
+	t.Parallel()
 	want := config.RotationPolicyConfig{
 		ID:   uuid.Must(uuid.NewV7()),
 		Name: "minimal",
@@ -97,6 +101,7 @@ func TestPutRotationPolicyNilOptionals(t *testing.T) {
 }
 
 func TestPutRetentionPolicy(t *testing.T) {
+	t.Parallel()
 	want := config.RetentionPolicyConfig{
 		ID:        uuid.Must(uuid.NewV7()),
 		Name:      "long-term",
@@ -113,6 +118,7 @@ func TestPutRetentionPolicy(t *testing.T) {
 }
 
 func TestPutRetentionPolicyNilOptionals(t *testing.T) {
+	t.Parallel()
 	want := config.RetentionPolicyConfig{
 		ID:   uuid.Must(uuid.NewV7()),
 		Name: "empty",
@@ -126,6 +132,7 @@ func TestPutRetentionPolicyNilOptionals(t *testing.T) {
 }
 
 func TestPutVault(t *testing.T) {
+	t.Parallel()
 	policyID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
 	destID := uuid.Must(uuid.NewV7())
@@ -151,6 +158,7 @@ func TestPutVault(t *testing.T) {
 }
 
 func TestPutVaultNilOptionals(t *testing.T) {
+	t.Parallel()
 	want := config.VaultConfig{
 		ID:   uuid.Must(uuid.NewV7()),
 		Name: "bare",
@@ -165,6 +173,7 @@ func TestPutVaultNilOptionals(t *testing.T) {
 }
 
 func TestPutIngester(t *testing.T) {
+	t.Parallel()
 	want := config.IngesterConfig{
 		ID:      uuid.Must(uuid.NewV7()),
 		Name:    "syslog-prod",
@@ -181,6 +190,7 @@ func TestPutIngester(t *testing.T) {
 }
 
 func TestPutServerSettings(t *testing.T) {
+	t.Parallel()
 	want := config.ServerSettings{
 		Auth:      config.AuthConfig{JWTSecret: "s3cret"},
 		Scheduler: config.SchedulerConfig{MaxConcurrentJobs: 4},
@@ -212,6 +222,7 @@ func TestPutServerSettings(t *testing.T) {
 }
 
 func TestPutCertificate(t *testing.T) {
+	t.Parallel()
 	want := config.CertPEM{
 		ID:       uuid.Must(uuid.NewV7()),
 		Name:     "main-cert",
@@ -229,6 +240,7 @@ func TestPutCertificate(t *testing.T) {
 }
 
 func TestCreateUser(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	want := config.User{
 		ID:                 uuid.Must(uuid.NewV7()),
@@ -257,6 +269,7 @@ func TestCreateUser(t *testing.T) {
 }
 
 func TestCreateUserZeroTime(t *testing.T) {
+	t.Parallel()
 	want := config.User{
 		ID:           uuid.Must(uuid.NewV7()),
 		Username:     "nobody",
@@ -272,6 +285,7 @@ func TestCreateUserZeroTime(t *testing.T) {
 }
 
 func TestUpdatePassword(t *testing.T) {
+	t.Parallel()
 	id := uuid.Must(uuid.NewV7())
 	hash := "$2a$10$newhash"
 	cmd := NewUpdatePassword(id, hash)
@@ -293,6 +307,7 @@ func TestUpdatePassword(t *testing.T) {
 }
 
 func TestUpdateUserRole(t *testing.T) {
+	t.Parallel()
 	id := uuid.Must(uuid.NewV7())
 	cmd := NewUpdateUserRole(id, "admin")
 	b, err := Marshal(cmd)
@@ -313,6 +328,7 @@ func TestUpdateUserRole(t *testing.T) {
 }
 
 func TestUpdateUsername(t *testing.T) {
+	t.Parallel()
 	id := uuid.Must(uuid.NewV7())
 	cmd := NewUpdateUsername(id, "newname")
 	b, err := Marshal(cmd)
@@ -333,6 +349,7 @@ func TestUpdateUsername(t *testing.T) {
 }
 
 func TestInvalidateTokens(t *testing.T) {
+	t.Parallel()
 	id := uuid.Must(uuid.NewV7())
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	cmd := NewInvalidateTokens(id, at)
@@ -355,6 +372,7 @@ func TestInvalidateTokens(t *testing.T) {
 }
 
 func TestPutUserPreferences(t *testing.T) {
+	t.Parallel()
 	id := uuid.Must(uuid.NewV7())
 	prefs := `{"theme":"light","syntax":"monokai"}`
 	cmd := NewPutUserPreferences(id, prefs)
@@ -376,6 +394,7 @@ func TestPutUserPreferences(t *testing.T) {
 }
 
 func TestCreateRefreshToken(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	want := config.RefreshToken{
 		ID:        uuid.Must(uuid.NewV7()),
@@ -397,6 +416,7 @@ func TestCreateRefreshToken(t *testing.T) {
 }
 
 func TestDeleteRefreshToken(t *testing.T) {
+	t.Parallel()
 	want := uuid.Must(uuid.NewV7())
 	cmd := NewDeleteRefreshToken(want)
 	b, err := Marshal(cmd)
@@ -417,6 +437,7 @@ func TestDeleteRefreshToken(t *testing.T) {
 }
 
 func TestDeleteUserRefreshTokens(t *testing.T) {
+	t.Parallel()
 	want := uuid.Must(uuid.NewV7())
 	cmd := NewDeleteUserRefreshTokens(want)
 	b, err := Marshal(cmd)
@@ -441,6 +462,7 @@ func TestDeleteUserRefreshTokens(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSnapshotRoundTrip(t *testing.T) {
+	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	filterID := uuid.Must(uuid.NewV7())
@@ -573,6 +595,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 }
 
 func TestSnapshotEmpty(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{}
 	snap := BuildSnapshot(cfg, nil, nil, nil)
 	b, err := MarshalSnapshot(snap)

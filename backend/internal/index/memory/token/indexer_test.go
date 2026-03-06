@@ -33,6 +33,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("error connecting to database")},
@@ -97,6 +98,7 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerBuildDedupeWithinRecord(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("error error error multiple errors")},
@@ -130,6 +132,7 @@ func TestIndexerBuildDedupeWithinRecord(t *testing.T) {
 }
 
 func TestIndexerBuildEmptyChunk(t *testing.T) {
+	t.Parallel()
 	manager, chunkID := setupChunkManager(t, nil)
 	indexer := NewIndexer(manager)
 
@@ -147,6 +150,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildNoTokensInRecord(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("a . b : c")}, // only single chars and delimiters
@@ -169,6 +173,7 @@ func TestIndexerBuildNoTokensInRecord(t *testing.T) {
 }
 
 func TestIndexerBuildSorted(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("zebra apple mango")},
@@ -206,6 +211,7 @@ func TestIndexerBuildSorted(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -229,6 +235,7 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestIndexerBuildCancelledContext(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("test data")},
@@ -250,6 +257,7 @@ func TestIndexerBuildCancelledContext(t *testing.T) {
 }
 
 func TestIndexerGetUnbuilt(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("test")},
@@ -265,6 +273,7 @@ func TestIndexerGetUnbuilt(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("test")},
@@ -281,6 +290,7 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("hello world")},

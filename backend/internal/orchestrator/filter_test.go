@@ -10,6 +10,7 @@ import (
 )
 
 func TestCompileFilter(t *testing.T) {
+	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 
 	tests := []struct {
@@ -82,6 +83,7 @@ func TestCompileFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			filter, err := CompileFilter(vaultID, tt.filter)
 			if tt.wantError {
 				if err == nil {
@@ -100,6 +102,7 @@ func TestCompileFilter(t *testing.T) {
 }
 
 func TestFilterSetMatch(t *testing.T) {
+	t.Parallel()
 	// Set up filters:
 	// - prod-errors: env=prod AND level=error
 	// - staging: env=staging
@@ -155,6 +158,7 @@ func TestFilterSetMatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := filterSet.Match(tt.attrs)
 			if !sameElements(got, tt.wantVaults) {
 				t.Errorf("got vaults %v, want %v", got, tt.wantVaults)
@@ -164,6 +168,7 @@ func TestFilterSetMatch(t *testing.T) {
 }
 
 func TestFilterSetCatchRestOnlyWhenNoExprMatch(t *testing.T) {
+	t.Parallel()
 	// catch-the-rest should NOT receive messages when an expression filter matches
 	prodID := uuid.Must(uuid.NewV7())
 	unfilteredID := uuid.Must(uuid.NewV7())
@@ -193,6 +198,7 @@ func TestFilterSetCatchRestOnlyWhenNoExprMatch(t *testing.T) {
 }
 
 func TestFilterSetCatchAllDoesNotPreventCatchRest(t *testing.T) {
+	t.Parallel()
 	// catch-all should NOT prevent catch-the-rest from receiving unmatched messages
 	// (catch-all is not an "expression match")
 	archiveID := uuid.Must(uuid.NewV7())
@@ -214,6 +220,7 @@ func TestFilterSetCatchAllDoesNotPreventCatchRest(t *testing.T) {
 }
 
 func TestFilterSetEmptyFilterReceivesNothing(t *testing.T) {
+	t.Parallel()
 	disabledID := uuid.Must(uuid.NewV7())
 	archiveID := uuid.Must(uuid.NewV7())
 
@@ -232,6 +239,7 @@ func TestFilterSetEmptyFilterReceivesNothing(t *testing.T) {
 }
 
 func TestFilterSetCaseInsensitiveMatching(t *testing.T) {
+	t.Parallel()
 	prodID := uuid.Must(uuid.NewV7())
 
 	filter, _ := CompileFilter(prodID, "env=PROD")
@@ -250,6 +258,7 @@ func TestFilterSetCaseInsensitiveMatching(t *testing.T) {
 }
 
 func TestFilterSetNotExpression(t *testing.T) {
+	t.Parallel()
 	notProdID := uuid.Must(uuid.NewV7())
 
 	// Filter that excludes prod
@@ -270,6 +279,7 @@ func TestFilterSetNotExpression(t *testing.T) {
 }
 
 func TestFilterSetKeyExists(t *testing.T) {
+	t.Parallel()
 	hasEnvID := uuid.Must(uuid.NewV7())
 
 	// Filter that matches any message with an "env" key
@@ -296,6 +306,7 @@ func TestFilterSetKeyExists(t *testing.T) {
 }
 
 func TestFilterSetValueExists(t *testing.T) {
+	t.Parallel()
 	hasErrorID := uuid.Must(uuid.NewV7())
 
 	// Filter that matches any message with value "error"
@@ -328,6 +339,7 @@ func TestFilterSetValueExists(t *testing.T) {
 }
 
 func TestFilterSetAddOrUpdate(t *testing.T) {
+	t.Parallel()
 	vaultA := uuid.Must(uuid.NewV7())
 	vaultB := uuid.Must(uuid.NewV7())
 
@@ -373,6 +385,7 @@ func TestFilterSetAddOrUpdate(t *testing.T) {
 }
 
 func TestFilterSetWithout(t *testing.T) {
+	t.Parallel()
 	vaultA := uuid.Must(uuid.NewV7())
 	vaultB := uuid.Must(uuid.NewV7())
 	vaultC := uuid.Must(uuid.NewV7())
@@ -417,6 +430,7 @@ func TestFilterSetWithout(t *testing.T) {
 }
 
 func TestAddOrUpdateWithNodePreservesNodeID(t *testing.T) {
+	t.Parallel()
 	vaultA := uuid.Must(uuid.NewV7())
 	vaultB := uuid.Must(uuid.NewV7())
 
@@ -454,6 +468,7 @@ func TestAddOrUpdateWithNodePreservesNodeID(t *testing.T) {
 }
 
 func TestMatchWithNodeReturnsNodeIDs(t *testing.T) {
+	t.Parallel()
 	localID := uuid.Must(uuid.NewV7())
 	remoteID := uuid.Must(uuid.NewV7())
 
@@ -487,6 +502,7 @@ func TestMatchWithNodeReturnsNodeIDs(t *testing.T) {
 }
 
 func TestMatchWithNodeCatchRest(t *testing.T) {
+	t.Parallel()
 	exprID := uuid.Must(uuid.NewV7())
 	catchRestID := uuid.Must(uuid.NewV7())
 

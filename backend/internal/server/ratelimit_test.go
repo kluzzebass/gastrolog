@@ -12,6 +12,7 @@ import (
 )
 
 func TestRateLimitMiddleware_NonAuthPaths(t *testing.T) {
+	t.Parallel()
 	rl := newRateLimiter(rate.Limit(1), 1) // very restrictive
 	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -30,6 +31,7 @@ func TestRateLimitMiddleware_NonAuthPaths(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_AuthPathThrottled(t *testing.T) {
+	t.Parallel()
 	rl := newRateLimiter(rate.Limit(1), 2) // 1 req/s, burst 2
 	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -69,6 +71,7 @@ func TestRateLimitMiddleware_AuthPathThrottled(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_DifferentIPsIndependent(t *testing.T) {
+	t.Parallel()
 	rl := newRateLimiter(rate.Limit(1), 1) // 1 req/s, burst 1
 	handler := rateLimitMiddleware(rl)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -105,6 +108,7 @@ func TestRateLimitMiddleware_DifferentIPsIndependent(t *testing.T) {
 }
 
 func TestRateLimiterCleanup(t *testing.T) {
+	t.Parallel()
 	rl := newRateLimiter(rate.Limit(1), 1)
 
 	// Create an entry.

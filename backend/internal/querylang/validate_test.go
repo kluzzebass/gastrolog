@@ -5,6 +5,7 @@ import (
 )
 
 func TestValidateExpression(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		expr       string
@@ -177,6 +178,7 @@ func TestValidateExpression(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			valid, msg, offset := ValidateExpression(tt.expr)
 			if valid != tt.wantValid {
 				t.Errorf("valid = %v, want %v (msg=%q, offset=%d)", valid, tt.wantValid, msg, offset)
@@ -195,6 +197,7 @@ func TestValidateExpression(t *testing.T) {
 }
 
 func TestValidateExpressionOffsetMapping(t *testing.T) {
+	t.Parallel()
 	// "last=5m error | stts count"
 	// After stripping: "error | stts count"
 	// stts is at position 8 in stripped string.
@@ -211,6 +214,7 @@ func TestValidateExpressionOffsetMapping(t *testing.T) {
 }
 
 func TestValidateExpressionOffsetMappingMultipleDirectives(t *testing.T) {
+	t.Parallel()
 	// "start=X end=Y | stts count"
 	// After stripping: " | stts count"
 	// The pipe-only query after stripping: "| stts count"
@@ -227,6 +231,7 @@ func TestValidateExpressionOffsetMappingMultipleDirectives(t *testing.T) {
 }
 
 func TestStripDirectives(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -245,6 +250,7 @@ func TestStripDirectives(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ranges := stripDirectives(tt.input)
 			if got != tt.wantStr {
 				t.Errorf("stripped = %q, want %q", got, tt.wantStr)

@@ -14,6 +14,7 @@ import (
 )
 
 func TestFileChunkManagerNanosecondPrecision(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {

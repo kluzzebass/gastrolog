@@ -18,6 +18,7 @@ import (
 )
 
 func TestMetricsEndpoint(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +92,7 @@ func TestMetricsEndpoint(t *testing.T) {
 }
 
 func TestMetricsWithRunningOrchestrator(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)

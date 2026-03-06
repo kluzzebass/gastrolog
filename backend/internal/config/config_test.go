@@ -9,6 +9,7 @@ import (
 )
 
 func TestParseBytesValid(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected uint64
@@ -27,6 +28,7 @@ func TestParseBytesValid(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.input, func(t *testing.T) {
+			t.Parallel()
 			got, err := ParseBytes(tc.input)
 			if err != nil {
 				t.Fatalf("ParseBytes(%q) error: %v", tc.input, err)
@@ -39,6 +41,7 @@ func TestParseBytesValid(t *testing.T) {
 }
 
 func TestParseBytesInvalid(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		"",
 		"abc",
@@ -48,6 +51,7 @@ func TestParseBytesInvalid(t *testing.T) {
 
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
+			t.Parallel()
 			_, err := ParseBytes(input)
 			if err == nil {
 				t.Errorf("ParseBytes(%q) expected error, got nil", input)
@@ -57,7 +61,9 @@ func TestParseBytesInvalid(t *testing.T) {
 }
 
 func TestRotationPolicyConfigToPolicy(t *testing.T) {
+	t.Parallel()
 	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
@@ -69,6 +75,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("maxBytes only", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{MaxBytes: new("64MB")}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
@@ -92,6 +99,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("maxRecords only", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{MaxRecords: new(int64(1000))}
 		policy, err := cfg.ToRotationPolicy()
 		if err != nil {
@@ -114,6 +122,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("composite", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{
 			MaxBytes:   new("1MB"),
 			MaxRecords: new(int64(100)),
@@ -148,6 +157,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("invalid maxBytes", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{MaxBytes: new("invalid")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
@@ -156,6 +166,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("invalid maxAge", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{MaxAge: new("invalid")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
@@ -164,6 +175,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 	})
 
 	t.Run("negative maxAge", func(t *testing.T) {
+		t.Parallel()
 		cfg := RotationPolicyConfig{MaxAge: new("-1h")}
 		_, err := cfg.ToRotationPolicy()
 		if err == nil {
@@ -173,6 +185,7 @@ func TestRotationPolicyConfigToPolicy(t *testing.T) {
 }
 
 func TestValidateCron(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		cron    *string
@@ -191,6 +204,7 @@ func TestValidateCron(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			cfg := RotationPolicyConfig{Cron: tc.cron}
 			err := cfg.ValidateCron()
 			if tc.wantErr && err == nil {
@@ -204,6 +218,7 @@ func TestValidateCron(t *testing.T) {
 }
 
 func TestStringPtr(t *testing.T) {
+	t.Parallel()
 	p := StringPtr("hello")
 	if p == nil {
 		t.Fatal("expected non-nil pointer")
@@ -223,6 +238,7 @@ func TestStringPtr(t *testing.T) {
 }
 
 func TestUUIDPtr(t *testing.T) {
+	t.Parallel()
 	id := uuid.Must(uuid.NewV7())
 	p := UUIDPtr(id)
 	if p == nil {
@@ -243,7 +259,9 @@ func TestUUIDPtr(t *testing.T) {
 }
 
 func TestToRetentionPolicy(t *testing.T) {
+	t.Parallel()
 	t.Run("empty config", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -255,6 +273,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("maxAge only", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxAge: new("24h")}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -266,6 +285,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("maxBytes only", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxBytes: new("10GB")}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -277,6 +297,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("maxChunks only", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxChunks: new(int64(5))}
 		policy, err := cfg.ToRetentionPolicy()
 		if err != nil {
@@ -288,6 +309,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("composite age and chunks", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{
 			MaxAge:    new("720h"),
 			MaxChunks: new(int64(100)),
@@ -302,6 +324,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("all three conditions", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{
 			MaxAge:    new("720h"),
 			MaxBytes:  new("10GB"),
@@ -317,6 +340,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("invalid maxAge", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxAge: new("not-a-duration")}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
@@ -325,6 +349,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("negative maxAge", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxAge: new("-1h")}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
@@ -333,6 +358,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("zero maxAge", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxAge: new("0s")}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
@@ -341,6 +367,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("invalid maxBytes", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxBytes: new("not-bytes")}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
@@ -349,6 +376,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("zero maxChunks", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxChunks: new(int64(0))}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {
@@ -357,6 +385,7 @@ func TestToRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("negative maxChunks", func(t *testing.T) {
+		t.Parallel()
 		cfg := RetentionPolicyConfig{MaxChunks: new(int64(-1))}
 		_, err := cfg.ToRetentionPolicy()
 		if err == nil {

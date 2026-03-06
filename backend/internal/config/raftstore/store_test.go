@@ -67,6 +67,7 @@ func newTestRaft(t *testing.T) (*hraft.Raft, *raftfsm.FSM) {
 }
 
 func TestConformance(t *testing.T) {
+	t.Parallel()
 	storetest.TestStore(t, func(t *testing.T) config.Store {
 		r, fsm := newTestRaft(t)
 		return New(r, fsm, 5*time.Second)
@@ -74,6 +75,7 @@ func TestConformance(t *testing.T) {
 }
 
 func TestApplyBadData(t *testing.T) {
+	t.Parallel()
 	r, fsm := newTestRaft(t)
 	s := New(r, fsm, 5*time.Second)
 
@@ -106,6 +108,7 @@ func (m *mockForwarder) Forward(ctx context.Context, data []byte) error {
 }
 
 func TestApplyForwardsOnNotLeader(t *testing.T) {
+	t.Parallel()
 	// Create a raft instance that is NOT the leader: bootstrap but
 	// immediately add a second non-existent node so this node steps down.
 	// Simpler approach: create a non-bootstrapped raft that returns ErrNotLeader.
@@ -150,6 +153,7 @@ func TestApplyForwardsOnNotLeader(t *testing.T) {
 }
 
 func TestApplyNoForwarderReturnsError(t *testing.T) {
+	t.Parallel()
 	// Non-bootstrapped raft, no forwarder set.
 	fsm := raftfsm.New()
 
@@ -185,6 +189,7 @@ func TestApplyNoForwarderReturnsError(t *testing.T) {
 }
 
 func TestApplyForwarderError(t *testing.T) {
+	t.Parallel()
 	fsm := raftfsm.New()
 
 	conf := hraft.DefaultConfig()

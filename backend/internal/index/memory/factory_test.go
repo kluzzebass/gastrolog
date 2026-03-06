@@ -7,6 +7,7 @@ import (
 )
 
 func TestFactoryDefaultValues(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 
@@ -27,6 +28,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 }
 
 func TestFactoryCustomKVBudget(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 
@@ -39,6 +41,7 @@ func TestFactoryCustomKVBudget(t *testing.T) {
 }
 
 func TestFactoryInvalidKVBudget(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
 

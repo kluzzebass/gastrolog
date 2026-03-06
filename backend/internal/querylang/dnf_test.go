@@ -5,6 +5,7 @@ import (
 )
 
 func TestToDNF(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		input        string
@@ -105,6 +106,7 @@ func TestToDNF(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -125,6 +127,7 @@ func TestToDNF(t *testing.T) {
 }
 
 func TestConjunctionPredicates(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		input        string
@@ -141,6 +144,7 @@ func TestConjunctionPredicates(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -163,6 +167,7 @@ func TestConjunctionPredicates(t *testing.T) {
 }
 
 func TestDNFDistribution(t *testing.T) {
+	t.Parallel()
 	// (a OR b) AND (c OR d) should produce 4 branches:
 	// (a AND c), (a AND d), (b AND c), (b AND d)
 	expr, err := Parse("(a OR b) AND (c OR d)")
@@ -187,6 +192,7 @@ func TestDNFDistribution(t *testing.T) {
 }
 
 func TestDNFWithComplex(t *testing.T) {
+	t.Parallel()
 	// (error OR warn) AND level=info AND NOT debug
 	// Should produce 2 branches:
 	// (error AND level=info AND NOT debug)

@@ -8,6 +8,7 @@ import (
 )
 
 func TestSignalNotifyWakesWaiter(t *testing.T) {
+	t.Parallel()
 	s := NewSignal()
 	ch := s.C()
 
@@ -27,6 +28,7 @@ func TestSignalNotifyWakesWaiter(t *testing.T) {
 }
 
 func TestSignalNotifyWakesMultipleWaiters(t *testing.T) {
+	t.Parallel()
 	s := NewSignal()
 	const n = 10
 
@@ -51,6 +53,7 @@ func TestSignalNotifyWakesMultipleWaiters(t *testing.T) {
 }
 
 func TestSignalRequiresReCallAfterReceive(t *testing.T) {
+	t.Parallel()
 	s := NewSignal()
 	ch1 := s.C()
 	s.Notify()
@@ -130,6 +133,7 @@ func TestSignalConcurrentNotify(t *testing.T) {
 }
 
 func TestSignalNotifyWithoutWaiters(t *testing.T) {
+	t.Parallel()
 	s := NewSignal()
 	// Must not panic when notifying with no waiters.
 	s.Notify()

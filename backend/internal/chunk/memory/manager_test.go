@@ -8,6 +8,7 @@ import (
 )
 
 func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
+	t.Parallel()
 	manager, err := NewManager(Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -60,6 +61,7 @@ func TestMemoryChunkManagerAppendSealOpenReader(t *testing.T) {
 }
 
 func TestMemoryChunkManagerEmptyChunk(t *testing.T) {
+	t.Parallel()
 	manager, err := NewManager(Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)

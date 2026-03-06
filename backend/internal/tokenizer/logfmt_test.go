@@ -3,6 +3,7 @@ package tokenizer
 import "testing"
 
 func TestExtractLogfmt(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		msg      string
@@ -94,6 +95,7 @@ func TestExtractLogfmt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ExtractLogfmt([]byte(tt.msg))
 			if len(result) != len(tt.expected) {
 				t.Errorf("expected %d pairs, got %d: %v", len(tt.expected), len(result), result)

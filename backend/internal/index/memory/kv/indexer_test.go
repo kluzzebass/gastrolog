@@ -38,6 +38,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("level=error host=server1 msg=failed")},
@@ -145,6 +146,7 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerCaseFolding(t *testing.T) {
+	t.Parallel()
 	// kv extraction lowercases both keys and values.
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
@@ -193,6 +195,7 @@ func TestIndexerCaseFolding(t *testing.T) {
 }
 
 func TestIndexerDeduplication(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		// Same key=value repeated in message
@@ -226,6 +229,7 @@ func TestIndexerDeduplication(t *testing.T) {
 }
 
 func TestIndexerBuildEmptyChunk(t *testing.T) {
+	t.Parallel()
 	manager, chunkID := setupChunkManager(t, nil)
 	indexer := NewIndexer(manager)
 
@@ -246,6 +250,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildNoKeyValues(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("just plain text without any key value pairs")},
@@ -272,6 +277,7 @@ func TestIndexerBuildNoKeyValues(t *testing.T) {
 }
 
 func TestIndexerBuildSorted(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("zebra=z apple=a mango=m")},
@@ -338,6 +344,7 @@ func TestIndexerBuildSorted(t *testing.T) {
 }
 
 func TestIndexerBuildDottedKeys(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("log.level=error app.name=myapp")},
@@ -369,6 +376,7 @@ func TestIndexerBuildDottedKeys(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	manager, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -392,6 +400,7 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestIndexerBuildCancelledContext(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("level=error")},
@@ -413,6 +422,7 @@ func TestIndexerBuildCancelledContext(t *testing.T) {
 }
 
 func TestIndexerGetUnbuilt(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("level=error")},
@@ -433,6 +443,7 @@ func TestIndexerGetUnbuilt(t *testing.T) {
 }
 
 func TestIndexerBuildInvalidChunkID(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("level=error")},
@@ -449,6 +460,7 @@ func TestIndexerBuildInvalidChunkID(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
+	t.Parallel()
 	attrs := chunk.Attributes{"source": "test"}
 	records := []chunk.Record{
 		{Attrs: attrs, Raw: []byte("level=error host=server1")},
@@ -477,6 +489,7 @@ func TestIndexerIdempotent(t *testing.T) {
 }
 
 func TestIndexerCapped(t *testing.T) {
+	t.Parallel()
 	// Create enough unique keys to exceed MaxUniqueKeys.
 	// We need to generate records that will cause capping.
 	// This test verifies the capping logic works correctly.

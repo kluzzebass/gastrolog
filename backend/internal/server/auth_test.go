@@ -32,6 +32,7 @@ func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *con
 }
 
 func TestGetAuthStatus_NeedsSetup(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -45,6 +46,7 @@ func TestGetAuthStatus_NeedsSetup(t *testing.T) {
 }
 
 func TestRegister_FirstUserIsAdmin(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -76,6 +78,7 @@ func TestRegister_FirstUserIsAdmin(t *testing.T) {
 }
 
 func TestRegister_AfterFirstUser(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -101,6 +104,7 @@ func TestRegister_AfterFirstUser(t *testing.T) {
 }
 
 func TestRegister_InvalidUsername(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -117,6 +121,7 @@ func TestRegister_InvalidUsername(t *testing.T) {
 }
 
 func TestRegister_ShortPassword(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -133,6 +138,7 @@ func TestRegister_ShortPassword(t *testing.T) {
 }
 
 func TestLogin_Success(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -159,6 +165,7 @@ func TestLogin_Success(t *testing.T) {
 }
 
 func TestLogin_WrongPassword(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -183,6 +190,7 @@ func TestLogin_WrongPassword(t *testing.T) {
 }
 
 func TestLogin_NonExistentUser(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -199,6 +207,7 @@ func TestLogin_NonExistentUser(t *testing.T) {
 }
 
 func TestChangePassword_Success(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 
@@ -239,6 +248,7 @@ func TestChangePassword_Success(t *testing.T) {
 }
 
 func TestChangePassword_WrongOldPassword(t *testing.T) {
+	t.Parallel()
 	client, _ := newAuthTestClient(t)
 	ctx := context.Background()
 

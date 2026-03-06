@@ -24,10 +24,12 @@ func (f *fakeStats) VaultSnapshots() []orchestrator.VaultSnapshot {
 }
 
 func TestNewFactory(t *testing.T) {
+	t.Parallel()
 	src := &fakeStats{depth: 5, capacity: 1000}
 	factory := NewFactory(src)
 
 	t.Run("default intervals", func(t *testing.T) {
+		t.Parallel()
 		ing, err := factory(uuid.New(), nil, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -42,6 +44,7 @@ func TestNewFactory(t *testing.T) {
 	})
 
 	t.Run("custom interval", func(t *testing.T) {
+		t.Parallel()
 		ing, err := factory(uuid.New(), map[string]string{"interval": "10s"}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -53,6 +56,7 @@ func TestNewFactory(t *testing.T) {
 	})
 
 	t.Run("custom vault_interval", func(t *testing.T) {
+		t.Parallel()
 		ing, err := factory(uuid.New(), map[string]string{"vault_interval": "5s"}, nil)
 		if err != nil {
 			t.Fatal(err)
@@ -64,6 +68,7 @@ func TestNewFactory(t *testing.T) {
 	})
 
 	t.Run("invalid interval", func(t *testing.T) {
+		t.Parallel()
 		_, err := factory(uuid.New(), map[string]string{"interval": "bad"}, nil)
 		if err == nil {
 			t.Fatal("expected error for invalid interval")
@@ -71,6 +76,7 @@ func TestNewFactory(t *testing.T) {
 	})
 
 	t.Run("non-positive interval", func(t *testing.T) {
+		t.Parallel()
 		_, err := factory(uuid.New(), map[string]string{"interval": "0s"}, nil)
 		if err == nil {
 			t.Fatal("expected error for zero interval")
@@ -78,6 +84,7 @@ func TestNewFactory(t *testing.T) {
 	})
 
 	t.Run("invalid vault_interval", func(t *testing.T) {
+		t.Parallel()
 		_, err := factory(uuid.New(), map[string]string{"vault_interval": "bad"}, nil)
 		if err == nil {
 			t.Fatal("expected error for invalid vault_interval")
@@ -85,6 +92,7 @@ func TestNewFactory(t *testing.T) {
 	})
 
 	t.Run("non-positive vault_interval", func(t *testing.T) {
+		t.Parallel()
 		_, err := factory(uuid.New(), map[string]string{"vault_interval": "-1s"}, nil)
 		if err == nil {
 			t.Fatal("expected error for negative vault_interval")
@@ -93,6 +101,7 @@ func TestNewFactory(t *testing.T) {
 }
 
 func TestSystemMetrics(t *testing.T) {
+	t.Parallel()
 	src := &fakeStats{depth: 3, capacity: 1000}
 	factory := NewFactory(src)
 
@@ -147,6 +156,7 @@ func TestSystemMetrics(t *testing.T) {
 }
 
 func TestVaultMetrics(t *testing.T) {
+	t.Parallel()
 	vaultID := uuid.New()
 	src := &fakeStats{
 		depth:    0,
@@ -214,6 +224,7 @@ func TestVaultMetrics(t *testing.T) {
 }
 
 func TestDualTickerIndependence(t *testing.T) {
+	t.Parallel()
 	src := &fakeStats{
 		depth:    1,
 		capacity: 100,
@@ -274,6 +285,7 @@ func TestDualTickerIndependence(t *testing.T) {
 }
 
 func TestCollectVaultsEmpty(t *testing.T) {
+	t.Parallel()
 	src := &fakeStats{depth: 0, capacity: 100}
 	m := &ingester{
 		id:            "test",
@@ -288,6 +300,7 @@ func TestCollectVaultsEmpty(t *testing.T) {
 }
 
 func TestParamDefaults(t *testing.T) {
+	t.Parallel()
 	defaults := ParamDefaults()
 	if defaults["interval"] != "10s" {
 		t.Errorf("got interval default %q, want 10s", defaults["interval"])

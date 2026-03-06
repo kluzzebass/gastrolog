@@ -114,6 +114,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUI
 }
 
 func TestMoveChunkRemote(t *testing.T) {
+	t.Parallel()
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 	remoteNodeID := "node-B"
@@ -181,6 +182,7 @@ func TestMoveChunkRemote(t *testing.T) {
 }
 
 func TestMoveChunkRemoteMemoryVault(t *testing.T) {
+	t.Parallel()
 	// Verify remote transfer works with memory vaults (no ChunkMover).
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
@@ -221,6 +223,7 @@ func TestMoveChunkRemoteMemoryVault(t *testing.T) {
 }
 
 func TestMoveChunkRemoteTransferError(t *testing.T) {
+	t.Parallel()
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 	remoteNodeID := "node-B"
@@ -262,6 +265,7 @@ func TestMoveChunkRemoteTransferError(t *testing.T) {
 }
 
 func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
+	t.Parallel()
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 
@@ -292,6 +296,7 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 }
 
 func TestMoveChunkLocalImportFallback(t *testing.T) {
+	t.Parallel()
 	// When both source and dest are memory vaults (no ChunkMover),
 	// MoveChunk should use ImportRecords (not AppendPreserved into active).
 	srcID := uuid.Must(uuid.NewV7())
@@ -338,6 +343,7 @@ func TestMoveChunkLocalImportFallback(t *testing.T) {
 }
 
 func TestImportRecordsMemory(t *testing.T) {
+	t.Parallel()
 	cm := newMemVault(t)
 
 	records := make([]chunk.Record, 5)
@@ -390,6 +396,7 @@ func TestImportRecordsMemory(t *testing.T) {
 }
 
 func TestImportRecordsFile(t *testing.T) {
+	t.Parallel()
 	cm, _ := newFileVault(t)
 
 	records := make([]chunk.Record, 5)
@@ -440,6 +447,7 @@ func TestImportRecordsFile(t *testing.T) {
 }
 
 func TestImportRecordsZeroWriteTS(t *testing.T) {
+	t.Parallel()
 	cm := newMemVault(t)
 
 	records := []chunk.Record{
@@ -453,6 +461,7 @@ func TestImportRecordsZeroWriteTS(t *testing.T) {
 }
 
 func TestImportRecordsEmpty(t *testing.T) {
+	t.Parallel()
 	cm := newMemVault(t)
 
 	meta, err := cm.ImportRecords(chunk.SliceIterator(nil))
@@ -543,6 +552,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 }
 
 func TestDrainVault_Basic(t *testing.T) {
+	t.Parallel()
 	orch, vaultID, mock := drainSetup(t, 5)
 
 	// Start drain.
@@ -594,6 +604,7 @@ func TestDrainVault_Basic(t *testing.T) {
 }
 
 func TestDrainVault_CancelDrain(t *testing.T) {
+	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 	routeID := uuid.Must(uuid.NewV7())
@@ -665,6 +676,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 }
 
 func TestDrainVault_AlreadyDraining(t *testing.T) {
+	t.Parallel()
 	orch, vaultID, _ := drainSetup(t, 3)
 
 	// Use a transferrer that blocks so the drain stays in progress.
@@ -685,6 +697,7 @@ func TestDrainVault_AlreadyDraining(t *testing.T) {
 }
 
 func TestDrainVault_EmptyVault(t *testing.T) {
+	t.Parallel()
 	orch, vaultID, mock := drainSetup(t, 0)
 
 	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
@@ -721,6 +734,7 @@ func TestDrainVault_EmptyVault(t *testing.T) {
 }
 
 func TestDrainVault_NoTransferrer(t *testing.T) {
+	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 	routeID := uuid.Must(uuid.NewV7())

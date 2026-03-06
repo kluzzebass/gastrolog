@@ -19,6 +19,7 @@ import (
 // TestIntegration_RegisterThenDeny proves that after a user is created,
 // unauthenticated requests to protected endpoints are denied.
 func TestIntegration_RegisterThenDeny(t *testing.T) {
+	t.Parallel()
 	cfgStore := configmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)

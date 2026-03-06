@@ -7,6 +7,7 @@ import (
 )
 
 func TestMoveDirSameFilesystem(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	src := filepath.Join(root, "src")
@@ -40,6 +41,7 @@ func TestMoveDirSameFilesystem(t *testing.T) {
 }
 
 func TestMoveDirNonexistentSource(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	src := filepath.Join(root, "nonexistent")
@@ -52,6 +54,7 @@ func TestMoveDirNonexistentSource(t *testing.T) {
 }
 
 func TestMoveDirNestedContent(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
 	src := filepath.Join(root, "src")

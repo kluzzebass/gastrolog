@@ -41,6 +41,7 @@ func waitJobDone(t *testing.T, sched *Scheduler, id string) {
 }
 
 func TestScheduler_SubmitAndGet(t *testing.T) {
+	t.Parallel()
 	sched := newTestScheduler(t)
 
 	done := make(chan struct{})
@@ -82,6 +83,7 @@ func TestScheduler_SubmitAndGet(t *testing.T) {
 }
 
 func TestScheduler_ExplicitComplete(t *testing.T) {
+	t.Parallel()
 	sched := newTestScheduler(t)
 
 	done := make(chan struct{})
@@ -109,6 +111,7 @@ func TestScheduler_ExplicitComplete(t *testing.T) {
 }
 
 func TestScheduler_Fail(t *testing.T) {
+	t.Parallel()
 	sched := newTestScheduler(t)
 
 	done := make(chan struct{})
@@ -139,6 +142,7 @@ func TestScheduler_Fail(t *testing.T) {
 }
 
 func TestScheduler_ListIncludesSubmitted(t *testing.T) {
+	t.Parallel()
 	sched := newTestScheduler(t)
 
 	var wg sync.WaitGroup
@@ -175,6 +179,7 @@ func TestScheduler_ListIncludesSubmitted(t *testing.T) {
 }
 
 func TestScheduler_GetNonexistent(t *testing.T) {
+	t.Parallel()
 	sched := newTestScheduler(t)
 	if _, ok := sched.GetJob("nonexistent"); ok {
 		t.Error("expected not found")
@@ -182,6 +187,7 @@ func TestScheduler_GetNonexistent(t *testing.T) {
 }
 
 func TestScheduler_Cleanup(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	mu := sync.Mutex{}
 
@@ -226,6 +232,7 @@ func TestScheduler_Cleanup(t *testing.T) {
 }
 
 func TestScheduler_ConcurrentProgress(t *testing.T) {
+	t.Parallel()
 	sched := newTestScheduler(t)
 
 	done := make(chan struct{})

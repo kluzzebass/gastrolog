@@ -74,6 +74,7 @@ func testRecords() []chunk.Record {
 }
 
 func TestBuildIndexes(t *testing.T) {
+	t.Parallel()
 	mgr, _, chunkID := setupManager(t, testRecords())
 
 	if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
@@ -82,6 +83,7 @@ func TestBuildIndexes(t *testing.T) {
 }
 
 func TestBuildIndexesCancelledContext(t *testing.T) {
+	t.Parallel()
 	mgr, _, chunkID := setupManager(t, testRecords())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -94,6 +96,7 @@ func TestBuildIndexesCancelledContext(t *testing.T) {
 }
 
 func TestBuildIndexesUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	chunkMgr, err := chunkfile.NewManager(chunkfile.Config{Dir: dir})
 	if err != nil {
@@ -117,6 +120,7 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 }
 
 func TestOpenTokenIndex(t *testing.T) {
+	t.Parallel()
 	mgr, _, chunkID := setupManager(t, testRecords())
 
 	if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
@@ -148,6 +152,7 @@ func TestOpenTokenIndex(t *testing.T) {
 }
 
 func TestOpenTokenIndexNotBuilt(t *testing.T) {
+	t.Parallel()
 	indexDir := t.TempDir()
 	mgr := NewManager(indexDir, nil, nil)
 
@@ -158,6 +163,7 @@ func TestOpenTokenIndexNotBuilt(t *testing.T) {
 }
 
 func TestBuildAndOpenRoundTrip(t *testing.T) {
+	t.Parallel()
 	records := testRecords()
 	mgr, _, chunkID := setupManager(t, records)
 

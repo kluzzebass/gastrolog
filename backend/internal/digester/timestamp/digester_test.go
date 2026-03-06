@@ -8,6 +8,7 @@ import (
 )
 
 func TestDigest_RFC3339(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -25,6 +26,7 @@ func TestDigest_RFC3339(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -44,6 +46,7 @@ func TestDigest_RFC3339(t *testing.T) {
 }
 
 func TestDigest_AppleUnified(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -74,6 +77,7 @@ func TestDigest_AppleUnified(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -93,6 +97,7 @@ func TestDigest_AppleUnified(t *testing.T) {
 }
 
 func TestDigest_SyslogBSD(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	tests := []struct {
@@ -110,6 +115,7 @@ func TestDigest_SyslogBSD(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -136,6 +142,7 @@ func TestDigest_SyslogBSD(t *testing.T) {
 }
 
 func TestDigest_CLF(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -156,6 +163,7 @@ func TestDigest_CLF(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -175,6 +183,7 @@ func TestDigest_CLF(t *testing.T) {
 }
 
 func TestDigest_GoRuby(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -195,6 +204,7 @@ func TestDigest_GoRuby(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -214,6 +224,7 @@ func TestDigest_GoRuby(t *testing.T) {
 }
 
 func TestDigest_Ctime(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		raw       string
@@ -232,6 +243,7 @@ func TestDigest_Ctime(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -260,6 +272,7 @@ func TestDigest_Ctime(t *testing.T) {
 }
 
 func TestDigest_SkipsNonZeroSourceTS(t *testing.T) {
+	t.Parallel()
 	d := New()
 	existing := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	msg := &orchestrator.IngestMessage{
@@ -273,6 +286,7 @@ func TestDigest_SkipsNonZeroSourceTS(t *testing.T) {
 }
 
 func TestDigest_NoMatch(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -287,6 +301,7 @@ func TestDigest_NoMatch(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw: []byte(tt.raw),
 			}
@@ -299,6 +314,7 @@ func TestDigest_NoMatch(t *testing.T) {
 }
 
 func TestDigest_EarliestPositionWins(t *testing.T) {
+	t.Parallel()
 	// Syslog BSD at position 0, RFC 3339 later in message.
 	// Syslog starts earlier, so it should win.
 	d := New()
@@ -317,6 +333,7 @@ func TestDigest_EarliestPositionWins(t *testing.T) {
 }
 
 func TestDigest_RFC3339BeforeSyslog(t *testing.T) {
+	t.Parallel()
 	// RFC 3339 at position 0, syslog BSD later — RFC 3339 should win.
 	d := New()
 	raw := "2024-06-01T12:00:00Z Jan 15 10:30:45 host msg"
@@ -334,6 +351,7 @@ func TestDigest_RFC3339BeforeSyslog(t *testing.T) {
 }
 
 func TestExtractTimestamp_AllFormats(t *testing.T) {
+	t.Parallel()
 	// Verify each format independently via the internal function.
 	tests := []struct {
 		name    string
@@ -350,6 +368,7 @@ func TestExtractTimestamp_AllFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts := extractTimestamp([]byte(tt.raw))
 			if tt.wantSet && ts.IsZero() {
 				t.Error("expected non-zero timestamp")

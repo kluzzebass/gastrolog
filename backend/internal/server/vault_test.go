@@ -98,6 +98,7 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 }
 
 func TestReindexVault(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 12) // 12 records = 2 sealed (5 each) + 1 active (2)
 	ctx := context.Background()
 
@@ -125,6 +126,7 @@ func TestReindexVault(t *testing.T) {
 }
 
 func TestReindexVaultNotFound(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 0)
 	ctx := context.Background()
 
@@ -140,6 +142,7 @@ func TestReindexVaultNotFound(t *testing.T) {
 }
 
 func TestReindexVaultEmpty(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 0)
 	ctx := context.Background()
 
@@ -157,6 +160,7 @@ func TestReindexVaultEmpty(t *testing.T) {
 }
 
 func TestValidateVault(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 12)
 	ctx := context.Background()
 
@@ -182,6 +186,7 @@ func TestValidateVault(t *testing.T) {
 }
 
 func TestValidateVaultNotFound(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 0)
 	ctx := context.Background()
 
@@ -197,6 +202,7 @@ func TestValidateVaultNotFound(t *testing.T) {
 }
 
 func TestGetStatsDetailed(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 12)
 	ctx := context.Background()
 
@@ -251,6 +257,7 @@ func TestGetStatsDetailed(t *testing.T) {
 }
 
 func TestGetStatsFilterByVault(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 5)
 	ctx := context.Background()
 
@@ -344,6 +351,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 }
 
 func TestMigrateVault(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 12)
 	ctx := context.Background()
 
@@ -412,6 +420,7 @@ func TestMigrateVault(t *testing.T) {
 }
 
 func TestMigrateVaultNotFound(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 0)
 	ctx := context.Background()
 
@@ -428,6 +437,7 @@ func TestMigrateVaultNotFound(t *testing.T) {
 }
 
 func TestExportVault(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 12)
 	ctx := context.Background()
 
@@ -468,6 +478,7 @@ func TestExportVault(t *testing.T) {
 }
 
 func TestExportVaultNotFound(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 0)
 	ctx := context.Background()
 
@@ -490,6 +501,7 @@ func TestExportVaultNotFound(t *testing.T) {
 }
 
 func TestImportRecords(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 0) // Empty vault.
 	ctx := context.Background()
 
@@ -528,6 +540,7 @@ func TestImportRecords(t *testing.T) {
 }
 
 func TestImportRecordsVaultNotFound(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 0)
 	ctx := context.Background()
 
@@ -544,6 +557,7 @@ func TestImportRecordsVaultNotFound(t *testing.T) {
 }
 
 func TestExportImportRoundTrip(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 12)
 	ctx := context.Background()
 
@@ -696,6 +710,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 }
 
 func TestMergeVaultsMemory(t *testing.T) {
+	t.Parallel()
 	tc := newTwoVaultTestSetup(t)
 	ctx := context.Background()
 
@@ -730,6 +745,7 @@ func TestMergeVaultsMemory(t *testing.T) {
 }
 
 func TestMergeVaultsFileBacked(t *testing.T) {
+	t.Parallel()
 	cfgStore := cfgmem.NewStore()
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	if err != nil {
@@ -887,6 +903,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 }
 
 func TestMergeVaultsNotFound(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 5)
 	ctx := context.Background()
 
@@ -903,6 +920,7 @@ func TestMergeVaultsNotFound(t *testing.T) {
 }
 
 func TestMergeVaultsSameVault(t *testing.T) {
+	t.Parallel()
 	clients := newVaultTestSetup(t, 5)
 	ctx := context.Background()
 
@@ -919,6 +937,7 @@ func TestMergeVaultsSameVault(t *testing.T) {
 }
 
 func TestMigrateVaultFileRequiresDir(t *testing.T) {
+	t.Parallel()
 	tc := newFullVaultTestSetup(t, 5)
 	ctx := context.Background()
 
@@ -937,6 +956,7 @@ func TestMigrateVaultFileRequiresDir(t *testing.T) {
 }
 
 func TestMergeVaultsAutoDisablesSource(t *testing.T) {
+	t.Parallel()
 	tc := newTwoVaultTestSetup(t)
 	ctx := context.Background()
 

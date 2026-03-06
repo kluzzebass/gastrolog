@@ -9,6 +9,7 @@ import (
 )
 
 func TestDeduplication(t *testing.T) {
+	t.Parallel()
 	var g Group[int]
 	var calls atomic.Int32
 	started := make(chan struct{})
@@ -50,6 +51,7 @@ func TestDeduplication(t *testing.T) {
 }
 
 func TestIndependentKeys(t *testing.T) {
+	t.Parallel()
 	var g Group[int]
 	var calls atomic.Int32
 
@@ -73,6 +75,7 @@ func TestIndependentKeys(t *testing.T) {
 }
 
 func TestWaiterReceivesResult(t *testing.T) {
+	t.Parallel()
 	var g Group[int]
 	started := make(chan struct{})
 
@@ -104,6 +107,7 @@ func TestWaiterReceivesResult(t *testing.T) {
 }
 
 func TestErrorPropagation(t *testing.T) {
+	t.Parallel()
 	var g Group[int]
 	sentinel := errors.New("failed")
 	started := make(chan struct{})
@@ -132,6 +136,7 @@ func TestErrorPropagation(t *testing.T) {
 }
 
 func TestReuseAfterCompletion(t *testing.T) {
+	t.Parallel()
 	var g Group[int]
 	var calls atomic.Int32
 

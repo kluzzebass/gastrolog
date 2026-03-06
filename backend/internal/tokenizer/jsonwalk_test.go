@@ -6,6 +6,7 @@ import (
 )
 
 func TestWalkJSON_Simple(t *testing.T) {
+	t.Parallel()
 	msg := []byte(`{"level":"error","message":"hello"}`)
 
 	var paths []string
@@ -38,6 +39,7 @@ func TestWalkJSON_Simple(t *testing.T) {
 }
 
 func TestWalkJSON_Nested(t *testing.T) {
+	t.Parallel()
 	msg := []byte(`{"service":{"name":"gateway","version":2}}`)
 
 	var paths []string
@@ -67,6 +69,7 @@ func TestWalkJSON_Nested(t *testing.T) {
 }
 
 func TestWalkJSON_ArrayOfObjects(t *testing.T) {
+	t.Parallel()
 	msg := []byte(`{"spans":[{"name":"auth"},{"name":"db"}]}`)
 
 	var paths []string
@@ -105,6 +108,7 @@ func TestWalkJSON_ArrayOfObjects(t *testing.T) {
 }
 
 func TestWalkJSON_DottedKeyVsNested(t *testing.T) {
+	t.Parallel()
 	// This is the key test: dotted key must not be confused with nested path.
 	dotted := []byte(`{"service.name":"x"}`)
 	nested := []byte(`{"service":{"name":"x"}}`)
@@ -136,6 +140,7 @@ func TestWalkJSON_DottedKeyVsNested(t *testing.T) {
 }
 
 func TestWalkJSON_ScalarArray(t *testing.T) {
+	t.Parallel()
 	msg := []byte(`{"tags":["web","api"]}`)
 
 	var leaves []string
@@ -157,6 +162,7 @@ func TestWalkJSON_ScalarArray(t *testing.T) {
 }
 
 func TestWalkJSON_NotJSON(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		msg  []byte
@@ -169,6 +175,7 @@ func TestWalkJSON_NotJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ok := WalkJSON(tt.msg, func(_ []byte) {
 				t.Error("unexpected path callback")
 			}, func(_, _ []byte) {
@@ -182,6 +189,7 @@ func TestWalkJSON_NotJSON(t *testing.T) {
 }
 
 func TestWalkJSON_ValuesLowercased(t *testing.T) {
+	t.Parallel()
 	msg := []byte(`{"level":"ERROR","service":"MyApp"}`)
 
 	var leaves []string
@@ -198,6 +206,7 @@ func TestWalkJSON_ValuesLowercased(t *testing.T) {
 }
 
 func TestWalkJSON_BoolAndNull(t *testing.T) {
+	t.Parallel()
 	msg := []byte(`{"enabled":true,"disabled":false,"empty":null}`)
 
 	var paths []string
@@ -225,6 +234,7 @@ func TestWalkJSON_BoolAndNull(t *testing.T) {
 }
 
 func TestWalkJSON_DeepNesting(t *testing.T) {
+	t.Parallel()
 	// No depth limit - should walk deeply nested structures
 	msg := []byte(`{"a":{"b":{"c":{"d":{"e":{"f":"deep"}}}}}}`)
 

@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewIngesterDefaults(t *testing.T) {
+	t.Parallel()
 	r, err := NewIngester(uuid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -29,6 +30,7 @@ func TestNewIngesterDefaults(t *testing.T) {
 }
 
 func TestNewIngesterCustomIntervals(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"minInterval": "50ms",
 		"maxInterval": "500ms",
@@ -49,6 +51,7 @@ func TestNewIngesterCustomIntervals(t *testing.T) {
 }
 
 func TestNewIngesterInvalidMinInterval(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"minInterval": "not-a-duration",
 	}
@@ -60,6 +63,7 @@ func TestNewIngesterInvalidMinInterval(t *testing.T) {
 }
 
 func TestNewIngesterInvalidMaxInterval(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"maxInterval": "not-a-duration",
 	}
@@ -71,6 +75,7 @@ func TestNewIngesterInvalidMaxInterval(t *testing.T) {
 }
 
 func TestNewIngesterNegativeInterval(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"minInterval": "-1s",
 	}
@@ -91,6 +96,7 @@ func TestNewIngesterNegativeInterval(t *testing.T) {
 }
 
 func TestNewIngesterMinExceedsMax(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"minInterval": "2s",
 		"maxInterval": "1s",
@@ -103,6 +109,7 @@ func TestNewIngesterMinExceedsMax(t *testing.T) {
 }
 
 func TestNewIngesterCustomHostCount(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"hostCount": "20",
 	}
@@ -114,6 +121,7 @@ func TestNewIngesterCustomHostCount(t *testing.T) {
 }
 
 func TestNewIngesterInvalidHostCount(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"hostCount": "not-a-number",
 	}
@@ -143,6 +151,7 @@ func TestNewIngesterInvalidHostCount(t *testing.T) {
 }
 
 func TestNewIngesterCustomServiceCount(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"serviceCount": "15",
 	}
@@ -154,6 +163,7 @@ func TestNewIngesterCustomServiceCount(t *testing.T) {
 }
 
 func TestNewIngesterInvalidServiceCount(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"serviceCount": "not-a-number",
 	}
@@ -174,6 +184,7 @@ func TestNewIngesterInvalidServiceCount(t *testing.T) {
 }
 
 func TestNewIngesterCustomFormats(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats": "plain,json,kv",
 	}
@@ -190,6 +201,7 @@ func TestNewIngesterCustomFormats(t *testing.T) {
 }
 
 func TestNewIngesterSingleFormat(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats": "json",
 	}
@@ -206,6 +218,7 @@ func TestNewIngesterSingleFormat(t *testing.T) {
 }
 
 func TestNewIngesterUnknownFormat(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats": "plain,unknown,json",
 	}
@@ -217,6 +230,7 @@ func TestNewIngesterUnknownFormat(t *testing.T) {
 }
 
 func TestNewIngesterEmptyFormatsString(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats": "   ",
 	}
@@ -228,6 +242,7 @@ func TestNewIngesterEmptyFormatsString(t *testing.T) {
 }
 
 func TestNewIngesterDuplicateFormats(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats": "plain,json,plain,json",
 	}
@@ -244,6 +259,7 @@ func TestNewIngesterDuplicateFormats(t *testing.T) {
 }
 
 func TestNewIngesterCustomWeights(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats":       "plain,json,kv",
 		"formatWeights": "plain=30,json=20,kv=50",
@@ -261,6 +277,7 @@ func TestNewIngesterCustomWeights(t *testing.T) {
 }
 
 func TestNewIngesterPartialWeights(t *testing.T) {
+	t.Parallel()
 	// Only specify weight for some formats; others get default weight of 1.
 	params := map[string]string{
 		"formats":       "plain,json,kv",
@@ -280,6 +297,7 @@ func TestNewIngesterPartialWeights(t *testing.T) {
 }
 
 func TestNewIngesterInvalidWeightFormat(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain:10", // Wrong separator.
@@ -292,6 +310,7 @@ func TestNewIngesterInvalidWeightFormat(t *testing.T) {
 }
 
 func TestNewIngesterInvalidWeightValue(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain=abc",
@@ -304,6 +323,7 @@ func TestNewIngesterInvalidWeightValue(t *testing.T) {
 }
 
 func TestNewIngesterZeroWeight(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain=0",
@@ -316,6 +336,7 @@ func TestNewIngesterZeroWeight(t *testing.T) {
 }
 
 func TestNewIngesterNegativeWeight(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "plain=-5",
@@ -328,6 +349,7 @@ func TestNewIngesterNegativeWeight(t *testing.T) {
 }
 
 func TestNewIngesterUnknownFormatInWeights(t *testing.T) {
+	t.Parallel()
 	params := map[string]string{
 		"formats":       "plain,json",
 		"formatWeights": "unknown=10",
@@ -340,6 +362,7 @@ func TestNewIngesterUnknownFormatInWeights(t *testing.T) {
 }
 
 func TestParseFormats(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -356,6 +379,7 @@ func TestParseFormats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, err := parseFormats(tt.input)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseFormats(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
@@ -369,6 +393,7 @@ func TestParseFormats(t *testing.T) {
 }
 
 func TestIsValidFormat(t *testing.T) {
+	t.Parallel()
 	for _, f := range allFormats {
 		if !isValidFormat(f) {
 			t.Errorf("isValidFormat(%q) = false, want true", f)

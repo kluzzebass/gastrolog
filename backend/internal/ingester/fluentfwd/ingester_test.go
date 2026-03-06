@@ -81,6 +81,7 @@ func sendMsgpack(t *testing.T, addr string, data []byte) net.Conn {
 // --- Message Mode Tests ---
 
 func TestFluentFwdMessageMode(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	ts := int64(1700000000)
@@ -120,6 +121,7 @@ func TestFluentFwdMessageMode(t *testing.T) {
 }
 
 func TestFluentFwdMessageModeLogKey(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Use "log" key instead of "message".
@@ -140,6 +142,7 @@ func TestFluentFwdMessageModeLogKey(t *testing.T) {
 }
 
 func TestFluentFwdMessageModeMsgKey(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Use "msg" key.
@@ -160,6 +163,7 @@ func TestFluentFwdMessageModeMsgKey(t *testing.T) {
 }
 
 func TestFluentFwdMessageModeNoKnownKey(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// No "message", "log", or "msg" key — should JSON-encode the whole record.
@@ -182,6 +186,7 @@ func TestFluentFwdMessageModeNoKnownKey(t *testing.T) {
 // --- Forward Mode Tests ---
 
 func TestFluentFwdForwardMode(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Forward mode: [tag, [[time1, record1], [time2, record2]]]
@@ -227,6 +232,7 @@ func TestFluentFwdForwardMode(t *testing.T) {
 // --- PackedForward Mode Tests ---
 
 func TestFluentFwdPackedForwardMode(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Build packed entries (concatenated msgpack arrays).
@@ -268,6 +274,7 @@ func TestFluentFwdPackedForwardMode(t *testing.T) {
 // --- CompressedPackedForward Mode Tests ---
 
 func TestFluentFwdCompressedPackedForwardMode(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Build packed entries.
@@ -306,6 +313,7 @@ func TestFluentFwdCompressedPackedForwardMode(t *testing.T) {
 // --- EventTime Extension Tests ---
 
 func TestFluentFwdEventTime(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Build a message mode with EventTime extension type 0.
@@ -338,6 +346,7 @@ func TestFluentFwdEventTime(t *testing.T) {
 // --- Ack Tests ---
 
 func TestFluentFwdAck(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	chunkID := "test-chunk-abc"
@@ -373,6 +382,7 @@ func TestFluentFwdAck(t *testing.T) {
 }
 
 func TestFluentFwdNoAckWithoutChunk(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	// Message mode without option — no ack expected.
@@ -403,6 +413,7 @@ func TestFluentFwdNoAckWithoutChunk(t *testing.T) {
 // --- Multiple Messages on Same Connection ---
 
 func TestFluentFwdMultipleMessagesOneConnection(t *testing.T) {
+	t.Parallel()
 	addr, out := dialIngester(t, 10)
 
 	conn, err := net.Dial("tcp", addr)
@@ -431,6 +442,7 @@ func TestFluentFwdMultipleMessagesOneConnection(t *testing.T) {
 // --- Connection Close Resilience ---
 
 func TestFluentFwdConnectionCloseResilience(t *testing.T) {
+	t.Parallel()
 	addr, _ := dialIngester(t, 10)
 
 	// Connect and immediately close — should not crash the ingester.
@@ -462,6 +474,7 @@ func TestFluentFwdConnectionCloseResilience(t *testing.T) {
 // --- EventTime Extension Encoding/Decoding ---
 
 func TestEventTimeMarshalUnmarshal(t *testing.T) {
+	t.Parallel()
 	original := time.Unix(1700000099, 500000000)
 	et := &eventTime{Time: original}
 
@@ -492,6 +505,7 @@ func TestEventTimeMarshalUnmarshal(t *testing.T) {
 }
 
 func TestEventTimeInvalidLength(t *testing.T) {
+	t.Parallel()
 	et := &eventTime{}
 	err := et.UnmarshalMsgpack([]byte{1, 2, 3}) // too short
 	if err == nil {

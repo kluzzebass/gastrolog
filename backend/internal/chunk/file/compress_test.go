@@ -20,6 +20,7 @@ import (
 // =============================================================================
 
 func TestCompressDecompressRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	// Write a file with a standard header + data section.
@@ -61,6 +62,7 @@ func TestCompressDecompressRoundTrip(t *testing.T) {
 }
 
 func TestCompressFlagSet(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 
@@ -100,6 +102,7 @@ func TestCompressFlagSet(t *testing.T) {
 }
 
 func TestUncompressedPassthrough(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 
@@ -120,6 +123,7 @@ func TestUncompressedPassthrough(t *testing.T) {
 }
 
 func TestCompressEmptyDataSection(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 
@@ -164,6 +168,7 @@ func TestCompressEmptyDataSection(t *testing.T) {
 }
 
 func TestSeekableRandomAccess(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.log")
 
@@ -224,6 +229,7 @@ func TestSeekableRandomAccess(t *testing.T) {
 // =============================================================================
 
 func TestCompressedChunkRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:         dir,
@@ -315,6 +321,7 @@ func TestCompressedChunkRoundTrip(t *testing.T) {
 }
 
 func TestCompressedChunkReverseCursor(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:         dir,
@@ -367,6 +374,7 @@ func TestCompressedChunkReverseCursor(t *testing.T) {
 }
 
 func TestCompressedFilesAreSmaller(t *testing.T) {
+	t.Parallel()
 	// Write identical data with and without compression, compare sizes.
 	records := make([]chunk.Record, 100)
 	for i := range records {
@@ -438,6 +446,7 @@ func TestCompressedFilesAreSmaller(t *testing.T) {
 }
 
 func TestCompressedChunkRotation(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:            dir,
@@ -522,6 +531,7 @@ func TestCompressedChunkRotation(t *testing.T) {
 }
 
 func TestCompressedChunkPersistAcrossRestart(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	attrs := chunk.Attributes{"host": "server-001", "env": "prod"}
@@ -580,6 +590,7 @@ func TestCompressedChunkPersistAcrossRestart(t *testing.T) {
 }
 
 func TestCompressedEmptyChunk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:         dir,
@@ -624,6 +635,7 @@ func TestCompressedEmptyChunk(t *testing.T) {
 }
 
 func TestOrphanTempFileCleanup(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	// First session: write, seal, close. Leave orphan temp files behind.

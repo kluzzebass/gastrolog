@@ -6,6 +6,7 @@ import (
 )
 
 func TestFieldsAtCursor_FilterSegment(t *testing.T) {
+	t.Parallel()
 	base := []string{"level", "message", "host"}
 	fields, completions := FieldsAtCursor("error timeout", 5, base)
 	if len(completions) != 0 {
@@ -17,6 +18,7 @@ func TestFieldsAtCursor_FilterSegment(t *testing.T) {
 }
 
 func TestFieldsAtCursor_AfterPipe(t *testing.T) {
+	t.Parallel()
 	// Cursor after "| " — in the keyword position.
 	base := []string{"level", "message"}
 	fields, _ := FieldsAtCursor("error | ", 8, base)
@@ -26,6 +28,7 @@ func TestFieldsAtCursor_AfterPipe(t *testing.T) {
 }
 
 func TestFieldsAtCursor_EvalAddsFields(t *testing.T) {
+	t.Parallel()
 	// "error | eval x=1 | "
 	//                      ^ cursor at end
 	base := []string{"level", "message"}
@@ -39,6 +42,7 @@ func TestFieldsAtCursor_EvalAddsFields(t *testing.T) {
 }
 
 func TestFieldsAtCursor_RenameTransforms(t *testing.T) {
+	t.Parallel()
 	// "error | rename level as severity | "
 	base := []string{"level", "message"}
 	expr := "error | rename level as severity | "
@@ -55,6 +59,7 @@ func TestFieldsAtCursor_RenameTransforms(t *testing.T) {
 }
 
 func TestFieldsAtCursor_FieldsKeep(t *testing.T) {
+	t.Parallel()
 	// "error | fields level, message | "
 	base := []string{"level", "message", "host"}
 	expr := "error | fields level, message | "
@@ -68,6 +73,7 @@ func TestFieldsAtCursor_FieldsKeep(t *testing.T) {
 }
 
 func TestFieldsAtCursor_FieldsDrop(t *testing.T) {
+	t.Parallel()
 	// "error | fields - host | "
 	base := []string{"level", "message", "host"}
 	expr := "error | fields - host | "
@@ -81,6 +87,7 @@ func TestFieldsAtCursor_FieldsDrop(t *testing.T) {
 }
 
 func TestFieldsAtCursor_StatsReplacesSchema(t *testing.T) {
+	t.Parallel()
 	// "error | stats count by level | "
 	base := []string{"level", "message", "host"}
 	expr := "error | stats count by level | "
@@ -97,6 +104,7 @@ func TestFieldsAtCursor_StatsReplacesSchema(t *testing.T) {
 }
 
 func TestFieldsAtCursor_StatsWithAlias(t *testing.T) {
+	t.Parallel()
 	// "error | stats count as n, avg(latency) as avg_lat by level | "
 	base := []string{"level", "latency", "host"}
 	expr := "error | stats count as n, avg(latency) as avg_lat by level | "
@@ -113,6 +121,7 @@ func TestFieldsAtCursor_StatsWithAlias(t *testing.T) {
 }
 
 func TestFieldsAtCursor_ChainedOperators(t *testing.T) {
+	t.Parallel()
 	// "error | eval x=1 | stats count by x | "
 	base := []string{"level"}
 	expr := "error | eval x=1 | stats count by x | "
@@ -129,6 +138,7 @@ func TestFieldsAtCursor_ChainedOperators(t *testing.T) {
 }
 
 func TestFieldsAtCursor_StatsCompletions(t *testing.T) {
+	t.Parallel()
 	// Cursor inside stats body.
 	base := []string{"level"}
 	expr := "error | stats count "
@@ -142,6 +152,7 @@ func TestFieldsAtCursor_StatsCompletions(t *testing.T) {
 }
 
 func TestFieldsAtCursor_RenameCompletions(t *testing.T) {
+	t.Parallel()
 	base := []string{"level"}
 	expr := "error | rename level "
 	_, completions := FieldsAtCursor(expr, len(expr), base)
@@ -151,6 +162,7 @@ func TestFieldsAtCursor_RenameCompletions(t *testing.T) {
 }
 
 func TestFieldsAtCursor_PassthroughOps(t *testing.T) {
+	t.Parallel()
 	// where, sort, head, tail, slice, raw don't change fields.
 	base := []string{"level", "message"}
 	for _, op := range []string{"where level=error", "sort level", "head 10", "tail 5", "slice 1 10", "raw"} {
@@ -163,6 +175,7 @@ func TestFieldsAtCursor_PassthroughOps(t *testing.T) {
 }
 
 func TestFieldsAtCursor_WithDirectives(t *testing.T) {
+	t.Parallel()
 	// Directives should be stripped before processing.
 	base := []string{"level", "message"}
 	expr := "last=5m error | eval x=1 | "
@@ -173,6 +186,7 @@ func TestFieldsAtCursor_WithDirectives(t *testing.T) {
 }
 
 func TestFieldsAtCursor_CursorInsideOperator(t *testing.T) {
+	t.Parallel()
 	// Cursor is inside the stats body — should return base fields (not stats output).
 	base := []string{"level", "message", "host"}
 	expr := "error | stats count by "
@@ -185,6 +199,7 @@ func TestFieldsAtCursor_CursorInsideOperator(t *testing.T) {
 }
 
 func TestFieldsAtCursor_EmptyExpression(t *testing.T) {
+	t.Parallel()
 	base := []string{"level"}
 	fields, completions := FieldsAtCursor("", 0, base)
 	if !slices.Contains(fields, "level") {
@@ -196,6 +211,7 @@ func TestFieldsAtCursor_EmptyExpression(t *testing.T) {
 }
 
 func TestFieldsAtCursor_TimechartOutput(t *testing.T) {
+	t.Parallel()
 	base := []string{"level", "message"}
 	expr := "error | timechart 50 by level | "
 	fields, _ := FieldsAtCursor(expr, len(expr), base)

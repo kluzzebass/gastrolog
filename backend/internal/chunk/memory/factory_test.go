@@ -7,6 +7,7 @@ import (
 )
 
 func TestFactoryDefaultValues(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	cm, err := factory(map[string]string{}, nil)
@@ -40,6 +41,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 }
 
 func TestFactoryCustomValues(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	cm, err := factory(map[string]string{
@@ -69,6 +71,7 @@ func TestFactoryCustomValues(t *testing.T) {
 }
 
 func TestFactoryInvalidMaxRecords(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(map[string]string{

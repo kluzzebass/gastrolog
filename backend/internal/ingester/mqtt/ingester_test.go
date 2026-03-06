@@ -7,6 +7,7 @@ import (
 )
 
 func TestFactory_RequiredParams(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -22,6 +23,7 @@ func TestFactory_RequiredParams(t *testing.T) {
 }
 
 func TestFactory_DefaultsV3(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -48,6 +50,7 @@ func TestFactory_DefaultsV3(t *testing.T) {
 }
 
 func TestFactory_V5(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -66,6 +69,7 @@ func TestFactory_V5(t *testing.T) {
 }
 
 func TestFactory_VersionValidation(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -95,6 +99,7 @@ func TestFactory_VersionValidation(t *testing.T) {
 
 
 func TestFactory_TopicSplitting(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -119,6 +124,7 @@ func TestFactory_TopicSplitting(t *testing.T) {
 }
 
 func TestFactory_ClientID(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -138,6 +144,7 @@ func TestFactory_ClientID(t *testing.T) {
 }
 
 func TestFactory_TLSAndAuth(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -165,6 +172,7 @@ func TestFactory_TLSAndAuth(t *testing.T) {
 }
 
 func TestFactory_CleanSessionFalse(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 
@@ -184,6 +192,7 @@ func TestFactory_CleanSessionFalse(t *testing.T) {
 }
 
 func TestParamDefaults(t *testing.T) {
+	t.Parallel()
 	d := ParamDefaults()
 	if d["version"] != "3" {
 		t.Errorf("expected default version=3, got %q", d["version"])

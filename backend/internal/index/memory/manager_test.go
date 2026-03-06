@@ -123,6 +123,7 @@ func testRecordsWithKV() []chunk.Record {
 }
 
 func TestBuildIndexes(t *testing.T) {
+	t.Parallel()
 	mgr, _, chunkID := setupManager(t, testRecords())
 
 	if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
@@ -131,6 +132,7 @@ func TestBuildIndexes(t *testing.T) {
 }
 
 func TestBuildIndexesCancelledContext(t *testing.T) {
+	t.Parallel()
 	mgr, _, chunkID := setupManager(t, testRecords())
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -143,6 +145,7 @@ func TestBuildIndexesCancelledContext(t *testing.T) {
 }
 
 func TestBuildIndexesUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	chunkMgr, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -170,6 +173,7 @@ func TestBuildIndexesUnsealedChunk(t *testing.T) {
 }
 
 func TestOpenTokenIndex(t *testing.T) {
+	t.Parallel()
 	mgr, _, chunkID := setupManager(t, testRecords())
 
 	if err := mgr.BuildIndexes(context.Background(), chunkID); err != nil {
@@ -201,6 +205,7 @@ func TestOpenTokenIndex(t *testing.T) {
 }
 
 func TestOpenTokenIndexNotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, err := chunkmemory.NewManager(chunkmemory.Config{})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -222,6 +227,7 @@ func TestOpenTokenIndexNotBuilt(t *testing.T) {
 }
 
 func TestBuildAndOpenRoundTrip(t *testing.T) {
+	t.Parallel()
 	records := testRecords()
 	mgr, _, chunkID := setupManager(t, records)
 
@@ -250,6 +256,7 @@ func TestBuildAndOpenRoundTrip(t *testing.T) {
 // --- Tests for OpenAttrKeyIndex ---
 
 func TestOpenAttrKeyIndex(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	idx, err := mgr.OpenAttrKeyIndex(chunkID)
@@ -275,6 +282,7 @@ func TestOpenAttrKeyIndex(t *testing.T) {
 }
 
 func TestOpenAttrKeyIndex_NilStore(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	_, err := mgr.OpenAttrKeyIndex(chunk.NewChunkID())
 	if !errors.Is(err, index.ErrIndexNotFound) {
@@ -283,6 +291,7 @@ func TestOpenAttrKeyIndex_NilStore(t *testing.T) {
 }
 
 func TestOpenAttrKeyIndex_NotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	attrIdx := memattr.NewIndexer(chunkMgr)
 	mgr := NewManager(nil, nil, attrIdx, nil, nil)
@@ -296,6 +305,7 @@ func TestOpenAttrKeyIndex_NotBuilt(t *testing.T) {
 // --- Tests for OpenAttrValueIndex ---
 
 func TestOpenAttrValueIndex(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	idx, err := mgr.OpenAttrValueIndex(chunkID)
@@ -320,6 +330,7 @@ func TestOpenAttrValueIndex(t *testing.T) {
 }
 
 func TestOpenAttrValueIndex_NilStore(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	_, err := mgr.OpenAttrValueIndex(chunk.NewChunkID())
 	if !errors.Is(err, index.ErrIndexNotFound) {
@@ -328,6 +339,7 @@ func TestOpenAttrValueIndex_NilStore(t *testing.T) {
 }
 
 func TestOpenAttrValueIndex_NotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	attrIdx := memattr.NewIndexer(chunkMgr)
 	mgr := NewManager(nil, nil, attrIdx, nil, nil)
@@ -341,6 +353,7 @@ func TestOpenAttrValueIndex_NotBuilt(t *testing.T) {
 // --- Tests for OpenAttrKVIndex ---
 
 func TestOpenAttrKVIndex(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	idx, err := mgr.OpenAttrKVIndex(chunkID)
@@ -371,6 +384,7 @@ func TestOpenAttrKVIndex(t *testing.T) {
 }
 
 func TestOpenAttrKVIndex_NilStore(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	_, err := mgr.OpenAttrKVIndex(chunk.NewChunkID())
 	if !errors.Is(err, index.ErrIndexNotFound) {
@@ -379,6 +393,7 @@ func TestOpenAttrKVIndex_NilStore(t *testing.T) {
 }
 
 func TestOpenAttrKVIndex_NotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	attrIdx := memattr.NewIndexer(chunkMgr)
 	mgr := NewManager(nil, nil, attrIdx, nil, nil)
@@ -392,6 +407,7 @@ func TestOpenAttrKVIndex_NotBuilt(t *testing.T) {
 // --- Tests for OpenKVKeyIndex ---
 
 func TestOpenKVKeyIndex(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	idx, status, err := mgr.OpenKVKeyIndex(chunkID)
@@ -419,6 +435,7 @@ func TestOpenKVKeyIndex(t *testing.T) {
 }
 
 func TestOpenKVKeyIndex_NilStore(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	_, _, err := mgr.OpenKVKeyIndex(chunk.NewChunkID())
 	if !errors.Is(err, index.ErrIndexNotFound) {
@@ -427,6 +444,7 @@ func TestOpenKVKeyIndex_NilStore(t *testing.T) {
 }
 
 func TestOpenKVKeyIndex_NotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	kvIdx := kv.NewIndexer(chunkMgr)
 	mgr := NewManager(nil, nil, nil, kvIdx, nil)
@@ -440,6 +458,7 @@ func TestOpenKVKeyIndex_NotBuilt(t *testing.T) {
 // --- Tests for OpenKVValueIndex ---
 
 func TestOpenKVValueIndex(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	idx, status, err := mgr.OpenKVValueIndex(chunkID)
@@ -467,6 +486,7 @@ func TestOpenKVValueIndex(t *testing.T) {
 }
 
 func TestOpenKVValueIndex_NilStore(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	_, _, err := mgr.OpenKVValueIndex(chunk.NewChunkID())
 	if !errors.Is(err, index.ErrIndexNotFound) {
@@ -475,6 +495,7 @@ func TestOpenKVValueIndex_NilStore(t *testing.T) {
 }
 
 func TestOpenKVValueIndex_NotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	kvIdx := kv.NewIndexer(chunkMgr)
 	mgr := NewManager(nil, nil, nil, kvIdx, nil)
@@ -488,6 +509,7 @@ func TestOpenKVValueIndex_NotBuilt(t *testing.T) {
 // --- Tests for OpenKVIndex ---
 
 func TestOpenKVIndex(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	idx, status, err := mgr.OpenKVIndex(chunkID)
@@ -520,6 +542,7 @@ func TestOpenKVIndex(t *testing.T) {
 }
 
 func TestOpenKVIndex_NilStore(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	_, _, err := mgr.OpenKVIndex(chunk.NewChunkID())
 	if !errors.Is(err, index.ErrIndexNotFound) {
@@ -528,6 +551,7 @@ func TestOpenKVIndex_NilStore(t *testing.T) {
 }
 
 func TestOpenKVIndex_NotBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	kvIdx := kv.NewIndexer(chunkMgr)
 	mgr := NewManager(nil, nil, nil, kvIdx, nil)
@@ -541,6 +565,7 @@ func TestOpenKVIndex_NotBuilt(t *testing.T) {
 // --- Tests for DeleteIndexes ---
 
 func TestDeleteIndexes(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	// Verify all indexes are accessible before deletion.
@@ -584,6 +609,7 @@ func TestDeleteIndexes(t *testing.T) {
 }
 
 func TestDeleteIndexes_NilStores(t *testing.T) {
+	t.Parallel()
 	// Manager with all nil stores should not panic.
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	if err := mgr.DeleteIndexes(chunk.NewChunkID()); err != nil {
@@ -592,6 +618,7 @@ func TestDeleteIndexes_NilStores(t *testing.T) {
 }
 
 func TestDeleteIndexes_NonexistentChunk(t *testing.T) {
+	t.Parallel()
 	mgr, _ := setupFullManager(t, testRecordsWithKV())
 
 	// Deleting indexes for a chunk that does not exist should not error.
@@ -603,6 +630,7 @@ func TestDeleteIndexes_NonexistentChunk(t *testing.T) {
 // --- Tests for FindIngestStartPosition ---
 
 func TestFindIngestStartPosition(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	_, _, err := mgr.FindIngestStartPosition(chunkID, gotime.Now())
@@ -614,6 +642,7 @@ func TestFindIngestStartPosition(t *testing.T) {
 // --- Tests for FindSourceStartPosition ---
 
 func TestFindSourceStartPosition(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	_, _, err := mgr.FindSourceStartPosition(chunkID, gotime.Now())
@@ -625,6 +654,7 @@ func TestFindSourceStartPosition(t *testing.T) {
 // --- Tests for IndexSizes ---
 
 func TestIndexSizes(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	sizes := mgr.IndexSizes(chunkID)
@@ -644,6 +674,7 @@ func TestIndexSizes(t *testing.T) {
 }
 
 func TestIndexSizes_NilStores(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	sizes := mgr.IndexSizes(chunk.NewChunkID())
 	if len(sizes) != 0 {
@@ -652,6 +683,7 @@ func TestIndexSizes_NilStores(t *testing.T) {
 }
 
 func TestIndexSizes_NoIndexesBuilt(t *testing.T) {
+	t.Parallel()
 	chunkMgr, _ := chunkmemory.NewManager(chunkmemory.Config{})
 	tokIdx := memtoken.NewIndexer(chunkMgr)
 	attrIdx := memattr.NewIndexer(chunkMgr)
@@ -668,6 +700,7 @@ func TestIndexSizes_NoIndexesBuilt(t *testing.T) {
 // --- Tests for IndexesComplete ---
 
 func TestIndexesComplete(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	complete, err := mgr.IndexesComplete(chunkID)
@@ -680,6 +713,7 @@ func TestIndexesComplete(t *testing.T) {
 }
 
 func TestIndexesComplete_NilStores(t *testing.T) {
+	t.Parallel()
 	mgr := NewManager(nil, nil, nil, nil, nil)
 	complete, err := mgr.IndexesComplete(chunk.NewChunkID())
 	if err != nil {
@@ -691,6 +725,7 @@ func TestIndexesComplete_NilStores(t *testing.T) {
 }
 
 func TestIndexesComplete_MissingTokenIndex(t *testing.T) {
+	t.Parallel()
 	chunkMgr, chunkID := setupChunkManager(t, testRecordsWithKV())
 	tokIdx := memtoken.NewIndexer(chunkMgr)
 	attrIdx := memattr.NewIndexer(chunkMgr)
@@ -716,6 +751,7 @@ func TestIndexesComplete_MissingTokenIndex(t *testing.T) {
 }
 
 func TestIndexesComplete_MissingAttrIndex(t *testing.T) {
+	t.Parallel()
 	chunkMgr, chunkID := setupChunkManager(t, testRecordsWithKV())
 	tokIdx := memtoken.NewIndexer(chunkMgr)
 	attrIdx := memattr.NewIndexer(chunkMgr)
@@ -741,6 +777,7 @@ func TestIndexesComplete_MissingAttrIndex(t *testing.T) {
 }
 
 func TestIndexesComplete_MissingKVIndex(t *testing.T) {
+	t.Parallel()
 	chunkMgr, chunkID := setupChunkManager(t, testRecordsWithKV())
 	tokIdx := memtoken.NewIndexer(chunkMgr)
 	attrIdx := memattr.NewIndexer(chunkMgr)
@@ -766,6 +803,7 @@ func TestIndexesComplete_MissingKVIndex(t *testing.T) {
 }
 
 func TestDeleteThenIndexesComplete(t *testing.T) {
+	t.Parallel()
 	mgr, chunkID := setupFullManager(t, testRecordsWithKV())
 
 	// Indexes are complete after build.

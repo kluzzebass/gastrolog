@@ -11,6 +11,7 @@ import (
 )
 
 func TestIdxEntryRoundTrip(t *testing.T) {
+	t.Parallel()
 	entry := IdxEntry{
 		IngestTS:   time.UnixMicro(123456789),
 		WriteTS:    time.UnixMicro(987654321),
@@ -46,6 +47,7 @@ func TestIdxEntryRoundTrip(t *testing.T) {
 }
 
 func TestIdxFileOffset(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		index    uint64
 		expected int64
@@ -65,6 +67,7 @@ func TestIdxFileOffset(t *testing.T) {
 }
 
 func TestRecordCount(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		fileSize int64
 		expected uint64
@@ -87,6 +90,7 @@ func TestRecordCount(t *testing.T) {
 }
 
 func TestManagerAppendAndCursor(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
@@ -162,6 +166,7 @@ func TestManagerAppendAndCursor(t *testing.T) {
 }
 
 func TestManagerSealAndMmapCursor(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
@@ -226,6 +231,7 @@ func TestManagerSealAndMmapCursor(t *testing.T) {
 }
 
 func TestCursorSeekAndPrev(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
@@ -319,6 +325,7 @@ func TestCursorSeekAndPrev(t *testing.T) {
 }
 
 func TestEmptyChunkCursor(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	mgr, err := NewManager(Config{
@@ -367,6 +374,7 @@ func TestEmptyChunkCursor(t *testing.T) {
 }
 
 func TestManagerReload(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	attrs := chunk.Attributes{"source": "test"}
@@ -440,6 +448,7 @@ func TestManagerReload(t *testing.T) {
 }
 
 func TestRotationOnMaxChunkBytes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	// Very small max to force rotation
@@ -492,6 +501,7 @@ func TestRotationOnMaxChunkBytes(t *testing.T) {
 }
 
 func TestCrashRecoveryTruncatesOrphanedRawData(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	// Create manager, write some records, close without sealing.
@@ -587,6 +597,7 @@ func TestCrashRecoveryTruncatesOrphanedRawData(t *testing.T) {
 }
 
 func TestFindStartPosition(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -664,6 +675,7 @@ func TestFindStartPosition(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			pos, found, err := mgr.FindStartPosition(chunkID, tt.ts)
 			if err != nil {
 				t.Fatalf("FindStartPosition: %v", err)

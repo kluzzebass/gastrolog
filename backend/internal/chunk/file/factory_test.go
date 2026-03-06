@@ -10,6 +10,7 @@ import (
 )
 
 func TestFactoryMissingDir(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(map[string]string{}, nil)
@@ -24,6 +25,7 @@ func TestFactoryMissingDir(t *testing.T) {
 }
 
 func TestFactoryDefaultValues(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -61,6 +63,7 @@ func TestFactoryDefaultValues(t *testing.T) {
 }
 
 func TestFactoryCustomMaxChunkBytes(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -94,6 +97,7 @@ func TestFactoryCustomMaxChunkBytes(t *testing.T) {
 }
 
 func TestFactoryCustomFileMode(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -116,6 +120,7 @@ func TestFactoryCustomFileMode(t *testing.T) {
 }
 
 func TestFactoryCustomMaxChunkAge(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -152,6 +157,7 @@ func TestFactoryCustomMaxChunkAge(t *testing.T) {
 }
 
 func TestFactoryInvalidMaxChunkBytes(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -181,6 +187,7 @@ func TestFactoryInvalidMaxChunkBytes(t *testing.T) {
 }
 
 func TestFactoryInvalidMaxChunkAge(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -210,6 +217,7 @@ func TestFactoryInvalidMaxChunkAge(t *testing.T) {
 }
 
 func TestFactoryInvalidFileMode(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 
@@ -223,6 +231,7 @@ func TestFactoryInvalidFileMode(t *testing.T) {
 }
 
 func TestFactoryCreatesDirectory(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := filepath.Join(t.TempDir(), "subdir", "chunks")
 
@@ -241,6 +250,7 @@ func TestFactoryCreatesDirectory(t *testing.T) {
 }
 
 func TestFactoryHardLimitAlwaysIncluded(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	dir := t.TempDir()
 

@@ -9,6 +9,7 @@ import (
 // --- Factory Tests ---
 
 func TestFactoryRequiresBrokers(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(uuid.New(), map[string]string{
@@ -20,6 +21,7 @@ func TestFactoryRequiresBrokers(t *testing.T) {
 }
 
 func TestFactoryRequiresTopic(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(uuid.New(), map[string]string{
@@ -31,6 +33,7 @@ func TestFactoryRequiresTopic(t *testing.T) {
 }
 
 func TestFactoryMinimalParams(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -57,6 +60,7 @@ func TestFactoryMinimalParams(t *testing.T) {
 }
 
 func TestFactoryMultipleBrokers(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -80,6 +84,7 @@ func TestFactoryMultipleBrokers(t *testing.T) {
 }
 
 func TestFactoryCustomGroup(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -98,6 +103,7 @@ func TestFactoryCustomGroup(t *testing.T) {
 }
 
 func TestFactoryTLSEnabled(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -116,6 +122,7 @@ func TestFactoryTLSEnabled(t *testing.T) {
 }
 
 func TestFactoryTLSNotEnabled(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	// "tls" set to something other than "true" should be false.
@@ -137,6 +144,7 @@ func TestFactoryTLSNotEnabled(t *testing.T) {
 // --- SASL Factory Tests ---
 
 func TestFactorySASLPlain(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -166,6 +174,7 @@ func TestFactorySASLPlain(t *testing.T) {
 }
 
 func TestFactorySASLScramSHA256(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -186,6 +195,7 @@ func TestFactorySASLScramSHA256(t *testing.T) {
 }
 
 func TestFactorySASLScramSHA512(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -206,6 +216,7 @@ func TestFactorySASLScramSHA512(t *testing.T) {
 }
 
 func TestFactorySASLMechanismCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -226,6 +237,7 @@ func TestFactorySASLMechanismCaseInsensitive(t *testing.T) {
 }
 
 func TestFactorySASLUnsupportedMechanism(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(uuid.New(), map[string]string{
@@ -239,6 +251,7 @@ func TestFactorySASLUnsupportedMechanism(t *testing.T) {
 }
 
 func TestFactoryNoSASLWhenMechanismEmpty(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -258,6 +271,7 @@ func TestFactoryNoSASLWhenMechanismEmpty(t *testing.T) {
 }
 
 func TestFactoryEmptyBrokersString(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(uuid.New(), map[string]string{
@@ -270,6 +284,7 @@ func TestFactoryEmptyBrokersString(t *testing.T) {
 }
 
 func TestFactoryEmptyTopicString(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(uuid.New(), map[string]string{
@@ -282,6 +297,7 @@ func TestFactoryEmptyTopicString(t *testing.T) {
 }
 
 func TestFactoryNilParams(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	_, err := factory(uuid.New(), nil, nil)
@@ -293,6 +309,7 @@ func TestFactoryNilParams(t *testing.T) {
 // --- buildSASLMechanism Tests ---
 
 func TestBuildSASLMechanismPlain(t *testing.T) {
+	t.Parallel()
 	mech, err := buildSASLMechanism(&SASLConfig{
 		Mechanism: "plain",
 		User:      "user",
@@ -307,6 +324,7 @@ func TestBuildSASLMechanismPlain(t *testing.T) {
 }
 
 func TestBuildSASLMechanismScramSHA256(t *testing.T) {
+	t.Parallel()
 	mech, err := buildSASLMechanism(&SASLConfig{
 		Mechanism: "scram-sha-256",
 		User:      "user",
@@ -321,6 +339,7 @@ func TestBuildSASLMechanismScramSHA256(t *testing.T) {
 }
 
 func TestBuildSASLMechanismScramSHA512(t *testing.T) {
+	t.Parallel()
 	mech, err := buildSASLMechanism(&SASLConfig{
 		Mechanism: "scram-sha-512",
 		User:      "user",
@@ -335,6 +354,7 @@ func TestBuildSASLMechanismScramSHA512(t *testing.T) {
 }
 
 func TestBuildSASLMechanismUnsupported(t *testing.T) {
+	t.Parallel()
 	_, err := buildSASLMechanism(&SASLConfig{
 		Mechanism: "oauthbearer",
 	})
@@ -346,6 +366,7 @@ func TestBuildSASLMechanismUnsupported(t *testing.T) {
 // --- Config Construction Tests ---
 
 func TestNewIngester(t *testing.T) {
+	t.Parallel()
 	id := uuid.New().String()
 	ing := New(Config{
 		ID:      id,
@@ -386,6 +407,7 @@ func TestNewIngester(t *testing.T) {
 // --- Full Factory Integration Tests ---
 
 func TestFactoryAllParams(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -435,6 +457,7 @@ func TestFactoryAllParams(t *testing.T) {
 }
 
 func TestFactorySingleBroker(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -455,6 +478,7 @@ func TestFactorySingleBroker(t *testing.T) {
 }
 
 func TestFactoryBrokerWhitespaceTrimming(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	ing, err := factory(uuid.New(), map[string]string{
@@ -478,6 +502,7 @@ func TestFactoryBrokerWhitespaceTrimming(t *testing.T) {
 }
 
 func TestFactoryIDPropagated(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 

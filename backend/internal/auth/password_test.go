@@ -6,6 +6,7 @@ import (
 )
 
 func TestHashPassword(t *testing.T) {
+	t.Parallel()
 	hash, err := HashPassword("testpassword")
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -23,6 +24,7 @@ func TestHashPassword(t *testing.T) {
 }
 
 func TestHashPasswordUniqueSalts(t *testing.T) {
+	t.Parallel()
 	h1, err := HashPassword("same-password")
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -38,6 +40,7 @@ func TestHashPasswordUniqueSalts(t *testing.T) {
 }
 
 func TestVerifyPasswordCorrect(t *testing.T) {
+	t.Parallel()
 	hash, err := HashPassword("correcthorse")
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -53,6 +56,7 @@ func TestVerifyPasswordCorrect(t *testing.T) {
 }
 
 func TestVerifyPasswordWrong(t *testing.T) {
+	t.Parallel()
 	hash, err := HashPassword("correcthorse")
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
@@ -68,6 +72,7 @@ func TestVerifyPasswordWrong(t *testing.T) {
 }
 
 func TestVerifyPasswordInvalidFormat(t *testing.T) {
+	t.Parallel()
 	_, err := VerifyPassword("test", "not-a-valid-hash")
 	if err == nil {
 		t.Error("expected error for invalid hash format")

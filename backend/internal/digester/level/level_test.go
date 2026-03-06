@@ -7,6 +7,7 @@ import (
 )
 
 func TestDigest_KVFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -28,6 +29,7 @@ func TestDigest_KVFormat(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
@@ -41,6 +43,7 @@ func TestDigest_KVFormat(t *testing.T) {
 }
 
 func TestDigest_JSONFormat(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -58,6 +61,7 @@ func TestDigest_JSONFormat(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
@@ -71,6 +75,7 @@ func TestDigest_JSONFormat(t *testing.T) {
 }
 
 func TestDigest_SyslogPriority(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -90,6 +95,7 @@ func TestDigest_SyslogPriority(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
@@ -103,6 +109,7 @@ func TestDigest_SyslogPriority(t *testing.T) {
 }
 
 func TestDigest_NoMatch(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		raw  string
@@ -117,6 +124,7 @@ func TestDigest_NoMatch(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),
@@ -130,10 +138,12 @@ func TestDigest_NoMatch(t *testing.T) {
 }
 
 func TestDigest_SkipsExistingAttr(t *testing.T) {
+	t.Parallel()
 	d := New()
 
 	for _, key := range []string{"level", "severity", "severity_name"} {
 		t.Run(key, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw:   []byte(`level=ERROR msg="fail"`),
 				Attrs: map[string]string{key: "custom"},
@@ -152,6 +162,7 @@ func TestDigest_SkipsExistingAttr(t *testing.T) {
 }
 
 func TestDigest_NilAttrs(t *testing.T) {
+	t.Parallel()
 	d := New()
 	msg := &orchestrator.IngestMessage{
 		Raw: []byte(`level=ERROR msg="fail"`),
@@ -166,6 +177,7 @@ func TestDigest_NilAttrs(t *testing.T) {
 }
 
 func TestNormalize(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -190,6 +202,7 @@ func TestNormalize(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			if got := normalize(tt.input); got != tt.want {
 				t.Errorf("normalize(%q) = %q, want %q", tt.input, got, tt.want)
 			}
@@ -198,6 +211,7 @@ func TestNormalize(t *testing.T) {
 }
 
 func TestExtractSyslogPriority(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		raw  string
 		want string
@@ -215,6 +229,7 @@ func TestExtractSyslogPriority(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.raw, func(t *testing.T) {
+			t.Parallel()
 			if got := extractSyslogPriority([]byte(tt.raw)); got != tt.want {
 				t.Errorf("extractSyslogPriority(%q) = %q, want %q", tt.raw, got, tt.want)
 			}
@@ -223,6 +238,7 @@ func TestExtractSyslogPriority(t *testing.T) {
 }
 
 func TestNoFalsePositives(t *testing.T) {
+	t.Parallel()
 	// These should NOT trigger level detection.
 	tests := []struct {
 		name string
@@ -236,6 +252,7 @@ func TestNoFalsePositives(t *testing.T) {
 	d := New()
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			msg := &orchestrator.IngestMessage{
 				Raw:   []byte(tt.raw),
 				Attrs: make(map[string]string),

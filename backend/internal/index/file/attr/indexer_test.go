@@ -41,6 +41,7 @@ func setupChunkManager(t *testing.T, records []chunk.Record) (chunk.ChunkManager
 }
 
 func TestIndexerBuild(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1000), Attrs: chunk.Attributes{"env": "prod", "host": "srv1"}, Raw: []byte("msg1")},
 		{IngestTS: gotime.UnixMicro(2000), Attrs: chunk.Attributes{"env": "prod", "host": "srv2"}, Raw: []byte("msg2")},
@@ -132,6 +133,7 @@ func TestIndexerBuild(t *testing.T) {
 }
 
 func TestIndexerIdempotent(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("data")},
 	}
@@ -157,6 +159,7 @@ func TestIndexerIdempotent(t *testing.T) {
 }
 
 func TestIndexerCancelledContext(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(100), Attrs: chunk.Attributes{"k": "v"}, Raw: []byte("data")},
 	}
@@ -178,6 +181,7 @@ func TestIndexerCancelledContext(t *testing.T) {
 }
 
 func TestIndexerBuildEmptyChunk(t *testing.T) {
+	t.Parallel()
 	manager, chunkID := setupChunkManager(t, nil)
 	indexDir := t.TempDir()
 	indexer := NewIndexer(indexDir, manager, nil)
@@ -196,6 +200,7 @@ func TestIndexerBuildEmptyChunk(t *testing.T) {
 }
 
 func TestIndexerBuildUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := chunkfile.NewManager(chunkfile.Config{Dir: dir})
 	if err != nil {
@@ -224,6 +229,7 @@ func TestIndexerBuildUnsealedChunk(t *testing.T) {
 }
 
 func TestIndexerCaseFolding(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: chunk.Attributes{"ENV": "PROD"}, Raw: []byte("msg1")},
 		{IngestTS: gotime.UnixMicro(2), Attrs: chunk.Attributes{"Env": "Prod"}, Raw: []byte("msg2")},
@@ -266,6 +272,7 @@ func TestIndexerCaseFolding(t *testing.T) {
 }
 
 func TestIndexerDeduplication(t *testing.T) {
+	t.Parallel()
 	// Same key=value multiple times in one record should only record position once
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: chunk.Attributes{"k1": "v1", "k2": "v1"}, Raw: []byte("msg")},
@@ -293,6 +300,7 @@ func TestIndexerDeduplication(t *testing.T) {
 }
 
 func TestEncodeDecodeKeyIndexRoundTrip(t *testing.T) {
+	t.Parallel()
 	entries := []index.AttrKeyIndexEntry{
 		{Key: "alpha", Positions: []uint64{0, 128, 256}},
 		{Key: "beta", Positions: []uint64{64, 192}},
@@ -319,6 +327,7 @@ func TestEncodeDecodeKeyIndexRoundTrip(t *testing.T) {
 }
 
 func TestEncodeDecodeValueIndexRoundTrip(t *testing.T) {
+	t.Parallel()
 	entries := []index.AttrValueIndexEntry{
 		{Value: "prod", Positions: []uint64{0, 64}},
 		{Value: "dev", Positions: []uint64{128}},
@@ -342,6 +351,7 @@ func TestEncodeDecodeValueIndexRoundTrip(t *testing.T) {
 }
 
 func TestEncodeDecodeKVIndexRoundTrip(t *testing.T) {
+	t.Parallel()
 	entries := []index.AttrKVIndexEntry{
 		{Key: "env", Value: "prod", Positions: []uint64{0, 64}},
 		{Key: "env", Value: "dev", Positions: []uint64{128}},
@@ -365,6 +375,7 @@ func TestEncodeDecodeKVIndexRoundTrip(t *testing.T) {
 }
 
 func TestEncodeDecodeEmpty(t *testing.T) {
+	t.Parallel()
 	keyData := encodeKeyIndex(nil)
 	keyGot, err := decodeKeyIndex(keyData)
 	if err != nil {
@@ -394,6 +405,7 @@ func TestEncodeDecodeEmpty(t *testing.T) {
 }
 
 func TestDecodeErrors(t *testing.T) {
+	t.Parallel()
 	// Too small
 	if _, err := decodeKeyIndex([]byte{'i'}); err != inverted.ErrIndexTooSmall {
 		t.Fatalf("expected ErrIndexTooSmall, got %v", err)
@@ -428,6 +440,7 @@ func TestDecodeErrors(t *testing.T) {
 }
 
 func TestLoadIndexNotFound(t *testing.T) {
+	t.Parallel()
 	indexDir := t.TempDir()
 	bogusID := chunk.NewChunkID()
 
@@ -448,6 +461,7 @@ func TestLoadIndexNotFound(t *testing.T) {
 }
 
 func TestIndexerEntriesSorted(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: chunk.Attributes{"zebra": "zoo", "alpha": "ant"}, Raw: []byte("msg")},
 	}
@@ -486,6 +500,7 @@ func TestIndexerEntriesSorted(t *testing.T) {
 }
 
 func TestOpenReaders(t *testing.T) {
+	t.Parallel()
 	records := []chunk.Record{
 		{IngestTS: gotime.UnixMicro(1), Attrs: chunk.Attributes{"env": "prod", "region": "us"}, Raw: []byte("msg1")},
 		{IngestTS: gotime.UnixMicro(2), Attrs: chunk.Attributes{"env": "dev", "region": "eu"}, Raw: []byte("msg2")},

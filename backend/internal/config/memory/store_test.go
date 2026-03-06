@@ -11,12 +11,14 @@ import (
 )
 
 func TestConformance(t *testing.T) {
+	t.Parallel()
 	storetest.TestStore(t, func(t *testing.T) config.Store {
 		return NewStore()
 	})
 }
 
 func TestStoreIsolation(t *testing.T) {
+	t.Parallel()
 	s := NewStore()
 	ctx := context.Background()
 

@@ -19,6 +19,7 @@ import (
 // TestIntegration_RegisterThenDenyQuery registers a user via the Register RPC,
 // then verifies that an unauthenticated query request is denied.
 func TestIntegration_RegisterThenDenyQuery(t *testing.T) {
+	t.Parallel()
 	cfgStore := configmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)

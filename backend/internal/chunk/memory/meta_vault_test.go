@@ -18,6 +18,7 @@ func testMeta() chunk.ChunkMeta {
 }
 
 func TestMetaStoreSaveLoad(t *testing.T) {
+	t.Parallel()
 	store := NewMetaStore()
 
 	meta := testMeta()
@@ -48,6 +49,7 @@ func TestMetaStoreSaveLoad(t *testing.T) {
 }
 
 func TestMetaStoreOverwrite(t *testing.T) {
+	t.Parallel()
 	store := NewMetaStore()
 
 	meta := testMeta()
@@ -76,6 +78,7 @@ func TestMetaStoreOverwrite(t *testing.T) {
 }
 
 func TestMetaStoreLoadNotFound(t *testing.T) {
+	t.Parallel()
 	store := NewMetaStore()
 
 	_, err := store.Load(chunk.NewChunkID())
@@ -85,6 +88,7 @@ func TestMetaStoreLoadNotFound(t *testing.T) {
 }
 
 func TestMetaStoreListEmpty(t *testing.T) {
+	t.Parallel()
 	store := NewMetaStore()
 
 	metas, err := store.List()
@@ -97,6 +101,7 @@ func TestMetaStoreListEmpty(t *testing.T) {
 }
 
 func TestMetaStoreListMultiple(t *testing.T) {
+	t.Parallel()
 	store := NewMetaStore()
 
 	m1 := testMeta()
@@ -129,6 +134,7 @@ func TestMetaStoreListMultiple(t *testing.T) {
 }
 
 func TestMetaStoreSaveMultipleLoadEach(t *testing.T) {
+	t.Parallel()
 	store := NewMetaStore()
 
 	m1 := testMeta()

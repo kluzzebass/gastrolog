@@ -17,6 +17,7 @@ import (
 // =============================================================================
 
 func TestRecordRoundTripWithAttributes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -216,6 +217,7 @@ func verifyRecord(t *testing.T, name string, got chunk.Record, wantAttrs chunk.A
 // =============================================================================
 
 func TestAttrLogFileFormat(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -292,6 +294,7 @@ func TestAttrLogFileFormat(t *testing.T) {
 }
 
 func TestAttrLogMultipleRecords(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -348,6 +351,7 @@ func TestAttrLogMultipleRecords(t *testing.T) {
 // =============================================================================
 
 func TestIdxLogEntryContainsAttrOffsets(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -420,6 +424,7 @@ func TestIdxLogEntryContainsAttrOffsets(t *testing.T) {
 // =============================================================================
 
 func TestAttributesPersistAcrossRestart(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	attrs := chunk.Attributes{
@@ -496,6 +501,7 @@ func TestAttributesPersistAcrossRestart(t *testing.T) {
 }
 
 func TestMultipleChunksWithAttributes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -601,6 +607,7 @@ func TestMultipleChunksWithAttributes(t *testing.T) {
 // =============================================================================
 
 func TestConcurrentReadWithAttributes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -682,6 +689,7 @@ func TestConcurrentReadWithAttributes(t *testing.T) {
 // =============================================================================
 
 func TestEmptyAttributesRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -721,6 +729,7 @@ func TestEmptyAttributesRoundTrip(t *testing.T) {
 }
 
 func TestNilAttributesRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -764,6 +773,7 @@ func TestNilAttributesRoundTrip(t *testing.T) {
 }
 
 func TestLargeAttributesRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -809,6 +819,7 @@ func TestLargeAttributesRoundTrip(t *testing.T) {
 }
 
 func TestBinaryDataInAttributes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -861,6 +872,7 @@ func TestBinaryDataInAttributes(t *testing.T) {
 // =============================================================================
 
 func TestRecordCopyWithAttributes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -922,6 +934,7 @@ func TestRecordCopyWithAttributes(t *testing.T) {
 // =============================================================================
 
 func TestManyRecordsWithVariedAttributes(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping stress test in short mode")
 	}

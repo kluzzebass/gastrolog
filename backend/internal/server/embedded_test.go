@@ -82,6 +82,7 @@ func (w *pipeResponseWriter) Write(data []byte) (int, error) {
 func (w *pipeResponseWriter) Flush() {}
 
 func TestEmbeddedTransportSearch(t *testing.T) {
+	t.Parallel()
 	// Create orchestrator with a vault
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {

@@ -3,6 +3,7 @@ package querylang
 import "testing"
 
 func TestCompileAttrFilter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		expr      string
@@ -28,6 +29,7 @@ func TestCompileAttrFilter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			dnf, err := CompileAttrFilter(tt.expr)
 			if tt.wantError {
 				if err == nil {
@@ -52,6 +54,7 @@ func TestCompileAttrFilter(t *testing.T) {
 }
 
 func TestMatchAttrsNilDNF(t *testing.T) {
+	t.Parallel()
 	// Nil DNF matches everything.
 	if !MatchAttrs(nil, map[string]string{"any": "thing"}) {
 		t.Error("nil DNF should match all")
@@ -62,6 +65,7 @@ func TestMatchAttrsNilDNF(t *testing.T) {
 }
 
 func TestMatchAttrsKV(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "env=prod")
 
 	if !MatchAttrs(dnf, map[string]string{"env": "prod"}) {
@@ -82,6 +86,7 @@ func TestMatchAttrsKV(t *testing.T) {
 }
 
 func TestMatchAttrsKeyExists(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "env=*")
 
 	if !MatchAttrs(dnf, map[string]string{"env": "anything"}) {
@@ -96,6 +101,7 @@ func TestMatchAttrsKeyExists(t *testing.T) {
 }
 
 func TestMatchAttrsValueExists(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "*=error")
 
 	if !MatchAttrs(dnf, map[string]string{"level": "error"}) {
@@ -113,6 +119,7 @@ func TestMatchAttrsValueExists(t *testing.T) {
 }
 
 func TestMatchAttrsAND(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "env=prod AND level=error")
 
 	if !MatchAttrs(dnf, map[string]string{"env": "prod", "level": "error"}) {
@@ -127,6 +134,7 @@ func TestMatchAttrsAND(t *testing.T) {
 }
 
 func TestMatchAttrsOR(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "env=prod OR env=staging")
 
 	if !MatchAttrs(dnf, map[string]string{"env": "prod"}) {
@@ -141,6 +149,7 @@ func TestMatchAttrsOR(t *testing.T) {
 }
 
 func TestMatchAttrsNOT(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "NOT env=prod")
 
 	if MatchAttrs(dnf, map[string]string{"env": "prod"}) {
@@ -155,6 +164,7 @@ func TestMatchAttrsNOT(t *testing.T) {
 }
 
 func TestMatchAttrsGlobValuePattern(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "image=nginx*")
 
 	if !MatchAttrs(dnf, map[string]string{"image": "nginx:latest"}) {
@@ -169,6 +179,7 @@ func TestMatchAttrsGlobValuePattern(t *testing.T) {
 }
 
 func TestMatchAttrsGlobKeyPattern(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "label.*=prod")
 
 	if !MatchAttrs(dnf, map[string]string{"label.env": "prod"}) {
@@ -186,6 +197,7 @@ func TestMatchAttrsGlobKeyPattern(t *testing.T) {
 }
 
 func TestMatchAttrsGlobKeyExists(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "label.*=*")
 
 	if !MatchAttrs(dnf, map[string]string{"label.env": "anything"}) {
@@ -197,6 +209,7 @@ func TestMatchAttrsGlobKeyExists(t *testing.T) {
 }
 
 func TestMatchAttrsGlobValueExists(t *testing.T) {
+	t.Parallel()
 	dnf := mustCompile(t, "*=err*")
 
 	if !MatchAttrs(dnf, map[string]string{"level": "error"}) {
@@ -211,6 +224,7 @@ func TestMatchAttrsGlobValueExists(t *testing.T) {
 }
 
 func TestMatchAttrsComplex(t *testing.T) {
+	t.Parallel()
 	// (name=web* AND label.env=prod) OR image=nginx*
 	dnf := mustCompile(t, "(name=web* AND label.env=prod) OR image=nginx*")
 

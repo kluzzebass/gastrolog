@@ -24,6 +24,7 @@ func (m *mockIndexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 }
 
 func TestBuildHelperDeduplication(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 	started := make(chan struct{})
 
@@ -71,6 +72,7 @@ func TestBuildHelperDeduplication(t *testing.T) {
 }
 
 func TestBuildHelperParallelism(t *testing.T) {
+	t.Parallel()
 	var (
 		mu     sync.Mutex
 		starts []time.Time
@@ -114,6 +116,7 @@ func TestBuildHelperParallelism(t *testing.T) {
 }
 
 func TestBuildHelperErrorPropagation(t *testing.T) {
+	t.Parallel()
 	sentinel := errors.New("build failed")
 
 	idx := &mockIndexer{
@@ -133,6 +136,7 @@ func TestBuildHelperErrorPropagation(t *testing.T) {
 }
 
 func TestBuildHelperWaiterContextCancellation(t *testing.T) {
+	t.Parallel()
 	buildStarted := make(chan struct{})
 	buildDone := make(chan struct{})
 
@@ -184,6 +188,7 @@ func TestBuildHelperWaiterContextCancellation(t *testing.T) {
 }
 
 func TestBuildHelperIndependentChunkIDs(t *testing.T) {
+	t.Parallel()
 	var calls atomic.Int32
 
 	idx := &mockIndexer{

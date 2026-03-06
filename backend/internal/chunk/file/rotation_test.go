@@ -16,6 +16,7 @@ import (
 // =============================================================================
 
 func TestRotationOnMaxChunkBytesWithAttributes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	// Small size policy to trigger rotation quickly
@@ -108,6 +109,7 @@ func TestRotationOnMaxChunkBytesWithAttributes(t *testing.T) {
 }
 
 func TestRotationPreservesAttributesAcrossChunks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	manager, err := NewManager(Config{
@@ -197,6 +199,7 @@ func TestRotationPreservesAttributesAcrossChunks(t *testing.T) {
 // =============================================================================
 
 func TestAttributesTooLargeFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -230,6 +233,7 @@ func TestAttributesTooLargeFails(t *testing.T) {
 }
 
 func TestAttributesNearMaxSize(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -282,6 +286,7 @@ func TestAttributesNearMaxSize(t *testing.T) {
 // =============================================================================
 
 func TestAllThreeFilesCreated(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -322,6 +327,7 @@ func TestAllThreeFilesCreated(t *testing.T) {
 }
 
 func TestFileHeadersAreCorrect(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -413,6 +419,7 @@ func TestFileHeadersAreCorrect(t *testing.T) {
 // =============================================================================
 
 func TestEmptyChunkHasAllFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -452,6 +459,7 @@ func TestEmptyChunkHasAllFiles(t *testing.T) {
 // =============================================================================
 
 func TestTruncatedAttrLogDetected(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -513,6 +521,7 @@ func TestTruncatedAttrLogDetected(t *testing.T) {
 // =============================================================================
 
 func TestReadWhileWriting(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -592,6 +601,7 @@ func TestReadWhileWriting(t *testing.T) {
 // =============================================================================
 
 func TestWriteTSIsMonotonic(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -653,6 +663,7 @@ func TestWriteTSIsMonotonic(t *testing.T) {
 // =============================================================================
 
 func TestReopenUnsealedChunk(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	var chunkID chunk.ChunkID

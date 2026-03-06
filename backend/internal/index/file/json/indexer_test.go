@@ -37,6 +37,7 @@ func setupChunk(t *testing.T, records []string) (chunk.ChunkManager, chunk.Chunk
 }
 
 func TestIndexer_BuildAndRead(t *testing.T) {
+	t.Parallel()
 	records := []string{
 		`{"level":"error","service":"gateway","http":{"status":500}}`,
 		`{"level":"info","service":"gateway","http":{"status":200}}`,
@@ -115,6 +116,7 @@ func TestIndexer_BuildAndRead(t *testing.T) {
 }
 
 func TestIndexer_NonJSON(t *testing.T) {
+	t.Parallel()
 	var records []string
 	for range 5 {
 		records = append(records, "plain text log message")
@@ -144,6 +146,7 @@ func TestIndexer_NonJSON(t *testing.T) {
 }
 
 func TestIndexer_PathPrefix(t *testing.T) {
+	t.Parallel()
 	records := []string{
 		`{"http":{"method":"GET","status":200}}`,
 		`{"http":{"method":"POST","status":201}}`,
@@ -175,6 +178,7 @@ func TestIndexer_PathPrefix(t *testing.T) {
 }
 
 func TestIndexer_CaseInsensitive(t *testing.T) {
+	t.Parallel()
 	records := []string{
 		`{"Level":"ERROR","Service":"MyApp"}`,
 	}
@@ -205,6 +209,7 @@ func TestIndexer_CaseInsensitive(t *testing.T) {
 }
 
 func TestIndexer_Budget(t *testing.T) {
+	t.Parallel()
 	var records []string
 	for i := range 100 {
 		record := fmt.Sprintf(`{"key%d":"value%d"}`, i, i)
@@ -239,6 +244,7 @@ func TestIndexer_Budget(t *testing.T) {
 }
 
 func TestIndexer_FormatRoundTrip(t *testing.T) {
+	t.Parallel()
 	dict := []string{"error", "level", "service", "web"}
 	pathTable := []pathTableEntry{
 		{dictID: 1, blobOffset: 0, count: 2},

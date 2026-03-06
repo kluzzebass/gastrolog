@@ -7,6 +7,7 @@ import (
 )
 
 func TestNew(t *testing.T) {
+	t.Parallel()
 	d := New("/tmp/gastrolog-test")
 	if d.Root() != "/tmp/gastrolog-test" {
 		t.Errorf("expected root /tmp/gastrolog-test, got %s", d.Root())
@@ -14,6 +15,7 @@ func TestNew(t *testing.T) {
 }
 
 func TestDefault(t *testing.T) {
+	t.Parallel()
 	d, err := Default()
 	if err != nil {
 		t.Fatalf("Default: %v", err)
@@ -28,6 +30,7 @@ func TestDefault(t *testing.T) {
 }
 
 func TestUsersPath(t *testing.T) {
+	t.Parallel()
 	d := New("/data")
 	if got := d.UsersPath(); got != "/data/users.json" {
 		t.Errorf("got %s", got)
@@ -35,6 +38,7 @@ func TestUsersPath(t *testing.T) {
 }
 
 func TestVaultDir(t *testing.T) {
+	t.Parallel()
 	d := New("/data")
 	if got := d.VaultDir("default"); got != "/data/stores/default" {
 		t.Errorf("got %s", got)
@@ -45,6 +49,7 @@ func TestVaultDir(t *testing.T) {
 }
 
 func TestEnsureExists(t *testing.T) {
+	t.Parallel()
 	root := filepath.Join(t.TempDir(), "nested", "gastrolog")
 	d := New(root)
 	if err := d.EnsureExists(); err != nil {

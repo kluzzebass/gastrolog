@@ -6,6 +6,7 @@ import (
 )
 
 func TestAppenderAppendAndBytes(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	n, err := a.Append([]byte("hello"))
 	if err != nil {
@@ -30,6 +31,7 @@ func TestAppenderAppendAndBytes(t *testing.T) {
 }
 
 func TestAppenderSize(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	if a.Size() != 0 {
 		t.Fatalf("expected size 0, got %d", a.Size())
@@ -47,6 +49,7 @@ func TestAppenderSize(t *testing.T) {
 }
 
 func TestAppenderBytesReturnsCopy(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	a.Append([]byte("original"))
 
@@ -61,6 +64,7 @@ func TestAppenderBytesReturnsCopy(t *testing.T) {
 }
 
 func TestAppenderEmptyBytes(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	got := a.Bytes()
 	if len(got) != 0 {
@@ -69,6 +73,7 @@ func TestAppenderEmptyBytes(t *testing.T) {
 }
 
 func TestAppenderAppendEmpty(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	n, err := a.Append([]byte{})
 	if err != nil {
@@ -83,6 +88,7 @@ func TestAppenderAppendEmpty(t *testing.T) {
 }
 
 func TestAppenderClose(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	a.Append([]byte("data"))
 
@@ -98,6 +104,7 @@ func TestAppenderClose(t *testing.T) {
 }
 
 func TestAppenderCloseIdempotent(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	if err := a.Close(); err != nil {
 		t.Fatalf("first close: %v", err)
@@ -108,6 +115,7 @@ func TestAppenderCloseIdempotent(t *testing.T) {
 }
 
 func TestAppenderSizeAfterClose(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	a.Append([]byte("hello"))
 	a.Close()
@@ -119,6 +127,7 @@ func TestAppenderSizeAfterClose(t *testing.T) {
 }
 
 func TestAppenderBytesAfterClose(t *testing.T) {
+	t.Parallel()
 	a := NewAppender()
 	a.Append([]byte("hello"))
 	a.Close()

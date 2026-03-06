@@ -50,6 +50,7 @@ func genCertAndKey(t *testing.T, certPath, keyPath string) (certPEM, keyPEM stri
 }
 
 func TestManager_AddFromPEMAndCertificate(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
 	keyPath := filepath.Join(dir, "key.pem")
@@ -80,6 +81,7 @@ func TestManager_AddFromPEMAndCertificate(t *testing.T) {
 }
 
 func TestManager_LoadFromConfig(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
 	keyPath := filepath.Join(dir, "key.pem")
@@ -100,6 +102,7 @@ func TestManager_LoadFromConfig(t *testing.T) {
 }
 
 func TestManager_LoadFromConfig_FilePaths(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	certPath := filepath.Join(dir, "cert.pem")
 	keyPath := filepath.Join(dir, "key.pem")

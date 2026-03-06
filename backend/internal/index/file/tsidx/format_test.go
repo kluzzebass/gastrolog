@@ -10,6 +10,7 @@ import (
 )
 
 func TestFindStartPosition(t *testing.T) {
+	t.Parallel()
 	entries := []Entry{
 		{TS: 100, Pos: 0},
 		{TS: 200, Pos: 1},
@@ -40,6 +41,7 @@ func TestFindStartPosition(t *testing.T) {
 }
 
 func TestEncodeDecodeRoundTrip(t *testing.T) {
+	t.Parallel()
 	entries := []Entry{
 		{TS: 300, Pos: 2},
 		{TS: 100, Pos: 0},
@@ -66,6 +68,7 @@ func TestEncodeDecodeRoundTrip(t *testing.T) {
 }
 
 func TestLoadIngestIndex(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	chunkID := chunk.NewChunkID()
 	chunkDir := filepath.Join(dir, chunkID.String())

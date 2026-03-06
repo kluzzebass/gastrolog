@@ -60,6 +60,7 @@ func setupTestSystem(t *testing.T, records []chunk.Record) (chunk.ChunkManager, 
 }
 
 func TestAnalyzeChunk_Basic(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	records := []chunk.Record{
 		{
@@ -119,6 +120,7 @@ func TestAnalyzeChunk_Basic(t *testing.T) {
 }
 
 func TestAnalyzeChunk_TokenIndex(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	records := []chunk.Record{
 		{IngestTS: now, WriteTS: now, Raw: []byte("error in module foo")},
@@ -156,6 +158,7 @@ func TestAnalyzeChunk_TokenIndex(t *testing.T) {
 }
 
 func TestAnalyzeChunk_AttrKVIndex(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	records := []chunk.Record{
 		{
@@ -208,6 +211,7 @@ func TestAnalyzeChunk_AttrKVIndex(t *testing.T) {
 }
 
 func TestAnalyzeChunk_KVIndex(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	records := []chunk.Record{
 		{IngestTS: now, WriteTS: now, Raw: []byte("user=alice action=login")},
@@ -245,6 +249,7 @@ func TestAnalyzeChunk_KVIndex(t *testing.T) {
 }
 
 func TestAnalyzeAll(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 
 	cm, err := chunkmem.NewManager(chunkmem.Config{
@@ -317,6 +322,7 @@ func TestAnalyzeAll(t *testing.T) {
 }
 
 func TestAnalyzeChunk_MissingIndexes(t *testing.T) {
+	t.Parallel()
 	now := time.Now()
 	records := []chunk.Record{
 		{IngestTS: now, WriteTS: now, Raw: []byte("test")},
@@ -366,6 +372,7 @@ func TestAnalyzeChunk_MissingIndexes(t *testing.T) {
 }
 
 func TestPercentile(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		sorted []int64
 		p      int
@@ -387,6 +394,7 @@ func TestPercentile(t *testing.T) {
 }
 
 func TestSafePercent(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		part, whole int64
 		want        float64

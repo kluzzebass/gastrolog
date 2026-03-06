@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewIndexWithIntType(t *testing.T) {
+	t.Parallel()
 	// Verify generics work with arbitrary types.
 	idx := NewIndex([]int{1, 2, 3})
 	got := idx.Entries()
@@ -21,6 +22,7 @@ func TestNewIndexWithIntType(t *testing.T) {
 // TokenIndexReader tests
 
 func TestTokenLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []TokenIndexEntry{
 		{Token: "apple", Positions: []uint64{0, 128}},
@@ -47,6 +49,7 @@ func TestTokenLookupFound(t *testing.T) {
 }
 
 func TestTokenLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []TokenIndexEntry{
 		{Token: "error", Positions: []uint64{0}},
@@ -65,6 +68,7 @@ func TestTokenLookupNotFound(t *testing.T) {
 }
 
 func TestTokenLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewTokenIndexReader(id, nil)
 
@@ -78,6 +82,7 @@ func TestTokenLookupEmptyIndex(t *testing.T) {
 }
 
 func TestTokenLookupSingleEntry(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []TokenIndexEntry{
 		{Token: "error", Positions: []uint64{42, 84}},
@@ -95,6 +100,7 @@ func TestTokenLookupSingleEntry(t *testing.T) {
 }
 
 func TestTokenLookupFirstEntry(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []TokenIndexEntry{
 		{Token: "aaa", Positions: []uint64{0}},
@@ -114,6 +120,7 @@ func TestTokenLookupFirstEntry(t *testing.T) {
 }
 
 func TestTokenLookupLastEntry(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []TokenIndexEntry{
 		{Token: "aaa", Positions: []uint64{0}},
@@ -133,6 +140,7 @@ func TestTokenLookupLastEntry(t *testing.T) {
 }
 
 func TestTokenLookupCaseSensitive(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []TokenIndexEntry{
 		{Token: "error", Positions: []uint64{0}},
@@ -156,6 +164,7 @@ func TestTokenLookupCaseSensitive(t *testing.T) {
 // AttrKeyIndexReader tests
 
 func TestAttrKeyLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []AttrKeyIndexEntry{
 		{Key: "env", Positions: []uint64{0, 128}},
@@ -182,6 +191,7 @@ func TestAttrKeyLookupFound(t *testing.T) {
 }
 
 func TestAttrKeyLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []AttrKeyIndexEntry{
 		{Key: "env", Positions: []uint64{0}},
@@ -200,6 +210,7 @@ func TestAttrKeyLookupNotFound(t *testing.T) {
 }
 
 func TestAttrKeyLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewAttrKeyIndexReader(id, nil)
 
@@ -215,6 +226,7 @@ func TestAttrKeyLookupEmptyIndex(t *testing.T) {
 // AttrValueIndexReader tests
 
 func TestAttrValueLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []AttrValueIndexEntry{
 		{Value: "dev", Positions: []uint64{0}},
@@ -236,6 +248,7 @@ func TestAttrValueLookupFound(t *testing.T) {
 }
 
 func TestAttrValueLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []AttrValueIndexEntry{
 		{Value: "prod", Positions: []uint64{0}},
@@ -250,6 +263,7 @@ func TestAttrValueLookupNotFound(t *testing.T) {
 }
 
 func TestAttrValueLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewAttrValueIndexReader(id, nil)
 
@@ -262,6 +276,7 @@ func TestAttrValueLookupEmptyIndex(t *testing.T) {
 // AttrKVIndexReader tests
 
 func TestAttrKVLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []AttrKVIndexEntry{
 		{Key: "env", Value: "dev", Positions: []uint64{0}},
@@ -283,6 +298,7 @@ func TestAttrKVLookupFound(t *testing.T) {
 }
 
 func TestAttrKVLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []AttrKVIndexEntry{
 		{Key: "env", Value: "prod", Positions: []uint64{0}},
@@ -304,6 +320,7 @@ func TestAttrKVLookupNotFound(t *testing.T) {
 }
 
 func TestAttrKVLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewAttrKVIndexReader(id, nil)
 
@@ -314,6 +331,7 @@ func TestAttrKVLookupEmptyIndex(t *testing.T) {
 }
 
 func TestAttrKVLookupSortedByKeyThenValue(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	// Entries must be sorted by (Key, Value) for binary search.
 	entries := []AttrKVIndexEntry{
@@ -355,6 +373,7 @@ func TestAttrKVLookupSortedByKeyThenValue(t *testing.T) {
 // KVKeyIndexReader tests
 
 func TestKVKeyLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVKeyIndexEntry{
 		{Key: "level", Positions: []uint64{0, 128}},
@@ -376,6 +395,7 @@ func TestKVKeyLookupFound(t *testing.T) {
 }
 
 func TestKVKeyLookupCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVKeyIndexEntry{
 		{Key: "level", Positions: []uint64{0}}, // stored lowercase
@@ -396,6 +416,7 @@ func TestKVKeyLookupCaseInsensitive(t *testing.T) {
 }
 
 func TestKVKeyLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVKeyIndexEntry{
 		{Key: "level", Positions: []uint64{0}},
@@ -410,6 +431,7 @@ func TestKVKeyLookupNotFound(t *testing.T) {
 }
 
 func TestKVKeyLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewKVKeyIndexReader(id, nil)
 
@@ -422,6 +444,7 @@ func TestKVKeyLookupEmptyIndex(t *testing.T) {
 // KVValueIndexReader tests
 
 func TestKVValueLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVValueIndexEntry{
 		{Value: "error", Positions: []uint64{0, 128}},
@@ -443,6 +466,7 @@ func TestKVValueLookupFound(t *testing.T) {
 }
 
 func TestKVValueLookupCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVValueIndexEntry{
 		{Value: "error", Positions: []uint64{0}}, // stored as-is (may be mixed case)
@@ -463,6 +487,7 @@ func TestKVValueLookupCaseInsensitive(t *testing.T) {
 }
 
 func TestKVValueLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVValueIndexEntry{
 		{Value: "error", Positions: []uint64{0}},
@@ -477,6 +502,7 @@ func TestKVValueLookupNotFound(t *testing.T) {
 }
 
 func TestKVValueLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewKVValueIndexReader(id, nil)
 
@@ -489,6 +515,7 @@ func TestKVValueLookupEmptyIndex(t *testing.T) {
 // KVIndexReader tests
 
 func TestKVLookupFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVIndexEntry{
 		{Key: "level", Value: "error", Positions: []uint64{0, 128}},
@@ -510,6 +537,7 @@ func TestKVLookupFound(t *testing.T) {
 }
 
 func TestKVLookupCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVIndexEntry{
 		{Key: "level", Value: "error", Positions: []uint64{0}}, // stored lowercase
@@ -536,6 +564,7 @@ func TestKVLookupCaseInsensitive(t *testing.T) {
 }
 
 func TestKVLookupNotFound(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVIndexEntry{
 		{Key: "level", Value: "error", Positions: []uint64{0}},
@@ -557,6 +586,7 @@ func TestKVLookupNotFound(t *testing.T) {
 }
 
 func TestKVLookupEmptyIndex(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	reader := NewKVIndexReader(id, nil)
 
@@ -567,6 +597,7 @@ func TestKVLookupEmptyIndex(t *testing.T) {
 }
 
 func TestKVEntries(t *testing.T) {
+	t.Parallel()
 	id := chunk.NewChunkID()
 	entries := []KVIndexEntry{
 		{Key: "level", Value: "error", Positions: []uint64{0}},

@@ -43,6 +43,7 @@ func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.U
 }
 
 func TestVaultExists(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	if !orch.VaultExists(id) {
 		t.Fatal("VaultExists returned false for registered vault")
@@ -53,6 +54,7 @@ func TestVaultExists(t *testing.T) {
 }
 
 func TestListChunkMetas(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 3)
 
@@ -66,6 +68,7 @@ func TestListChunkMetas(t *testing.T) {
 }
 
 func TestListChunkMetas_UnknownVault(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -77,6 +80,7 @@ func TestListChunkMetas_UnknownVault(t *testing.T) {
 }
 
 func TestGetChunkMeta(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 1)
 
@@ -95,6 +99,7 @@ func TestGetChunkMeta(t *testing.T) {
 }
 
 func TestSealActive(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 3)
 
@@ -119,6 +124,7 @@ func TestSealActive(t *testing.T) {
 }
 
 func TestSealActive_Empty(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	// No records appended — seal should be a no-op.
 	if err := orch.SealActive(id); err != nil {
@@ -127,6 +133,7 @@ func TestSealActive_Empty(t *testing.T) {
 }
 
 func TestSealActive_UnknownVault(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +145,7 @@ func TestSealActive_UnknownVault(t *testing.T) {
 }
 
 func TestOpenCursor(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 2)
 
@@ -155,6 +163,7 @@ func TestOpenCursor(t *testing.T) {
 }
 
 func TestAppend(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	rec := chunk.Record{
 		IngestTS: time.Now(),
@@ -171,6 +180,7 @@ func TestAppend(t *testing.T) {
 }
 
 func TestAppend_UnknownVault(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -182,6 +192,7 @@ func TestAppend_UnknownVault(t *testing.T) {
 }
 
 func TestIndexOps(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	// Append enough to trigger rotation (policy is 5 records).
 	appendRecords(t, orch, id, 6)
@@ -233,6 +244,7 @@ func TestIndexOps(t *testing.T) {
 }
 
 func TestChunkIndexInfos(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 6)
 
@@ -266,6 +278,7 @@ func TestChunkIndexInfos(t *testing.T) {
 }
 
 func TestNewAnalyzer(t *testing.T) {
+	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	a, err := orch.NewAnalyzer(id)
 	if err != nil {
@@ -277,6 +290,7 @@ func TestNewAnalyzer(t *testing.T) {
 }
 
 func TestNewAnalyzer_UnknownVault(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -288,6 +302,7 @@ func TestNewAnalyzer_UnknownVault(t *testing.T) {
 }
 
 func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -307,6 +322,7 @@ func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
 }
 
 func TestCopyRecords(t *testing.T) {
+	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)

@@ -179,6 +179,7 @@ func newNoAuthSetup(t *testing.T) *testSetup {
 }
 
 func TestNoAuth_PublicEndpoint(t *testing.T) {
+	t.Parallel()
 	s := newNoAuthSetup(t)
 	_, err := s.authClient.Login(context.Background(), connect.NewRequest(&apiv1.LoginRequest{}))
 	if err != nil {
@@ -187,6 +188,7 @@ func TestNoAuth_PublicEndpoint(t *testing.T) {
 }
 
 func TestNoAuth_AuthenticatedEndpoint(t *testing.T) {
+	t.Parallel()
 	s := newNoAuthSetup(t)
 	_, err := s.queryClient.Explain(context.Background(), connect.NewRequest(&apiv1.ExplainRequest{}))
 	if err != nil {
@@ -195,6 +197,7 @@ func TestNoAuth_AuthenticatedEndpoint(t *testing.T) {
 }
 
 func TestNoAuth_AdminEndpoint(t *testing.T) {
+	t.Parallel()
 	s := newNoAuthSetup(t)
 	_, err := s.configClient.GetConfig(context.Background(), connect.NewRequest(&apiv1.GetConfigRequest{}))
 	if err != nil {
@@ -203,6 +206,7 @@ func TestNoAuth_AdminEndpoint(t *testing.T) {
 }
 
 func TestNoAuth_ClaimsAreAdmin(t *testing.T) {
+	t.Parallel()
 	// Verify that NoAuthInterceptor injects admin claims into context.
 	var gotClaims *auth.Claims
 	handler := &claimsCapture{fn: func(ctx context.Context) {
@@ -241,6 +245,7 @@ func (c *claimsCapture) ChangePassword(ctx context.Context, req *connect.Request
 }
 
 func TestPublicEndpoint_NoToken(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{count: 5})
 
 	_, err := s.authClient.Login(context.Background(), connect.NewRequest(&apiv1.LoginRequest{}))
@@ -250,6 +255,7 @@ func TestPublicEndpoint_NoToken(t *testing.T) {
 }
 
 func TestAuthenticatedEndpoint_MissingToken(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{count: 1})
 
 	_, err := s.queryClient.Explain(context.Background(), connect.NewRequest(&apiv1.ExplainRequest{}))
@@ -262,6 +268,7 @@ func TestAuthenticatedEndpoint_MissingToken(t *testing.T) {
 }
 
 func TestAuthenticatedEndpoint_InvalidToken(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{count: 1})
 
 	client := gastrologv1connect.NewQueryServiceClient(http.DefaultClient, s.server.URL, withBearer("invalid-token"))
@@ -275,6 +282,7 @@ func TestAuthenticatedEndpoint_InvalidToken(t *testing.T) {
 }
 
 func TestAuthenticatedEndpoint_ValidToken(t *testing.T) {
+	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	token, _, err := tokens.Issue("uid-alice", "alice", "user")
 	if err != nil {
@@ -291,6 +299,7 @@ func TestAuthenticatedEndpoint_ValidToken(t *testing.T) {
 }
 
 func TestAdminEndpoint_NonAdminToken(t *testing.T) {
+	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	token, _, err := tokens.Issue("uid-alice", "alice", "user")
 	if err != nil {
@@ -310,6 +319,7 @@ func TestAdminEndpoint_NonAdminToken(t *testing.T) {
 }
 
 func TestAdminEndpoint_AdminToken(t *testing.T) {
+	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	token, _, err := tokens.Issue("uid-admin", "admin", "admin")
 	if err != nil {
@@ -326,6 +336,7 @@ func TestAdminEndpoint_AdminToken(t *testing.T) {
 }
 
 func TestFirstBoot_NonPublicDenied(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{count: 0})
 
 	// Non-public endpoints should be denied even during first-boot.
@@ -339,6 +350,7 @@ func TestFirstBoot_NonPublicDenied(t *testing.T) {
 }
 
 func TestFirstBoot_PublicAllowed(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{count: 0})
 
 	// Public endpoints should still work during first-boot.
@@ -349,6 +361,7 @@ func TestFirstBoot_PublicAllowed(t *testing.T) {
 }
 
 func TestCountUsersError_FailsClosed(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{err: fmt.Errorf("db error")})
 
 	_, err := s.queryClient.Explain(context.Background(), connect.NewRequest(&apiv1.ExplainRequest{}))
@@ -361,6 +374,7 @@ func TestCountUsersError_FailsClosed(t *testing.T) {
 }
 
 func TestRegister_FirstBoot_Allowed(t *testing.T) {
+	t.Parallel()
 	s := newTestSetup(t, &mockCounter{count: 0})
 
 	_, err := s.authClient.Register(context.Background(), connect.NewRequest(&apiv1.RegisterRequest{}))
@@ -370,6 +384,7 @@ func TestRegister_FirstBoot_Allowed(t *testing.T) {
 }
 
 func TestRegister_AfterSetup_PublicButSelfGuards(t *testing.T) {
+	t.Parallel()
 	// Register is public at the interceptor level — the handler itself
 	// rejects calls after the first user (tested in server tests).
 	// Here we verify the interceptor doesn't block it.
@@ -382,6 +397,7 @@ func TestRegister_AfterSetup_PublicButSelfGuards(t *testing.T) {
 }
 
 func TestCreateUser_RequiresAdmin(t *testing.T) {
+	t.Parallel()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 
 	// No token → Unauthenticated.

@@ -10,6 +10,7 @@ import (
 )
 
 func TestDefaultConfig(t *testing.T) {
+	t.Parallel()
 	cfg := config.DefaultConfig()
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
@@ -39,6 +40,7 @@ func TestDefaultConfig(t *testing.T) {
 }
 
 func TestBootstrap(t *testing.T) {
+	t.Parallel()
 	s := memory.NewStore()
 	ctx := context.Background()
 
@@ -91,6 +93,7 @@ func TestBootstrap(t *testing.T) {
 }
 
 func TestLoadServerSettingsEmptyReturnsZero(t *testing.T) {
+	t.Parallel()
 	s := memory.NewStore()
 	ctx := context.Background()
 
@@ -104,6 +107,7 @@ func TestLoadServerSettingsEmptyReturnsZero(t *testing.T) {
 }
 
 func TestSaveLoadServerSettingsRoundTrip(t *testing.T) {
+	t.Parallel()
 	s := memory.NewStore()
 	ctx := context.Background()
 
@@ -139,6 +143,7 @@ func TestSaveLoadServerSettingsRoundTrip(t *testing.T) {
 }
 
 func TestSaveServerSettingsOverwritePreservesLatest(t *testing.T) {
+	t.Parallel()
 	s := memory.NewStore()
 	ctx := context.Background()
 

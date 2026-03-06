@@ -32,6 +32,7 @@ func applyCmd(t *testing.T, fsm *FSM, cmd *gastrologv1.ConfigCommand) {
 func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
 
 func TestApplyPutFilter(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutFilter(config.FilterConfig{
@@ -48,6 +49,7 @@ func TestApplyPutFilter(t *testing.T) {
 }
 
 func TestApplyDeleteFilter(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutFilter(config.FilterConfig{ID: id, Name: "f"}))
@@ -63,6 +65,7 @@ func TestApplyDeleteFilter(t *testing.T) {
 }
 
 func TestApplyPutRotationPolicy(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	maxBytes := "64MB"
@@ -80,6 +83,7 @@ func TestApplyPutRotationPolicy(t *testing.T) {
 }
 
 func TestApplyDeleteRotationPolicy(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutRotationPolicy(config.RotationPolicyConfig{ID: id, Name: "rp"}))
@@ -95,6 +99,7 @@ func TestApplyDeleteRotationPolicy(t *testing.T) {
 }
 
 func TestApplyPutRetentionPolicy(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	maxAge := "720h"
@@ -112,6 +117,7 @@ func TestApplyPutRetentionPolicy(t *testing.T) {
 }
 
 func TestApplyDeleteRetentionPolicy(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutRetentionPolicy(config.RetentionPolicyConfig{ID: id, Name: "ret"}))
@@ -127,6 +133,7 @@ func TestApplyDeleteRetentionPolicy(t *testing.T) {
 }
 
 func TestApplyPutVault(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{
@@ -144,6 +151,7 @@ func TestApplyPutVault(t *testing.T) {
 }
 
 func TestApplyDeleteVault(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: id, Name: "v", Type: "file"}))
@@ -159,6 +167,7 @@ func TestApplyDeleteVault(t *testing.T) {
 }
 
 func TestApplyPutIngester(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutIngester(config.IngesterConfig{
@@ -176,6 +185,7 @@ func TestApplyPutIngester(t *testing.T) {
 }
 
 func TestApplyDeleteIngester(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutIngester(config.IngesterConfig{ID: id, Name: "ing", Type: "syslog-udp"}))
@@ -191,6 +201,7 @@ func TestApplyDeleteIngester(t *testing.T) {
 }
 
 func TestApplyPutServerSettings(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	cmd, err := command.NewPutServerSettings(config.ServerSettings{
 		Auth:      config.AuthConfig{JWTSecret: "test-secret"},
@@ -214,6 +225,7 @@ func TestApplyPutServerSettings(t *testing.T) {
 }
 
 func TestApplyPutCertificate(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutCertificate(config.CertPEM{
@@ -230,6 +242,7 @@ func TestApplyPutCertificate(t *testing.T) {
 }
 
 func TestApplyDeleteCertificate(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutCertificate(config.CertPEM{ID: id, Name: "cert"}))
@@ -245,6 +258,7 @@ func TestApplyDeleteCertificate(t *testing.T) {
 }
 
 func TestApplyCreateUser(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -263,6 +277,7 @@ func TestApplyCreateUser(t *testing.T) {
 }
 
 func TestApplyUpdatePassword(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -282,6 +297,7 @@ func TestApplyUpdatePassword(t *testing.T) {
 }
 
 func TestApplyUpdateUserRole(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -301,6 +317,7 @@ func TestApplyUpdateUserRole(t *testing.T) {
 }
 
 func TestApplyUpdateUsername(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -320,6 +337,7 @@ func TestApplyUpdateUsername(t *testing.T) {
 }
 
 func TestApplyDeleteUser(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -339,6 +357,7 @@ func TestApplyDeleteUser(t *testing.T) {
 }
 
 func TestApplyInvalidateTokens(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -360,6 +379,7 @@ func TestApplyInvalidateTokens(t *testing.T) {
 }
 
 func TestApplyPutUserPreferences(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -379,6 +399,7 @@ func TestApplyPutUserPreferences(t *testing.T) {
 }
 
 func TestApplyCreateRefreshToken(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -397,6 +418,7 @@ func TestApplyCreateRefreshToken(t *testing.T) {
 }
 
 func TestApplyDeleteRefreshToken(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	id := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -416,6 +438,7 @@ func TestApplyDeleteRefreshToken(t *testing.T) {
 }
 
 func TestApplyDeleteUserRefreshTokens(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 	userID := newID()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -445,6 +468,7 @@ func TestApplyDeleteUserRefreshTokens(t *testing.T) {
 // TestCompoundDeleteRotationPolicy verifies the cascade: deleting a rotation
 // policy clears the Policy reference on vaults that used it.
 func TestCompoundDeleteRotationPolicy(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 
 	policyID := newID()
@@ -491,6 +515,7 @@ func TestCompoundDeleteRotationPolicy(t *testing.T) {
 // TestCompoundDeleteRetentionPolicy verifies the cascade: deleting a retention
 // policy removes matching retention rules from vaults.
 func TestCompoundDeleteRetentionPolicy(t *testing.T) {
+	t.Parallel()
 	fsm := New()
 
 	policyID := newID()
@@ -531,6 +556,7 @@ func TestCompoundDeleteRetentionPolicy(t *testing.T) {
 // TestSnapshotRestore verifies the full round-trip: populate an FSM, snapshot,
 // restore into a new FSM, and verify identical state.
 func TestSnapshotRestore(t *testing.T) {
+	t.Parallel()
 	fsm1 := New()
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
@@ -657,6 +683,7 @@ func TestSnapshotRestore(t *testing.T) {
 
 // TestApplyAfterRestore verifies Apply continues to work after Restore.
 func TestApplyAfterRestore(t *testing.T) {
+	t.Parallel()
 	fsm1 := New()
 	now := time.Now().UTC().Truncate(time.Second)
 
@@ -698,6 +725,7 @@ func TestApplyAfterRestore(t *testing.T) {
 
 // TestSnapshotEmptyStore verifies snapshot works on an empty store.
 func TestSnapshotEmptyStore(t *testing.T) {
+	t.Parallel()
 	fsm1 := New()
 
 	snap, err := fsm1.Snapshot()

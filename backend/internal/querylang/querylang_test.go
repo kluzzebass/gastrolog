@@ -7,6 +7,7 @@ import (
 )
 
 func TestParseSingleToken(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  *PredicateExpr
@@ -21,6 +22,7 @@ func TestParseSingleToken(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -37,6 +39,7 @@ func TestParseSingleToken(t *testing.T) {
 }
 
 func TestParseKeyValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  *PredicateExpr
@@ -49,6 +52,7 @@ func TestParseKeyValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -65,6 +69,7 @@ func TestParseKeyValue(t *testing.T) {
 }
 
 func TestParseQuotedStrings(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  *PredicateExpr
@@ -78,6 +83,7 @@ func TestParseQuotedStrings(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -94,6 +100,7 @@ func TestParseQuotedStrings(t *testing.T) {
 }
 
 func TestParseQuotedKeyValue(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  *PredicateExpr
@@ -106,6 +113,7 @@ func TestParseQuotedKeyValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -122,6 +130,7 @@ func TestParseQuotedKeyValue(t *testing.T) {
 }
 
 func TestParseEscapeSequences(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -136,6 +145,7 @@ func TestParseEscapeSequences(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -152,6 +162,7 @@ func TestParseEscapeSequences(t *testing.T) {
 }
 
 func TestParseAnd(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -166,6 +177,7 @@ func TestParseAnd(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -182,6 +194,7 @@ func TestParseAnd(t *testing.T) {
 }
 
 func TestParseOr(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -193,6 +206,7 @@ func TestParseOr(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -209,6 +223,7 @@ func TestParseOr(t *testing.T) {
 }
 
 func TestParseNot(t *testing.T) {
+	t.Parallel()
 	input := "NOT error"
 	expr, err := Parse(input)
 	if err != nil {
@@ -228,6 +243,7 @@ func TestParseNot(t *testing.T) {
 }
 
 func TestParsePrecedence(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		input    string
@@ -316,6 +332,7 @@ func TestParsePrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -328,6 +345,7 @@ func TestParsePrecedence(t *testing.T) {
 }
 
 func TestParseComplexExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -342,6 +360,7 @@ func TestParseComplexExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -356,6 +375,7 @@ func TestParseComplexExpressions(t *testing.T) {
 }
 
 func TestParseCaseInsensitiveKeywords(t *testing.T) {
+	t.Parallel()
 	tests := []string{
 		"a or b",
 		"a OR b",
@@ -371,6 +391,7 @@ func TestParseCaseInsensitiveKeywords(t *testing.T) {
 
 	for _, input := range tests {
 		t.Run(input, func(t *testing.T) {
+			t.Parallel()
 			_, err := Parse(input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", input, err)
@@ -380,6 +401,7 @@ func TestParseCaseInsensitiveKeywords(t *testing.T) {
 }
 
 func TestParseErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -405,6 +427,7 @@ func TestParseErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := Parse(tt.input)
 			if err == nil {
 				t.Fatalf("Parse(%q) expected error, got nil", tt.input)
@@ -417,6 +440,7 @@ func TestParseErrors(t *testing.T) {
 }
 
 func TestParseWhitespace(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 	}{
@@ -429,6 +453,7 @@ func TestParseWhitespace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			_, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -438,6 +463,7 @@ func TestParseWhitespace(t *testing.T) {
 }
 
 func TestLexer(t *testing.T) {
+	t.Parallel()
 	input := `error OR (level="disk full" AND NOT debug)`
 	lex := NewLexer(input)
 
@@ -473,6 +499,7 @@ func TestLexer(t *testing.T) {
 }
 
 func TestExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -489,6 +516,7 @@ func TestExprString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -502,6 +530,7 @@ func TestExprString(t *testing.T) {
 }
 
 func TestParseRegex(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -516,6 +545,7 @@ func TestParseRegex(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -543,6 +573,7 @@ func TestParseRegex(t *testing.T) {
 }
 
 func TestParseRegexInBooleanExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -557,6 +588,7 @@ func TestParseRegexInBooleanExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -570,6 +602,7 @@ func TestParseRegexInBooleanExpressions(t *testing.T) {
 }
 
 func TestParseRegexErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -582,6 +615,7 @@ func TestParseRegexErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := Parse(tt.input)
 			if err == nil {
 				t.Fatalf("Parse(%q) expected error, got nil", tt.input)
@@ -594,6 +628,7 @@ func TestParseRegexErrors(t *testing.T) {
 }
 
 func TestLexerRegex(t *testing.T) {
+	t.Parallel()
 	input := `/error\d+/ AND level=warn`
 	lex := NewLexer(input)
 
@@ -626,6 +661,7 @@ func TestLexerRegex(t *testing.T) {
 // --- Glob pattern tests ---
 
 func TestLexerGlob(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected []struct {
@@ -686,6 +722,7 @@ func TestLexerGlob(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			lex := NewLexer(tt.input)
 			for i, want := range tt.expected {
 				tok, err := lex.Next()
@@ -704,6 +741,7 @@ func TestLexerGlob(t *testing.T) {
 }
 
 func TestParseGlobStandalone(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		value string
@@ -717,6 +755,7 @@ func TestParseGlobStandalone(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -739,6 +778,7 @@ func TestParseGlobStandalone(t *testing.T) {
 }
 
 func TestParseGlobKV(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		kind     PredicateKind
@@ -756,6 +796,7 @@ func TestParseGlobKV(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -784,6 +825,7 @@ func TestParseGlobKV(t *testing.T) {
 }
 
 func TestParseGlobInBooleanExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -798,6 +840,7 @@ func TestParseGlobInBooleanExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -811,6 +854,7 @@ func TestParseGlobInBooleanExpressions(t *testing.T) {
 }
 
 func TestGlobExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -822,6 +866,7 @@ func TestGlobExprString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -835,6 +880,7 @@ func TestGlobExprString(t *testing.T) {
 }
 
 func TestCompileGlob(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		pattern string
 		match   []string
@@ -849,6 +895,7 @@ func TestCompileGlob(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
+			t.Parallel()
 			re, err := CompileGlob(tt.pattern)
 			if err != nil {
 				t.Fatalf("CompileGlob(%q) error: %v", tt.pattern, err)
@@ -868,6 +915,7 @@ func TestCompileGlob(t *testing.T) {
 }
 
 func TestExtractGlobPrefix(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		pattern string
 		prefix  string
@@ -883,6 +931,7 @@ func TestExtractGlobPrefix(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.pattern, func(t *testing.T) {
+			t.Parallel()
 			prefix, ok := ExtractGlobPrefix(tt.pattern)
 			if ok != tt.ok || prefix != tt.prefix {
 				t.Errorf("ExtractGlobPrefix(%q) = (%q, %v), want (%q, %v)", tt.pattern, prefix, ok, tt.prefix, tt.ok)
@@ -894,6 +943,7 @@ func TestExtractGlobPrefix(t *testing.T) {
 // --- Comparison operator tests ---
 
 func TestLexerComparisonOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input    string
 		expected []struct {
@@ -940,6 +990,7 @@ func TestLexerComparisonOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			lex := NewLexer(tt.input)
 			for i, want := range tt.expected {
 				tok, err := lex.Next()
@@ -958,6 +1009,7 @@ func TestLexerComparisonOperators(t *testing.T) {
 }
 
 func TestLexerStandaloneBang(t *testing.T) {
+	t.Parallel()
 	lex := NewLexer("!foo")
 	_, err := lex.Next()
 	if err == nil {
@@ -969,6 +1021,7 @@ func TestLexerStandaloneBang(t *testing.T) {
 }
 
 func TestParseComparisonOperators(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		key   string
@@ -987,6 +1040,7 @@ func TestParseComparisonOperators(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -1012,6 +1066,7 @@ func TestParseComparisonOperators(t *testing.T) {
 }
 
 func TestParseComparisonInBooleanExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -1026,6 +1081,7 @@ func TestParseComparisonInBooleanExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -1039,6 +1095,7 @@ func TestParseComparisonInBooleanExpressions(t *testing.T) {
 }
 
 func TestParseComparisonErrors(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		input   string
@@ -1054,6 +1111,7 @@ func TestParseComparisonErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := Parse(tt.input)
 			if err == nil {
 				t.Fatalf("Parse(%q) expected error, got nil", tt.input)
@@ -1066,6 +1124,7 @@ func TestParseComparisonErrors(t *testing.T) {
 }
 
 func TestComparisonExprString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -1080,6 +1139,7 @@ func TestComparisonExprString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -1093,6 +1153,7 @@ func TestComparisonExprString(t *testing.T) {
 }
 
 func TestSlashNoLongerInBareword(t *testing.T) {
+	t.Parallel()
 	// Verify that '/' terminates barewords.
 	// "path/to" should NOT parse as a single token.
 	lex := NewLexer("path/to/file")
@@ -1116,6 +1177,7 @@ func TestSlashNoLongerInBareword(t *testing.T) {
 // --- Expression predicate tests ---
 
 func TestParseExprPredicate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		lhs   string
@@ -1136,6 +1198,7 @@ func TestParseExprPredicate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -1164,6 +1227,7 @@ func TestParseExprPredicate(t *testing.T) {
 }
 
 func TestParseExprPredicateInBooleanExpressions(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name  string
 		input string
@@ -1178,6 +1242,7 @@ func TestParseExprPredicateInBooleanExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -1191,6 +1256,7 @@ func TestParseExprPredicateInBooleanExpressions(t *testing.T) {
 }
 
 func TestParseExprPredicateBacktrack(t *testing.T) {
+	t.Parallel()
 	// "len" without parens should parse as a token predicate, not an expression.
 	expr, err := Parse("len")
 	if err != nil {
@@ -1206,6 +1272,7 @@ func TestParseExprPredicateBacktrack(t *testing.T) {
 }
 
 func TestParseExprPredicateBacktrackNoCompareOp(t *testing.T) {
+	t.Parallel()
 	// "len(foo)" without a comparison operator should backtrack.
 	// "len" becomes a token, "(foo)" becomes a grouped expression with token "foo".
 	// Result: implicit AND of token(len) and token(foo).
@@ -1225,6 +1292,7 @@ func TestParseExprPredicateBacktrackNoCompareOp(t *testing.T) {
 }
 
 func TestExprPredicateString(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input string
 		want  string
@@ -1235,6 +1303,7 @@ func TestExprPredicateString(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
+			t.Parallel()
 			expr, err := Parse(tt.input)
 			if err != nil {
 				t.Fatalf("Parse(%q) error: %v", tt.input, err)
@@ -1248,6 +1317,7 @@ func TestExprPredicateString(t *testing.T) {
 }
 
 func TestExprPredicatePipeline(t *testing.T) {
+	t.Parallel()
 	// Expression predicates should work in pipeline filter sections.
 	tests := []struct {
 		name  string
@@ -1259,6 +1329,7 @@ func TestExprPredicatePipeline(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			pipeline, err := ParsePipeline(tt.input)
 			if err != nil {
 				t.Fatalf("ParsePipeline(%q) error: %v", tt.input, err)

@@ -5,6 +5,7 @@ import (
 )
 
 func TestExtractKeyValues(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		msg      string
@@ -188,6 +189,7 @@ func TestExtractKeyValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			result := ExtractKeyValues([]byte(tt.msg))
 			if len(result) != len(tt.expected) {
 				t.Errorf("expected %d pairs, got %d: %v", len(tt.expected), len(result), result)
@@ -204,6 +206,7 @@ func TestExtractKeyValues(t *testing.T) {
 }
 
 func TestIsValidKey(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		"status",
 		"user_id",
@@ -241,6 +244,7 @@ func TestIsValidKey(t *testing.T) {
 }
 
 func TestIsValidValue(t *testing.T) {
+	t.Parallel()
 	valid := []string{
 		"500",
 		"/login",

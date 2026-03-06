@@ -156,6 +156,7 @@ func collectMessages(ctx context.Context, out <-chan orchestrator.IngestMessage,
 // --- Tests ---
 
 func TestFactoryValidation(t *testing.T) {
+	t.Parallel()
 	vault := configmem.NewStore()
 	factory := NewFactory(vault)
 
@@ -223,6 +224,7 @@ func TestFactoryValidation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			_, err := factory(uuid.New(), tt.params, logging.Discard())
 			if tt.wantErr == "" {
 				// For valid params, we may still get a connection error.
@@ -240,6 +242,7 @@ func TestFactoryValidation(t *testing.T) {
 }
 
 func TestSingleContainerTailing(t *testing.T) {
+	t.Parallel()
 	client := newFakeClient()
 	ts := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
@@ -317,6 +320,7 @@ func TestSingleContainerTailing(t *testing.T) {
 }
 
 func TestContainerStartEvent(t *testing.T) {
+	t.Parallel()
 	client := newFakeClient()
 	ts := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
@@ -367,6 +371,7 @@ func TestContainerStartEvent(t *testing.T) {
 }
 
 func TestContainerStopEvent(t *testing.T) {
+	t.Parallel()
 	client := newFakeClient()
 	ts := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
@@ -421,6 +426,7 @@ func TestContainerStopEvent(t *testing.T) {
 }
 
 func TestBookmarkPersistence(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	stateFile := filepath.Join(tmpDir, "state", "docker", "test.json")
 
@@ -453,6 +459,7 @@ func TestBookmarkPersistence(t *testing.T) {
 }
 
 func TestBookmarkLoadMissing(t *testing.T) {
+	t.Parallel()
 	st, err := loadState("/nonexistent/path/state.json")
 	if err != nil {
 		t.Fatalf("loadState should not error for missing file: %v", err)
@@ -463,6 +470,7 @@ func TestBookmarkLoadMissing(t *testing.T) {
 }
 
 func TestBookmarkEmptyPath(t *testing.T) {
+	t.Parallel()
 	st, err := loadState("")
 	if err != nil {
 		t.Fatalf("loadState empty path: %v", err)
@@ -476,6 +484,7 @@ func TestBookmarkEmptyPath(t *testing.T) {
 }
 
 func TestFilterMatching(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		filterExpr string
@@ -570,6 +579,7 @@ func TestFilterMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			var filter *querylang.DNF
 			if tt.filterExpr != "" {
 				var err error
@@ -587,6 +597,7 @@ func TestFilterMatching(t *testing.T) {
 }
 
 func TestContainerAttrs(t *testing.T) {
+	t.Parallel()
 	info := containerInfo{
 		Name:   "web-1",
 		Image:  "nginx:latest",
@@ -613,6 +624,7 @@ func TestContainerAttrs(t *testing.T) {
 }
 
 func TestLogDemuxMultiplexed(t *testing.T) {
+	t.Parallel()
 	ts1 := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 	ts2 := time.Date(2025, 1, 15, 10, 0, 1, 0, time.UTC)
 
@@ -664,6 +676,7 @@ func makePartialFrame(stream streamType, ts time.Time, content string) []byte {
 }
 
 func TestPartialFrameReassembly(t *testing.T) {
+	t.Parallel()
 	ts := time.Date(2025, 6, 10, 12, 0, 0, 123456789, time.UTC)
 	first16K := strings.Repeat("A", 16384)
 	remaining := strings.Repeat("B", 3616)
@@ -702,6 +715,7 @@ func TestPartialFrameReassembly(t *testing.T) {
 }
 
 func TestPartialFrameThreeWaySplit(t *testing.T) {
+	t.Parallel()
 	ts := time.Date(2025, 6, 10, 12, 0, 0, 0, time.UTC)
 
 	var buf bytes.Buffer
@@ -729,6 +743,7 @@ func TestPartialFrameThreeWaySplit(t *testing.T) {
 }
 
 func TestPartialFrameInterleavedStreams(t *testing.T) {
+	t.Parallel()
 	ts1 := time.Date(2025, 6, 10, 12, 0, 0, 0, time.UTC)
 	ts2 := time.Date(2025, 6, 10, 12, 0, 1, 0, time.UTC)
 
@@ -773,6 +788,7 @@ func TestPartialFrameInterleavedStreams(t *testing.T) {
 }
 
 func TestLogDemuxTTY(t *testing.T) {
+	t.Parallel()
 	ts := time.Date(2025, 1, 15, 10, 0, 0, 0, time.UTC)
 
 	var buf bytes.Buffer
@@ -806,6 +822,7 @@ func TestLogDemuxTTY(t *testing.T) {
 }
 
 func TestTimestampParsing(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		input  string
@@ -833,6 +850,7 @@ func TestTimestampParsing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			ts, rest := parseTimestamp([]byte(tt.input))
 			if tt.wantOK {
 				if ts.IsZero() {
@@ -855,6 +873,7 @@ func TestTimestampParsing(t *testing.T) {
 }
 
 func TestGracefulShutdown(t *testing.T) {
+	t.Parallel()
 	client := newFakeClient()
 	ts := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
@@ -913,6 +932,7 @@ func TestGracefulShutdown(t *testing.T) {
 }
 
 func TestFilteredContainersNotTailed(t *testing.T) {
+	t.Parallel()
 	client := newFakeClient()
 	ts := time.Date(2025, 1, 15, 10, 30, 0, 0, time.UTC)
 
@@ -984,6 +1004,7 @@ func TestFilteredContainersNotTailed(t *testing.T) {
 }
 
 func TestStreamTypeString(t *testing.T) {
+	t.Parallel()
 	if streamStdout.String() != "stdout" {
 		t.Errorf("stdout string = %q", streamStdout.String())
 	}

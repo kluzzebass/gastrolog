@@ -3,6 +3,7 @@ package tokenizer
 import "testing"
 
 func TestIsLetter(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		c    byte
 		want bool
@@ -31,6 +32,7 @@ func TestIsLetter(t *testing.T) {
 }
 
 func TestIsDigit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		c    byte
 		want bool
@@ -53,6 +55,7 @@ func TestIsDigit(t *testing.T) {
 }
 
 func TestIsHexDigit(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		c    byte
 		want bool
@@ -77,6 +80,7 @@ func TestIsHexDigit(t *testing.T) {
 }
 
 func TestIsWhitespace(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		c    byte
 		want bool
@@ -99,6 +103,7 @@ func TestIsWhitespace(t *testing.T) {
 }
 
 func TestLowercase(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		c    byte
 		want byte
@@ -122,6 +127,7 @@ func TestLowercase(t *testing.T) {
 }
 
 func TestToLowerASCII(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		input []byte
 		want  string

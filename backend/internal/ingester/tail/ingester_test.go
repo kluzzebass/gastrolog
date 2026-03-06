@@ -28,6 +28,7 @@ func collectMessages(t *testing.T, out chan orchestrator.IngestMessage, timeout 
 }
 
 func TestFactoryMissingPaths(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	_, err := factory(uuid.New(), map[string]string{}, nil)
 	if err == nil {
@@ -36,6 +37,7 @@ func TestFactoryMissingPaths(t *testing.T) {
 }
 
 func TestFactoryInvalidPathsJSON(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	_, err := factory(uuid.New(), map[string]string{"paths": "not-json"}, nil)
 	if err == nil {
@@ -44,6 +46,7 @@ func TestFactoryInvalidPathsJSON(t *testing.T) {
 }
 
 func TestFactoryEmptyPaths(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	_, err := factory(uuid.New(), map[string]string{"paths": "[]"}, nil)
 	if err == nil {
@@ -52,6 +55,7 @@ func TestFactoryEmptyPaths(t *testing.T) {
 }
 
 func TestFactoryInvalidPollInterval(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	_, err := factory(uuid.New(), map[string]string{
 		"paths":         `["/tmp/*.log"]`,
@@ -63,6 +67,7 @@ func TestFactoryInvalidPollInterval(t *testing.T) {
 }
 
 func TestFactoryNegativePollInterval(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	_, err := factory(uuid.New(), map[string]string{
 		"paths":         `["/tmp/*.log"]`,
@@ -74,6 +79,7 @@ func TestFactoryNegativePollInterval(t *testing.T) {
 }
 
 func TestFactoryStateDir(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 	id := uuid.New()
 	ing, err := factory(id, map[string]string{
@@ -91,6 +97,7 @@ func TestFactoryStateDir(t *testing.T) {
 }
 
 func TestSingleFileTailing(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	logFile := filepath.Join(dir, "app.log")
 	if err := os.WriteFile(logFile, []byte("existing line\n"), 0o644); err != nil {
@@ -160,6 +167,7 @@ func TestSingleFileTailing(t *testing.T) {
 }
 
 func TestCRLFLineEndings(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	logFile := filepath.Join(dir, "app.log")
 
@@ -211,6 +219,7 @@ func TestCRLFLineEndings(t *testing.T) {
 }
 
 func TestMultipleFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	log1 := filepath.Join(dir, "a.log")
 	log2 := filepath.Join(dir, "b.log")
@@ -263,6 +272,7 @@ func TestMultipleFiles(t *testing.T) {
 }
 
 func TestTruncationDetection(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	logFile := filepath.Join(dir, "app.log")
 	os.WriteFile(logFile, nil, 0o644)
@@ -311,6 +321,7 @@ func TestTruncationDetection(t *testing.T) {
 }
 
 func TestBookmarkRoundTrip(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	stateFile := filepath.Join(dir, "state.json")
 
@@ -341,6 +352,7 @@ func TestBookmarkRoundTrip(t *testing.T) {
 }
 
 func TestBookmarkLoadMissing(t *testing.T) {
+	t.Parallel()
 	bm, err := loadBookmarks("/nonexistent/path.json")
 	if err != nil {
 		t.Fatal(err)
@@ -351,6 +363,7 @@ func TestBookmarkLoadMissing(t *testing.T) {
 }
 
 func TestBookmarkResumeFromOffset(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	logFile := filepath.Join(dir, "app.log")
 	stateFile := filepath.Join(dir, "state.json")
@@ -423,6 +436,7 @@ func TestBookmarkResumeFromOffset(t *testing.T) {
 }
 
 func TestGlobDiscovery(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	sub := filepath.Join(dir, "sub")
 	os.MkdirAll(sub, 0o755)
@@ -451,6 +465,7 @@ func TestGlobDiscovery(t *testing.T) {
 }
 
 func TestWatchDirsForPatterns(t *testing.T) {
+	t.Parallel()
 	dirs := watchDirsForPatterns([]string{
 		"/var/log/*.log",
 		"/var/log/app/**/*.log",
@@ -474,6 +489,7 @@ func TestWatchDirsForPatterns(t *testing.T) {
 }
 
 func TestPollDetectsNewFile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 
 	factory := NewFactory()

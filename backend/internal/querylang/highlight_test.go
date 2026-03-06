@@ -22,6 +22,7 @@ func spanRoles(spans []Span) []string {
 }
 
 func TestHighlight_Roundtrip(t *testing.T) {
+	t.Parallel()
 	inputs := []string{
 		"",
 		"error",
@@ -50,6 +51,7 @@ func TestHighlight_Roundtrip(t *testing.T) {
 }
 
 func TestHighlight_LevelError(t *testing.T) {
+	t.Parallel()
 	spans, hasPipeline := Highlight("level=error", -1)
 	if hasPipeline {
 		t.Error("expected hasPipeline=false")
@@ -62,6 +64,7 @@ func TestHighlight_LevelError(t *testing.T) {
 }
 
 func TestHighlight_DirectiveKey(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("last=5m", -1)
 	roles := spanRoles(spans)
 	expected := []string{"directive-key", "eq", "value"}
@@ -71,6 +74,7 @@ func TestHighlight_DirectiveKey(t *testing.T) {
 }
 
 func TestHighlight_Pipeline(t *testing.T) {
+	t.Parallel()
 	spans, hasPipeline := Highlight("error | stats count by level", -1)
 	if !hasPipeline {
 		t.Error("expected hasPipeline=true")
@@ -89,6 +93,7 @@ func TestHighlight_Pipeline(t *testing.T) {
 }
 
 func TestHighlight_QuotedString(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight(`"hello world"`, -1)
 	if len(spans) != 1 {
 		t.Fatalf("expected 1 span, got %d: %v", len(spans), spans)
@@ -102,6 +107,7 @@ func TestHighlight_QuotedString(t *testing.T) {
 }
 
 func TestHighlight_Comment(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("hello # comment", -1)
 	roles := spanRoles(spans)
 	expected := []string{"token", "whitespace", "comment"}
@@ -111,6 +117,7 @@ func TestHighlight_Comment(t *testing.T) {
 }
 
 func TestHighlight_ErrorMarking(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("level=", 6)
 	// "level" is at 0..5, "=" is at 5..6, error offset is 6 (past the =).
 	// There are only 2 spans: "level" and "=".
@@ -123,6 +130,7 @@ func TestHighlight_ErrorMarking(t *testing.T) {
 }
 
 func TestHighlight_ErrorMarkingMidExpression(t *testing.T) {
+	t.Parallel()
 	input := "level=error AND"
 	// Simulate error at offset 12 (at "AND").
 	spans, _ := Highlight(input, 12)
@@ -142,6 +150,7 @@ func TestHighlight_ErrorMarkingMidExpression(t *testing.T) {
 }
 
 func TestHighlight_Operators(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("error OR warn AND NOT debug", -1)
 	roles := spanRoles(spans)
 	expected := []string{
@@ -155,6 +164,7 @@ func TestHighlight_Operators(t *testing.T) {
 }
 
 func TestHighlight_CompareOps(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("level!=info", -1)
 	roles := spanRoles(spans)
 	expected := []string{"key", "compare-op", "value"}
@@ -164,6 +174,7 @@ func TestHighlight_CompareOps(t *testing.T) {
 }
 
 func TestHighlight_Regex(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("/error.*/", -1)
 	if len(spans) != 1 {
 		t.Fatalf("expected 1 span, got %d", len(spans))
@@ -174,6 +185,7 @@ func TestHighlight_Regex(t *testing.T) {
 }
 
 func TestHighlight_Glob(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("error*", -1)
 	if len(spans) != 1 {
 		t.Fatalf("expected 1 span, got %d", len(spans))
@@ -184,6 +196,7 @@ func TestHighlight_Glob(t *testing.T) {
 }
 
 func TestHighlight_ScalarFunctionInFilter(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("len(message)>100", -1)
 	roles := spanRoles(spans)
 	// len ( message ) > 100
@@ -194,6 +207,7 @@ func TestHighlight_ScalarFunctionInFilter(t *testing.T) {
 }
 
 func TestHighlight_WhereBody(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("error | where level=error", -1)
 	roles := spanRoles(spans)
 	// error ws | ws where ws level = error
@@ -207,6 +221,7 @@ func TestHighlight_WhereBody(t *testing.T) {
 }
 
 func TestHighlight_Parens(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("(error)", -1)
 	roles := spanRoles(spans)
 	expected := []string{"paren", "token", "paren"}
@@ -216,6 +231,7 @@ func TestHighlight_Parens(t *testing.T) {
 }
 
 func TestHighlight_Star(t *testing.T) {
+	t.Parallel()
 	spans, _ := Highlight("*", -1)
 	if len(spans) != 1 || spans[0].Role != RoleStar {
 		t.Errorf("star: got %v", spans)
@@ -223,6 +239,7 @@ func TestHighlight_Star(t *testing.T) {
 }
 
 func TestHighlight_Empty(t *testing.T) {
+	t.Parallel()
 	spans, hasPipeline := Highlight("", -1)
 	if len(spans) != 0 {
 		t.Errorf("expected no spans for empty input, got %d", len(spans))

@@ -18,6 +18,7 @@ import (
 )
 
 func TestLokiPushSingleStream(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -71,6 +72,7 @@ func TestLokiPushSingleStream(t *testing.T) {
 }
 
 func TestLokiPushMultipleValues(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -118,6 +120,7 @@ func TestLokiPushMultipleValues(t *testing.T) {
 }
 
 func TestLokiPushMultipleStreams(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -169,6 +172,7 @@ func TestLokiPushMultipleStreams(t *testing.T) {
 }
 
 func TestLokiPushStructuredMetadata(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -219,6 +223,7 @@ func TestLokiPushStructuredMetadata(t *testing.T) {
 }
 
 func TestLokiPushGzipCompression(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -260,6 +265,7 @@ func TestLokiPushGzipCompression(t *testing.T) {
 }
 
 func TestLokiPushZstdCompression(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -298,6 +304,7 @@ func TestLokiPushZstdCompression(t *testing.T) {
 }
 
 func TestLokiPushUnsupportedEncoding(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -321,6 +328,7 @@ func TestLokiPushUnsupportedEncoding(t *testing.T) {
 }
 
 func TestLokiPushWaitAck(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -375,6 +383,7 @@ func TestLokiPushWaitAck(t *testing.T) {
 }
 
 func TestLokiPushWaitAckError(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -421,6 +430,7 @@ func TestLokiPushWaitAckError(t *testing.T) {
 }
 
 func TestLokiPushLegacyEndpoint(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -453,6 +463,7 @@ func TestLokiPushLegacyEndpoint(t *testing.T) {
 }
 
 func TestLokiPushEmptyStreams(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -473,6 +484,7 @@ func TestLokiPushEmptyStreams(t *testing.T) {
 }
 
 func TestLokiPushInvalidJSON(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -492,6 +504,7 @@ func TestLokiPushInvalidJSON(t *testing.T) {
 }
 
 func TestLokiPushInvalidTimestamp(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -513,6 +526,7 @@ func TestLokiPushInvalidTimestamp(t *testing.T) {
 }
 
 func TestReadyEndpoint(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -532,6 +546,7 @@ func TestReadyEndpoint(t *testing.T) {
 }
 
 func TestLokiPushTooManyAttrs(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -561,6 +576,7 @@ func TestLokiPushTooManyAttrs(t *testing.T) {
 }
 
 func TestLokiPushAttrKeyTooLong(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 
@@ -585,6 +601,7 @@ func TestLokiPushAttrKeyTooLong(t *testing.T) {
 }
 
 func TestLokiPushAttrValueTooLong(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	recv := New(Config{Addr: "127.0.0.1:0"})
 

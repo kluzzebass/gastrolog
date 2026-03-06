@@ -7,6 +7,7 @@ import (
 )
 
 func TestEvalFieldRef(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"status": "200", "duration": "1500", "method": "GET"}
 
@@ -25,6 +26,7 @@ func TestEvalFieldRef(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v, err := eval.Eval(tt.expr, row)
 			if err != nil {
 				t.Fatalf("Eval error: %v", err)
@@ -48,6 +50,7 @@ func TestEvalFieldRef(t *testing.T) {
 }
 
 func TestEvalNumberLit(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{}
 
@@ -69,6 +72,7 @@ func TestEvalNumberLit(t *testing.T) {
 }
 
 func TestEvalStringLit(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{}
 
@@ -82,6 +86,7 @@ func TestEvalStringLit(t *testing.T) {
 }
 
 func TestEvalArithmetic(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"a": "10", "b": "3"}
 
@@ -128,6 +133,7 @@ func TestEvalArithmetic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v, err := eval.Eval(tt.expr, row)
 			if err != nil {
 				t.Fatalf("Eval error: %v", err)
@@ -143,6 +149,7 @@ func TestEvalArithmetic(t *testing.T) {
 }
 
 func TestEvalDivisionByZero(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"a": "10"}
 
@@ -159,6 +166,7 @@ func TestEvalDivisionByZero(t *testing.T) {
 }
 
 func TestEvalArithMissingField(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"a": "10"}
 
@@ -175,6 +183,7 @@ func TestEvalArithMissingField(t *testing.T) {
 }
 
 func TestEvalArithNonNumeric(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"a": "10", "b": "hello"}
 
@@ -188,6 +197,7 @@ func TestEvalArithNonNumeric(t *testing.T) {
 }
 
 func TestEvalToNumber(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 
 	tests := []struct {
@@ -206,6 +216,7 @@ func TestEvalToNumber(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v, err := eval.Eval(expr, tt.row)
 			if err != nil {
 				t.Fatalf("Eval error: %v", err)
@@ -221,6 +232,7 @@ func TestEvalToNumber(t *testing.T) {
 }
 
 func TestEvalToNumberArgError(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 
 	// toNumber with wrong number of args.
@@ -238,6 +250,7 @@ func TestEvalToNumberArgError(t *testing.T) {
 }
 
 func TestEvalUnknownFunction(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	_, err := eval.Eval(&FuncCall{Name: "bogus", Args: []PipeExpr{}}, Row{})
 	if err == nil {
@@ -246,6 +259,7 @@ func TestEvalUnknownFunction(t *testing.T) {
 }
 
 func TestEvalNestedFuncAndArith(t *testing.T) {
+	t.Parallel()
 	// avg(toNumber(response_time) / 1000) — just the inner expression part.
 	eval := NewEvaluator()
 	row := Row{"response_time": "1500"}
@@ -266,6 +280,7 @@ func TestEvalNestedFuncAndArith(t *testing.T) {
 }
 
 func TestEvalCustomFunc(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	eval.RegisterFunc("double", func(args []Value) (Value, error) {
 		if len(args) != 1 {
@@ -288,6 +303,7 @@ func TestEvalCustomFunc(t *testing.T) {
 }
 
 func TestEvalValueToNum(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		val  Value
@@ -302,6 +318,7 @@ func TestEvalValueToNum(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := tt.val.ToNum()
 			if ok != tt.ok {
 				t.Errorf("ok = %v, want %v", ok, tt.ok)
@@ -314,6 +331,7 @@ func TestEvalValueToNum(t *testing.T) {
 }
 
 func TestEvalModulo(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"a": "10", "b": "3"}
 
@@ -330,6 +348,7 @@ func TestEvalModulo(t *testing.T) {
 }
 
 func TestEvalModuloByZero(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"a": "10"}
 
@@ -346,6 +365,7 @@ func TestEvalModuloByZero(t *testing.T) {
 }
 
 func TestEvalUnaryNegation(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"x": "42"}
 
@@ -359,6 +379,7 @@ func TestEvalUnaryNegation(t *testing.T) {
 }
 
 func TestEvalUnaryNegationMissing(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	v, err := eval.Eval(&UnaryExpr{Op: ArithSub, Expr: &FieldRef{Name: "missing"}}, Row{})
 	if err != nil {
@@ -370,6 +391,7 @@ func TestEvalUnaryNegationMissing(t *testing.T) {
 }
 
 func TestEvalScalarFunctions(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 
 	tests := []struct {
@@ -422,6 +444,7 @@ func TestEvalScalarFunctions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			v, err := eval.Eval(tt.expr, tt.row)
 			if err != nil {
 				t.Fatalf("Eval error: %v", err)
@@ -447,6 +470,7 @@ func TestEvalScalarFunctions(t *testing.T) {
 }
 
 func TestEvalMissingPropagation(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 
 	// All 1-arg functions should propagate missing.
@@ -456,6 +480,7 @@ func TestEvalMissingPropagation(t *testing.T) {
 			continue // these return a value even for missing
 		}
 		t.Run(fn, func(t *testing.T) {
+			t.Parallel()
 			v, err := eval.Eval(&FuncCall{Name: fn, Args: []PipeExpr{&FieldRef{Name: "missing"}}}, Row{})
 			if err != nil {
 				t.Fatalf("Eval error: %v", err)
@@ -469,6 +494,7 @@ func TestEvalMissingPropagation(t *testing.T) {
 
 // Ensure the evaluator works with parsed expressions from the pipeline parser.
 func TestEvalWithParsedExpressions(t *testing.T) {
+	t.Parallel()
 	eval := NewEvaluator()
 	row := Row{"duration": "1500", "status": "200"}
 

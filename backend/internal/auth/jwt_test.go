@@ -6,6 +6,7 @@ import (
 )
 
 func TestIssueAndVerify(t *testing.T) {
+	t.Parallel()
 	ts := NewTokenService([]byte("test-secret-key-for-testing-only"), 7*24*time.Hour)
 
 	token, expiresAt, err := ts.Issue("user-001", "alice", "admin")
@@ -38,6 +39,7 @@ func TestIssueAndVerify(t *testing.T) {
 }
 
 func TestVerifyExpiredToken(t *testing.T) {
+	t.Parallel()
 	// Token that expired 1 hour ago.
 	ts := NewTokenService([]byte("test-secret"), -1*time.Hour)
 
@@ -53,6 +55,7 @@ func TestVerifyExpiredToken(t *testing.T) {
 }
 
 func TestVerifyWrongSecret(t *testing.T) {
+	t.Parallel()
 	ts1 := NewTokenService([]byte("secret-one"), 7*24*time.Hour)
 	ts2 := NewTokenService([]byte("secret-two"), 7*24*time.Hour)
 
@@ -68,6 +71,7 @@ func TestVerifyWrongSecret(t *testing.T) {
 }
 
 func TestVerifyInvalidToken(t *testing.T) {
+	t.Parallel()
 	ts := NewTokenService([]byte("secret"), 7*24*time.Hour)
 
 	_, err := ts.Verify("not-a-valid-token")

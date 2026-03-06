@@ -18,6 +18,7 @@ func newTestPools() *AttributePools {
 }
 
 func TestPlainTextFormat_Generate(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewPlainTextFormat(pools)
 	rng := newTestRng()
@@ -40,6 +41,7 @@ func TestPlainTextFormat_Generate(t *testing.T) {
 }
 
 func TestKeyValueFormat_Generate(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewKeyValueFormat(pools)
 	rng := newTestRng()
@@ -73,6 +75,7 @@ func TestKeyValueFormat_Generate(t *testing.T) {
 }
 
 func TestJSONFormat_Generate(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewJSONFormat(pools)
 	rng := newTestRng()
@@ -111,6 +114,7 @@ func TestJSONFormat_Generate(t *testing.T) {
 }
 
 func TestAccessLogFormat_Generate(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewAccessLogFormat(pools)
 	rng := newTestRng()
@@ -145,6 +149,7 @@ func TestAccessLogFormat_Generate(t *testing.T) {
 }
 
 func TestSyslogFormat_Generate(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewSyslogFormat(pools)
 	rng := newTestRng()
@@ -176,6 +181,7 @@ func TestSyslogFormat_Generate(t *testing.T) {
 }
 
 func TestWeirdFormat_Generate(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewWeirdFormat(pools)
 	rng := newTestRng()
@@ -198,6 +204,7 @@ func TestWeirdFormat_Generate(t *testing.T) {
 }
 
 func TestAttributePools_HostCount(t *testing.T) {
+	t.Parallel()
 	pools := NewAttributePools(5, 3)
 	if len(pools.Hosts) != 5 {
 		t.Errorf("expected 5 hosts, got %d", len(pools.Hosts))
@@ -208,6 +215,7 @@ func TestAttributePools_HostCount(t *testing.T) {
 }
 
 func TestAttributePools_HostNames(t *testing.T) {
+	t.Parallel()
 	pools := NewAttributePools(3, 2)
 	expected := []string{"host-1", "host-2", "host-3"}
 	for i, want := range expected {
@@ -218,6 +226,7 @@ func TestAttributePools_HostNames(t *testing.T) {
 }
 
 func TestFormat_AttributeVariation(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewKeyValueFormat(pools)
 	rng := newTestRng()
@@ -242,6 +251,7 @@ func TestFormat_AttributeVariation(t *testing.T) {
 }
 
 func TestFormat_SameAttrsStableSourceID(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewPlainTextFormat(pools)
 
@@ -264,6 +274,7 @@ func TestFormat_SameAttrsStableSourceID(t *testing.T) {
 // Additional format-specific tests
 
 func TestJSONFormat_AllVariants(t *testing.T) {
+	t.Parallel()
 	// Test that all JSON format variants (HTTP metrics, error details, business event,
 	// system metrics, distributed tracing) can be generated without panicking.
 	pools := newTestPools()
@@ -306,6 +317,7 @@ func TestJSONFormat_AllVariants(t *testing.T) {
 }
 
 func TestKeyValueFormat_AllVariants(t *testing.T) {
+	t.Parallel()
 	// Test that all KV format variants can be generated.
 	pools := newTestPools()
 	format := NewKeyValueFormat(pools)
@@ -338,6 +350,7 @@ func TestKeyValueFormat_AllVariants(t *testing.T) {
 }
 
 func TestSyslogFormat_PriorityRange(t *testing.T) {
+	t.Parallel()
 	// Test that syslog messages have valid priority values (0-191).
 	pools := newTestPools()
 	format := NewSyslogFormat(pools)
@@ -374,6 +387,7 @@ func TestSyslogFormat_PriorityRange(t *testing.T) {
 }
 
 func TestAccessLogFormat_CombinedFormat(t *testing.T) {
+	t.Parallel()
 	// Verify access log follows combined log format structure.
 	pools := newTestPools()
 	format := NewAccessLogFormat(pools)
@@ -410,6 +424,7 @@ func TestAccessLogFormat_CombinedFormat(t *testing.T) {
 }
 
 func TestMultirecordFormat_GenerateMulti(t *testing.T) {
+	t.Parallel()
 	pools := newTestPools()
 	format := NewMultirecordFormat(pools)
 	rng := newTestRng()
@@ -445,6 +460,7 @@ func TestMultirecordFormat_GenerateMulti(t *testing.T) {
 }
 
 func TestWeirdFormat_Robustness(t *testing.T) {
+	t.Parallel()
 	// Weird format should always produce valid attrs and not panic.
 	pools := newTestPools()
 	format := NewWeirdFormat(pools)
