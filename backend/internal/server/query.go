@@ -103,6 +103,12 @@ func (s *QueryServer) searchPipeline(
 	pipeline *querylang.Pipeline,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
+	// Non-distributive cap (head/tail/slice) before aggregation: gather raw
+	// records from all nodes, then run the pipeline on the coordinator.
+	if query.PipelineNeedsGlobalRecords(pipeline) {
+		return s.searchPipelineGlobal(ctx, eng, q, pipeline, stream)
+	}
+
 	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
 		q.Limit = int(s.maxResultCount)
 	}
@@ -122,6 +128,53 @@ func (s *QueryServer) searchPipeline(
 	}
 	// Non-aggregating but needs full materialization (sort/tail/slice):
 	// stream all records.
+	batch := make([]*apiv1.Record, 0, 100)
+	for _, rec := range result.Records {
+		batch = append(batch, recordToProto(rec))
+		if len(batch) >= 100 {
+			if err := stream.Send(&apiv1.SearchResponse{Records: batch, HasMore: true}); err != nil {
+				return err
+			}
+			batch = batch[:0]
+		}
+	}
+	return stream.Send(&apiv1.SearchResponse{Records: batch})
+}
+
+// searchPipelineGlobal handles pipelines where non-distributive cap operators
+// (head, tail, slice) precede an aggregation (stats/timechart). Instead of
+// fanning out the full pipeline to each remote node (which would apply the cap
+// independently per-node), it gathers raw records from all remote nodes, then
+// runs the entire pipeline on the coordinator.
+func (s *QueryServer) searchPipelineGlobal(
+	ctx context.Context,
+	eng *query.Engine,
+	q query.Query,
+	pipeline *querylang.Pipeline,
+	stream *connect.ServerStream[apiv1.SearchResponse],
+) error {
+	if s.maxResultCount > 0 && (q.Limit == 0 || int64(q.Limit) > s.maxResultCount) {
+		q.Limit = int(s.maxResultCount)
+	}
+
+	// Collect raw records from remote nodes (no pipeline — just the base query).
+	remote := s.collectRemote(ctx, q)
+	var extraRecords []chunk.Record
+	for _, r := range remote {
+		extraRecords = append(extraRecords, protoToChunkRecord(r))
+	}
+
+	result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, extraRecords)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+
+	if result.Table != nil {
+		return stream.Send(&apiv1.SearchResponse{
+			TableResult: tableResultToProto(result.Table, pipeline),
+		})
+	}
+
 	batch := make([]*apiv1.Record, 0, 100)
 	for _, rec := range result.Records {
 		batch = append(batch, recordToProto(rec))
@@ -230,6 +283,47 @@ func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 	return rec
 }
 
+// emitRemoteRecord writes a remote proto record to the batcher, routing it
+// through the transform when present. Returns (done, err).
+func emitRemoteRecord(ctx context.Context, sb *streamBatcher, r *apiv1.Record, transform *query.RecordTransform) (bool, error) {
+	if transform != nil {
+		return emitRecord(ctx, sb, protoToChunkRecord(r), transform)
+	}
+	return false, sb.add(r)
+}
+
+// drainRemoteUntil emits remote records (starting at index ri) whose timestamps
+// sort before cutoff according to isBefore. When cutoff is zero, drains all
+// remaining records. Returns the updated index and whether the transform is done.
+func drainRemoteUntil(
+	ctx context.Context,
+	sb *streamBatcher,
+	remote []*apiv1.Record,
+	ri int,
+	cutoff time.Time,
+	isBefore func(a, b time.Time) bool,
+	dedup *ingestDedup,
+	transform *query.RecordTransform,
+) (int, bool, error) {
+	for ri < len(remote) {
+		ts := remote[ri].GetIngestTs().AsTime()
+		if !cutoff.IsZero() && !isBefore(ts, cutoff) {
+			break
+		}
+		if !dedup.seen(ts, remote[ri].GetAttrs()["ingester_id"]) {
+			done, err := emitRemoteRecord(ctx, sb, remote[ri], transform)
+			if err != nil {
+				return ri, false, err
+			}
+			if done {
+				return ri, true, nil
+			}
+		}
+		ri++
+	}
+	return ri, false, nil
+}
+
 // mergeAndStream interleaves the local engine iterator with pre-fetched remote
 // results in timestamp order, deduplicates by (ingest_ts, ingester_id), applies
 // optional per-record transforms, and streams batches to the client.
@@ -244,7 +338,6 @@ func (s *QueryServer) mergeAndStream(
 	transform *query.RecordTransform,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
-	ri := 0
 	isBefore := func(a, b time.Time) bool {
 		if reverse {
 			return a.After(b)
@@ -254,27 +347,27 @@ func (s *QueryServer) mergeAndStream(
 
 	sb := newStreamBatcher(stream, 100)
 	var dedup ingestDedup
+	ri := 0
 
 	for rec, err := range localIter {
 		if err != nil {
 			return mapSearchError(err)
 		}
 
-		// Drain remote records that sort before this local record.
-		for ri < len(remote) && isBefore(remote[ri].GetIngestTs().AsTime(), rec.IngestTS) {
-			if !dedup.seen(remote[ri].GetIngestTs().AsTime(), remote[ri].GetAttrs()["ingester_id"]) {
-				if err := sb.add(remote[ri]); err != nil {
-					return err
-				}
-			}
-			ri++
+		var done bool
+		ri, done, err = drainRemoteUntil(ctx, sb, remote, ri, rec.IngestTS, isBefore, &dedup, transform)
+		if err != nil {
+			return err
+		}
+		if done {
+			break
 		}
 
 		if dedup.seen(rec.IngestTS, rec.Attrs["ingester_id"]) {
 			continue
 		}
 
-		done, err := emitRecord(ctx, sb, rec, transform)
+		done, err = emitRecord(ctx, sb, rec, transform)
 		if err != nil {
 			return err
 		}
@@ -283,8 +376,8 @@ func (s *QueryServer) mergeAndStream(
 		}
 	}
 
-	// Drain remaining remote records.
-	if err := drainRemote(sb, remote[ri:], &dedup); err != nil {
+	// Drain remaining remote records (zero cutoff = drain all).
+	if _, _, err := drainRemoteUntil(ctx, sb, remote, ri, time.Time{}, isBefore, &dedup, transform); err != nil {
 		return err
 	}
 
@@ -308,7 +401,7 @@ func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transf
 	if transform != nil {
 		rec, ok := transform.Apply(ctx, rec)
 		if !ok {
-			return false, nil
+			return transform.Done(), nil
 		}
 		if err := sb.add(recordToProto(rec)); err != nil {
 			return false, err
@@ -318,18 +411,6 @@ func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transf
 	return false, sb.add(recordToProto(rec))
 }
 
-// drainRemote writes remaining remote records to the batcher, skipping
-// duplicates already seen in the dedup tracker.
-func drainRemote(sb *streamBatcher, records []*apiv1.Record, dedup *ingestDedup) error {
-	for _, r := range records {
-		if !dedup.seen(r.GetIngestTs().AsTime(), r.GetAttrs()["ingester_id"]) {
-			if err := sb.add(r); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
 
 // streamBatcher accumulates records and flushes them to a server stream
 // in fixed-size batches.
@@ -1380,6 +1461,31 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 		Truncated:  result.Truncated,
 		ResultType: resultType,
 	}
+}
+
+// protoToChunkRecord converts a proto Record back to the internal chunk.Record.
+// Used when remote records need to flow through the local pipeline (e.g. head/tail/slice
+// before stats requires gathering all raw records globally).
+func protoToChunkRecord(r *apiv1.Record) chunk.Record {
+	rec := chunk.Record{
+		Raw:   r.Raw,
+		Attrs: r.GetAttrs(),
+	}
+	if t := r.GetIngestTs(); t != nil {
+		rec.IngestTS = t.AsTime()
+	}
+	if t := r.GetWriteTs(); t != nil {
+		rec.WriteTS = t.AsTime()
+	}
+	if t := r.GetSourceTs(); t != nil {
+		rec.SourceTS = t.AsTime()
+	}
+	if ref := r.GetRef(); ref != nil {
+		rec.VaultID, _ = uuid.Parse(ref.VaultId)
+		rec.Ref.ChunkID, _ = chunk.ParseChunkID(ref.ChunkId)
+		rec.Ref.Pos = ref.Pos
+	}
+	return rec
 }
 
 // recordToProto converts an internal Record to the proto type.

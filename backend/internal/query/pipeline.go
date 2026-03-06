@@ -195,6 +195,113 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 	return headN
 }
 
+// PipelineNeedsGlobalRecords reports whether a pipeline query must gather raw
+// records from all cluster nodes before running the pipeline on the coordinator.
+// This is true when a non-distributive cap operator (head, tail, slice) appears
+// in the pre-aggregation phase AND the pipeline includes an aggregation
+// (stats or timechart). In that case, fanning out the full pipeline to each node
+// would apply the cap independently per-node, producing incorrect aggregates.
+func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
+	ph, err := classifyPipes(pipeline)
+	if err != nil {
+		return false
+	}
+	if ph.statsOp == nil && ph.timechartOp == nil {
+		return false
+	}
+	return hasExplicitCap(ph.preOps)
+}
+
+// RunPipelineOnRecords executes a pipeline query where extra records (typically
+// from remote cluster nodes) are merged with the local search results before
+// pipeline operators run. This enables correct head/tail/slice + stats on a
+// coordinator: gather raw records globally, then apply the pipeline once.
+func (e *Engine) RunPipelineOnRecords(ctx context.Context, q Query, pipeline *querylang.Pipeline, extraRecords []chunk.Record) (*PipelineResult, error) {
+	ph, err := classifyPipes(pipeline)
+	if err != nil {
+		return nil, err
+	}
+
+	// Timechart with extra records is not supported yet (would need bucket
+	// merging). Fall back to local-only for now.
+	if ph.timechartOp != nil {
+		return e.runTimechartPipeline(ctx, q, ph)
+	}
+
+	// Clear incoming limit — pipeline operators control their own caps.
+	origLimit := q.Limit
+	q.Limit = 0
+	if ph.statsOp == nil {
+		if n := headOnlyLimit(ph.preOps); n > 0 {
+			q.Limit = n
+		}
+	}
+
+	iter, _ := e.Search(ctx, q, nil)
+	var records []chunk.Record
+	for rec, err := range iter {
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, rec.Copy())
+	}
+
+	// Merge in extra (remote) records.
+	records = append(records, extraRecords...)
+
+	// Sort merged records by IngestTS to match the expected stream order.
+	reverse := q.Reverse()
+	slices.SortStableFunc(records, func(a, b chunk.Record) int {
+		if reverse {
+			return b.IngestTS.Compare(a.IngestTS)
+		}
+		return a.IngestTS.Compare(b.IngestTS)
+	})
+
+	// Materialize fields and apply pre-stats ops.
+	materializeFields(records)
+	eval := querylang.NewEvaluator()
+	for _, op := range ph.preOps {
+		switch o := op.(type) {
+		case *querylang.WhereOp:
+			records = applyRecordWhere(records, o)
+		case *querylang.EvalOp:
+			records, err = applyRecordEval(records, o, eval)
+		case *querylang.SortOp:
+			applyRecordSort(records, o)
+		case *querylang.HeadOp:
+			records = applyRecordHead(records, o)
+		case *querylang.TailOp:
+			records = applyRecordTail(records, o)
+		case *querylang.SliceOp:
+			records = applyRecordSlice(records, o)
+		case *querylang.RenameOp:
+			applyRecordRename(records, o)
+		case *querylang.FieldsOp:
+			applyRecordFields(records, o)
+		case *querylang.LookupOp:
+			applyRecordLookup(ctx, records, o, e.lookupResolver)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if ph.statsOp == nil {
+		if ph.hasRaw {
+			return &PipelineResult{Table: recordsToTable(records)}, nil
+		}
+		if len(ph.preOps) > 0 && origLimit > 0 && !hasExplicitCap(ph.preOps) {
+			if len(records) > origLimit {
+				records = records[:origLimit]
+			}
+		}
+		return &PipelineResult{Records: records}, nil
+	}
+
+	return e.runAggregation(ctx, records, ph, q)
+}
+
 // recordsToTable converts a slice of records into a flat TableResult.
 // Columns are: _write_ts, _ingest_ts, _source_ts, then all field keys
 // (extracted KV/JSON + attributes, sorted), then _raw.

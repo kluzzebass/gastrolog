@@ -233,3 +233,149 @@ func TestRunPipelineIgnoresIncomingLimit(t *testing.T) {
 		t.Errorf("stats count = %d, want 50 (incoming limit should be ignored)", count)
 	}
 }
+
+func TestPipelineNeedsGlobalRecords(t *testing.T) {
+	tests := []struct {
+		name string
+		ops  []querylang.PipeOp
+		want bool
+	}{
+		{
+			name: "head before stats",
+			ops: []querylang.PipeOp{
+				&querylang.HeadOp{N: 10},
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{{Func: "count"}}},
+			},
+			want: true,
+		},
+		{
+			name: "tail before stats",
+			ops: []querylang.PipeOp{
+				&querylang.TailOp{N: 10},
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{{Func: "count"}}},
+			},
+			want: true,
+		},
+		{
+			name: "slice before stats",
+			ops: []querylang.PipeOp{
+				&querylang.SliceOp{Start: 0, End: 10},
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{{Func: "count"}}},
+			},
+			want: true,
+		},
+		{
+			name: "stats alone",
+			ops: []querylang.PipeOp{
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{{Func: "count"}}},
+			},
+			want: false,
+		},
+		{
+			name: "head alone",
+			ops: []querylang.PipeOp{
+				&querylang.HeadOp{N: 10},
+			},
+			want: false,
+		},
+		{
+			name: "where before stats",
+			ops: []querylang.PipeOp{
+				&querylang.WhereOp{},
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{{Func: "count"}}},
+			},
+			want: false,
+		},
+		{
+			name: "head before timechart",
+			ops: []querylang.PipeOp{
+				&querylang.HeadOp{N: 10},
+				&querylang.TimechartOp{N: 10},
+			},
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pipeline := &querylang.Pipeline{Pipes: tc.ops}
+			got := query.PipelineNeedsGlobalRecords(pipeline)
+			if got != tc.want {
+				t.Errorf("PipelineNeedsGlobalRecords = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRunPipelineOnRecords(t *testing.T) {
+	// Set up a single-vault engine with 20 local records.
+	vaultID := uuid.Must(uuid.NewV7())
+	s := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+	})
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 20 {
+		ts := t0.Add(time.Duration(i) * time.Minute)
+		s.CM.AppendPreserved(chunk.Record{
+			WriteTS:  ts,
+			IngestTS: ts,
+			Raw:      fmt.Appendf(nil, "local-%d", i),
+		})
+	}
+	s.CM.Seal()
+
+	reg := &testRegistry{
+		vaults: map[uuid.UUID]struct {
+			cm chunk.ChunkManager
+			im index.IndexManager
+		}{
+			vaultID: {s.CM, s.IM},
+		},
+	}
+	eng := query.NewWithRegistry(reg, nil)
+
+	// Create 30 "remote" records interleaved with local ones.
+	var extra []chunk.Record
+	for i := range 30 {
+		ts := t0.Add(time.Duration(i)*time.Minute + 30*time.Second)
+		extra = append(extra, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "remote-%d", i),
+		})
+	}
+
+	// Pipeline: | head 10 | stats count — should count exactly 10.
+	pipeline := &querylang.Pipeline{
+		Pipes: []querylang.PipeOp{
+			&querylang.HeadOp{N: 10},
+			&querylang.StatsOp{Aggs: []querylang.AggExpr{{Func: "count"}}},
+		},
+	}
+
+	q := query.Query{
+		Start: t0,
+		End:   t0.Add(60 * time.Minute),
+	}
+
+	result, err := eng.RunPipelineOnRecords(context.Background(), q, pipeline, extra)
+	if err != nil {
+		t.Fatalf("RunPipelineOnRecords: %v", err)
+	}
+	if result.Table == nil {
+		t.Fatal("expected table result")
+	}
+	if len(result.Table.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(result.Table.Rows))
+	}
+
+	countVal := result.Table.Rows[0][0]
+	count, err := strconv.Atoi(countVal)
+	if err != nil {
+		t.Fatalf("parsing count %q: %v", countVal, err)
+	}
+	if count != 10 {
+		t.Errorf("stats count = %d, want 10 (head should cap merged records)", count)
+	}
+}

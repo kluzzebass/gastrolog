@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -20,8 +19,12 @@ import (
 	"github.com/google/uuid"
 )
 
-func TestQueryServerSearch(t *testing.T) {
-	// Create orchestrator with a vault
+// newQueryTestSetup creates an orchestrator with a memory vault containing
+// numRecords records, wires up a QueryServiceClient via embeddedTransport,
+// and returns the client for streaming RPCs.
+func newQueryTestSetup(t *testing.T, numRecords int) gastrologv1connect.QueryServiceClient {
+	t.Helper()
+
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -31,9 +34,8 @@ func TestQueryServerSearch(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
-	// Add some records
 	t0 := time.Now()
-	for i := range 5 {
+	for i := range numRecords {
 		s.CM.Append(chunk.Record{
 			IngestTS: t0.Add(time.Duration(i) * time.Second),
 			Raw:      []byte("test-record"),
@@ -43,22 +45,18 @@ func TestQueryServerSearch(t *testing.T) {
 	defaultID := uuid.Must(uuid.NewV7())
 	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 
-	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
 
-	// Create test server
-	ts := httptest.NewServer(handler)
-	defer ts.Close()
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+	return gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
+}
 
-	// Create client
-	client := gastrologv1connect.NewQueryServiceClient(
-		http.DefaultClient,
-		ts.URL,
-	)
+func TestQueryServerSearch(t *testing.T) {
+	client := newQueryTestSetup(t, 5)
 
-	// Run search
-	t.Log("Running search...")
 	stream, err := client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
 		Query: &gastrologv1.Query{},
 	}))
@@ -70,14 +68,227 @@ func TestQueryServerSearch(t *testing.T) {
 	for stream.Receive() {
 		msg := stream.Msg()
 		count += len(msg.Records)
-		t.Logf("Received batch of %d records", len(msg.Records))
 	}
 	if err := stream.Err(); err != nil && err != io.EOF {
 		t.Fatalf("Stream error: %v", err)
 	}
 
-	t.Logf("Total: %d records", count)
 	if count != 5 {
 		t.Errorf("expected 5 records, got %d", count)
+	}
+}
+
+func TestSearchInvalidQuery(t *testing.T) {
+	client := newQueryTestSetup(t, 0)
+
+	// "start=not-a-time" will fail in applyDirective → parseTime.
+	stream, err := client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: "start=not-a-time"},
+	}))
+	if err != nil {
+		// Connect may surface the error on initial call for server-stream RPCs.
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+		}
+		return
+	}
+	// Or it may surface on the stream.
+	for stream.Receive() {
+	}
+	if err := stream.Err(); err == nil {
+		t.Fatal("expected error for invalid query expression")
+	} else if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestSearchInvalidResumeToken(t *testing.T) {
+	client := newQueryTestSetup(t, 0)
+
+	// Corrupt bytes that aren't a valid protobuf ResumeToken.
+	stream, err := client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query:       &gastrologv1.Query{},
+		ResumeToken: []byte{0xFF, 0xFE, 0xFD, 0x01, 0x02, 0x03},
+	}))
+	if err != nil {
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+		}
+		return
+	}
+	for stream.Receive() {
+	}
+	if err := stream.Err(); err == nil {
+		t.Fatal("expected error for corrupt resume token")
+	} else if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestSearchContextCancellation(t *testing.T) {
+	client := newQueryTestSetup(t, 100)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	stream, err := client.Search(ctx, connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{},
+	}))
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	// Receive one batch, then cancel.
+	if stream.Receive() {
+		cancel()
+	} else {
+		cancel()
+		t.Skip("no records received before cancel")
+	}
+
+	// Drain remaining — should terminate cleanly.
+	for stream.Receive() {
+	}
+	// Either CodeCanceled or nil (clean exit) is acceptable.
+	if err := stream.Err(); err != nil {
+		code := connect.CodeOf(err)
+		if code != connect.CodeCanceled && code != connect.CodeUnknown {
+			t.Fatalf("unexpected error code %v: %v", code, err)
+		}
+	}
+}
+
+func TestFollowInvalidQuery(t *testing.T) {
+	client := newQueryTestSetup(t, 0)
+
+	stream, err := client.Follow(context.Background(), connect.NewRequest(&gastrologv1.FollowRequest{
+		Query: &gastrologv1.Query{Expression: "start=not-a-time"},
+	}))
+	if err != nil {
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+		}
+		return
+	}
+	for stream.Receive() {
+	}
+	if err := stream.Err(); err == nil {
+		t.Fatal("expected error for invalid query expression")
+	} else if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestFollowRejectsAggregatingOps(t *testing.T) {
+	client := newQueryTestSetup(t, 0)
+
+	cases := []struct {
+		name string
+		expr string
+	}{
+		{"stats", "* | stats count"},
+		{"sort", "* | sort timestamp"},
+		{"tail", "* | tail 10"},
+		{"slice", "* | slice 0 10"},
+		{"timechart", "* | timechart count span=1h"},
+		{"barchart", "* | barchart count by source"},
+		{"donut", "* | donut count by source"},
+		{"map", "* | map count by source"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			stream, err := client.Follow(ctx, connect.NewRequest(&gastrologv1.FollowRequest{
+				Query: &gastrologv1.Query{Expression: tc.expr},
+			}))
+			if err != nil {
+				if connect.CodeOf(err) != connect.CodeInvalidArgument {
+					t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+				}
+				return
+			}
+			for stream.Receive() {
+			}
+			if err := stream.Err(); err == nil {
+				t.Fatalf("expected error for %s in follow mode", tc.name)
+			} else if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+			}
+		})
+	}
+}
+
+func TestSearchHeadLimitsResults(t *testing.T) {
+	client := newQueryTestSetup(t, 100)
+
+	// Exact reproduction of what the frontend sends: proto-level limit=100
+	// (page size) with a | head 10 pipeline in the expression.
+	stream, err := client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{
+			Expression: "reverse=true | head 10",
+			Limit:      100,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	count := 0
+	for stream.Receive() {
+		count += len(stream.Msg().Records)
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		t.Fatalf("Stream error: %v", err)
+	}
+
+	if count != 10 {
+		t.Errorf("expected 10 records from | head 10, got %d", count)
+	}
+}
+
+func TestSearchHeadBeforeStats(t *testing.T) {
+	client := newQueryTestSetup(t, 100)
+
+	// Pipeline: | head 10 | stats count — head should truncate before aggregation.
+	stream, err := client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{
+			Expression: "reverse=true | head 10 | stats count",
+			Limit:      100,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("Search failed: %v", err)
+	}
+
+	var countVal string
+	for stream.Receive() {
+		msg := stream.Msg()
+		if msg.TableResult != nil && len(msg.TableResult.Rows) > 0 {
+			row := msg.TableResult.Rows[0]
+			if len(row.Values) > 0 {
+				countVal = row.Values[0]
+			}
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		t.Fatalf("Stream error: %v", err)
+	}
+	if countVal != "10" {
+		t.Errorf("head 10 | stats count = %q, want \"10\"", countVal)
+	}
+}
+
+func TestExplainInvalidQuery(t *testing.T) {
+	client := newQueryTestSetup(t, 0)
+
+	_, err := client.Explain(context.Background(), connect.NewRequest(&gastrologv1.ExplainRequest{
+		Query: &gastrologv1.Query{Expression: "start=not-a-time"},
+	}))
+	if err == nil {
+		t.Fatal("expected error for invalid query expression")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
 	}
 }
