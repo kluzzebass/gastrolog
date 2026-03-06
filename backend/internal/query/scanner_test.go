@@ -608,3 +608,88 @@ func TestScannerBuilderFilters(t *testing.T) {
 		t.Errorf("expected 2 filters, got %d", len(b.filters))
 	}
 }
+
+// ─── Benchmarks ──────────────────────────────────────────────────────────────
+
+// makePositions generates a sorted slice of n positions with the given step.
+func makePositions(n int, start, step uint64) []uint64 {
+	out := make([]uint64, n)
+	for i := range out {
+		out[i] = start + uint64(i)*step
+	}
+	return out
+}
+
+// BenchmarkIntersectPositions_Dense benchmarks intersection where ~50% of elements overlap.
+func BenchmarkIntersectPositions_Dense(b *testing.B) {
+	a := makePositions(10000, 0, 2)  // 0, 2, 4, ..., 19998
+	bSlice := makePositions(10000, 0, 3) // 0, 3, 6, ..., 29997
+	for b.Loop() {
+		_ = intersectPositions(a, bSlice)
+	}
+}
+
+// BenchmarkIntersectPositions_Sparse benchmarks intersection with minimal overlap.
+func BenchmarkIntersectPositions_Sparse(b *testing.B) {
+	a := makePositions(10000, 0, 2)      // even numbers
+	bSlice := makePositions(10000, 1, 2) // odd numbers — zero overlap
+	for b.Loop() {
+		_ = intersectPositions(a, bSlice)
+	}
+}
+
+// BenchmarkUnionPositions benchmarks union of two large position lists.
+func BenchmarkUnionPositions(b *testing.B) {
+	a := makePositions(10000, 0, 3) // 0, 3, 6, ...
+	bSlice := makePositions(10000, 0, 5) // 0, 5, 10, ...
+	for b.Loop() {
+		_ = unionPositions(a, bSlice)
+	}
+}
+
+// BenchmarkPrunePositions benchmarks binary-search-based position pruning.
+func BenchmarkPrunePositions(b *testing.B) {
+	positions := makePositions(10000, 0, 1)
+	for b.Loop() {
+		_ = prunePositions(positions, 5000)
+	}
+}
+
+// BenchmarkMatchesTokens_Indexable benchmarks token matching for indexable tokens.
+func BenchmarkMatchesTokens_Indexable(b *testing.B) {
+	raw := []byte(`2024-01-15T10:22:15.123Z ERROR [auth-service] Authentication failed for user admin from host db-primary-01 timeout reached after retry`)
+	tokens := []string{"error", "timeout", "retry"}
+	for b.Loop() {
+		_ = matchesTokens(raw, tokens)
+	}
+}
+
+// BenchmarkMatchesTokens_NonIndexable benchmarks matching tokens that require substring fallback.
+func BenchmarkMatchesTokens_NonIndexable(b *testing.B) {
+	raw := []byte(`2024-01-15T10:22:15.123Z ERROR request from 192.168.1.100 to server.example.com failed`)
+	tokens := []string{"192.168.1.100", "server.example.com"}
+	for b.Loop() {
+		_ = matchesTokens(raw, tokens)
+	}
+}
+
+// BenchmarkMatchesSingleToken benchmarks the single-token fast path.
+func BenchmarkMatchesSingleToken(b *testing.B) {
+	raw := []byte(`level=ERROR msg="connection refused" host=db-primary-01 port=5432 retry=3`)
+	for b.Loop() {
+		_ = matchesSingleToken(raw, "error")
+	}
+}
+
+// BenchmarkEvalPredicate benchmarks expression predicate evaluation.
+func BenchmarkEvalPredicate(b *testing.B) {
+	expr, err := querylang.Parse("len(message) > 5")
+	if err != nil {
+		b.Fatal(err)
+	}
+	pred := expr.(*querylang.PredicateExpr)
+	rec := chunk.Record{Attrs: chunk.Attributes{"message": "hello world authentication failed"}}
+	for b.Loop() {
+		_ = evalPredicate(pred, rec)
+	}
+}

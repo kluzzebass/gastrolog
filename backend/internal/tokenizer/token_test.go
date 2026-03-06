@@ -399,3 +399,70 @@ func TestIterTokensEarlyStop(t *testing.T) {
 		t.Errorf("IterTokens early stop: got %v, want %v", tokens, want)
 	}
 }
+
+// ─── Benchmarks ──────────────────────────────────────────────────────────────
+
+// BenchmarkIterTokens_Short measures tokenization of a short structured log line.
+func BenchmarkIterTokens_Short(b *testing.B) {
+	data := []byte(`level=ERROR msg="connection refused" host=db-primary-01 port=5432 retry=3`)
+	buf := make([]byte, 0, DefaultMaxTokenLen)
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		IterTokens(data, buf, DefaultMaxTokenLen, func([]byte) bool { return true })
+	}
+}
+
+// BenchmarkIterTokens_Long measures tokenization of a 1 KB JSON log line.
+func BenchmarkIterTokens_Long(b *testing.B) {
+	data := []byte(`{"timestamp":"2024-01-15T10:22:15.123Z","level":"ERROR","logger":"com.example.auth.UserService","thread":"http-nio-8080-exec-5","message":"Authentication failed for user admin@example.com from 192.168.1.100","exception":"org.springframework.security.authentication.BadCredentialsException: Bad credentials","context":{"request_id":"019c0bc0-d19f-77db-bbdf-4c36766e13ca","session_id":"abc-def-123","user_agent":"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36","method":"POST","path":"/api/v1/auth/login","status":401,"duration_ms":42,"remote_ip":"192.168.1.100","server":"app-server-03","datacenter":"us-east-1","trace_id":"4bf92f3577b34da6a3ce929d0e0e4736","span_id":"00f067aa0ba902b7"},"tags":["security","auth","failure"]}`)
+	buf := make([]byte, 0, DefaultMaxTokenLen)
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		IterTokens(data, buf, DefaultMaxTokenLen, func([]byte) bool { return true })
+	}
+}
+
+// BenchmarkTokens allocates and returns a []string (the non-streaming API).
+func BenchmarkTokens(b *testing.B) {
+	data := []byte(`level=ERROR msg="connection refused" host=db-primary-01 port=5432 retry=3`)
+	for b.Loop() {
+		_ = Tokens(data)
+	}
+}
+
+// BenchmarkIsIndexable tests the per-token query-time check.
+func BenchmarkIsIndexable(b *testing.B) {
+	tokens := []string{"error", "timeout", "15ms", "0xdeadbeef", "019c0bc0-d19f-77db-bbdf-4c36766e13ca", "hello-world", "ab"}
+	for b.Loop() {
+		for _, tok := range tokens {
+			_ = IsIndexable(tok)
+		}
+	}
+}
+
+// BenchmarkIsNumeric measures the numeric detection hot path.
+func BenchmarkIsNumeric(b *testing.B) {
+	cases := [][]byte{
+		[]byte("404"),
+		[]byte("0xdeadbeef"),
+		[]byte("deadbeef"),
+		[]byte("dead-beef-cafe"),
+		[]byte("hello-world"),
+		[]byte("15ms"),
+	}
+	for b.Loop() {
+		for _, c := range cases {
+			_ = isNumeric(c)
+		}
+	}
+}
+
+// BenchmarkIsUUID measures UUID detection (fixed 36-byte format check).
+func BenchmarkIsUUID(b *testing.B) {
+	uuid := []byte("019c0bc0-d19f-77db-bbdf-4c36766e13ca")
+	nonUUID := []byte("hello-world-foo-bar-baz")
+	for b.Loop() {
+		_ = isUUID(uuid)
+		_ = isUUID(nonUUID)
+	}
+}

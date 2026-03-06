@@ -168,3 +168,69 @@ func TestCompressMiddleware_Flush(t *testing.T) {
 		t.Fatalf("body = %q, want both chunks", plain)
 	}
 }
+
+// ─── Benchmarks ──────────────────────────────────────────────────────────────
+
+// makeJSONPayload generates a realistic JSON log response payload of approximately n bytes.
+func makeJSONPayload(n int) []byte {
+	line := []byte(`{"ts":"2024-01-15T10:22:15.123Z","level":"ERROR","msg":"authentication failed","host":"app-01"}` + "\n")
+	buf := make([]byte, 0, n)
+	for len(buf) < n {
+		buf = append(buf, line...)
+	}
+	return buf[:n]
+}
+
+// BenchmarkCompressBrotli measures brotli compression throughput via the middleware.
+func BenchmarkCompressBrotli(b *testing.B) {
+	payload := makeJSONPayload(32 * 1024) // 32 KB
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(payload)
+	})
+	h := compressMiddleware(inner)
+	b.SetBytes(int64(len(payload)))
+	for b.Loop() {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Accept-Encoding", "br")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+	}
+}
+
+// BenchmarkCompressGzip measures gzip compression throughput via the middleware.
+func BenchmarkCompressGzip(b *testing.B) {
+	payload := makeJSONPayload(32 * 1024) // 32 KB
+	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write(payload)
+	})
+	h := compressMiddleware(inner)
+	b.SetBytes(int64(len(payload)))
+	for b.Loop() {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set("Accept-Encoding", "gzip")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+	}
+}
+
+// BenchmarkBrotliWriterPool measures the channel-based brotli writer pool get/put cycle.
+func BenchmarkBrotliWriterPool(b *testing.B) {
+	for b.Loop() {
+		w := getBrotliWriter(io.Discard)
+		w.Write([]byte("benchmark data for pool recycling test"))
+		w.Close()
+		putBrotliWriter(w)
+	}
+}
+
+// BenchmarkAcceptsEncoding measures Accept-Encoding header parsing.
+func BenchmarkAcceptsEncoding(b *testing.B) {
+	header := "gzip, deflate, br, zstd"
+	for b.Loop() {
+		_ = acceptsEncoding(header, "br")
+		_ = acceptsEncoding(header, "gzip")
+		_ = acceptsEncoding(header, "identity")
+	}
+}

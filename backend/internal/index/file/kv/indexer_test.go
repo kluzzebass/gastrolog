@@ -3,6 +3,7 @@ package kv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -615,5 +616,54 @@ func TestOpenReaders(t *testing.T) {
 	_, found = kvReader.Lookup("status", "404")
 	if found {
 		t.Fatal("expected not to find kv 'status=404'")
+	}
+}
+
+// ─── Benchmarks ──────────────────────────────────────────────────────────────
+
+// makeCandidates generates n candidates with synthetic keys and position lists.
+func makeCandidates(n, positionsPerCandidate int) map[string]*kvCandidate {
+	m := make(map[string]*kvCandidate, n)
+	for i := range n {
+		key := fmt.Sprintf("key_%04d", i)
+		value := fmt.Sprintf("value_%04d", i)
+		positions := make([]uint64, positionsPerCandidate)
+		for j := range positions {
+			positions[j] = uint64(j)
+		}
+		m[key+"="+value] = &kvCandidate{
+			key:       key,
+			value:     value,
+			positions: positions,
+			frequency: uint32(n - i), // descending frequency
+			cost:      kvCost(key, value, positionsPerCandidate),
+		}
+	}
+	return m
+}
+
+// BenchmarkSortCandidates benchmarks sorting 1000 candidates by frequency then cost.
+func BenchmarkSortCandidates(b *testing.B) {
+	candidates := makeCandidates(1000, 10)
+	for b.Loop() {
+		_ = sortCandidates(candidates)
+	}
+}
+
+// BenchmarkAdmitWithinBudget benchmarks the budget-constrained admission loop.
+func BenchmarkAdmitWithinBudget(b *testing.B) {
+	sorted := sortCandidates(makeCandidates(1000, 10))
+	budget := int64(50 * 1024) // 50 KB — admits roughly half
+	for b.Loop() {
+		_, _ = admitWithinBudget(sorted, budget)
+	}
+}
+
+// BenchmarkKVCost benchmarks the per-entry cost calculation.
+func BenchmarkKVCost(b *testing.B) {
+	for b.Loop() {
+		_ = kvCost("status", "error", 100)
+		_ = keyCost("level", 500)
+		_ = valueCost("warning", 250)
 	}
 }
