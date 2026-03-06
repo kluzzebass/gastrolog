@@ -808,6 +808,7 @@ func TestOTLPHTTPUnsupportedEncoding(t *testing.T) {
 // --- gRPC Compression Tests ---
 
 func TestOTLPGRPCGzipCompression(t *testing.T) {
+	t.Parallel()
 	// Verify gzip compressor is registered (by our blank import).
 	if encoding.GetCompressor(grpcgzip.Name) == nil {
 		t.Fatal("gzip compressor not registered")
@@ -841,6 +842,7 @@ func TestOTLPGRPCGzipCompression(t *testing.T) {
 }
 
 func TestOTLPGRPCZstdCompression(t *testing.T) {
+	t.Parallel()
 	// Verify zstd compressor is registered (by our grpccomp.go init).
 	if encoding.GetCompressor("zstd") == nil {
 		t.Fatal("zstd compressor not registered")

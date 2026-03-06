@@ -94,6 +94,7 @@ func readToken(reader *bufio.Reader) (string, error) {
 }
 
 func TestRELPFactory(t *testing.T) {
+	t.Parallel()
 	factory := NewFactory()
 
 	// Default addr.
@@ -116,6 +117,7 @@ func TestRELPFactory(t *testing.T) {
 }
 
 func TestRELPSession(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0"})
 
@@ -215,6 +217,7 @@ func TestRELPSession(t *testing.T) {
 }
 
 func TestRELPMultipleMessages(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0"})
 
@@ -280,6 +283,7 @@ func TestRELPMultipleMessages(t *testing.T) {
 }
 
 func TestRELPConnectionClose(t *testing.T) {
+	t.Parallel()
 	out := make(chan orchestrator.IngestMessage, 10)
 	ing := New(Config{ID: "test-relp", Addr: "127.0.0.1:0"})
 

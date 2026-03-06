@@ -842,6 +842,7 @@ func TestAdopt(t *testing.T) {
 }
 
 func TestAdoptMissingDirFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -856,6 +857,7 @@ func TestAdoptMissingDirFails(t *testing.T) {
 }
 
 func TestAdoptAlreadyTrackedFails(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
@@ -880,6 +882,7 @@ func TestAdoptAlreadyTrackedFails(t *testing.T) {
 
 // TestListReturnsSortedChunks verifies that List() returns chunks sorted by StartTS.
 func TestListReturnsSortedChunks(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	attrs := chunk.Attributes{"source": "test"}
 
@@ -929,6 +932,7 @@ func TestListReturnsSortedChunks(t *testing.T) {
 }
 
 func TestConcurrentAppend(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	manager, err := NewManager(Config{Dir: dir})
 	if err != nil {
