@@ -223,6 +223,19 @@ message ForwardExplainResponse {
   int32 total_chunks = 2;
 }
 
+// ForwardFollowRequest opens a server-streaming follow (tail -f) on a remote
+// node's local vaults. The remote node runs eng.Follow() and streams new
+// records as they arrive. The coordinator merges local and remote streams.
+message ForwardFollowRequest {
+  repeated string vault_ids = 1;
+  string query = 2;
+}
+
+// ForwardFollowResponse carries a batch of new records from a remote follow.
+message ForwardFollowResponse {
+  repeated ExportRecord records = 1;
+}
+
 // ImportRecordMessage carries a single record for client-streaming import.
 // vault_id is set on every message; the server validates consistency.
 message ImportRecordMessage {

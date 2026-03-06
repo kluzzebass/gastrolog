@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"iter"
 	"maps"
 
 	"gastrolog/internal/chunk"
@@ -44,6 +45,11 @@ type ValidateVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (*gastro
 // ExplainExecutor returns the explain plan for local vaults matching the query.
 // Used by the ForwardExplain handler to serve remote explain requests.
 type ExplainExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error)
+
+// FollowExecutor runs a follow (tail -f) on local vaults for a remote request.
+// Returns an iterator that yields new records as they arrive. The caller is
+// responsible for cancelling the context to stop the follow.
+type FollowExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], error)
 
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
@@ -89,6 +95,11 @@ func (s *Server) SetValidateVaultExecutor(fn ValidateVaultExecutor) {
 // SetExplainExecutor injects the callback for handling remote Explain requests.
 func (s *Server) SetExplainExecutor(fn ExplainExecutor) {
 	s.explainExecutor = fn
+}
+
+// SetFollowExecutor injects the callback for handling remote follow requests.
+func (s *Server) SetFollowExecutor(fn FollowExecutor) {
+	s.followExecutor = fn
 }
 
 // forwardRecords handles the ForwardRecords RPC. Converts proto ExportRecords
@@ -208,6 +219,48 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	}
 
 	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})
+}
+
+// forwardFollowStreamHandler handles the server-streaming ForwardFollow RPC.
+// Runs eng.Follow() on the specified local vaults and streams new records back
+// to the coordinating node as they arrive.
+func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.followExecutor == nil {
+		return status.Error(codes.Unavailable, "follow executor not configured")
+	}
+
+	req := &gastrologv1.ForwardFollowRequest{}
+	if err := stream.RecvMsg(req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+
+	vaultIDs := make([]uuid.UUID, 0, len(req.GetVaultIds()))
+	for _, raw := range req.GetVaultIds() {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid vault_id %q: %v", raw, err)
+		}
+		vaultIDs = append(vaultIDs, id)
+	}
+
+	records, err := s.followExecutor(stream.Context(), vaultIDs, req.GetQuery())
+	if err != nil {
+		return status.Errorf(codes.Internal, "follow: %v", err)
+	}
+
+	for rec, err := range records {
+		if err != nil {
+			return status.Errorf(codes.Internal, "follow record: %v", err)
+		}
+		resp := &gastrologv1.ForwardFollowResponse{
+			Records: []*gastrologv1.ExportRecord{RecordToExportRecord(rec)},
+		}
+		if err := stream.SendMsg(resp); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // forwardSearch handles the ForwardSearch RPC. Executes a search on a local
@@ -493,6 +546,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			StreamName:    "ForwardImportRecords",
 			Handler:       forwardImportRecordsStreamHandler,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "ForwardFollow",
+			Handler:       forwardFollowStreamHandler,
+			ServerStreams: true,
 		},
 	},
 }

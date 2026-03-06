@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -33,6 +34,7 @@ type RemoteSearcher interface {
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
+	Follow(ctx context.Context, nodeID string, req *apiv1.ForwardFollowRequest) (<-chan *apiv1.ExportRecord, <-chan error)
 }
 
 // QueryServer implements the QueryService.
@@ -672,24 +674,181 @@ func (s *QueryServer) Follow(
 		}
 	}
 
-	// Use Follow which continuously polls for new records.
-	iter := eng.Follow(ctx, q)
+	// Start remote follow streams for vaults on other nodes.
+	remoteRecords := s.startRemoteFollows(ctx, q)
 
-	// Send each record immediately for real-time tailing.
-	for rec, err := range iter {
-		if err != nil {
-			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-				return nil // Normal termination for follow
-			}
-			return connect.NewError(connect.CodeInternal, err)
+	// Local follow for vaults on this node.
+	localIter := eng.Follow(ctx, q)
+
+	// Merge local and remote records and stream to the client.
+	return s.mergeFollowStreams(ctx, localIter, remoteRecords, stream)
+}
+
+// startRemoteFollows opens ForwardFollow streams to all remote nodes that own
+// vaults matching the query. Returns a channel that carries records from all
+// remote streams combined.
+func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-chan *apiv1.Record {
+	if s.remoteSearcher == nil || s.cfgStore == nil {
+		return nil
+	}
+
+	byNode := s.remoteVaultsByNode(ctx)
+	if len(byNode) == 0 {
+		return nil
+	}
+
+	queryExpr := q.String()
+	merged := make(chan *apiv1.Record, 64)
+	var wg sync.WaitGroup
+
+	for nodeID, vaultIDs := range byNode {
+		vaultStrs := make([]string, len(vaultIDs))
+		for i, v := range vaultIDs {
+			vaultStrs[i] = v.String()
 		}
 
+		wg.Add(1)
+		go func(nodeID string, vaultStrs []string) {
+			defer wg.Done()
+
+			recCh, errCh := s.remoteSearcher.Follow(ctx, nodeID, &apiv1.ForwardFollowRequest{
+				VaultIds: vaultStrs,
+				Query:    queryExpr,
+			})
+
+			for {
+				select {
+				case rec, ok := <-recCh:
+					if !ok {
+						// Check for error after channel closes.
+						if err := <-errCh; err != nil {
+							s.logger.Warn("follow: remote stream error", "node", nodeID, "err", err)
+						}
+						return
+					}
+					select {
+					case merged <- exportToRecord(rec):
+					case <-ctx.Done():
+						return
+					}
+				case <-ctx.Done():
+					return
+				}
+			}
+		}(nodeID, vaultStrs)
+	}
+
+	// Close merged channel when all remote streams end.
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
+	return merged
+}
+
+// mergeFollowStreams interleaves local follow records with remote records
+// and streams them to the client. Records are sent immediately as they arrive
+// — there's no ordering guarantee in follow mode (it's real-time tailing).
+func (s *QueryServer) mergeFollowStreams(
+	ctx context.Context,
+	localIter iter.Seq2[chunk.Record, error],
+	remoteRecords <-chan *apiv1.Record,
+	stream *connect.ServerStream[apiv1.FollowResponse],
+) error {
+	// If no remote records, just stream local.
+	if remoteRecords == nil {
+		return streamLocalFollow(localIter, stream)
+	}
+
+	// Both local and remote: run local in a goroutine, merge via channel.
+	localCh := make(chan localFollowMsg, 64)
+	go func() {
+		defer close(localCh)
+		for rec, err := range localIter {
+			select {
+			case localCh <- localFollowMsg{rec: rec, err: err}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	for {
+		select {
+		case msg, ok := <-localCh:
+			if !ok {
+				return drainRemoteFollow(remoteRecords, stream)
+			}
+			if err := sendLocalFollowMsg(msg, stream); err != nil {
+				return err
+			}
+		case rec, ok := <-remoteRecords:
+			if !ok {
+				return drainLocalFollow(localCh, stream)
+			}
+			if err := stream.Send(&apiv1.FollowResponse{Records: []*apiv1.Record{rec}}); err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+type localFollowMsg struct {
+	rec chunk.Record
+	err error
+}
+
+// streamLocalFollow streams all records from a local follow iterator.
+func streamLocalFollow(localIter iter.Seq2[chunk.Record, error], stream *connect.ServerStream[apiv1.FollowResponse]) error {
+	for rec, err := range localIter {
+		if err != nil {
+			return followError(err)
+		}
 		if err := stream.Send(&apiv1.FollowResponse{Records: []*apiv1.Record{recordToProto(rec)}}); err != nil {
 			return err
 		}
 	}
-
 	return nil
+}
+
+// sendLocalFollowMsg sends a single local follow message to the stream.
+func sendLocalFollowMsg(msg localFollowMsg, stream *connect.ServerStream[apiv1.FollowResponse]) error {
+	if msg.err != nil {
+		return followError(msg.err)
+	}
+	return stream.Send(&apiv1.FollowResponse{Records: []*apiv1.Record{recordToProto(msg.rec)}})
+}
+
+// drainRemoteFollow streams remaining remote records after local closes.
+func drainRemoteFollow(remoteRecords <-chan *apiv1.Record, stream *connect.ServerStream[apiv1.FollowResponse]) error {
+	for rec := range remoteRecords {
+		if err := stream.Send(&apiv1.FollowResponse{Records: []*apiv1.Record{rec}}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// drainLocalFollow streams remaining local records after remote closes.
+func drainLocalFollow(localCh <-chan localFollowMsg, stream *connect.ServerStream[apiv1.FollowResponse]) error {
+	for msg := range localCh {
+		if err := sendLocalFollowMsg(msg, stream); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// followError returns nil for normal termination (context cancelled/deadline)
+// or wraps the error as a connect error.
+func followError(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return nil
+	}
+	return connect.NewError(connect.CodeInternal, err)
 }
 
 // Explain returns the query execution plan without executing.

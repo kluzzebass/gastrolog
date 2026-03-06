@@ -2,9 +2,13 @@ package cluster
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+
+	"google.golang.org/grpc"
 )
 
 // SearchForwarder sends search requests to remote cluster nodes.
@@ -101,6 +105,66 @@ func (sf *SearchForwarder) Explain(ctx context.Context, nodeID string, req *gast
 		return nil, fmt.Errorf("forward explain to %s: %w", nodeID, err)
 	}
 	return resp, nil
+}
+
+// Follow opens a server-streaming ForwardFollow RPC to the given node.
+// Returns a channel that yields ExportRecords as they arrive from the remote.
+// The channel is closed when the stream ends or ctx is cancelled.
+func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastrologv1.ForwardFollowRequest) (<-chan *gastrologv1.ExportRecord, <-chan error) {
+	recCh := make(chan *gastrologv1.ExportRecord, 64)
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer close(recCh)
+		defer close(errCh)
+
+		conn, err := sf.peers.Conn(nodeID)
+		if err != nil {
+			errCh <- fmt.Errorf("dial node %s: %w", nodeID, err)
+			return
+		}
+
+		stream, err := conn.NewStream(ctx,
+			&grpc.StreamDesc{
+				StreamName:    "ForwardFollow",
+				ServerStreams: true,
+			},
+			"/gastrolog.v1.ClusterService/ForwardFollow",
+		)
+		if err != nil {
+			sf.peers.Invalidate(nodeID)
+			errCh <- fmt.Errorf("open follow stream to %s: %w", nodeID, err)
+			return
+		}
+		if err := stream.SendMsg(req); err != nil {
+			sf.peers.Invalidate(nodeID)
+			errCh <- fmt.Errorf("send follow request to %s: %w", nodeID, err)
+			return
+		}
+		if err := stream.CloseSend(); err != nil {
+			errCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
+			return
+		}
+
+		for {
+			resp := &gastrologv1.ForwardFollowResponse{}
+			if err := stream.RecvMsg(resp); err != nil {
+				if !errors.Is(err, io.EOF) {
+					errCh <- fmt.Errorf("follow stream from %s: %w", nodeID, err)
+				}
+				return
+			}
+			for _, rec := range resp.GetRecords() {
+				select {
+				case recCh <- rec:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return recCh, errCh
 }
 
 // Close is a no-op — connection lifecycle is managed by PeerConns.

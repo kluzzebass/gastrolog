@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"iter"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -198,6 +199,36 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 			}
 		}
 		return allChunks, totalChunks, nil
+	}
+}
+
+// newFollowExecutor creates a cluster.FollowExecutor that runs a follow on
+// local vaults for ForwardFollow RPCs received from peer nodes.
+func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
+	return func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], error) {
+		// Scope the query to the requested vaults by prepending vault= predicates.
+		var scopedExpr string
+		for _, vid := range vaultIDs {
+			if scopedExpr != "" {
+				scopedExpr += " OR "
+			}
+			scopedExpr += "vault=" + vid.String()
+		}
+		if queryExpr != "" {
+			if len(vaultIDs) > 1 {
+				scopedExpr = "(" + scopedExpr + ") " + queryExpr
+			} else {
+				scopedExpr += " " + queryExpr
+			}
+		}
+
+		q, _, err := server.ParseExpression(scopedExpr)
+		if err != nil {
+			return nil, fmt.Errorf("parse query: %w", err)
+		}
+
+		eng := o.MultiVaultQueryEngine()
+		return eng.Follow(ctx, q), nil
 	}
 }
 

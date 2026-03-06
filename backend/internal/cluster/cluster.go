@@ -119,6 +119,9 @@ type Server struct {
 	// explainExecutor returns explain plans for local vaults for remote Explain requests.
 	explainExecutor ExplainExecutor
 
+	// followExecutor runs a follow (tail -f) on local vaults for remote requests.
+	followExecutor FollowExecutor
+
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns

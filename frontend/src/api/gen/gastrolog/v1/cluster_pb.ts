@@ -1519,6 +1519,92 @@ export class ForwardExplainResponse extends Message<ForwardExplainResponse> {
 }
 
 /**
+ * ForwardFollowRequest opens a server-streaming follow (tail -f) on a remote
+ * node's local vaults. The remote node runs eng.Follow() and streams new
+ * records as they arrive. The coordinator merges local and remote streams.
+ *
+ * @generated from message gastrolog.v1.ForwardFollowRequest
+ */
+export class ForwardFollowRequest extends Message<ForwardFollowRequest> {
+  /**
+   * @generated from field: repeated string vault_ids = 1;
+   */
+  vaultIds: string[] = [];
+
+  /**
+   * @generated from field: string query = 2;
+   */
+  query = "";
+
+  constructor(data?: PartialMessage<ForwardFollowRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardFollowRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardFollowRequest {
+    return new ForwardFollowRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardFollowRequest {
+    return new ForwardFollowRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardFollowRequest {
+    return new ForwardFollowRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardFollowRequest | PlainMessage<ForwardFollowRequest> | undefined, b: ForwardFollowRequest | PlainMessage<ForwardFollowRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardFollowRequest, a, b);
+  }
+}
+
+/**
+ * ForwardFollowResponse carries a batch of new records from a remote follow.
+ *
+ * @generated from message gastrolog.v1.ForwardFollowResponse
+ */
+export class ForwardFollowResponse extends Message<ForwardFollowResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.ExportRecord records = 1;
+   */
+  records: ExportRecord[] = [];
+
+  constructor(data?: PartialMessage<ForwardFollowResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardFollowResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardFollowResponse {
+    return new ForwardFollowResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardFollowResponse {
+    return new ForwardFollowResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardFollowResponse {
+    return new ForwardFollowResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardFollowResponse | PlainMessage<ForwardFollowResponse> | undefined, b: ForwardFollowResponse | PlainMessage<ForwardFollowResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardFollowResponse, a, b);
+  }
+}
+
+/**
  * ImportRecordMessage carries a single record for client-streaming import.
  * vault_id is set on every message; the server validates consistency.
  *
