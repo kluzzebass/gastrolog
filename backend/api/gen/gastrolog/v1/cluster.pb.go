@@ -947,6 +947,7 @@ type ForwardSearchResponse struct {
 	ResumeToken   []byte                 `protobuf:"bytes,2,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
 	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	TableResult   *TableResult           `protobuf:"bytes,4,opt,name=table_result,json=tableResult,proto3" json:"table_result,omitempty"` // Pipeline results (timechart, stats)
+	Histogram     []*HistogramBucket     `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`                        // Volume histogram from this node's vaults
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1005,6 +1006,13 @@ func (x *ForwardSearchResponse) GetHasMore() bool {
 func (x *ForwardSearchResponse) GetTableResult() *TableResult {
 	if x != nil {
 		return x.TableResult
+	}
+	return nil
+}
+
+func (x *ForwardSearchResponse) GetHistogram() []*HistogramBucket {
+	if x != nil {
+		return x.Histogram
 	}
 	return nil
 }
@@ -1942,12 +1950,13 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
-	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\"\xc9\x01\n" +
+	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12<\n" +
-	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\"\x90\x01\n" +
+	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
+	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\x90\x01\n" +
 	"\x18ForwardGetContextRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x10\n" +
@@ -2044,10 +2053,11 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*VaultStats)(nil),                     // 33: gastrolog.v1.VaultStats
 	(*ExportRecord)(nil),                   // 34: gastrolog.v1.ExportRecord
 	(*TableResult)(nil),                    // 35: gastrolog.v1.TableResult
-	(*ChunkMeta)(nil),                      // 36: gastrolog.v1.ChunkMeta
-	(*IndexInfo)(nil),                      // 37: gastrolog.v1.IndexInfo
-	(*ChunkValidation)(nil),                // 38: gastrolog.v1.ChunkValidation
-	(*ChunkPlan)(nil),                      // 39: gastrolog.v1.ChunkPlan
+	(*HistogramBucket)(nil),                // 36: gastrolog.v1.HistogramBucket
+	(*ChunkMeta)(nil),                      // 37: gastrolog.v1.ChunkMeta
+	(*IndexInfo)(nil),                      // 38: gastrolog.v1.IndexInfo
+	(*ChunkValidation)(nil),                // 39: gastrolog.v1.ChunkValidation
+	(*ChunkPlan)(nil),                      // 40: gastrolog.v1.ChunkPlan
 }
 var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	6,  // 0: gastrolog.v1.BroadcastRequest.message:type_name -> gastrolog.v1.BroadcastMessage
@@ -2060,19 +2070,20 @@ var file_gastrolog_v1_cluster_proto_depIdxs = []int32{
 	34, // 7: gastrolog.v1.ForwardRecordsRequest.records:type_name -> gastrolog.v1.ExportRecord
 	34, // 8: gastrolog.v1.ForwardSearchResponse.records:type_name -> gastrolog.v1.ExportRecord
 	35, // 9: gastrolog.v1.ForwardSearchResponse.table_result:type_name -> gastrolog.v1.TableResult
-	34, // 10: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
-	34, // 11: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
-	34, // 12: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
-	36, // 13: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	37, // 14: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
-	38, // 15: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
-	39, // 16: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	34, // 17: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	36, // 10: gastrolog.v1.ForwardSearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
+	34, // 11: gastrolog.v1.ForwardGetContextResponse.before:type_name -> gastrolog.v1.ExportRecord
+	34, // 12: gastrolog.v1.ForwardGetContextResponse.anchor:type_name -> gastrolog.v1.ExportRecord
+	34, // 13: gastrolog.v1.ForwardGetContextResponse.after:type_name -> gastrolog.v1.ExportRecord
+	37, // 14: gastrolog.v1.ForwardListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
+	38, // 15: gastrolog.v1.ForwardGetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
+	39, // 16: gastrolog.v1.ForwardValidateVaultResponse.chunks:type_name -> gastrolog.v1.ChunkValidation
+	40, // 17: gastrolog.v1.ForwardExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
+	34, // 18: gastrolog.v1.ImportRecordMessage.record:type_name -> gastrolog.v1.ExportRecord
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_cluster_proto_init() }

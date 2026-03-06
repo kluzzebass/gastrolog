@@ -27,6 +27,11 @@ function buildColorMap(data: HistogramData): Map<string, string> {
       seen.delete(key);
     }
   }
+  // "other" represents records without a level — use the copper theme color.
+  if (seen.has("other")) {
+    colorMap.set("other", "var(--color-copper)");
+    seen.delete("other");
+  }
   for (const key of [...seen].sort()) {
     colorMap.set(key, GROUP_PALETTE[paletteIdx % GROUP_PALETTE.length]!);
     paletteIdx++;
@@ -147,7 +152,7 @@ export function HistogramChart({
   const firstBucket = buckets[0];
   const lastBucket = buckets.at(-1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
-  const barHeight = barHeightProp ?? 48;
+  const barHeight = barHeightProp ?? 96;
 
   const hasGroups = groupKeys.length > 0;
   const baseOpacity = dark ? 0.6 : 0.5;

@@ -19,6 +19,7 @@ import (
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
+	"gastrolog/internal/ingester/syslog"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
 
@@ -491,5 +492,97 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 	}
 	if !stored.Enabled {
 		t.Error("config vault should have Enabled=true after resume")
+	}
+}
+
+// newConfigTestSetupWithIngesters is like newConfigTestSetup but wires in
+// ingester type registrations so PutIngester validation works end-to-end.
+func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.ConfigServiceClient, config.Store, *orchestrator.Orchestrator) {
+	t.Helper()
+
+	cfgStore := cfgmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+			"file":   chunkfile.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+			"file":   indexfile.NewFactory(),
+		},
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults},
+		},
+	}
+
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{
+		AfterConfigApply: testAfterConfigApply(orch, cfgStore, factories),
+	})
+	handler := srv.Handler()
+
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+	client := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+
+	return client, cfgStore, orch
+}
+
+func TestPutIngesterUnknownType(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Type:    "nonexistent",
+			Enabled: true,
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for unknown ingester type")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestDeleteIngesterNotFound(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	nonexistentID := uuid.Must(uuid.NewV7())
+	_, err := client.DeleteIngester(ctx, connect.NewRequest(&gastrologv1.DeleteIngesterRequest{
+		Id: nonexistentID.String(),
+	}))
+	if err == nil {
+		t.Fatal("expected error for nonexistent ingester")
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected CodeNotFound, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestPutIngesterMissingRequiredParam(t *testing.T) {
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	// Syslog requires at least one of udp_addr or tcp_addr.
+	_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Type:    "syslog",
+			Enabled: true,
+			Params:  map[string]string{},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for syslog without addr params")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
 	}
 }

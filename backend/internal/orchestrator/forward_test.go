@@ -282,4 +282,7 @@ func (n *noopChunkManager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.
 func (n *noopChunkManager) SetRotationPolicy(chunk.RotationPolicy)                             {}
 func (n *noopChunkManager) CheckRotation() *string                                             { return nil }
 func (n *noopChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta, error)        { return chunk.ChunkMeta{}, nil }
-func (n *noopChunkManager) Close() error                                                       { return nil }
+func (n *noopChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
+	return nil
+}
+func (n *noopChunkManager) Close() error { return nil }

@@ -12,7 +12,7 @@ import {
   useRecordContext,
   extractTokens,
 } from "../api/hooks";
-import { tableResultToHistogramData } from "../utils/histogramData";
+import { histogramBucketsToData } from "../utils/histogramData";
 import { useVaults, useStats, useLogout, useCurrentUser } from "../api/hooks";
 import { Record as ProtoRecord, getToken } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
@@ -232,6 +232,7 @@ export function useSearchView() {
     isSearching,
     hasMore,
     tableResult,
+    histogram,
     search,
     loadMore,
     setRecords,
@@ -258,11 +259,6 @@ export function useSearchView() {
     isLoading: isExplaining,
     explain,
   } = useExplain({ onError: toastError });
-  const {
-    tableResult: histogramTableResult,
-    search: histogramSearch,
-    reset: histogramReset,
-  } = useSearch({ onError: toastError });
   const {
     before: contextBefore,
     after: contextAfter,
@@ -358,14 +354,6 @@ export function useSearchView() {
         scrollToSelectedRef.current = false;
         logScrollRef.current?.scrollTo(0, 0);
         search(q, false, !hasPipeOutsideQuotes(q));
-        if (hasPipeOutsideQuotes(q)) {
-          histogramReset();
-        } else {
-          const timechartExpr = q.trim()
-            ? `${q.trim()} | timechart 50 by level`
-            : `| timechart 50 by level`;
-          histogramSearch(timechartExpr, false, true);
-        }
         if (showPlan) explain(q);
         return;
       }
@@ -466,14 +454,6 @@ export function useSearchView() {
       scrollToSelectedRef.current = false;
       logScrollRef.current?.scrollTo(0, 0);
       search(q, false, !hasPipeOutsideQuotes(q));
-      if (hasPipeOutsideQuotes(q)) {
-        histogramReset();
-      } else {
-        const timechartExpr = q.trim()
-          ? `${q.trim()} | timechart 50 by level`
-          : `| timechart 50 by level`;
-        histogramSearch(timechartExpr, false, true);
-      }
       if (showPlan) explain(q);
     } else {
       navigate({ to: "/search", search: (prev) => ({ ...prev, q: normalized }), replace: false });
@@ -608,8 +588,8 @@ export function useSearchView() {
     }
   };
 
-  const histogramData = histogramTableResult
-    ? tableResultToHistogramData(histogramTableResult.columns, histogramTableResult.rows)
+  const histogramData = histogram
+    ? histogramBucketsToData(histogram)
     : null;
   const liveHistogramData = useLiveHistogram(followRecords);
   const tokens = extractTokens(q);
@@ -629,15 +609,9 @@ export function useSearchView() {
     if (!pollInterval || isFollowMode) return;
     const id = setInterval(() => {
       search(q, false, false, true);
-      if (!hasPipeOutsideQuotes(q)) {
-        const timechartExpr = q.trim()
-          ? `${q.trim()} | timechart 50 by level`
-          : `| timechart 50 by level`;
-        histogramSearch(timechartExpr, false, false, true);
-      }
     }, pollInterval);
     return () => clearInterval(id);
-  }, [pollInterval, isFollowMode, q, search, histogramSearch]);
+  }, [pollInterval, isFollowMode, q, search]);
 
   const displayRecords = isFollowMode ? followRecords : records;
   const attrFields = aggregateFields(displayRecords, "attrs");
@@ -812,7 +786,7 @@ export function useSearchView() {
     startFollow, stopFollowMode,
 
     // Histogram
-    histogramData, histogramTableResult,
+    histogramData,
     liveHistogramData,
     handleBrushSelect, handleFollowBrushSelect, handlePan,
     handleSegmentClick,

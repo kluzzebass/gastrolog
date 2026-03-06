@@ -25,8 +25,8 @@ import (
 // Three modes:
 //   - No grouping, no filter, no pre-ops: fast path using FindStartPosition
 //     binary search. O(buckets * log(n)) per chunk, no record scanning.
-//   - Grouping, no filter, no pre-ops: attr-only scan using AttrScanner.
-//     Reads only idx.log + attr.log (~88 bytes/record), uncapped.
+//   - Grouping, no filter, no pre-ops: attr-only scan using ScanAttrs.
+//     Reads only timestamps + attrs (~88 bytes/record on file vaults), uncapped.
 //   - Filter or pre-ops: falls back to Search() → applyRecordOps() → manual binning.
 //     Capped at 1M records; sets Truncated when cap is hit.
 //
@@ -103,15 +103,8 @@ func (e *Engine) runTimechartStrategy(
 	}
 
 	// Group breakdown via per-bucket sampling — O(buckets × 1000).
-	if e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, groupField, groupCounts) {
-		return false, nil
-	}
-
-	// AttrScanner not supported — fall back to full scan for groups.
-	// Clear fast-path counts since scanPath will recount.
-	clear(counts)
-	return e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth,
-		numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
+	e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, groupField, groupCounts)
+	return false, nil
 }
 
 // clampBuckets normalizes the bucket count to the valid range [1, 500], defaulting to 50.
@@ -186,31 +179,18 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 
 // timechartAttrScanGroups populates group breakdown counts using per-bucket
 // sampling. For each bucket, binary search finds the record position range,
-// then AttrScanner reads up to samplePerBucket attrs and scales the proportions
+// then ScanAttrs reads up to samplePerBucket attrs and scales the proportions
 // to the exact count. Total cost: O(buckets × samplePerBucket) regardless of
 // dataset size (~50K records for default 50 buckets).
 // Does NOT update total counts — those come from timechartFastPath.
-// Returns handled=false if any vault doesn't implement AttrScanner.
-func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) (handled bool) {
+func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) {
 	const samplePerBucket = 1000
 
-	// Pre-check: all vaults must support AttrScanner.
 	for _, vaultID := range selectedVaults {
 		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
-		if _, ok := cm.(chunk.AttrScanner); !ok {
-			return false
-		}
-	}
-
-	for _, vaultID := range selectedVaults {
-		cm, _ := e.getVaultManagers(vaultID)
-		if cm == nil {
-			continue
-		}
-		scanner := cm.(chunk.AttrScanner)
 		metas, err := cm.List()
 		if err != nil {
 			continue
@@ -222,10 +202,9 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end 
 			if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
 				continue
 			}
-			timechartChunkGroups(cm, scanner, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
+			timechartChunkGroups(cm, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
 		}
 	}
-	return true
 }
 
 // timechartChunkGroups samples attrs per bucket within a single chunk.
@@ -234,7 +213,6 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end 
 // proportions to the exact bucket count (from binary search).
 func timechartChunkGroups(
 	cm chunk.ChunkManager,
-	scanner chunk.AttrScanner,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -286,7 +264,7 @@ func timechartChunkGroups(
 		sampled := 0
 		limit := min(int(bucketRecords), sampleSize)
 
-		_ = scanner.ScanAttrs(meta.ID, startPos, func(_ time.Time, attrs chunk.Attributes) bool {
+		_ = cm.ScanAttrs(meta.ID, startPos, func(_ time.Time, attrs chunk.Attributes) bool {
 			if v := attrs[groupField]; v != "" {
 				localCounts[v]++
 			}

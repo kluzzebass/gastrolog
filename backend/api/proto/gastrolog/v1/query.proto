@@ -51,6 +51,18 @@ message SearchResponse {
   // Set for pipeline queries (e.g. "error | stats count by level").
   // When present, records is empty; results are in table form.
   TableResult table_result = 4;
+
+  // Volume histogram, set on the first response message only.
+  // Provides an approximate record count distribution by time bucket and level.
+  repeated HistogramBucket histogram = 5;
+}
+
+// HistogramBucket holds the count for a single time bucket in the volume histogram.
+// Used as a lightweight side-channel on search responses — not part of the pipeline.
+message HistogramBucket {
+  int64 timestamp_ms = 1;              // Bucket start time (milliseconds since epoch)
+  int64 count = 2;                     // Total records in this bucket
+  map<string, int64> group_counts = 3; // Level → count; records without level → "other"
 }
 
 // TableResult holds aggregated results from a pipeline stats operator.

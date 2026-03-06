@@ -58,7 +58,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 		o.ingesterCancels[id] = recvCancel
 		meta := o.ingesterMeta[id]
 		o.logger.Info("starting ingester", "id", id, "name", meta.Name, "type", meta.Type)
-		o.ingesterWg.Go(func() { _ = r.Run(recvCtx, o.ingestCh) })
+		o.ingesterWg.Go(func() { o.runIngester(id, r, recvCtx, o.ingestCh) })
 	}
 
 	// Launch digest + write pipeline.
@@ -122,6 +122,17 @@ func (o *Orchestrator) Stop() error {
 	o.mu.Unlock()
 
 	return nil
+}
+
+// runIngester executes a single ingester with panic recovery so that a
+// misbehaving ingester cannot crash the entire process.
+func (o *Orchestrator) runIngester(id uuid.UUID, r Ingester, ctx context.Context, out chan<- IngestMessage) {
+	defer func() {
+		if v := recover(); v != nil {
+			o.logger.Error("ingester panicked", "id", id, "panic", v)
+		}
+	}()
+	_ = r.Run(ctx, out)
 }
 
 // digestLoop reads IngestMessages, stamps identity, runs the digester chain,

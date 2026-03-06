@@ -126,7 +126,8 @@ message ForwardSearchResponse {
   repeated ExportRecord records = 1;
   bytes resume_token = 2;
   bool has_more = 3;
-  TableResult table_result = 4;  // Pipeline results (timechart, stats)
+  TableResult table_result = 4;          // Pipeline results (timechart, stats)
+  repeated HistogramBucket histogram = 5; // Volume histogram from this node's vaults
 }
 
 // ForwardGetContextRequest asks a remote node to return records surrounding

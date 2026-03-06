@@ -1489,3 +1489,78 @@ func TestPipelineOverlap(t *testing.T) {
 		t.Errorf("pipeline did not overlap: elapsed %v >= threshold %v (sequential %v)", elapsed, threshold, seqTime)
 	}
 }
+
+// panickingIngester emits one message then panics.
+type panickingIngester struct {
+	started chan struct{}
+}
+
+func (r *panickingIngester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
+	close(r.started)
+
+	out <- orchestrator.IngestMessage{
+		Raw:      []byte("before-panic"),
+		IngestTS: time.Now(),
+	}
+	panic("intentional test panic")
+}
+
+func TestIngesterPanicRecovery(t *testing.T) {
+	orch, cm := newIngesterTestSetup(t)
+
+	panicker := &panickingIngester{started: make(chan struct{})}
+	normalMsg := orchestrator.IngestMessage{
+		Raw:      []byte("normal-message"),
+		IngestTS: time.Now(),
+	}
+	normal := newMockIngester([]orchestrator.IngestMessage{normalMsg})
+
+	panickerID := uuid.Must(uuid.NewV7())
+	normalID := uuid.Must(uuid.NewV7())
+
+	if err := orch.AddIngester(panickerID, "panicker", "test", panicker); err != nil {
+		t.Fatal(err)
+	}
+	if err := orch.AddIngester(normalID, "normal", "test", normal); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wait for both ingesters to start.
+	select {
+	case <-panicker.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("panicking ingester did not start")
+	}
+	select {
+	case <-normal.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("normal ingester did not start")
+	}
+
+	// Give the pipeline time to process messages.
+	time.Sleep(200 * time.Millisecond)
+
+	// Stop should complete without hanging — the panicking ingester's
+	// goroutine has already exited via recover().
+	if err := orch.Stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The normal ingester's message should have been written.
+	records, err := cm.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	totalRecords := int64(0)
+	for _, meta := range records {
+		totalRecords += meta.RecordCount
+	}
+	if totalRecords == 0 {
+		t.Error("expected at least one record from the normal ingester")
+	}
+}

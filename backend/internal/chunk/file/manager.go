@@ -511,8 +511,6 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	return scanAttrsActive(idxPath, attrPath, dictPath, startPos, fn)
 }
 
-// Compile-time check that Manager implements AttrScanner.
-var _ chunk.AttrScanner = (*Manager)(nil)
 
 func (m *Manager) loadExisting() error {
 	entries, err := os.ReadDir(m.cfg.Dir)

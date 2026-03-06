@@ -366,3 +366,17 @@ func TestSyslogBothUDPAndTCP(t *testing.T) {
 		t.Error("did not receive TCP message")
 	}
 }
+
+func TestSyslogFactoryMissingAddr(t *testing.T) {
+	factory := NewFactory()
+	id := [16]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	// No udp_addr or tcp_addr → must error.
+	_, err := factory(id, map[string]string{}, nil)
+	if err == nil {
+		t.Fatal("expected error when both udp_addr and tcp_addr are missing")
+	}
+	if got := err.Error(); got != "syslog ingester: at least one of udp_addr or tcp_addr is required" {
+		t.Fatalf("unexpected error message: %s", got)
+	}
+}

@@ -40,7 +40,10 @@ func (f *fakeChunkManager) SetRotationPolicy(policy chunk.RotationPolicy) {}
 func (f *fakeChunkManager) CheckRotation() *string                        { return nil }
 func (f *fakeChunkManager) Delete(id chunk.ChunkID) error                 { return nil }
 func (f *fakeChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta, error) { return chunk.ChunkMeta{}, nil }
-func (f *fakeChunkManager) Close() error                                  { return nil }
+func (f *fakeChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
+	return nil
+}
+func (f *fakeChunkManager) Close() error { return nil }
 
 // fakeIndexManager implements index.IndexManager for testing.
 type fakeIndexManager struct{}

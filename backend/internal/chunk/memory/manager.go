@@ -327,6 +327,25 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	return results, nil
 }
 
+// ScanAttrs iterates records starting from startPos, calling fn with each
+// record's WriteTS and Attributes. For memory vaults this is a direct slice
+// iteration (no raw body loading since records are already in memory).
+func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil {
+		return chunk.ErrChunkNotFound
+	}
+
+	for i := int(startPos); i < len(state.records); i++ { //nolint:gosec // G115: startPos checked by bounds
+		if !fn(state.records[i].WriteTS, state.records[i].Attrs) {
+			break
+		}
+	}
+	return nil
+}
+
 // Delete removes a sealed chunk from memory.
 // Returns ErrActiveChunk if the chunk is the current active chunk.
 // Returns ErrChunkNotFound if the chunk does not exist.

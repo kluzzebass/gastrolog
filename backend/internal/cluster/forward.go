@@ -23,9 +23,10 @@ type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Recor
 
 // SearchExecutor runs a search on a local vault and returns a batch of records.
 // When the query contains a pipeline (stats, timechart), the TableResult is
-// returned instead of individual records.
+// returned instead of individual records. The histogram slice (if non-nil)
+// provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []byte, bool, error)
+type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
@@ -207,7 +208,7 @@ func (s *Server) forwardSearch(ctx context.Context, req *gastrologv1.ForwardSear
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
-	records, tableResult, resumeToken, hasMore, err := s.searchExecutor(ctx, vaultID, req.GetQuery(), req.GetResumeToken())
+	records, tableResult, histogram, resumeToken, hasMore, err := s.searchExecutor(ctx, vaultID, req.GetQuery(), req.GetResumeToken())
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "search: %v", err)
 	}
@@ -216,6 +217,7 @@ func (s *Server) forwardSearch(ctx context.Context, req *gastrologv1.ForwardSear
 		ResumeToken: resumeToken,
 		HasMore:     hasMore,
 		TableResult: tableResult,
+		Histogram:   histogram,
 	}, nil
 }
 

@@ -205,7 +205,7 @@ export function SearchView() {
                 <HistogramChart
                   data={sv.histogramData}
                   dark={sv.dark}
-                  truncated={sv.histogramTableResult?.truncated}
+                  truncated={false}
                   onBrushSelect={sv.handleBrushSelect}
                   onPan={sv.handlePan}
                   onSegmentClick={sv.handleSegmentClick}

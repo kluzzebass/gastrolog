@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record, TableResult, refreshAuth } from "../client";
+import { HistogramBucket } from "../gen/gastrolog/v1/query_pb";
 
 interface SearchState {
   records: Record[];
@@ -9,6 +10,7 @@ interface SearchState {
   hasMore: boolean;
   resumeToken: Uint8Array | null;
   tableResult: TableResult | null;
+  histogram: HistogramBucket[] | null;
 }
 
 /**
@@ -87,6 +89,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
     hasMore: false,
     resumeToken: null,
     tableResult: null,
+    histogram: null,
   });
 
   const abortRef = useRef<AbortController | null>(null);
@@ -129,6 +132,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           // keepPrevious preserves records for smooth transitions, but stale
           // pipeline results must not bleed into a new non-pipeline search.
           tableResult: append ? prev.tableResult : null,
+          histogram: append ? prev.histogram : null,
         }));
       }
 
@@ -139,6 +143,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           ? (cur.resumeToken as Uint8Array<ArrayBuffer> | null)
           : null;
         let hasMore = false;
+        let histogram: HistogramBucket[] | null = null;
 
         // Stream results
         for await (const response of queryClient.search(
@@ -148,11 +153,17 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           },
           { signal: abortRef.current.signal },
         )) {
+          // Capture histogram from whichever response carries it.
+          if (response.histogram.length > 0) {
+            histogram = response.histogram;
+          }
+
           // Pipeline queries return a single response with tableResult.
           if (response.tableResult) {
             setState((prev) => ({
               ...prev,
               tableResult: response.tableResult ?? null,
+              histogram,
               isSearching: false,
               hasMore: false,
               resumeToken: null,
@@ -187,6 +198,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           isSearching: false,
           hasMore,
           resumeToken: lastResumeToken,
+          histogram,
         }));
       } catch (err) {
         if (
@@ -250,6 +262,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       hasMore: false,
       resumeToken: null,
       tableResult: null,
+      histogram: null,
     });
   }, []);
 
@@ -267,6 +280,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       hasMore: false,
       resumeToken: null,
       tableResult: null,
+      histogram: null,
     });
   }, []);
 

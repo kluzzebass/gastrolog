@@ -11,6 +11,37 @@ export interface HistogramData {
 }
 
 /**
+ * Converts proto HistogramBucket[] (piggyback on SearchResponse) into HistogramData.
+ * The histogram always groups by "level".
+ */
+export function histogramBucketsToData(
+  buckets: { timestampMs: bigint; count: bigint; groupCounts: { [key: string]: bigint } }[],
+): HistogramData | null {
+  if (buckets.length === 0) return null;
+
+  const converted = buckets
+    .map((b) => {
+      const gc: Record<string, number> = {};
+      for (const [k, v] of Object.entries(b.groupCounts)) {
+        gc[k] = Number(v);
+      }
+      return {
+        ts: new Date(Number(b.timestampMs)),
+        count: Number(b.count),
+        groupCounts: gc,
+      };
+    })
+    .sort((a, b) => a.ts.getTime() - b.ts.getTime());
+
+  return {
+    buckets: converted,
+    groupField: "level",
+    start: converted[0]!.ts,
+    end: converted.at(-1)!.ts,
+  };
+}
+
+/**
  * Converts a table result (columns + rows) from a timechart query into HistogramData.
  * Expects columns to include "_time" and "count". Any additional column is treated
  * as the group-by field (e.g. "level", "status", etc.).

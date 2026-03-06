@@ -7,7 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
-import { ChunkPlan, TableResult } from "./query_pb.js";
+import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
@@ -779,6 +779,13 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
    */
   tableResult?: TableResult;
 
+  /**
+   * Volume histogram from this node's vaults
+   *
+   * @generated from field: repeated gastrolog.v1.HistogramBucket histogram = 5;
+   */
+  histogram: HistogramBucket[] = [];
+
   constructor(data?: PartialMessage<ForwardSearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -791,6 +798,7 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
     { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "table_result", kind: "message", T: TableResult },
+    { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchResponse {

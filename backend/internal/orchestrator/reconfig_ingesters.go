@@ -30,7 +30,7 @@ func (o *Orchestrator) AddIngester(id uuid.UUID, name, ingType string, r Ingeste
 		o.ingesterCancels[id] = cancel
 
 		o.ingesterWg.Go(func() {
-			_ = r.Run(ctx, o.ingestCh)
+			o.runIngester(id, r, ctx, o.ingestCh)
 		})
 		o.logger.Info("ingester started", "id", id, "name", name, "type", ingType)
 	}

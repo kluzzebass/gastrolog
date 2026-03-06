@@ -116,6 +116,9 @@ func (s *QueryServer) searchPipeline(
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
+	// Compute local histogram to include alongside pipeline results.
+	histogram := histogramToProto(eng.ComputeHistogram(q, 50))
+
 	if result.Table != nil {
 		// Fan out to remote nodes and merge table results.
 		remoteResults := s.collectRemotePipeline(ctx, q, pipeline)
@@ -124,6 +127,7 @@ func (s *QueryServer) searchPipeline(
 		}
 		return stream.Send(&apiv1.SearchResponse{
 			TableResult: tableResultToProto(result.Table, pipeline),
+			Histogram:   histogram,
 		})
 	}
 	// Non-aggregating but needs full materialization (sort/tail/slice):
@@ -138,7 +142,7 @@ func (s *QueryServer) searchPipeline(
 			batch = batch[:0]
 		}
 	}
-	return stream.Send(&apiv1.SearchResponse{Records: batch})
+	return stream.Send(&apiv1.SearchResponse{Records: batch, Histogram: histogram})
 }
 
 // searchPipelineGlobal handles pipelines where non-distributive cap operators
@@ -158,9 +162,9 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// Collect raw records from remote nodes (no pipeline — just the base query).
-	remote := s.collectRemote(ctx, q)
+	remoteRes := s.collectRemote(ctx, q)
 	var extraRecords []chunk.Record
-	for _, r := range remote {
+	for _, r := range remoteRes.records {
 		extraRecords = append(extraRecords, protoToChunkRecord(r))
 	}
 
@@ -169,9 +173,14 @@ func (s *QueryServer) searchPipelineGlobal(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 
+	// Compute and merge histogram.
+	localHist := histogramToProto(eng.ComputeHistogram(q, 50))
+	histogram := mergeHistogramBuckets(localHist, remoteRes.histogram)
+
 	if result.Table != nil {
 		return stream.Send(&apiv1.SearchResponse{
 			TableResult: tableResultToProto(result.Table, pipeline),
+			Histogram:   histogram,
 		})
 	}
 
@@ -214,15 +223,19 @@ func (s *QueryServer) searchDirect(
 		}
 	}
 
-	// Collect remote results (empty slice when no remote vaults or on resume).
-	var remote []*apiv1.Record
+	// Collect remote results (empty when no remote vaults or on resume).
+	var remoteRes remoteResult
 	if resume == nil {
-		remote = s.collectRemote(ctx, q)
+		remoteRes = s.collectRemote(ctx, q)
 	}
+
+	// Compute local histogram and merge with remote.
+	localHist := histogramToProto(eng.ComputeHistogram(q, 50))
+	histogram := mergeHistogramBuckets(localHist, remoteRes.histogram)
 
 	iter, getToken := eng.Search(ctx, q, resume)
 
-	return s.mergeAndStream(ctx, iter, getToken, remote, q.Reverse(), transform, stream)
+	return s.mergeAndStream(ctx, iter, getToken, remoteRes.records, q.Reverse(), transform, histogram, stream)
 }
 
 func mapSearchError(err error) error {
@@ -336,6 +349,7 @@ func (s *QueryServer) mergeAndStream(
 	remote []*apiv1.Record,
 	reverse bool,
 	transform *query.RecordTransform,
+	histogram []*apiv1.HistogramBucket,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	isBefore := func(a, b time.Time) bool {
@@ -392,6 +406,7 @@ func (s *QueryServer) mergeAndStream(
 		Records:     sb.pending(),
 		ResumeToken: tokenBytes,
 		HasMore:     len(tokenBytes) > 0,
+		Histogram:   histogram,
 	})
 }
 
@@ -458,27 +473,36 @@ func (d *ingestDedup) seen(ts time.Time, ingesterID string) bool {
 	return false
 }
 
+// remoteResult holds records and histogram from remote vault queries.
+type remoteResult struct {
+	records   []*apiv1.Record
+	histogram []*apiv1.HistogramBucket
+}
+
 // collectRemote gathers results from all remote vaults into a single sorted
 // slice. Each vault's results arrive individually sorted, but concatenating
 // multiple vaults breaks that ordering, so we re-sort the combined slice for
 // the merge step. When reverse is true, sort descending (newest first).
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) []*apiv1.Record {
+// Also merges histogram buckets from all remote nodes.
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) remoteResult {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return nil
+		return remoteResult{}
 	}
 	byNode := s.remoteVaultsByNode(ctx)
 	if len(byNode) == 0 {
-		return nil
+		return remoteResult{}
 	}
 
 	queryExpr := q.String()
 	reverse := q.Reverse()
 
 	var all []*apiv1.Record
+	var allHist []*apiv1.HistogramBucket
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
-			records := s.fetchRemoteVault(ctx, nodeID, vid, queryExpr)
+			records, histogram := s.fetchRemoteVault(ctx, nodeID, vid, queryExpr)
 			all = append(all, records...)
+			allHist = mergeHistogramBuckets(allHist, histogram)
 		}
 	}
 
@@ -493,33 +517,87 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) []*apiv1
 	})
 
 	s.logger.Debug("search: collected remote records", "nodes", len(byNode), "total", len(all))
-	return all
+	return remoteResult{records: all, histogram: allHist}
 }
 
-// fetchRemoteVault sends a ForwardSearch RPC and returns the records as protos.
+// mergeHistogramBuckets sums two histogram bucket slices by matching timestamp.
+// The result is sorted by timestamp to ensure chronological order even when
+// remote nodes produce slightly different bucket boundaries (e.g. from
+// independent "last=5m" resolution with clock skew).
+func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBucket {
+	if len(b) == 0 {
+		return a
+	}
+	if len(a) == 0 {
+		return b
+	}
+	idx := make(map[int64]int, len(a))
+	for i, bucket := range a {
+		idx[bucket.TimestampMs] = i
+	}
+	for _, bucket := range b {
+		if i, ok := idx[bucket.TimestampMs]; ok {
+			a[i].Count += bucket.Count
+			for k, v := range bucket.GroupCounts {
+				if a[i].GroupCounts == nil {
+					a[i].GroupCounts = make(map[string]int64)
+				}
+				a[i].GroupCounts[k] += v
+			}
+		} else {
+			idx[bucket.TimestampMs] = len(a)
+			a = append(a, bucket)
+		}
+	}
+	slices.SortFunc(a, func(x, y *apiv1.HistogramBucket) int {
+		return int(x.TimestampMs - y.TimestampMs)
+	})
+	return a
+}
+
+// histogramToProto converts internal histogram buckets to the proto type.
+func histogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket {
+	if len(buckets) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.HistogramBucket, len(buckets))
+	for i, b := range buckets {
+		out[i] = &apiv1.HistogramBucket{
+			TimestampMs: b.TimestampMs,
+			Count:       b.Count,
+			GroupCounts: b.GroupCounts,
+		}
+	}
+	return out
+}
+
+// fetchRemoteVault sends a ForwardSearch RPC and returns the records and histogram.
 func (s *QueryServer) fetchRemoteVault(
 	ctx context.Context,
 	nodeID string,
 	vaultID uuid.UUID,
 	queryExpr string,
-) []*apiv1.Record {
+) ([]*apiv1.Record, []*apiv1.HistogramBucket) {
 	resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
 		VaultId: vaultID.String(),
 		Query:   queryExpr,
 	})
 	if err != nil {
 		s.logger.Warn("search: remote vault failed", "node", nodeID, "vault", vaultID, "err", err)
-		return nil
+		return nil, nil
 	}
+
+	histogram := resp.GetHistogram()
+
 	if len(resp.GetRecords()) == 0 {
-		return nil
+		return nil, histogram
 	}
 
 	records := make([]*apiv1.Record, 0, len(resp.Records))
 	for _, er := range resp.Records {
 		records = append(records, exportToRecord(er))
 	}
-	return records
+	return records, histogram
 }
 
 // collectRemotePipeline fans out a pipeline query to all remote vaults and
@@ -1042,7 +1120,7 @@ func (s *QueryServer) searchContext(
 ) ([]*apiv1.Record, error) {
 	eng := s.orch.MultiVaultQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
-	remote := s.collectRemote(ctx, q)
+	remote := s.collectRemote(ctx, q).records
 
 	reverse := q.Reverse()
 	ri := 0

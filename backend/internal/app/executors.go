@@ -80,31 +80,34 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // contains a pipeline (stats, timechart), runs RunPipeline and returns the
 // TableResult instead of individual records.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, _ []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []byte, bool, error) {
+	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, _ []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error) {
 		scopedExpr := fmt.Sprintf("vault=%s %s", vaultID, queryExpr)
 
 		q, pipeline, err := server.ParseExpression(scopedExpr)
 		if err != nil {
-			return nil, nil, nil, false, fmt.Errorf("parse query: %w", err)
+			return nil, nil, nil, nil, false, fmt.Errorf("parse query: %w", err)
 		}
 
 		eng := o.MultiVaultQueryEngine()
+
+		// Compute volume histogram for this vault.
+		histogram := histogramBucketsToProto(eng.ComputeHistogramForVaults(q, 50, []uuid.UUID{vaultID}))
 
 		// Pipeline query: run aggregation locally and return table result.
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 			result, err := eng.RunPipeline(ctx, q, pipeline)
 			if err != nil {
-				return nil, nil, nil, false, err
+				return nil, nil, nil, nil, false, err
 			}
 			if result.Table != nil {
-				return nil, server.TableResultToBasicProto(result.Table), nil, false, nil
+				return nil, server.TableResultToBasicProto(result.Table), histogram, nil, false, nil
 			}
 			// Non-table pipeline (sort/tail/slice): return as records.
 			records := make([]*gastrologv1.ExportRecord, 0, len(result.Records))
 			for _, rec := range result.Records {
 				records = append(records, cluster.RecordToExportRecord(rec))
 			}
-			return records, nil, nil, false, nil
+			return records, nil, histogram, nil, false, nil
 		}
 
 		// Regular search path.
@@ -117,12 +120,28 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		var records []*gastrologv1.ExportRecord
 		for rec, err := range iter {
 			if err != nil {
-				return records, nil, nil, false, err
+				return records, nil, histogram, nil, false, err
 			}
 			records = append(records, cluster.RecordToExportRecord(rec))
 		}
-		return records, nil, nil, false, nil
+		return records, nil, histogram, nil, false, nil
 	}
+}
+
+// histogramBucketsToProto converts internal histogram buckets to proto type.
+func histogramBucketsToProto(buckets []query.HistogramBucket) []*gastrologv1.HistogramBucket {
+	if len(buckets) == 0 {
+		return nil
+	}
+	out := make([]*gastrologv1.HistogramBucket, len(buckets))
+	for i, b := range buckets {
+		out[i] = &gastrologv1.HistogramBucket{
+			TimestampMs: b.TimestampMs,
+			Count:       b.Count,
+			GroupCounts: b.GroupCounts,
+		}
+	}
+	return out
 }
 
 // newExplainExecutor creates a cluster.ExplainExecutor that runs explain on

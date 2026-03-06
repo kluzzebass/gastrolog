@@ -80,6 +80,14 @@ export class SearchResponse extends Message<SearchResponse> {
    */
   tableResult?: TableResult;
 
+  /**
+   * Volume histogram, set on the first response message only.
+   * Provides an approximate record count distribution by time bucket and level.
+   *
+   * @generated from field: repeated gastrolog.v1.HistogramBucket histogram = 5;
+   */
+  histogram: HistogramBucket[] = [];
+
   constructor(data?: PartialMessage<SearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -92,6 +100,7 @@ export class SearchResponse extends Message<SearchResponse> {
     { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "table_result", kind: "message", T: TableResult },
+    { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchResponse {
@@ -108,6 +117,64 @@ export class SearchResponse extends Message<SearchResponse> {
 
   static equals(a: SearchResponse | PlainMessage<SearchResponse> | undefined, b: SearchResponse | PlainMessage<SearchResponse> | undefined): boolean {
     return proto3.util.equals(SearchResponse, a, b);
+  }
+}
+
+/**
+ * HistogramBucket holds the count for a single time bucket in the volume histogram.
+ * Used as a lightweight side-channel on search responses — not part of the pipeline.
+ *
+ * @generated from message gastrolog.v1.HistogramBucket
+ */
+export class HistogramBucket extends Message<HistogramBucket> {
+  /**
+   * Bucket start time (milliseconds since epoch)
+   *
+   * @generated from field: int64 timestamp_ms = 1;
+   */
+  timestampMs = protoInt64.zero;
+
+  /**
+   * Total records in this bucket
+   *
+   * @generated from field: int64 count = 2;
+   */
+  count = protoInt64.zero;
+
+  /**
+   * Level → count; records without level → "other"
+   *
+   * @generated from field: map<string, int64> group_counts = 3;
+   */
+  groupCounts: { [key: string]: bigint } = {};
+
+  constructor(data?: PartialMessage<HistogramBucket>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HistogramBucket";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "timestamp_ms", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "group_counts", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 3 /* ScalarType.INT64 */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramBucket {
+    return new HistogramBucket().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HistogramBucket {
+    return new HistogramBucket().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HistogramBucket {
+    return new HistogramBucket().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HistogramBucket | PlainMessage<HistogramBucket> | undefined, b: HistogramBucket | PlainMessage<HistogramBucket> | undefined): boolean {
+    return proto3.util.equals(HistogramBucket, a, b);
   }
 }
 
