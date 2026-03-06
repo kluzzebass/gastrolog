@@ -99,11 +99,13 @@ func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuck
 // buildHistogramBuckets converts raw count arrays into HistogramBucket structs.
 // Computes the "other" group as total minus the sum of known groups.
 func buildHistogramBuckets(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64) []HistogramBucket {
-	buckets := make([]HistogramBucket, 0, numBuckets)
+	buckets := make([]HistogramBucket, numBuckets)
 	for i := range numBuckets {
+		buckets[i].TimestampMs = start.Add(bucketWidth * time.Duration(i)).UnixMilli()
 		if counts[i] == 0 {
 			continue
 		}
+		buckets[i].Count = counts[i]
 
 		gc := groupCounts[i]
 
@@ -118,12 +120,7 @@ func buildHistogramBuckets(start time.Time, bucketWidth time.Duration, numBucket
 			}
 			gc["other"] = other
 		}
-
-		buckets = append(buckets, HistogramBucket{
-			TimestampMs: start.Add(bucketWidth * time.Duration(i)).UnixMilli(),
-			Count:       counts[i],
-			GroupCounts: gc,
-		})
+		buckets[i].GroupCounts = gc
 	}
 	return buckets
 }

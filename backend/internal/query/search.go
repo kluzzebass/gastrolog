@@ -394,12 +394,12 @@ func runMergeLoop(
 	return count, mergeCompleted
 }
 
-// Search returns an iterator over records matching the query, ordered by ingest timestamp.
+// Search returns an iterator over records matching the query, ordered by write timestamp.
 // The iterator yields (record, nil) for each match, or (zero, err) on error.
 // After yielding an error, iteration stops.
 //
 // For multi-vault engines, this searches across all vaults (or vaults matching
-// vault=X predicates in the query) and merge-sorts results by IngestTS.
+// vault=X predicates in the query) and merge-sorts results by WriteTS.
 //
 // The resume parameter allows continuing from a previous search. Pass nil to start fresh.
 // The returned nextToken function returns a ResumeToken if iteration stopped early
@@ -504,7 +504,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 // Time bounds and limit still apply to all yielded records.
 //
 // For multi-vault engines, this searches across all vaults (or vaults matching
-// vault=X predicates in the query) and merge-sorts results by IngestTS.
+// vault=X predicates in the query) and merge-sorts results by WriteTS.
 func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
@@ -624,7 +624,7 @@ func (e *Engine) reopenFollowScanners(
 		heap.Pop(ms.h)
 	}
 
-	firstMatchTS := firstMatch.rec.IngestTS
+	firstMatchTS := firstMatch.rec.WriteTS
 
 	for _, sc := range allChunks {
 		key := mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}
@@ -697,7 +697,7 @@ func (e *Engine) seekFollowPosition(
 		}
 
 		// For other chunks, skip records at or before firstMatchTS.
-		if rr.Record.IngestTS.After(firstMatchTS) {
+		if rr.Record.WriteTS.After(firstMatchTS) {
 			return rr, next, stop, true, nil
 		}
 		// Continue to next record.
@@ -711,7 +711,7 @@ func (e *Engine) seekFollowPosition(
 // Unlike SearchThenFollow, this method never completes on its own - it keeps
 // polling for new records until ctx is cancelled.
 //
-// For multi-vault engines, records are merged by IngestTS across all vaults.
+// For multi-vault engines, records are merged by WriteTS across all vaults.
 func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, error] {
 	// Normalize query to ensure BoolExpr is set.
 	q = q.Normalize()
