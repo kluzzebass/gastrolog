@@ -32,6 +32,11 @@ func newCPUTracker(clock func() time.Time, rusage func() (user, sys time.Duratio
 	}
 }
 
+// minWindow is the minimum wall-clock duration between baseline resets.
+// Multiple callers within this window get the same stable reading instead
+// of racing over progressively shorter (and noisier) measurement windows.
+const minWindow = 2 * time.Second
+
 func (t *cpuTracker) percent() float64 {
 	now := t.clock()
 	utime, stime := t.rusage()
@@ -40,7 +45,7 @@ func (t *cpuTracker) percent() float64 {
 	defer t.mu.Unlock()
 
 	wall := now.Sub(t.lastWall)
-	if wall <= 0 {
+	if wall < minWindow {
 		return t.lastCPU
 	}
 

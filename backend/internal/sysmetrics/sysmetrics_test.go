@@ -42,9 +42,9 @@ func fakeRusage(userStep, sysStep time.Duration) func() (time.Duration, time.Dur
 }
 
 func TestCPUBasic(t *testing.T) {
-	// 1s wall, 300ms user + 200ms sys = 500ms CPU → 50%.
-	clock := fakeClock(time.Unix(0, 0), time.Second)
-	rusage := fakeRusage(300*time.Millisecond, 200*time.Millisecond)
+	// 5s wall, 1500ms user + 1000ms sys = 2500ms CPU → 50%.
+	clock := fakeClock(time.Unix(0, 0), 5*time.Second)
+	rusage := fakeRusage(1500*time.Millisecond, 1000*time.Millisecond)
 
 	tr := newCPUTracker(clock, rusage)
 	pct := tr.percent()
@@ -62,8 +62,8 @@ func TestCPUClockRegression(t *testing.T) {
 		switch calls {
 		case 1: // seed
 			return start
-		case 2: // first percent() → normal
-			return start.Add(time.Second)
+		case 2: // first percent() → normal (must exceed minWindow)
+			return start.Add(5 * time.Second)
 		default: // second percent() → regression
 			return start // earlier than lastWall
 		}
@@ -85,7 +85,7 @@ func TestCPUClockRegression(t *testing.T) {
 
 func TestCPUZeroDelta(t *testing.T) {
 	// Clock advances but no CPU time consumed → 0%.
-	clock := fakeClock(time.Unix(0, 0), time.Second)
+	clock := fakeClock(time.Unix(0, 0), 5*time.Second)
 	rusage := fakeRusage(0, 0)
 
 	tr := newCPUTracker(clock, rusage)
@@ -97,9 +97,9 @@ func TestCPUZeroDelta(t *testing.T) {
 }
 
 func TestCPUMultiCore(t *testing.T) {
-	// 1s wall, 1200ms user + 800ms sys = 2000ms CPU → 200%.
-	clock := fakeClock(time.Unix(0, 0), time.Second)
-	rusage := fakeRusage(1200*time.Millisecond, 800*time.Millisecond)
+	// 5s wall, 6000ms user + 4000ms sys = 10000ms CPU → 200%.
+	clock := fakeClock(time.Unix(0, 0), 5*time.Second)
+	rusage := fakeRusage(6000*time.Millisecond, 4000*time.Millisecond)
 
 	tr := newCPUTracker(clock, rusage)
 	pct := tr.percent()
@@ -110,8 +110,9 @@ func TestCPUMultiCore(t *testing.T) {
 }
 
 func TestCPUConcurrent(t *testing.T) {
-	clock := fakeClock(time.Unix(0, 0), time.Millisecond)
-	rusage := fakeRusage(100*time.Microsecond, 50*time.Microsecond)
+	// Each call advances 5s so every call can potentially update the baseline.
+	clock := fakeClock(time.Unix(0, 0), 5*time.Second)
+	rusage := fakeRusage(500*time.Millisecond, 250*time.Millisecond)
 
 	tr := newCPUTracker(clock, rusage)
 
@@ -127,6 +128,34 @@ func TestCPUConcurrent(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+func TestCPUMinWindow(t *testing.T) {
+	// Calls within minWindow should return the cached value, not reset the baseline.
+	start := time.Unix(0, 0)
+	calls := 0
+	clock := func() time.Time {
+		calls++
+		switch calls {
+		case 1: // seed
+			return start
+		case 2: // first percent() → exceeds minWindow
+			return start.Add(5 * time.Second)
+		case 3: // second percent() → within minWindow of last reset
+			return start.Add(6 * time.Second)
+		default:
+			return start.Add(time.Duration(calls) * 5 * time.Second)
+		}
+	}
+	rusage := fakeRusage(250*time.Millisecond, 0)
+
+	tr := newCPUTracker(clock, rusage)
+	first := tr.percent()
+	second := tr.percent()
+
+	if first != second {
+		t.Fatalf("call within minWindow should return cached %.2f, got %.2f", first, second)
+	}
 }
 
 func TestMemoryReasonable(t *testing.T) {
