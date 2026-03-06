@@ -14,7 +14,7 @@ interface QueryInputProps {
   children?: ReactNode;
 }
 
-function roleStyle(role: string, dark: boolean): React.CSSProperties {
+export function roleStyle(role: string, dark: boolean): React.CSSProperties {
   switch (role) {
     case "operator":
       return { color: "var(--color-severity-warn)", fontWeight: 700 };
@@ -130,7 +130,7 @@ function dropSpans(spans: Span[], len: number): Span[] {
  *   with neutral "token" color.
  * - No spans at all → entire text in neutral.
  */
-function resolveSpans(
+export function resolveSpans(
   displayValue: string,
   highlightSpans: Span[] | undefined,
   highlightExpression: string | undefined,

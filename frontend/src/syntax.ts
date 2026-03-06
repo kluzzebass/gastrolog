@@ -157,6 +157,7 @@ function highlightJSON(text: string): SyntaxSpan[] {
   // After : → next string/number/keyword is value.
   let expectKey = false;
   let afterColon = false;
+  let lastKey = ""; // most recent JSON key (unquoted), used to build key=value clickValues
 
   const push = (
     start: number,
@@ -203,12 +204,14 @@ function highlightJSON(text: string): SyntaxSpan[] {
       if (i < len) i++; // skip closing quote
       const isKey = expectKey;
       const color = isKey ? C_KEY : C_STRING;
-      // Value strings are clickable (content without quotes).
-      const cv = !isKey ? text.slice(start + 1, i - 1) : undefined;
-      push(start, i, color, cv);
+      const content = text.slice(start + 1, i - 1);
       if (isKey) {
+        lastKey = content;
         expectKey = false;
       }
+      // Value strings are clickable as key=value pairs.
+      const cv = !isKey && lastKey ? `${lastKey}=${content}` : undefined;
+      push(start, i, color, cv);
       afterColon = false;
     } else if (afterColon && (ch === "-" || (ch >= "0" && ch <= "9"))) {
       // Number
@@ -236,7 +239,7 @@ function highlightJSON(text: string): SyntaxSpan[] {
         }
       }
       const numStr = text.slice(start, i);
-      push(start, i, C_NUMBER, numStr);
+      push(start, i, C_NUMBER, lastKey ? `${lastKey}=${numStr}` : numStr);
       afterColon = false;
     } else if (
       afterColon &&
@@ -279,7 +282,7 @@ function highlightJSON(text: string): SyntaxSpan[] {
 interface ColorInterval {
   start: number;
   end: number;
-  color: string;
+  color?: string;
   url?: string;
   clickValue?: string;
 }
@@ -500,13 +503,25 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     });
   }
 
-  // 2. Key=value pairs — color the key and = sign.
+  // 2. Key=value pairs — color the key+= dim, entire pair clickable as key=value.
+  //    clickValue intervals are collected separately and prepended so they take
+  //    priority over bare clickValues from other rules (e.g. severity keywords).
+  const kvClickIntervals: ColorInterval[] = [];
   reset(RE_KV);
   while ((m = RE_KV.exec(text)) !== null) {
     const fullMatch = m[0];
     const keyStart = m.index + fullMatch.indexOf(m[1]!);
     const keyEnd = keyStart + m[1]!.length + 1; // +1 for the = sign
     intervals.push({ start: keyStart, end: keyEnd, color: C_DIM });
+    // Entire key=value span — clickable (color-less so it doesn't override other rules)
+    const valEnd = m.index + fullMatch.length;
+    const rawVal = text.slice(keyEnd, valEnd);
+    const unquoted = rawVal.length >= 2 && ((rawVal[0] === '"' && rawVal.at(-1) === '"') || (rawVal[0] === "'" && rawVal.at(-1) === "'"))
+      ? rawVal.slice(1, -1)
+      : rawVal;
+    const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(unquoted);
+    const cv = needsQuotes ? `${m[1]!}="${unquoted}"` : `${m[1]!}=${unquoted}`;
+    kvClickIntervals.push({ start: keyStart, end: valEnd, clickValue: cv });
   }
 
   // 3. Timestamps: ISO, CLF, Go/Ruby, ctime, syslog BSD.
@@ -618,7 +633,8 @@ function highlightKVPlain(text: string): SyntaxSpan[] {
     });
   }
 
-  return intervalsToSpans(text, intervals);
+  // KV clickValue intervals first so key=value pairs take priority over bare values.
+  return intervalsToSpans(text, [...kvClickIntervals, ...intervals]);
 }
 
 /** Convert a set of (possibly overlapping) color intervals to non-overlapping spans.
@@ -652,10 +668,16 @@ export function intervalsToSpans(
     let clickValue: string | undefined;
     for (const iv of intervals) {
       if (iv.start <= segStart && iv.end >= segEnd) {
-        color = iv.color;
-        url = iv.url;
-        clickValue = iv.clickValue;
-        break;
+        // First interval with color wins for color/url.
+        // First interval with clickValue wins for clickValue (independently).
+        if (color === undefined && iv.color !== undefined) {
+          color = iv.color;
+          url = iv.url;
+        }
+        if (clickValue === undefined && iv.clickValue !== undefined) {
+          clickValue = iv.clickValue;
+        }
+        if (color !== undefined && clickValue !== undefined) break;
       }
     }
     // Merge with previous span if attributes match.

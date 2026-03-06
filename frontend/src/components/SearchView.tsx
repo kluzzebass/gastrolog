@@ -286,6 +286,7 @@ export function SearchView() {
 
         <DetailPanelProvider value={{
           onFieldSelect: sv.handleFieldSelect,
+          onSpanClick: sv.handleSpanClick,
           onChunkSelect: sv.handleChunkSelect,
           onVaultSelect: sv.handleVaultSelect,
           onPosSelect: sv.handlePosSelect,

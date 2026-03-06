@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { QueryInput } from "./QueryInput";
+import { useState, useRef, useEffect } from "react";
+import { QueryInput, resolveSpans, roleStyle } from "./QueryInput";
 import { QueryHistory } from "./QueryHistory";
 import { SavedQueries } from "./SavedQueries";
 import { QueryAutocomplete } from "./QueryAutocomplete";
@@ -143,11 +143,41 @@ export function QueryBar({
   const c = useThemeClass(dark);
   const { openHelp } = useHelp();
   const [focused, setFocused] = useState(false);
+  const barRef = useRef<HTMLDivElement>(null);
+  // Tracks whether a mousedown happened, so the blur handler can tell
+  // keyboard blur (Tab) apart from mouse blur (click outside).
+  const mouseDownRef = useRef(false);
+
+  // Collapse on outside click — uses the `click` event (not mousedown/blur)
+  // so the target's own click handler fires first. This prevents the
+  // "two clicks needed" problem where blur-driven collapse ate the first click.
+  useEffect(() => {
+    if (!focused) return;
+    const onDown = () => { mouseDownRef.current = true; };
+    const onUp = () => { mouseDownRef.current = false; };
+    const onClick = (e: MouseEvent) => {
+      if (barRef.current?.contains(e.target as Node)) return;
+      setFocused(false);
+      setShowHistory(false);
+      setShowSavedQueries(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("mouseup", onUp);
+    document.addEventListener("click", onClick);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("click", onClick);
+    };
+  }, [focused, setShowHistory, setShowSavedQueries]);
 
   const collapsed = !focused;
   const lines = draft.split("\n");
   const firstLine = lines[0] || "";
   const hiddenCount = lines.length - 1;
+  const collapsedSpans = collapsed
+    ? resolveSpans(firstLine, highlightSpans, highlightExpression)
+    : [];
 
   const expand = () => {
     setFocused(true);
@@ -156,6 +186,7 @@ export function QueryBar({
 
   return (
     <div
+      ref={barRef}
       className={`px-5 py-4 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
     >
       <div className="flex gap-3 items-start">
@@ -173,7 +204,13 @@ export function QueryBar({
               if (e.key === "Enter" || e.key === " ") expand();
             }}
           >
-            <span className="truncate">{firstLine || "Search logs..."}</span>
+            <span className="truncate">
+              {firstLine
+                ? collapsedSpans.map((span, i) => (
+                    <span key={i} style={roleStyle(span.role, dark)}>{span.text}</span>
+                  ))
+                : "Search logs..."}
+            </span>
             {hiddenCount > 0 && (
               <span className={`shrink-0 text-xs tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}>
                 +{hiddenCount} line{hiddenCount > 1 ? "s" : ""}
@@ -186,8 +223,12 @@ export function QueryBar({
             className="flex-1 relative"
             onFocusCapture={() => setFocused(true)}
             onBlurCapture={(e) => {
-              // Stay expanded if focus moved to another element within this container.
-              if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              // Keyboard blur (Tab): collapse immediately — no click to worry about.
+              // Mouse blur: skip — the document-level click handler will collapse.
+              if (
+                !e.currentTarget.contains(e.relatedTarget as Node) &&
+                !mouseDownRef.current
+              ) {
                 setFocused(false);
                 setShowHistory(false);
                 setShowSavedQueries(false);

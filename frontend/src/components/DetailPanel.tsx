@@ -24,6 +24,7 @@ export function DetailPanelContent({
 }>) {
   const {
     onFieldSelect,
+    onSpanClick,
     onChunkSelect,
     onVaultSelect,
     onPosSelect,
@@ -135,6 +136,14 @@ export function DetailPanelContent({
             <td colSpan={2} className={`pb-1 max-w-0 ${borderCls}`}>
               <pre
                 className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre overflow-x-auto leading-relaxed app-scroll ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
+                onClick={(e) => {
+                  if (!e.altKey) return;
+                  const el = (e.target as HTMLElement).closest<HTMLElement>("[data-click-value]");
+                  if (el) {
+                    e.stopPropagation();
+                    onSpanClick(el.dataset.clickValue!);
+                  }
+                }}
               >
                 {(() => {
                   const spans = syntaxHighlight(visibleText, highlightMode);
@@ -145,18 +154,34 @@ export function DetailPanelContent({
                   return spans.map((span, i) => {
                     const style = span.color ? { color: span.color } : undefined;
                     const key = `msg-${offsets[i]}`;
-                    return span.url ? (
-                      <a
-                        key={key}
-                        href={span.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={style}
-                        className="underline decoration-current/30 hover:decoration-current/60"
-                      >
-                        {span.text}
-                      </a>
-                    ) : (
+                    if (span.url) {
+                      return (
+                        <a
+                          key={key}
+                          href={span.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={style}
+                          className="underline decoration-current/30 hover:decoration-current/60"
+                        >
+                          {span.text}
+                        </a>
+                      );
+                    }
+                    if (span.clickValue) {
+                      return (
+                        <span
+                          key={key}
+                          style={style}
+                          className="cursor-pointer hover:brightness-125"
+                          data-click-value={span.clickValue}
+                          title="⌥ click to add filter"
+                        >
+                          {span.text}
+                        </span>
+                      );
+                    }
+                    return (
                       <span key={key} style={style}>
                         {span.text}
                       </span>

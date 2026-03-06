@@ -357,7 +357,7 @@ export function useSearchView() {
         setSelectedRecord(null);
         scrollToSelectedRef.current = false;
         logScrollRef.current?.scrollTo(0, 0);
-        search(q, false, true);
+        search(q, false, !hasPipeOutsideQuotes(q));
         if (hasPipeOutsideQuotes(q)) {
           histogramReset();
         } else {
@@ -465,7 +465,7 @@ export function useSearchView() {
       setSelectedRecord(null);
       scrollToSelectedRef.current = false;
       logScrollRef.current?.scrollTo(0, 0);
-      search(q, false, true);
+      search(q, false, !hasPipeOutsideQuotes(q));
       if (hasPipeOutsideQuotes(q)) {
         histogramReset();
       } else {
@@ -669,41 +669,29 @@ export function useSearchView() {
     }
   };
 
-  // eslint-disable-next-line sonarjs/cognitive-complexity -- OR-group parser requires nested bracket matching
-  const handleSpanClick = (value: string, shiftKey: boolean) => {
-    const trimmed = draft.trim();
-    if (shiftKey) {
-      if (trimmed.endsWith(")")) {
-        let depth = 0;
-        let matchIdx = -1;
-        for (let i = trimmed.length - 1; i >= 0; i--) {
-          if (trimmed[i] === ")") depth++;
-          else if (trimmed[i] === "(") {
-            depth--;
-            if (depth === 0) { matchIdx = i; break; }
-          }
-        }
-        const atBoundary = matchIdx === 0 || trimmed[matchIdx - 1] === " ";
-        if (matchIdx >= 0 && atBoundary && /\bOR\b/.test(trimmed.slice(matchIdx))) {
-          setDraft(trimmed.slice(0, -1) + " OR " + value + ")");
-          queryInputRef.current?.focus();
-          return;
-        }
+  const handleSpanClick = (value: string) => {
+    const text = draft;
+    const pos = cursorRef.current;
+
+    // Insert at cursor position with surrounding spaces
+    const before = text.slice(0, pos);
+    const after = text.slice(pos);
+    const needSpaceBefore = before.length > 0 && !before.endsWith(" ") && !before.endsWith("(");
+    const needSpaceAfter = after.length > 0 && !after.startsWith(" ") && !after.startsWith(")");
+    const inserted = `${needSpaceBefore ? " " : ""}${value}${needSpaceAfter ? " " : ""}`;
+    const newDraft = before + inserted + after;
+    const newCursor = before.length + inserted.length;
+
+    setDraft(newDraft);
+    cursorRef.current = newCursor;
+    requestAnimationFrame(() => {
+      const ta = queryInputRef.current;
+      if (ta) {
+        ta.focus();
+        ta.selectionStart = newCursor;
+        ta.selectionEnd = newCursor;
       }
-      const lastSpace = trimmed.lastIndexOf(" ");
-      if (lastSpace !== -1) {
-        const prefix = trimmed.slice(0, lastSpace);
-        const lastToken = trimmed.slice(lastSpace + 1);
-        setDraft(`${prefix} (${lastToken} OR ${value})`);
-      } else if (trimmed) {
-        setDraft(`(${trimmed} OR ${value})`);
-      } else {
-        setDraft(value);
-      }
-    } else {
-      setDraft(trimmed ? `${trimmed} ${value}` : value);
-    }
-    queryInputRef.current?.focus();
+    });
   };
 
   const handleTokenToggle = (token: string) => {

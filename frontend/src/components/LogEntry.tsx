@@ -49,7 +49,7 @@ export const LogEntry = forwardRef<
     isSelected: boolean;
     onSelect: () => void;
     onFilterToggle?: (token: string) => void;
-    onSpanClick?: (value: string, shiftKey: boolean) => void;
+    onSpanClick?: (value: string) => void;
     dark: boolean;
     highlightMode?: HighlightMode;
   }
@@ -102,10 +102,11 @@ export const LogEntry = forwardRef<
       <div
         className={`font-mono text-[0.85em] leading-relaxed truncate whitespace-pre self-center pl-1.5 ${dark ? "text-text-normal" : "text-light-text-normal"}`}
         onClick={onSpanClick ? (e) => {
+          if (!e.altKey) return; // plain click bubbles to onSelect
           const el = (e.target as HTMLElement).closest<HTMLElement>("[data-click-value]");
           if (el) {
             e.stopPropagation();
-            onSpanClick(el.dataset.clickValue!, e.shiftKey);
+            onSpanClick(el.dataset.clickValue!);
           }
         } : undefined}
       >
@@ -140,6 +141,7 @@ export const LogEntry = forwardRef<
                   style={style}
                   className={`cursor-pointer hover:brightness-125 ${className}`}
                   data-click-value={part.clickValue}
+                  title="⌥ click to add filter"
                 >
                   {part.text}
                 </span>

@@ -17,7 +17,23 @@ interface SearchState {
  * all real query parsing via the `expression` field.
  */
 export function extractTokens(queryStr: string): string[] {
-  const parts = queryStr.trim().split(/\s+/).filter(Boolean);
+  // Strip pipeline segments — only the filter part before the first unquoted pipe
+  // should produce highlight tokens.
+  let filterPart = queryStr;
+  let inQuote: string | null = null;
+  for (let i = 0; i < queryStr.length; i++) {
+    const ch = queryStr[i]!;
+    if (inQuote) {
+      if (ch === "\\" && i + 1 < queryStr.length) i++;
+      else if (ch === inQuote) inQuote = null;
+    } else if (ch === '"' || ch === "'") {
+      inQuote = ch;
+    } else if (ch === "|") {
+      filterPart = queryStr.slice(0, i);
+      break;
+    }
+  }
+  const parts = filterPart.trim().split(/\s+/).filter(Boolean);
   const tokens: string[] = [];
 
   for (let part of parts) {

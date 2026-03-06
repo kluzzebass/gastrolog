@@ -36,7 +36,7 @@ interface SearchResultsProps {
   onSelectRecord: (rec: ProtoRecord | null) => void;
   toggleReverse: () => void;
   onTokenToggle: (token: string) => void;
-  onSpanClick: (value: string, shiftKey: boolean) => void;
+  onSpanClick: (value: string) => void;
   onZoomOut: () => void;
   onFollowBufferSizeChange: (size: number) => void;
   resetFollowNewCount: () => void;
