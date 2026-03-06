@@ -46,20 +46,16 @@ type VaultServer struct {
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remote RemoteVaultForwarder, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
 		orch:        orch,
 		cfgStore:    cfgStore,
 		factories:   factories,
 		peerStats:   peerStats,
+		remote:      remote,
 		localNodeID: localNodeID,
 		logger:      logging.Default(logger).With("component", "vault-server"),
 	}
-}
-
-// SetRemoteForwarder sets the forwarder for forwarding vault RPCs to remote nodes.
-func (s *VaultServer) SetRemoteForwarder(fwd RemoteVaultForwarder) {
-	s.remote = fwd
 }
 
 // remoteNodeForVault returns the owning node ID if the vault is remote.

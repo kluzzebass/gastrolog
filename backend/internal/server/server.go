@@ -319,14 +319,8 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	s.loadInitialLookupConfig(geoipTable, asnTable)
 
-	queryServer := NewQueryServer(s.orch, s.cfgStore, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
-	if s.remoteSearcher != nil {
-		queryServer.SetRemoteSearcher(s.remoteSearcher, s.localNodeID)
-	}
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.localNodeID, s.logger)
-	if s.remoteVaultForwarder != nil {
-		vaultServer.SetRemoteForwarder(s.remoteVaultForwarder)
-	}
+	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.localNodeID, s.afterConfigApply, s.configSignal)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {

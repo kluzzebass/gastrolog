@@ -51,14 +51,8 @@ type QueryServer struct {
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, cfgStore config.Store, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64, logger *slog.Logger) *QueryServer {
-	return &QueryServer{orch: orch, cfgStore: cfgStore, lookupResolver: lookupResolver, lookupNames: lookupNames, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount, logger: logger}
-}
-
-// SetRemoteSearcher configures the search forwarder for cross-node queries.
-func (s *QueryServer) SetRemoteSearcher(rs RemoteSearcher, localNodeID string) {
-	s.remoteSearcher = rs
-	s.localNodeID = localNodeID
+func NewQueryServer(orch *orchestrator.Orchestrator, cfgStore config.Store, remoteSearcher RemoteSearcher, localNodeID string, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64, logger *slog.Logger) *QueryServer {
+	return &QueryServer{orch: orch, cfgStore: cfgStore, remoteSearcher: remoteSearcher, localNodeID: localNodeID, lookupResolver: lookupResolver, lookupNames: lookupNames, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount, logger: logger}
 }
 
 // Search executes a query and streams matching records.
