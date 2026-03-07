@@ -70,9 +70,9 @@ func detectAggColumns(cols []string) []aggColumn {
 		case strings.HasPrefix(lower, "max("):
 			aggs = append(aggs, aggColumn{index: i, typ: aggMax})
 		case strings.HasPrefix(lower, "avg("):
-			// avg can't be directly merged — treat as sum for now
-			// (better than dropping). In practice avg across nodes
-			// requires count+sum but that's a future refinement.
+			// Non-distributive: pipelines with avg() are now routed through
+			// searchPipelineGlobal (raw record gathering) so this path should
+			// not be reached. Keep as fallback for safety.
 			aggs = append(aggs, aggColumn{index: i, typ: aggSum})
 		}
 	}

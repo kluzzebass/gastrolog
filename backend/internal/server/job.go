@@ -17,6 +17,12 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// JobScheduler is the subset of orchestrator.Scheduler used by JobServer.
+type JobScheduler interface {
+	GetJob(id string) (orchestrator.JobInfo, bool)
+	ListJobs() []orchestrator.JobInfo
+}
+
 // PeerJobsProvider returns active jobs from peer cluster nodes.
 type PeerJobsProvider interface {
 	GetAll() map[string][]*apiv1.Job
@@ -24,7 +30,7 @@ type PeerJobsProvider interface {
 
 // JobServer implements the JobService.
 type JobServer struct {
-	scheduler   *orchestrator.Scheduler
+	scheduler   JobScheduler
 	localNodeID string
 	peerJobs    PeerJobsProvider // nil in single-node mode
 }
@@ -32,11 +38,12 @@ type JobServer struct {
 var _ gastrologv1connect.JobServiceHandler = (*JobServer)(nil)
 
 // NewJobServer creates a new JobServer.
-func NewJobServer(scheduler *orchestrator.Scheduler, localNodeID string, peerJobs PeerJobsProvider) *JobServer {
+func NewJobServer(scheduler JobScheduler, localNodeID string, peerJobs PeerJobsProvider) *JobServer {
 	return &JobServer{scheduler: scheduler, localNodeID: localNodeID, peerJobs: peerJobs}
 }
 
-// GetJob returns a single job by ID (local node only).
+// GetJob returns a single job by ID, checking the local scheduler first
+// and falling back to peer broadcasts for jobs on remote nodes.
 func (s *JobServer) GetJob(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetJobRequest],
@@ -45,14 +52,26 @@ func (s *JobServer) GetJob(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
+	// Check local scheduler first.
 	info, ok := s.scheduler.GetJob(req.Msg.Id)
-	if !ok {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("job not found"))
+	if ok {
+		return connect.NewResponse(&apiv1.GetJobResponse{
+			Job: JobInfoToProto(info.Snapshot(), s.localNodeID),
+		}), nil
 	}
 
-	return connect.NewResponse(&apiv1.GetJobResponse{
-		Job: JobInfoToProto(info.Snapshot(), s.localNodeID),
-	}), nil
+	// Fall back to peer jobs from cluster broadcast.
+	if s.peerJobs != nil {
+		for _, peerJobList := range s.peerJobs.GetAll() {
+			for _, job := range peerJobList {
+				if job.Id == req.Msg.Id {
+					return connect.NewResponse(&apiv1.GetJobResponse{Job: job}), nil
+				}
+			}
+		}
+	}
+
+	return nil, connect.NewError(connect.CodeNotFound, errors.New("job not found"))
 }
 
 // ListJobs returns all jobs (local + peer) including cron, one-time, and recently completed.
