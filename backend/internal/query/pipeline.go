@@ -5,6 +5,7 @@ import (
 	"errors"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -197,10 +198,12 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 
 // PipelineNeedsGlobalRecords reports whether a pipeline query must gather raw
 // records from all cluster nodes before running the pipeline on the coordinator.
-// This is true when a non-distributive cap operator (head, tail, slice) appears
-// in the pre-aggregation phase AND the pipeline includes an aggregation
-// (stats or timechart). In that case, fanning out the full pipeline to each node
-// would apply the cap independently per-node, producing incorrect aggregates.
+// This is true when:
+//   - A non-distributive cap operator (head, tail, slice) appears in the
+//     pre-aggregation phase AND the pipeline includes an aggregation, OR
+//   - The pipeline contains a non-distributive aggregation function (avg,
+//     dcount, median, first, last, values) that cannot be correctly merged
+//     from per-node results.
 func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
 	ph, err := classifyPipes(pipeline)
 	if err != nil {
@@ -209,7 +212,27 @@ func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
 	if ph.statsOp == nil && ph.timechartOp == nil {
 		return false
 	}
-	return hasExplicitCap(ph.preOps)
+	if hasExplicitCap(ph.preOps) {
+		return true
+	}
+	return hasNonDistributiveAgg(ph.statsOp)
+}
+
+// hasNonDistributiveAgg returns true if the StatsOp contains aggregate functions
+// that cannot be correctly merged from independent per-node results.
+// Distributive: count, sum, min, max (can be merged by summing/min/max).
+// Non-distributive: avg, dcount, median, first, last, values.
+func hasNonDistributiveAgg(op *querylang.StatsOp) bool {
+	if op == nil {
+		return false
+	}
+	for _, agg := range op.Aggs {
+		switch strings.ToLower(agg.Func) {
+		case "avg", "dcount", "median", "first", "last", "values":
+			return true
+		}
+	}
+	return false
 }
 
 // RunPipelineOnRecords executes a pipeline query where extra records (typically

@@ -641,7 +641,14 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 
 	// Reconstruct expression with absolute timestamps so remote nodes
 	// produce identical timechart bucket boundaries.
-	remoteExpr := q.String() + " " + pipeline.String()
+	// Pipeline.String() uses " | " between parts but omits a leading "|"
+	// when there is no filter. Prefix with "| " to ensure the remote parser
+	// sees the pipe operator.
+	pipelineStr := pipeline.String()
+	if len(pipelineStr) > 0 && pipelineStr[0] != '|' {
+		pipelineStr = "| " + pipelineStr
+	}
+	remoteExpr := q.String() + " " + pipelineStr
 
 	var results []*query.TableResult
 	for nodeID, vaultIDs := range byNode {

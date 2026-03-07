@@ -297,6 +297,53 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "stats with avg is non-distributive",
+			ops: []querylang.PipeOp{
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{
+					{Func: "avg", Arg: &querylang.FieldRef{Name: "duration"}},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "stats with dcount is non-distributive",
+			ops: []querylang.PipeOp{
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{
+					{Func: "dcount", Arg: &querylang.FieldRef{Name: "host"}},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "stats with median is non-distributive",
+			ops: []querylang.PipeOp{
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{
+					{Func: "median", Arg: &querylang.FieldRef{Name: "latency"}},
+				}},
+			},
+			want: true,
+		},
+		{
+			name: "stats with count and sum are distributive",
+			ops: []querylang.PipeOp{
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{
+					{Func: "count"},
+					{Func: "sum", Arg: &querylang.FieldRef{Name: "bytes"}},
+				}},
+			},
+			want: false,
+		},
+		{
+			name: "stats with mix of distributive and non-distributive",
+			ops: []querylang.PipeOp{
+				&querylang.StatsOp{Aggs: []querylang.AggExpr{
+					{Func: "count"},
+					{Func: "avg", Arg: &querylang.FieldRef{Name: "duration"}},
+				}},
+			},
+			want: true,
+		},
 	}
 
 	for _, tc := range tests {

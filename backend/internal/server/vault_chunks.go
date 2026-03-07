@@ -74,6 +74,21 @@ func (s *VaultServer) GetChunk(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
+	// Forward to remote node if the vault isn't local.
+	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
+		if s.remote == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
+		}
+		fwdResp, err := s.remote.GetChunk(ctx, nodeID, &apiv1.ForwardGetChunkRequest{
+			VaultId: vaultID.String(),
+			ChunkId: chunkID.String(),
+		})
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
+		}
+		return connect.NewResponse(&apiv1.GetChunkResponse{Chunk: fwdResp.GetChunk()}), nil
+	}
+
 	meta, err := s.orch.GetChunkMeta(vaultID, chunkID)
 	if err != nil {
 		return nil, mapVaultError(err)
@@ -156,6 +171,21 @@ func (s *VaultServer) AnalyzeChunk(
 		return nil, connErr
 	}
 
+	// Forward to remote node if the vault isn't local.
+	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
+		if s.remote == nil {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
+		}
+		fwdResp, err := s.remote.AnalyzeChunk(ctx, nodeID, &apiv1.ForwardAnalyzeChunkRequest{
+			VaultId: vaultID.String(),
+			ChunkId: req.Msg.ChunkId,
+		})
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
+		}
+		return connect.NewResponse(&apiv1.AnalyzeChunkResponse{Analyses: fwdResp.GetAnalyses()}), nil
+	}
+
 	a, err := s.orch.NewAnalyzer(vaultID)
 	if err != nil {
 		return nil, mapVaultError(err)
@@ -186,44 +216,7 @@ func (s *VaultServer) AnalyzeChunk(
 	}
 
 	for _, ca := range analyses {
-		protoAnalysis := &apiv1.ChunkAnalysis{
-			ChunkId:     ca.ChunkID.String(),
-			Sealed:      ca.Sealed,
-			RecordCount: ca.ChunkRecords,
-			Indexes:     make([]*apiv1.IndexAnalysis, 0),
-		}
-
-		// Token index
-		if ca.TokenStats != nil {
-			protoAnalysis.Indexes = append(protoAnalysis.Indexes, &apiv1.IndexAnalysis{
-				Name:       "token",
-				Complete:   true, // Token index doesn't have partial state
-				Status:     tokenStatusString(ca.TokenStats),
-				EntryCount: ca.TokenStats.UniqueTokens,
-			})
-		}
-
-		// Attr index
-		if ca.AttrKVStats != nil {
-			protoAnalysis.Indexes = append(protoAnalysis.Indexes, &apiv1.IndexAnalysis{
-				Name:       "attr",
-				Complete:   true, // Attr index doesn't have budget limits
-				Status:     "ok",
-				EntryCount: ca.AttrKVStats.UniqueKeys + ca.AttrKVStats.UniqueValues + ca.AttrKVStats.UniqueKeyValuePairs,
-			})
-		}
-
-		// KV index
-		if ca.KVStats != nil {
-			protoAnalysis.Indexes = append(protoAnalysis.Indexes, &apiv1.IndexAnalysis{
-				Name:       "kv",
-				Complete:   !ca.KVStats.BudgetExhausted,
-				Status:     kvStatusString(ca.KVStats),
-				EntryCount: ca.KVStats.KeysIndexed + ca.KVStats.ValuesIndexed + ca.KVStats.PairsIndexed,
-			})
-		}
-
-		resp.Analyses = append(resp.Analyses, protoAnalysis)
+		resp.Analyses = append(resp.Analyses, ChunkAnalysisToProto(ca))
 	}
 
 	return connect.NewResponse(resp), nil

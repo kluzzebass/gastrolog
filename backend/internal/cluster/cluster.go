@@ -122,6 +122,18 @@ type Server struct {
 	// followExecutor runs a follow (tail -f) on local vaults for remote requests.
 	followExecutor FollowExecutor
 
+	// getChunkExecutor returns details for a specific chunk in a local vault.
+	getChunkExecutor GetChunkExecutor
+
+	// analyzeChunkExecutor runs index analysis on a local vault.
+	analyzeChunkExecutor AnalyzeChunkExecutor
+
+	// sealVaultExecutor seals the active chunk of a local vault.
+	sealVaultExecutor SealVaultExecutor
+
+	// reindexVaultExecutor rebuilds all indexes for a local vault.
+	reindexVaultExecutor ReindexVaultExecutor
+
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns

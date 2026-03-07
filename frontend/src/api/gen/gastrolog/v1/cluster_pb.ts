@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
-import { ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
+import { ChunkAnalysis, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
@@ -1196,6 +1196,320 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
 
   static equals(a: ForwardValidateVaultResponse | PlainMessage<ForwardValidateVaultResponse> | undefined, b: ForwardValidateVaultResponse | PlainMessage<ForwardValidateVaultResponse> | undefined): boolean {
     return proto3.util.equals(ForwardValidateVaultResponse, a, b);
+  }
+}
+
+/**
+ * ForwardGetChunkRequest asks a remote node to return details for a specific
+ * chunk in one of its local vaults.
+ *
+ * @generated from message gastrolog.v1.ForwardGetChunkRequest
+ */
+export class ForwardGetChunkRequest extends Message<ForwardGetChunkRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: string chunk_id = 2;
+   */
+  chunkId = "";
+
+  constructor(data?: PartialMessage<ForwardGetChunkRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardGetChunkRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetChunkRequest {
+    return new ForwardGetChunkRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardGetChunkRequest {
+    return new ForwardGetChunkRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardGetChunkRequest {
+    return new ForwardGetChunkRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardGetChunkRequest | PlainMessage<ForwardGetChunkRequest> | undefined, b: ForwardGetChunkRequest | PlainMessage<ForwardGetChunkRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardGetChunkRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardGetChunkResponse
+ */
+export class ForwardGetChunkResponse extends Message<ForwardGetChunkResponse> {
+  /**
+   * @generated from field: gastrolog.v1.ChunkMeta chunk = 1;
+   */
+  chunk?: ChunkMeta;
+
+  constructor(data?: PartialMessage<ForwardGetChunkResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardGetChunkResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "chunk", kind: "message", T: ChunkMeta },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetChunkResponse {
+    return new ForwardGetChunkResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardGetChunkResponse {
+    return new ForwardGetChunkResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardGetChunkResponse {
+    return new ForwardGetChunkResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardGetChunkResponse | PlainMessage<ForwardGetChunkResponse> | undefined, b: ForwardGetChunkResponse | PlainMessage<ForwardGetChunkResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardGetChunkResponse, a, b);
+  }
+}
+
+/**
+ * ForwardAnalyzeChunkRequest asks a remote node to run index analysis on a
+ * vault (or specific chunk) and return the results.
+ *
+ * @generated from message gastrolog.v1.ForwardAnalyzeChunkRequest
+ */
+export class ForwardAnalyzeChunkRequest extends Message<ForwardAnalyzeChunkRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * empty = analyze all chunks
+   *
+   * @generated from field: string chunk_id = 2;
+   */
+  chunkId = "";
+
+  constructor(data?: PartialMessage<ForwardAnalyzeChunkRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardAnalyzeChunkRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardAnalyzeChunkRequest {
+    return new ForwardAnalyzeChunkRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardAnalyzeChunkRequest {
+    return new ForwardAnalyzeChunkRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardAnalyzeChunkRequest {
+    return new ForwardAnalyzeChunkRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardAnalyzeChunkRequest | PlainMessage<ForwardAnalyzeChunkRequest> | undefined, b: ForwardAnalyzeChunkRequest | PlainMessage<ForwardAnalyzeChunkRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardAnalyzeChunkRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardAnalyzeChunkResponse
+ */
+export class ForwardAnalyzeChunkResponse extends Message<ForwardAnalyzeChunkResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.ChunkAnalysis analyses = 1;
+   */
+  analyses: ChunkAnalysis[] = [];
+
+  constructor(data?: PartialMessage<ForwardAnalyzeChunkResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardAnalyzeChunkResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "analyses", kind: "message", T: ChunkAnalysis, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardAnalyzeChunkResponse {
+    return new ForwardAnalyzeChunkResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardAnalyzeChunkResponse {
+    return new ForwardAnalyzeChunkResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardAnalyzeChunkResponse {
+    return new ForwardAnalyzeChunkResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardAnalyzeChunkResponse | PlainMessage<ForwardAnalyzeChunkResponse> | undefined, b: ForwardAnalyzeChunkResponse | PlainMessage<ForwardAnalyzeChunkResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardAnalyzeChunkResponse, a, b);
+  }
+}
+
+/**
+ * ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
+ *
+ * @generated from message gastrolog.v1.ForwardSealVaultRequest
+ */
+export class ForwardSealVaultRequest extends Message<ForwardSealVaultRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  constructor(data?: PartialMessage<ForwardSealVaultRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSealVaultRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealVaultRequest {
+    return new ForwardSealVaultRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealVaultRequest {
+    return new ForwardSealVaultRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealVaultRequest {
+    return new ForwardSealVaultRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSealVaultRequest | PlainMessage<ForwardSealVaultRequest> | undefined, b: ForwardSealVaultRequest | PlainMessage<ForwardSealVaultRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardSealVaultRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardSealVaultResponse
+ */
+export class ForwardSealVaultResponse extends Message<ForwardSealVaultResponse> {
+  constructor(data?: PartialMessage<ForwardSealVaultResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSealVaultResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealVaultResponse {
+    return new ForwardSealVaultResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealVaultResponse {
+    return new ForwardSealVaultResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealVaultResponse {
+    return new ForwardSealVaultResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSealVaultResponse | PlainMessage<ForwardSealVaultResponse> | undefined, b: ForwardSealVaultResponse | PlainMessage<ForwardSealVaultResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardSealVaultResponse, a, b);
+  }
+}
+
+/**
+ * ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
+ *
+ * @generated from message gastrolog.v1.ForwardReindexVaultRequest
+ */
+export class ForwardReindexVaultRequest extends Message<ForwardReindexVaultRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  constructor(data?: PartialMessage<ForwardReindexVaultRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardReindexVaultRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReindexVaultRequest {
+    return new ForwardReindexVaultRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardReindexVaultRequest {
+    return new ForwardReindexVaultRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardReindexVaultRequest {
+    return new ForwardReindexVaultRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardReindexVaultRequest | PlainMessage<ForwardReindexVaultRequest> | undefined, b: ForwardReindexVaultRequest | PlainMessage<ForwardReindexVaultRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardReindexVaultRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardReindexVaultResponse
+ */
+export class ForwardReindexVaultResponse extends Message<ForwardReindexVaultResponse> {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId = "";
+
+  constructor(data?: PartialMessage<ForwardReindexVaultResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardReindexVaultResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReindexVaultResponse {
+    return new ForwardReindexVaultResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardReindexVaultResponse {
+    return new ForwardReindexVaultResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardReindexVaultResponse {
+    return new ForwardReindexVaultResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardReindexVaultResponse | PlainMessage<ForwardReindexVaultResponse> | undefined, b: ForwardReindexVaultResponse | PlainMessage<ForwardReindexVaultResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardReindexVaultResponse, a, b);
   }
 }
 

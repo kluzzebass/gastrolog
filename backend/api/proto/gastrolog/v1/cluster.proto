@@ -184,6 +184,44 @@ message ForwardValidateVaultResponse {
   repeated ChunkValidation chunks = 2;
 }
 
+// ForwardGetChunkRequest asks a remote node to return details for a specific
+// chunk in one of its local vaults.
+message ForwardGetChunkRequest {
+  string vault_id = 1;
+  string chunk_id = 2;
+}
+
+message ForwardGetChunkResponse {
+  ChunkMeta chunk = 1;
+}
+
+// ForwardAnalyzeChunkRequest asks a remote node to run index analysis on a
+// vault (or specific chunk) and return the results.
+message ForwardAnalyzeChunkRequest {
+  string vault_id = 1;
+  string chunk_id = 2; // empty = analyze all chunks
+}
+
+message ForwardAnalyzeChunkResponse {
+  repeated ChunkAnalysis analyses = 1;
+}
+
+// ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
+message ForwardSealVaultRequest {
+  string vault_id = 1;
+}
+
+message ForwardSealVaultResponse {}
+
+// ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
+message ForwardReindexVaultRequest {
+  string vault_id = 1;
+}
+
+message ForwardReindexVaultResponse {
+  string job_id = 1;
+}
+
 // NotifyEvictionRequest is sent by the leader to a node that has been removed
 // from the cluster. The evicted node should initiate a graceful shutdown.
 message NotifyEvictionRequest {
