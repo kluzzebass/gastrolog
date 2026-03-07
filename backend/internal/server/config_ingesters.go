@@ -16,44 +16,43 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// ListIngesters returns all registered ingesters.
+// ListIngesters returns all configured ingesters across the cluster.
+// Running status is only known for ingesters on the local node.
 func (s *ConfigServer) ListIngesters(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListIngestersRequest],
 ) (*connect.Response[apiv1.ListIngestersResponse], error) {
-	ids := s.orch.ListIngesters()
-
-	// Build type, name, and node_id lookup from config.
-	type ingMeta struct {
-		typ    string
-		name   string
-		nodeID string
-	}
-	metaMap := make(map[uuid.UUID]ingMeta)
+	// Config store is the source of truth for all ingesters (cluster-wide).
+	var allIngesters []config.IngesterConfig
 	if s.cfgStore != nil {
-		ingesters, err := s.cfgStore.ListIngesters(ctx)
-		if err == nil {
-			for _, ing := range ingesters {
-				metaMap[ing.ID] = ingMeta{typ: ing.Type, name: ing.Name, nodeID: ing.NodeID}
-			}
+		var err error
+		allIngesters, err = s.cfgStore.ListIngesters(ctx)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
 		}
+	}
+
+	// Local orchestrator knows which ingesters are running on this node.
+	localIDs := make(map[uuid.UUID]struct{})
+	for _, id := range s.orch.ListIngesters() {
+		localIDs[id] = struct{}{}
 	}
 
 	resp := &apiv1.ListIngestersResponse{
-		Ingesters: make([]*apiv1.IngesterInfo, 0, len(ids)),
+		Ingesters: make([]*apiv1.IngesterInfo, 0, len(allIngesters)),
 	}
 
-	for _, id := range ids {
-		m := metaMap[id]
-		nodeID := m.nodeID
+	for _, ing := range allIngesters {
+		nodeID := ing.NodeID
 		if nodeID == "" {
 			nodeID = s.localNodeID
 		}
+		_, isLocal := localIDs[ing.ID]
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
-			Id:      id.String(),
-			Name:    m.name,
-			Type:    m.typ,
-			Running: s.orch.IsRunning(),
+			Id:      ing.ID.String(),
+			Name:    ing.Name,
+			Type:    ing.Type,
+			Running: isLocal && s.orch.IsRunning(),
 			NodeId:  nodeID,
 		})
 	}
@@ -62,6 +61,7 @@ func (s *ConfigServer) ListIngesters(
 }
 
 // GetIngesterStatus returns status for a specific ingester.
+// Works for any configured ingester, not just locally running ones.
 func (s *ConfigServer) GetIngesterStatus(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIngesterStatusRequest],
@@ -75,30 +75,24 @@ func (s *ConfigServer) GetIngesterStatus(
 		return nil, connErr
 	}
 
-	found := slices.Contains(s.orch.ListIngesters(), id)
-	if !found {
+	// Check config store for existence (cluster-wide).
+	var ingCfg *config.IngesterConfig
+	if s.cfgStore != nil {
+		ingCfg, _ = s.cfgStore.GetIngester(ctx, id)
+	}
+	if ingCfg == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
 
+	isLocal := slices.Contains(s.orch.ListIngesters(), id)
+
 	resp := &apiv1.GetIngesterStatusResponse{
 		Id:      req.Msg.Id,
-		Running: s.orch.IsRunning(),
+		Type:    ingCfg.Type,
+		Running: isLocal && s.orch.IsRunning(),
 	}
 
-	// Look up ingester type from config.
-	if s.cfgStore != nil {
-		ingesters, err := s.cfgStore.ListIngesters(ctx)
-		if err == nil {
-			for _, ing := range ingesters {
-				if ing.ID == id {
-					resp.Type = ing.Type
-					break
-				}
-			}
-		}
-	}
-
-	// Populate stats from orchestrator.
+	// Populate stats from orchestrator (only available for local ingesters).
 	if stats := s.orch.GetIngesterStats(id); stats != nil {
 		resp.MessagesIngested = stats.MessagesIngested.Load()
 		resp.Errors = stats.Errors.Load()

@@ -279,6 +279,40 @@ func TestSearchHeadBeforeStats(t *testing.T) {
 	}
 }
 
+// TestQueryStringRoundTrip verifies that Query.String() preserves nanosecond
+// precision so remote nodes compute identical time ranges. A regression here
+// causes cross-node histogram bucket misalignment and missing records.
+func TestQueryStringRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	// Simulate what "last=5m" produces: nanosecond-precise timestamps.
+	now := time.Now()
+	original := "start=" + now.Add(-5*time.Minute).Format(time.RFC3339Nano) +
+		" end=" + now.Format(time.RFC3339Nano) + " reverse=true"
+
+	q, _, err := server.ParseExpression(original)
+	if err != nil {
+		t.Fatalf("ParseExpression: %v", err)
+	}
+
+	// Round-trip: serialize with String(), re-parse on "remote" node.
+	serialized := q.String()
+	q2, _, err := server.ParseExpression(serialized)
+	if err != nil {
+		t.Fatalf("ParseExpression round-trip: %v", err)
+	}
+
+	if !q.Start.Equal(q2.Start) {
+		t.Errorf("Start lost precision: %v → %v (diff %v)", q.Start, q2.Start, q.Start.Sub(q2.Start))
+	}
+	if !q.End.Equal(q2.End) {
+		t.Errorf("End lost precision: %v → %v (diff %v)", q.End, q2.End, q.End.Sub(q2.End))
+	}
+	if q.IsReverse != q2.IsReverse {
+		t.Errorf("IsReverse: %v → %v", q.IsReverse, q2.IsReverse)
+	}
+}
+
 func TestExplainInvalidQuery(t *testing.T) {
 	client := newQueryTestSetup(t, 0)
 

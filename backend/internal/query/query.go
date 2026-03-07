@@ -90,10 +90,10 @@ func (q Query) String() string {
 		parts = append(parts, q.BoolExpr.String())
 	}
 	if !q.Start.IsZero() {
-		parts = append(parts, "start="+q.Start.Format(time.RFC3339))
+		parts = append(parts, "start="+q.Start.Format(time.RFC3339Nano))
 	}
 	if !q.End.IsZero() {
-		parts = append(parts, "end="+q.End.Format(time.RFC3339))
+		parts = append(parts, "end="+q.End.Format(time.RFC3339Nano))
 	}
 	if q.IsReverse {
 		parts = append(parts, "reverse=true")
