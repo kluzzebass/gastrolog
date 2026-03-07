@@ -866,6 +866,33 @@ func TestMultiNode_ValidateVaultRemote(t *testing.T) {
 	}
 }
 
+func TestMultiNode_GetVaultRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 5, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	resp, err := h.vaultClient.GetVault(context.Background(), connect.NewRequest(&gastrologv1.GetVaultRequest{
+		Id: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("GetVault on remote vault: %v", err)
+	}
+	if resp.Msg.Vault == nil {
+		t.Fatal("expected vault info, got nil")
+	}
+	if resp.Msg.Vault.Id != remoteVaultID {
+		t.Errorf("expected vault ID %q, got %q", remoteVaultID, resp.Msg.Vault.Id)
+	}
+	if !resp.Msg.Vault.Remote {
+		t.Error("expected Remote=true for remote vault")
+	}
+	if resp.Msg.Vault.Name != "vault-data-1" {
+		t.Errorf("expected name %q, got %q", "vault-data-1", resp.Msg.Vault.Name)
+	}
+}
+
 func TestMultiNode_ReindexVaultRemote(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))

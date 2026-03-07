@@ -12,6 +12,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/sysmetrics"
 )
@@ -26,32 +27,14 @@ func (s *VaultServer) vaultName(ctx context.Context, id uuid.UUID) string {
 }
 
 // ListVaults returns all registered vaults, including remote vaults from
-// other cluster nodes. Remote vaults are enriched with stats from peer
-// broadcasts when available.
+// other cluster nodes. The config store is the source of truth for vault
+// identity; runtime stats come from the local orchestrator or peer broadcasts.
 func (s *VaultServer) ListVaults(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListVaultsRequest],
 ) (*connect.Response[apiv1.ListVaultsResponse], error) {
-	localIDs := s.orch.ListVaults()
-
-	resp := &apiv1.ListVaultsResponse{
-		Vaults: make([]*apiv1.VaultInfo, 0, len(localIDs)),
-	}
-
-	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
-	for _, id := range localIDs {
-		localSet[id] = struct{}{}
-		info, err := s.getVaultInfo(ctx, id)
-		if err != nil {
-			continue
-		}
-		resp.Vaults = append(resp.Vaults, info)
-	}
-
-	// Append remote vaults from config store (vaults owned by other nodes).
-	s.appendRemoteVaults(ctx, localSet, resp)
-
-	return connect.NewResponse(resp), nil
+	vaults := s.allVaultInfos(ctx)
+	return connect.NewResponse(&apiv1.ListVaultsResponse{Vaults: vaults}), nil
 }
 
 // GetVault returns details for a specific vault.
@@ -63,11 +46,11 @@ func (s *VaultServer) GetVault(
 	if connErr != nil {
 		return nil, connErr
 	}
-	info, err := s.getVaultInfo(ctx, id)
-	if err != nil {
-		return nil, mapVaultError(err)
-	}
 
+	info := s.buildVaultInfo(ctx, id)
+	if info == nil {
+		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
+	}
 	return connect.NewResponse(&apiv1.GetVaultResponse{Vault: info}), nil
 }
 
@@ -81,22 +64,36 @@ func (s *VaultServer) GetStats(
 		return nil, err
 	}
 
-	resp := &apiv1.GetStatsResponse{
-		TotalVaults: int64(len(vaults)),
+	// Separate local from remote so each gets the right stats source.
+	localIDs := s.orch.ListVaults()
+	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	for _, id := range localIDs {
+		localSet[id] = struct{}{}
 	}
 
+	resp := &apiv1.GetStatsResponse{}
+
 	for _, vaultID := range vaults {
+		if _, local := localSet[vaultID]; !local {
+			continue // handled below via peer broadcasts
+		}
 		metas, err := s.orch.ListChunkMetas(vaultID)
 		if err != nil {
 			continue
 		}
+		resp.TotalVaults++
 		vaultStat := s.buildVaultStats(ctx, vaultID, metas)
 		s.accumulateGlobalStats(resp, vaultStat, metas)
 		resp.VaultStats = append(resp.VaultStats, vaultStat)
 	}
 
 	// Include remote vaults from peer broadcasts.
-	s.accumulateRemoteVaultStats(ctx, vaults, resp)
+	// When no vault filter was provided, pass nil so all remote vaults are included.
+	var remoteFilter []uuid.UUID
+	if req.Msg.Vault != "" {
+		remoteFilter = vaults
+	}
+	s.accumulateRemoteVaultStats(ctx, localIDs, resp, remoteFilter)
 
 	s.fillProcessMetrics(resp)
 
@@ -104,18 +101,25 @@ func (s *VaultServer) GetStats(
 }
 
 func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]uuid.UUID, error) {
-	vaults := s.orch.ListVaults()
+	localVaults := s.orch.ListVaults()
 	if vaultFilter == "" {
-		return vaults, nil
+		return localVaults, nil
 	}
 	vaultID, connErr := parseUUID(vaultFilter)
 	if connErr != nil {
 		return nil, connErr
 	}
-	if !slices.Contains(vaults, vaultID) {
-		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
+	// Local vault — fast path.
+	if slices.Contains(localVaults, vaultID) {
+		return []uuid.UUID{vaultID}, nil
 	}
-	return []uuid.UUID{vaultID}, nil
+	// Check config store for remote vaults.
+	if s.cfgStore != nil {
+		if cfg, err := s.cfgStore.GetVault(context.Background(), vaultID); err == nil && cfg != nil {
+			return []uuid.UUID{vaultID}, nil
+		}
+	}
+	return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 }
 
 func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.VaultStats {
@@ -195,8 +199,9 @@ func (s *VaultServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 }
 
 // accumulateRemoteVaultStats adds stats from remote vaults (via peer broadcasts)
-// to the GetStats response. Process metrics (CPU/memory) are local-only.
-func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVaults []uuid.UUID, resp *apiv1.GetStatsResponse) {
+// to the GetStats response. localVaults are skipped (already counted).
+// If filter is non-empty, only the specified vaults are included.
+func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVaults []uuid.UUID, resp *apiv1.GetStatsResponse, filter []uuid.UUID) {
 	if s.cfgStore == nil || s.peerStats == nil {
 		return
 	}
@@ -210,9 +215,23 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 		localSet[id] = struct{}{}
 	}
 
+	// If a filter was provided, only include those specific remote vaults.
+	var filterSet map[uuid.UUID]struct{}
+	if len(filter) > 0 {
+		filterSet = make(map[uuid.UUID]struct{}, len(filter))
+		for _, id := range filter {
+			filterSet[id] = struct{}{}
+		}
+	}
+
 	for _, vc := range allCfg {
 		if _, local := localSet[vc.ID]; local {
 			continue
+		}
+		if filterSet != nil {
+			if _, wanted := filterSet[vc.ID]; !wanted {
+				continue
+			}
 		}
 		vs := s.peerStats.FindVaultStats(vc.ID.String())
 		if vs == nil {
@@ -233,66 +252,147 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 	}
 }
 
-// appendRemoteVaults adds vaults from the config store that aren't registered locally.
-func (s *VaultServer) appendRemoteVaults(ctx context.Context, localSet map[uuid.UUID]struct{}, resp *apiv1.ListVaultsResponse) {
-	if s.cfgStore == nil {
-		return
+// allVaultInfos returns VaultInfo for every vault known to the config store,
+// enriched with runtime stats from the local orchestrator or peer broadcasts.
+// Vaults registered locally but missing from the config store (e.g. single-node
+// mode with no config store) are included as a fallback.
+func (s *VaultServer) allVaultInfos(ctx context.Context) []*apiv1.VaultInfo {
+	localIDs := s.orch.ListVaults()
+	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	for _, id := range localIDs {
+		localSet[id] = struct{}{}
 	}
-	allCfg, err := s.cfgStore.ListVaults(ctx)
+
+	// Config store is the source of truth for vault identity.
+	if s.cfgStore != nil {
+		allCfg, err := s.cfgStore.ListVaults(ctx)
+		if err == nil {
+			infos := make([]*apiv1.VaultInfo, 0, len(allCfg))
+			seen := make(map[uuid.UUID]struct{}, len(allCfg))
+			for _, vc := range allCfg {
+				seen[vc.ID] = struct{}{}
+				infos = append(infos, s.vaultInfoFromConfig(vc, localSet))
+			}
+			// Include local vaults not yet in the config store (race during creation).
+			for _, id := range localIDs {
+				if _, ok := seen[id]; !ok {
+					infos = append(infos, s.vaultInfoFromLocal(ctx, id))
+				}
+			}
+			return infos
+		}
+	}
+
+	// No config store — fall back to local orchestrator only.
+	infos := make([]*apiv1.VaultInfo, 0, len(localIDs))
+	for _, id := range localIDs {
+		infos = append(infos, s.vaultInfoFromLocal(ctx, id))
+	}
+	return infos
+}
+
+// buildVaultInfo returns VaultInfo for a single vault, or nil if not found.
+func (s *VaultServer) buildVaultInfo(ctx context.Context, id uuid.UUID) *apiv1.VaultInfo {
+	localIDs := s.orch.ListVaults()
+	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	for _, lid := range localIDs {
+		localSet[lid] = struct{}{}
+	}
+
+	// Config store first.
+	if s.cfgStore != nil {
+		cfg, err := s.cfgStore.GetVault(ctx, id)
+		if err == nil && cfg != nil {
+			return s.vaultInfoFromConfig(*cfg, localSet)
+		}
+	}
+
+	// Fall back to local orchestrator if no config store.
+	if _, local := localSet[id]; local {
+		return s.vaultInfoFromLocal(ctx, id)
+	}
+
+	return nil
+}
+
+// vaultInfoFromConfig builds a VaultInfo from a config store entry, enriching
+// with runtime stats from the local orchestrator (if local) or peer broadcasts
+// (if remote).
+func (s *VaultServer) vaultInfoFromConfig(cfg config.VaultConfig, localSet map[uuid.UUID]struct{}) *apiv1.VaultInfo {
+	info := &apiv1.VaultInfo{
+		Id:      cfg.ID.String(),
+		Name:    cfg.Name,
+		Type:    cfg.Type,
+		NodeId:  cfg.NodeID,
+		Enabled: cfg.Enabled,
+	}
+
+	_, local := localSet[cfg.ID]
+	if !local {
+		info.Remote = true
+		s.enrichRemoteVaultInfo(info, cfg.ID)
+		return info
+	}
+
+	// Local vault — get live stats from orchestrator.
+	info.Enabled = s.orch.IsVaultEnabled(cfg.ID)
+	if info.NodeId == "" {
+		info.NodeId = s.localNodeID
+	}
+	s.enrichLocalVaultInfo(info, cfg.ID)
+
+	return info
+}
+
+func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id uuid.UUID) {
+	metas, err := s.orch.ListChunkMetas(id)
 	if err != nil {
 		return
 	}
-	for _, vc := range allCfg {
-		if _, local := localSet[vc.ID]; local {
-			continue
-		}
-		info := &apiv1.VaultInfo{
-			Id:      vc.ID.String(),
-			Name:    vc.Name,
-			Type:    vc.Type,
-			NodeId:  vc.NodeID,
-			Remote:  true,
-			Enabled: vc.Enabled,
-		}
-		if s.peerStats != nil {
-			if vs := s.peerStats.FindVaultStats(vc.ID.String()); vs != nil {
-				info.RecordCount = vs.RecordCount
-				info.ChunkCount = vs.ChunkCount
-			}
-		}
-		resp.Vaults = append(resp.Vaults, info)
+	info.ChunkCount = int64(len(metas))
+	for _, m := range metas {
+		info.RecordCount += m.RecordCount
 	}
 }
 
-func (s *VaultServer) getVaultInfo(ctx context.Context, id uuid.UUID) (*apiv1.VaultInfo, error) {
-	metas, err := s.orch.ListChunkMetas(id)
-	if err != nil {
-		return nil, err
+func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id uuid.UUID) {
+	if s.peerStats == nil {
+		return
 	}
-
-	var recordCount int64
-	for _, meta := range metas {
-		recordCount += meta.RecordCount
+	vs := s.peerStats.FindVaultStats(id.String())
+	if vs == nil {
+		return
 	}
+	info.RecordCount = vs.RecordCount
+	info.ChunkCount = vs.ChunkCount
+}
 
-	// Get vault config from config vault (has name, type, params).
-	cfg, _ := s.getFullVaultConfig(ctx, id)
-
-	nodeID := cfg.NodeID
-	if nodeID == "" {
-		nodeID = s.localNodeID
-	}
-
+// vaultInfoFromLocal builds a VaultInfo purely from the local orchestrator.
+// Used as fallback when the config store is unavailable or missing the entry.
+func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id uuid.UUID) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
-		Id:          id.String(),
-		Name:        cfg.Name,
-		Type:        cfg.Type,
-		ChunkCount:  int64(len(metas)),
-		RecordCount: recordCount,
-		Enabled:     s.orch.IsVaultEnabled(id),
-		NodeId:      nodeID,
+		Id:      id.String(),
+		NodeId:  s.localNodeID,
+		Enabled: s.orch.IsVaultEnabled(id),
 	}
-	return info, nil
+
+	// Try to get name/type from config store even in fallback path.
+	if cfg, err := s.getFullVaultConfig(ctx, id); err == nil {
+		info.Name = cfg.Name
+		info.Type = cfg.Type
+		if cfg.NodeID != "" {
+			info.NodeId = cfg.NodeID
+		}
+	}
+
+	if metas, err := s.orch.ListChunkMetas(id); err == nil {
+		info.ChunkCount = int64(len(metas))
+		for _, m := range metas {
+			info.RecordCount += m.RecordCount
+		}
+	}
+
+	return info
 }
 
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
