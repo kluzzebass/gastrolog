@@ -1,4 +1,13 @@
 import { mock } from "bun:test";
+// Re-export all proto types that client.ts re-exports (export * from "./gen/...").
+// Without these, test files that transitively import proto types from "../client"
+// would get "Export not found" errors when mock.module replaces the module.
+import * as queryPb from "../src/api/gen/gastrolog/v1/query_pb";
+import * as vaultPb from "../src/api/gen/gastrolog/v1/vault_pb";
+import * as lifecyclePb from "../src/api/gen/gastrolog/v1/lifecycle_pb";
+import * as configPb from "../src/api/gen/gastrolog/v1/config_pb";
+import * as authPb from "../src/api/gen/gastrolog/v1/auth_pb";
+import * as jobPb from "../src/api/gen/gastrolog/v1/job_pb";
 
 type MockFn = ReturnType<typeof mock>;
 
@@ -55,6 +64,12 @@ export function installMockClients() {
   // ../src/api/client which matches the hooks' "../client" import.
   mock.module("../src/api/client", () => ({
     ...clients,
+    ...queryPb,
+    ...vaultPb,
+    ...lifecyclePb,
+    ...configPb,
+    ...authPb,
+    ...jobPb,
     getToken: mock(() => null),
     setToken: mock(() => {}),
     getRefreshToken: mock(() => null),
