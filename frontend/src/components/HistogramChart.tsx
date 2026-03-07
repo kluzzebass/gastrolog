@@ -44,16 +44,21 @@ function HistogramLegend({
   hoveredGroup,
   colorMap,
   dark,
+  compact = false,
 }: Readonly<{
   legendKeys: string[];
   hoveredGroup: string | null;
   colorMap: Map<string, string>;
   dark: boolean;
+  compact?: boolean;
 }>) {
   const c = useThemeClass(dark);
   if (legendKeys.length === 0) return null;
+  const gapCls = compact ? "gap-x-2.5 gap-y-0.5" : "gap-x-3 gap-y-1 mb-2";
+  const dotCls = compact ? "w-1.5 h-1.5" : "w-2 h-2";
+  const textCls = compact ? "text-[0.65em]" : "text-[0.7em]";
   return (
-    <div className="flex flex-wrap gap-x-3 gap-y-1 mb-2">
+    <div className={`flex flex-wrap ${gapCls}`}>
       {legendKeys.map((key) => (
         <div
           key={key}
@@ -62,11 +67,11 @@ function HistogramLegend({
           }`}
         >
           <span
-            className="inline-block w-2 h-2 rounded-full shrink-0"
+            className={`inline-block ${dotCls} rounded-full shrink-0`}
             style={{ backgroundColor: colorMap.get(key) ?? "var(--color-copper)" }}
           />
           <span
-            className={`text-[0.7em] font-mono ${
+            className={`${textCls} font-mono ${
               hoveredGroup === key
                 ? c("text-text-bright", "text-light-text-bright")
                 : c("text-text-muted", "text-light-text-muted")
@@ -522,30 +527,13 @@ export function HistogramChart({
               Volume
             </span>
             {legendKeys.length > 0 && (
-              <div className="flex flex-wrap gap-x-2.5 gap-y-0.5">
-                {legendKeys.map((key) => (
-                  <div
-                    key={key}
-                    className={`flex items-center gap-1 transition-opacity ${
-                      ix.hoveredGroup !== null && ix.hoveredGroup !== key ? "opacity-40" : ""
-                    }`}
-                  >
-                    <span
-                      className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
-                      style={{ backgroundColor: colorMap.get(key) ?? "var(--color-copper)" }}
-                    />
-                    <span
-                      className={`text-[0.65em] font-mono ${
-                        ix.hoveredGroup === key
-                          ? c("text-text-bright", "text-light-text-bright")
-                          : c("text-text-muted", "text-light-text-muted")
-                      }`}
-                    >
-                      {key}
-                    </span>
-                  </div>
-                ))}
-              </div>
+              <HistogramLegend
+                legendKeys={legendKeys}
+                hoveredGroup={ix.hoveredGroup}
+                colorMap={colorMap}
+                dark={dark}
+                compact
+              />
             )}
           </div>
           <span

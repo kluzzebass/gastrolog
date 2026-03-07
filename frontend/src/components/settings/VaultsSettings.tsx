@@ -27,6 +27,7 @@ import { NodeSelect } from "./NodeSelect";
 import { sortByName } from "../../lib/sort";
 import { JobProgress, RetentionRulesEditor } from "./VaultHelpers";
 import type { RetentionRuleEdit } from "./VaultHelpers";
+import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 
 export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
   const c = useThemeClass(dark);
@@ -444,184 +445,92 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 dark={dark}
                 vaultName={edit.name || vault.name}
               />
-              {migrateTarget[vault.id] && (() => {
-                const mt = migrateTarget[vault.id]!;
-                const resolvedType = mt.type || vault.type;
-                const dirRequired = resolvedType === "file";
-                const canSubmit = mt.name.trim() && (!dirRequired || mt.dir.trim());
-                return (
-                  <div
-                    className={`flex flex-col gap-3 p-3 rounded border ${c(
-                      "border-ink-border-subtle bg-ink-raised",
-                      "border-light-border-subtle bg-light-bg",
-                    )}`}
-                  >
-                    <div
-                      className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                    >
-                      Migrate Vault
-                    </div>
-                    <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                      Creates a new destination vault, disables this vault so no new data flows in, then moves all records to the destination and deletes this vault.
-                    </p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <FormField label="Destination Name" dark={dark}>
-                        <TextInput
-                          value={mt.name}
-                          onChange={(v) =>
-                            setMigrateTarget((prev) => ({
-                              ...prev,
-                              [vault.id]: { ...prev[vault.id]!, name: v },
-                            }))
-                          }
-                          placeholder="new-vault"
-                          dark={dark}
-                          mono
-                        />
-                      </FormField>
-                      <FormField label="Type" dark={dark}>
-                        <SelectInput
-                          value={mt.type}
-                          onChange={(v) =>
-                            setMigrateTarget((prev) => ({
-                              ...prev,
-                              [vault.id]: { ...prev[vault.id]!, type: v, dir: "" },
-                            }))
-                          }
-                          options={[
-                            { value: "", label: `same (${vault.type})` },
-                            { value: "memory", label: "memory" },
-                            { value: "file", label: "file" },
-                          ]}
-                          dark={dark}
-                        />
-                      </FormField>
-                      {dirRequired && (
-                        <FormField label="Directory" dark={dark}>
-                          <TextInput
-                            value={mt.dir}
-                            onChange={(v) =>
-                              setMigrateTarget((prev) => ({
-                                ...prev,
-                                [vault.id]: { ...prev[vault.id]!, dir: v },
-                              }))
-                            }
-                            placeholder="/path/to/vault"
-                            dark={dark}
-                            mono
-                            examples={["/var/lib/gastrolog/data"]}
-                          />
-                        </FormField>
-                      )}
-                    </div>
-                    <div className="flex justify-end">
-                      <Button
-                        disabled={migrate.isPending || !canSubmit || !!activeJob}
-                        onClick={async () => {
-                          const trimmedName = mt.name.trim();
-                          if (!trimmedName) return;
-                          const srcLabel = vault.name || vault.id;
-                          if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
-                          const destType = mt.type || undefined;
-                          const params: Record<string, string> = {};
-                          if (mt.dir.trim()) {
-                            params["dir"] = mt.dir.trim();
-                          }
-                          const destParams = Object.keys(params).length > 0 ? params : undefined;
-                          try {
-                            const result = await migrate.mutateAsync({
-                              source: vault.id,
-                              destination: trimmedName,
-                              destinationType: destType,
-                              destinationParams: destParams,
-                            });
-                            setActiveJobs((prev) => ({
-                              ...prev,
-                              [vault.id]: {
-                                jobId: result.jobId,
-                                label: "Migrating",
-                              },
-                            }));
-                            setMigrateTarget((prev) => {
-                              const next = { ...prev };
-                              delete next[vault.id];
-                              return next;
-                            });
-                          } catch (err: unknown) {
-                            addToast(err instanceof Error ? err.message : "Migrate failed", "error");
-                          }
-                        }}
-                      >
-                        {migrate.isPending ? "Migrating..." : "Migrate"}
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })()}
+              {migrateTarget[vault.id] && (
+                <MigrateVaultForm
+                  dark={dark}
+                  vault={vault}
+                  target={migrateTarget[vault.id]!}
+                  isPending={migrate.isPending}
+                  activeJob={!!activeJob}
+                  onTargetChange={(update) =>
+                    setMigrateTarget((prev) => ({
+                      ...prev,
+                      [vault.id]: { ...prev[vault.id]!, ...update },
+                    }))
+                  }
+                  onSubmit={async () => {
+                    const mt = migrateTarget[vault.id]!;
+                    const trimmedName = mt.name.trim();
+                    if (!trimmedName) return;
+                    const srcLabel = vault.name || vault.id;
+                    if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
+                    const destType = mt.type || undefined;
+                    const params: Record<string, string> = {};
+                    if (mt.dir.trim()) {
+                      params["dir"] = mt.dir.trim();
+                    }
+                    const destParams = Object.keys(params).length > 0 ? params : undefined;
+                    try {
+                      const result = await migrate.mutateAsync({
+                        source: vault.id,
+                        destination: trimmedName,
+                        destinationType: destType,
+                        destinationParams: destParams,
+                      });
+                      setActiveJobs((prev) => ({
+                        ...prev,
+                        [vault.id]: {
+                          jobId: result.jobId,
+                          label: "Migrating",
+                        },
+                      }));
+                      setMigrateTarget((prev) => {
+                        const next = { ...prev };
+                        delete next[vault.id];
+                        return next;
+                      });
+                    } catch (err: unknown) {
+                      addToast(err instanceof Error ? err.message : "Migrate failed", "error");
+                    }
+                  }}
+                />
+              )}
               {mergeTarget[vault.id] !== undefined && (
-                <div
-                  className={`flex flex-col gap-3 p-3 rounded border ${c(
-                    "border-ink-border-subtle bg-ink-raised",
-                    "border-light-border-subtle bg-light-bg",
-                  )}`}
-                >
-                  <div
-                    className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    Merge Into Another Vault
-                  </div>
-                  <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
-                    Disables this vault, moves all records into the destination, then deletes this vault.
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <FormField label="Destination" dark={dark}>
-                      <SelectInput
-                        value={mergeTarget[vault.id] ?? ""}
-                        onChange={(v) =>
-                          setMergeTarget((prev) => ({ ...prev, [vault.id]: v }))
-                        }
-                        options={[
-                          { value: "", label: "(select)" },
-                          ...vaults
-                            .filter((s) => s.id !== vault.id)
-                            .map((s) => ({ value: s.id, label: s.name || s.id })),
-                        ]}
-                        dark={dark}
-                      />
-                    </FormField>
-                  </div>
-                  <div className="flex justify-end">
-                    <Button
-                      disabled={merge.isPending || !mergeTarget[vault.id] || !!activeJob}
-                      onClick={async () => {
-                        const dest = mergeTarget[vault.id];
-                        if (!dest) return;
-                        const destName = vaults.find((s) => s.id === dest)?.name || dest;
-                        if (!confirm(`Merge "${vault.name || vault.id}" into "${destName}"? This will immediately disable "${vault.name || vault.id}" and delete it after all records are moved.`)) return;
-                        try {
-                          const result = await merge.mutateAsync({
-                            source: vault.id,
-                            destination: dest,
-                          });
-                          setActiveJobs((prev) => ({
-                            ...prev,
-                            [vault.id]: {
-                              jobId: result.jobId,
-                              label: "Merging",
-                            },
-                          }));
-                          setMergeTarget((prev) =>
-                            Object.fromEntries(Object.entries(prev).filter(([k]) => k !== vault.id)),
-                          );
-                        } catch (err: unknown) {
-                          addToast(err instanceof Error ? err.message : "Merge failed", "error");
-                        }
-                      }}
-                    >
-                      {merge.isPending ? "Merging..." : "Merge"}
-                    </Button>
-                  </div>
-                </div>
+                <MergeVaultForm
+                  dark={dark}
+                  vault={vault}
+                  selectedDestination={mergeTarget[vault.id] ?? ""}
+                  vaults={vaults}
+                  isPending={merge.isPending}
+                  activeJob={!!activeJob}
+                  onDestinationChange={(v) =>
+                    setMergeTarget((prev) => ({ ...prev, [vault.id]: v }))
+                  }
+                  onSubmit={async () => {
+                    const dest = mergeTarget[vault.id];
+                    if (!dest) return;
+                    const destName = vaults.find((s) => s.id === dest)?.name || dest;
+                    if (!confirm(`Merge "${vault.name || vault.id}" into "${destName}"? This will immediately disable "${vault.name || vault.id}" and delete it after all records are moved.`)) return;
+                    try {
+                      const result = await merge.mutateAsync({
+                        source: vault.id,
+                        destination: dest,
+                      });
+                      setActiveJobs((prev) => ({
+                        ...prev,
+                        [vault.id]: {
+                          jobId: result.jobId,
+                          label: "Merging",
+                        },
+                      }));
+                      setMergeTarget((prev) =>
+                        Object.fromEntries(Object.entries(prev).filter(([k]) => k !== vault.id)),
+                      );
+                    } catch (err: unknown) {
+                      addToast(err instanceof Error ? err.message : "Merge failed", "error");
+                    }
+                  }}
+                />
               )}
             </div>
           </SettingsCard>
