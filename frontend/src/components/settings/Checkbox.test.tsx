@@ -23,7 +23,7 @@ describe("Checkbox", () => {
     const { container } = render(
       <Checkbox checked={false} onChange={onChange} dark={true} />,
     );
-    fireEvent.click(container.querySelector(".cursor-pointer")!);
+    fireEvent.click(container.querySelector('[role="checkbox"]')!);
     expect(onChange).toHaveBeenCalledWith(true);
   });
 
@@ -32,7 +32,7 @@ describe("Checkbox", () => {
     const { container } = render(
       <Checkbox checked={true} onChange={onChange} dark={true} />,
     );
-    fireEvent.click(container.querySelector(".cursor-pointer")!);
+    fireEvent.click(container.querySelector('[role="checkbox"]')!);
     expect(onChange).toHaveBeenCalledWith(false);
   });
 
@@ -50,11 +50,10 @@ describe("Checkbox", () => {
     expect(queryByText("Enable feature")).toBeNull();
   });
 
-  test("checked state has copper styling", () => {
+  test("checked state sets aria-checked to true", () => {
     const { container } = render(
       <Checkbox checked={true} onChange={() => {}} dark={true} />,
     );
-    const btn = container.querySelector("button");
-    expect(btn?.className).toContain("bg-copper");
+    expect(container.querySelector('[aria-checked="true"]')).toBeTruthy();
   });
 });
