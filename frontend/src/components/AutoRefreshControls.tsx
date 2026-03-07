@@ -1,6 +1,6 @@
 import { useThemeClass } from "../hooks/useThemeClass";
 
-export const POLL_OPTIONS: { label: string; ms: number | null }[] = [
+const POLL_OPTIONS: { label: string; ms: number | null }[] = [
   { label: "Off", ms: null },
   { label: "5s", ms: 5_000 },
   { label: "10s", ms: 10_000 },

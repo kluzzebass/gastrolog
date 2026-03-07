@@ -113,7 +113,7 @@ export const appendOrExpression = (q: string, value: string): string => {
  * default-range injection (which navigates and could change the route)
  * must never run when following.
  */
-export type QueryEffectAction = "follow" | "search" | "inject-default-range" | "skip-search";
+type QueryEffectAction = "follow" | "search" | "inject-default-range" | "skip-search";
 
 export function resolveQueryEffectAction(
   q: string,

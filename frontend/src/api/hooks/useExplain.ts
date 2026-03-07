@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { queryClient, Query, ChunkPlan, QueryPipelineStage } from "../client";
 
-export interface ExplainState {
+interface ExplainState {
   chunks: ChunkPlan[];
   direction: string;
   totalChunks: number;

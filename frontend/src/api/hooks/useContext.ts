@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, type MutableRefObject } from "react";
 import { queryClient, Record, RecordRef } from "../client";
 
-export interface ContextState {
+interface ContextState {
   before: Record[];
   anchor: Record | null;
   after: Record[];

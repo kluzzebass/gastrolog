@@ -3,7 +3,7 @@ import { AutoRefreshControls } from "./AutoRefreshControls";
 import { ExportButton } from "./ExportButton";
 import { useThemeClass } from "../hooks/useThemeClass";
 
-export const FOLLOW_BUFFER_SIZES = [100, 500, 1000, 2500, 5000, 10_000, 25_000] as const;
+const FOLLOW_BUFFER_SIZES = [100, 500, 1000, 2500, 5000, 10_000, 25_000] as const;
 
 interface ResultsToolbarProps {
   dark: boolean;

@@ -49,7 +49,7 @@ export function handleDragLeave(e: React.DragEvent) {
 
 // -- PEM cert form --
 
-export interface PemCertFormProps {
+interface PemCertFormProps {
   dark: boolean;
   name: string;
   certPem: string;
@@ -156,7 +156,7 @@ export function PemCertForm({
 
 // -- Files cert form --
 
-export interface FilesCertFormProps {
+interface FilesCertFormProps {
   dark: boolean;
   name: string;
   certFile: string;

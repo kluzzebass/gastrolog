@@ -1,6 +1,5 @@
 export {
   useVaults,
-  useVault,
   useChunks,
   useIndexes,
   useStats,
@@ -9,11 +8,8 @@ export {
   useValidateVault,
   useMigrateVault,
   useMergeVaults,
-  useImportRecords,
   usePutVault,
   useDeleteVault,
-  usePauseVault,
-  useResumeVault,
 } from "./useVaults";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";

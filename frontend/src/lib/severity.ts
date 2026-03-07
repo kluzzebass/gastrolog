@@ -1,6 +1,6 @@
 /** Canonical severity levels in descending order. */
 export const SEVERITY_LEVELS = ["error", "warn", "info", "debug", "trace"] as const;
-export type SeverityLevel = (typeof SEVERITY_LEVELS)[number];
+type SeverityLevel = (typeof SEVERITY_LEVELS)[number];
 
 interface SeverityDef {
   label: string;        // "Error"

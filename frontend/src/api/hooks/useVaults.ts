@@ -1,5 +1,4 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Timestamp } from "@bufbuild/protobuf";
 import { vaultClient, configClient } from "../client";
 import type { RetentionRule } from "../gen/gastrolog/v1/config_pb";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
@@ -153,37 +152,6 @@ export function useMergeVaults() {
   });
 }
 
-export function useImportRecords() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
-      vault: string;
-      records: Array<{
-        sourceTs?: Date;
-        ingestTs?: Date;
-        attrs?: Record<string, string>;
-        raw: Uint8Array;
-      }>;
-    }) => {
-      const response = await vaultClient.importRecords({
-        vault: args.vault,
-        records: args.records.map((r) => ({
-          raw: r.raw as Uint8Array<ArrayBuffer>,
-          attrs: r.attrs,
-          sourceTs: r.sourceTs ? Timestamp.fromDate(r.sourceTs) : undefined,
-          ingestTs: r.ingestTs ? Timestamp.fromDate(r.ingestTs) : undefined,
-        })),
-      });
-      return response;
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-      qc.invalidateQueries({ queryKey: ["chunks"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
-}
-
 export function usePutVault() {
   const qc = useQueryClient();
   return useMutation({
@@ -232,28 +200,3 @@ export function useDeleteVault() {
   });
 }
 
-export function usePauseVault() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await configClient.pauseVault({ id });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-    },
-  });
-}
-
-export function useResumeVault() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
-      await configClient.resumeVault({ id });
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-    },
-  });
-}

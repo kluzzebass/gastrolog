@@ -54,10 +54,10 @@ import { usePipelineFields } from "./usePipelineFields";
 // ── Types ──────────────────────────────────────────────────────────────
 
 /** Search params shared by /search and /follow routes. */
-export type ViewSearch = { q: string; help?: string; settings?: string; inspector?: string };
+type ViewSearch = { q: string; help?: string; settings?: string; inspector?: string };
 
 /** Navigate function typed for routes with ViewSearch params. */
-export type ViewNavigate = (opts: {
+type ViewNavigate = (opts: {
   to?: string;
   search?: ViewSearch | ((prev: ViewSearch) => ViewSearch);
   replace?: boolean;

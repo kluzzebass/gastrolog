@@ -43,7 +43,7 @@ function getSnapshot() {
 }
 
 /** Add a toast from anywhere — works outside the React tree. */
-export function addToast(message: string, level: ToastLevel = "error") {
+function addToast(message: string, level: ToastLevel = "error") {
   if (toasts.some((t) => t.message === message && t.level === level)) return;
 
   nextId++;

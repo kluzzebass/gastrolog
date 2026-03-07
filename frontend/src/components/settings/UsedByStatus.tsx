@@ -69,15 +69,6 @@ export function routeRefsForFilter(
     .map((r) => r.name || r.id);
 }
 
-export function routeRefsForVault(
-  routes: Route[],
-  vaultId: string,
-): string[] {
-  return routes
-    .filter((r) => r.destinations.some((d) => d.vaultId === vaultId))
-    .map((r) => r.name || r.id);
-}
-
 export function ruleRefsFor(
   vaults: Vault[],
   retentionPolicyId: string,

@@ -1,4 +1,4 @@
-export interface NodeGroup<T> {
+interface NodeGroup<T> {
   nodeId: string;
   nodeName: string;
   items: T[];

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useTransition } from "react";
 import { queryClient } from "../api/client";
 
-export interface ValidationResult {
+interface ValidationResult {
   valid: boolean;
   errorMessage: string | null;
   errorOffset: number; // -1 if valid

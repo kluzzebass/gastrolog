@@ -15,7 +15,7 @@ function isAbortError(err: unknown): boolean {
   );
 }
 
-export interface WatchJobsState {
+interface WatchJobsState {
   jobs: Job[];
   connected: boolean;
   reconnecting: boolean;

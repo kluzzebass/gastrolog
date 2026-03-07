@@ -53,10 +53,6 @@ function detectDateOrder(): DateOrder {
   return cachedDateOrder;
 }
 
-export function resetDateOrderCache(): void {
-  cachedDateOrder = null;
-}
-
 export function parseHumanTime(
   value: string,
   opts?: ParseOptions,

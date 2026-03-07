@@ -2,7 +2,7 @@
  * ISO 3166-1 alpha-2 → world-atlas country name mapping.
  * Names must match the `properties.name` values in world-atlas/countries-110m.json exactly.
  */
-export const ISO_TO_NAME: Record<string, string> = {
+const ISO_TO_NAME: Record<string, string> = {
   AF: "Afghanistan",
   AL: "Albania",
   DZ: "Algeria",

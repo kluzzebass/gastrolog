@@ -4,7 +4,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 const FormFieldIdContext = createContext<string | undefined>(undefined);
 
 /** Returns the auto-generated id from the enclosing FormField, if any. */
-export function useFormFieldId() {
+function useFormFieldId() {
   return useContext(FormFieldIdContext);
 }
 

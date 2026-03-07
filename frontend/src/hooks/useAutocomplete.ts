@@ -130,7 +130,7 @@ export function prevWordBeforeCursor(
 // the dropdown entirely.  Omitting a condition (undefined) means "skip
 // this check and fall through to the next one."
 
-export type SuggestRule = {
+type SuggestRule = {
   fields?: boolean; // include field names
   aggs?: boolean; // include aggregation functions (AGG_FUNCTIONS)
   funcs?: boolean; // include all pipeFunctions (scalar + agg)
@@ -140,7 +140,7 @@ export type SuggestRule = {
 
 type Suggest = SuggestRule | "none";
 
-export interface PipeGrammar {
+interface PipeGrammar {
   empty: Suggest; // body is empty (just typed "| kw ")
   afterAs?: Suggest; // previous word is "as"
   afterBy?: Suggest; // previous word is "by"
