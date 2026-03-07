@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import {
   startOfMonth,
@@ -16,6 +16,62 @@ import {
 } from "date-fns";
 import { timeRangeMs } from "../utils";
 
+// ── Picker reducer ───────────────────────────────────────────────────
+
+interface PickerState {
+  viewMonth: Date;
+  pendingStart: Date | null;
+  pendingEnd: Date | null;
+  startTime: string;
+  endTime: string;
+  picking: "start" | "end";
+  prevRange: { start: Date | null; end: Date | null };
+}
+
+type PickerAction =
+  | { type: "sync"; rangeStart: Date | null; rangeEnd: Date | null }
+  | { type: "pickDay"; day: Date }
+  | { type: "prevMonth" }
+  | { type: "nextMonth" }
+  | { type: "setStartTime"; value: string }
+  | { type: "setEndTime"; value: string };
+
+function pickerReducer(state: PickerState, action: PickerAction): PickerState {
+  switch (action.type) {
+    case "sync": {
+      const { rangeStart, rangeEnd } = action;
+      return {
+        ...state,
+        prevRange: { start: rangeStart, end: rangeEnd },
+        pendingStart: rangeStart,
+        pendingEnd: rangeEnd,
+        startTime: rangeStart ? format(rangeStart, "HH:mm") : state.startTime,
+        endTime: rangeEnd ? format(rangeEnd, "HH:mm") : state.endTime,
+        viewMonth: rangeEnd ?? state.viewMonth,
+        picking: "start",
+      };
+    }
+    case "pickDay": {
+      const { day } = action;
+      if (state.picking === "start") {
+        return { ...state, pendingStart: day, pendingEnd: null, picking: "end" };
+      }
+      let s = state.pendingStart!;
+      let e = day;
+      if (isBefore(e, s)) [s, e] = [e, s];
+      return { ...state, pendingStart: s, pendingEnd: e, picking: "start" };
+    }
+    case "prevMonth":
+      return { ...state, viewMonth: subMonths(state.viewMonth, 1) };
+    case "nextMonth":
+      return { ...state, viewMonth: addMonths(state.viewMonth, 1) };
+    case "setStartTime":
+      return { ...state, startTime: action.value };
+    case "setEndTime":
+      return { ...state, endTime: action.value };
+  }
+}
+
 export function TimeRangePicker({
   dark,
   rangeStart,
@@ -32,58 +88,35 @@ export function TimeRangePicker({
   onApply: (start: Date, end: Date) => void;
 }>) {
   const c = useThemeClass(dark);
-  const [viewMonth, setViewMonth] = useState(() => rangeEnd ?? new Date());
-  const [pendingStart, setPendingStart] = useState<Date | null>(rangeStart);
-  const [pendingEnd, setPendingEnd] = useState<Date | null>(rangeEnd);
-  const [startTime, setStartTime] = useState(() =>
-    rangeStart ? format(rangeStart, "HH:mm") : "00:00",
-  );
-  const [endTime, setEndTime] = useState(() =>
-    rangeEnd ? format(rangeEnd, "HH:mm") : "23:59",
-  );
-  const [picking, setPicking] = useState<"start" | "end">("start");
+  const [s, dispatch] = useReducer(pickerReducer, undefined, (): PickerState => ({
+    viewMonth: rangeEnd ?? new Date(),
+    pendingStart: rangeStart,
+    pendingEnd: rangeEnd,
+    startTime: rangeStart ? format(rangeStart, "HH:mm") : "00:00",
+    endTime: rangeEnd ? format(rangeEnd, "HH:mm") : "23:59",
+    picking: "start",
+    prevRange: { start: rangeStart, end: rangeEnd },
+  }));
 
   // Sync from parent when presets or histogram brush update the range.
-  const [prevRange, setPrevRange] = useState<{ start: Date | null; end: Date | null }>({ start: rangeStart, end: rangeEnd });
-  if (rangeStart !== prevRange.start || rangeEnd !== prevRange.end) {
-    setPrevRange({ start: rangeStart, end: rangeEnd });
-    setPendingStart(rangeStart);
-    setPendingEnd(rangeEnd);
-    if (rangeStart) setStartTime(format(rangeStart, "HH:mm"));
-    if (rangeEnd) setEndTime(format(rangeEnd, "HH:mm"));
-    if (rangeEnd) setViewMonth(rangeEnd);
-    setPicking("start");
+  if (rangeStart !== s.prevRange.start || rangeEnd !== s.prevRange.end) {
+    dispatch({ type: "sync", rangeStart, rangeEnd });
   }
 
-  const handleDayClick = (day: Date) => {
-    if (picking === "start") {
-      setPendingStart(day);
-      setPendingEnd(null);
-      setPicking("end");
-    } else {
-      let s = pendingStart!;
-      let e = day;
-      if (isBefore(e, s)) [s, e] = [e, s];
-      setPendingStart(s);
-      setPendingEnd(e);
-      setPicking("start");
-    }
-  };
-
   const handleApply = () => {
-    if (!pendingStart || !pendingEnd) return;
-    const [sh = 0, sm = 0] = startTime.split(":").map(Number);
-    const [eh = 0, em = 0] = endTime.split(":").map(Number);
-    const start = new Date(pendingStart);
+    if (!s.pendingStart || !s.pendingEnd) return;
+    const [sh = 0, sm = 0] = s.startTime.split(":").map(Number);
+    const [eh = 0, em = 0] = s.endTime.split(":").map(Number);
+    const start = new Date(s.pendingStart);
     start.setHours(sh, sm, 0, 0);
-    const end = new Date(pendingEnd);
+    const end = new Date(s.pendingEnd);
     end.setHours(eh, em, 59, 999);
     onApply(start, end);
   };
 
   // Calendar grid
-  const monthStart = startOfMonth(viewMonth);
-  const monthEnd = endOfMonth(viewMonth);
+  const monthStart = startOfMonth(s.viewMonth);
+  const monthEnd = endOfMonth(s.viewMonth);
   const calStart = startOfWeek(monthStart, { weekStartsOn: 1 });
   const calEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
   const days = eachDayOfInterval({ start: calStart, end: calEnd });
@@ -124,14 +157,14 @@ export function TimeRangePicker({
           <span
             className={`flex-1 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
           >
-            {pendingStart ? format(pendingStart, "yyyy-MM-dd") : "\u2014"}
+            {s.pendingStart ? format(s.pendingStart, "yyyy-MM-dd") : "\u2014"}
           </span>
           <input
             type="text"
-            value={startTime}
+            value={s.startTime}
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9:]/g, "");
-              if (v.length <= 5) setStartTime(v);
+              if (v.length <= 5) dispatch({ type: "setStartTime", value: v });
             }}
             placeholder="HH:mm"
             className={`text-[0.75em] font-mono w-14 px-1 py-0.5 rounded border text-center ${c(
@@ -149,14 +182,14 @@ export function TimeRangePicker({
           <span
             className={`flex-1 text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
           >
-            {pendingEnd ? format(pendingEnd, "yyyy-MM-dd") : "\u2014"}
+            {s.pendingEnd ? format(s.pendingEnd, "yyyy-MM-dd") : "\u2014"}
           </span>
           <input
             type="text"
-            value={endTime}
+            value={s.endTime}
             onChange={(e) => {
               const v = e.target.value.replace(/[^0-9:]/g, "");
-              if (v.length <= 5) setEndTime(v);
+              if (v.length <= 5) dispatch({ type: "setEndTime", value: v });
             }}
             placeholder="HH:mm"
             className={`text-[0.75em] font-mono w-14 px-1 py-0.5 rounded border text-center ${c(
@@ -170,7 +203,7 @@ export function TimeRangePicker({
       {/* Month navigation */}
       <div className="flex items-center justify-between">
         <button
-          onClick={() => setViewMonth((m) => subMonths(m, 1))}
+          onClick={() => dispatch({ type: "prevMonth" })}
           className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
         >
           {"\u25C2"}
@@ -178,10 +211,10 @@ export function TimeRangePicker({
         <span
           className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          {format(viewMonth, "MMMM yyyy")}
+          {format(s.viewMonth, "MMMM yyyy")}
         </span>
         <button
-          onClick={() => setViewMonth((m) => addMonths(m, 1))}
+          onClick={() => dispatch({ type: "nextMonth" })}
           className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
         >
           {"\u25B8"}
@@ -202,16 +235,16 @@ export function TimeRangePicker({
         </div>
         <div className="grid grid-cols-7 gap-px">
           {days.map((day) => {
-            const inMonth = isSameMonth(day, viewMonth);
+            const inMonth = isSameMonth(day, s.viewMonth);
             const isToday = isSameDay(day, today);
-            const isStart = pendingStart && isSameDay(day, pendingStart);
-            const isEnd = pendingEnd && isSameDay(day, pendingEnd);
+            const isStart = s.pendingStart && isSameDay(day, s.pendingStart);
+            const isEnd = s.pendingEnd && isSameDay(day, s.pendingEnd);
             const inRange =
-              pendingStart &&
-              pendingEnd &&
+              s.pendingStart &&
+              s.pendingEnd &&
               isWithinInterval(day, {
-                start: pendingStart,
-                end: pendingEnd,
+                start: s.pendingStart,
+                end: s.pendingEnd,
               });
             const selected = isStart || isEnd;
 
@@ -230,7 +263,7 @@ export function TimeRangePicker({
             return (
               <button
                 key={day.toISOString()}
-                onClick={() => handleDayClick(day)}
+                onClick={() => dispatch({ type: "pickDay", day })}
                 className={`text-center text-[0.7em] font-mono py-0.5 rounded transition-colors ${dayCls}${todayCls}`}
               >
                 {format(day, "d")}
@@ -243,7 +276,7 @@ export function TimeRangePicker({
       {/* Apply button */}
       <button
         onClick={handleApply}
-        disabled={!pendingStart || !pendingEnd}
+        disabled={!s.pendingStart || !s.pendingEnd}
         className="w-full py-1 text-[0.8em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
       >
         Apply

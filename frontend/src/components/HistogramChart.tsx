@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useReducer, useRef, useEffect } from "react";
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { useThemeClass } from "../hooks/useThemeClass";
@@ -92,6 +92,51 @@ function clearGrabbingCursor() {
   document.body.style.userSelect = "";
 }
 
+// ── Interaction state reducer ─────────────────────────────────────────
+
+interface ChartInteraction {
+  hoveredGroup: string | null;
+  hoveredBar: number | null;
+  brushStart: number | null;
+  brushEnd: number | null;
+  panAxisWidth: number;
+  panOffset: number;
+}
+
+type ChartAction =
+  | { type: "hover"; group: string | null; bar: number | null }
+  | { type: "brushStart"; idx: number }
+  | { type: "brushMove"; idx: number }
+  | { type: "brushEnd" }
+  | { type: "panStart"; axisWidth: number }
+  | { type: "panMove"; offset: number }
+  | { type: "panEnd" };
+
+const CHART_INITIAL: ChartInteraction = {
+  hoveredGroup: null, hoveredBar: null,
+  brushStart: null, brushEnd: null,
+  panAxisWidth: 1, panOffset: 0,
+};
+
+function chartReducer(state: ChartInteraction, action: ChartAction): ChartInteraction {
+  switch (action.type) {
+    case "hover":
+      return { ...state, hoveredGroup: action.group, hoveredBar: action.bar };
+    case "brushStart":
+      return { ...state, brushStart: action.idx, brushEnd: action.idx };
+    case "brushMove":
+      return { ...state, brushEnd: action.idx };
+    case "brushEnd":
+      return { ...state, brushStart: null, brushEnd: null };
+    case "panStart":
+      return { ...state, panAxisWidth: action.axisWidth };
+    case "panMove":
+      return { ...state, panOffset: action.offset };
+    case "panEnd":
+      return { ...state, panOffset: 0 };
+  }
+}
+
 // eslint-disable-next-line sonarjs/cognitive-complexity -- chart component with many interactive features (brush, pan, tooltip, legend)
 export function HistogramChart({
   data,
@@ -116,12 +161,7 @@ export function HistogramChart({
   const c = useThemeClass(dark);
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
-  const [hoveredGroup, setHoveredGroup] = useState<string | null>(null);
-  const [hoveredBar, setHoveredBar] = useState<number | null>(null);
-
-  // Brush state.
-  const [brushStart, setBrushStart] = useState<number | null>(null);
-  const [brushEnd, setBrushEnd] = useState<number | null>(null);
+  const [ix, dix] = useReducer(chartReducer, CHART_INITIAL);
   const brushingRef = useRef(false);
 
   // Stable tooltip formatter ref: echarts-for-react uses fast-deep-equal to
@@ -132,12 +172,10 @@ export function HistogramChart({
   const formatterImplRef = useRef<(params: any) => string>(() => "");
   const [stableFormatter] = useState(() => (params: any) => formatterImplRef.current(params));
 
-  // Pan state.
+  // Pan state refs.
   const axisRef = useRef<HTMLDivElement>(null);
   const panStartX = useRef<number>(0);
-  const [panAxisWidth, setPanAxisWidth] = useState(1);
   const panningRef = useRef(false);
-  const [panOffset, setPanOffset] = useState(0);
 
   // --- Data derived from buckets (safe for empty arrays) ---
   const colorMap = buckets.length > 0 ? buildColorMap(data) : new Map<string, string>();
@@ -204,7 +242,7 @@ export function HistogramChart({
         value: valueGrid[seriesIdx]![i],
         itemStyle: {
           color,
-          opacity: hoveredBar === i ? 1 : baseOpacity,
+          opacity: ix.hoveredBar === i ? 1 : baseOpacity,
           borderRadius: topSeriesPerBucket[i] === seriesIdx ? [2, 2, 0, 0] : 0,
         },
       })),
@@ -243,7 +281,7 @@ export function HistogramChart({
     const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
     let style: string;
     if (isBold) style = "font-weight:bold";
-    else if (hoveredGroup) style = "opacity:0.5";
+    else if (ix.hoveredGroup) style = "opacity:0.5";
     else style = "opacity:0.7";
     const valueStyle = isBold ? "font-weight:bold" : "";
     return `${dot}<span style="${style}">${label}</span> <span style="${valueStyle}">${count.toLocaleString()}</span>`;
@@ -262,12 +300,12 @@ export function HistogramChart({
       const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
       const other = bucket.count - groupSum;
       if (other > 0) {
-        lines.push(tooltipLine(copperColor, "other", other, hoveredGroup === "other"));
+        lines.push(tooltipLine(copperColor, "other", other, ix.hoveredGroup === "other"));
       }
       for (const key of groupKeys.toReversed()) {
         const count = bucket.groupCounts[key];
         if (count && count > 0) {
-          lines.push(tooltipLine(resolveColor(colorMap.get(key) ?? copperColor), key, count, hoveredGroup === key));
+          lines.push(tooltipLine(resolveColor(colorMap.get(key) ?? copperColor), key, count, ix.hoveredGroup === key));
         }
       }
     }
@@ -337,12 +375,10 @@ export function HistogramChart({
     mouseover: (params: any) => {
       const name = params.seriesName as string;
       const group = name === "count" ? null : name;
-      setHoveredGroup(group);
-      setHoveredBar(params.dataIndex as number);
+      dix({ type: "hover", group, bar: params.dataIndex as number });
     },
     mouseout: () => {
-      setHoveredGroup(null);
-      setHoveredBar(null);
+      dix({ type: "hover", group: null, bar: null });
     },
     click: (params: any) => {
       if (!onSegmentClick) return;
@@ -368,13 +404,12 @@ export function HistogramChart({
     if (e.button !== 0) return;
     e.preventDefault();
     const idx = getBucketIndex(e.clientX);
-    setBrushStart(idx);
-    setBrushEnd(idx);
+    dix({ type: "brushStart", idx });
     brushingRef.current = true;
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!brushingRef.current) return;
-      setBrushEnd(getBucketIndex(ev.clientX));
+      dix({ type: "brushMove", idx: getBucketIndex(ev.clientX) });
     };
     const onMouseUp = (ev: MouseEvent) => {
       if (!brushingRef.current) return;
@@ -385,8 +420,7 @@ export function HistogramChart({
       if (lo !== hi) {
         onBrushSelect(buckets[lo]!.ts, buckets[hi]!.ts);
       }
-      setBrushStart(null);
-      setBrushEnd(null);
+      dix({ type: "brushEnd" });
       globalThis.removeEventListener("mousemove", onMouseMove);
       globalThis.removeEventListener("mouseup", onMouseUp);
     };
@@ -395,12 +429,12 @@ export function HistogramChart({
   };
 
   const brushLo =
-    brushStart !== null && brushEnd !== null
-      ? Math.min(brushStart, brushEnd)
+    ix.brushStart !== null && ix.brushEnd !== null
+      ? Math.min(ix.brushStart, ix.brushEnd)
       : null;
   const brushHi =
-    brushStart !== null && brushEnd !== null
-      ? Math.max(brushStart, brushEnd)
+    ix.brushStart !== null && ix.brushEnd !== null
+      ? Math.max(ix.brushStart, ix.brushEnd)
       : null;
 
   // Pan handlers.
@@ -420,17 +454,17 @@ export function HistogramChart({
     if (!onPan || buckets.length < 2) return;
     e.preventDefault();
     panStartX.current = e.clientX;
-    setPanAxisWidth(axisRef.current?.getBoundingClientRect().width || 1);
+    dix({ type: "panStart", axisWidth: axisRef.current?.getBoundingClientRect().width || 1 });
     panningRef.current = true;
     setGrabbingCursor();
 
     const onMouseMove = (ev: MouseEvent) => {
-      setPanOffset(ev.clientX - panStartX.current);
+      dix({ type: "panMove", offset: ev.clientX - panStartX.current });
     };
     const onMouseUp = (ev: MouseEvent) => {
       panningRef.current = false;
       clearGrabbingCursor();
-      setPanOffset(0);
+      dix({ type: "panEnd" });
       globalThis.removeEventListener("mousemove", onMouseMove);
       globalThis.removeEventListener("mouseup", onMouseUp);
 
@@ -455,7 +489,7 @@ export function HistogramChart({
   const windowMs =
     buckets.length > 1 ? lastBucket!.ts.getTime() - firstBucket!.ts.getTime() : 0;
   const panDeltaMs =
-    panOffset !== 0 ? -((panOffset / panAxisWidth) * windowMs) : 0;
+    ix.panOffset !== 0 ? -((ix.panOffset / ix.panAxisWidth) * windowMs) : 0;
 
   const formatDuration = (ms: number): string => {
     const abs = Math.abs(ms);
@@ -493,7 +527,7 @@ export function HistogramChart({
                   <div
                     key={key}
                     className={`flex items-center gap-1 transition-opacity ${
-                      hoveredGroup !== null && hoveredGroup !== key ? "opacity-40" : ""
+                      ix.hoveredGroup !== null && ix.hoveredGroup !== key ? "opacity-40" : ""
                     }`}
                   >
                     <span
@@ -502,7 +536,7 @@ export function HistogramChart({
                     />
                     <span
                       className={`text-[0.65em] font-mono ${
-                        hoveredGroup === key
+                        ix.hoveredGroup === key
                           ? c("text-text-bright", "text-light-text-bright")
                           : c("text-text-muted", "text-light-text-muted")
                       }`}
@@ -524,7 +558,7 @@ export function HistogramChart({
       ) : (
         <HistogramLegend
           legendKeys={legendKeys}
-          hoveredGroup={hoveredGroup}
+          hoveredGroup={ix.hoveredGroup}
           colorMap={colorMap}
           dark={dark}
         />
@@ -538,7 +572,7 @@ export function HistogramChart({
         onMouseDown={handleMouseDown}
       >
         {/* Pan delta indicator */}
-        {panOffset !== 0 && (
+        {ix.panOffset !== 0 && (
           <div
             className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 text-[0.7em] font-mono rounded whitespace-nowrap pointer-events-none z-20 ${c(
               "bg-ink-surface text-copper border border-copper/30",
@@ -594,7 +628,7 @@ export function HistogramChart({
           onMouseDown={handleAxisMouseDown}
           className={`flex-1 flex justify-between overflow-hidden ${onPan ? "cursor-grab active:cursor-grabbing" : ""}`}
           style={
-            panOffset ? { transform: `translateX(${panOffset}px)` } : undefined
+            ix.panOffset ? { transform: `translateX(${ix.panOffset}px)` } : undefined
           }
         >
           {Array.from({ length: labelCount }, (_, labelIdx) => {

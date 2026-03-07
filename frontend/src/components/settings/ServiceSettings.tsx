@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useReducer } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { EyeIcon, EyeOffIcon } from "../icons";
@@ -11,6 +11,90 @@ import { Checkbox } from "./Checkbox";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { extractMessage } from "../../utils/errors";
+
+// ── Form reducer ─────────────────────────────────────────────────────
+
+interface ServiceFormState {
+  tokenDuration: string;
+  jwtSecret: string;
+  minPwLen: string;
+  maxJobs: string;
+  tlsDefaultCert: string;
+  tlsEnabled: boolean;
+  httpToHttpsRedirect: boolean;
+  httpsPort: string;
+  requireMixedCase: boolean;
+  requireDigit: boolean;
+  requireSpecial: boolean;
+  maxConsecutiveRepeats: string;
+  forbidAnimalNoise: boolean;
+  refreshTokenDuration: string;
+  maxFollowDuration: string;
+  queryTimeout: string;
+  maxResultCount: string;
+  broadcastInterval: string;
+  initialized: boolean;
+  showSecret: boolean;
+}
+
+type ServiceFormAction =
+  | { type: "init"; data: any }
+  | { type: "reset"; data: any }
+  | { type: "set"; field: keyof ServiceFormState; value: string | boolean }
+  | { type: "toggleSecret" };
+
+function fieldsFromData(data: any): Omit<ServiceFormState, "showSecret"> {
+  const auth = data.auth;
+  const pp = auth?.passwordPolicy;
+  const query = data.query;
+  const sched = data.scheduler;
+  const tls = data.tls;
+  return {
+    tokenDuration: auth?.tokenDuration ?? "",
+    jwtSecret: auth?.jwtSecretConfigured ? JWT_KEEP : "",
+    minPwLen: pp?.minLength ? String(pp.minLength) : "8",
+    maxJobs: sched?.maxConcurrentJobs ? String(sched.maxConcurrentJobs) : "4",
+    tlsDefaultCert: tls?.defaultCert ?? "",
+    tlsEnabled: tls?.enabled ?? false,
+    httpToHttpsRedirect: tls?.httpToHttpsRedirect ?? false,
+    httpsPort: tls?.httpsPort ?? "",
+    requireMixedCase: pp?.requireMixedCase ?? false,
+    requireDigit: pp?.requireDigit ?? false,
+    requireSpecial: pp?.requireSpecial ?? false,
+    maxConsecutiveRepeats: pp?.maxConsecutiveRepeats ? String(pp.maxConsecutiveRepeats) : "0",
+    forbidAnimalNoise: pp?.forbidAnimalNoise ?? false,
+    refreshTokenDuration: auth?.refreshTokenDuration ?? "",
+    maxFollowDuration: query?.maxFollowDuration ?? "",
+    queryTimeout: query?.timeout ?? "",
+    maxResultCount: query?.maxResultCount ? String(query.maxResultCount) : "10000",
+    broadcastInterval: data.cluster?.broadcastInterval || "5s",
+    initialized: true,
+  };
+}
+
+const INITIAL_STATE: ServiceFormState = {
+  tokenDuration: "", jwtSecret: "", minPwLen: "", maxJobs: "",
+  tlsDefaultCert: "", tlsEnabled: false, httpToHttpsRedirect: false,
+  httpsPort: "", requireMixedCase: false, requireDigit: false,
+  requireSpecial: false, maxConsecutiveRepeats: "", forbidAnimalNoise: false,
+  refreshTokenDuration: "", maxFollowDuration: "", queryTimeout: "",
+  maxResultCount: "", broadcastInterval: "", initialized: false,
+  showSecret: false,
+};
+
+function serviceReducer(state: ServiceFormState, action: ServiceFormAction): ServiceFormState {
+  switch (action.type) {
+    case "init":
+      if (state.initialized) return state;
+      return { ...fieldsFromData(action.data), showSecret: false };
+    case "reset":
+      return { ...fieldsFromData(action.data), showSecret: state.showSecret };
+    case "set":
+      return { ...state, [action.field]: action.value };
+    case "toggleSecret":
+      return { ...state, showSecret: !state.showSecret };
+  }
+}
 
 /** Parse a Go duration string (e.g. "1h30m", "15m", "90s") into total seconds, or null if unparseable. */
 function parseDurationSeconds(s: string): number | null {
@@ -40,117 +124,77 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
   const putConfig = usePutSettings();
   const { addToast } = useToast();
 
-  const [tokenDuration, setTokenDuration] = useState("");
-  const [jwtSecret, setJwtSecret] = useState("");
-  const [minPwLen, setMinPwLen] = useState("");
-  const [maxJobs, setMaxJobs] = useState("");
-  const [tlsDefaultCert, setTlsDefaultCert] = useState("");
-  const [tlsEnabled, setTlsEnabled] = useState(false);
-  const [httpToHttpsRedirect, setHttpToHttpsRedirect] = useState(false);
-  const [httpsPort, setHttpsPort] = useState("");
-  const [requireMixedCase, setRequireMixedCase] = useState(false);
-  const [requireDigit, setRequireDigit] = useState(false);
-  const [requireSpecial, setRequireSpecial] = useState(false);
-  const [maxConsecutiveRepeats, setMaxConsecutiveRepeats] = useState("");
-  const [forbidAnimalNoise, setForbidAnimalNoise] = useState(false);
-  const [refreshTokenDuration, setRefreshTokenDuration] = useState("");
-  const [maxFollowDuration, setMaxFollowDuration] = useState("");
-  const [queryTimeout, setQueryTimeout] = useState("");
-  const [maxResultCount, setMaxResultCount] = useState("");
-  const [broadcastInterval, setBroadcastInterval] = useState("");
-  const [initialized, setInitialized] = useState(false);
-  const [showSecret, setShowSecret] = useState(false);
+  const [s, dispatch] = useReducer(serviceReducer, INITIAL_STATE);
+  const set = (field: keyof ServiceFormState) => (value: string | boolean) =>
+    dispatch({ type: "set", field, value });
 
   const certs = certData?.certificates ?? [];
   const certIdSet = new Set(certs.map((c) => c.id));
 
-  if (data && !initialized) {
-    const auth = data.auth;
-    const pp = auth?.passwordPolicy;
-    const query = data.query;
-    const sched = data.scheduler;
-    const tls = data.tls;
-    setTokenDuration(auth?.tokenDuration ?? "");
-    setJwtSecret(auth?.jwtSecretConfigured ? JWT_KEEP : "");
-    setMinPwLen(pp?.minLength ? String(pp.minLength) : "8");
-    setMaxJobs(sched?.maxConcurrentJobs ? String(sched.maxConcurrentJobs) : "4");
-    setTlsDefaultCert(tls?.defaultCert ?? "");
-    setTlsEnabled(tls?.enabled ?? false);
-    setHttpToHttpsRedirect(tls?.httpToHttpsRedirect ?? false);
-    setHttpsPort(tls?.httpsPort ?? "");
-    setRequireMixedCase(pp?.requireMixedCase ?? false);
-    setRequireDigit(pp?.requireDigit ?? false);
-    setRequireSpecial(pp?.requireSpecial ?? false);
-    setMaxConsecutiveRepeats(pp?.maxConsecutiveRepeats ? String(pp.maxConsecutiveRepeats) : "0");
-    setForbidAnimalNoise(pp?.forbidAnimalNoise ?? false);
-    setRefreshTokenDuration(auth?.refreshTokenDuration ?? "");
-    setMaxFollowDuration(query?.maxFollowDuration ?? "");
-    setQueryTimeout(query?.timeout ?? "");
-    setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
-    setBroadcastInterval(data.cluster?.broadcastInterval || "5s");
-    setInitialized(true);
+  if (data && !s.initialized) {
+    dispatch({ type: "init", data });
   }
 
   const dirty =
-    initialized &&
+    s.initialized &&
     data &&
-    (tokenDuration !== (data.auth?.tokenDuration ?? "") ||
-      (jwtSecret !== JWT_KEEP && jwtSecret !== "") ||
-      minPwLen !== String(data.auth?.passwordPolicy?.minLength || 8) ||
-      maxJobs !== String(data.scheduler?.maxConcurrentJobs || 4) ||
-      tlsDefaultCert !== (data.tls?.defaultCert ?? "") ||
-      tlsEnabled !== (data.tls?.enabled ?? false) ||
-      httpToHttpsRedirect !== (data.tls?.httpToHttpsRedirect ?? false) ||
-      httpsPort !== (data.tls?.httpsPort ?? "") ||
-      requireMixedCase !== (data.auth?.passwordPolicy?.requireMixedCase ?? false) ||
-      requireDigit !== (data.auth?.passwordPolicy?.requireDigit ?? false) ||
-      requireSpecial !== (data.auth?.passwordPolicy?.requireSpecial ?? false) ||
-      maxConsecutiveRepeats !== String(data.auth?.passwordPolicy?.maxConsecutiveRepeats || 0) ||
-      forbidAnimalNoise !== (data.auth?.passwordPolicy?.forbidAnimalNoise ?? false) ||
-      refreshTokenDuration !== (data.auth?.refreshTokenDuration ?? "") ||
-      maxFollowDuration !== (data.query?.maxFollowDuration ?? "") ||
-      queryTimeout !== (data.query?.timeout ?? "") ||
-      maxResultCount !== String(data.query?.maxResultCount || 10000) ||
-      broadcastInterval !== (data.cluster?.broadcastInterval || "5s"));
+    (s.tokenDuration !== (data.auth?.tokenDuration ?? "") ||
+      (s.jwtSecret !== JWT_KEEP && s.jwtSecret !== "") ||
+      s.minPwLen !== String(data.auth?.passwordPolicy?.minLength || 8) ||
+      s.maxJobs !== String(data.scheduler?.maxConcurrentJobs || 4) ||
+      s.tlsDefaultCert !== (data.tls?.defaultCert ?? "") ||
+      s.tlsEnabled !== (data.tls?.enabled ?? false) ||
+      s.httpToHttpsRedirect !== (data.tls?.httpToHttpsRedirect ?? false) ||
+      s.httpsPort !== (data.tls?.httpsPort ?? "") ||
+      s.requireMixedCase !== (data.auth?.passwordPolicy?.requireMixedCase ?? false) ||
+      s.requireDigit !== (data.auth?.passwordPolicy?.requireDigit ?? false) ||
+      s.requireSpecial !== (data.auth?.passwordPolicy?.requireSpecial ?? false) ||
+      s.maxConsecutiveRepeats !== String(data.auth?.passwordPolicy?.maxConsecutiveRepeats || 0) ||
+      s.forbidAnimalNoise !== (data.auth?.passwordPolicy?.forbidAnimalNoise ?? false) ||
+      s.refreshTokenDuration !== (data.auth?.refreshTokenDuration ?? "") ||
+      s.maxFollowDuration !== (data.query?.maxFollowDuration ?? "") ||
+      s.queryTimeout !== (data.query?.timeout ?? "") ||
+      s.maxResultCount !== String(data.query?.maxResultCount || 10000) ||
+      s.broadcastInterval !== (data.cluster?.broadcastInterval || "5s"));
 
   const handleSave = async () => {
-    const hasCert = certIdSet.has(tlsDefaultCert);
-    const effectiveTls = hasCert ? tlsEnabled : false;
-    const effectiveRedirect = hasCert ? httpToHttpsRedirect : false;
-    const effectiveJwtSecret = jwtSecret === JWT_KEEP ? JWT_KEEP : jwtSecret;
-    const effectiveMinPwLen = parseInt(minPwLen, 10) || 8;
-    const effectiveMaxJobs = parseInt(maxJobs, 10) || 4;
-    const effectiveMaxRepeats = parseInt(maxConsecutiveRepeats, 10) || 0;
-    const effectiveMaxResultCount = parseInt(maxResultCount, 10) || 0;
-    const effectiveBroadcast = broadcastInterval || undefined;
+    const hasCert = certIdSet.has(s.tlsDefaultCert);
+    const effectiveTls = hasCert ? s.tlsEnabled : false;
+    const effectiveRedirect = hasCert ? s.httpToHttpsRedirect : false;
+    const effectiveJwtSecret = s.jwtSecret === JWT_KEEP ? JWT_KEEP : s.jwtSecret;
+    const effectiveMinPwLen = parseInt(s.minPwLen, 10) || 8;
+    const effectiveMaxJobs = parseInt(s.maxJobs, 10) || 4;
+    const effectiveMaxRepeats = parseInt(s.maxConsecutiveRepeats, 10) || 0;
+    const effectiveMaxResultCount = parseInt(s.maxResultCount, 10) || 0;
+    const effectiveBroadcast = s.broadcastInterval || undefined;
     try {
       await putConfig.mutateAsync({
         auth: {
-          tokenDuration,
+          tokenDuration: s.tokenDuration,
           jwtSecret: effectiveJwtSecret,
-          refreshTokenDuration,
+          refreshTokenDuration: s.refreshTokenDuration,
           passwordPolicy: {
             minLength: effectiveMinPwLen,
-            requireMixedCase,
-            requireDigit,
-            requireSpecial,
+            requireMixedCase: s.requireMixedCase,
+            requireDigit: s.requireDigit,
+            requireSpecial: s.requireSpecial,
             maxConsecutiveRepeats: effectiveMaxRepeats,
-            forbidAnimalNoise,
+            forbidAnimalNoise: s.forbidAnimalNoise,
           },
         },
         query: {
-          timeout: queryTimeout,
-          maxFollowDuration,
+          timeout: s.queryTimeout,
+          maxFollowDuration: s.maxFollowDuration,
           maxResultCount: effectiveMaxResultCount,
         },
         scheduler: {
           maxConcurrentJobs: effectiveMaxJobs,
         },
         tls: {
-          defaultCert: tlsDefaultCert,
+          defaultCert: s.tlsDefaultCert,
           enabled: effectiveTls,
           httpToHttpsRedirect: effectiveRedirect,
-          httpsPort,
+          httpsPort: s.httpsPort,
         },
         cluster: {
           broadcastInterval: effectiveBroadcast,
@@ -163,31 +207,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
   };
 
   const handleReset = () => {
-    if (data) {
-      const auth = data.auth;
-      const pp = auth?.passwordPolicy;
-      const query = data.query;
-      const sched = data.scheduler;
-      const tls = data.tls;
-      setTokenDuration(auth?.tokenDuration ?? "");
-      setJwtSecret(auth?.jwtSecretConfigured ? JWT_KEEP : "");
-      setMinPwLen(pp?.minLength ? String(pp.minLength) : "8");
-      setMaxJobs(sched?.maxConcurrentJobs ? String(sched.maxConcurrentJobs) : "4");
-      setTlsDefaultCert(tls?.defaultCert ?? "");
-      setTlsEnabled(tls?.enabled ?? false);
-      setHttpToHttpsRedirect(tls?.httpToHttpsRedirect ?? false);
-      setHttpsPort(tls?.httpsPort ?? "");
-      setRequireMixedCase(pp?.requireMixedCase ?? false);
-      setRequireDigit(pp?.requireDigit ?? false);
-      setRequireSpecial(pp?.requireSpecial ?? false);
-      setMaxConsecutiveRepeats(pp?.maxConsecutiveRepeats ? String(pp.maxConsecutiveRepeats) : "0");
-      setForbidAnimalNoise(pp?.forbidAnimalNoise ?? false);
-      setRefreshTokenDuration(auth?.refreshTokenDuration ?? "");
-      setMaxFollowDuration(query?.maxFollowDuration ?? "");
-      setQueryTimeout(query?.timeout ?? "");
-      setMaxResultCount(query?.maxResultCount ? String(query.maxResultCount) : "10000");
-      setBroadcastInterval(data.cluster?.broadcastInterval || "5s");
-    }
+    if (data) dispatch({ type: "reset", data });
   };
 
   const { toggle, isExpanded } = useExpandedCards({
@@ -220,15 +240,15 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <TextInput
-                  value={tokenDuration}
-                  onChange={setTokenDuration}
+                  value={s.tokenDuration}
+                  onChange={set("tokenDuration")}
                   placeholder="15m"
                   dark={dark}
                   mono
                   examples={["15m", "1h", "24h"]}
                 />
                 {(() => {
-                  const secs = parseDurationSeconds(tokenDuration);
+                  const secs = parseDurationSeconds(s.tokenDuration);
                   if (secs !== null && secs < 60)
                     return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 minute</p>;
                   return null;
@@ -241,16 +261,16 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <TextInput
-                  value={refreshTokenDuration}
-                  onChange={setRefreshTokenDuration}
+                  value={s.refreshTokenDuration}
+                  onChange={set("refreshTokenDuration")}
                   placeholder="168h"
                   dark={dark}
                   mono
                   examples={["24h", "168h", "720h"]}
                 />
                 {(() => {
-                  const secs = parseDurationSeconds(refreshTokenDuration);
-                  const tokenSecs = parseDurationSeconds(tokenDuration);
+                  const secs = parseDurationSeconds(s.refreshTokenDuration);
+                  const tokenSecs = parseDurationSeconds(s.tokenDuration);
                   if (secs !== null && secs < 3600)
                     return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 hour</p>;
                   if (secs !== null && tokenSecs !== null && secs <= tokenSecs)
@@ -266,9 +286,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               >
                 <div className="relative">
                   <input
-                    type={showSecret ? "text" : "password"}
-                    value={jwtSecret === JWT_KEEP ? "" : jwtSecret}
-                    onChange={(e) => setJwtSecret(e.target.value)}
+                    type={s.showSecret ? "text" : "password"}
+                    value={s.jwtSecret === JWT_KEEP ? "" : s.jwtSecret}
+                    onChange={(e) => dispatch({ type: "set", field: "jwtSecret", value: e.target.value })}
                     placeholder={data?.auth?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
                     className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
                       "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
@@ -277,13 +297,13 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   />
                   <button
                     type="button"
-                    onClick={() => setShowSecret(!showSecret)}
+                    onClick={() => dispatch({ type: "toggleSecret" })}
                     className={`absolute right-2 top-1/2 -translate-y-1/2 transition-colors ${c(
                       "text-text-ghost hover:text-text-muted",
                       "text-light-text-ghost hover:text-light-text-muted",
                     )}`}
                   >
-                    {showSecret ? (
+                    {s.showSecret ? (
                       <EyeOffIcon className="w-4 h-4" />
                     ) : (
                       <EyeIcon className="w-4 h-4" />
@@ -309,8 +329,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   dark={dark}
                 >
                   <NumberInput
-                    value={minPwLen}
-                    onChange={setMinPwLen}
+                    value={s.minPwLen}
+                    onChange={set("minPwLen")}
                     placeholder="8"
                     dark={dark}
                     min={1}
@@ -322,8 +342,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   dark={dark}
                 >
                   <NumberInput
-                    value={maxConsecutiveRepeats}
-                    onChange={setMaxConsecutiveRepeats}
+                    value={s.maxConsecutiveRepeats}
+                    onChange={set("maxConsecutiveRepeats")}
                     placeholder="0 (no limit)"
                     dark={dark}
                     min={0}
@@ -332,10 +352,10 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
               </div>
 
               <div className="flex flex-col gap-2.5">
-                <Checkbox checked={requireMixedCase} onChange={setRequireMixedCase} label="Require mixed case (upper + lowercase)" dark={dark} />
-                <Checkbox checked={requireDigit} onChange={setRequireDigit} label="Require digit (0-9)" dark={dark} />
-                <Checkbox checked={requireSpecial} onChange={setRequireSpecial} label="Require special character" dark={dark} />
-                <Checkbox checked={forbidAnimalNoise} onChange={setForbidAnimalNoise} label="Forbid animal noises (moo, woof, meow, ...)" dark={dark} />
+                <Checkbox checked={s.requireMixedCase} onChange={set("requireMixedCase")} label="Require mixed case (upper + lowercase)" dark={dark} />
+                <Checkbox checked={s.requireDigit} onChange={set("requireDigit")} label="Require digit (0-9)" dark={dark} />
+                <Checkbox checked={s.requireSpecial} onChange={set("requireSpecial")} label="Require special character" dark={dark} />
+                <Checkbox checked={s.forbidAnimalNoise} onChange={set("forbidAnimalNoise")} label="Forbid animal noises (moo, woof, meow, ...)" dark={dark} />
               </div>
             </div>
           </ExpandableCard>
@@ -354,8 +374,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <NumberInput
-                  value={maxJobs}
-                  onChange={setMaxJobs}
+                  value={s.maxJobs}
+                  onChange={set("maxJobs")}
                   placeholder="4"
                   dark={dark}
                   min={1}
@@ -379,8 +399,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <TextInput
-                  value={queryTimeout}
-                  onChange={setQueryTimeout}
+                  value={s.queryTimeout}
+                  onChange={set("queryTimeout")}
                   placeholder="30s"
                   dark={dark}
                   mono
@@ -394,8 +414,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <TextInput
-                  value={maxFollowDuration}
-                  onChange={setMaxFollowDuration}
+                  value={s.maxFollowDuration}
+                  onChange={set("maxFollowDuration")}
                   placeholder="4h"
                   dark={dark}
                   mono
@@ -409,8 +429,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <NumberInput
-                  value={maxResultCount}
-                  onChange={setMaxResultCount}
+                  value={s.maxResultCount}
+                  onChange={set("maxResultCount")}
                   dark={dark}
                   min={0}
                   examples={["1000", "10000", "100000"]}
@@ -425,8 +445,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             expanded={isExpanded("tls")}
             onToggle={() => toggle("tls")}
             monoTitle={false}
-            typeBadge={tlsEnabled ? "enabled" : undefined}
-            typeBadgeAccent={tlsEnabled}
+            typeBadge={s.tlsEnabled ? "enabled" : undefined}
+            typeBadgeAccent={s.tlsEnabled}
           >
             <div className="flex flex-col gap-4">
               <FormField
@@ -435,8 +455,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <select
-                  value={tlsDefaultCert}
-                  onChange={(e) => setTlsDefaultCert(e.target.value)}
+                  value={s.tlsDefaultCert}
+                  onChange={(e) => dispatch({ type: "set", field: "tlsDefaultCert", value: e.target.value })}
                   className={`w-full px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${c(
                     "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
                     "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
@@ -451,7 +471,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 </select>
               </FormField>
 
-              {tlsDefaultCert && (
+              {s.tlsDefaultCert && (
                 <>
                   <FormField
                     label="Enable TLS (HTTPS)"
@@ -459,12 +479,12 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                     dark={dark}
                   >
                     <Checkbox
-                      checked={tlsEnabled}
-                      onChange={setTlsEnabled}
+                      checked={s.tlsEnabled}
+                      onChange={set("tlsEnabled")}
                       dark={dark}
                     />
                   </FormField>
-                  {tlsEnabled && (
+                  {s.tlsEnabled && (
                     <>
                       <FormField
                         label="HTTPS port"
@@ -474,8 +494,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                         <input
                           type="text"
                           inputMode="numeric"
-                          value={httpsPort}
-                          onChange={(e) => setHttpsPort(e.target.value)}
+                          value={s.httpsPort}
+                          onChange={(e) => dispatch({ type: "set", field: "httpsPort", value: e.target.value })}
                           placeholder="auto"
                           className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
                             "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
@@ -489,8 +509,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                         dark={dark}
                       >
                         <Checkbox
-                          checked={httpToHttpsRedirect}
-                          onChange={setHttpToHttpsRedirect}
+                          checked={s.httpToHttpsRedirect}
+                          onChange={set("httpToHttpsRedirect")}
                           dark={dark}
                         />
                       </FormField>
@@ -515,16 +535,16 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 dark={dark}
               >
                 <TextInput
-                  value={broadcastInterval}
-                  onChange={setBroadcastInterval}
+                  value={s.broadcastInterval}
+                  onChange={set("broadcastInterval")}
                   placeholder="5s"
                   dark={dark}
                   mono
                   examples={["3s", "5s", "10s", "30s"]}
                 />
                 {(() => {
-                  const secs = parseDurationSeconds(broadcastInterval);
-                  if (broadcastInterval && secs === null)
+                  const secs = parseDurationSeconds(s.broadcastInterval);
+                  if (s.broadcastInterval && secs === null)
                     return <p className="text-[0.75em] text-amber-500 mt-1">Invalid duration format</p>;
                   if (secs !== null && secs < 1)
                     return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 second</p>;
