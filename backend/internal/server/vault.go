@@ -28,8 +28,12 @@ type PeerVaultStatsProvider interface {
 // Implemented by cluster.SearchForwarder; nil in single-node mode.
 type RemoteVaultForwarder interface {
 	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
+	GetChunk(ctx context.Context, nodeID string, req *apiv1.ForwardGetChunkRequest) (*apiv1.ForwardGetChunkResponse, error)
 	GetIndexes(ctx context.Context, nodeID string, req *apiv1.ForwardGetIndexesRequest) (*apiv1.ForwardGetIndexesResponse, error)
+	AnalyzeChunk(ctx context.Context, nodeID string, req *apiv1.ForwardAnalyzeChunkRequest) (*apiv1.ForwardAnalyzeChunkResponse, error)
 	ValidateVault(ctx context.Context, nodeID string, req *apiv1.ForwardValidateVaultRequest) (*apiv1.ForwardValidateVaultResponse, error)
+	SealVault(ctx context.Context, nodeID string, req *apiv1.ForwardSealVaultRequest) (*apiv1.ForwardSealVaultResponse, error)
+	ReindexVault(ctx context.Context, nodeID string, req *apiv1.ForwardReindexVaultRequest) (*apiv1.ForwardReindexVaultResponse, error)
 }
 
 // VaultServer implements the VaultService.

@@ -36,7 +36,7 @@ func waitJobDone(t *testing.T, sched *Scheduler, id string) {
 		if time.Now().After(deadline) {
 			t.Fatal("timed out waiting for job to finish")
 		}
-		runtime.Gosched()
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -218,16 +218,25 @@ func TestScheduler_Cleanup(t *testing.T) {
 	now = now.Add(2 * time.Hour)
 	mu.Unlock()
 
-	// ListJobs triggers cleanup.
-	jobs := sched.ListJobs()
-	found := false
-	for _, j := range jobs {
-		if j.ID == id {
-			found = true
+	// ListJobs triggers cleanup. Retry briefly to allow gocron's
+	// AfterJobRuns listener to move the job from s.jobs to s.completed
+	// (cleanup only purges from the completed map).
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		jobs := sched.ListJobs()
+		found := false
+		for _, j := range jobs {
+			if j.ID == id {
+				found = true
+			}
 		}
-	}
-	if found {
-		t.Error("old job should have been cleaned up")
+		if !found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("old job should have been cleaned up")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

@@ -65,6 +65,20 @@ func (sf *SearchForwarder) ListChunks(ctx context.Context, nodeID string, req *g
 	return resp, nil
 }
 
+// GetChunk sends a ForwardGetChunk RPC to the given node.
+func (sf *SearchForwarder) GetChunk(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardGetChunkResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardGetChunk", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward get chunk to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
 // GetIndexes sends a ForwardGetIndexes RPC to the given node.
 func (sf *SearchForwarder) GetIndexes(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
 	conn, err := sf.peers.Conn(nodeID)
@@ -79,6 +93,20 @@ func (sf *SearchForwarder) GetIndexes(ctx context.Context, nodeID string, req *g
 	return resp, nil
 }
 
+// AnalyzeChunk sends a ForwardAnalyzeChunk RPC to the given node.
+func (sf *SearchForwarder) AnalyzeChunk(ctx context.Context, nodeID string, req *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardAnalyzeChunkResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardAnalyzeChunk", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward analyze chunk to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
 // ValidateVault sends a ForwardValidateVault RPC to the given node.
 func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
 	conn, err := sf.peers.Conn(nodeID)
@@ -89,6 +117,34 @@ func (sf *SearchForwarder) ValidateVault(ctx context.Context, nodeID string, req
 	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardValidateVault", req, resp); err != nil {
 		sf.peers.Invalidate(nodeID)
 		return nil, fmt.Errorf("forward validate vault to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
+// SealVault sends a ForwardSealVault RPC to the given node.
+func (sf *SearchForwarder) SealVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardSealVaultResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSealVault", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward seal vault to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
+// ReindexVault sends a ForwardReindexVault RPC to the given node.
+func (sf *SearchForwarder) ReindexVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardReindexVaultResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardReindexVault", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward reindex vault to %s: %w", nodeID, err)
 	}
 	return resp, nil
 }

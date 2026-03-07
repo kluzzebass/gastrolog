@@ -2,8 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
+	"time"
 
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -11,6 +13,7 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
@@ -303,5 +306,91 @@ func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaul
 			return nil, err
 		}
 		return server.ValidateVaultLocal(o, vaultID, metas), nil
+	}
+}
+
+func newGetChunkExecutor(o *orchestrator.Orchestrator) cluster.GetChunkExecutor {
+	return func(_ context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error) {
+		meta, err := o.GetChunkMeta(vaultID, chunkID)
+		if err != nil {
+			return nil, err
+		}
+		return server.ChunkMetaToProto(meta), nil
+	}
+}
+
+func newAnalyzeChunkExecutor(o *orchestrator.Orchestrator) cluster.AnalyzeChunkExecutor {
+	return func(_ context.Context, vaultID uuid.UUID, chunkIDStr string) ([]*gastrologv1.ChunkAnalysis, error) {
+		a, err := o.NewAnalyzer(vaultID)
+		if err != nil {
+			return nil, err
+		}
+		var analyses []analyzer.ChunkAnalysis
+		if chunkIDStr != "" {
+			chunkID, parseErr := chunk.ParseChunkID(chunkIDStr)
+			if parseErr != nil {
+				return nil, parseErr
+			}
+			analysis, analyzeErr := a.AnalyzeChunk(chunkID)
+			if analyzeErr != nil {
+				return nil, analyzeErr
+			}
+			analyses = []analyzer.ChunkAnalysis{*analysis}
+		} else {
+			agg, aggErr := a.AnalyzeAll()
+			if aggErr != nil {
+				return nil, aggErr
+			}
+			analyses = agg.Chunks
+		}
+		out := make([]*gastrologv1.ChunkAnalysis, 0, len(analyses))
+		for _, ca := range analyses {
+			out = append(out, server.ChunkAnalysisToProto(ca))
+		}
+		return out, nil
+	}
+}
+
+func newSealVaultExecutor(o *orchestrator.Orchestrator) cluster.SealVaultExecutor {
+	return func(_ context.Context, vaultID uuid.UUID) error {
+		return o.SealActive(vaultID)
+	}
+}
+
+func newReindexVaultExecutor(o *orchestrator.Orchestrator) cluster.ReindexVaultExecutor {
+	return func(_ context.Context, vaultID uuid.UUID) (string, error) {
+		if !o.VaultExists(vaultID) {
+			return "", errors.New("vault not found")
+		}
+		jobName := "reindex:" + vaultID.String()
+		jobID := o.Scheduler().Submit(jobName, func(ctx context.Context, job *orchestrator.JobProgress) {
+			metas, err := o.ListChunkMetas(vaultID)
+			if err != nil {
+				job.Fail(time.Now(), err.Error())
+				return
+			}
+			var sealedCount int64
+			for _, m := range metas {
+				if m.Sealed {
+					sealedCount++
+				}
+			}
+			job.SetRunning(sealedCount)
+			for _, m := range metas {
+				if !m.Sealed {
+					continue
+				}
+				if err := o.DeleteIndexes(vaultID, m.ID); err != nil {
+					job.AddErrorDetail(fmt.Sprintf("delete indexes for chunk %s: %v", m.ID, err))
+					continue
+				}
+				if err := o.BuildIndexes(ctx, vaultID, m.ID); err != nil {
+					job.AddErrorDetail(fmt.Sprintf("build indexes for chunk %s: %v", m.ID, err))
+					continue
+				}
+				job.IncrChunks()
+			}
+		})
+		return jobID, nil
 	}
 }

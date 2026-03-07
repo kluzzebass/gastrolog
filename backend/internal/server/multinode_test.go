@@ -52,6 +52,7 @@ type multiNodeHarness struct {
 	cfgStore    config.Store
 	srv         *server.Server
 	client      gastrologv1connect.QueryServiceClient
+	vaultClient gastrologv1connect.VaultServiceClient
 	jobSrv      gastrologv1connect.JobServiceClient
 	peerJobs    *mnPeerJobs
 }
@@ -133,14 +134,16 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		remoteOrchestrators[id] = nodes[id].orch
 	}
 	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
+	remoteVaultFwd := &directRemoteVaultForwarder{nodes: remoteOrchestrators}
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}}
 
 	coordNode := nodes[coordinatorID]
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
-		NodeID:         coordinatorID,
-		RemoteSearcher: remoteSearcher,
-		PeerJobs:       peerJobs,
+		NodeID:               coordinatorID,
+		RemoteSearcher:       remoteSearcher,
+		RemoteVaultForwarder: remoteVaultFwd,
+		PeerJobs:             peerJobs,
 	})
 
 	handler := srv.Handler()
@@ -148,6 +151,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		Transport: &embeddedTransport{handler: handler},
 	}
 	queryClient := gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
+	vaultClient := gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded")
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 
 	t.Cleanup(func() {
@@ -162,6 +166,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		cfgStore:    cfgStore,
 		srv:         srv,
 		client:      queryClient,
+		vaultClient: vaultClient,
 		jobSrv:      jobClient,
 		peerJobs:    peerJobs,
 	}
@@ -275,6 +280,163 @@ func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *g
 	errCh <- fmt.Errorf("not implemented in test harness")
 	close(errCh)
 	return nil, errCh
+}
+
+// directRemoteVaultForwarder implements RemoteVaultForwarder by calling
+// directly into the target node's orchestrator, simulating cluster RPCs.
+type directRemoteVaultForwarder struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *directRemoteVaultForwarder) orch(nodeID string) (*orchestrator.Orchestrator, error) {
+	o, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+	return o, nil
+}
+
+func (d *directRemoteVaultForwarder) ListChunks(_ context.Context, nodeID string, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
+	o, err := d.orch(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	metas, err := o.ListChunkMetas(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	chunks := make([]*gastrologv1.ChunkMeta, 0, len(metas))
+	for _, m := range metas {
+		chunks = append(chunks, server.ChunkMetaToProto(m))
+	}
+	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
+}
+
+func (d *directRemoteVaultForwarder) GetChunk(_ context.Context, nodeID string, req *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error) {
+	o, err := d.orch(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, err
+	}
+	meta, err := o.GetChunkMeta(vaultID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	return &gastrologv1.ForwardGetChunkResponse{Chunk: server.ChunkMetaToProto(meta)}, nil
+}
+
+func (d *directRemoteVaultForwarder) GetIndexes(_ context.Context, nodeID string, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
+	o, err := d.orch(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, err
+	}
+	report, err := o.ChunkIndexInfos(vaultID, chunkID)
+	if err != nil {
+		return nil, err
+	}
+	resp := &gastrologv1.ForwardGetIndexesResponse{Sealed: report.Sealed}
+	for _, idx := range report.Indexes {
+		resp.Indexes = append(resp.Indexes, &gastrologv1.IndexInfo{
+			Name: idx.Name, Exists: idx.Exists,
+			EntryCount: idx.EntryCount, SizeBytes: idx.SizeBytes,
+		})
+	}
+	return resp, nil
+}
+
+func (d *directRemoteVaultForwarder) AnalyzeChunk(_ context.Context, nodeID string, req *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error) {
+	o, err := d.orch(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	a, err := o.NewAnalyzer(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetChunkId() != "" {
+		chunkID, parseErr := chunk.ParseChunkID(req.GetChunkId())
+		if parseErr != nil {
+			return nil, parseErr
+		}
+		analysis, analyzeErr := a.AnalyzeChunk(chunkID)
+		if analyzeErr != nil {
+			return nil, analyzeErr
+		}
+		return &gastrologv1.ForwardAnalyzeChunkResponse{
+			Analyses: []*gastrologv1.ChunkAnalysis{server.ChunkAnalysisToProto(*analysis)},
+		}, nil
+	}
+	agg, err := a.AnalyzeAll()
+	if err != nil {
+		return nil, err
+	}
+	analyses := make([]*gastrologv1.ChunkAnalysis, 0, len(agg.Chunks))
+	for _, ca := range agg.Chunks {
+		analyses = append(analyses, server.ChunkAnalysisToProto(ca))
+	}
+	return &gastrologv1.ForwardAnalyzeChunkResponse{Analyses: analyses}, nil
+}
+
+func (d *directRemoteVaultForwarder) ValidateVault(_ context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
+	o, err := d.orch(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	metas, err := o.ListChunkMetas(vaultID)
+	if err != nil {
+		return nil, err
+	}
+	resp := server.ValidateVaultLocal(o, vaultID, metas)
+	return &gastrologv1.ForwardValidateVaultResponse{
+		Valid: resp.Valid, Chunks: resp.Chunks,
+	}, nil
+}
+
+func (d *directRemoteVaultForwarder) SealVault(_ context.Context, nodeID string, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
+	o, err := d.orch(nodeID)
+	if err != nil {
+		return nil, err
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, err
+	}
+	if err := o.SealActive(vaultID); err != nil {
+		return nil, err
+	}
+	return &gastrologv1.ForwardSealVaultResponse{}, nil
+}
+
+func (d *directRemoteVaultForwarder) ReindexVault(_ context.Context, nodeID string, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
+	// In tests we don't have the scheduler wired up, so just return a fake job ID.
+	return &gastrologv1.ForwardReindexVaultResponse{JobId: "test-reindex-job"}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -572,5 +734,150 @@ func TestMultiNode_AvgAcrossTwoRemoteNodes(t *testing.T) {
 				t.Errorf("expected avg(val) = 25 (global across 2 remote nodes), got %q", val)
 			}
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Vault admin RPC forwarding to remote nodes
+// ---------------------------------------------------------------------------
+
+func TestMultiNode_ListChunksRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	resp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("ListChunks on remote vault: %v", err)
+	}
+	if len(resp.Msg.Chunks) == 0 {
+		t.Error("expected at least 1 chunk from remote vault, got 0")
+	}
+}
+
+func TestMultiNode_GetChunkRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+
+	// First list chunks to get a chunk ID.
+	listResp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("ListChunks: %v", err)
+	}
+	if len(listResp.Msg.Chunks) == 0 {
+		t.Fatal("no chunks to test GetChunk with")
+	}
+	chunkID := listResp.Msg.Chunks[0].Id
+
+	resp, err := h.vaultClient.GetChunk(context.Background(), connect.NewRequest(&gastrologv1.GetChunkRequest{
+		Vault:   remoteVaultID,
+		ChunkId: chunkID,
+	}))
+	if err != nil {
+		t.Fatalf("GetChunk on remote vault: %v", err)
+	}
+	if resp.Msg.Chunk == nil {
+		t.Error("expected chunk metadata, got nil")
+	}
+	if resp.Msg.Chunk.Id != chunkID {
+		t.Errorf("expected chunk ID %q, got %q", chunkID, resp.Msg.Chunk.Id)
+	}
+	if resp.Msg.Chunk.RecordCount != 3 {
+		t.Errorf("expected 3 records in chunk, got %d", resp.Msg.Chunk.RecordCount)
+	}
+}
+
+func TestMultiNode_AnalyzeChunkRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 5, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	// Memory vaults don't produce full analysis data, but the RPC should
+	// succeed — proving the forwarding path works end-to-end.
+	_, err := h.vaultClient.AnalyzeChunk(context.Background(), connect.NewRequest(&gastrologv1.AnalyzeChunkRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("AnalyzeChunk on remote vault: %v", err)
+	}
+}
+
+func TestMultiNode_SealVaultRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+
+	// Seal the remote vault's active chunk.
+	_, err := h.vaultClient.SealVault(context.Background(), connect.NewRequest(&gastrologv1.SealVaultRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("SealVault on remote vault: %v", err)
+	}
+
+	// Verify the chunk is now sealed by listing chunks.
+	listResp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("ListChunks after seal: %v", err)
+	}
+	sealedCount := 0
+	for _, c := range listResp.Msg.Chunks {
+		if c.Sealed {
+			sealedCount++
+		}
+	}
+	if sealedCount == 0 {
+		t.Error("expected at least 1 sealed chunk after SealVault, got 0")
+	}
+}
+
+func TestMultiNode_ValidateVaultRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	resp, err := h.vaultClient.ValidateVault(context.Background(), connect.NewRequest(&gastrologv1.ValidateVaultRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("ValidateVault on remote vault: %v", err)
+	}
+	if !resp.Msg.Valid {
+		t.Error("expected vault to be valid")
+	}
+}
+
+func TestMultiNode_ReindexVaultRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	resp, err := h.vaultClient.ReindexVault(context.Background(), connect.NewRequest(&gastrologv1.ReindexVaultRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("ReindexVault on remote vault: %v", err)
+	}
+	if resp.Msg.JobId == "" {
+		t.Error("expected non-empty job ID from remote reindex")
 	}
 }

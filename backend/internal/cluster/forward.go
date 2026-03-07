@@ -51,6 +51,18 @@ type ExplainExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr s
 // responsible for cancelling the context to stop the follow.
 type FollowExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], error)
 
+// GetChunkExecutor returns details for a specific chunk in a local vault.
+type GetChunkExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error)
+
+// AnalyzeChunkExecutor runs index analysis on a local vault (or specific chunk).
+type AnalyzeChunkExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID string) ([]*gastrologv1.ChunkAnalysis, error)
+
+// SealVaultExecutor seals the active chunk of a local vault.
+type SealVaultExecutor func(ctx context.Context, vaultID uuid.UUID) error
+
+// ReindexVaultExecutor rebuilds all indexes for a local vault.
+type ReindexVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (string, error)
+
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
@@ -100,6 +112,26 @@ func (s *Server) SetExplainExecutor(fn ExplainExecutor) {
 // SetFollowExecutor injects the callback for handling remote follow requests.
 func (s *Server) SetFollowExecutor(fn FollowExecutor) {
 	s.followExecutor = fn
+}
+
+// SetGetChunkExecutor injects the callback for handling remote GetChunk requests.
+func (s *Server) SetGetChunkExecutor(fn GetChunkExecutor) {
+	s.getChunkExecutor = fn
+}
+
+// SetAnalyzeChunkExecutor injects the callback for handling remote AnalyzeChunk requests.
+func (s *Server) SetAnalyzeChunkExecutor(fn AnalyzeChunkExecutor) {
+	s.analyzeChunkExecutor = fn
+}
+
+// SetSealVaultExecutor injects the callback for handling remote SealVault requests.
+func (s *Server) SetSealVaultExecutor(fn SealVaultExecutor) {
+	s.sealVaultExecutor = fn
+}
+
+// SetReindexVaultExecutor injects the callback for handling remote ReindexVault requests.
+func (s *Server) SetReindexVaultExecutor(fn ReindexVaultExecutor) {
+	s.reindexVaultExecutor = fn
 }
 
 // forwardRecords handles the ForwardRecords RPC. Converts proto ExportRecords
@@ -409,6 +441,77 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 	}, nil
 }
 
+// forwardGetChunk handles the ForwardGetChunk RPC. Returns details for a
+// specific chunk in a local vault.
+func (s *Server) forwardGetChunk(ctx context.Context, req *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error) {
+	if s.getChunkExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "get chunk executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+	}
+	meta, err := s.getChunkExecutor(ctx, vaultID, chunkID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get chunk: %v", err)
+	}
+	return &gastrologv1.ForwardGetChunkResponse{Chunk: meta}, nil
+}
+
+// forwardAnalyzeChunk handles the ForwardAnalyzeChunk RPC. Runs index analysis
+// on a local vault (or specific chunk).
+func (s *Server) forwardAnalyzeChunk(ctx context.Context, req *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error) {
+	if s.analyzeChunkExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "analyze chunk executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	analyses, err := s.analyzeChunkExecutor(ctx, vaultID, req.GetChunkId())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "analyze chunk: %v", err)
+	}
+	return &gastrologv1.ForwardAnalyzeChunkResponse{Analyses: analyses}, nil
+}
+
+// forwardSealVault handles the ForwardSealVault RPC. Seals the active chunk
+// of a local vault.
+func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
+	if s.sealVaultExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "seal vault executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	if err := s.sealVaultExecutor(ctx, vaultID); err != nil {
+		return nil, status.Errorf(codes.Internal, "seal vault: %v", err)
+	}
+	return &gastrologv1.ForwardSealVaultResponse{}, nil
+}
+
+// forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
+// for a local vault.
+func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
+	if s.reindexVaultExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "reindex vault executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	jobID, err := s.reindexVaultExecutor(ctx, vaultID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "reindex vault: %v", err)
+	}
+	return &gastrologv1.ForwardReindexVaultResponse{JobId: jobID}, nil
+}
+
 // forwardExplain handles the ForwardExplain RPC. Returns the explain plan
 // for the requested local vaults.
 func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error) {
@@ -540,6 +643,22 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ForwardExplain",
 			Handler:    forwardExplainHandler,
 		},
+		{
+			MethodName: "ForwardGetChunk",
+			Handler:    forwardGetChunkHandler,
+		},
+		{
+			MethodName: "ForwardAnalyzeChunk",
+			Handler:    forwardAnalyzeChunkHandler,
+		},
+		{
+			MethodName: "ForwardSealVault",
+			Handler:    forwardSealVaultHandler,
+		},
+		{
+			MethodName: "ForwardReindexVault",
+			Handler:    forwardReindexVaultHandler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -570,6 +689,10 @@ type clusterServiceServer interface {
 	forwardRemoveNode(context.Context, *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error)
 	forwardSetNodeSuffrage(context.Context, *gastrologv1.ForwardSetNodeSuffrageRequest) (*gastrologv1.ForwardSetNodeSuffrageResponse, error)
 	forwardExplain(context.Context, *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error)
+	forwardGetChunk(context.Context, *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error)
+	forwardAnalyzeChunk(context.Context, *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error)
+	forwardSealVault(context.Context, *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error)
+	forwardReindexVault(context.Context, *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -758,6 +881,82 @@ func forwardExplainHandler(srv any, ctx context.Context, dec func(any) error, in
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardExplain(ctx, req.(*gastrologv1.ForwardExplainRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardGetChunkHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardGetChunkRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardGetChunk(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardGetChunk",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardGetChunk(ctx, req.(*gastrologv1.ForwardGetChunkRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardAnalyzeChunkHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardAnalyzeChunkRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardAnalyzeChunk(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardAnalyzeChunk",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardAnalyzeChunk(ctx, req.(*gastrologv1.ForwardAnalyzeChunkRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardSealVaultHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardSealVaultRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardSealVault(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardSealVault",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardSealVault(ctx, req.(*gastrologv1.ForwardSealVaultRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardReindexVaultHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardReindexVaultRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardReindexVault(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardReindexVault",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardReindexVault(ctx, req.(*gastrologv1.ForwardReindexVaultRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

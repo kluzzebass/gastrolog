@@ -308,6 +308,41 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	}
 }
 
+// ChunkAnalysisToProto converts an analyzer.ChunkAnalysis to a proto ChunkAnalysis.
+func ChunkAnalysisToProto(ca analyzer.ChunkAnalysis) *apiv1.ChunkAnalysis {
+	protoAnalysis := &apiv1.ChunkAnalysis{
+		ChunkId:     ca.ChunkID.String(),
+		Sealed:      ca.Sealed,
+		RecordCount: ca.ChunkRecords,
+		Indexes:     make([]*apiv1.IndexAnalysis, 0),
+	}
+	if ca.TokenStats != nil {
+		protoAnalysis.Indexes = append(protoAnalysis.Indexes, &apiv1.IndexAnalysis{
+			Name:       "token",
+			Complete:   true,
+			Status:     tokenStatusString(ca.TokenStats),
+			EntryCount: ca.TokenStats.UniqueTokens,
+		})
+	}
+	if ca.AttrKVStats != nil {
+		protoAnalysis.Indexes = append(protoAnalysis.Indexes, &apiv1.IndexAnalysis{
+			Name:       "attr",
+			Complete:   true,
+			Status:     "ok",
+			EntryCount: ca.AttrKVStats.UniqueKeys + ca.AttrKVStats.UniqueValues + ca.AttrKVStats.UniqueKeyValuePairs,
+		})
+	}
+	if ca.KVStats != nil {
+		protoAnalysis.Indexes = append(protoAnalysis.Indexes, &apiv1.IndexAnalysis{
+			Name:       "kv",
+			Complete:   !ca.KVStats.BudgetExhausted,
+			Status:     kvStatusString(ca.KVStats),
+			EntryCount: ca.KVStats.KeysIndexed + ca.KVStats.ValuesIndexed + ca.KVStats.PairsIndexed,
+		})
+	}
+	return protoAnalysis
+}
+
 func tokenStatusString(stats *analyzer.TokenIndexStats) string {
 	if stats == nil {
 		return "missing"
