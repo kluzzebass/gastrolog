@@ -81,7 +81,7 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // contains a pipeline (stats, timechart), runs RunPipeline and returns the
 // TableResult instead of individual records.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, _ []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error) {
+	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error) {
 		scopedExpr := fmt.Sprintf("vault=%s %s", vaultID, queryExpr)
 
 		q, pipeline, err := server.ParseExpression(scopedExpr)
@@ -117,15 +117,28 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 			q.Limit = maxBatch
 		}
 
-		iter, _ := eng.Search(ctx, q, nil)
+		var resume *query.ResumeToken
+		if len(resumeToken) > 0 {
+			resume, err = server.ProtoToResumeToken(resumeToken)
+			if err != nil {
+				return nil, nil, nil, nil, false, fmt.Errorf("parse resume token: %w", err)
+			}
+		}
+
+		searchIter, getToken := eng.Search(ctx, q, resume)
 		var records []*gastrologv1.ExportRecord
-		for rec, err := range iter {
+		for rec, err := range searchIter {
 			if err != nil {
 				return records, nil, histogram, nil, false, err
 			}
 			records = append(records, cluster.RecordToExportRecord(rec))
 		}
-		return records, nil, histogram, nil, false, nil
+		token := getToken()
+		var tokenBytes []byte
+		if token != nil {
+			tokenBytes = server.ResumeTokenToProto(token)
+		}
+		return records, nil, histogram, tokenBytes, token != nil, nil
 	}
 }
 

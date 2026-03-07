@@ -4,6 +4,7 @@ import { TableResult } from "../api/gen/gastrolog/v1/query_pb";
 import { sameRecord } from "../utils";
 import { EmptyState } from "./EmptyState";
 import { LogEntry } from "./LogEntry";
+import { VirtualLogList } from "./VirtualLogList";
 import { PipelineResults } from "./PipelineResults";
 import { ResultsToolbar } from "./ResultsToolbar";
 import type { HighlightMode } from "../hooks/useThemeSync";
@@ -173,7 +174,7 @@ export function SearchResults({
               Waiting for new records...
             </div>
           )}
-          {!isEmpty && (
+          {!isEmpty && isFollowMode && (
             <div>
               {displayList.map((record, i) => {
                 const selected = sameRecord(selectedRecord, record);
@@ -192,8 +193,24 @@ export function SearchResults({
                   />
                 );
               })}
-              {/* Infinite scroll sentinel (search only) */}
-              {!isFollowMode && <div ref={sentinelRef} className="h-1" />}
+            </div>
+          )}
+          {!isEmpty && !isFollowMode && (
+            <div>
+              <VirtualLogList
+                records={displayList}
+                selectedRecord={selectedRecord}
+                tokens={tokens}
+                highlightMode={highlightMode}
+                dark={dark}
+                scrollRef={logScrollRef}
+                selectedRowRef={selectedRowRef}
+                onSelectRecord={onSelectRecord}
+                onTokenToggle={onTokenToggle}
+                onSpanClick={onSpanClick}
+              />
+              {/* Infinite scroll sentinel — same position as before virtualization */}
+              <div ref={sentinelRef} className="h-1" />
               {(isSearching && records.length > 0) && (
                 <div
                   className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}

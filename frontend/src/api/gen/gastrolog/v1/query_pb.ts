@@ -821,6 +821,7 @@ export class RecordRef extends Message<RecordRef> {
 /**
  * ResumeToken encodes pagination state for multi-vault queries.
  * The positions array tracks the last returned position for each vault/chunk.
+ * Remote positions carry opaque tokens for vaults on other nodes.
  *
  * @generated from message gastrolog.v1.ResumeToken
  */
@@ -829,6 +830,11 @@ export class ResumeToken extends Message<ResumeToken> {
    * @generated from field: repeated gastrolog.v1.VaultPosition positions = 1;
    */
   positions: VaultPosition[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.RemoteVaultPosition remote_positions = 2;
+   */
+  remotePositions: RemoteVaultPosition[] = [];
 
   constructor(data?: PartialMessage<ResumeToken>) {
     super();
@@ -839,6 +845,7 @@ export class ResumeToken extends Message<ResumeToken> {
   static readonly typeName = "gastrolog.v1.ResumeToken";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "positions", kind: "message", T: VaultPosition, repeated: true },
+    { no: 2, name: "remote_positions", kind: "message", T: RemoteVaultPosition, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeToken {
@@ -855,6 +862,53 @@ export class ResumeToken extends Message<ResumeToken> {
 
   static equals(a: ResumeToken | PlainMessage<ResumeToken> | undefined, b: ResumeToken | PlainMessage<ResumeToken> | undefined): boolean {
     return proto3.util.equals(ResumeToken, a, b);
+  }
+}
+
+/**
+ * RemoteVaultPosition carries an opaque resume token for a vault owned by
+ * another node. The coordinator stores these alongside local positions so that
+ * cross-node pagination works transparently.
+ *
+ * @generated from message gastrolog.v1.RemoteVaultPosition
+ */
+export class RemoteVaultPosition extends Message<RemoteVaultPosition> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: bytes resume_token = 2;
+   */
+  resumeToken = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<RemoteVaultPosition>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RemoteVaultPosition";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemoteVaultPosition {
+    return new RemoteVaultPosition().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RemoteVaultPosition {
+    return new RemoteVaultPosition().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RemoteVaultPosition {
+    return new RemoteVaultPosition().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RemoteVaultPosition | PlainMessage<RemoteVaultPosition> | undefined, b: RemoteVaultPosition | PlainMessage<RemoteVaultPosition> | undefined): boolean {
+    return proto3.util.equals(RemoteVaultPosition, a, b);
   }
 }
 

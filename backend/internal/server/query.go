@@ -164,7 +164,7 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// Collect raw records from remote nodes (no pipeline — just the base query).
-	remoteRes := s.collectRemote(ctx, q)
+	remoteRes := s.collectRemote(ctx, q, nil)
 	var extraRecords []chunk.Record
 	for _, r := range remoteRes.records {
 		extraRecords = append(extraRecords, protoToChunkRecord(r))
@@ -219,16 +219,22 @@ func (s *QueryServer) searchDirect(
 	var resume *query.ResumeToken
 	if len(resumeTokenData) > 0 {
 		var err error
-		resume, err = protoToResumeToken(resumeTokenData)
+		resume, err = ProtoToResumeToken(resumeTokenData)
 		if err != nil {
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}
 	}
 
-	// Collect remote results (empty when no remote vaults or on resume).
+	// Collect remote results. On the first page (no resume) we fetch all
+	// remote vaults. On subsequent pages we only re-fetch vaults that still
+	// have data (tracked via remote positions in the resume token).
+	var prevRemote []query.RemoteVaultPosition
+	if resume != nil {
+		prevRemote = resume.RemotePositions
+	}
 	var remoteRes remoteResult
-	if resume == nil {
-		remoteRes = s.collectRemote(ctx, q)
+	if resume == nil || len(prevRemote) > 0 {
+		remoteRes = s.collectRemote(ctx, q, prevRemote)
 	}
 
 	// Compute local histogram and merge with remote.
@@ -237,7 +243,7 @@ func (s *QueryServer) searchDirect(
 
 	iter, getToken := eng.Search(ctx, q, resume)
 
-	return s.mergeAndStream(ctx, iter, getToken, remoteRes.records, q.Reverse(), transform, histogram, stream)
+	return s.mergeAndStream(ctx, iter, getToken, remoteRes, q.Reverse(), transform, histogram, stream)
 }
 
 func mapSearchError(err error) error {
@@ -347,12 +353,14 @@ func (s *QueryServer) mergeAndStream(
 	ctx context.Context,
 	localIter iter.Seq2[chunk.Record, error],
 	getToken func() *query.ResumeToken,
-	remote []*apiv1.Record,
+	remoteRes remoteResult,
 	reverse bool,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
+	remote := remoteRes.records
+
 	isBefore := func(a, b time.Time) bool {
 		if reverse {
 			return a.After(b)
@@ -391,11 +399,18 @@ func (s *QueryServer) mergeAndStream(
 		return err
 	}
 
-	// Final batch with resume token.
+	// Build the combined resume token from local + remote state.
 	var tokenBytes []byte
 	if transform == nil || !transform.Done() {
-		if token := getToken(); token != nil {
-			tokenBytes = resumeTokenToProto(token)
+		token := getToken()
+		if token == nil && remoteRes.hasMore {
+			// No local state but remote has more — create a token with only
+			// remote positions so the next page re-fetches from remote.
+			token = &query.ResumeToken{}
+		}
+		if token != nil {
+			token.RemotePositions = remoteRes.remotePositions
+			tokenBytes = ResumeTokenToProto(token)
 		}
 	}
 	return stream.Send(&apiv1.SearchResponse{
@@ -452,6 +467,10 @@ func (b *streamBatcher) pending() []*apiv1.Record { return b.batch }
 type remoteResult struct {
 	records   []*apiv1.Record
 	histogram []*apiv1.HistogramBucket
+	// remotePositions carries per-vault resume tokens from remote nodes so the
+	// coordinator can paginate across nodes.
+	remotePositions []query.RemoteVaultPosition
+	hasMore         bool
 }
 
 // collectRemote gathers results from all remote vaults into a single sorted
@@ -459,7 +478,11 @@ type remoteResult struct {
 // multiple vaults breaks that ordering, so we re-sort the combined slice for
 // the merge step. When reverse is true, sort descending (newest first).
 // Also merges histogram buckets from all remote nodes.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) remoteResult {
+//
+// prevRemote carries per-vault resume tokens from a previous page. On the
+// first page this is nil; on subsequent pages it tells each remote vault
+// where to continue from.
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, prevRemote []query.RemoteVaultPosition) remoteResult {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return remoteResult{}
 	}
@@ -471,13 +494,28 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) remoteRe
 	queryExpr := q.String()
 	reverse := q.Reverse()
 
+	// Build a lookup for previous per-vault resume tokens.
+	prevTokens := make(map[uuid.UUID][]byte, len(prevRemote))
+	for _, rp := range prevRemote {
+		prevTokens[rp.VaultID] = rp.ResumeToken
+	}
+
 	var all []*apiv1.Record
 	var allHist []*apiv1.HistogramBucket
+	var remotePositions []query.RemoteVaultPosition
+	hasMore := false
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
-			records, histogram := s.fetchRemoteVault(ctx, nodeID, vid, queryExpr)
-			all = append(all, records...)
-			allHist = mergeHistogramBuckets(allHist, histogram)
+			result := s.fetchRemoteVault(ctx, nodeID, vid, queryExpr, prevTokens[vid])
+			all = append(all, result.records...)
+			allHist = mergeHistogramBuckets(allHist, result.histogram)
+			if result.hasMore {
+				hasMore = true
+				remotePositions = append(remotePositions, query.RemoteVaultPosition{
+					VaultID:     vid,
+					ResumeToken: result.resumeToken,
+				})
+			}
 		}
 	}
 
@@ -492,7 +530,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) remoteRe
 	})
 
 	s.logger.Debug("search: collected remote records", "nodes", len(byNode), "total", len(all))
-	return remoteResult{records: all, histogram: allHist}
+	return remoteResult{records: all, histogram: allHist, remotePositions: remotePositions, hasMore: hasMore}
 }
 
 // mergeHistogramBuckets sums two histogram bucket slices by matching timestamp.
@@ -546,33 +584,42 @@ func histogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket 
 	return out
 }
 
-// fetchRemoteVault sends a ForwardSearch RPC and returns the records and histogram.
+// remoteVaultResult holds the full response from a single remote vault query.
+type remoteVaultResult struct {
+	records     []*apiv1.Record
+	histogram   []*apiv1.HistogramBucket
+	resumeToken []byte
+	hasMore     bool
+}
+
+// fetchRemoteVault sends a ForwardSearch RPC and returns the full result.
 func (s *QueryServer) fetchRemoteVault(
 	ctx context.Context,
 	nodeID string,
 	vaultID uuid.UUID,
 	queryExpr string,
-) ([]*apiv1.Record, []*apiv1.HistogramBucket) {
+	resumeToken []byte,
+) remoteVaultResult {
 	resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
-		VaultId: vaultID.String(),
-		Query:   queryExpr,
+		VaultId:     vaultID.String(),
+		Query:       queryExpr,
+		ResumeToken: resumeToken,
 	})
 	if err != nil {
 		s.logger.Warn("search: remote vault failed", "node", nodeID, "vault", vaultID, "err", err)
-		return nil, nil
+		return remoteVaultResult{}
 	}
 
-	histogram := resp.GetHistogram()
-
-	if len(resp.GetRecords()) == 0 {
-		return nil, histogram
-	}
-
-	records := make([]*apiv1.Record, 0, len(resp.Records))
-	for _, er := range resp.Records {
+	var records []*apiv1.Record
+	for _, er := range resp.GetRecords() {
 		records = append(records, exportToRecord(er))
 	}
-	return records, histogram
+	return remoteVaultResult{
+		records:     records,
+		histogram:   resp.GetHistogram(),
+		resumeToken: resp.GetResumeToken(),
+		hasMore:     resp.GetHasMore(),
+	}
 }
 
 // collectRemotePipeline fans out a pipeline query to all remote vaults and
@@ -1259,7 +1306,7 @@ func (s *QueryServer) searchContext(
 ) ([]*apiv1.Record, error) {
 	eng := s.orch.MultiVaultQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
-	remote := s.collectRemote(ctx, q).records
+	remote := s.collectRemote(ctx, q, nil).records
 
 	reverse := q.Reverse()
 	ri := 0
@@ -1741,9 +1788,8 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 	return r
 }
 
-// protoToResumeToken converts a proto resume token to the internal type.
-// Uses protobuf encoding for the ResumeToken message.
-func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
+// ProtoToResumeToken converts a proto resume token to the internal type.
+func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 	if len(data) == 0 {
 		return nil, nil
 	}
@@ -1775,13 +1821,23 @@ func protoToResumeToken(data []byte) (*query.ResumeToken, error) {
 		}
 	}
 
+	for _, rp := range protoToken.RemotePositions {
+		vaultID, err := uuid.Parse(rp.VaultId)
+		if err != nil {
+			return nil, fmt.Errorf("invalid vault ID in remote position: %w", err)
+		}
+		token.RemotePositions = append(token.RemotePositions, query.RemoteVaultPosition{
+			VaultID:     vaultID,
+			ResumeToken: rp.ResumeToken,
+		})
+	}
+
 	return token, nil
 }
 
-// resumeTokenToProto converts an internal resume token to proto bytes.
-// Uses protobuf encoding for the ResumeToken message.
-func resumeTokenToProto(token *query.ResumeToken) []byte {
-	if token == nil || len(token.Positions) == 0 {
+// ResumeTokenToProto converts an internal resume token to proto bytes.
+func ResumeTokenToProto(token *query.ResumeToken) []byte {
+	if token == nil || (len(token.Positions) == 0 && len(token.RemotePositions) == 0) {
 		return nil
 	}
 
@@ -1795,6 +1851,13 @@ func resumeTokenToProto(token *query.ResumeToken) []byte {
 			ChunkId:  pos.ChunkID.String(),
 			Position: pos.Position,
 		}
+	}
+
+	for _, rp := range token.RemotePositions {
+		protoToken.RemotePositions = append(protoToken.RemotePositions, &apiv1.RemoteVaultPosition{
+			VaultId:     rp.VaultID.String(),
+			ResumeToken: rp.ResumeToken,
+		})
 	}
 
 	data, err := proto.Marshal(protoToken)
