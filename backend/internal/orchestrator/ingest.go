@@ -50,25 +50,35 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 		return nil
 	}
 
-	o.routeStats.Routed.Add(1)
+	// Write records first, then update stats only on success.
+	routed := false
 	for _, t := range matches {
-		vs := o.getOrCreateVaultRouteStats(t.VaultID)
-		vs.Matched.Add(1)
-		if t.RouteID != uuid.Nil {
-			rs := o.getOrCreatePerRouteStats(t.RouteID)
-			rs.Matched.Add(1)
-			if t.NodeID != "" {
+		if t.NodeID != "" {
+			o.forwardRemote(t, rec)
+			vs := o.getOrCreateVaultRouteStats(t.VaultID)
+			vs.Matched.Add(1)
+			vs.Forwarded.Add(1)
+			if t.RouteID != uuid.Nil {
+				rs := o.getOrCreatePerRouteStats(t.RouteID)
+				rs.Matched.Add(1)
 				rs.Forwarded.Add(1)
 			}
-		}
-		if t.NodeID != "" {
-			vs.Forwarded.Add(1)
-			o.forwardRemote(t, rec)
+			routed = true
 			continue
 		}
 		if err := o.appendLocal(t.VaultID, rec); err != nil {
 			return err
 		}
+		vs := o.getOrCreateVaultRouteStats(t.VaultID)
+		vs.Matched.Add(1)
+		if t.RouteID != uuid.Nil {
+			rs := o.getOrCreatePerRouteStats(t.RouteID)
+			rs.Matched.Add(1)
+		}
+		routed = true
+	}
+	if routed {
+		o.routeStats.Routed.Add(1)
 	}
 	return nil
 }

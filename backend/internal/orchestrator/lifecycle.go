@@ -217,6 +217,9 @@ func (o *Orchestrator) writeLoop() {
 	for dr := range o.digestedCh {
 		// Filter to chunk managers (reuses existing Ingest logic).
 		err := o.ingest(dr.rec)
+		if err != nil {
+			o.logger.Error("write failed", "error", err, "ingester", dr.ingesterID)
+		}
 
 		// Track per-ingester stats.
 		o.trackWriteStats(dr, err)
