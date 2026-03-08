@@ -289,3 +289,26 @@ message ImportRecordMessage {
   string vault_id = 1;
   ExportRecord record = 2;
 }
+
+// --- Lookup file distribution ---
+
+// PullLookupFileRequest asks a peer to stream a lookup file's contents.
+message PullLookupFileRequest {
+  string file_id = 1;
+}
+
+// PullLookupFileChunk carries a chunk of file data during streaming transfer.
+// The first chunk includes the filename and expected SHA256 hash.
+message PullLookupFileChunk {
+  bytes data = 1;            // chunk of file content (up to 64KB)
+  string name = 2;           // original filename (first chunk only)
+  string sha256 = 3;         // expected hash (first chunk only)
+}
+
+// ListPeerLookupFilesRequest asks a peer which lookup files it has on disk.
+message ListPeerLookupFilesRequest {}
+
+// ListPeerLookupFilesResponse returns the file IDs present on a peer.
+message ListPeerLookupFilesResponse {
+  repeated string file_ids = 1;
+}

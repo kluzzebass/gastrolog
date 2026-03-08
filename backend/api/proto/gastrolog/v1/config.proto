@@ -107,6 +107,12 @@ service ConfigService {
 
   // GetRouteStats returns live routing statistics.
   rpc GetRouteStats(GetRouteStatsRequest) returns (GetRouteStatsResponse);
+
+  // ListLookupFiles returns all uploaded lookup files.
+  rpc ListLookupFiles(ListLookupFilesRequest) returns (ListLookupFilesResponse);
+
+  // DeleteLookupFile removes an uploaded lookup file.
+  rpc DeleteLookupFile(DeleteLookupFileRequest) returns (DeleteLookupFileResponse);
 }
 
 message GetConfigRequest {}
@@ -119,6 +125,7 @@ message GetConfigResponse {
   repeated RetentionPolicyConfig retention_policies = 5;
   repeated NodeConfig node_configs = 6;
   repeated RouteConfig routes = 7;
+  repeated LookupFileInfo lookup_files = 8;
 }
 
 message RetentionRule {
@@ -593,3 +600,25 @@ message PerRouteStats {
   int64 records_matched = 2;   // records matched by this route
   int64 records_forwarded = 3; // subset sent to remote nodes
 }
+
+// --- Lookup Files ---
+
+message LookupFileInfo {
+  string id = 1;
+  string name = 2;          // original filename
+  string sha256 = 3;        // hex-encoded content hash
+  int64 size = 4;           // file size in bytes
+  string uploaded_at = 5;   // RFC3339 timestamp
+}
+
+message ListLookupFilesRequest {}
+
+message ListLookupFilesResponse {
+  repeated LookupFileInfo files = 1;
+}
+
+message DeleteLookupFileRequest {
+  string id = 1;
+}
+
+message DeleteLookupFileResponse {}

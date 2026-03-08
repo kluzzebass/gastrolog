@@ -360,6 +360,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	s.registerProbes(mux)
 	s.registerMetrics(mux)
+	s.registerUploadHandler(mux)
 
 	if h := frontend.Handler(); h != nil {
 		mux.Handle("/", h)

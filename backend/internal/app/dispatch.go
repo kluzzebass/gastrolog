@@ -85,6 +85,8 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleClusterTLSPut(ctx)
 	case raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted:
 		// No orchestrator side effects; configSignal fires below.
+	case raftfsm.NotifyLookupFilePut, raftfsm.NotifyLookupFileDeleted:
+		// Handled by the lookup file manager (disk sync); configSignal fires below.
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.

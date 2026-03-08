@@ -305,6 +305,42 @@ func (p *StoreProxy) DeleteRoute(ctx context.Context, id uuid.UUID) error {
 	return p.inner.DeleteRoute(ctx, id)
 }
 
+func (p *StoreProxy) GetLookupFile(ctx context.Context, id uuid.UUID) (*LookupFileConfig, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.GetLookupFile(ctx, id)
+}
+
+func (p *StoreProxy) ListLookupFiles(ctx context.Context) ([]LookupFileConfig, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.ListLookupFiles(ctx)
+}
+
+func (p *StoreProxy) PutLookupFile(ctx context.Context, cfg LookupFileConfig) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.PutLookupFile(ctx, cfg)
+}
+
+func (p *StoreProxy) DeleteLookupFile(ctx context.Context, id uuid.UUID) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.DeleteLookupFile(ctx, id)
+}
+
 func (p *StoreProxy) LoadServerSettings(ctx context.Context) (ServerSettings, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

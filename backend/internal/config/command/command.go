@@ -409,6 +409,60 @@ func ExtractDeleteRoute(cmd *gastrologv1.DeleteRouteCommand) (uuid.UUID, error) 
 }
 
 // ---------------------------------------------------------------------------
+// Lookup Files
+// ---------------------------------------------------------------------------
+
+func putLookupFileCmd(cfg config.LookupFileConfig) *gastrologv1.PutLookupFileCommand {
+	return &gastrologv1.PutLookupFileCommand{
+		Id:         cfg.ID.String(),
+		Name:       cfg.Name,
+		Sha256:     cfg.SHA256,
+		Size:       cfg.Size,
+		UploadedAt: cfg.UploadedAt.Format(time.RFC3339Nano),
+	}
+}
+
+// NewPutLookupFile creates a ConfigCommand for PutLookupFile.
+func NewPutLookupFile(cfg config.LookupFileConfig) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_PutLookupFile{PutLookupFile: putLookupFileCmd(cfg)},
+	}
+}
+
+// NewDeleteLookupFile creates a ConfigCommand for DeleteLookupFile.
+func NewDeleteLookupFile(id uuid.UUID) *gastrologv1.ConfigCommand {
+	return &gastrologv1.ConfigCommand{
+		Command: &gastrologv1.ConfigCommand_DeleteLookupFile{
+			DeleteLookupFile: &gastrologv1.DeleteLookupFileCommand{Id: id.String()},
+		},
+	}
+}
+
+// ExtractPutLookupFile converts a PutLookupFileCommand back to a LookupFileConfig.
+func ExtractPutLookupFile(cmd *gastrologv1.PutLookupFileCommand) (config.LookupFileConfig, error) {
+	id, err := uuid.Parse(cmd.GetId())
+	if err != nil {
+		return config.LookupFileConfig{}, fmt.Errorf("parse lookup file id: %w", err)
+	}
+	var uploadedAt time.Time
+	if cmd.GetUploadedAt() != "" {
+		uploadedAt, _ = time.Parse(time.RFC3339Nano, cmd.GetUploadedAt())
+	}
+	return config.LookupFileConfig{
+		ID:         id,
+		Name:       cmd.GetName(),
+		SHA256:     cmd.GetSha256(),
+		Size:       cmd.GetSize(),
+		UploadedAt: uploadedAt,
+	}, nil
+}
+
+// ExtractDeleteLookupFile extracts the UUID from a DeleteLookupFileCommand.
+func ExtractDeleteLookupFile(cmd *gastrologv1.DeleteLookupFileCommand) (uuid.UUID, error) {
+	return uuid.Parse(cmd.GetId())
+}
+
+// ---------------------------------------------------------------------------
 // Server Settings
 // ---------------------------------------------------------------------------
 
@@ -909,6 +963,9 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	for _, rt := range cfg.Routes {
 		snap.Routes = append(snap.Routes, putRouteCmd(rt))
 	}
+	for _, lf := range cfg.LookupFiles {
+		snap.LookupFiles = append(snap.LookupFiles, putLookupFileCmd(lf))
+	}
 	for _, c := range cfg.Certs {
 		snap.Certificates = append(snap.Certificates, putCertificateCmd(c))
 	}
@@ -994,6 +1051,13 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 			return nil, nil, nil, nil, fmt.Errorf("restore route: %w", err)
 		}
 		cfg.Routes = append(cfg.Routes, rc)
+	}
+	for _, lf := range snap.GetLookupFiles() {
+		lfc, err := ExtractPutLookupFile(lf)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("restore lookup file: %w", err)
+		}
+		cfg.LookupFiles = append(cfg.LookupFiles, lfc)
 	}
 	for _, c := range snap.GetCertificates() {
 		cc, err := ExtractPutCertificate(c)

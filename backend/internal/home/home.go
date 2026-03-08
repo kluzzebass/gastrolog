@@ -70,6 +70,16 @@ func (d Dir) ClusterTLSPath() string {
 	return filepath.Join(d.root, "cluster-tls.json")
 }
 
+// LookupsDir returns the directory for uploaded lookup files.
+func (d Dir) LookupsDir() string {
+	return filepath.Join(d.root, "lookups")
+}
+
+// LookupFileDir returns the directory for a specific lookup file.
+func (d Dir) LookupFileDir(fileID string) string {
+	return filepath.Join(d.root, "lookups", fileID)
+}
+
 // SocketPath returns the path to the Unix domain socket for local CLI access.
 func (d Dir) SocketPath() string {
 	return filepath.Join(d.root, "gastrolog.sock")

@@ -131,6 +131,12 @@ const (
 	// ConfigServiceGetRouteStatsProcedure is the fully-qualified name of the ConfigService's
 	// GetRouteStats RPC.
 	ConfigServiceGetRouteStatsProcedure = "/gastrolog.v1.ConfigService/GetRouteStats"
+	// ConfigServiceListLookupFilesProcedure is the fully-qualified name of the ConfigService's
+	// ListLookupFiles RPC.
+	ConfigServiceListLookupFilesProcedure = "/gastrolog.v1.ConfigService/ListLookupFiles"
+	// ConfigServiceDeleteLookupFileProcedure is the fully-qualified name of the ConfigService's
+	// DeleteLookupFile RPC.
+	ConfigServiceDeleteLookupFileProcedure = "/gastrolog.v1.ConfigService/DeleteLookupFile"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -203,6 +209,10 @@ type ConfigServiceClient interface {
 	WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest]) (*connect.ServerStreamForClient[v1.WatchConfigResponse], error)
 	// GetRouteStats returns live routing statistics.
 	GetRouteStats(context.Context, *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error)
+	// ListLookupFiles returns all uploaded lookup files.
+	ListLookupFiles(context.Context, *connect.Request[v1.ListLookupFilesRequest]) (*connect.Response[v1.ListLookupFilesResponse], error)
+	// DeleteLookupFile removes an uploaded lookup file.
+	DeleteLookupFile(context.Context, *connect.Request[v1.DeleteLookupFileRequest]) (*connect.Response[v1.DeleteLookupFileResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -420,6 +430,18 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("GetRouteStats")),
 			connect.WithClientOptions(opts...),
 		),
+		listLookupFiles: connect.NewClient[v1.ListLookupFilesRequest, v1.ListLookupFilesResponse](
+			httpClient,
+			baseURL+ConfigServiceListLookupFilesProcedure,
+			connect.WithSchema(configServiceMethods.ByName("ListLookupFiles")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteLookupFile: connect.NewClient[v1.DeleteLookupFileRequest, v1.DeleteLookupFileResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteLookupFileProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteLookupFile")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -459,6 +481,8 @@ type configServiceClient struct {
 	generateName          *connect.Client[v1.GenerateNameRequest, v1.GenerateNameResponse]
 	watchConfig           *connect.Client[v1.WatchConfigRequest, v1.WatchConfigResponse]
 	getRouteStats         *connect.Client[v1.GetRouteStatsRequest, v1.GetRouteStatsResponse]
+	listLookupFiles       *connect.Client[v1.ListLookupFilesRequest, v1.ListLookupFilesResponse]
+	deleteLookupFile      *connect.Client[v1.DeleteLookupFileRequest, v1.DeleteLookupFileResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -631,6 +655,16 @@ func (c *configServiceClient) GetRouteStats(ctx context.Context, req *connect.Re
 	return c.getRouteStats.CallUnary(ctx, req)
 }
 
+// ListLookupFiles calls gastrolog.v1.ConfigService.ListLookupFiles.
+func (c *configServiceClient) ListLookupFiles(ctx context.Context, req *connect.Request[v1.ListLookupFilesRequest]) (*connect.Response[v1.ListLookupFilesResponse], error) {
+	return c.listLookupFiles.CallUnary(ctx, req)
+}
+
+// DeleteLookupFile calls gastrolog.v1.ConfigService.DeleteLookupFile.
+func (c *configServiceClient) DeleteLookupFile(ctx context.Context, req *connect.Request[v1.DeleteLookupFileRequest]) (*connect.Response[v1.DeleteLookupFileResponse], error) {
+	return c.deleteLookupFile.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -701,6 +735,10 @@ type ConfigServiceHandler interface {
 	WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest], *connect.ServerStream[v1.WatchConfigResponse]) error
 	// GetRouteStats returns live routing statistics.
 	GetRouteStats(context.Context, *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error)
+	// ListLookupFiles returns all uploaded lookup files.
+	ListLookupFiles(context.Context, *connect.Request[v1.ListLookupFilesRequest]) (*connect.Response[v1.ListLookupFilesResponse], error)
+	// DeleteLookupFile removes an uploaded lookup file.
+	DeleteLookupFile(context.Context, *connect.Request[v1.DeleteLookupFileRequest]) (*connect.Response[v1.DeleteLookupFileResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -914,6 +952,18 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("GetRouteStats")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceListLookupFilesHandler := connect.NewUnaryHandler(
+		ConfigServiceListLookupFilesProcedure,
+		svc.ListLookupFiles,
+		connect.WithSchema(configServiceMethods.ByName("ListLookupFiles")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteLookupFileHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteLookupFileProcedure,
+		svc.DeleteLookupFile,
+		connect.WithSchema(configServiceMethods.ByName("DeleteLookupFile")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -984,6 +1034,10 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceWatchConfigHandler.ServeHTTP(w, r)
 		case ConfigServiceGetRouteStatsProcedure:
 			configServiceGetRouteStatsHandler.ServeHTTP(w, r)
+		case ConfigServiceListLookupFilesProcedure:
+			configServiceListLookupFilesHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteLookupFileProcedure:
+			configServiceDeleteLookupFileHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1127,4 +1181,12 @@ func (UnimplementedConfigServiceHandler) WatchConfig(context.Context, *connect.R
 
 func (UnimplementedConfigServiceHandler) GetRouteStats(context.Context, *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetRouteStats is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) ListLookupFiles(context.Context, *connect.Request[v1.ListLookupFilesRequest]) (*connect.Response[v1.ListLookupFilesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.ListLookupFiles is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteLookupFile(context.Context, *connect.Request[v1.DeleteLookupFileRequest]) (*connect.Response[v1.DeleteLookupFileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteLookupFile is not implemented"))
 }

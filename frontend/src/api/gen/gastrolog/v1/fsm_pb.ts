@@ -4,7 +4,7 @@
 // @ts-nocheck
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
-import { Message, proto3, Timestamp } from "@bufbuild/protobuf";
+import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 
 /**
  * ConfigCommand is a single mutation applied to the config store via Raft.
@@ -190,6 +190,18 @@ export class ConfigCommand extends Message<ConfigCommand> {
      */
     value: DeleteRouteCommand;
     case: "deleteRoute";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PutLookupFileCommand put_lookup_file = 30;
+     */
+    value: PutLookupFileCommand;
+    case: "putLookupFile";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.DeleteLookupFileCommand delete_lookup_file = 31;
+     */
+    value: DeleteLookupFileCommand;
+    case: "deleteLookupFile";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ConfigCommand>) {
@@ -229,6 +241,8 @@ export class ConfigCommand extends Message<ConfigCommand> {
     { no: 27, name: "put_cluster_tls", kind: "message", T: PutClusterTLSCommand, oneof: "command" },
     { no: 28, name: "put_route", kind: "message", T: PutRouteCommand, oneof: "command" },
     { no: 29, name: "delete_route", kind: "message", T: DeleteRouteCommand, oneof: "command" },
+    { no: 30, name: "put_lookup_file", kind: "message", T: PutLookupFileCommand, oneof: "command" },
+    { no: 31, name: "delete_lookup_file", kind: "message", T: DeleteLookupFileCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigCommand {
@@ -1710,6 +1724,112 @@ export class DeleteRouteCommand extends Message<DeleteRouteCommand> {
 }
 
 /**
+ * @generated from message gastrolog.v1.PutLookupFileCommand
+ */
+export class PutLookupFileCommand extends Message<PutLookupFileCommand> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * original filename
+   *
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * hex-encoded content hash
+   *
+   * @generated from field: string sha256 = 3;
+   */
+  sha256 = "";
+
+  /**
+   * file size in bytes
+   *
+   * @generated from field: int64 size = 4;
+   */
+  size = protoInt64.zero;
+
+  /**
+   * RFC3339 timestamp
+   *
+   * @generated from field: string uploaded_at = 5;
+   */
+  uploadedAt = "";
+
+  constructor(data?: PartialMessage<PutLookupFileCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLookupFileCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "sha256", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "uploaded_at", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupFileCommand {
+    return new PutLookupFileCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLookupFileCommand {
+    return new PutLookupFileCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLookupFileCommand {
+    return new PutLookupFileCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLookupFileCommand | PlainMessage<PutLookupFileCommand> | undefined, b: PutLookupFileCommand | PlainMessage<PutLookupFileCommand> | undefined): boolean {
+    return proto3.util.equals(PutLookupFileCommand, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteLookupFileCommand
+ */
+export class DeleteLookupFileCommand extends Message<DeleteLookupFileCommand> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DeleteLookupFileCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteLookupFileCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteLookupFileCommand {
+    return new DeleteLookupFileCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteLookupFileCommand {
+    return new DeleteLookupFileCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteLookupFileCommand {
+    return new DeleteLookupFileCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteLookupFileCommand | PlainMessage<DeleteLookupFileCommand> | undefined, b: DeleteLookupFileCommand | PlainMessage<DeleteLookupFileCommand> | undefined): boolean {
+    return proto3.util.equals(DeleteLookupFileCommand, a, b);
+  }
+}
+
+/**
  * ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -1777,6 +1897,11 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
    */
   routes: PutRouteCommand[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.PutLookupFileCommand lookup_files = 13;
+   */
+  lookupFiles: PutLookupFileCommand[] = [];
+
   constructor(data?: PartialMessage<ConfigSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1797,6 +1922,7 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
     { no: 10, name: "node_configs", kind: "message", T: PutNodeConfigCommand, repeated: true },
     { no: 11, name: "cluster_tls", kind: "message", T: PutClusterTLSCommand },
     { no: 12, name: "routes", kind: "message", T: PutRouteCommand, repeated: true },
+    { no: 13, name: "lookup_files", kind: "message", T: PutLookupFileCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigSnapshot {

@@ -95,6 +95,7 @@ func (s *ConfigServer) GetConfig(
 		s.loadConfigRetentionPolicies(ctx, resp)
 		s.loadConfigRoutes(ctx, resp)
 		s.loadConfigNodeConfigs(ctx, resp)
+		s.loadConfigLookupFiles(ctx, resp)
 	}
 	return connect.NewResponse(resp), nil
 }

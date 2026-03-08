@@ -148,6 +148,14 @@ func (s *Store) ListRoutes(ctx context.Context) ([]config.RouteConfig, error) {
 	return s.fsm.Store().ListRoutes(ctx)
 }
 
+func (s *Store) GetLookupFile(ctx context.Context, id uuid.UUID) (*config.LookupFileConfig, error) {
+	return s.fsm.Store().GetLookupFile(ctx, id)
+}
+
+func (s *Store) ListLookupFiles(ctx context.Context) ([]config.LookupFileConfig, error) {
+	return s.fsm.Store().ListLookupFiles(ctx)
+}
+
 func (s *Store) LoadServerSettings(ctx context.Context) (config.ServerSettings, error) {
 	return s.fsm.Store().LoadServerSettings(ctx)
 }
@@ -246,6 +254,14 @@ func (s *Store) PutRoute(ctx context.Context, cfg config.RouteConfig) error {
 
 func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
 	return s.apply(command.NewDeleteRoute(id))
+}
+
+func (s *Store) PutLookupFile(ctx context.Context, cfg config.LookupFileConfig) error {
+	return s.apply(command.NewPutLookupFile(cfg))
+}
+
+func (s *Store) DeleteLookupFile(ctx context.Context, id uuid.UUID) error {
+	return s.apply(command.NewDeleteLookupFile(id))
 }
 
 func (s *Store) SaveServerSettings(ctx context.Context, ss config.ServerSettings) error {

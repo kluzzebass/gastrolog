@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupFileRequest, DeleteLookupFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListLookupFilesRequest, ListLookupFilesResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -386,6 +386,28 @@ export const ConfigService = {
       name: "GetRouteStats",
       I: GetRouteStatsRequest,
       O: GetRouteStatsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ListLookupFiles returns all uploaded lookup files.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.ListLookupFiles
+     */
+    listLookupFiles: {
+      name: "ListLookupFiles",
+      I: ListLookupFilesRequest,
+      O: ListLookupFilesResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * DeleteLookupFile removes an uploaded lookup file.
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteLookupFile
+     */
+    deleteLookupFile: {
+      name: "DeleteLookupFile",
+      I: DeleteLookupFileRequest,
+      O: DeleteLookupFileResponse,
       kind: MethodKind.Unary,
     },
   }

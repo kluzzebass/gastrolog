@@ -39,6 +39,8 @@ message ConfigCommand {
     PutClusterTLSCommand put_cluster_tls = 27;
     PutRouteCommand put_route = 28;
     DeleteRouteCommand delete_route = 29;
+    PutLookupFileCommand put_lookup_file = 30;
+    DeleteLookupFileCommand delete_lookup_file = 31;
   }
 }
 
@@ -247,6 +249,20 @@ message DeleteRouteCommand {
   string id = 1;
 }
 
+// --- Lookup Files ---
+
+message PutLookupFileCommand {
+  string id = 1;
+  string name = 2;          // original filename
+  string sha256 = 3;        // hex-encoded content hash
+  int64 size = 4;           // file size in bytes
+  string uploaded_at = 5;   // RFC3339 timestamp
+}
+
+message DeleteLookupFileCommand {
+  string id = 1;
+}
+
 // --- Snapshot ---
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -265,4 +281,5 @@ message ConfigSnapshot {
   repeated PutNodeConfigCommand node_configs = 10;
   PutClusterTLSCommand cluster_tls = 11;
   repeated PutRouteCommand routes = 12;
+  repeated PutLookupFileCommand lookup_files = 13;
 }

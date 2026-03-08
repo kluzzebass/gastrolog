@@ -38,6 +38,8 @@ const (
 	NotifyRouteDeleted
 	NotifyNodeConfigPut
 	NotifyNodeConfigDeleted
+	NotifyLookupFilePut
+	NotifyLookupFileDeleted
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -114,7 +116,9 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_DeleteNodeConfig,
 		*gastrologv1.ConfigCommand_PutClusterTls,
 		*gastrologv1.ConfigCommand_PutRoute,
-		*gastrologv1.ConfigCommand_DeleteRoute:
+		*gastrologv1.ConfigCommand_DeleteRoute,
+		*gastrologv1.ConfigCommand_PutLookupFile,
+		*gastrologv1.ConfigCommand_DeleteLookupFile:
 		return f.applyConfig(ctx, cmd)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -220,6 +224,10 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 		return f.applyPutRoute(ctx, c.PutRoute)
 	case *gastrologv1.ConfigCommand_DeleteRoute:
 		return f.applyDeleteRoute(ctx, c.DeleteRoute)
+	case *gastrologv1.ConfigCommand_PutLookupFile:
+		return f.applyPutLookupFile(ctx, c.PutLookupFile)
+	case *gastrologv1.ConfigCommand_DeleteLookupFile:
+		return f.applyDeleteLookupFile(ctx, c.DeleteLookupFile)
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -393,6 +401,28 @@ func (f *FSM) applyDeleteRoute(ctx context.Context, pb *gastrologv1.DeleteRouteC
 		return nil, err
 	}
 	return &Notification{Kind: NotifyRouteDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutLookupFile(ctx context.Context, pb *gastrologv1.PutLookupFileCommand) (*Notification, error) {
+	cfg, err := command.ExtractPutLookupFile(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutLookupFile(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyLookupFilePut, ID: cfg.ID}, nil
+}
+
+func (f *FSM) applyDeleteLookupFile(ctx context.Context, pb *gastrologv1.DeleteLookupFileCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteLookupFile(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteLookupFile(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyLookupFileDeleted, ID: id}, nil
 }
 
 // applyUser dispatches user-management commands.

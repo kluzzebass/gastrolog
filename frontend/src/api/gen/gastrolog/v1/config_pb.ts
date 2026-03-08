@@ -76,6 +76,11 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
    */
   routes: RouteConfig[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.LookupFileInfo lookup_files = 8;
+   */
+  lookupFiles: LookupFileInfo[] = [];
+
   constructor(data?: PartialMessage<GetConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -91,6 +96,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 5, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
     { no: 6, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
     { no: 7, name: "routes", kind: "message", T: RouteConfig, repeated: true },
+    { no: 8, name: "lookup_files", kind: "message", T: LookupFileInfo, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetConfigResponse {
@@ -4375,6 +4381,211 @@ export class PerRouteStats extends Message<PerRouteStats> {
 
   static equals(a: PerRouteStats | PlainMessage<PerRouteStats> | undefined, b: PerRouteStats | PlainMessage<PerRouteStats> | undefined): boolean {
     return proto3.util.equals(PerRouteStats, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.LookupFileInfo
+ */
+export class LookupFileInfo extends Message<LookupFileInfo> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * original filename
+   *
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * hex-encoded content hash
+   *
+   * @generated from field: string sha256 = 3;
+   */
+  sha256 = "";
+
+  /**
+   * file size in bytes
+   *
+   * @generated from field: int64 size = 4;
+   */
+  size = protoInt64.zero;
+
+  /**
+   * RFC3339 timestamp
+   *
+   * @generated from field: string uploaded_at = 5;
+   */
+  uploadedAt = "";
+
+  constructor(data?: PartialMessage<LookupFileInfo>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.LookupFileInfo";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "sha256", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 5, name: "uploaded_at", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupFileInfo {
+    return new LookupFileInfo().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): LookupFileInfo {
+    return new LookupFileInfo().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): LookupFileInfo {
+    return new LookupFileInfo().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: LookupFileInfo | PlainMessage<LookupFileInfo> | undefined, b: LookupFileInfo | PlainMessage<LookupFileInfo> | undefined): boolean {
+    return proto3.util.equals(LookupFileInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListLookupFilesRequest
+ */
+export class ListLookupFilesRequest extends Message<ListLookupFilesRequest> {
+  constructor(data?: PartialMessage<ListLookupFilesRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListLookupFilesRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListLookupFilesRequest {
+    return new ListLookupFilesRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListLookupFilesRequest {
+    return new ListLookupFilesRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListLookupFilesRequest {
+    return new ListLookupFilesRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListLookupFilesRequest | PlainMessage<ListLookupFilesRequest> | undefined, b: ListLookupFilesRequest | PlainMessage<ListLookupFilesRequest> | undefined): boolean {
+    return proto3.util.equals(ListLookupFilesRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ListLookupFilesResponse
+ */
+export class ListLookupFilesResponse extends Message<ListLookupFilesResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.LookupFileInfo files = 1;
+   */
+  files: LookupFileInfo[] = [];
+
+  constructor(data?: PartialMessage<ListLookupFilesResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ListLookupFilesResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "files", kind: "message", T: LookupFileInfo, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListLookupFilesResponse {
+    return new ListLookupFilesResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListLookupFilesResponse {
+    return new ListLookupFilesResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListLookupFilesResponse {
+    return new ListLookupFilesResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ListLookupFilesResponse | PlainMessage<ListLookupFilesResponse> | undefined, b: ListLookupFilesResponse | PlainMessage<ListLookupFilesResponse> | undefined): boolean {
+    return proto3.util.equals(ListLookupFilesResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteLookupFileRequest
+ */
+export class DeleteLookupFileRequest extends Message<DeleteLookupFileRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DeleteLookupFileRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteLookupFileRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteLookupFileRequest {
+    return new DeleteLookupFileRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteLookupFileRequest {
+    return new DeleteLookupFileRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteLookupFileRequest {
+    return new DeleteLookupFileRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteLookupFileRequest | PlainMessage<DeleteLookupFileRequest> | undefined, b: DeleteLookupFileRequest | PlainMessage<DeleteLookupFileRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteLookupFileRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteLookupFileResponse
+ */
+export class DeleteLookupFileResponse extends Message<DeleteLookupFileResponse> {
+  constructor(data?: PartialMessage<DeleteLookupFileResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteLookupFileResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteLookupFileResponse {
+    return new DeleteLookupFileResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteLookupFileResponse {
+    return new DeleteLookupFileResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteLookupFileResponse {
+    return new DeleteLookupFileResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteLookupFileResponse | PlainMessage<DeleteLookupFileResponse> | undefined, b: DeleteLookupFileResponse | PlainMessage<DeleteLookupFileResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteLookupFileResponse, a, b);
   }
 }
 
