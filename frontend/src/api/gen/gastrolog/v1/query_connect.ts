@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetPipelineFieldsRequest, GetPipelineFieldsResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse, ValidateQueryRequest, ValidateQueryResponse } from "./query_pb.js";
+import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetFieldsRequest, GetFieldsResponse, GetPipelineFieldsRequest, GetPipelineFieldsResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse, ValidateQueryRequest, ValidateQueryResponse } from "./query_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -94,6 +94,19 @@ export const QueryService = {
       name: "GetPipelineFields",
       I: GetPipelineFieldsRequest,
       O: GetPipelineFieldsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * GetFields samples matching records and extracts field names with value
+     * distributions using the backend's full extractor suite (KV, logfmt,
+     * access log). Replaces the frontend's client-side field extraction.
+     *
+     * @generated from rpc gastrolog.v1.QueryService.GetFields
+     */
+    getFields: {
+      name: "GetFields",
+      I: GetFieldsRequest,
+      O: GetFieldsResponse,
       kind: MethodKind.Unary,
     },
   }

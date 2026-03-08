@@ -62,42 +62,6 @@ export type FieldSummary = {
   values: { value: string; count: number }[];
 };
 
-export function aggregateFields(
-  records: ProtoRecord[],
-  source: "attrs" | "kv",
-): FieldSummary[] {
-  const keyMap = new Map<string, Map<string, number>>();
-  const decoder = new TextDecoder();
-  for (const record of records) {
-    const pairs: [string, string][] =
-      source === "attrs"
-        ? Object.entries(record.attrs)
-        : extractKVPairs(decoder.decode(record.raw)).map((p) => [
-            p.key,
-            p.value,
-          ]);
-    for (const [key, value] of pairs) {
-      if (source === "kv" && key === "level") continue;
-      let valMap = keyMap.get(key);
-      if (!valMap) {
-        valMap = new Map();
-        keyMap.set(key, valMap);
-      }
-      valMap.set(value, (valMap.get(value) ?? 0) + 1);
-    }
-  }
-  return Array.from(keyMap.entries())
-    .map(([key, valMap]) => ({
-      key,
-      count: Array.from(valMap.values()).reduce((a, b) => a + b, 0),
-      values: Array.from(valMap.entries())
-        .map(([value, count]) => ({ value, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 10),
-    }))
-    .sort((a, b) => b.count - a.count);
-}
-
 export function formatChunkId(chunkId: string): string {
   return chunkId || "N/A";
 }

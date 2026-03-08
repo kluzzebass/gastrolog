@@ -33,6 +33,11 @@ service QueryService {
   // GetPipelineFields returns the available fields and completions at a
   // given cursor position within a pipeline expression.
   rpc GetPipelineFields(GetPipelineFieldsRequest) returns (GetPipelineFieldsResponse);
+
+  // GetFields samples matching records and extracts field names with value
+  // distributions using the backend's full extractor suite (KV, logfmt,
+  // access log). Replaces the frontend's client-side field extraction.
+  rpc GetFields(GetFieldsRequest) returns (GetFieldsResponse);
 }
 
 message SearchRequest {
@@ -261,4 +266,25 @@ message GetPipelineFieldsRequest {
 message GetPipelineFieldsResponse {
   repeated string fields = 1;       // available fields at cursor position
   repeated string completions = 2;  // context keywords ("by", "as", "rdns", etc.)
+}
+
+message GetFieldsRequest {
+  string expression = 1;            // query expression (with time range directives)
+  int32 max_samples = 2;            // max records to sample (0 = default 500)
+}
+
+message GetFieldsResponse {
+  repeated FieldInfo attr_fields = 1;  // fields from record attributes
+  repeated FieldInfo kv_fields = 2;    // fields from KV/logfmt/access log extraction
+}
+
+message FieldInfo {
+  string key = 1;
+  int32 count = 2;                     // records containing this field
+  repeated FieldValue top_values = 3;  // most common values (up to 10)
+}
+
+message FieldValue {
+  string value = 1;
+  int32 count = 2;
 }

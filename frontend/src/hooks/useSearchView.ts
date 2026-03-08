@@ -17,7 +17,7 @@ import { useVaults, useStats, useLogout, useCurrentUser } from "../api/hooks";
 import { Record as ProtoRecord, getToken } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
-import { timeRangeMs, aggregateFields, sameRecord } from "../utils";
+import { timeRangeMs, sameRecord } from "../utils";
 import {
   stripTimeRange,
   stripChunk,
@@ -50,6 +50,7 @@ import { useSettings } from "../api/hooks/useSettings";
 import { useSyntax } from "../api/hooks/useSyntax";
 import { useValidation } from "./useValidation";
 import { usePipelineFields } from "./usePipelineFields";
+import { useFields } from "./useFields";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -657,8 +658,8 @@ export function useSearchView() {
   }, [pollInterval, isFollowMode, q, search]);
 
   const displayRecords = isFollowMode ? followRecords : records;
-  const attrFields = aggregateFields(displayRecords, "attrs");
-  const kvFields = aggregateFields(displayRecords, "kv");
+  const hasResults = displayRecords.length > 0;
+  const { attrFields, kvFields } = useFields(q, hasResults, isPipelineResult);
   const allFields = (() => {
     const seen = new Set<string>();
     const merged = [];

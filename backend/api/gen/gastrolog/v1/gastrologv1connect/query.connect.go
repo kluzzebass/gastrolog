@@ -49,6 +49,8 @@ const (
 	// QueryServiceGetPipelineFieldsProcedure is the fully-qualified name of the QueryService's
 	// GetPipelineFields RPC.
 	QueryServiceGetPipelineFieldsProcedure = "/gastrolog.v1.QueryService/GetPipelineFields"
+	// QueryServiceGetFieldsProcedure is the fully-qualified name of the QueryService's GetFields RPC.
+	QueryServiceGetFieldsProcedure = "/gastrolog.v1.QueryService/GetFields"
 )
 
 // QueryServiceClient is a client for the gastrolog.v1.QueryService service.
@@ -72,6 +74,10 @@ type QueryServiceClient interface {
 	// GetPipelineFields returns the available fields and completions at a
 	// given cursor position within a pipeline expression.
 	GetPipelineFields(context.Context, *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error)
+	// GetFields samples matching records and extracts field names with value
+	// distributions using the backend's full extractor suite (KV, logfmt,
+	// access log). Replaces the frontend's client-side field extraction.
+	GetFields(context.Context, *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error)
 }
 
 // NewQueryServiceClient constructs a client for the gastrolog.v1.QueryService service. By default,
@@ -127,6 +133,12 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("GetPipelineFields")),
 			connect.WithClientOptions(opts...),
 		),
+		getFields: connect.NewClient[v1.GetFieldsRequest, v1.GetFieldsResponse](
+			httpClient,
+			baseURL+QueryServiceGetFieldsProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("GetFields")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -139,6 +151,7 @@ type queryServiceClient struct {
 	getSyntax         *connect.Client[v1.GetSyntaxRequest, v1.GetSyntaxResponse]
 	validateQuery     *connect.Client[v1.ValidateQueryRequest, v1.ValidateQueryResponse]
 	getPipelineFields *connect.Client[v1.GetPipelineFieldsRequest, v1.GetPipelineFieldsResponse]
+	getFields         *connect.Client[v1.GetFieldsRequest, v1.GetFieldsResponse]
 }
 
 // Search calls gastrolog.v1.QueryService.Search.
@@ -176,6 +189,11 @@ func (c *queryServiceClient) GetPipelineFields(ctx context.Context, req *connect
 	return c.getPipelineFields.CallUnary(ctx, req)
 }
 
+// GetFields calls gastrolog.v1.QueryService.GetFields.
+func (c *queryServiceClient) GetFields(ctx context.Context, req *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error) {
+	return c.getFields.CallUnary(ctx, req)
+}
+
 // QueryServiceHandler is an implementation of the gastrolog.v1.QueryService service.
 type QueryServiceHandler interface {
 	// Search executes a query and streams matching records.
@@ -197,6 +215,10 @@ type QueryServiceHandler interface {
 	// GetPipelineFields returns the available fields and completions at a
 	// given cursor position within a pipeline expression.
 	GetPipelineFields(context.Context, *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error)
+	// GetFields samples matching records and extracts field names with value
+	// distributions using the backend's full extractor suite (KV, logfmt,
+	// access log). Replaces the frontend's client-side field extraction.
+	GetFields(context.Context, *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error)
 }
 
 // NewQueryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -248,6 +270,12 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("GetPipelineFields")),
 		connect.WithHandlerOptions(opts...),
 	)
+	queryServiceGetFieldsHandler := connect.NewUnaryHandler(
+		QueryServiceGetFieldsProcedure,
+		svc.GetFields,
+		connect.WithSchema(queryServiceMethods.ByName("GetFields")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.QueryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QueryServiceSearchProcedure:
@@ -264,6 +292,8 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceValidateQueryHandler.ServeHTTP(w, r)
 		case QueryServiceGetPipelineFieldsProcedure:
 			queryServiceGetPipelineFieldsHandler.ServeHTTP(w, r)
+		case QueryServiceGetFieldsProcedure:
+			queryServiceGetFieldsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -299,4 +329,8 @@ func (UnimplementedQueryServiceHandler) ValidateQuery(context.Context, *connect.
 
 func (UnimplementedQueryServiceHandler) GetPipelineFields(context.Context, *connect.Request[v1.GetPipelineFieldsRequest]) (*connect.Response[v1.GetPipelineFieldsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetPipelineFields is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) GetFields(context.Context, *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetFields is not implemented"))
 }

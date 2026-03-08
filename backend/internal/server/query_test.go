@@ -313,6 +313,147 @@ func TestQueryStringRoundTrip(t *testing.T) {
 	}
 }
 
+func TestGetFields(t *testing.T) {
+	t.Parallel()
+
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+	})
+
+	t0 := time.Now()
+
+	// Record 1: logfmt with structured attrs.
+	s.CM.Append(chunk.Record{
+		IngestTS: t0,
+		Attrs:    chunk.Attributes{"source": "app1", "host": "web-01"},
+		Raw:      []byte(`level=error msg="connection refused" host=db-01 port=5432`),
+	})
+	// Record 2: same source attr, different KV content.
+	s.CM.Append(chunk.Record{
+		IngestTS: t0.Add(time.Second),
+		Attrs:    chunk.Attributes{"source": "app1", "host": "web-02"},
+		Raw:      []byte(`level=info msg="request completed" host=db-01 duration=42ms`),
+	})
+	// Record 3: different source, overlapping KV keys.
+	s.CM.Append(chunk.Record{
+		IngestTS: t0.Add(2 * time.Second),
+		Attrs:    chunk.Attributes{"source": "app2"},
+		Raw:      []byte(`level=debug msg="cache hit" host=cache-01 port=6379`),
+	})
+
+	defaultID := uuid.Must(uuid.NewV7())
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+
+	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
+	handler := srv.Handler()
+
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+	client := gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
+
+	resp, err := client.GetFields(context.Background(), connect.NewRequest(&gastrologv1.GetFieldsRequest{
+		Expression: "reverse=true",
+	}))
+	if err != nil {
+		t.Fatalf("GetFields failed: %v", err)
+	}
+
+	// --- Attr fields ---
+	attrFields := resp.Msg.AttrFields
+	attrByKey := make(map[string]*gastrologv1.FieldInfo, len(attrFields))
+	for _, f := range attrFields {
+		attrByKey[f.Key] = f
+	}
+
+	if f, ok := attrByKey["source"]; !ok {
+		t.Error("missing attr field 'source'")
+	} else if f.Count != 3 {
+		t.Errorf("source count = %d, want 3", f.Count)
+	}
+
+	if f, ok := attrByKey["host"]; !ok {
+		t.Error("missing attr field 'host'")
+	} else if f.Count != 2 {
+		t.Errorf("host attr count = %d, want 2", f.Count)
+	}
+
+	// --- KV fields ---
+	kvFields := resp.Msg.KvFields
+	kvByKey := make(map[string]*gastrologv1.FieldInfo, len(kvFields))
+	for _, f := range kvFields {
+		kvByKey[f.Key] = f
+	}
+
+	// "level" should be filtered out.
+	if _, ok := kvByKey["level"]; ok {
+		t.Error("KV fields should not contain 'level'")
+	}
+
+	// "msg" should be present from all 3 records.
+	if f, ok := kvByKey["msg"]; !ok {
+		t.Error("missing KV field 'msg'")
+	} else if f.Count != 3 {
+		t.Errorf("msg count = %d, want 3", f.Count)
+	}
+
+	// "host" from KV extraction (all 3 records have host=...).
+	if f, ok := kvByKey["host"]; !ok {
+		t.Error("missing KV field 'host'")
+	} else if f.Count != 3 {
+		t.Errorf("host KV count = %d, want 3", f.Count)
+	}
+
+	// "port" appears in 2 of 3 records.
+	if f, ok := kvByKey["port"]; !ok {
+		t.Error("missing KV field 'port'")
+	} else if f.Count != 2 {
+		t.Errorf("port count = %d, want 2", f.Count)
+	}
+
+	// Top values should be sorted by frequency descending.
+	if f, ok := kvByKey["host"]; ok && len(f.TopValues) > 0 {
+		// db-01 appears twice, cache-01 once → db-01 should be first.
+		if f.TopValues[0].Value != "db-01" {
+			t.Errorf("host top value = %q, want 'db-01'", f.TopValues[0].Value)
+		}
+	}
+}
+
+func TestGetFieldsClampsMaxSamples(t *testing.T) {
+	client := newQueryTestSetup(t, 5)
+
+	// max_samples=0 should use default (500), not fail.
+	resp, err := client.GetFields(context.Background(), connect.NewRequest(&gastrologv1.GetFieldsRequest{
+		Expression: "reverse=true",
+		MaxSamples: 0,
+	}))
+	if err != nil {
+		t.Fatalf("GetFields with max_samples=0 failed: %v", err)
+	}
+	// With only 5 records, we won't hit the default cap — just verify it returns.
+	_ = resp.Msg
+}
+
+func TestGetFieldsInvalidExpression(t *testing.T) {
+	client := newQueryTestSetup(t, 0)
+
+	_, err := client.GetFields(context.Background(), connect.NewRequest(&gastrologv1.GetFieldsRequest{
+		Expression: "start=not-a-time",
+	}))
+	if err == nil {
+		t.Fatal("expected error for invalid expression")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
 func TestExplainInvalidQuery(t *testing.T) {
 	client := newQueryTestSetup(t, 0)
 

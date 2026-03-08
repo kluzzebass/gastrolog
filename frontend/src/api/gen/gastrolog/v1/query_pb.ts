@@ -1689,3 +1689,193 @@ export class GetPipelineFieldsResponse extends Message<GetPipelineFieldsResponse
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetFieldsRequest
+ */
+export class GetFieldsRequest extends Message<GetFieldsRequest> {
+  /**
+   * query expression (with time range directives)
+   *
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  /**
+   * max records to sample (0 = default 500)
+   *
+   * @generated from field: int32 max_samples = 2;
+   */
+  maxSamples = 0;
+
+  constructor(data?: PartialMessage<GetFieldsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetFieldsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "max_samples", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetFieldsRequest {
+    return new GetFieldsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetFieldsRequest {
+    return new GetFieldsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetFieldsRequest {
+    return new GetFieldsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetFieldsRequest | PlainMessage<GetFieldsRequest> | undefined, b: GetFieldsRequest | PlainMessage<GetFieldsRequest> | undefined): boolean {
+    return proto3.util.equals(GetFieldsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetFieldsResponse
+ */
+export class GetFieldsResponse extends Message<GetFieldsResponse> {
+  /**
+   * fields from record attributes
+   *
+   * @generated from field: repeated gastrolog.v1.FieldInfo attr_fields = 1;
+   */
+  attrFields: FieldInfo[] = [];
+
+  /**
+   * fields from KV/logfmt/access log extraction
+   *
+   * @generated from field: repeated gastrolog.v1.FieldInfo kv_fields = 2;
+   */
+  kvFields: FieldInfo[] = [];
+
+  constructor(data?: PartialMessage<GetFieldsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetFieldsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "attr_fields", kind: "message", T: FieldInfo, repeated: true },
+    { no: 2, name: "kv_fields", kind: "message", T: FieldInfo, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetFieldsResponse {
+    return new GetFieldsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetFieldsResponse {
+    return new GetFieldsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetFieldsResponse {
+    return new GetFieldsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetFieldsResponse | PlainMessage<GetFieldsResponse> | undefined, b: GetFieldsResponse | PlainMessage<GetFieldsResponse> | undefined): boolean {
+    return proto3.util.equals(GetFieldsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.FieldInfo
+ */
+export class FieldInfo extends Message<FieldInfo> {
+  /**
+   * @generated from field: string key = 1;
+   */
+  key = "";
+
+  /**
+   * records containing this field
+   *
+   * @generated from field: int32 count = 2;
+   */
+  count = 0;
+
+  /**
+   * most common values (up to 10)
+   *
+   * @generated from field: repeated gastrolog.v1.FieldValue top_values = 3;
+   */
+  topValues: FieldValue[] = [];
+
+  constructor(data?: PartialMessage<FieldInfo>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.FieldInfo";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "key", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "top_values", kind: "message", T: FieldValue, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FieldInfo {
+    return new FieldInfo().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FieldInfo {
+    return new FieldInfo().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FieldInfo {
+    return new FieldInfo().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: FieldInfo | PlainMessage<FieldInfo> | undefined, b: FieldInfo | PlainMessage<FieldInfo> | undefined): boolean {
+    return proto3.util.equals(FieldInfo, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.FieldValue
+ */
+export class FieldValue extends Message<FieldValue> {
+  /**
+   * @generated from field: string value = 1;
+   */
+  value = "";
+
+  /**
+   * @generated from field: int32 count = 2;
+   */
+  count = 0;
+
+  constructor(data?: PartialMessage<FieldValue>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.FieldValue";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "value", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FieldValue {
+    return new FieldValue().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FieldValue {
+    return new FieldValue().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FieldValue {
+    return new FieldValue().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: FieldValue | PlainMessage<FieldValue> | undefined, b: FieldValue | PlainMessage<FieldValue> | undefined): boolean {
+    return proto3.util.equals(FieldValue, a, b);
+  }
+}
+
