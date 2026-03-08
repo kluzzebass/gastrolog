@@ -158,6 +158,7 @@ function highlightJSON(text: string): SyntaxSpan[] {
   let expectKey = false;
   let afterColon = false;
   let lastKey = ""; // most recent JSON key (unquoted), used to build key=value clickValues
+  const keyStack: string[] = []; // tracks nested object keys for dotted paths
 
   const push = (
     start: number,
@@ -175,11 +176,17 @@ function highlightJSON(text: string): SyntaxSpan[] {
 
     if (ch === "{" || ch === "[") {
       push(i, i + 1, C_PUNCT);
-      expectKey = ch === "{";
+      if (ch === "{") {
+        keyStack.push(lastKey);
+        expectKey = true;
+      } else {
+        expectKey = false;
+      }
       afterColon = false;
       i++;
     } else if (ch === "}" || ch === "]") {
       push(i, i + 1, C_PUNCT);
+      if (ch === "}") keyStack.pop();
       expectKey = false;
       afterColon = false;
       i++;
@@ -209,8 +216,14 @@ function highlightJSON(text: string): SyntaxSpan[] {
         lastKey = content;
         expectKey = false;
       }
-      // Value strings are clickable as key=value pairs.
-      const cv = !isKey && lastKey ? `${lastKey}=${content}` : undefined;
+      // Value strings are clickable as key=value pairs with full dotted path.
+      let cv: string | undefined;
+      if (!isKey && lastKey) {
+        const pathParts = [...keyStack.filter(Boolean), lastKey];
+        const fullKey = pathParts.join(".");
+        const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(content);
+        cv = needsQuotes ? `${fullKey}="${content}"` : `${fullKey}=${content}`;
+      }
       push(start, i, color, cv);
       afterColon = false;
     } else if (afterColon && (ch === "-" || (ch >= "0" && ch <= "9"))) {

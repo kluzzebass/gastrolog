@@ -93,6 +93,34 @@ describe("highlightJSON", () => {
     expect(numSpan).toBeDefined();
     expect(numSpan!.color).toBeDefined();
   });
+
+  test("clickValue uses full dotted path for nested objects", () => {
+    const spans = syntaxHighlight('{"request": {"user": {"name": "alice"}}}');
+    const valSpan = spans.find((s) => s.clickValue?.includes("name"));
+    expect(valSpan).toBeDefined();
+    expect(valSpan!.clickValue).toBe("request.user.name=alice");
+  });
+
+  test("clickValue quotes values with spaces", () => {
+    const spans = syntaxHighlight('{"msg": "user session expired"}');
+    const valSpan = spans.find((s) => s.clickValue?.startsWith("msg="));
+    expect(valSpan).toBeDefined();
+    expect(valSpan!.clickValue).toBe('msg="user session expired"');
+  });
+
+  test("clickValue quotes values with special characters", () => {
+    const spans = syntaxHighlight('{"auth": "Bearer ***"}');
+    const valSpan = spans.find((s) => s.clickValue?.startsWith("auth="));
+    expect(valSpan).toBeDefined();
+    expect(valSpan!.clickValue).toBe('auth="Bearer ***"');
+  });
+
+  test("clickValue does not quote simple values", () => {
+    const spans = syntaxHighlight('{"level": "error"}');
+    const valSpan = spans.find((s) => s.clickValue?.startsWith("level="));
+    expect(valSpan).toBeDefined();
+    expect(valSpan!.clickValue).toBe("level=error");
+  });
 });
 
 // ── highlightKVPlain (via syntaxHighlight) ──
