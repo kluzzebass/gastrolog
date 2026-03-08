@@ -91,7 +91,15 @@ func (p *PredicateExpr) String() string {
 	case PredToken:
 		return fmt.Sprintf("token(%s)", p.Value)
 	case PredKV:
-		return fmt.Sprintf("%s%s%s", p.Key, p.Op, p.Value)
+		key := p.Key
+		if p.KeyPat == nil {
+			key = quoteIfNeeded(key)
+		}
+		val := p.Value
+		if p.ValuePat == nil {
+			val = quoteIfNeeded(val)
+		}
+		return fmt.Sprintf("%s%s%s", key, p.Op, val)
 	case PredKeyExists:
 		return p.Key + "=*"
 	case PredValueExists:
@@ -105,6 +113,53 @@ func (p *PredicateExpr) String() string {
 	default:
 		return fmt.Sprintf("unknown(%d)", p.Kind)
 	}
+}
+
+// quoteIfNeeded wraps s in double quotes if it contains characters that would
+// be misinterpreted by the lexer as glob metacharacters, operators, or whitespace.
+// Values that are safe as barewords are returned unchanged.
+func quoteIfNeeded(s string) string {
+	for i := range len(s) {
+		if !isBarewordSafe(s[i]) {
+			return `"` + escapeQuoted(s) + `"`
+		}
+	}
+	return s
+}
+
+// isBarewordSafe returns true if ch can appear unquoted in a bareword.
+// Mirrors isBarewordChar in lexer.go.
+func isBarewordSafe(ch byte) bool {
+	switch ch {
+	case ' ', '\t', '\n', '\r':
+		return false
+	case '(', ')', '=', '*', '?', '[', '"', '\'', '/', '>', '<', '!':
+		return false
+	case '|', ',', '+', '%', '#':
+		return false
+	default:
+		return true
+	}
+}
+
+// escapeQuoted escapes backslashes and double quotes inside a quoted string.
+func escapeQuoted(s string) string {
+	if !strings.ContainsAny(s, `\"`) {
+		return s
+	}
+	var sb strings.Builder
+	sb.Grow(len(s) + 4)
+	for i := range len(s) {
+		switch s[i] {
+		case '\\':
+			sb.WriteString(`\\`)
+		case '"':
+			sb.WriteString(`\"`)
+		default:
+			sb.WriteByte(s[i])
+		}
+	}
+	return sb.String()
 }
 
 // flattenAnd combines two expressions into an AndExpr, flattening nested AndExprs.

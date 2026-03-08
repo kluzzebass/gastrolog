@@ -512,6 +512,12 @@ func TestExprString(t *testing.T) {
 		{"a AND b", "(token(a) AND token(b))"},
 		{"a OR b", "(token(a) OR token(b))"},
 		{`/error\d+/`, `regex(/error\d+/)`},
+		// Values with special chars must be quoted to survive re-parsing.
+		{`key="Bearer ***"`, `key="Bearer ***"`},
+		{`key="hello world"`, `key="hello world"`},
+		{`path="/var/log/app.log"`, `path="/var/log/app.log"`},
+		// Glob values must NOT be quoted (they need to stay as globs).
+		{"level=err*", "level=err*"},
 	}
 
 	for _, tt := range tests {
@@ -524,6 +530,41 @@ func TestExprString(t *testing.T) {
 			got := expr.String()
 			if got != tt.want {
 				t.Errorf("Parse(%q).String() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestExprStringRoundtrip verifies that String() output can be re-parsed
+// and produces the same String() output (idempotent serialization).
+// This is critical for cross-node query forwarding where the expression
+// is serialized, sent to a remote node, and re-parsed.
+func TestExprStringRoundtrip(t *testing.T) {
+	t.Parallel()
+	tests := []string{
+		`key="Bearer ***"`,
+		`request.headers.authorization="Bearer token123"`,
+		`msg="hello world"`,
+		`path="/var/log/app.log"`,
+		`key="value with \"quotes\""`,
+		`level=error`,
+		`level=err*`,
+		`key="spaces and *globs*"`,
+	}
+	for _, input := range tests {
+		t.Run(input, func(t *testing.T) {
+			t.Parallel()
+			expr, err := Parse(input)
+			if err != nil {
+				t.Fatalf("Parse(%q) error: %v", input, err)
+			}
+			serialized := expr.String()
+			expr2, err := Parse(serialized)
+			if err != nil {
+				t.Fatalf("Parse(expr.String()) error: Parse(%q) = %v", serialized, err)
+			}
+			if expr2.String() != serialized {
+				t.Errorf("roundtrip mismatch: %q -> %q -> %q", input, serialized, expr2.String())
 			}
 		})
 	}
