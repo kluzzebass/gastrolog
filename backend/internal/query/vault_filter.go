@@ -9,16 +9,16 @@ import (
 )
 
 // vaultKey is the reserved key for vault filtering.
-const vaultKey = "vault"
+const vaultKey = "vault_id"
 
 // ExtractVaultFilter extracts vault predicates from a BoolExpr and returns:
 // - vaults: the set of vault IDs to query (nil means all vaults)
 // - remainingExpr: the expression with vault predicates removed (nil if nothing remains)
 //
 // Vault predicates are KV predicates with key="vault":
-//   - vault=prod         -> query only "prod" vault
-//   - vault=prod OR vault=staging -> query "prod" and "staging" vaults
-//   - error vault=prod   -> query "prod" for "error" token
+//   - vault_id=<uuid>         -> query only "prod" vault
+//   - vault_id=<uuid> OR vault_id=<uuid2> -> query "prod" and "staging" vaults
+//   - error vault_id=<uuid>   -> query "prod" for "error" token
 //
 // Vault predicates at the top level (ANDed with other terms) are extracted.
 // Vault predicates inside OR branches or negated are left in place and
@@ -52,7 +52,7 @@ func ExtractVaultFilter(expr querylang.Expr, allVaults []uuid.UUID) (vaults []uu
 	return vaults, remaining
 }
 
-// extractVaultPredicates recursively extracts vault=X predicates from ANDed terms.
+// extractVaultPredicates recursively extracts vault_id=X predicates from ANDed terms.
 // Returns the remaining expression with vault predicates removed.
 func extractVaultPredicates(expr querylang.Expr, vaults map[string]struct{}) querylang.Expr {
 	switch e := expr.(type) {
@@ -81,7 +81,7 @@ func extractVaultPredicates(expr querylang.Expr, vaults map[string]struct{}) que
 		return &querylang.AndExpr{Terms: remaining}
 
 	case *querylang.OrExpr:
-		// Check if ALL branches are vault predicates (vault=A OR vault=B)
+		// Check if ALL branches are vault predicates (vault_id=A OR vault_id=B)
 		allVaultPredicates := true
 		for _, term := range e.Terms {
 			if p, ok := term.(*querylang.PredicateExpr); ok {
@@ -103,12 +103,12 @@ func extractVaultPredicates(expr querylang.Expr, vaults map[string]struct{}) que
 		}
 
 		// Mixed OR - don't extract, keep as-is for runtime filtering
-		// This handles unusual cases like: (vault=prod AND error) OR (vault=staging AND warn)
+		// This handles unusual cases like: (vault_id=<uuid> AND error) OR (vault_id=<uuid2> AND warn)
 		return expr
 
 	case *querylang.NotExpr:
 		// Don't extract negated vault predicates - they're weird but valid
-		// e.g., NOT vault=prod means "all vaults except prod"
+		// e.g., NOT vault_id=<uuid> means "all vaults except prod"
 		// For now, leave these for runtime filtering
 		return expr
 

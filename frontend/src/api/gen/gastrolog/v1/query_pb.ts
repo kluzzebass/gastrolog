@@ -594,7 +594,7 @@ export class Query extends Message<Query> {
    * Supports the full query language: bare words (tokens), key=value,
    * AND/OR/NOT, parentheses, start=/end=/limit= control args.
    * Examples: "error timeout", "(error OR warn) AND NOT debug",
-   *           "start=2024-01-01T00:00:00Z level=error vault=prod"
+   *           "start=2024-01-01T00:00:00Z level=error vault_id=<uuid>"
    *
    * @generated from field: string expression = 8;
    */

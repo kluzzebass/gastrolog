@@ -85,7 +85,7 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // TableResult instead of individual records.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error) {
-		scopedExpr := fmt.Sprintf("vault=%s %s", vaultID, queryExpr)
+		scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, queryExpr)
 
 		q, pipeline, err := server.ParseExpression(scopedExpr)
 		if err != nil {
@@ -170,7 +170,7 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 		var totalChunks int32
 
 		for _, vid := range vaultIDs {
-			scopedExpr := fmt.Sprintf("vault=%s %s", vid, queryExpr)
+			scopedExpr := fmt.Sprintf("vault_id=%s %s", vid, queryExpr)
 			q, _, err := server.ParseExpression(scopedExpr)
 			if err != nil {
 				return nil, 0, fmt.Errorf("parse query for vault %s: %w", vid, err)
@@ -222,13 +222,13 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 // local vaults for ForwardFollow RPCs received from peer nodes.
 func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 	return func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], error) {
-		// Scope the query to the requested vaults by prepending vault= predicates.
+		// Scope the query to the requested vaults by prepending vault_id= predicates.
 		var scopedExpr string
 		for _, vid := range vaultIDs {
 			if scopedExpr != "" {
 				scopedExpr += " OR "
 			}
-			scopedExpr += "vault=" + vid.String()
+			scopedExpr += "vault_id=" + vid.String()
 		}
 		if queryExpr != "" {
 			if len(vaultIDs) > 1 {

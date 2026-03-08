@@ -179,12 +179,12 @@ func (q Query) TimeBounds() (lower, upper time.Time) {
 	return q.Start, q.End
 }
 
-// WithVaultPredicate returns a copy of the query with a vault=X predicate added.
+// WithVaultPredicate returns a copy of the query with a vault_id=X predicate added.
 // The predicate is ANDed with any existing BoolExpr.
 func (q Query) WithVaultPredicate(vaultID string) Query {
 	vaultPred := &querylang.PredicateExpr{
 		Kind:  querylang.PredKV,
-		Key:   "vault",
+		Key:   "vault_id",
 		Value: vaultID,
 	}
 
@@ -314,7 +314,7 @@ func New(chunks chunk.ChunkManager, indexes index.IndexManager, logger *slog.Log
 }
 
 // NewWithRegistry creates a query engine that can search across multiple vaults.
-// Vault predicates in queries (e.g., "vault=prod") filter which vaults are searched.
+// Vault predicates in queries (e.g., "vault_id=<uuid>") filter which vaults are searched.
 // If no vault predicate is present, all vaults are searched.
 // If logger is nil, logging is disabled.
 func NewWithRegistry(registry VaultRegistry, logger *slog.Logger) *Engine {

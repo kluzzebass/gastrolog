@@ -399,7 +399,7 @@ func runMergeLoop(
 // After yielding an error, iteration stops.
 //
 // For multi-vault engines, this searches across all vaults (or vaults matching
-// vault=X predicates in the query) and merge-sorts results by WriteTS.
+// vault_id=X predicates in the query) and merge-sorts results by WriteTS.
 //
 // The resume parameter allows continuing from a previous search. Pass nil to start fresh.
 // The returned nextToken function returns a ResumeToken if iteration stopped early
@@ -504,7 +504,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 // Time bounds and limit still apply to all yielded records.
 //
 // For multi-vault engines, this searches across all vaults (or vaults matching
-// vault=X predicates in the query) and merge-sorts results by WriteTS.
+// vault_id=X predicates in the query) and merge-sorts results by WriteTS.
 func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeToken) (iter.Seq2[chunk.Record, error], func() *ResumeToken) {
 	// Normalize query to ensure BoolExpr is set (converts legacy Tokens/KV if needed).
 	q = q.Normalize()
@@ -717,7 +717,7 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 	q = q.Normalize()
 
 	// Extract vault predicates once (the expression doesn't change).
-	// vaultFilter is nil when the query has no vault= predicate (follow all).
+	// vaultFilter is nil when the query has no vault_id= predicate (follow all).
 	vaultFilter, remainingExpr := ExtractVaultFilter(q.BoolExpr, nil)
 	q.BoolExpr = remainingExpr
 
@@ -793,7 +793,7 @@ func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, vaultID uu
 }
 
 // resolveVaults returns the vaults to poll this iteration.
-// When no vault= predicate exists, it re-evaluates the live vault
+// When no vault_id= predicate exists, it re-evaluates the live vault
 // list each call, initializing positions for any newly discovered vault.
 func (fs *followState) resolveVaults() []uuid.UUID {
 	vaults := fs.vaultFilter
