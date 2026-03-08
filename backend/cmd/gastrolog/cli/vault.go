@@ -26,6 +26,9 @@ func newVaultCmd() *cobra.Command {
 		newVaultDeleteCmd(),
 		newVaultPauseCmd(),
 		newVaultResumeCmd(),
+		newVaultSealCmd(),
+		newVaultReindexCmd(),
+		newVaultMigrateCmd(),
 	)
 	return cmd
 }
@@ -307,4 +310,94 @@ func newVaultResumeCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func newVaultSealCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "seal <name-or-id>",
+		Short: "Seal the active chunk of a vault",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			r, err := newResolver(context.Background(), client)
+			if err != nil {
+				return err
+			}
+			id, err := resolve(args[0], r.vaults, "vault")
+			if err != nil {
+				return err
+			}
+			_, err = client.Vault.SealVault(context.Background(), connect.NewRequest(&v1.SealVaultRequest{Vault: id}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Sealed vault %s\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newVaultReindexCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "reindex <name-or-id>",
+		Short: "Rebuild all indexes for a vault",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			r, err := newResolver(context.Background(), client)
+			if err != nil {
+				return err
+			}
+			id, err := resolve(args[0], r.vaults, "vault")
+			if err != nil {
+				return err
+			}
+			resp, err := client.Vault.ReindexVault(context.Background(), connect.NewRequest(&v1.ReindexVaultRequest{Vault: id}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Reindexing vault %s (job %s)\n", args[0], resp.Msg.JobId)
+			return nil
+		},
+	}
+}
+
+func newVaultMigrateCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "migrate <source-name-or-id>",
+		Short: "Migrate a vault to a new destination",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			dest, _ := cmd.Flags().GetString("destination")
+			destType, _ := cmd.Flags().GetString("type")
+			params, _ := cmd.Flags().GetStringSlice("param")
+
+			client := clientFromCmd(cmd)
+			r, err := newResolver(context.Background(), client)
+			if err != nil {
+				return err
+			}
+			sourceID, err := resolve(args[0], r.vaults, "vault")
+			if err != nil {
+				return err
+			}
+
+			resp, err := client.Vault.MigrateVault(context.Background(), connect.NewRequest(&v1.MigrateVaultRequest{
+				Source:            sourceID,
+				Destination:       dest,
+				DestinationType:   destType,
+				DestinationParams: parseParams(params),
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Migrating vault %s (job %s)\n", args[0], resp.Msg.JobId)
+			return nil
+		},
+	}
+	cmd.Flags().String("destination", "", "destination vault name (required)")
+	cmd.Flags().String("type", "", "destination vault type (default: same as source)")
+	cmd.Flags().StringSlice("param", nil, "destination key=value parameter (repeatable)")
+	_ = cmd.MarkFlagRequired("destination")
+	return cmd
 }

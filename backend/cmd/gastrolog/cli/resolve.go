@@ -22,6 +22,7 @@ type resolver struct {
 	nodes             map[string]string
 	users             map[string]string // username → id
 	certs             map[string]string
+	routes            map[string]string
 }
 
 // newResolver fetches the full config and user list, building name→ID maps.
@@ -40,6 +41,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 		nodes:             make(map[string]string),
 		users:             make(map[string]string),
 		certs:             make(map[string]string),
+		routes:            make(map[string]string),
 	}
 
 	cfg := resp.Msg
@@ -60,6 +62,9 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 	for _, n := range cfg.NodeConfigs {
 		r.nodes[strings.ToLower(n.Name)] = n.Id
+	}
+	for _, rt := range cfg.Routes {
+		r.routes[strings.ToLower(rt.Name)] = rt.Id
 	}
 
 	// Certs via ListCertificates.

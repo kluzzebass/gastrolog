@@ -23,6 +23,7 @@ func newIngesterCmd() *cobra.Command {
 		newIngesterCreateCmd(),
 		newIngesterDeleteCmd(),
 		newIngesterTestCmd(),
+		newIngesterStatusCmd(),
 	)
 	return cmd
 }
@@ -159,6 +160,42 @@ func newIngesterDeleteCmd() *cobra.Command {
 				return err
 			}
 			fmt.Printf("Deleted ingester %s\n", args[0])
+			return nil
+		},
+	}
+}
+
+func newIngesterStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status <name-or-id>",
+		Short: "Get ingester runtime status",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			r, err := newResolver(context.Background(), client)
+			if err != nil {
+				return err
+			}
+			id, err := resolve(args[0], r.ingesters, "ingester")
+			if err != nil {
+				return err
+			}
+			resp, err := client.Config.GetIngesterStatus(context.Background(), connect.NewRequest(&v1.GetIngesterStatusRequest{Id: id}))
+			if err != nil {
+				return err
+			}
+			p := newPrinter(outputFormat(cmd))
+			if outputFormat(cmd) == "json" {
+				return p.json(resp.Msg)
+			}
+			p.kv([][2]string{
+				{"ID", resp.Msg.Id},
+				{"Type", resp.Msg.Type},
+				{"Running", strconv.FormatBool(resp.Msg.Running)},
+				{"Messages Ingested", strconv.FormatInt(resp.Msg.MessagesIngested, 10)},
+				{"Bytes Ingested", formatBytesStr(resp.Msg.BytesIngested)},
+				{"Errors", strconv.FormatInt(resp.Msg.Errors, 10)},
+			})
 			return nil
 		},
 	}

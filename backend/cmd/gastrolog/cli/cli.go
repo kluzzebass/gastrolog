@@ -32,6 +32,9 @@ func NewConfigCommand() *cobra.Command {
 		newRetentionPolicyCmd(),
 		newVaultCmd(),
 		newIngesterCmd(),
+		newRouteCmd(),
+		newFileCmd(),
+		newJobCmd(),
 		newNodeCmd(),
 		newCertCmd(),
 		newUserCmd(),
@@ -42,6 +45,7 @@ func NewConfigCommand() *cobra.Command {
 		newLookupCmd(),
 		newExportCmd(),
 		newImportCmd(),
+		newClusterCmd(),
 	)
 
 	return cmd
