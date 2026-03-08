@@ -141,8 +141,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	}
 	for _, ef := range existing {
 		if ef.Name == filename && ef.SHA256 == hash {
-			cleanPath := filepath.Clean(srcPath)
-			_ = os.Remove(cleanPath)
+			_ = os.Remove(srcPath) //nolint:gosec // srcPath is from trusted caller (temp file we created)
 			return ef, nil
 		}
 	}

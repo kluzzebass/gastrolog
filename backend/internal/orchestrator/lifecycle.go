@@ -228,6 +228,18 @@ func (o *Orchestrator) writeLoop() {
 		if dr.ack != nil {
 			dr.ack <- err
 		}
+
+		// Periodic sanity log: every 10000 records, log pipeline health.
+		total := o.routeStats.Ingested.Load()
+		if total > 0 && total%10000 == 0 {
+			o.logger.Info("write pipeline health",
+				"ingested", total,
+				"routed", o.routeStats.Routed.Load(),
+				"dropped", o.routeStats.Dropped.Load(),
+				"vaults", len(o.vaults),
+				"has_filters", o.filterSet != nil,
+			)
+		}
 	}
 }
 

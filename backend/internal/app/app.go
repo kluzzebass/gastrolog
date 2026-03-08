@@ -151,9 +151,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	factories := buildFactories(logger, homeDir, cfgStore, orch, cfg.SlogCapture, cfg.SlogCaptureHandler)
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
+	// orchReady is closed after startOrchestrator completes so that forwarded
+	// records block (instead of failing) while vaults are being registered.
+	orchReady := make(chan struct{})
 	var searchForwarder *cluster.SearchForwarder
 	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
-		searchForwarder = wireClusterForwarding(clusterSrv, orch, nodeID, logger)
+		searchForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger)
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -164,6 +167,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	if err := startOrchestrator(ctx, logger, orch, appCfg, factories); err != nil {
 		return err
 	}
+	close(orchReady)
 
 	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, nodeID, cfg.ServerAddr, cfg.PprofAddr)
 
@@ -226,7 +230,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // wireClusterForwarding sets up cross-node record, search, context, vault,
 // and explain forwarding on the cluster server. Returns the search forwarder
 // for the HTTP server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string, logger *slog.Logger) *cluster.SearchForwarder {
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger) *cluster.SearchForwarder {
 	peerConns := clusterSrv.PeerConns()
 
 	recordForwarder := cluster.NewRecordForwarder(
@@ -237,7 +241,33 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	// NOTE: recordForwarder.Close() is not deferred here because the caller
 	// manages shutdown order. The forwarder is closed when the orchestrator stops.
 
+	// The record appender waits for the orchestrator to be ready (vaults
+	// registered) before writing. Without this gate, forwarded records
+	// arriving during startup hit ErrVaultNotFound, causing the sending
+	// node's forwarder to enter exponential backoff and silently buffer
+	// records for up to 2 minutes.
+	var gateLogOnce sync.Once
+	waitForOrch := func(ctx context.Context) error {
+		select {
+		case <-orchReady:
+			return nil
+		default:
+		}
+		gateLogOnce.Do(func() {
+			logger.Info("forwarded record waiting for orchestrator startup")
+		})
+		select {
+		case <-orchReady:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
 	clusterSrv.SetRecordAppender(func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error {
+		if err := waitForOrch(ctx); err != nil {
+			return err
+		}
 		_, _, err := orch.Append(vaultID, rec)
 		return err
 	})
@@ -246,7 +276,13 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
-	clusterSrv.SetRecordImporter(orch.ImportChunkRecords)
+	// Same readiness gate for bulk chunk imports.
+	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error {
+		if err := waitForOrch(ctx); err != nil {
+			return err
+		}
+		return orch.ImportChunkRecords(ctx, vaultID, next)
+	})
 
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))
