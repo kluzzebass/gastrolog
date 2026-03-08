@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/logging"
@@ -139,6 +140,11 @@ type Server struct {
 
 	// managedFileIDs returns which managed files exist on this node.
 	managedFileIDs ManagedFileIDsLister
+
+	// forwardedReceived counts records received via ForwardRecords RPCs.
+	forwardedReceived atomic.Int64
+	// forwardedWritten counts records successfully appended via ForwardRecords RPCs.
+	forwardedWritten atomic.Int64
 
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.

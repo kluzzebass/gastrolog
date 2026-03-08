@@ -162,6 +162,9 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
 
+	batchSize := int64(len(req.GetRecords()))
+	s.forwardedReceived.Add(batchSize)
+
 	var written int64
 	for _, exportRec := range req.GetRecords() {
 		rec := chunk.Record{
@@ -185,9 +188,23 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 		rec.EventID.IngestTS = rec.IngestTS
 
 		if err := s.recordAppender(ctx, vaultID, rec); err != nil {
+			s.cfg.Logger.Warn("forward: append failed",
+				"vault", vaultID, "error", err,
+				"received_so_far", s.forwardedReceived.Load())
 			return nil, status.Errorf(codes.Internal, "append record: %v", err)
 		}
 		written++
+	}
+
+	prevWritten := s.forwardedWritten.Load()
+	totalWritten := s.forwardedWritten.Add(written)
+	// Log on first batch and every 10k forwarded records.
+	if prevWritten == 0 || totalWritten/(10_000) != prevWritten/(10_000) {
+		s.cfg.Logger.Info("forwarded records health",
+			"received_total", s.forwardedReceived.Load(),
+			"written_total", totalWritten,
+			"vault", vaultID,
+		)
 	}
 
 	return &gastrologv1.ForwardRecordsResponse{RecordsWritten: written}, nil

@@ -41,6 +41,7 @@ type nodeForwarder struct {
 	// Backoff state — only accessed from the flushLoop goroutine.
 	failures int           // consecutive send failures
 	backoff  time.Duration // current backoff duration
+	everSent bool          // true after first successful batch
 }
 
 const (
@@ -196,6 +197,10 @@ func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder
 		if nf.failures > 0 {
 			rf.logger.Info("forward: connection restored",
 				"node", nodeID, "after_failures", nf.failures)
+		} else if nf.failures == 0 && nf.backoff == 0 && !nf.everSent {
+			rf.logger.Info("forward: first batch sent",
+				"node", nodeID, "records", len(entries))
+			nf.everSent = true
 		}
 		nf.failures = 0
 		nf.backoff = 0
@@ -253,9 +258,16 @@ func (rf *RecordForwarder) sendBatch(nodeID string, nf *nodeForwarder, entries [
 			rf.peers.Invalidate(nodeID)
 			return false
 		}
-		rf.logger.Debug("forwarded records",
-			"node", nodeID, "vault", vaultID,
-			"sent", len(records), "written", resp.GetRecordsWritten())
+		ack := resp.GetRecordsWritten()
+		if ack != int64(len(records)) {
+			rf.logger.Warn("forward: partial write",
+				"node", nodeID, "vault", vaultID,
+				"sent", len(records), "written", ack)
+		} else {
+			rf.logger.Debug("forwarded records",
+				"node", nodeID, "vault", vaultID,
+				"sent", len(records), "written", ack)
+		}
 	}
 	return true
 }

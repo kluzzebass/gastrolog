@@ -171,6 +171,7 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		vault.Type = vaultCfg.Type
 		vault.Enabled = vaultCfg.Enabled
 		o.RegisterVault(vault)
+		o.logger.Info("vault registered", "id", vaultCfg.ID, "name", vaultCfg.Name, "enabled", vaultCfg.Enabled)
 	}
 
 	// Build filter set from routes.
