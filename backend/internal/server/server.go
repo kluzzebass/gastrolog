@@ -161,6 +161,7 @@ type Server struct {
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
+	repairLookupFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
 
 	mu       sync.Mutex
 	listener net.Listener

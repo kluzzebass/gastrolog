@@ -137,13 +137,13 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string) (config.Looku
 	fileID := uuid.Must(uuid.NewV7())
 	hd := home.New(s.homeDir)
 	fileDir := hd.LookupFileDir(fileID.String())
-	if err := os.MkdirAll(fileDir, 0o750); err != nil {
+	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // path from trusted home dir + UUID
 		return config.LookupFileConfig{}, fmt.Errorf("create dir: %w", err)
 	}
 
 	finalPath := filepath.Join(fileDir, filename)
-	if err := os.Rename(srcPath, finalPath); err != nil {
-		_ = os.RemoveAll(fileDir)
+	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // trusted caller paths
+		_ = os.RemoveAll(fileDir) //nolint:gosec // cleanup our own dir
 		return config.LookupFileConfig{}, fmt.Errorf("move file: %w", err)
 	}
 
@@ -156,7 +156,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string) (config.Looku
 		UploadedAt: now,
 	}
 	if err := s.cfgStore.PutLookupFile(ctx, lf); err != nil {
-		_ = os.RemoveAll(fileDir)
+		_ = os.RemoveAll(fileDir) //nolint:gosec // cleanup our own dir
 		return config.LookupFileConfig{}, fmt.Errorf("commit metadata: %w", err)
 	}
 	s.configSignal.Notify()
@@ -183,8 +183,17 @@ func (s *Server) deleteExistingByName(ctx context.Context, filename string) erro
 	return nil
 }
 
+// SetLookupFileRepair sets the on-demand repair callback. When a lookup file
+// is in the manifest but missing from local disk, this function is called to
+// pull it from a peer before returning "not found".
+func (s *Server) SetLookupFileRepair(fn func(fileID string) bool) {
+	s.repairLookupFile = fn
+}
+
 // ResolveLookupFilePath returns the on-disk path for a lookup file entity
-// matched by filename. Returns empty string if not found.
+// matched by filename. If the file is in the manifest but missing from disk,
+// it triggers an on-demand repair (pull from peer) before giving up.
+// Returns empty string if not found.
 func (s *Server) ResolveLookupFilePath(ctx context.Context, filename string) string {
 	if s.homeDir == "" {
 		return ""
@@ -197,10 +206,17 @@ func (s *Server) ResolveLookupFilePath(ctx context.Context, filename string) str
 	for i := len(files) - 1; i >= 0; i-- {
 		if files[i].Name == filename {
 			hd := home.New(s.homeDir)
-			dir := hd.LookupFileDir(files[i].ID.String())
+			fid := files[i].ID.String()
+			dir := hd.LookupFileDir(fid)
 			path := filepath.Join(dir, filename)
 			if _, err := os.Stat(path); err == nil {
 				return path
+			}
+			// File is in manifest but missing from disk — try on-demand repair.
+			if s.repairLookupFile != nil && s.repairLookupFile(fid) {
+				if _, err := os.Stat(path); err == nil {
+					return path
+				}
 			}
 		}
 	}
@@ -220,7 +236,7 @@ func (s *Server) cleanupLookupFile(fileID uuid.UUID) {
 	}
 	hd := home.New(s.homeDir)
 	dir := hd.LookupFileDir(fileID.String())
-	if err := os.RemoveAll(dir); err != nil {
+	if err := os.RemoveAll(dir); err != nil { //nolint:gosec,nolintlint // G703: trusted UUID path
 		s.logger.Warn("cleanup lookup file", "file_id", fileID, "error", err)
 	} else {
 		s.logger.Info("removed lookup file", "file_id", fileID, "dir", dir)

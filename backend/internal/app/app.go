@@ -265,19 +265,20 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 }
 
 // wireLookupFileTransfer sets up cluster-side handlers for streaming lookup
-// files between nodes and returns a LookupFileHandler for the dispatcher.
-func wireLookupFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, homeDir string, logger *slog.Logger) LookupFileHandler {
+// files between nodes and returns a lookupFileManager for the dispatcher.
+func wireLookupFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, cfgStore config.Store, homeDir string, logger *slog.Logger) *lookupFileManager {
 	peerConns := clusterSrv.PeerConns()
 	clusterSrv.SetLookupFileReader(httpSrv.LookupFileReader)
 	clusterSrv.SetLookupFileIDs(httpSrv.LookupFileIDs)
 
 	transferrer := cluster.NewLookupTransferrer(peerConns)
 	return &lookupFileManager{
-		homeDir:    homeDir,
+		homeDir:     homeDir,
+		cfgStore:    cfgStore,
 		transferrer: transferrer,
-		peerIDs:    peerConns.PeerIDs,
-		fileExists: httpSrv.LookupFileExists,
-		logger:     logger.With("component", "lookup-files"),
+		peerIDs:     peerConns.PeerIDs,
+		fileExists:  httpSrv.LookupFileExists,
+		logger:      logger.With("component", "lookup-files"),
 	}
 }
 
@@ -678,14 +679,19 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		// server owns the lookup files on disk; the cluster server streams them
 		// to peers. Must happen after server creation but before serving starts.
 		if deps.ClusterSrv != nil && deps.Dispatcher != nil {
-			lfh := wireLookupFileTransfer(deps.ClusterSrv, srv, deps.HomeDir, deps.Logger)
-			deps.Dispatcher.lookupFileHandler = lfh
+			mgr := wireLookupFileTransfer(deps.ClusterSrv, srv, deps.CfgStore, deps.HomeDir, deps.Logger)
+			deps.Dispatcher.lookupFileHandler = mgr
 
-			// Reconcile lookup files: pull any files that Raft knows about
-			// but aren't on this node's disk yet (e.g., after joining a cluster).
-			if mgr, ok := lfh.(*lookupFileManager); ok {
-				go reconcileLookupFiles(ctx, deps.CfgStore, mgr, deps.Logger)
-			}
+			// Wire on-demand repair: when the server resolves a manifest
+			// entry but the file is missing from disk, it calls this to
+			// pull the file from a peer before returning "not found".
+			srv.SetLookupFileRepair(mgr.RepairFile)
+
+			// Startup reconciliation with backoff, then periodic drift check.
+			go func() {
+				reconcileLookupFilesStartup(ctx, mgr)
+				mgr.RunPeriodicReconciliation(ctx)
+			}()
 		}
 
 		serverWg.Go(func() {

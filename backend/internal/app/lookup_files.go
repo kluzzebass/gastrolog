@@ -14,10 +14,11 @@ import (
 )
 
 const (
-	pullTimeout          = 2 * time.Minute  // per-peer pull timeout
-	reconcileBaseDelay   = 5 * time.Second  // initial retry delay
-	reconcileMaxDelay    = 2 * time.Minute  // max retry delay
-	reconcileMaxAttempts = 10               // give up after this many rounds
+	pullTimeout            = 2 * time.Minute  // per-peer pull timeout
+	reconcileBaseDelay     = 5 * time.Second  // initial retry delay
+	reconcileMaxDelay      = 2 * time.Minute  // max retry delay
+	reconcileMaxAttempts   = 10               // give up after this many rounds
+	periodicReconcileEvery = 5 * time.Minute  // drift check interval
 )
 
 // lookupFileManager handles lookup file distribution across cluster nodes.
@@ -25,11 +26,12 @@ const (
 // it from a peer if missing. On delete notifications, it cleans up the local
 // disk. File pulls are asynchronous to avoid blocking FSM.Apply.
 type lookupFileManager struct {
-	homeDir    string
+	homeDir     string
+	cfgStore    config.Store
 	transferrer *cluster.LookupTransferrer
-	peerIDs    func() []string // returns peer node IDs in the cluster
-	fileExists func(fileID string) bool
-	logger     *slog.Logger
+	peerIDs     func() []string // returns peer node IDs in the cluster
+	fileExists  func(fileID string) bool
+	logger      *slog.Logger
 }
 
 var _ LookupFileHandler = (*lookupFileManager)(nil)
@@ -80,10 +82,68 @@ func (m *lookupFileManager) pullFromPeer(ctx context.Context, fileID string) boo
 	return false
 }
 
-// reconcileLookupFiles loads the manifest from the config store and retries
-// pulling missing files with exponential backoff. Peers may not be ready
-// immediately after a cluster restart, so we keep trying.
-func reconcileLookupFiles(ctx context.Context, cfgStore config.Store, mgr *lookupFileManager, logger *slog.Logger) {
+// RepairFile attempts to pull a specific file from a peer. Called on-demand
+// when a lookup file is in the manifest but missing from local disk.
+// Returns true if the file was successfully repaired.
+func (m *lookupFileManager) RepairFile(fileID string) bool {
+	if m.fileExists(fileID) {
+		return true
+	}
+	m.logger.Info("on-demand repair: pulling missing lookup file", "file_id", fileID)
+	return m.pullFromPeer(context.Background(), fileID)
+}
+
+// RunPeriodicReconciliation checks for manifest-vs-disk drift on a timer.
+// Runs until ctx is cancelled.
+func (m *lookupFileManager) RunPeriodicReconciliation(ctx context.Context) {
+	ticker := time.NewTicker(periodicReconcileEvery)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reconcileOnce(ctx)
+		}
+	}
+}
+
+// reconcileOnce does a single manifest-vs-disk pass, pulling any missing files.
+func (m *lookupFileManager) reconcileOnce(ctx context.Context) {
+	files, err := m.cfgStore.ListLookupFiles(ctx)
+	if err != nil {
+		m.logger.Debug("periodic reconcile: list from store", "error", err)
+		return
+	}
+
+	var missing []string
+	for _, f := range files {
+		fid := f.ID.String()
+		if !m.fileExists(fid) {
+			missing = append(missing, fid)
+		}
+	}
+	if len(missing) == 0 {
+		return
+	}
+
+	m.logger.Info("periodic reconcile: pulling missing files",
+		"missing", len(missing), "total", len(files))
+
+	for _, fid := range missing {
+		if ctx.Err() != nil {
+			return
+		}
+		m.pullFromPeer(ctx, fid)
+	}
+}
+
+// reconcileLookupFilesStartup retries pulling missing files with exponential
+// backoff. Peers may not be ready immediately after a cluster restart, so we
+// keep trying. Once all files are present (or we give up), the periodic loop
+// takes over.
+func reconcileLookupFilesStartup(ctx context.Context, mgr *lookupFileManager) {
 	delay := reconcileBaseDelay
 
 	for attempt := range reconcileMaxAttempts {
@@ -91,50 +151,25 @@ func reconcileLookupFiles(ctx context.Context, cfgStore config.Store, mgr *looku
 			return
 		}
 
-		files, err := cfgStore.ListLookupFiles(ctx)
-		if err != nil {
-			logger.Error("reconcile lookup files: list from store", "error", err)
-			return
-		}
-
-		var missing []string
-		for _, f := range files {
-			fid := f.ID.String()
-			if !mgr.fileExists(fid) {
-				missing = append(missing, fid)
-			}
-		}
-		if len(missing) == 0 {
+		remaining := mgr.missingFileCount(ctx)
+		if remaining == 0 {
 			if attempt > 0 {
-				logger.Info("reconcile lookup files: all files present")
+				mgr.logger.Info("startup reconcile: all files present")
 			}
 			return
 		}
 
-		logger.Info("reconcile lookup files: pulling missing files",
-			"missing", len(missing), "total", len(files), "attempt", attempt+1)
+		mgr.logger.Info("startup reconcile: pulling missing files",
+			"missing", remaining, "attempt", attempt+1)
+		mgr.reconcileOnce(ctx)
 
-		for _, fid := range missing {
-			if ctx.Err() != nil {
-				return
-			}
-			mgr.pullFromPeer(ctx, fid)
-		}
-
-		// Check if everything landed before sleeping.
-		allPresent := true
-		for _, fid := range missing {
-			if !mgr.fileExists(fid) {
-				allPresent = false
-				break
-			}
-		}
-		if allPresent {
-			logger.Info("reconcile lookup files: all files present")
+		// Re-check after pulling.
+		if mgr.missingFileCount(ctx) == 0 {
+			mgr.logger.Info("startup reconcile: all files present")
 			return
 		}
 
-		logger.Info("reconcile lookup files: some files still missing, retrying",
+		mgr.logger.Info("startup reconcile: some files still missing, retrying",
 			"delay", delay)
 		select {
 		case <-ctx.Done():
@@ -144,6 +179,21 @@ func reconcileLookupFiles(ctx context.Context, cfgStore config.Store, mgr *looku
 		delay = min(delay*2, reconcileMaxDelay)
 	}
 
-	logger.Error("reconcile lookup files: gave up after max attempts",
+	mgr.logger.Error("startup reconcile: gave up after max attempts",
 		"attempts", reconcileMaxAttempts)
+}
+
+// missingFileCount returns the number of manifest files not on local disk.
+func (m *lookupFileManager) missingFileCount(ctx context.Context) int {
+	files, err := m.cfgStore.ListLookupFiles(ctx)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, f := range files {
+		if !m.fileExists(f.ID.String()) {
+			n++
+		}
+	}
+	return n
 }
