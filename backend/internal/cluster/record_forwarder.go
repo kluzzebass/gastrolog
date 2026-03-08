@@ -207,7 +207,10 @@ func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder
 		return
 	}
 
-	// Failure — bump backoff.
+	// Failure — bump backoff. The batch is dropped.
+	rf.logger.Warn("forward: batch dropped",
+		"node", nodeID, "records", len(entries),
+		"failures", nf.failures+1)
 	nf.failures++
 	if nf.failures == 1 {
 		nf.backoff = backoffMin
@@ -272,20 +275,16 @@ func (rf *RecordForwarder) sendBatch(nodeID string, nf *nodeForwarder, entries [
 	return true
 }
 
-// logFailure logs a forwarding failure at INFO on the first occurrence,
-// then at DEBUG for subsequent failures. Peer unavailability is normal
-// in a cluster, so this is not a warning.
+// logFailure logs forwarding failures at INFO level. Every failure is logged
+// because silent drops during backoff are extremely hard to diagnose.
 //
 // nf is passed directly by the caller (always within the flushLoop goroutine)
 // to avoid a racy map lookup → read of nf.failures across goroutines.
 func (rf *RecordForwarder) logFailure(nodeID string, nf *nodeForwarder, msg string, err error) {
-	if nf.failures == 0 {
-		rf.logger.Info("forward: "+msg,
-			"node", nodeID, "error", err)
-	} else {
-		rf.logger.Debug("forward: "+msg,
-			"node", nodeID, "error", err, "consecutive_failures", nf.failures)
-	}
+	rf.logger.Info("forward: "+msg,
+		"node", nodeID, "error", err,
+		"consecutive_failures", nf.failures,
+		"backoff", nf.backoff)
 }
 
 // Close shuts down all per-node forwarders. Connection cleanup is handled
