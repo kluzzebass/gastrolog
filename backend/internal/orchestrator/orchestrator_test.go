@@ -516,6 +516,57 @@ func TestIngesterMessageReachesChunkManager(t *testing.T) {
 	}
 }
 
+func TestRouteStatsThroughLifecycle(t *testing.T) {
+	t.Parallel()
+	orch, _ := newIngesterTestSetup(t)
+
+	msgs := make([]orchestrator.IngestMessage, 5)
+	for i := range msgs {
+		msgs[i] = orchestrator.IngestMessage{
+			Attrs: map[string]string{"host": "server1"},
+			Raw:   fmt.Appendf(nil, "msg-%d", i),
+		}
+	}
+
+	recv := newMockIngester(msgs)
+	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+
+	if err := orch.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	<-recv.started
+	time.Sleep(100 * time.Millisecond)
+
+	if err := orch.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	rs := orch.GetRouteStats()
+	if got := rs.Ingested.Load(); got != 5 {
+		t.Errorf("Ingested = %d, want 5", got)
+	}
+	if got := rs.Routed.Load(); got != 5 {
+		t.Errorf("Routed = %d, want 5", got)
+	}
+	if got := rs.Dropped.Load(); got != 0 {
+		t.Errorf("Dropped = %d, want 0", got)
+	}
+	if !orch.IsFilterSetActive() {
+		t.Error("expected filterSet active")
+	}
+
+	vaultStats := orch.VaultRouteStatsList()
+	if len(vaultStats) != 1 {
+		t.Fatalf("expected 1 vault stat entry, got %d", len(vaultStats))
+	}
+	for _, vs := range vaultStats {
+		if got := vs.Matched.Load(); got != 5 {
+			t.Errorf("Matched = %d, want 5", got)
+		}
+	}
+}
+
 func TestIngesterContextCancellation(t *testing.T) {
 	orch, _ := newIngesterTestSetup(t)
 

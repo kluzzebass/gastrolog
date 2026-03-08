@@ -25,6 +25,22 @@ type StatsVaultSnapshot struct {
 	Enabled      bool
 }
 
+// StatsRouteSnapshot captures route stats for broadcast.
+type StatsRouteSnapshot struct {
+	Ingested       int64
+	Dropped        int64
+	Routed         int64
+	FilterActive   bool
+	VaultStats     []StatsVaultRouteSnapshot
+}
+
+// StatsVaultRouteSnapshot captures per-vault route stats.
+type StatsVaultRouteSnapshot struct {
+	VaultID   string
+	Matched   int64
+	Forwarded int64
+}
+
 // StatsProvider abstracts the orchestrator for stats collection.
 // Defined here at the consumer site to avoid importing orchestrator.
 type StatsProvider interface {
@@ -33,6 +49,7 @@ type StatsProvider interface {
 	VaultSnapshots() []StatsVaultSnapshot
 	IngesterIDs() []string
 	IngesterStats(id string) (name string, messages, bytes, errors int64, running bool)
+	RouteStats() StatsRouteSnapshot
 }
 
 // RaftStatsProvider exposes local Raft stats for the collector.
@@ -151,6 +168,20 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 				BytesIngested:    uint64(bytes),  //nolint:gosec
 				Errors:           uint64(errs),   //nolint:gosec
 				Running:          running,
+			})
+		}
+
+		// Route stats.
+		rs := c.cfg.Stats.RouteStats()
+		stats.RouteStatsIngested = rs.Ingested
+		stats.RouteStatsDropped = rs.Dropped
+		stats.RouteStatsRouted = rs.Routed
+		stats.RouteStatsFilterActive = rs.FilterActive
+		for _, vs := range rs.VaultStats {
+			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
+				VaultId:          vs.VaultID,
+				RecordsMatched:   vs.Matched,
+				RecordsForwarded: vs.Forwarded,
 			})
 		}
 	}

@@ -84,6 +84,47 @@ func (p *PeerState) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNo
 	return nil
 }
 
+// AggregateRouteStats sums route stats from all live peers.
+// Returns per-peer totals merged into a single snapshot.
+func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+
+	// Merge per-vault stats across peers by vault ID.
+	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
+
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		ingested += e.stats.RouteStatsIngested
+		dropped += e.stats.RouteStatsDropped
+		routed += e.stats.RouteStatsRouted
+		if e.stats.RouteStatsFilterActive {
+			filterActive = true
+		}
+		for _, vs := range e.stats.RouteVaultStats {
+			existing, ok := vaultMap[vs.VaultId]
+			if !ok {
+				vaultMap[vs.VaultId] = &gastrologv1.VaultRouteStats{
+					VaultId:          vs.VaultId,
+					RecordsMatched:   vs.RecordsMatched,
+					RecordsForwarded: vs.RecordsForwarded,
+				}
+			} else {
+				existing.RecordsMatched += vs.RecordsMatched
+				existing.RecordsForwarded += vs.RecordsForwarded
+			}
+		}
+	}
+
+	for _, vs := range vaultMap {
+		vaultStats = append(vaultStats, vs)
+	}
+	return
+}
+
 // HandleBroadcast is a subscriber callback for the cluster broadcast system.
 // It extracts NodeStats from the broadcast message and stores it.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {

@@ -64,6 +64,24 @@ func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, byte
 	return a.orch.IngesterName(uid), s.MessagesIngested.Load(), s.BytesIngested.Load(), s.Errors.Load(), a.orch.IsIngesterRunning(uid)
 }
 
+func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
+	rs := a.orch.GetRouteStats()
+	snap := cluster.StatsRouteSnapshot{
+		Ingested:     rs.Ingested.Load(),
+		Dropped:      rs.Dropped.Load(),
+		Routed:       rs.Routed.Load(),
+		FilterActive: a.orch.IsFilterSetActive(),
+	}
+	for vaultID, vs := range a.orch.VaultRouteStatsList() {
+		snap.VaultStats = append(snap.VaultStats, cluster.StatsVaultRouteSnapshot{
+			VaultID:   vaultID.String(),
+			Matched:   vs.Matched.Load(),
+			Forwarded: vs.Forwarded.Load(),
+		})
+	}
+	return snap
+}
+
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
 type jobBroadcastAdapter struct {
 	scheduler *orchestrator.Scheduler

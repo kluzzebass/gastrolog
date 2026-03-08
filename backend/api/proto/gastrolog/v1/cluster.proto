@@ -4,6 +4,7 @@ package gastrolog.v1;
 import "google/protobuf/timestamp.proto";
 import "gastrolog/v1/job.proto";
 import "gastrolog/v1/query.proto";
+import "gastrolog/v1/config.proto";
 import "gastrolog/v1/vault.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
@@ -94,6 +95,13 @@ message NodeStats {
   // Addresses (advertised via broadcast so peers know each other's endpoints)
   string api_address = 26;        // HTTP API address (e.g. ":4564")
   string pprof_address = 27;      // pprof HTTP address, empty if disabled
+
+  // Route stats (aggregated cluster-wide by GetRouteStats RPC)
+  int64 route_stats_ingested = 28;
+  int64 route_stats_dropped = 29;
+  int64 route_stats_routed = 30;
+  bool route_stats_filter_active = 31;
+  repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

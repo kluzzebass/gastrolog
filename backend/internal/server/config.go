@@ -26,6 +26,12 @@ type PeerIngesterStatsProvider interface {
 	FindIngesterStats(ingesterID string) *apiv1.IngesterNodeStats
 }
 
+// PeerRouteStatsProvider aggregates route stats from all cluster peer broadcasts.
+// Implemented by cluster.PeerState; nil in single-node mode.
+type PeerRouteStatsProvider interface {
+	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats)
+}
+
 // ConfigServer implements the ConfigService.
 type ConfigServer struct {
 	orch                  *orchestrator.Orchestrator
@@ -33,6 +39,7 @@ type ConfigServer struct {
 	factories             orchestrator.Factories
 	certManager           CertManager
 	peerStats             PeerIngesterStatsProvider
+	peerRouteStats        PeerRouteStatsProvider
 	localNodeID           string
 	onTLSConfigChange     func()
 	onLookupConfigChange  func(config.LookupConfig)
@@ -43,13 +50,14 @@ type ConfigServer struct {
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, peerStats PeerIngesterStatsProvider, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal) *ConfigServer {
+func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, peerStats PeerIngesterStatsProvider, peerRouteStats PeerRouteStatsProvider, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal) *ConfigServer {
 	return &ConfigServer{
 		orch:             orch,
 		cfgStore:         cfgStore,
 		factories:        factories,
 		certManager:      certManager,
 		peerStats:        peerStats,
+		peerRouteStats:   peerRouteStats,
 		localNodeID:      localNodeID,
 		afterConfigApply: afterConfigApply,
 		configSignal:     configSignal,

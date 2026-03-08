@@ -7,6 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkAnalysis, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
+import { VaultRouteStats } from "./config_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
@@ -512,6 +513,33 @@ export class NodeStats extends Message<NodeStats> {
    */
   pprofAddress = "";
 
+  /**
+   * Route stats (aggregated cluster-wide by GetRouteStats RPC)
+   *
+   * @generated from field: int64 route_stats_ingested = 28;
+   */
+  routeStatsIngested = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 route_stats_dropped = 29;
+   */
+  routeStatsDropped = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 route_stats_routed = 30;
+   */
+  routeStatsRouted = protoInt64.zero;
+
+  /**
+   * @generated from field: bool route_stats_filter_active = 31;
+   */
+  routeStatsFilterActive = false;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
+   */
+  routeVaultStats: VaultRouteStats[] = [];
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -547,6 +575,11 @@ export class NodeStats extends Message<NodeStats> {
     { no: 25, name: "raft_fsm_pending", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 26, name: "api_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 27, name: "pprof_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 28, name: "route_stats_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 29, name: "route_stats_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 30, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

@@ -648,7 +648,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath,
 			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal,
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
-			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState,
+			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerJobs: deps.PeerJobState,
 			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder,
 			RemoteVaultForwarder: deps.SearchForwarder, ClusterAddress: deps.ClusterAddr,
