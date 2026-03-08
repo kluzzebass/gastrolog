@@ -47,14 +47,16 @@ type multinodeTestNode struct {
 // multiNodeHarness holds the cluster of test nodes and the coordinator's
 // server + clients.
 type multiNodeHarness struct {
-	coordinator string // nodeID of the coordinator
-	nodes       map[string]multinodeTestNode
-	cfgStore    config.Store
-	srv         *server.Server
-	client      gastrologv1connect.QueryServiceClient
-	vaultClient gastrologv1connect.VaultServiceClient
-	jobSrv      gastrologv1connect.JobServiceClient
-	peerJobs    *mnPeerJobs
+	coordinator   string // nodeID of the coordinator
+	nodes         map[string]multinodeTestNode
+	cfgStore      config.Store
+	srv           *server.Server
+	client        gastrologv1connect.QueryServiceClient
+	vaultClient   gastrologv1connect.VaultServiceClient
+	configClient  gastrologv1connect.ConfigServiceClient
+	jobSrv        gastrologv1connect.JobServiceClient
+	peerJobs      *mnPeerJobs
+	peerRouteStats *mnPeerRouteStats
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -138,12 +140,22 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}}
 
+	// Collect remote orchestrators for peer route stats.
+	peerRouteNodes := make(map[string]*orchestrator.Orchestrator)
+	for _, id := range nodeIDs {
+		if id != coordinatorID {
+			peerRouteNodes[id] = nodes[id].orch
+		}
+	}
+	peerRouteStats := &mnPeerRouteStats{nodes: peerRouteNodes}
+
 	coordNode := nodes[coordinatorID]
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
 		NodeID:               coordinatorID,
 		RemoteSearcher:       remoteSearcher,
 		RemoteVaultForwarder: remoteVaultFwd,
 		PeerJobs:             peerJobs,
+		PeerRouteStats:       peerRouteStats,
 	})
 
 	handler := srv.Handler()
@@ -152,6 +164,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	}
 	queryClient := gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
 	vaultClient := gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded")
+	configClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 
 	t.Cleanup(func() {
@@ -161,14 +174,16 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	})
 
 	return &multiNodeHarness{
-		coordinator: coordinatorID,
-		nodes:       nodes,
-		cfgStore:    cfgStore,
-		srv:         srv,
-		client:      queryClient,
-		vaultClient: vaultClient,
-		jobSrv:      jobClient,
-		peerJobs:    peerJobs,
+		coordinator:    coordinatorID,
+		nodes:          nodes,
+		cfgStore:       cfgStore,
+		srv:            srv,
+		client:         queryClient,
+		vaultClient:    vaultClient,
+		configClient:   configClient,
+		jobSrv:         jobClient,
+		peerJobs:       peerJobs,
+		peerRouteStats: peerRouteStats,
 	}
 }
 
@@ -208,6 +223,43 @@ type mnPeerJobs struct {
 
 func (p *mnPeerJobs) GetAll() map[string][]*gastrologv1.Job {
 	return p.peers
+}
+
+// mnPeerRouteStats simulates aggregated route stats from peer nodes.
+// Collects stats from all non-coordinator orchestrators.
+type mnPeerRouteStats struct {
+	nodes map[string]*orchestrator.Orchestrator // remote node orchs
+}
+
+func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats) {
+	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
+	for _, orch := range p.nodes {
+		rs := orch.GetRouteStats()
+		ingested += rs.Ingested.Load()
+		dropped += rs.Dropped.Load()
+		routed += rs.Routed.Load()
+		if orch.IsFilterSetActive() {
+			filterActive = true
+		}
+		for vaultID, vs := range orch.VaultRouteStatsList() {
+			id := vaultID.String()
+			existing, ok := vaultMap[id]
+			if !ok {
+				vaultMap[id] = &gastrologv1.VaultRouteStats{
+					VaultId:          id,
+					RecordsMatched:   vs.Matched.Load(),
+					RecordsForwarded: vs.Forwarded.Load(),
+				}
+			} else {
+				existing.RecordsMatched += vs.Matched.Load()
+				existing.RecordsForwarded += vs.Forwarded.Load()
+			}
+		}
+	}
+	for _, vs := range vaultMap {
+		vaultStats = append(vaultStats, vs)
+	}
+	return
 }
 
 // directRemoteSearcher calls directly into the target node's orchestrator,
@@ -906,5 +958,72 @@ func TestMultiNode_ReindexVaultRemote(t *testing.T) {
 	}
 	if resp.Msg.JobId == "" {
 		t.Error("expected non-empty job ID from remote reindex")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Route stats aggregated across cluster nodes
+// ---------------------------------------------------------------------------
+
+func TestMultiNode_RouteStatsAggregated(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+	ctx := context.Background()
+
+	// Set up catch-all routes on data nodes so ingest() routes records.
+	d1 := h.Node(t, "data-1")
+	d2 := h.Node(t, "data-2")
+
+	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: d1.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
+	d2.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: d2.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
+	}))
+
+	// Ingest records on each data node (simulating ingesters on those nodes).
+	for range 3 {
+		if err := d1.orch.Ingest(chunk.Record{Raw: []byte("from-d1")}); err != nil {
+			t.Fatalf("Ingest on data-1: %v", err)
+		}
+	}
+	for range 7 {
+		if err := d2.orch.Ingest(chunk.Record{Raw: []byte("from-d2")}); err != nil {
+			t.Fatalf("Ingest on data-2: %v", err)
+		}
+	}
+
+	// Query route stats via the coordinator — should aggregate both data nodes.
+	resp, err := h.configClient.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+	if err != nil {
+		t.Fatalf("GetRouteStats: %v", err)
+	}
+
+	if resp.Msg.TotalIngested != 10 {
+		t.Errorf("TotalIngested = %d, want 10 (3+7)", resp.Msg.TotalIngested)
+	}
+	if resp.Msg.TotalRouted != 10 {
+		t.Errorf("TotalRouted = %d, want 10", resp.Msg.TotalRouted)
+	}
+	if resp.Msg.TotalDropped != 0 {
+		t.Errorf("TotalDropped = %d, want 0", resp.Msg.TotalDropped)
+	}
+	if !resp.Msg.FilterSetActive {
+		t.Error("expected FilterSetActive=true")
+	}
+	if len(resp.Msg.VaultStats) != 2 {
+		t.Fatalf("expected 2 vault stats, got %d", len(resp.Msg.VaultStats))
+	}
+
+	// Build a map for easier assertions.
+	vsMap := make(map[string]int64)
+	for _, vs := range resp.Msg.VaultStats {
+		vsMap[vs.VaultId] = vs.RecordsMatched
+	}
+	if vsMap[d1.vaultID.String()] != 3 {
+		t.Errorf("data-1 vault matched = %d, want 3", vsMap[d1.vaultID.String()])
+	}
+	if vsMap[d2.vaultID.String()] != 7 {
+		t.Errorf("data-2 vault matched = %d, want 7", vsMap[d2.vaultID.String()])
 	}
 }
