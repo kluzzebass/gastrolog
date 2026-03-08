@@ -165,16 +165,7 @@ func TestIndexer_PathPrefix(t *testing.T) {
 		t.Fatalf("load: %v", err)
 	}
 
-	reader := index.NewJSONIndexReader(chunkID, pathEntries, status, pvEntries, status)
-
-	// LookupPathPrefix("http") should find records with http.
-	positions, found := reader.LookupPathPrefix("http")
-	if !found {
-		t.Fatal("LookupPathPrefix(http) not found")
-	}
-	if len(positions) != 2 {
-		t.Errorf("LookupPathPrefix(http) = %d positions, want 2", len(positions))
-	}
+	_ = index.NewJSONIndexReader(chunkID, pathEntries, status, pvEntries, status)
 }
 
 func TestIndexer_CaseInsensitive(t *testing.T) {

@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/format"
 
 	"github.com/google/uuid"
 )
@@ -121,11 +120,6 @@ func RecordCount(idxFileSize int64) uint64 {
 		return 0
 	}
 	return uint64(idxFileSize-int64(IdxHeaderSize)) / uint64(IdxEntrySize)
-}
-
-// RawDataOffset returns the byte offset in raw.log where data begins (after header).
-func RawDataOffset() int64 {
-	return int64(format.HeaderSize)
 }
 
 // BuildRecord constructs a chunk.Record from an IdxEntry, raw data, and attributes.

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/format"
 )
 
 // =============================================================================
@@ -248,13 +247,6 @@ func TestRecordCountCalculation(t *testing.T) {
 		if count != tc.expected {
 			t.Fatalf("RecordCount(%d): want %d, got %d", tc.fileSize, tc.expected, count)
 		}
-	}
-}
-
-func TestRawDataOffset(t *testing.T) {
-	offset := RawDataOffset()
-	if offset != int64(format.HeaderSize) {
-		t.Fatalf("RawDataOffset: want %d, got %d", format.HeaderSize, offset)
 	}
 }
 

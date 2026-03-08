@@ -964,59 +964,6 @@ func TestAggregatorMultipleBinGroups(t *testing.T) {
 	}
 }
 
-func TestRunStats(t *testing.T) {
-	stats := &querylang.StatsOp{
-		Aggs:   []querylang.AggExpr{{Func: "count"}},
-		Groups: []querylang.GroupExpr{{Field: &querylang.FieldRef{Name: "level"}}},
-	}
-
-	records := func(yield func(chunk.Record, error) bool) {
-		if !yield(makeRec(baseTime, chunk.Attributes{"level": "error"}, ""), nil) {
-			return
-		}
-		if !yield(makeRec(baseTime, chunk.Attributes{"level": "error"}, ""), nil) {
-			return
-		}
-		if !yield(makeRec(baseTime, chunk.Attributes{"level": "info"}, ""), nil) {
-			return
-		}
-	}
-
-	result, err := RunStats(records, stats, time.Time{}, time.Time{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Rows) != 2 {
-		t.Fatalf("rows = %d, want 2", len(result.Rows))
-	}
-	if result.Rows[0][0] != "error" || result.Rows[0][1] != "2" {
-		t.Errorf("error row = %v", result.Rows[0])
-	}
-	if result.Rows[1][0] != "info" || result.Rows[1][1] != "1" {
-		t.Errorf("info row = %v", result.Rows[1])
-	}
-}
-
-func TestRunStatsError(t *testing.T) {
-	stats := &querylang.StatsOp{
-		Aggs: []querylang.AggExpr{{Func: "count"}},
-	}
-
-	testErr := errForTest("test error")
-	records := func(yield func(chunk.Record, error) bool) {
-		yield(chunk.Record{}, testErr)
-	}
-
-	_, err := RunStats(records, stats, time.Time{}, time.Time{})
-	if err == nil {
-		t.Fatal("expected error")
-	}
-}
-
-type errForTest string
-
-func (e errForTest) Error() string { return string(e) }
-
 func TestAccumulatorEdgeCases(t *testing.T) {
 	t.Run("count never missing", func(t *testing.T) {
 		acc := &countAcc{}

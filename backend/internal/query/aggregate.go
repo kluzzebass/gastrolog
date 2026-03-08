@@ -3,7 +3,6 @@ package query
 import (
 	"errors"
 	"fmt"
-	"iter"
 	"maps"
 	"slices"
 	"strconv"
@@ -250,25 +249,6 @@ func (a *Aggregator) Result(start, end time.Time) *TableResult {
 		Rows:      rows,
 		Truncated: a.truncated,
 	}
-}
-
-// RunStats is a convenience function that runs a stats aggregation over a record stream.
-func RunStats(records iter.Seq2[chunk.Record, error], stats *querylang.StatsOp, start, end time.Time) (*TableResult, error) {
-	agg, err := NewAggregator(stats)
-	if err != nil {
-		return nil, err
-	}
-
-	for rec, err := range records {
-		if err != nil {
-			return nil, err
-		}
-		if err := agg.Add(rec); err != nil {
-			return nil, err
-		}
-	}
-
-	return agg.Result(start, end), nil
 }
 
 // makeGroupKey creates a hashable string from group values using null byte separator.

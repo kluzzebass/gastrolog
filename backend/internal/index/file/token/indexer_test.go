@@ -785,10 +785,11 @@ func TestOpenReader(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	reader, err := Open(indexDir, chunkID)
+	entries, err := LoadIndex(indexDir, chunkID)
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("load index: %v", err)
 	}
+	reader := index.NewTokenIndexReader(chunkID, entries)
 
 	positions, found := reader.Lookup("beta")
 	if !found {
@@ -834,10 +835,11 @@ func TestIndexerHighBytesAreDelimiters(t *testing.T) {
 	}
 
 	// Verify we can look them up via reader
-	reader, err := Open(indexDir, chunkID)
+	entries2, err := LoadIndex(indexDir, chunkID)
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("load index: %v", err)
 	}
+	reader := index.NewTokenIndexReader(chunkID, entries2)
 
 	_, found := reader.Lookup("ber")
 	if !found {
@@ -899,10 +901,11 @@ func TestOpenReaderLookupFirstLast(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	reader, err := Open(indexDir, chunkID)
+	entries, err := LoadIndex(indexDir, chunkID)
 	if err != nil {
-		t.Fatalf("open: %v", err)
+		t.Fatalf("load index: %v", err)
 	}
+	reader := index.NewTokenIndexReader(chunkID, entries)
 
 	// First entry (alphabetically)
 	_, found := reader.Lookup("aardvark")

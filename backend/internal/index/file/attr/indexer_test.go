@@ -515,10 +515,11 @@ func TestOpenReaders(t *testing.T) {
 	}
 
 	// Test key reader
-	keyReader, err := OpenKeyIndex(indexDir, chunkID)
+	keyEntries, err := LoadKeyIndex(indexDir, chunkID)
 	if err != nil {
-		t.Fatalf("open key index: %v", err)
+		t.Fatalf("load key index: %v", err)
 	}
+	keyReader := index.NewAttrKeyIndexReader(chunkID, keyEntries)
 
 	positions, found := keyReader.Lookup("env")
 	if !found {
@@ -534,10 +535,11 @@ func TestOpenReaders(t *testing.T) {
 	}
 
 	// Test value reader
-	valueReader, err := OpenValueIndex(indexDir, chunkID)
+	valueEntries, err := LoadValueIndex(indexDir, chunkID)
 	if err != nil {
-		t.Fatalf("open value index: %v", err)
+		t.Fatalf("load value index: %v", err)
 	}
+	valueReader := index.NewAttrValueIndexReader(chunkID, valueEntries)
 
 	positions, found = valueReader.Lookup("prod")
 	if !found {
@@ -548,10 +550,11 @@ func TestOpenReaders(t *testing.T) {
 	}
 
 	// Test kv reader
-	kvReader, err := OpenKVIndex(indexDir, chunkID)
+	kvEntries, err := LoadKVIndex(indexDir, chunkID)
 	if err != nil {
-		t.Fatalf("open kv index: %v", err)
+		t.Fatalf("load kv index: %v", err)
 	}
+	kvReader := index.NewAttrKVIndexReader(chunkID, kvEntries)
 
 	positions, found = kvReader.Lookup("env", "prod")
 	if !found {

@@ -558,13 +558,14 @@ func TestOpenReaders(t *testing.T) {
 	}
 
 	// Test key reader
-	keyReader, status, err := OpenKeyIndex(indexDir, chunkID)
+	keyEntries, status, err := LoadKeyIndex(indexDir, chunkID)
 	if err != nil {
 		t.Fatalf("open key index: %v", err)
 	}
 	if status != index.KVComplete {
 		t.Fatalf("expected complete status, got %v", status)
 	}
+	keyReader := index.NewKVKeyIndexReader(chunkID, keyEntries)
 
 	positions, found := keyReader.Lookup("status")
 	if !found {
@@ -580,13 +581,14 @@ func TestOpenReaders(t *testing.T) {
 	}
 
 	// Test value reader
-	valueReader, status, err := OpenValueIndex(indexDir, chunkID)
+	valueEntries, status, err := LoadValueIndex(indexDir, chunkID)
 	if err != nil {
 		t.Fatalf("open value index: %v", err)
 	}
 	if status != index.KVComplete {
 		t.Fatalf("expected complete status, got %v", status)
 	}
+	valueReader := index.NewKVValueIndexReader(chunkID, valueEntries)
 
 	positions, found = valueReader.Lookup("500")
 	if !found {
@@ -597,13 +599,14 @@ func TestOpenReaders(t *testing.T) {
 	}
 
 	// Test kv reader
-	kvReader, status, err := OpenKVIndex(indexDir, chunkID)
+	kvEntries, status, err := LoadKVIndex(indexDir, chunkID)
 	if err != nil {
 		t.Fatalf("open kv index: %v", err)
 	}
 	if status != index.KVComplete {
 		t.Fatalf("expected complete status, got %v", status)
 	}
+	kvReader := index.NewKVIndexReader(chunkID, kvEntries)
 
 	positions, found = kvReader.Lookup("status", "500")
 	if !found {

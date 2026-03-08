@@ -133,22 +133,6 @@ func hclogToSlog(level hclog.Level) slog.Level {
 	}
 }
 
-// SlogToHclogLevel converts an slog.Level to the closest hclog.Level.
-func SlogToHclogLevel(level slog.Level) hclog.Level {
-	switch {
-	case level <= slog.LevelDebug-4:
-		return hclog.Trace
-	case level <= slog.LevelDebug:
-		return hclog.Debug
-	case level <= slog.LevelInfo:
-		return hclog.Info
-	case level <= slog.LevelWarn:
-		return hclog.Warn
-	default:
-		return hclog.Error
-	}
-}
-
 // FilterHclogMessages returns an hclog.Logger that drops messages containing
 // any of the given substrings. Useful for suppressing noisy library logs.
 func FilterHclogMessages(base hclog.Logger, suppress ...string) hclog.Logger {
