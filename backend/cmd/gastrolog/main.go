@@ -116,7 +116,7 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(serverCmd, versionCmd, cli.NewConfigCommand())
+	rootCmd.AddCommand(serverCmd, versionCmd, cli.NewConfigCommand(), cli.NewPrimeCommand())
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if ctx.Err() != nil {
