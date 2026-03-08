@@ -65,6 +65,25 @@ func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
 	return nil
 }
 
+// FindIngesterStats scans all live peers for an IngesterNodeStats matching the given ID.
+// Returns nil if no peer reports stats for this ingester.
+func (p *PeerState) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNodeStats {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	for _, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, is := range e.stats.Ingesters {
+			if is.Id == ingesterID {
+				return is
+			}
+		}
+	}
+	return nil
+}
+
 // HandleBroadcast is a subscriber callback for the cluster broadcast system.
 // It extracts NodeStats from the broadcast message and stores it.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {

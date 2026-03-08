@@ -567,6 +567,222 @@ func TestDeleteIngesterNotFound(t *testing.T) {
 	}
 }
 
+// noopIngester is a dummy ingester that blocks until cancelled.
+type noopIngester struct{}
+
+func (n *noopIngester) Run(ctx context.Context, _ chan<- orchestrator.IngestMessage) error {
+	<-ctx.Done()
+	return nil
+}
+
+// mockPeerIngesterStats implements server.PeerIngesterStatsProvider for tests.
+type mockPeerIngesterStats struct {
+	stats map[string]*gastrologv1.IngesterNodeStats
+}
+
+func (m *mockPeerIngesterStats) FindIngesterStats(id string) *gastrologv1.IngesterNodeStats {
+	return m.stats[id]
+}
+
+func TestListIngestersRemoteRunning(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cfgStore := cfgmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	remoteIngID := uuid.Must(uuid.NewV7())
+	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
+		ID: remoteIngID, Name: "remote-syslog", Type: "syslog", NodeID: "node-B", Enabled: true,
+	})
+
+	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
+		remoteIngID.String(): {
+			Id: remoteIngID.String(), Running: true,
+			MessagesIngested: 42, BytesIngested: 1024, Errors: 1,
+		},
+	}}
+
+	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NodeID:            "node-A",
+		PeerIngesterStats: peerStats,
+	})
+	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
+	client := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+
+	resp, err := client.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found *gastrologv1.IngesterInfo
+	for _, ing := range resp.Msg.Ingesters {
+		if ing.Id == remoteIngID.String() {
+			found = ing
+		}
+	}
+	if found == nil {
+		t.Fatal("remote ingester not found in list")
+	}
+	if !found.Running {
+		t.Error("expected Running=true for remote ingester")
+	}
+}
+
+func TestGetIngesterStatusRemote(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cfgStore := cfgmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	remoteIngID := uuid.Must(uuid.NewV7())
+	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
+		ID: remoteIngID, Name: "remote-syslog", Type: "syslog", NodeID: "node-B", Enabled: true,
+	})
+
+	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
+		remoteIngID.String(): {
+			Id: remoteIngID.String(), Running: true,
+			MessagesIngested: 42, BytesIngested: 1024, Errors: 1,
+		},
+	}}
+
+	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NodeID:            "node-A",
+		PeerIngesterStats: peerStats,
+	})
+	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
+	client := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+
+	resp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
+		Id: remoteIngID.String(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Msg.Running {
+		t.Error("expected Running=true")
+	}
+	if resp.Msg.MessagesIngested != 42 {
+		t.Errorf("MessagesIngested = %d, want 42", resp.Msg.MessagesIngested)
+	}
+	if resp.Msg.BytesIngested != 1024 {
+		t.Errorf("BytesIngested = %d, want 1024", resp.Msg.BytesIngested)
+	}
+	if resp.Msg.Errors != 1 {
+		t.Errorf("Errors = %d, want 1", resp.Msg.Errors)
+	}
+}
+
+func TestGetIngesterStatusLocal(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cfgStore := cfgmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ingID := uuid.Must(uuid.NewV7())
+	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
+		ID: ingID, Name: "local-syslog", Type: "syslog", NodeID: "node-A", Enabled: true,
+	})
+
+	// Register in orchestrator so GetIngesterStats returns non-nil.
+	orch.RegisterIngester(ingID, "local-syslog", "syslog", &noopIngester{})
+
+	// Simulate some stats.
+	stats := orch.GetIngesterStats(ingID)
+	stats.MessagesIngested.Store(99)
+	stats.BytesIngested.Store(2048)
+	stats.Errors.Store(3)
+
+	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NodeID: "node-A",
+	})
+	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
+	client := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+
+	resp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
+		Id: ingID.String(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.Msg.MessagesIngested != 99 {
+		t.Errorf("MessagesIngested = %d, want 99", resp.Msg.MessagesIngested)
+	}
+	if resp.Msg.BytesIngested != 2048 {
+		t.Errorf("BytesIngested = %d, want 2048", resp.Msg.BytesIngested)
+	}
+	if resp.Msg.Errors != 3 {
+		t.Errorf("Errors = %d, want 3", resp.Msg.Errors)
+	}
+}
+
+func TestListIngestersNoPeerStats(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	cfgStore := cfgmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	remoteIngID := uuid.Must(uuid.NewV7())
+	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
+		ID: remoteIngID, Name: "remote-syslog", Type: "syslog", NodeID: "node-B", Enabled: true,
+	})
+
+	// No PeerIngesterStats provided (single-node mode).
+	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NodeID: "node-A",
+	})
+	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
+	client := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+
+	resp, err := client.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found *gastrologv1.IngesterInfo
+	for _, ing := range resp.Msg.Ingesters {
+		if ing.Id == remoteIngID.String() {
+			found = ing
+		}
+	}
+	if found == nil {
+		t.Fatal("remote ingester not found in list")
+	}
+	if found.Running {
+		t.Error("expected Running=false when no peer stats available")
+	}
+
+	// GetIngesterStatus should also work without error.
+	statusResp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
+		Id: remoteIngID.String(),
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statusResp.Msg.Running {
+		t.Error("expected Running=false")
+	}
+	if statusResp.Msg.MessagesIngested != 0 {
+		t.Errorf("MessagesIngested = %d, want 0", statusResp.Msg.MessagesIngested)
+	}
+}
+
 func TestPutIngesterMissingRequiredParam(t *testing.T) {
 	client, _, _ := newConfigTestSetupWithIngesters(t)
 	ctx := context.Background()

@@ -81,6 +81,10 @@ type Config struct {
 	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerStats.
 	PeerVaultStats PeerVaultStatsProvider
 
+	// PeerIngesterStats looks up ingester-level stats from cluster peers.
+	// Nil in single-node mode. Typically the same *cluster.PeerState as PeerStats.
+	PeerIngesterStats PeerIngesterStatsProvider
+
 	// RemoteSearcher forwards search requests to remote cluster nodes.
 	// Nil in single-node mode.
 	RemoteSearcher RemoteSearcher
@@ -137,8 +141,9 @@ type Server struct {
 	logger      *slog.Logger
 	cluster          ClusterStatusProvider
 	peerStats        NodeStatsProvider
-	peerVaultStats   PeerVaultStatsProvider
-	remoteSearcher       RemoteSearcher
+	peerVaultStats      PeerVaultStatsProvider
+	peerIngesterStats   PeerIngesterStatsProvider
+	remoteSearcher      RemoteSearcher
 	remoteVaultForwarder RemoteVaultForwarder
 	peerJobs             PeerJobsProvider
 	localStatsFn     func() *apiv1.NodeStats
@@ -189,7 +194,8 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		logger:      logging.Default(cfg.Logger).With("component", "server"),
 		cluster:          cfg.Cluster,
 		peerStats:        cfg.PeerStats,
-		peerVaultStats:   cfg.PeerVaultStats,
+		peerVaultStats:    cfg.PeerVaultStats,
+		peerIngesterStats: cfg.PeerIngesterStats,
 		remoteSearcher:       cfg.RemoteSearcher,
 		remoteVaultForwarder: cfg.RemoteVaultForwarder,
 		peerJobs:             cfg.PeerJobs,
@@ -321,7 +327,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.localNodeID, s.afterConfigApply, s.configSignal)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.localNodeID, s.afterConfigApply, s.configSignal)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
 		s.applyLookupConfig(cfg, geoipTable, asnTable)

@@ -20,12 +20,19 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// PeerIngesterStatsProvider looks up ingester stats from cluster peer broadcasts.
+// Implemented by cluster.PeerState; nil in single-node mode.
+type PeerIngesterStatsProvider interface {
+	FindIngesterStats(ingesterID string) *apiv1.IngesterNodeStats
+}
+
 // ConfigServer implements the ConfigService.
 type ConfigServer struct {
 	orch                  *orchestrator.Orchestrator
 	cfgStore              config.Store
 	factories             orchestrator.Factories
 	certManager           CertManager
+	peerStats             PeerIngesterStatsProvider
 	localNodeID           string
 	onTLSConfigChange     func()
 	onLookupConfigChange  func(config.LookupConfig)
@@ -36,12 +43,13 @@ type ConfigServer struct {
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal) *ConfigServer {
+func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, peerStats PeerIngesterStatsProvider, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal) *ConfigServer {
 	return &ConfigServer{
 		orch:             orch,
 		cfgStore:         cfgStore,
 		factories:        factories,
 		certManager:      certManager,
+		peerStats:        peerStats,
 		localNodeID:      localNodeID,
 		afterConfigApply: afterConfigApply,
 		configSignal:     configSignal,
