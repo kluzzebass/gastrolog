@@ -4160,3 +4160,160 @@ export class WatchConfigResponse extends Message<WatchConfigResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.GetRouteStatsRequest
+ */
+export class GetRouteStatsRequest extends Message<GetRouteStatsRequest> {
+  constructor(data?: PartialMessage<GetRouteStatsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetRouteStatsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsRequest {
+    return new GetRouteStatsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetRouteStatsRequest {
+    return new GetRouteStatsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetRouteStatsRequest {
+    return new GetRouteStatsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetRouteStatsRequest | PlainMessage<GetRouteStatsRequest> | undefined, b: GetRouteStatsRequest | PlainMessage<GetRouteStatsRequest> | undefined): boolean {
+    return proto3.util.equals(GetRouteStatsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.GetRouteStatsResponse
+ */
+export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
+  /**
+   * Global counters since process start.
+   *
+   * total records entering ingest()
+   *
+   * @generated from field: int64 total_ingested = 1;
+   */
+  totalIngested = protoInt64.zero;
+
+  /**
+   * records matching no filter (silently lost)
+   *
+   * @generated from field: int64 total_dropped = 2;
+   */
+  totalDropped = protoInt64.zero;
+
+  /**
+   * records delivered to at least one vault
+   *
+   * @generated from field: int64 total_routed = 3;
+   */
+  totalRouted = protoInt64.zero;
+
+  /**
+   * false = no routes compiled, all records dropped
+   *
+   * @generated from field: bool filter_set_active = 4;
+   */
+  filterSetActive = false;
+
+  /**
+   * Per-vault destination counters.
+   *
+   * @generated from field: repeated gastrolog.v1.VaultRouteStats vault_stats = 5;
+   */
+  vaultStats: VaultRouteStats[] = [];
+
+  constructor(data?: PartialMessage<GetRouteStatsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.GetRouteStatsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "total_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 2, name: "total_dropped", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsResponse {
+    return new GetRouteStatsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): GetRouteStatsResponse {
+    return new GetRouteStatsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): GetRouteStatsResponse {
+    return new GetRouteStatsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: GetRouteStatsResponse | PlainMessage<GetRouteStatsResponse> | undefined, b: GetRouteStatsResponse | PlainMessage<GetRouteStatsResponse> | undefined): boolean {
+    return proto3.util.equals(GetRouteStatsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.VaultRouteStats
+ */
+export class VaultRouteStats extends Message<VaultRouteStats> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * records routed to this vault
+   *
+   * @generated from field: int64 records_matched = 2;
+   */
+  recordsMatched = protoInt64.zero;
+
+  /**
+   * subset sent to a remote node
+   *
+   * @generated from field: int64 records_forwarded = 3;
+   */
+  recordsForwarded = protoInt64.zero;
+
+  constructor(data?: PartialMessage<VaultRouteStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.VaultRouteStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRouteStats {
+    return new VaultRouteStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultRouteStats {
+    return new VaultRouteStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultRouteStats {
+    return new VaultRouteStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: VaultRouteStats | PlainMessage<VaultRouteStats> | undefined, b: VaultRouteStats | PlainMessage<VaultRouteStats> | undefined): boolean {
+    return proto3.util.equals(VaultRouteStats, a, b);
+  }
+}
+

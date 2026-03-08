@@ -128,6 +128,9 @@ const (
 	// ConfigServiceWatchConfigProcedure is the fully-qualified name of the ConfigService's WatchConfig
 	// RPC.
 	ConfigServiceWatchConfigProcedure = "/gastrolog.v1.ConfigService/WatchConfig"
+	// ConfigServiceGetRouteStatsProcedure is the fully-qualified name of the ConfigService's
+	// GetRouteStats RPC.
+	ConfigServiceGetRouteStatsProcedure = "/gastrolog.v1.ConfigService/GetRouteStats"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -198,6 +201,8 @@ type ConfigServiceClient interface {
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 	// WatchConfig streams a notification whenever configuration changes.
 	WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest]) (*connect.ServerStreamForClient[v1.WatchConfigResponse], error)
+	// GetRouteStats returns live routing statistics.
+	GetRouteStats(context.Context, *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -409,6 +414,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("WatchConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		getRouteStats: connect.NewClient[v1.GetRouteStatsRequest, v1.GetRouteStatsResponse](
+			httpClient,
+			baseURL+ConfigServiceGetRouteStatsProcedure,
+			connect.WithSchema(configServiceMethods.ByName("GetRouteStats")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -447,6 +458,7 @@ type configServiceClient struct {
 	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
 	generateName          *connect.Client[v1.GenerateNameRequest, v1.GenerateNameResponse]
 	watchConfig           *connect.Client[v1.WatchConfigRequest, v1.WatchConfigResponse]
+	getRouteStats         *connect.Client[v1.GetRouteStatsRequest, v1.GetRouteStatsResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -614,6 +626,11 @@ func (c *configServiceClient) WatchConfig(ctx context.Context, req *connect.Requ
 	return c.watchConfig.CallServerStream(ctx, req)
 }
 
+// GetRouteStats calls gastrolog.v1.ConfigService.GetRouteStats.
+func (c *configServiceClient) GetRouteStats(ctx context.Context, req *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error) {
+	return c.getRouteStats.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -682,6 +699,8 @@ type ConfigServiceHandler interface {
 	GenerateName(context.Context, *connect.Request[v1.GenerateNameRequest]) (*connect.Response[v1.GenerateNameResponse], error)
 	// WatchConfig streams a notification whenever configuration changes.
 	WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest], *connect.ServerStream[v1.WatchConfigResponse]) error
+	// GetRouteStats returns live routing statistics.
+	GetRouteStats(context.Context, *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -889,6 +908,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("WatchConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceGetRouteStatsHandler := connect.NewUnaryHandler(
+		ConfigServiceGetRouteStatsProcedure,
+		svc.GetRouteStats,
+		connect.WithSchema(configServiceMethods.ByName("GetRouteStats")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -957,6 +982,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGenerateNameHandler.ServeHTTP(w, r)
 		case ConfigServiceWatchConfigProcedure:
 			configServiceWatchConfigHandler.ServeHTTP(w, r)
+		case ConfigServiceGetRouteStatsProcedure:
+			configServiceGetRouteStatsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1096,4 +1123,8 @@ func (UnimplementedConfigServiceHandler) GenerateName(context.Context, *connect.
 
 func (UnimplementedConfigServiceHandler) WatchConfig(context.Context, *connect.Request[v1.WatchConfigRequest], *connect.ServerStream[v1.WatchConfigResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.WatchConfig is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) GetRouteStats(context.Context, *connect.Request[v1.GetRouteStatsRequest]) (*connect.Response[v1.GetRouteStatsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetRouteStats is not implemented"))
 }

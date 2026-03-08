@@ -802,3 +802,80 @@ func TestPutIngesterMissingRequiredParam(t *testing.T) {
 		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
 	}
 }
+
+func TestGetRouteStats(t *testing.T) {
+	t.Parallel()
+	client, cfgStore, orch := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Before any ingestion, stats should be zero.
+	resp, err := client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+	if err != nil {
+		t.Fatalf("GetRouteStats: %v", err)
+	}
+	if resp.Msg.TotalIngested != 0 {
+		t.Errorf("expected 0 ingested, got %d", resp.Msg.TotalIngested)
+	}
+	// No filter set configured yet.
+	if resp.Msg.FilterSetActive {
+		t.Error("expected filterSetActive=false before routes configured")
+	}
+
+	// Configure a vault, filter, and route.
+	vaultID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
+
+	cm, err := chunkmem.NewManager(chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(100000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+
+	_ = cfgStore.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "test-vault", Type: "memory", Enabled: true})
+	_ = cfgStore.PutFilter(ctx, config.FilterConfig{ID: filterID, Expression: "*"})
+	_ = cfgStore.PutRoute(ctx, config.RouteConfig{
+		ID: routeID, FilterID: &filterID,
+		Destinations: []uuid.UUID{vaultID}, Enabled: true,
+	})
+
+	if err := orch.ReloadFilters(ctx); err != nil {
+		t.Fatalf("ReloadFilters: %v", err)
+	}
+
+	// Ingest some records.
+	for range 5 {
+		if err := orch.Ingest(chunk.Record{Raw: []byte("test")}); err != nil {
+			t.Fatalf("Ingest: %v", err)
+		}
+	}
+
+	resp, err = client.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+	if err != nil {
+		t.Fatalf("GetRouteStats: %v", err)
+	}
+	if resp.Msg.TotalIngested != 5 {
+		t.Errorf("expected 5 ingested, got %d", resp.Msg.TotalIngested)
+	}
+	if resp.Msg.TotalRouted != 5 {
+		t.Errorf("expected 5 routed, got %d", resp.Msg.TotalRouted)
+	}
+	if resp.Msg.TotalDropped != 0 {
+		t.Errorf("expected 0 dropped, got %d", resp.Msg.TotalDropped)
+	}
+	if !resp.Msg.FilterSetActive {
+		t.Error("expected filterSetActive=true")
+	}
+	if len(resp.Msg.VaultStats) != 1 {
+		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
+	}
+	vs := resp.Msg.VaultStats[0]
+	if vs.VaultId != vaultID.String() {
+		t.Errorf("expected vault %s, got %s", vaultID, vs.VaultId)
+	}
+	if vs.RecordsMatched != 5 {
+		t.Errorf("expected 5 matched, got %d", vs.RecordsMatched)
+	}
+}

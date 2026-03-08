@@ -16,6 +16,7 @@ import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
 import { formatTimestamp, elapsed, countdown, useTick } from "./JobCard";
 import { LocalSystemStats, SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
+import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
 import type { EntityType } from "./InspectorDialog";
 
@@ -30,6 +31,8 @@ export function EntityListPane({ entityType, dark }: Readonly<EntityListPaneProp
       return <VaultsList dark={dark} />;
     case "ingesters":
       return <IngestersList dark={dark} />;
+    case "routes":
+      return <RouteStatsList dark={dark} />;
     case "jobs":
       return <JobsList dark={dark} />;
     case "system":
@@ -128,6 +131,17 @@ function IngestersList({ dark }: Readonly<{ dark: boolean }>) {
           onToggle={() => toggle(ing.id)}
         />
       ))}
+    </div>
+  );
+}
+
+// ---- Routes ----
+
+function RouteStatsList({ dark }: Readonly<{ dark: boolean }>) {
+  return (
+    <div className="flex flex-col gap-3">
+      <EntityHeader title="Routes" helpTopicId="inspector-routes" dark={dark} />
+      <RouteStatsView dark={dark} />
     </div>
   );
 }

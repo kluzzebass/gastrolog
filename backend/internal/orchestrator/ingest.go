@@ -32,16 +32,30 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
+	o.routeStats.Ingested.Add(1)
+
 	if len(o.vaults) == 0 && o.forwarder == nil {
+		o.routeStats.Dropped.Add(1)
 		return ErrNoChunkManagers
 	}
 
 	if o.filterSet == nil {
+		o.routeStats.Dropped.Add(1)
 		return nil // No routes configured — drop the record.
 	}
 
-	for _, t := range o.filterSet.MatchWithNode(rec.Attrs) {
+	matches := o.filterSet.MatchWithNode(rec.Attrs)
+	if len(matches) == 0 {
+		o.routeStats.Dropped.Add(1)
+		return nil
+	}
+
+	o.routeStats.Routed.Add(1)
+	for _, t := range matches {
+		vs := o.getOrCreateVaultRouteStats(t.VaultID)
+		vs.Matched.Add(1)
 		if t.NodeID != "" {
+			vs.Forwarded.Add(1)
 			o.forwardRemote(t, rec)
 			continue
 		}
@@ -50,6 +64,15 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 		}
 	}
 	return nil
+}
+
+// getOrCreateVaultRouteStats returns the per-vault route stats, creating if needed.
+func (o *Orchestrator) getOrCreateVaultRouteStats(vaultID uuid.UUID) *VaultRouteStats {
+	if v, ok := o.vaultRouteStats.Load(vaultID); ok {
+		return v.(*VaultRouteStats)
+	}
+	v, _ := o.vaultRouteStats.LoadOrStore(vaultID, &VaultRouteStats{})
+	return v.(*VaultRouteStats)
 }
 
 // appendLocal appends a record to a local vault.

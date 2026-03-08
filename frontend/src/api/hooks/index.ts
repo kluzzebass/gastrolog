@@ -46,3 +46,4 @@ export type { SyntaxKeywords } from "./useSyntax";
 export { useIngesterDefaults } from "./useIngesterDefaults";
 export type { IngesterDefaults } from "./useIngesterDefaults";
 export { useSetNodeSuffrage } from "./useSetNodeSuffrage";
+export { useRouteStats } from "./useRouteStats";

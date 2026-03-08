@@ -27,6 +27,20 @@ type IngesterStats struct {
 	Errors           atomic.Int64
 }
 
+// RouteStats tracks routing metrics using atomic counters.
+// Safe for concurrent reads (from API handlers) and writes (from ingest loop).
+type RouteStats struct {
+	Ingested atomic.Int64 // total records entering ingest()
+	Dropped  atomic.Int64 // records matching no filter
+	Routed   atomic.Int64 // records delivered to at least one vault
+}
+
+// VaultRouteStats tracks per-vault routing metrics.
+type VaultRouteStats struct {
+	Matched   atomic.Int64 // records routed to this vault
+	Forwarded atomic.Int64 // records sent to remote node for this vault
+}
+
 // ingesterInfo holds metadata about an ingester for logging purposes.
 // The Ingester interface is a bare Run() — metadata lives alongside it.
 type ingesterInfo struct {
@@ -118,6 +132,10 @@ type Orchestrator struct {
 
 	// Vault filters.
 	filterSet *FilterSet
+
+	// Route stats (atomic, no lock needed for reads/writes).
+	routeStats     RouteStats
+	vaultRouteStats sync.Map // uuid.UUID → *VaultRouteStats
 
 	// Record forwarder for cross-node delivery (nil in single-node mode).
 	forwarder RecordForwarder
@@ -292,6 +310,30 @@ func (o *Orchestrator) IsIngesterRunning(id uuid.UUID) bool {
 	defer o.mu.RUnlock()
 	_, ok := o.ingesterCancels[id]
 	return ok
+}
+
+// GetRouteStats returns the global route stats.
+func (o *Orchestrator) GetRouteStats() *RouteStats {
+	return &o.routeStats
+}
+
+// IsFilterSetActive reports whether a compiled filter set exists.
+// When false, all ingested records are silently dropped.
+func (o *Orchestrator) IsFilterSetActive() bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.filterSet != nil
+}
+
+// VaultRouteStatsList returns per-vault routing stats for all vaults
+// that have received at least one record.
+func (o *Orchestrator) VaultRouteStatsList() map[uuid.UUID]*VaultRouteStats {
+	result := make(map[uuid.UUID]*VaultRouteStats)
+	o.vaultRouteStats.Range(func(key, value any) bool {
+		result[key.(uuid.UUID)] = value.(*VaultRouteStats)
+		return true
+	})
+	return result
 }
 
 // IngestQueueDepth returns the current number of messages in the ingest channel.

@@ -104,6 +104,9 @@ service ConfigService {
 
   // WatchConfig streams a notification whenever configuration changes.
   rpc WatchConfig(WatchConfigRequest) returns (stream WatchConfigResponse);
+
+  // GetRouteStats returns live routing statistics.
+  rpc GetRouteStats(GetRouteStatsRequest) returns (GetRouteStatsResponse);
 }
 
 message GetConfigRequest {}
@@ -562,3 +565,22 @@ message GenerateNameResponse {
 message WatchConfigRequest {}
 
 message WatchConfigResponse {}
+
+message GetRouteStatsRequest {}
+
+message GetRouteStatsResponse {
+  // Global counters since process start.
+  int64 total_ingested = 1;   // total records entering ingest()
+  int64 total_dropped = 2;    // records matching no filter (silently lost)
+  int64 total_routed = 3;     // records delivered to at least one vault
+  bool filter_set_active = 4; // false = no routes compiled, all records dropped
+
+  // Per-vault destination counters.
+  repeated VaultRouteStats vault_stats = 5;
+}
+
+message VaultRouteStats {
+  string vault_id = 1;
+  int64 records_matched = 2;   // records routed to this vault
+  int64 records_forwarded = 3; // subset sent to a remote node
+}

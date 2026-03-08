@@ -7,14 +7,14 @@ import { useWatchJobs } from "../../api/hooks";
 import { toastError } from "../Toast";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import { Dialog } from "../Dialog";
-import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon } from "../icons";
+import { VaultsIcon, IngestersIcon, JobsIcon, MetricsIcon, ClusterIcon, RouteIcon } from "../icons";
 import { Badge } from "../Badge";
 import { ModeToggle } from "./ModeToggle";
 import type { InspectorMode } from "./ModeToggle";
 import { NodeDetailPane } from "./NodeDetailPane";
 import { EntityListPane } from "./EntityListPane";
 
-export type EntityType = "vaults" | "ingesters" | "jobs" | "system";
+export type EntityType = "vaults" | "ingesters" | "routes" | "jobs" | "system";
 
 interface InspectorDialogProps {
   dark: boolean;
@@ -29,7 +29,7 @@ type ParsedState =
   | { mode: "nodes"; nodeId: string }
   | { mode: "entities"; entityType: EntityType };
 
-const entityTypes: EntityType[] = ["vaults", "ingesters", "jobs", "system"];
+const entityTypes: EntityType[] = ["vaults", "ingesters", "routes", "jobs", "system"];
 
 function parseParam(param: string): ParsedState {
   if (param.startsWith("nodes:")) {
@@ -75,6 +75,7 @@ type EntityNavItem = {
 const entityNavItems: EntityNavItem[] = [
   { id: "vaults", label: "Vaults", icon: VaultsIcon },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon },
+  { id: "routes", label: "Routes", icon: RouteIcon },
   { id: "jobs", label: "Jobs", icon: JobsIcon },
   { id: "system", label: "System", icon: MetricsIcon },
 ];
@@ -102,9 +103,11 @@ export function InspectorDialog({
   const { data: ingesters } = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
+  const routeCount = config?.routes?.length ?? 0;
   const entityCounts: Record<EntityType, number> = {
     vaults: vaults?.length ?? 0,
     ingesters: ingesters?.length ?? 0,
+    routes: routeCount,
     jobs: jobs.length,
     system: cluster?.nodes.length ?? 1,
   };
