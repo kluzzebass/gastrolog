@@ -59,6 +59,7 @@ type RecordForwarder struct {
 	nodes  map[string]*nodeForwarder // keyed by node ID
 	wg     sync.WaitGroup
 	closed bool
+	stop   chan struct{} // closed on Close() to unblock backoff sleeps
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
@@ -67,6 +68,7 @@ func NewRecordForwarder(peers *PeerConns, logger *slog.Logger) *RecordForwarder 
 		peers:  peers,
 		logger: logger,
 		nodes:  make(map[string]*nodeForwarder),
+		stop:   make(chan struct{}),
 	}
 }
 
@@ -122,25 +124,21 @@ func (rf *RecordForwarder) flushLoop(nodeID string, nf *nodeForwarder) {
 		// normal flush interval. Records keep accumulating in the channel
 		// and will be sent in the next successful batch.
 		if nf.backoff > 0 {
+			// During backoff, DON'T drain the channel. Let it fill up so
+			// Forward() sees the backpressure and logs overflow drops.
 			timer.Reset(nf.backoff)
 			select {
 			case <-timer.C:
-				// Backoff expired — drain channel and attempt send.
-				batch = rf.drainChannel(nf, batch)
-				if len(batch) > 0 {
-					rf.sendBatchWithBackoff(nodeID, nf, batch)
-					batch = batch[:0]
-				}
-				continue
-			case entry, ok := <-nf.ch:
-				if !ok {
-					return
-				}
-				// Record arrived during backoff — accumulate it but
-				// keep waiting for the backoff timer.
-				batch = append(batch, entry)
-				continue
+			case <-rf.stop:
+				return
 			}
+			// Backoff expired — drain channel and retry.
+			batch = rf.drainChannel(nf, batch)
+			if len(batch) > 0 {
+				rf.sendBatchWithBackoff(nodeID, nf, batch)
+				batch = batch[:0]
+			}
+			continue
 		}
 
 		// Wait for first entry or channel close.
@@ -292,6 +290,7 @@ func (rf *RecordForwarder) logFailure(nodeID string, nf *nodeForwarder, msg stri
 func (rf *RecordForwarder) Close() error {
 	rf.mu.Lock()
 	rf.closed = true
+	close(rf.stop) // unblock any backoff sleeps
 	for _, nf := range rf.nodes {
 		close(nf.ch)
 	}

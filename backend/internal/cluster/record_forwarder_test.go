@@ -118,6 +118,7 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 	rf := &RecordForwarder{
 		logger: discardLogger(),
 		nodes:  make(map[string]*nodeForwarder),
+		stop:   make(chan struct{}),
 	}
 
 	nodeID := "test-node"
