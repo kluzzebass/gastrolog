@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ---------------------------------------------------------------------------
@@ -47,16 +49,18 @@ type multinodeTestNode struct {
 // multiNodeHarness holds the cluster of test nodes and the coordinator's
 // server + clients.
 type multiNodeHarness struct {
-	coordinator   string // nodeID of the coordinator
-	nodes         map[string]multinodeTestNode
-	cfgStore      config.Store
-	srv           *server.Server
-	client        gastrologv1connect.QueryServiceClient
-	vaultClient   gastrologv1connect.VaultServiceClient
-	configClient  gastrologv1connect.ConfigServiceClient
-	jobSrv        gastrologv1connect.JobServiceClient
-	peerJobs      *mnPeerJobs
-	peerRouteStats *mnPeerRouteStats
+	coordinator        string // nodeID of the coordinator
+	nodes              map[string]multinodeTestNode
+	cfgStore           config.Store
+	srv                *server.Server
+	client             gastrologv1connect.QueryServiceClient
+	vaultClient        gastrologv1connect.VaultServiceClient
+	configClient       gastrologv1connect.ConfigServiceClient
+	jobSrv             gastrologv1connect.JobServiceClient
+	peerJobs           *mnPeerJobs
+	peerRouteStats     *mnPeerRouteStats
+	peerIngesterStats  *mnPeerIngesterStats
+	peerVaultStats     *mnPeerVaultStats
 }
 
 // Node returns the test node by ID, fataling if not found.
@@ -148,6 +152,8 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		}
 	}
 	peerRouteStats := &mnPeerRouteStats{nodes: peerRouteNodes}
+	peerIngesterStats := &mnPeerIngesterStats{nodes: peerRouteNodes}
+	peerVaultStats := &mnPeerVaultStats{nodes: peerRouteNodes}
 
 	coordNode := nodes[coordinatorID]
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
@@ -156,6 +162,8 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		RemoteVaultForwarder: remoteVaultFwd,
 		PeerJobs:             peerJobs,
 		PeerRouteStats:       peerRouteStats,
+		PeerIngesterStats:    peerIngesterStats,
+		PeerVaultStats:       peerVaultStats,
 	})
 
 	handler := srv.Handler()
@@ -174,16 +182,18 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	})
 
 	return &multiNodeHarness{
-		coordinator:    coordinatorID,
-		nodes:          nodes,
-		cfgStore:       cfgStore,
-		srv:            srv,
-		client:         queryClient,
-		vaultClient:    vaultClient,
-		configClient:   configClient,
-		jobSrv:         jobClient,
-		peerJobs:       peerJobs,
-		peerRouteStats: peerRouteStats,
+		coordinator:       coordinatorID,
+		nodes:             nodes,
+		cfgStore:          cfgStore,
+		srv:               srv,
+		client:            queryClient,
+		vaultClient:       vaultClient,
+		configClient:      configClient,
+		jobSrv:            jobClient,
+		peerJobs:          peerJobs,
+		peerRouteStats:    peerRouteStats,
+		peerIngesterStats: peerIngesterStats,
+		peerVaultStats:    peerVaultStats,
 	}
 }
 
@@ -262,6 +272,74 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 	return
 }
 
+// mnPeerIngesterStats implements PeerIngesterStatsProvider by scanning all
+// non-coordinator orchestrators for matching ingester stats.
+type mnPeerIngesterStats struct {
+	nodes map[string]*orchestrator.Orchestrator // remote node orchs
+}
+
+func (p *mnPeerIngesterStats) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNodeStats {
+	id, err := uuid.Parse(ingesterID)
+	if err != nil {
+		return nil
+	}
+	for _, orch := range p.nodes {
+		stats := orch.GetIngesterStats(id)
+		if stats == nil {
+			continue
+		}
+		return &gastrologv1.IngesterNodeStats{
+			Id:               ingesterID,
+			Running:          orch.IsIngesterRunning(id),
+			MessagesIngested: uint64(stats.MessagesIngested.Load()), //nolint:gosec
+			BytesIngested:    uint64(stats.BytesIngested.Load()),    //nolint:gosec
+			Errors:           uint64(stats.Errors.Load()),           //nolint:gosec
+			Name:             orch.IngesterName(id),
+		}
+	}
+	return nil
+}
+
+// mnPeerVaultStats implements PeerVaultStatsProvider by scanning all
+// non-coordinator orchestrators for matching vault stats.
+type mnPeerVaultStats struct {
+	nodes map[string]*orchestrator.Orchestrator // remote node orchs
+}
+
+func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
+	id, err := uuid.Parse(vaultID)
+	if err != nil {
+		return nil
+	}
+	for _, orch := range p.nodes {
+		for _, vid := range orch.ListVaults() {
+			if vid != id {
+				continue
+			}
+			metas, err := orch.ListChunkMetas(vid)
+			if err != nil {
+				return nil
+			}
+			stat := &gastrologv1.VaultStats{
+				Id:         vaultID,
+				ChunkCount: int64(len(metas)),
+				Enabled:    orch.IsVaultEnabled(vid),
+			}
+			for _, meta := range metas {
+				if meta.Sealed {
+					stat.SealedChunks++
+				} else {
+					stat.ActiveChunks++
+				}
+				stat.RecordCount += meta.RecordCount
+				stat.DataBytes += meta.Bytes
+			}
+			return stat
+		}
+	}
+	return nil
+}
+
 // directRemoteSearcher calls directly into the target node's orchestrator,
 // simulating ForwardSearch/ForwardFollow/ForwardExplain RPCs without gRPC.
 type directRemoteSearcher struct {
@@ -320,18 +398,173 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
-	return nil, fmt.Errorf("not implemented in test harness")
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, fmt.Errorf("invalid vault_id: %w", err)
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, fmt.Errorf("invalid chunk_id: %w", err)
+	}
+
+	eng := orch.MultiVaultQueryEngine()
+	result, err := eng.GetContext(ctx, query.ContextRef{
+		VaultID: vaultID,
+		ChunkID: chunkID,
+		Pos:     req.GetPos(),
+	}, int(req.GetBefore()), int(req.GetAfter()))
+	if err != nil {
+		return nil, err
+	}
+
+	resp := &gastrologv1.ForwardGetContextResponse{
+		Anchor: cluster.RecordToExportRecord(result.Anchor),
+		Before: make([]*gastrologv1.ExportRecord, len(result.Before)),
+		After:  make([]*gastrologv1.ExportRecord, len(result.After)),
+	}
+	for i, rec := range result.Before {
+		resp.Before[i] = cluster.RecordToExportRecord(rec)
+	}
+	for i, rec := range result.After {
+		resp.After[i] = cluster.RecordToExportRecord(rec)
+	}
+	return resp, nil
 }
 
 func (d *directRemoteSearcher) Explain(ctx context.Context, nodeID string, req *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error) {
-	return nil, fmt.Errorf("not implemented in test harness")
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return nil, fmt.Errorf("unknown node: %s", nodeID)
+	}
+
+	var allChunks []*gastrologv1.ChunkPlan
+	var totalChunks int32
+
+	for _, vaultStr := range req.GetVaultIds() {
+		scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultStr, req.GetQuery())
+		q, _, err := server.ParseExpression(scopedExpr)
+		if err != nil {
+			return nil, fmt.Errorf("parse query for vault %s: %w", vaultStr, err)
+		}
+
+		eng := orch.MultiVaultQueryEngine()
+		plan, err := eng.Explain(ctx, q)
+		if err != nil {
+			return nil, fmt.Errorf("explain vault %s: %w", vaultStr, err)
+		}
+
+		totalChunks += int32(plan.TotalChunks) //nolint:gosec // G115: chunk count fits in int32
+		for _, cp := range plan.ChunkPlans {
+			chunkPlan := &gastrologv1.ChunkPlan{
+				VaultId:          cp.VaultID.String(),
+				ChunkId:          cp.ChunkID.String(),
+				Sealed:           cp.Sealed,
+				RecordCount:      int64(cp.RecordCount),
+				ScanMode:         cp.ScanMode,
+				EstimatedRecords: int64(cp.EstimatedScan),
+				RuntimeFilters:   []string{cp.RuntimeFilter},
+				Steps:            server.PipelineStepsToProto(cp.Pipeline),
+				SkipReason:       cp.SkipReason,
+				NodeId:           nodeID,
+			}
+			if !cp.StartTS.IsZero() {
+				chunkPlan.StartTs = timestamppb.New(cp.StartTS)
+			}
+			if !cp.EndTS.IsZero() {
+				chunkPlan.EndTs = timestamppb.New(cp.EndTS)
+			}
+			for _, bp := range cp.BranchPlans {
+				chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &gastrologv1.BranchPlan{
+					Expression:       bp.BranchExpr,
+					Steps:            server.PipelineStepsToProto(bp.Pipeline),
+					Skipped:          bp.Skipped,
+					SkipReason:       bp.SkipReason,
+					EstimatedRecords: int64(bp.EstimatedScan),
+				})
+			}
+			allChunks = append(allChunks, chunkPlan)
+		}
+	}
+
+	return &gastrologv1.ForwardExplainResponse{
+		Chunks:      allChunks,
+		TotalChunks: totalChunks,
+	}, nil
 }
 
 func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *gastrologv1.ForwardFollowRequest) (<-chan *gastrologv1.ExportRecord, <-chan error) {
+	recCh := make(chan *gastrologv1.ExportRecord, 64)
 	errCh := make(chan error, 1)
-	errCh <- fmt.Errorf("not implemented in test harness")
-	close(errCh)
-	return nil, errCh
+
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		errCh <- fmt.Errorf("unknown node: %s", nodeID)
+		close(errCh)
+		close(recCh)
+		return recCh, errCh
+	}
+
+	// Build a scoped query for the requested vaults.
+	var scopedExpr string
+	for _, vid := range req.GetVaultIds() {
+		if scopedExpr != "" {
+			scopedExpr += " OR "
+		}
+		scopedExpr += "vault_id=" + vid
+	}
+	if req.GetQuery() != "" {
+		if len(req.GetVaultIds()) > 1 {
+			scopedExpr = "(" + scopedExpr + ") " + req.GetQuery()
+		} else {
+			scopedExpr += " " + req.GetQuery()
+		}
+	}
+
+	q, _, err := server.ParseExpression(scopedExpr)
+	if err != nil {
+		errCh <- fmt.Errorf("parse query: %w", err)
+		close(errCh)
+		close(recCh)
+		return recCh, errCh
+	}
+
+	// Use the parent ctx (which already has a timeout from the caller).
+	// A short secondary timeout risks closing before records arrive.
+	followCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+
+	eng := orch.MultiVaultQueryEngine()
+	followIter := eng.Follow(followCtx, q)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer cancel()
+		defer close(recCh)
+		for rec, iterErr := range followIter {
+			if iterErr != nil {
+				errCh <- iterErr
+				return
+			}
+			select {
+			case recCh <- cluster.RecordToExportRecord(rec):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	go func() {
+		wg.Wait()
+		close(errCh)
+	}()
+
+	return recCh, errCh
 }
 
 // directRemoteVaultForwarder implements RemoteVaultForwarder by calling
@@ -1025,5 +1258,403 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	}
 	if vsMap[d2.vaultID.String()] != 7 {
 		t.Errorf("data-2 vault matched = %d, want 7", vsMap[d2.vaultID.String()])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Query fan-out (Explain, GetContext, Follow, GetFields)
+// ---------------------------------------------------------------------------
+
+func TestMultiNode_ExplainCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 4, nil)
+	addMNRecords(t, h.Node(t, "data-2"), "D2", 6, nil)
+
+	resp, err := h.client.Explain(context.Background(), connect.NewRequest(&gastrologv1.ExplainRequest{
+		Query: &gastrologv1.Query{Expression: ""},
+	}))
+	if err != nil {
+		t.Fatalf("Explain: %v", err)
+	}
+	if resp.Msg.TotalChunks < 2 {
+		t.Errorf("expected at least 2 chunks (one per data node), got %d", resp.Msg.TotalChunks)
+	}
+
+	// Verify chunks span both nodes.
+	nodesSeen := make(map[string]bool)
+	for _, cp := range resp.Msg.Chunks {
+		nodesSeen[cp.NodeId] = true
+	}
+	if !nodesSeen["data-1"] {
+		t.Error("expected chunk plan from data-1")
+	}
+	if !nodesSeen["data-2"] {
+		t.Error("expected chunk plan from data-2")
+	}
+}
+
+func TestMultiNode_GetContextCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 10, nil)
+
+	// First, search to get a record ref from the remote node.
+	records := searchAll(t, h.client, "")
+	if len(records) == 0 {
+		t.Fatal("expected records from data-1")
+	}
+
+	// Pick a record in the middle for meaningful before/after context.
+	mid := records[len(records)/2]
+	if mid.Ref == nil {
+		t.Fatal("expected record ref")
+	}
+
+	resp, err := h.client.GetContext(context.Background(), connect.NewRequest(&gastrologv1.GetContextRequest{
+		Ref:    mid.Ref,
+		Before: 3,
+		After:  3,
+	}))
+	if err != nil {
+		t.Fatalf("GetContext: %v", err)
+	}
+	if resp.Msg.Anchor == nil {
+		t.Fatal("expected anchor record")
+	}
+	if len(resp.Msg.Before) == 0 && len(resp.Msg.After) == 0 {
+		t.Error("expected at least some before/after context records")
+	}
+}
+
+func TestMultiNode_FollowCrossNode(t *testing.T) {
+	t.Parallel()
+	// Test the directRemoteSearcher.Follow forwarder directly, since the
+	// embedded transport doesn't support long-lived streaming (no http.Flusher).
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	vaultID := h.Node(t, "data-1").vaultID.String()
+
+	// Call the directRemoteSearcher's Follow directly.
+	searcher := &directRemoteSearcher{nodes: map[string]*orchestrator.Orchestrator{
+		"data-1": h.Node(t, "data-1").orch,
+	}}
+	followRecCh, followErrCh := searcher.Follow(ctx, "data-1", &gastrologv1.ForwardFollowRequest{
+		VaultIds: []string{vaultID},
+	})
+
+	// Add records after follow starts.
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		node := h.Node(t, "data-1")
+		t0 := time.Now()
+		for i := range 5 {
+			ts := t0.Add(time.Duration(i) * time.Millisecond)
+			node.vault.CM.Append(chunk.Record{
+				IngestTS: ts,
+				WriteTS:  ts,
+				Raw:      fmt.Appendf(nil, "follow-%d", i),
+			})
+		}
+	}()
+
+	var records []*gastrologv1.ExportRecord
+	for rec := range followRecCh {
+		records = append(records, rec)
+		if len(records) >= 5 {
+			break
+		}
+	}
+	// Drain errors.
+	for err := range followErrCh {
+		if err != nil {
+			t.Errorf("follow error: %v", err)
+		}
+	}
+
+	if len(records) < 5 {
+		t.Errorf("expected at least 5 follow records from remote node, got %d", len(records))
+	}
+}
+
+func TestMultiNode_GetFieldsCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 5, map[string]string{"source": "syslog"})
+	addMNRecords(t, h.Node(t, "data-2"), "D2", 5, map[string]string{"source": "mqtt", "region": "us-east"})
+
+	resp, err := h.client.GetFields(context.Background(), connect.NewRequest(&gastrologv1.GetFieldsRequest{
+		Expression: "",
+		MaxSamples: 100,
+	}))
+	if err != nil {
+		t.Fatalf("GetFields: %v", err)
+	}
+
+	// Check attr fields contain keys from both nodes.
+	attrKeys := make(map[string]bool)
+	for _, f := range resp.Msg.AttrFields {
+		attrKeys[f.Key] = true
+	}
+	if !attrKeys["source"] {
+		t.Error("expected 'source' attr field (present on both nodes)")
+	}
+	if !attrKeys["region"] {
+		t.Error("expected 'region' attr field (only on data-2)")
+	}
+
+	// "source" should have values from both nodes.
+	for _, f := range resp.Msg.AttrFields {
+		if f.Key == "source" && f.Count != 10 {
+			t.Errorf("expected source count=10 (5+5), got %d", f.Count)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Vault stats and info across cluster nodes
+// ---------------------------------------------------------------------------
+
+func TestMultiNode_GetStatsRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 5, nil)
+	addMNRecords(t, h.Node(t, "data-2"), "D2", 8, nil)
+
+	resp, err := h.vaultClient.GetStats(context.Background(), connect.NewRequest(&gastrologv1.GetStatsRequest{}))
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+
+	if resp.Msg.TotalVaults != 2 {
+		t.Errorf("TotalVaults = %d, want 2", resp.Msg.TotalVaults)
+	}
+	if resp.Msg.TotalRecords != 13 {
+		t.Errorf("TotalRecords = %d, want 13 (5+8)", resp.Msg.TotalRecords)
+	}
+	if resp.Msg.TotalChunks < 2 {
+		t.Errorf("TotalChunks = %d, want at least 2", resp.Msg.TotalChunks)
+	}
+	if len(resp.Msg.VaultStats) != 2 {
+		t.Errorf("expected 2 vault stats, got %d", len(resp.Msg.VaultStats))
+	}
+}
+
+func TestMultiNode_GetStatsForSpecificRemoteVault(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 5, nil)
+	addMNRecords(t, h.Node(t, "data-2"), "D2", 8, nil)
+
+	// Request stats for just one remote vault.
+	remoteVaultID := h.Node(t, "data-2").vaultID.String()
+	resp, err := h.vaultClient.GetStats(context.Background(), connect.NewRequest(&gastrologv1.GetStatsRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("GetStats: %v", err)
+	}
+
+	if resp.Msg.TotalRecords != 8 {
+		t.Errorf("TotalRecords = %d, want 8 (only data-2)", resp.Msg.TotalRecords)
+	}
+	if len(resp.Msg.VaultStats) != 1 {
+		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
+	}
+	if resp.Msg.VaultStats[0].Id != remoteVaultID {
+		t.Errorf("expected vault %s, got %s", remoteVaultID, resp.Msg.VaultStats[0].Id)
+	}
+}
+
+func TestMultiNode_ListVaultsCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
+	addMNRecords(t, h.Node(t, "data-2"), "D2", 7, nil)
+
+	resp, err := h.vaultClient.ListVaults(context.Background(), connect.NewRequest(&gastrologv1.ListVaultsRequest{}))
+	if err != nil {
+		t.Fatalf("ListVaults: %v", err)
+	}
+
+	if len(resp.Msg.Vaults) != 2 {
+		t.Fatalf("expected 2 vaults, got %d", len(resp.Msg.Vaults))
+	}
+
+	vaultMap := make(map[string]*gastrologv1.VaultInfo)
+	for _, v := range resp.Msg.Vaults {
+		vaultMap[v.Id] = v
+	}
+
+	d1Vault := vaultMap[h.Node(t, "data-1").vaultID.String()]
+	d2Vault := vaultMap[h.Node(t, "data-2").vaultID.String()]
+
+	if d1Vault == nil || d2Vault == nil {
+		t.Fatal("expected both data node vaults in listing")
+	}
+	if !d1Vault.Remote || !d2Vault.Remote {
+		t.Error("expected both vaults to be marked Remote=true from coordinator")
+	}
+	if d1Vault.RecordCount != 3 {
+		t.Errorf("data-1 vault records = %d, want 3", d1Vault.RecordCount)
+	}
+	if d2Vault.RecordCount != 7 {
+		t.Errorf("data-2 vault records = %d, want 7", d2Vault.RecordCount)
+	}
+}
+
+func TestMultiNode_GetIndexesRemote(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
+
+	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+
+	// List chunks first to get a chunk ID.
+	listResp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
+		Vault: remoteVaultID,
+	}))
+	if err != nil {
+		t.Fatalf("ListChunks: %v", err)
+	}
+	if len(listResp.Msg.Chunks) == 0 {
+		t.Fatal("no chunks to test GetIndexes with")
+	}
+	chunkID := listResp.Msg.Chunks[0].Id
+
+	resp, err := h.vaultClient.GetIndexes(context.Background(), connect.NewRequest(&gastrologv1.GetIndexesRequest{
+		Vault:   remoteVaultID,
+		ChunkId: chunkID,
+	}))
+	if err != nil {
+		t.Fatalf("GetIndexes on remote vault: %v", err)
+	}
+	// Memory-backed chunks won't have detailed indexes, but the RPC should succeed.
+	_ = resp.Msg.Sealed // proves the response was populated
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Ingester stats across cluster nodes
+// ---------------------------------------------------------------------------
+
+func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+	ctx := context.Background()
+
+	// Register an ingester on data-1's orchestrator.
+	ingID := uuid.Must(uuid.NewV7())
+	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
+
+	// Also register it in the config store so ListIngesters can find it.
+	_ = h.cfgStore.PutIngester(ctx, config.IngesterConfig{
+		ID:     ingID,
+		Name:   "test-ing",
+		Type:   "mqtt",
+		NodeID: "data-1",
+	})
+
+	resp, err := h.configClient.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
+	if err != nil {
+		t.Fatalf("ListIngesters: %v", err)
+	}
+
+	if len(resp.Msg.Ingesters) != 1 {
+		t.Fatalf("expected 1 ingester, got %d", len(resp.Msg.Ingesters))
+	}
+	ing := resp.Msg.Ingesters[0]
+	if ing.Id != ingID.String() {
+		t.Errorf("ingester ID = %q, want %q", ing.Id, ingID.String())
+	}
+	if ing.NodeId != "data-1" {
+		t.Errorf("ingester NodeId = %q, want data-1", ing.NodeId)
+	}
+	if ing.Name != "test-ing" {
+		t.Errorf("ingester Name = %q, want test-ing", ing.Name)
+	}
+}
+
+func TestMultiNode_GetIngesterStatusCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+	ctx := context.Background()
+
+	// Register an ingester on data-1.
+	ingID := uuid.Must(uuid.NewV7())
+	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
+
+	_ = h.cfgStore.PutIngester(ctx, config.IngesterConfig{
+		ID:     ingID,
+		Name:   "test-ing",
+		Type:   "mqtt",
+		NodeID: "data-1",
+	})
+
+	// Simulate some ingester activity by bumping stats on data-1.
+	stats := h.Node(t, "data-1").orch.GetIngesterStats(ingID)
+	if stats != nil {
+		stats.MessagesIngested.Add(42)
+		stats.BytesIngested.Add(1024)
+	}
+
+	resp, err := h.configClient.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
+		Id: ingID.String(),
+	}))
+	if err != nil {
+		t.Fatalf("GetIngesterStatus: %v", err)
+	}
+
+	if resp.Msg.Type != "mqtt" {
+		t.Errorf("Type = %q, want mqtt", resp.Msg.Type)
+	}
+	if resp.Msg.MessagesIngested != 42 {
+		t.Errorf("MessagesIngested = %d, want 42", resp.Msg.MessagesIngested)
+	}
+	if resp.Msg.BytesIngested != 1024 {
+		t.Errorf("BytesIngested = %d, want 1024", resp.Msg.BytesIngested)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Tests — Jobs across cluster nodes
+// ---------------------------------------------------------------------------
+
+func TestMultiNode_ListJobsCrossNode(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
+
+	// Inject a peer job from data-1.
+	h.peerJobs.peers["data-1"] = []*gastrologv1.Job{
+		{Id: "remote-compact", Name: "compact", Description: "compact data-1 vault", NodeId: "data-1", Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
+		{Id: "remote-retain", Name: "retain", Description: "retain data-1 vault", NodeId: "data-1", Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
+	}
+
+	resp, err := h.jobSrv.ListJobs(context.Background(), connect.NewRequest(&gastrologv1.ListJobsRequest{}))
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+
+	// Should include both the peer jobs (local scheduler may also have jobs).
+	peerJobIDs := make(map[string]bool)
+	for _, j := range resp.Msg.Jobs {
+		if j.NodeId == "data-1" {
+			peerJobIDs[j.Id] = true
+		}
+	}
+	if !peerJobIDs["remote-compact"] {
+		t.Error("expected remote-compact from data-1 in ListJobs")
+	}
+	if !peerJobIDs["remote-retain"] {
+		t.Error("expected remote-retain from data-1 in ListJobs")
 	}
 }
