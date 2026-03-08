@@ -67,6 +67,10 @@ export default defineConfig({
         target: "http://localhost:4564",
         timeout: 0,
       },
+      "^/api/": {
+        target: "http://localhost:4564",
+        timeout: 0,
+      },
     }),
     multiNodeProxy(),
   ],

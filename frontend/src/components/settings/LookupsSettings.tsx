@@ -3,18 +3,21 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useSettings, usePutSettings, MAXMIND_KEEP } from "../../api/hooks/useSettings";
+import { useUploadLookupFile } from "../../api/hooks/useUploadLookupFile";
 import type { MmdbValidation } from "../../api/gen/gastrolog/v1/config_pb";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
 import { ExpandableCard } from "./ExpandableCard";
+import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with multiple expandable cards and dirty tracking
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useSettings();
   const putConfig = usePutSettings();
+  const uploadFile = useUploadLookupFile();
   const { addToast } = useToast();
 
   const [geoipDbPath, setGeoipDbPath] = useState("");
@@ -201,12 +204,20 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                 <span className="font-mono">| lookup geoip</span>.
               </p>
 
+              <MmdbDropZone
+                dark={dark}
+                label="GeoLite2-City / GeoIP2-City"
+                expectedSuffix="City"
+                uploadFile={uploadFile}
+                addToast={addToast}
+              />
+
               <FormField
-                label="Manual MMDB Path"
+                label="Server Path Override"
                 description={
                   autoDownload
                     ? "Overrides the auto-downloaded GeoLite2-City database. Leave blank to use auto-download."
-                    : "Path to a GeoLite2-City or GeoIP2-City .mmdb file. Hot-reloaded on changes."
+                    : "Path to a GeoLite2-City or GeoIP2-City .mmdb file on the server. Hot-reloaded on changes."
                 }
                 dark={dark}
               >
@@ -216,7 +227,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   placeholder={
                     autoDownload
                       ? "(using auto-downloaded GeoLite2-City)"
-                      : "path/to/GeoLite2-City.mmdb"
+                      : ""
                   }
                   dark={dark}
                   mono
@@ -245,12 +256,20 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                 <span className="font-mono">| lookup asn</span>.
               </p>
 
+              <MmdbDropZone
+                dark={dark}
+                label="GeoLite2-ASN / GeoIP2-ISP"
+                expectedSuffix="ASN"
+                uploadFile={uploadFile}
+                addToast={addToast}
+              />
+
               <FormField
-                label="Manual MMDB Path"
+                label="Server Path Override"
                 description={
                   autoDownload
                     ? "Overrides the auto-downloaded GeoLite2-ASN database. Leave blank to use auto-download."
-                    : "Path to a GeoLite2-ASN or GeoIP2-ISP .mmdb file. Hot-reloaded on changes."
+                    : "Path to a GeoLite2-ASN or GeoIP2-ISP .mmdb file on the server. Hot-reloaded on changes."
                 }
                 dark={dark}
               >
@@ -260,7 +279,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   placeholder={
                     autoDownload
                       ? "(using auto-downloaded GeoLite2-ASN)"
-                      : "path/to/GeoLite2-ASN.mmdb"
+                      : ""
                   }
                   dark={dark}
                   mono
@@ -325,6 +344,130 @@ function ValidationResult({
       {validation.error}
     </div>
   );
+}
+
+function MmdbDropZone({
+  dark,
+  label,
+  expectedSuffix: _expectedSuffix,
+  uploadFile,
+  addToast,
+}: Readonly<{
+  dark: boolean;
+  label: string;
+  expectedSuffix: string;
+  uploadFile: ReturnType<typeof useUploadLookupFile>;
+  addToast: (msg: string, type: "info" | "error") => void;
+}>) {
+  const c = useThemeClass(dark);
+  const [dragging, setDragging] = useState(false);
+  const [uploadedName, setUploadedName] = useState<string | null>(null);
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.currentTarget.classList.remove("ring-2", "ring-copper");
+    setDragging(false);
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (!file.name.endsWith(".mmdb")) {
+      addToast("Only .mmdb files are accepted", "error");
+      return;
+    }
+
+    uploadFile.mutate(file, {
+      onSuccess: (result) => {
+        setUploadedName(result.name);
+        addToast(`Uploaded ${result.name} (${formatBytes(result.size)})`, "info");
+      },
+      onError: (err) => {
+        addToast(err instanceof Error ? err.message : "Upload failed", "error");
+      },
+    });
+  };
+
+  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.name.endsWith(".mmdb")) {
+      addToast("Only .mmdb files are accepted", "error");
+      return;
+    }
+
+    uploadFile.mutate(file, {
+      onSuccess: (result) => {
+        setUploadedName(result.name);
+        addToast(`Uploaded ${result.name} (${formatBytes(result.size)})`, "info");
+      },
+      onError: (err) => {
+        addToast(err instanceof Error ? err.message : "Upload failed", "error");
+      },
+    });
+    // Reset so the same file can be re-uploaded.
+    e.target.value = "";
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onDragOver={handleDragOver}
+      onDragEnter={(e) => { handleDragEnter(e); setDragging(true); }}
+      onDragLeave={(e) => { handleDragLeave(e); if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+      onDrop={handleDrop}
+      className={`relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-5 transition-all cursor-pointer ${
+        dragging
+          ? "ring-2 ring-copper border-copper"
+          : c("border-ink-border hover:border-copper-dim", "border-light-border hover:border-copper")
+      } ${c("bg-ink-surface/50", "bg-light-surface/50")}`}
+      onClick={() => {
+        const input = document.getElementById(`mmdb-upload-${label}`) as HTMLInputElement | null;
+        input?.click();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          const input = document.getElementById(`mmdb-upload-${label}`) as HTMLInputElement | null;
+          input?.click();
+        }
+      }}
+    >
+      <input
+        id={`mmdb-upload-${label}`}
+        type="file"
+        accept=".mmdb"
+        className="hidden"
+        onChange={handleFileInput}
+      />
+
+      {uploadFile.isPending ? (
+        <span className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+          Uploading...
+        </span>
+      ) : (
+        <>
+          <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
+            Drop {label} .mmdb file here
+          </span>
+          <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            or click to browse
+          </span>
+        </>
+      )}
+
+      {uploadedName && !uploadFile.isPending && (
+        <span className={`text-[0.75em] mt-1 ${c("text-copper-dim", "text-copper")}`}>
+          Uploaded: {uploadedName}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function PasswordInput({
