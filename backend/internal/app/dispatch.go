@@ -38,18 +38,29 @@ type orchActions interface {
 	UpdateMaxConcurrentJobs(n int) error
 }
 
+// LookupFileHandler handles lookup file lifecycle events from the FSM.
+type LookupFileHandler interface {
+	// OnPut is called when a lookup file's metadata is committed to Raft.
+	// If the file isn't already on disk, it should be pulled from a peer.
+	OnPut(ctx context.Context, fileID uuid.UUID)
+	// OnDelete is called when a lookup file is removed from Raft.
+	// The handler should clean up the file from disk.
+	OnDelete(fileID uuid.UUID)
+}
+
 // configDispatcher translates FSM notifications into orchestrator side effects.
 // It is called synchronously from within FSM.Apply, so actions complete before
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
-	orch         orchActions
-	cfgStore     config.Store
-	factories    orchestrator.Factories
-	localNodeID  string
-	logger       *slog.Logger
-	clusterTLS   *cluster.ClusterTLS // nil for single-node or memory mode
-	tlsFilePath  string              // path to persist cluster TLS on rotation
-	configSignal *notify.Signal      // broadcasts config changes to WatchConfig streams
+	orch              orchActions
+	cfgStore          config.Store
+	factories         orchestrator.Factories
+	localNodeID       string
+	logger            *slog.Logger
+	clusterTLS        *cluster.ClusterTLS // nil for single-node or memory mode
+	tlsFilePath       string              // path to persist cluster TLS on rotation
+	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
+	lookupFileHandler LookupFileHandler   // nil for single-node or before wiring
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -85,8 +96,14 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleClusterTLSPut(ctx)
 	case raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted:
 		// No orchestrator side effects; configSignal fires below.
-	case raftfsm.NotifyLookupFilePut, raftfsm.NotifyLookupFileDeleted:
-		// Handled by the lookup file manager (disk sync); configSignal fires below.
+	case raftfsm.NotifyLookupFilePut:
+		if d.lookupFileHandler != nil {
+			d.lookupFileHandler.OnPut(ctx, n.ID)
+		}
+	case raftfsm.NotifyLookupFileDeleted:
+		if d.lookupFileHandler != nil {
+			d.lookupFileHandler.OnDelete(n.ID)
+		}
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.

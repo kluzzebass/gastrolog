@@ -145,8 +145,8 @@ func (s *Server) cleanupLookupFile(fileID uuid.UUID) {
 	}
 }
 
-// lookupFileExists checks whether a lookup file exists on disk.
-func (s *Server) lookupFileExists(fileID string) bool {
+// LookupFileExists checks whether a lookup file exists on disk.
+func (s *Server) LookupFileExists(fileID string) bool {
 	if s.homeDir == "" {
 		return false
 	}
@@ -159,8 +159,8 @@ func (s *Server) lookupFileExists(fileID string) bool {
 	return len(entries) > 0
 }
 
-// lookupFileIDs returns the IDs of lookup files present on disk.
-func (s *Server) lookupFileIDs() []string {
+// LookupFileIDs returns the IDs of lookup files present on disk.
+func (s *Server) LookupFileIDs() []string {
 	if s.homeDir == "" {
 		return nil
 	}
@@ -178,8 +178,8 @@ func (s *Server) lookupFileIDs() []string {
 	return ids
 }
 
-// lookupFileReader opens a lookup file for reading.
-func (s *Server) lookupFileReader(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error) {
+// LookupFileReader opens a lookup file for reading.
+func (s *Server) LookupFileReader(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error) {
 	if s.homeDir == "" {
 		return "", nil, "", errors.New("no home directory")
 	}

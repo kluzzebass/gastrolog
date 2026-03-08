@@ -219,6 +219,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		JoinClusterFunc:     joinClusterFn,
 		RemoveNodeFunc:      removeNodeFn,
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
+		Dispatcher:          disp,
 	})
 }
 
@@ -261,6 +262,23 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
 
 	return searchForwarder
+}
+
+// wireLookupFileTransfer sets up cluster-side handlers for streaming lookup
+// files between nodes and returns a LookupFileHandler for the dispatcher.
+func wireLookupFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, homeDir string, logger *slog.Logger) LookupFileHandler {
+	peerConns := clusterSrv.PeerConns()
+	clusterSrv.SetLookupFileReader(httpSrv.LookupFileReader)
+	clusterSrv.SetLookupFileIDs(httpSrv.LookupFileIDs)
+
+	transferrer := cluster.NewLookupTransferrer(peerConns)
+	return &lookupFileManager{
+		homeDir:    homeDir,
+		transferrer: transferrer,
+		peerIDs:    peerConns.PeerIDs,
+		fileExists: httpSrv.LookupFileExists,
+		logger:     logger.With("component", "lookup-files"),
+	}
 }
 
 // nonRaftApplyHook returns the dispatcher callback for non-raft config stores.
@@ -637,6 +655,7 @@ type serverDeps struct {
 	JoinClusterFunc     func(ctx context.Context, leaderAddr, joinToken string) error
 	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
+	Dispatcher          *configDispatcher
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -655,6 +674,20 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 		})
+		// Wire lookup file transfer handlers on the cluster server. The HTTP
+		// server owns the lookup files on disk; the cluster server streams them
+		// to peers. Must happen after server creation but before serving starts.
+		if deps.ClusterSrv != nil && deps.Dispatcher != nil {
+			lfh := wireLookupFileTransfer(deps.ClusterSrv, srv, deps.HomeDir, deps.Logger)
+			deps.Dispatcher.lookupFileHandler = lfh
+
+			// Reconcile lookup files: pull any files that Raft knows about
+			// but aren't on this node's disk yet (e.g., after joining a cluster).
+			if mgr, ok := lfh.(*lookupFileManager); ok {
+				go reconcileLookupFiles(ctx, deps.CfgStore, mgr, deps.Logger)
+			}
+		}
+
 		serverWg.Go(func() {
 			if err := srv.ServeTCP(deps.ServerAddr); err != nil {
 				deps.Logger.Error("server error", "error", err)

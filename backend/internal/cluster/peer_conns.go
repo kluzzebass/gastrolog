@@ -100,6 +100,19 @@ func (p *PeerConns) Peers() ([]hraft.Server, error) {
 	return peers, nil
 }
 
+// PeerIDs returns the node IDs of all peers (excluding self) as strings.
+func (p *PeerConns) PeerIDs() []string {
+	peers, err := p.Peers()
+	if err != nil {
+		return nil
+	}
+	ids := make([]string, len(peers))
+	for i, srv := range peers {
+		ids[i] = string(srv.ID)
+	}
+	return ids
+}
+
 // Reset swaps the raft pointer and closes all cached connections,
 // forcing fresh dials on the next Conn call. Components holding a *PeerConns
 // reference (Broadcaster, RecordForwarder, SearchForwarder) automatically
