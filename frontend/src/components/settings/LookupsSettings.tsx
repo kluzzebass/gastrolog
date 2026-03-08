@@ -4,7 +4,6 @@ import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useSettings, usePutSettings, MAXMIND_KEEP } from "../../api/hooks/useSettings";
 import { useUploadLookupFile } from "../../api/hooks/useUploadLookupFile";
-import type { MmdbValidation } from "../../api/gen/gastrolog/v1/config_pb";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
@@ -20,15 +19,10 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const uploadFile = useUploadLookupFile();
   const { addToast } = useToast();
 
-  const [geoipDbPath, setGeoipDbPath] = useState("");
-  const [asnDbPath, setAsnDbPath] = useState("");
   const [autoDownload, setAutoDownload] = useState(false);
   const [accountId, setAccountId] = useState("");
   const [licenseKey, setLicenseKey] = useState("");
   const [initialized, setInitialized] = useState(false);
-
-  const [geoipValidation, setGeoipValidation] = useState<MmdbValidation | undefined>();
-  const [asnValidation, setAsnValidation] = useState<MmdbValidation | undefined>();
 
   const { toggle, isExpanded } = useExpandedCards({
     maxmind: true,
@@ -37,8 +31,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   });
 
   if (data && !initialized) {
-    setGeoipDbPath(data.lookup?.geoipDbPath ?? "");
-    setAsnDbPath(data.lookup?.asnDbPath ?? "");
     setAutoDownload(data.lookup?.maxmind?.autoDownload ?? false);
     setAccountId("");
     setLicenseKey("");
@@ -48,18 +40,14 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const dirty =
     initialized &&
     data &&
-    (geoipDbPath !== (data.lookup?.geoipDbPath ?? "") ||
-      asnDbPath !== (data.lookup?.asnDbPath ?? "") ||
-      autoDownload !== (data.lookup?.maxmind?.autoDownload ?? false) ||
+    (autoDownload !== (data.lookup?.maxmind?.autoDownload ?? false) ||
       accountId !== "" ||
       licenseKey !== "");
 
   const handleSave = async () => {
     try {
-      const resp = await putConfig.mutateAsync({
+      await putConfig.mutateAsync({
         lookup: {
-          geoipDbPath,
-          asnDbPath,
           maxmind: {
             autoDownload,
             accountId: accountId || undefined,
@@ -69,8 +57,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
       });
       setAccountId("");
       setLicenseKey("");
-      setGeoipValidation(resp.geoipValidation);
-      setAsnValidation(resp.asnValidation);
       addToast("Lookup configuration updated", "info");
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to update lookup configuration", "error");
@@ -79,27 +65,11 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const handleReset = () => {
     if (data) {
-      setGeoipDbPath(data.lookup?.geoipDbPath ?? "");
-      setAsnDbPath(data.lookup?.asnDbPath ?? "");
       setAutoDownload(data.lookup?.maxmind?.autoDownload ?? false);
       setAccountId("");
       setLicenseKey("");
     }
   };
-
-  let geoipBadge: string | undefined;
-  if (geoipDbPath) {
-    geoipBadge = "manual path";
-  } else if (autoDownload) {
-    geoipBadge = "auto";
-  }
-
-  let asnBadge: string | undefined;
-  if (asnDbPath) {
-    asnBadge = "manual path";
-  } else if (autoDownload) {
-    asnBadge = "auto";
-  }
 
   return (
     <div>
@@ -193,8 +163,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             expanded={isExpanded("geoip")}
             onToggle={() => toggle("geoip")}
             monoTitle={false}
-            typeBadge={geoipBadge}
-            typeBadgeAccent={!geoipDbPath && autoDownload}
+            typeBadge={autoDownload ? "auto" : undefined}
+            typeBadgeAccent={autoDownload}
           >
             <div className="flex flex-col gap-4">
               <p
@@ -211,31 +181,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                 uploadFile={uploadFile}
                 addToast={addToast}
               />
-
-              <FormField
-                label="Server Path Override"
-                description={
-                  autoDownload
-                    ? "Overrides the auto-downloaded GeoLite2-City database. Leave blank to use auto-download."
-                    : "Path to a GeoLite2-City or GeoIP2-City .mmdb file on the server. Hot-reloaded on changes."
-                }
-                dark={dark}
-              >
-                <TextInput
-                  value={geoipDbPath}
-                  onChange={(v) => { setGeoipDbPath(v); setGeoipValidation(undefined); }}
-                  placeholder={
-                    autoDownload
-                      ? "(using auto-downloaded GeoLite2-City)"
-                      : ""
-                  }
-                  dark={dark}
-                  mono
-                />
-              </FormField>
-              {geoipValidation && (
-                <ValidationResult validation={geoipValidation} dark={dark} />
-              )}
             </div>
           </ExpandableCard>
 
@@ -245,8 +190,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             expanded={isExpanded("asn")}
             onToggle={() => toggle("asn")}
             monoTitle={false}
-            typeBadge={asnBadge}
-            typeBadgeAccent={!asnDbPath && autoDownload}
+            typeBadge={autoDownload ? "auto" : undefined}
+            typeBadgeAccent={autoDownload}
           >
             <div className="flex flex-col gap-4">
               <p
@@ -263,31 +208,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                 uploadFile={uploadFile}
                 addToast={addToast}
               />
-
-              <FormField
-                label="Server Path Override"
-                description={
-                  autoDownload
-                    ? "Overrides the auto-downloaded GeoLite2-ASN database. Leave blank to use auto-download."
-                    : "Path to a GeoLite2-ASN or GeoIP2-ISP .mmdb file on the server. Hot-reloaded on changes."
-                }
-                dark={dark}
-              >
-                <TextInput
-                  value={asnDbPath}
-                  onChange={(v) => { setAsnDbPath(v); setAsnValidation(undefined); }}
-                  placeholder={
-                    autoDownload
-                      ? "(using auto-downloaded GeoLite2-ASN)"
-                      : ""
-                  }
-                  dark={dark}
-                  mono
-                />
-              </FormField>
-              {asnValidation && (
-                <ValidationResult validation={asnValidation} dark={dark} />
-              )}
             </div>
           </ExpandableCard>
 
@@ -306,42 +226,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           </div>
         </div>
       )}
-    </div>
-  );
-}
-
-function ValidationResult({
-  validation,
-  dark,
-}: Readonly<{
-  validation: MmdbValidation;
-  dark: boolean;
-}>) {
-  const c = useThemeClass(dark);
-  if (validation.valid) {
-    const built = validation.buildTime
-      ? new Date(validation.buildTime).toLocaleDateString()
-      : "unknown";
-    return (
-      <div
-        className={`text-[0.8em] leading-relaxed rounded px-2.5 py-1.5 border ${c(
-          "bg-green-950/30 border-green-800/40 text-green-400",
-          "bg-green-50 border-green-200 text-green-700",
-        )}`}
-      >
-        <span className="font-semibold">{validation.databaseType}</span>
-        {" \u2014 "}built {built}, {validation.nodeCount.toLocaleString()} nodes
-      </div>
-    );
-  }
-  return (
-    <div
-      className={`text-[0.8em] leading-relaxed rounded px-2.5 py-1.5 border ${c(
-        "bg-red-950/30 border-red-800/40 text-red-400",
-        "bg-red-50 border-red-200 text-red-700",
-      )}`}
-    >
-      {validation.error}
     </div>
   );
 }
