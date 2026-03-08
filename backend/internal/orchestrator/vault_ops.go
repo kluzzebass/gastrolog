@@ -118,6 +118,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		return chunk.ChunkID{}, 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if !vault.Enabled {
+		o.logger.Warn("record dropped: vault disabled", "vault", vaultID, "vault_name", vault.Name)
 		return chunk.ChunkID{}, 0, nil
 	}
 

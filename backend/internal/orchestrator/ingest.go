@@ -104,6 +104,9 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID uuid.UUID) *PerRouteStat
 // appendLocal appends a record to a local vault.
 func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) error {
 	_, _, err := o.appendRecord(vaultID, rec)
+	if err != nil {
+		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
+	}
 	return err
 }
 
