@@ -14,6 +14,8 @@
 //	    snapshots/                     (raft file snapshot store)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
+//	  managed-files/
+//	    <file-id>/                     (managed file entity: lookups, etc.)
 package home
 
 import (
@@ -70,14 +72,14 @@ func (d Dir) ClusterTLSPath() string {
 	return filepath.Join(d.root, "cluster-tls.json")
 }
 
-// LookupsDir returns the directory for uploaded lookup files.
-func (d Dir) LookupsDir() string {
-	return filepath.Join(d.root, "lookups")
+// ManagedFilesDir returns the directory for uploaded managed files.
+func (d Dir) ManagedFilesDir() string {
+	return filepath.Join(d.root, "managed-files")
 }
 
-// LookupFileDir returns the directory for a specific lookup file.
-func (d Dir) LookupFileDir(fileID string) string {
-	return filepath.Join(d.root, "lookups", fileID)
+// ManagedFileDir returns the directory for a specific managed file.
+func (d Dir) ManagedFileDir(fileID string) string {
+	return filepath.Join(d.root, "managed-files", fileID)
 }
 
 // SocketPath returns the path to the Unix domain socket for local CLI access.

@@ -57,8 +57,8 @@ type ConfigCommand struct {
 	//	*ConfigCommand_PutClusterTls
 	//	*ConfigCommand_PutRoute
 	//	*ConfigCommand_DeleteRoute
-	//	*ConfigCommand_PutLookupFile
-	//	*ConfigCommand_DeleteLookupFile
+	//	*ConfigCommand_PutManagedFile
+	//	*ConfigCommand_DeleteManagedFile
 	Command       isConfigCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -362,19 +362,19 @@ func (x *ConfigCommand) GetDeleteRoute() *DeleteRouteCommand {
 	return nil
 }
 
-func (x *ConfigCommand) GetPutLookupFile() *PutLookupFileCommand {
+func (x *ConfigCommand) GetPutManagedFile() *PutManagedFileCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutLookupFile); ok {
-			return x.PutLookupFile
+		if x, ok := x.Command.(*ConfigCommand_PutManagedFile); ok {
+			return x.PutManagedFile
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteLookupFile() *DeleteLookupFileCommand {
+func (x *ConfigCommand) GetDeleteManagedFile() *DeleteManagedFileCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteLookupFile); ok {
-			return x.DeleteLookupFile
+		if x, ok := x.Command.(*ConfigCommand_DeleteManagedFile); ok {
+			return x.DeleteManagedFile
 		}
 	}
 	return nil
@@ -500,12 +500,12 @@ type ConfigCommand_DeleteRoute struct {
 	DeleteRoute *DeleteRouteCommand `protobuf:"bytes,29,opt,name=delete_route,json=deleteRoute,proto3,oneof"`
 }
 
-type ConfigCommand_PutLookupFile struct {
-	PutLookupFile *PutLookupFileCommand `protobuf:"bytes,30,opt,name=put_lookup_file,json=putLookupFile,proto3,oneof"`
+type ConfigCommand_PutManagedFile struct {
+	PutManagedFile *PutManagedFileCommand `protobuf:"bytes,30,opt,name=put_managed_file,json=putManagedFile,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteLookupFile struct {
-	DeleteLookupFile *DeleteLookupFileCommand `protobuf:"bytes,31,opt,name=delete_lookup_file,json=deleteLookupFile,proto3,oneof"`
+type ConfigCommand_DeleteManagedFile struct {
+	DeleteManagedFile *DeleteManagedFileCommand `protobuf:"bytes,31,opt,name=delete_managed_file,json=deleteManagedFile,proto3,oneof"`
 }
 
 func (*ConfigCommand_PutFilter) isConfigCommand_Command() {}
@@ -566,9 +566,9 @@ func (*ConfigCommand_PutRoute) isConfigCommand_Command() {}
 
 func (*ConfigCommand_DeleteRoute) isConfigCommand_Command() {}
 
-func (*ConfigCommand_PutLookupFile) isConfigCommand_Command() {}
+func (*ConfigCommand_PutManagedFile) isConfigCommand_Command() {}
 
-func (*ConfigCommand_DeleteLookupFile) isConfigCommand_Command() {}
+func (*ConfigCommand_DeleteManagedFile) isConfigCommand_Command() {}
 
 type PutFilterCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2348,7 +2348,7 @@ func (x *DeleteRouteCommand) GetId() string {
 	return ""
 }
 
-type PutLookupFileCommand struct {
+type PutManagedFileCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // original filename
@@ -2359,20 +2359,20 @@ type PutLookupFileCommand struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PutLookupFileCommand) Reset() {
-	*x = PutLookupFileCommand{}
+func (x *PutManagedFileCommand) Reset() {
+	*x = PutManagedFileCommand{}
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PutLookupFileCommand) String() string {
+func (x *PutManagedFileCommand) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PutLookupFileCommand) ProtoMessage() {}
+func (*PutManagedFileCommand) ProtoMessage() {}
 
-func (x *PutLookupFileCommand) ProtoReflect() protoreflect.Message {
+func (x *PutManagedFileCommand) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2384,67 +2384,67 @@ func (x *PutLookupFileCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PutLookupFileCommand.ProtoReflect.Descriptor instead.
-func (*PutLookupFileCommand) Descriptor() ([]byte, []int) {
+// Deprecated: Use PutManagedFileCommand.ProtoReflect.Descriptor instead.
+func (*PutManagedFileCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{31}
 }
 
-func (x *PutLookupFileCommand) GetId() string {
+func (x *PutManagedFileCommand) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *PutLookupFileCommand) GetName() string {
+func (x *PutManagedFileCommand) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *PutLookupFileCommand) GetSha256() string {
+func (x *PutManagedFileCommand) GetSha256() string {
 	if x != nil {
 		return x.Sha256
 	}
 	return ""
 }
 
-func (x *PutLookupFileCommand) GetSize() int64 {
+func (x *PutManagedFileCommand) GetSize() int64 {
 	if x != nil {
 		return x.Size
 	}
 	return 0
 }
 
-func (x *PutLookupFileCommand) GetUploadedAt() string {
+func (x *PutManagedFileCommand) GetUploadedAt() string {
 	if x != nil {
 		return x.UploadedAt
 	}
 	return ""
 }
 
-type DeleteLookupFileCommand struct {
+type DeleteManagedFileCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DeleteLookupFileCommand) Reset() {
-	*x = DeleteLookupFileCommand{}
+func (x *DeleteManagedFileCommand) Reset() {
+	*x = DeleteManagedFileCommand{}
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeleteLookupFileCommand) String() string {
+func (x *DeleteManagedFileCommand) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeleteLookupFileCommand) ProtoMessage() {}
+func (*DeleteManagedFileCommand) ProtoMessage() {}
 
-func (x *DeleteLookupFileCommand) ProtoReflect() protoreflect.Message {
+func (x *DeleteManagedFileCommand) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2456,12 +2456,12 @@ func (x *DeleteLookupFileCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeleteLookupFileCommand.ProtoReflect.Descriptor instead.
-func (*DeleteLookupFileCommand) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeleteManagedFileCommand.ProtoReflect.Descriptor instead.
+func (*DeleteManagedFileCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{32}
 }
 
-func (x *DeleteLookupFileCommand) GetId() string {
+func (x *DeleteManagedFileCommand) GetId() string {
 	if x != nil {
 		return x.Id
 	}
@@ -2485,7 +2485,7 @@ type ConfigSnapshot struct {
 	NodeConfigs       []*PutNodeConfigCommand      `protobuf:"bytes,10,rep,name=node_configs,json=nodeConfigs,proto3" json:"node_configs,omitempty"`
 	ClusterTls        *PutClusterTLSCommand        `protobuf:"bytes,11,opt,name=cluster_tls,json=clusterTls,proto3" json:"cluster_tls,omitempty"`
 	Routes            []*PutRouteCommand           `protobuf:"bytes,12,rep,name=routes,proto3" json:"routes,omitempty"`
-	LookupFiles       []*PutLookupFileCommand      `protobuf:"bytes,13,rep,name=lookup_files,json=lookupFiles,proto3" json:"lookup_files,omitempty"`
+	ManagedFiles      []*PutManagedFileCommand     `protobuf:"bytes,13,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2604,9 +2604,9 @@ func (x *ConfigSnapshot) GetRoutes() []*PutRouteCommand {
 	return nil
 }
 
-func (x *ConfigSnapshot) GetLookupFiles() []*PutLookupFileCommand {
+func (x *ConfigSnapshot) GetManagedFiles() []*PutManagedFileCommand {
 	if x != nil {
-		return x.LookupFiles
+		return x.ManagedFiles
 	}
 	return nil
 }
@@ -2615,7 +2615,7 @@ var File_gastrolog_v1_fsm_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xeb\x13\n" +
+	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf1\x13\n" +
 	"\rConfigCommand\x12?\n" +
 	"\n" +
 	"put_filter\x18\x01 \x01(\v2\x1e.gastrolog.v1.PutFilterCommandH\x00R\tputFilter\x12H\n" +
@@ -2650,9 +2650,9 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x12delete_node_config\x18\x1a \x01(\v2%.gastrolog.v1.DeleteNodeConfigCommandH\x00R\x10deleteNodeConfig\x12L\n" +
 	"\x0fput_cluster_tls\x18\x1b \x01(\v2\".gastrolog.v1.PutClusterTLSCommandH\x00R\rputClusterTls\x12<\n" +
 	"\tput_route\x18\x1c \x01(\v2\x1d.gastrolog.v1.PutRouteCommandH\x00R\bputRoute\x12E\n" +
-	"\fdelete_route\x18\x1d \x01(\v2 .gastrolog.v1.DeleteRouteCommandH\x00R\vdeleteRoute\x12L\n" +
-	"\x0fput_lookup_file\x18\x1e \x01(\v2\".gastrolog.v1.PutLookupFileCommandH\x00R\rputLookupFile\x12U\n" +
-	"\x12delete_lookup_file\x18\x1f \x01(\v2%.gastrolog.v1.DeleteLookupFileCommandH\x00R\x10deleteLookupFileB\t\n" +
+	"\fdelete_route\x18\x1d \x01(\v2 .gastrolog.v1.DeleteRouteCommandH\x00R\vdeleteRoute\x12O\n" +
+	"\x10put_managed_file\x18\x1e \x01(\v2#.gastrolog.v1.PutManagedFileCommandH\x00R\x0eputManagedFile\x12X\n" +
+	"\x13delete_managed_file\x18\x1f \x01(\v2&.gastrolog.v1.DeleteManagedFileCommandH\x00R\x11deleteManagedFileB\t\n" +
 	"\acommand\"V\n" +
 	"\x10PutFilterCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -2798,16 +2798,16 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
 	"\aenabled\x18\x06 \x01(\bR\aenabled\"$\n" +
 	"\x12DeleteRouteCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x87\x01\n" +
-	"\x14PutLookupFileCommand\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x88\x01\n" +
+	"\x15PutManagedFileCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x1f\n" +
 	"\vuploaded_at\x18\x05 \x01(\tR\n" +
-	"uploadedAt\")\n" +
-	"\x17DeleteLookupFileCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xcd\a\n" +
+	"uploadedAt\"*\n" +
+	"\x18DeleteManagedFileCommand\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xd0\a\n" +
 	"\x0eConfigSnapshot\x128\n" +
 	"\afilters\x18\x01 \x03(\v2\x1e.gastrolog.v1.PutFilterCommandR\afilters\x12S\n" +
 	"\x11rotation_policies\x18\x02 \x03(\v2&.gastrolog.v1.PutRotationPolicyCommandR\x10rotationPolicies\x12V\n" +
@@ -2822,8 +2822,8 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	" \x03(\v2\".gastrolog.v1.PutNodeConfigCommandR\vnodeConfigs\x12C\n" +
 	"\vcluster_tls\x18\v \x01(\v2\".gastrolog.v1.PutClusterTLSCommandR\n" +
 	"clusterTls\x125\n" +
-	"\x06routes\x18\f \x03(\v2\x1d.gastrolog.v1.PutRouteCommandR\x06routes\x12E\n" +
-	"\flookup_files\x18\r \x03(\v2\".gastrolog.v1.PutLookupFileCommandR\vlookupFiles\x1a;\n" +
+	"\x06routes\x18\f \x03(\v2\x1d.gastrolog.v1.PutRouteCommandR\x06routes\x12H\n" +
+	"\rmanaged_files\x18\r \x03(\v2#.gastrolog.v1.PutManagedFileCommandR\fmanagedFiles\x1a;\n" +
 	"\rSettingsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
@@ -2873,8 +2873,8 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*PutClusterTLSCommand)(nil),           // 28: gastrolog.v1.PutClusterTLSCommand
 	(*PutRouteCommand)(nil),                // 29: gastrolog.v1.PutRouteCommand
 	(*DeleteRouteCommand)(nil),             // 30: gastrolog.v1.DeleteRouteCommand
-	(*PutLookupFileCommand)(nil),           // 31: gastrolog.v1.PutLookupFileCommand
-	(*DeleteLookupFileCommand)(nil),        // 32: gastrolog.v1.DeleteLookupFileCommand
+	(*PutManagedFileCommand)(nil),          // 31: gastrolog.v1.PutManagedFileCommand
+	(*DeleteManagedFileCommand)(nil),       // 32: gastrolog.v1.DeleteManagedFileCommand
 	(*ConfigSnapshot)(nil),                 // 33: gastrolog.v1.ConfigSnapshot
 	nil,                                    // 34: gastrolog.v1.PutVaultCommand.ParamsEntry
 	nil,                                    // 35: gastrolog.v1.PutIngesterCommand.ParamsEntry
@@ -2911,8 +2911,8 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	28, // 26: gastrolog.v1.ConfigCommand.put_cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
 	29, // 27: gastrolog.v1.ConfigCommand.put_route:type_name -> gastrolog.v1.PutRouteCommand
 	30, // 28: gastrolog.v1.ConfigCommand.delete_route:type_name -> gastrolog.v1.DeleteRouteCommand
-	31, // 29: gastrolog.v1.ConfigCommand.put_lookup_file:type_name -> gastrolog.v1.PutLookupFileCommand
-	32, // 30: gastrolog.v1.ConfigCommand.delete_lookup_file:type_name -> gastrolog.v1.DeleteLookupFileCommand
+	31, // 29: gastrolog.v1.ConfigCommand.put_managed_file:type_name -> gastrolog.v1.PutManagedFileCommand
+	32, // 30: gastrolog.v1.ConfigCommand.delete_managed_file:type_name -> gastrolog.v1.DeleteManagedFileCommand
 	7,  // 31: gastrolog.v1.PutVaultCommand.retention_rules:type_name -> gastrolog.v1.VaultRetentionRule
 	34, // 32: gastrolog.v1.PutVaultCommand.params:type_name -> gastrolog.v1.PutVaultCommand.ParamsEntry
 	35, // 33: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
@@ -2934,7 +2934,7 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	26, // 49: gastrolog.v1.ConfigSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
 	28, // 50: gastrolog.v1.ConfigSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
 	29, // 51: gastrolog.v1.ConfigSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
-	31, // 52: gastrolog.v1.ConfigSnapshot.lookup_files:type_name -> gastrolog.v1.PutLookupFileCommand
+	31, // 52: gastrolog.v1.ConfigSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
 	53, // [53:53] is the sub-list for method output_type
 	53, // [53:53] is the sub-list for method input_type
 	53, // [53:53] is the sub-list for extension type_name
@@ -2977,8 +2977,8 @@ func file_gastrolog_v1_fsm_proto_init() {
 		(*ConfigCommand_PutClusterTls)(nil),
 		(*ConfigCommand_PutRoute)(nil),
 		(*ConfigCommand_DeleteRoute)(nil),
-		(*ConfigCommand_PutLookupFile)(nil),
-		(*ConfigCommand_DeleteLookupFile)(nil),
+		(*ConfigCommand_PutManagedFile)(nil),
+		(*ConfigCommand_DeleteManagedFile)(nil),
 	}
 	file_gastrolog_v1_fsm_proto_msgTypes[3].OneofWrappers = []any{}
 	file_gastrolog_v1_fsm_proto_msgTypes[5].OneofWrappers = []any{}

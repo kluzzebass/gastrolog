@@ -2405,28 +2405,28 @@ func (x *ImportRecordMessage) GetRecord() *ExportRecord {
 	return nil
 }
 
-// PullLookupFileRequest asks a peer to stream a lookup file's contents.
-type PullLookupFileRequest struct {
+// PullManagedFileRequest asks a peer to stream a managed file's contents.
+type PullManagedFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PullLookupFileRequest) Reset() {
-	*x = PullLookupFileRequest{}
+func (x *PullManagedFileRequest) Reset() {
+	*x = PullManagedFileRequest{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PullLookupFileRequest) String() string {
+func (x *PullManagedFileRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PullLookupFileRequest) ProtoMessage() {}
+func (*PullManagedFileRequest) ProtoMessage() {}
 
-func (x *PullLookupFileRequest) ProtoReflect() protoreflect.Message {
+func (x *PullManagedFileRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2438,21 +2438,21 @@ func (x *PullLookupFileRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PullLookupFileRequest.ProtoReflect.Descriptor instead.
-func (*PullLookupFileRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use PullManagedFileRequest.ProtoReflect.Descriptor instead.
+func (*PullManagedFileRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{41}
 }
 
-func (x *PullLookupFileRequest) GetFileId() string {
+func (x *PullManagedFileRequest) GetFileId() string {
 	if x != nil {
 		return x.FileId
 	}
 	return ""
 }
 
-// PullLookupFileChunk carries a chunk of file data during streaming transfer.
+// PullManagedFileChunk carries a chunk of file data during streaming transfer.
 // The first chunk includes the filename and expected SHA256 hash.
-type PullLookupFileChunk struct {
+type PullManagedFileChunk struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`     // chunk of file content (up to 64KB)
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`     // original filename (first chunk only)
@@ -2461,20 +2461,20 @@ type PullLookupFileChunk struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *PullLookupFileChunk) Reset() {
-	*x = PullLookupFileChunk{}
+func (x *PullManagedFileChunk) Reset() {
+	*x = PullManagedFileChunk{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *PullLookupFileChunk) String() string {
+func (x *PullManagedFileChunk) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*PullLookupFileChunk) ProtoMessage() {}
+func (*PullManagedFileChunk) ProtoMessage() {}
 
-func (x *PullLookupFileChunk) ProtoReflect() protoreflect.Message {
+func (x *PullManagedFileChunk) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2486,53 +2486,53 @@ func (x *PullLookupFileChunk) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use PullLookupFileChunk.ProtoReflect.Descriptor instead.
-func (*PullLookupFileChunk) Descriptor() ([]byte, []int) {
+// Deprecated: Use PullManagedFileChunk.ProtoReflect.Descriptor instead.
+func (*PullManagedFileChunk) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{42}
 }
 
-func (x *PullLookupFileChunk) GetData() []byte {
+func (x *PullManagedFileChunk) GetData() []byte {
 	if x != nil {
 		return x.Data
 	}
 	return nil
 }
 
-func (x *PullLookupFileChunk) GetName() string {
+func (x *PullManagedFileChunk) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *PullLookupFileChunk) GetSha256() string {
+func (x *PullManagedFileChunk) GetSha256() string {
 	if x != nil {
 		return x.Sha256
 	}
 	return ""
 }
 
-// ListPeerLookupFilesRequest asks a peer which lookup files it has on disk.
-type ListPeerLookupFilesRequest struct {
+// ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
+type ListPeerManagedFilesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListPeerLookupFilesRequest) Reset() {
-	*x = ListPeerLookupFilesRequest{}
+func (x *ListPeerManagedFilesRequest) Reset() {
+	*x = ListPeerManagedFilesRequest{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListPeerLookupFilesRequest) String() string {
+func (x *ListPeerManagedFilesRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListPeerLookupFilesRequest) ProtoMessage() {}
+func (*ListPeerManagedFilesRequest) ProtoMessage() {}
 
-func (x *ListPeerLookupFilesRequest) ProtoReflect() protoreflect.Message {
+func (x *ListPeerManagedFilesRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2544,33 +2544,33 @@ func (x *ListPeerLookupFilesRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListPeerLookupFilesRequest.ProtoReflect.Descriptor instead.
-func (*ListPeerLookupFilesRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListPeerManagedFilesRequest.ProtoReflect.Descriptor instead.
+func (*ListPeerManagedFilesRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{43}
 }
 
-// ListPeerLookupFilesResponse returns the file IDs present on a peer.
-type ListPeerLookupFilesResponse struct {
+// ListPeerManagedFilesResponse returns the file IDs present on a peer.
+type ListPeerManagedFilesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FileIds       []string               `protobuf:"bytes,1,rep,name=file_ids,json=fileIds,proto3" json:"file_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListPeerLookupFilesResponse) Reset() {
-	*x = ListPeerLookupFilesResponse{}
+func (x *ListPeerManagedFilesResponse) Reset() {
+	*x = ListPeerManagedFilesResponse{}
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListPeerLookupFilesResponse) String() string {
+func (x *ListPeerManagedFilesResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListPeerLookupFilesResponse) ProtoMessage() {}
+func (*ListPeerManagedFilesResponse) ProtoMessage() {}
 
-func (x *ListPeerLookupFilesResponse) ProtoReflect() protoreflect.Message {
+func (x *ListPeerManagedFilesResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_cluster_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2582,12 +2582,12 @@ func (x *ListPeerLookupFilesResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListPeerLookupFilesResponse.ProtoReflect.Descriptor instead.
-func (*ListPeerLookupFilesResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListPeerManagedFilesResponse.ProtoReflect.Descriptor instead.
+func (*ListPeerManagedFilesResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{44}
 }
 
-func (x *ListPeerLookupFilesResponse) GetFileIds() []string {
+func (x *ListPeerManagedFilesResponse) GetFileIds() []string {
 	if x != nil {
 		return x.FileIds
 	}
@@ -2753,15 +2753,15 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"d\n" +
 	"\x13ImportRecordMessage\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x122\n" +
-	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\"0\n" +
-	"\x15PullLookupFileRequest\x12\x17\n" +
-	"\afile_id\x18\x01 \x01(\tR\x06fileId\"U\n" +
-	"\x13PullLookupFileChunk\x12\x12\n" +
+	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\"1\n" +
+	"\x16PullManagedFileRequest\x12\x17\n" +
+	"\afile_id\x18\x01 \x01(\tR\x06fileId\"V\n" +
+	"\x14PullManagedFileChunk\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
-	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"\x1c\n" +
-	"\x1aListPeerLookupFilesRequest\"8\n" +
-	"\x1bListPeerLookupFilesResponse\x12\x19\n" +
+	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"\x1d\n" +
+	"\x1bListPeerManagedFilesRequest\"9\n" +
+	"\x1cListPeerManagedFilesResponse\x12\x19\n" +
 	"\bfile_ids\x18\x01 \x03(\tR\afileIdsB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
@@ -2819,10 +2819,10 @@ var file_gastrolog_v1_cluster_proto_goTypes = []any{
 	(*ForwardFollowRequest)(nil),           // 38: gastrolog.v1.ForwardFollowRequest
 	(*ForwardFollowResponse)(nil),          // 39: gastrolog.v1.ForwardFollowResponse
 	(*ImportRecordMessage)(nil),            // 40: gastrolog.v1.ImportRecordMessage
-	(*PullLookupFileRequest)(nil),          // 41: gastrolog.v1.PullLookupFileRequest
-	(*PullLookupFileChunk)(nil),            // 42: gastrolog.v1.PullLookupFileChunk
-	(*ListPeerLookupFilesRequest)(nil),     // 43: gastrolog.v1.ListPeerLookupFilesRequest
-	(*ListPeerLookupFilesResponse)(nil),    // 44: gastrolog.v1.ListPeerLookupFilesResponse
+	(*PullManagedFileRequest)(nil),         // 41: gastrolog.v1.PullManagedFileRequest
+	(*PullManagedFileChunk)(nil),           // 42: gastrolog.v1.PullManagedFileChunk
+	(*ListPeerManagedFilesRequest)(nil),    // 43: gastrolog.v1.ListPeerManagedFilesRequest
+	(*ListPeerManagedFilesResponse)(nil),   // 44: gastrolog.v1.ListPeerManagedFilesResponse
 	(*timestamppb.Timestamp)(nil),          // 45: google.protobuf.Timestamp
 	(*Job)(nil),                            // 46: gastrolog.v1.Job
 	(*VaultStats)(nil),                     // 47: gastrolog.v1.VaultStats

@@ -10,11 +10,10 @@ interface UploadResult {
 }
 
 /**
- * Uploads a file to the lookup file management system via the multipart
- * upload endpoint. On success, invalidates config/settings queries so
- * the UI picks up the new MMDB file.
+ * Uploads a file to the managed file system via the multipart upload endpoint.
+ * On success, invalidates config/settings queries so the UI picks up the new file.
  */
-export function useUploadLookupFile() {
+export function useUploadManagedFile() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (file: File): Promise<UploadResult> => {
@@ -27,7 +26,7 @@ export function useUploadLookupFile() {
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const res = await fetch("/api/v1/lookup-files/upload", {
+      const res = await fetch("/api/v1/managed-files/upload", {
         method: "POST",
         headers,
         body: form,

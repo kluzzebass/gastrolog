@@ -264,21 +264,21 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	return searchForwarder
 }
 
-// wireLookupFileTransfer sets up cluster-side handlers for streaming lookup
-// files between nodes and returns a lookupFileManager for the dispatcher.
-func wireLookupFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, cfgStore config.Store, homeDir string, logger *slog.Logger) *lookupFileManager {
+// wireManagedFileTransfer sets up cluster-side handlers for streaming managed
+// files between nodes and returns a managedFileManager for the dispatcher.
+func wireManagedFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, cfgStore config.Store, homeDir string, logger *slog.Logger) *managedFileManager {
 	peerConns := clusterSrv.PeerConns()
-	clusterSrv.SetLookupFileReader(httpSrv.LookupFileReader)
-	clusterSrv.SetLookupFileIDs(httpSrv.LookupFileIDs)
+	clusterSrv.SetManagedFileReader(httpSrv.ManagedFileReader)
+	clusterSrv.SetManagedFileIDs(httpSrv.ManagedFileIDs)
 
-	transferrer := cluster.NewLookupTransferrer(peerConns)
-	return &lookupFileManager{
+	transferrer := cluster.NewManagedFileTransferrer(peerConns)
+	return &managedFileManager{
 		homeDir:     homeDir,
 		cfgStore:    cfgStore,
 		transferrer: transferrer,
 		peerIDs:     peerConns.PeerIDs,
-		fileExists:  httpSrv.LookupFileExists,
-		logger:      logger.With("component", "lookup-files"),
+		fileExists:  httpSrv.ManagedFileExists,
+		logger:      logger.With("component", "managed-files"),
 	}
 }
 
@@ -675,21 +675,21 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 		})
-		// Wire lookup file transfer handlers on the cluster server. The HTTP
-		// server owns the lookup files on disk; the cluster server streams them
+		// Wire managed file transfer handlers on the cluster server. The HTTP
+		// server owns the managed files on disk; the cluster server streams them
 		// to peers. Must happen after server creation but before serving starts.
 		if deps.ClusterSrv != nil && deps.Dispatcher != nil {
-			mgr := wireLookupFileTransfer(deps.ClusterSrv, srv, deps.CfgStore, deps.HomeDir, deps.Logger)
-			deps.Dispatcher.lookupFileHandler = mgr
+			mgr := wireManagedFileTransfer(deps.ClusterSrv, srv, deps.CfgStore, deps.HomeDir, deps.Logger)
+			deps.Dispatcher.managedFileHandler = mgr
 
 			// Wire on-demand repair: when the server resolves a manifest
 			// entry but the file is missing from disk, it calls this to
 			// pull the file from a peer before returning "not found".
-			srv.SetLookupFileRepair(mgr.RepairFile)
+			srv.SetManagedFileRepair(mgr.RepairFile)
 
 			// Startup reconciliation with backoff, then periodic drift check.
 			go func() {
-				reconcileLookupFilesStartup(ctx, mgr)
+				reconcileManagedFilesStartup(ctx, mgr)
 				mgr.RunPeriodicReconciliation(ctx)
 			}()
 		}

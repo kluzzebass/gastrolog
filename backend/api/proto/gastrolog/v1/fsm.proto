@@ -39,8 +39,8 @@ message ConfigCommand {
     PutClusterTLSCommand put_cluster_tls = 27;
     PutRouteCommand put_route = 28;
     DeleteRouteCommand delete_route = 29;
-    PutLookupFileCommand put_lookup_file = 30;
-    DeleteLookupFileCommand delete_lookup_file = 31;
+    PutManagedFileCommand put_managed_file = 30;
+    DeleteManagedFileCommand delete_managed_file = 31;
   }
 }
 
@@ -249,9 +249,9 @@ message DeleteRouteCommand {
   string id = 1;
 }
 
-// --- Lookup Files ---
+// --- Managed Files ---
 
-message PutLookupFileCommand {
+message PutManagedFileCommand {
   string id = 1;
   string name = 2;          // original filename
   string sha256 = 3;        // hex-encoded content hash
@@ -259,7 +259,7 @@ message PutLookupFileCommand {
   string uploaded_at = 5;   // RFC3339 timestamp
 }
 
-message DeleteLookupFileCommand {
+message DeleteManagedFileCommand {
   string id = 1;
 }
 
@@ -281,5 +281,5 @@ message ConfigSnapshot {
   repeated PutNodeConfigCommand node_configs = 10;
   PutClusterTLSCommand cluster_tls = 11;
   repeated PutRouteCommand routes = 12;
-  repeated PutLookupFileCommand lookup_files = 13;
+  repeated PutManagedFileCommand managed_files = 13;
 }

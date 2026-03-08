@@ -2004,51 +2004,51 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
 }
 
 /**
- * PullLookupFileRequest asks a peer to stream a lookup file's contents.
+ * PullManagedFileRequest asks a peer to stream a managed file's contents.
  *
- * @generated from message gastrolog.v1.PullLookupFileRequest
+ * @generated from message gastrolog.v1.PullManagedFileRequest
  */
-export class PullLookupFileRequest extends Message<PullLookupFileRequest> {
+export class PullManagedFileRequest extends Message<PullManagedFileRequest> {
   /**
    * @generated from field: string file_id = 1;
    */
   fileId = "";
 
-  constructor(data?: PartialMessage<PullLookupFileRequest>) {
+  constructor(data?: PartialMessage<PullManagedFileRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PullLookupFileRequest";
+  static readonly typeName = "gastrolog.v1.PullManagedFileRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullLookupFileRequest {
-    return new PullLookupFileRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullManagedFileRequest {
+    return new PullManagedFileRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullLookupFileRequest {
-    return new PullLookupFileRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullManagedFileRequest {
+    return new PullManagedFileRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullLookupFileRequest {
-    return new PullLookupFileRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullManagedFileRequest {
+    return new PullManagedFileRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PullLookupFileRequest | PlainMessage<PullLookupFileRequest> | undefined, b: PullLookupFileRequest | PlainMessage<PullLookupFileRequest> | undefined): boolean {
-    return proto3.util.equals(PullLookupFileRequest, a, b);
+  static equals(a: PullManagedFileRequest | PlainMessage<PullManagedFileRequest> | undefined, b: PullManagedFileRequest | PlainMessage<PullManagedFileRequest> | undefined): boolean {
+    return proto3.util.equals(PullManagedFileRequest, a, b);
   }
 }
 
 /**
- * PullLookupFileChunk carries a chunk of file data during streaming transfer.
+ * PullManagedFileChunk carries a chunk of file data during streaming transfer.
  * The first chunk includes the filename and expected SHA256 hash.
  *
- * @generated from message gastrolog.v1.PullLookupFileChunk
+ * @generated from message gastrolog.v1.PullManagedFileChunk
  */
-export class PullLookupFileChunk extends Message<PullLookupFileChunk> {
+export class PullManagedFileChunk extends Message<PullManagedFileChunk> {
   /**
    * chunk of file content (up to 64KB)
    *
@@ -2070,105 +2070,105 @@ export class PullLookupFileChunk extends Message<PullLookupFileChunk> {
    */
   sha256 = "";
 
-  constructor(data?: PartialMessage<PullLookupFileChunk>) {
+  constructor(data?: PartialMessage<PullManagedFileChunk>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PullLookupFileChunk";
+  static readonly typeName = "gastrolog.v1.PullManagedFileChunk";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "sha256", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullLookupFileChunk {
-    return new PullLookupFileChunk().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullManagedFileChunk {
+    return new PullManagedFileChunk().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullLookupFileChunk {
-    return new PullLookupFileChunk().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PullManagedFileChunk {
+    return new PullManagedFileChunk().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullLookupFileChunk {
-    return new PullLookupFileChunk().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PullManagedFileChunk {
+    return new PullManagedFileChunk().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PullLookupFileChunk | PlainMessage<PullLookupFileChunk> | undefined, b: PullLookupFileChunk | PlainMessage<PullLookupFileChunk> | undefined): boolean {
-    return proto3.util.equals(PullLookupFileChunk, a, b);
+  static equals(a: PullManagedFileChunk | PlainMessage<PullManagedFileChunk> | undefined, b: PullManagedFileChunk | PlainMessage<PullManagedFileChunk> | undefined): boolean {
+    return proto3.util.equals(PullManagedFileChunk, a, b);
   }
 }
 
 /**
- * ListPeerLookupFilesRequest asks a peer which lookup files it has on disk.
+ * ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
  *
- * @generated from message gastrolog.v1.ListPeerLookupFilesRequest
+ * @generated from message gastrolog.v1.ListPeerManagedFilesRequest
  */
-export class ListPeerLookupFilesRequest extends Message<ListPeerLookupFilesRequest> {
-  constructor(data?: PartialMessage<ListPeerLookupFilesRequest>) {
+export class ListPeerManagedFilesRequest extends Message<ListPeerManagedFilesRequest> {
+  constructor(data?: PartialMessage<ListPeerManagedFilesRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ListPeerLookupFilesRequest";
+  static readonly typeName = "gastrolog.v1.ListPeerManagedFilesRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListPeerLookupFilesRequest {
-    return new ListPeerLookupFilesRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListPeerManagedFilesRequest {
+    return new ListPeerManagedFilesRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListPeerLookupFilesRequest {
-    return new ListPeerLookupFilesRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListPeerManagedFilesRequest {
+    return new ListPeerManagedFilesRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListPeerLookupFilesRequest {
-    return new ListPeerLookupFilesRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListPeerManagedFilesRequest {
+    return new ListPeerManagedFilesRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ListPeerLookupFilesRequest | PlainMessage<ListPeerLookupFilesRequest> | undefined, b: ListPeerLookupFilesRequest | PlainMessage<ListPeerLookupFilesRequest> | undefined): boolean {
-    return proto3.util.equals(ListPeerLookupFilesRequest, a, b);
+  static equals(a: ListPeerManagedFilesRequest | PlainMessage<ListPeerManagedFilesRequest> | undefined, b: ListPeerManagedFilesRequest | PlainMessage<ListPeerManagedFilesRequest> | undefined): boolean {
+    return proto3.util.equals(ListPeerManagedFilesRequest, a, b);
   }
 }
 
 /**
- * ListPeerLookupFilesResponse returns the file IDs present on a peer.
+ * ListPeerManagedFilesResponse returns the file IDs present on a peer.
  *
- * @generated from message gastrolog.v1.ListPeerLookupFilesResponse
+ * @generated from message gastrolog.v1.ListPeerManagedFilesResponse
  */
-export class ListPeerLookupFilesResponse extends Message<ListPeerLookupFilesResponse> {
+export class ListPeerManagedFilesResponse extends Message<ListPeerManagedFilesResponse> {
   /**
    * @generated from field: repeated string file_ids = 1;
    */
   fileIds: string[] = [];
 
-  constructor(data?: PartialMessage<ListPeerLookupFilesResponse>) {
+  constructor(data?: PartialMessage<ListPeerManagedFilesResponse>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ListPeerLookupFilesResponse";
+  static readonly typeName = "gastrolog.v1.ListPeerManagedFilesResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "file_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListPeerLookupFilesResponse {
-    return new ListPeerLookupFilesResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListPeerManagedFilesResponse {
+    return new ListPeerManagedFilesResponse().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListPeerLookupFilesResponse {
-    return new ListPeerLookupFilesResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ListPeerManagedFilesResponse {
+    return new ListPeerManagedFilesResponse().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListPeerLookupFilesResponse {
-    return new ListPeerLookupFilesResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ListPeerManagedFilesResponse {
+    return new ListPeerManagedFilesResponse().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ListPeerLookupFilesResponse | PlainMessage<ListPeerLookupFilesResponse> | undefined, b: ListPeerLookupFilesResponse | PlainMessage<ListPeerLookupFilesResponse> | undefined): boolean {
-    return proto3.util.equals(ListPeerLookupFilesResponse, a, b);
+  static equals(a: ListPeerManagedFilesResponse | PlainMessage<ListPeerManagedFilesResponse> | undefined, b: ListPeerManagedFilesResponse | PlainMessage<ListPeerManagedFilesResponse> | undefined): boolean {
+    return proto3.util.equals(ListPeerManagedFilesResponse, a, b);
   }
 }
 

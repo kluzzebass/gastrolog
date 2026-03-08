@@ -67,12 +67,12 @@ type ReindexVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (string, 
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
 
-// LookupFileReader opens a lookup file for streaming to a peer.
+// ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
-type LookupFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
+type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
 
-// LookupFileIDsLister returns the IDs of lookup files present on this node's disk.
-type LookupFileIDsLister func() []string
+// ManagedFileIDsLister returns the IDs of managed files present on this node's disk.
+type ManagedFileIDsLister func() []string
 
 // SetRecordAppender injects the callback for writing forwarded records.
 // Must be called before the cluster server receives ForwardRecords RPCs.
@@ -141,14 +141,14 @@ func (s *Server) SetReindexVaultExecutor(fn ReindexVaultExecutor) {
 	s.reindexVaultExecutor = fn
 }
 
-// SetLookupFileReader injects the callback for streaming lookup files to peers.
-func (s *Server) SetLookupFileReader(fn LookupFileReader) {
-	s.lookupFileReader = fn
+// SetManagedFileReader injects the callback for streaming managed files to peers.
+func (s *Server) SetManagedFileReader(fn ManagedFileReader) {
+	s.managedFileReader = fn
 }
 
-// SetLookupFileIDs injects the callback for listing local lookup file IDs.
-func (s *Server) SetLookupFileIDs(fn LookupFileIDsLister) {
-	s.lookupFileIDs = fn
+// SetManagedFileIDs injects the callback for listing local managed file IDs.
+func (s *Server) SetManagedFileIDs(fn ManagedFileIDsLister) {
+	s.managedFileIDs = fn
 }
 
 // forwardRecords handles the ForwardRecords RPC. Converts proto ExportRecords
@@ -600,41 +600,41 @@ func (s *Server) notifyEviction(_ context.Context, req *gastrologv1.NotifyEvicti
 	return &gastrologv1.NotifyEvictionResponse{}, nil
 }
 
-// listPeerLookupFiles handles the unary ListPeerLookupFiles RPC.
-// Returns the file IDs of lookup files present on this node's disk.
-func (s *Server) listPeerLookupFiles(_ context.Context, _ *gastrologv1.ListPeerLookupFilesRequest) (*gastrologv1.ListPeerLookupFilesResponse, error) {
-	if s.lookupFileIDs == nil {
-		return &gastrologv1.ListPeerLookupFilesResponse{}, nil
+// listPeerManagedFiles handles the unary ListPeerManagedFiles RPC.
+// Returns the file IDs of managed files present on this node's disk.
+func (s *Server) listPeerManagedFiles(_ context.Context, _ *gastrologv1.ListPeerManagedFilesRequest) (*gastrologv1.ListPeerManagedFilesResponse, error) {
+	if s.managedFileIDs == nil {
+		return &gastrologv1.ListPeerManagedFilesResponse{}, nil
 	}
-	return &gastrologv1.ListPeerLookupFilesResponse{FileIds: s.lookupFileIDs()}, nil
+	return &gastrologv1.ListPeerManagedFilesResponse{FileIds: s.managedFileIDs()}, nil
 }
 
-// pullLookupFileStreamHandler handles the server-streaming PullLookupFile RPC.
-// Reads the requested lookup file from disk and streams it back in 64KB chunks.
-func pullLookupFileStreamHandler(srv any, stream grpc.ServerStream) error {
+// pullManagedFileStreamHandler handles the server-streaming PullManagedFile RPC.
+// Reads the requested managed file from disk and streams it back in 64KB chunks.
+func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 	s := srv.(*Server)
-	if s.lookupFileReader == nil {
-		return status.Error(codes.Unavailable, "lookup file reader not configured")
+	if s.managedFileReader == nil {
+		return status.Error(codes.Unavailable, "managed file reader not configured")
 	}
 
-	req := &gastrologv1.PullLookupFileRequest{}
+	req := &gastrologv1.PullManagedFileRequest{}
 	if err := stream.RecvMsg(req); err != nil {
 		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
 	}
 
-	name, rc, sha256hex, err := s.lookupFileReader(req.GetFileId())
+	name, rc, sha256hex, err := s.managedFileReader(req.GetFileId())
 	if err != nil {
-		return status.Errorf(codes.NotFound, "open lookup file %s: %v", req.GetFileId(), err)
+		return status.Errorf(codes.NotFound, "open managed file %s: %v", req.GetFileId(), err)
 	}
 	defer rc.Close() //nolint:errcheck // best-effort close
 
 	// Send first chunk with metadata.
-	buf := make([]byte, lookupChunkSize)
+	buf := make([]byte, managedFileChunkSize)
 	first := true
 	for {
 		n, readErr := rc.Read(buf)
 		if n > 0 {
-			msg := &gastrologv1.PullLookupFileChunk{
+			msg := &gastrologv1.PullManagedFileChunk{
 				Data: buf[:n],
 			}
 			if first {
@@ -734,8 +734,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardReindexVaultHandler,
 		},
 		{
-			MethodName: "ListPeerLookupFiles",
-			Handler:    listPeerLookupFilesHandler,
+			MethodName: "ListPeerManagedFiles",
+			Handler:    listPeerManagedFilesHandler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
@@ -750,8 +750,8 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 		{
-			StreamName:    "PullLookupFile",
-			Handler:       pullLookupFileStreamHandler,
+			StreamName:    "PullManagedFile",
+			Handler:       pullManagedFileStreamHandler,
 			ServerStreams: true,
 		},
 	},
@@ -776,7 +776,7 @@ type clusterServiceServer interface {
 	forwardAnalyzeChunk(context.Context, *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error)
 	forwardSealVault(context.Context, *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error)
 	forwardReindexVault(context.Context, *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error)
-	listPeerLookupFiles(context.Context, *gastrologv1.ListPeerLookupFilesRequest) (*gastrologv1.ListPeerLookupFilesResponse, error)
+	listPeerManagedFiles(context.Context, *gastrologv1.ListPeerManagedFilesRequest) (*gastrologv1.ListPeerManagedFilesResponse, error)
 }
 
 func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
@@ -1064,21 +1064,21 @@ func notifyEvictionHandler(srv any, ctx context.Context, dec func(any) error, in
 	return interceptor(ctx, req, info, handler)
 }
 
-func listPeerLookupFilesHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ListPeerLookupFilesRequest{}
+func listPeerManagedFilesHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ListPeerManagedFilesRequest{}
 	if err := dec(req); err != nil {
 		return nil, err
 	}
 	s := srv.(*Server)
 	if interceptor == nil {
-		return s.listPeerLookupFiles(ctx, req)
+		return s.listPeerManagedFiles(ctx, req)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ListPeerLookupFiles",
+		FullMethod: "/gastrolog.v1.ClusterService/ListPeerManagedFiles",
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
-		return s.listPeerLookupFiles(ctx, req.(*gastrologv1.ListPeerLookupFilesRequest))
+		return s.listPeerManagedFiles(ctx, req.(*gastrologv1.ListPeerManagedFilesRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

@@ -38,12 +38,12 @@ type orchActions interface {
 	UpdateMaxConcurrentJobs(n int) error
 }
 
-// LookupFileHandler handles lookup file lifecycle events from the FSM.
-type LookupFileHandler interface {
-	// OnPut is called when a lookup file's metadata is committed to Raft.
+// ManagedFileHandler handles managed file lifecycle events from the FSM.
+type ManagedFileHandler interface {
+	// OnPut is called when a managed file's metadata is committed to Raft.
 	// If the file isn't already on disk, it should be pulled from a peer.
 	OnPut(ctx context.Context, fileID uuid.UUID)
-	// OnDelete is called when a lookup file is removed from Raft.
+	// OnDelete is called when a managed file is removed from Raft.
 	// The handler should clean up the file from disk.
 	OnDelete(fileID uuid.UUID)
 }
@@ -60,7 +60,7 @@ type configDispatcher struct {
 	clusterTLS        *cluster.ClusterTLS // nil for single-node or memory mode
 	tlsFilePath       string              // path to persist cluster TLS on rotation
 	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
-	lookupFileHandler LookupFileHandler   // nil for single-node or before wiring
+	managedFileHandler ManagedFileHandler   // nil for single-node or before wiring
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -96,13 +96,13 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleClusterTLSPut(ctx)
 	case raftfsm.NotifyNodeConfigPut, raftfsm.NotifyNodeConfigDeleted:
 		// No orchestrator side effects; configSignal fires below.
-	case raftfsm.NotifyLookupFilePut:
-		if d.lookupFileHandler != nil {
-			d.lookupFileHandler.OnPut(ctx, n.ID)
+	case raftfsm.NotifyManagedFilePut:
+		if d.managedFileHandler != nil {
+			d.managedFileHandler.OnPut(ctx, n.ID)
 		}
-	case raftfsm.NotifyLookupFileDeleted:
-		if d.lookupFileHandler != nil {
-			d.lookupFileHandler.OnDelete(n.ID)
+	case raftfsm.NotifyManagedFileDeleted:
+		if d.managedFileHandler != nil {
+			d.managedFileHandler.OnDelete(n.ID)
 		}
 	}
 

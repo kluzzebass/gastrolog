@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupFileRequest, DeleteLookupFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListLookupFilesRequest, ListLookupFilesResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, ResumeVaultRequest, ResumeVaultResponse, TestIngesterRequest, TestIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -389,25 +389,25 @@ export const ConfigService = {
       kind: MethodKind.Unary,
     },
     /**
-     * ListLookupFiles returns all uploaded lookup files.
+     * ListManagedFiles returns all managed files.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.ListLookupFiles
+     * @generated from rpc gastrolog.v1.ConfigService.ListManagedFiles
      */
-    listLookupFiles: {
-      name: "ListLookupFiles",
-      I: ListLookupFilesRequest,
-      O: ListLookupFilesResponse,
+    listManagedFiles: {
+      name: "ListManagedFiles",
+      I: ListManagedFilesRequest,
+      O: ListManagedFilesResponse,
       kind: MethodKind.Unary,
     },
     /**
-     * DeleteLookupFile removes an uploaded lookup file.
+     * DeleteManagedFile removes an managed file.
      *
-     * @generated from rpc gastrolog.v1.ConfigService.DeleteLookupFile
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteManagedFile
      */
-    deleteLookupFile: {
-      name: "DeleteLookupFile",
-      I: DeleteLookupFileRequest,
-      O: DeleteLookupFileResponse,
+    deleteManagedFile: {
+      name: "DeleteManagedFile",
+      I: DeleteManagedFileRequest,
+      O: DeleteManagedFileResponse,
       kind: MethodKind.Unary,
     },
   }

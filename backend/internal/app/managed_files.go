@@ -21,23 +21,23 @@ const (
 	periodicReconcileEvery = 5 * time.Minute  // drift check interval
 )
 
-// lookupFileManager handles lookup file distribution across cluster nodes.
+// managedFileManager handles managed file distribution across cluster nodes.
 // On put notifications, it checks whether the file exists locally and pulls
 // it from a peer if missing. On delete notifications, it cleans up the local
 // disk. File pulls are asynchronous to avoid blocking FSM.Apply.
-type lookupFileManager struct {
+type managedFileManager struct {
 	homeDir     string
 	cfgStore    config.Store
-	transferrer *cluster.LookupTransferrer
+	transferrer *cluster.ManagedFileTransferrer
 	peerIDs     func() []string // returns peer node IDs in the cluster
 	fileExists  func(fileID string) bool
 	logger      *slog.Logger
 }
 
-var _ LookupFileHandler = (*lookupFileManager)(nil)
+var _ ManagedFileHandler = (*managedFileManager)(nil)
 
 // OnPut checks if the file exists locally; if not, starts an async pull from a peer.
-func (m *lookupFileManager) OnPut(_ context.Context, fileID uuid.UUID) {
+func (m *managedFileManager) OnPut(_ context.Context, fileID uuid.UUID) {
 	fid := fileID.String()
 	if m.fileExists(fid) {
 		return // already have it (we're the uploader)
@@ -47,55 +47,55 @@ func (m *lookupFileManager) OnPut(_ context.Context, fileID uuid.UUID) {
 	go m.pullFromPeer(context.Background(), fid)
 }
 
-// OnDelete removes the lookup file from local disk.
-func (m *lookupFileManager) OnDelete(fileID uuid.UUID) {
+// OnDelete removes the managed file from local disk.
+func (m *managedFileManager) OnDelete(fileID uuid.UUID) {
 	if m.homeDir == "" {
 		return
 	}
 	hd := home.New(m.homeDir)
-	dir := hd.LookupFileDir(fileID.String())
+	dir := hd.ManagedFileDir(fileID.String())
 	if err := os.RemoveAll(dir); err != nil {
-		m.logger.Warn("cleanup lookup file", "file_id", fileID, "error", err)
+		m.logger.Warn("cleanup managed file", "file_id", fileID, "error", err)
 	} else {
-		m.logger.Info("removed lookup file", "file_id", fileID, "dir", dir)
+		m.logger.Info("removed managed file", "file_id", fileID, "dir", dir)
 	}
 }
 
 // pullFromPeer tries each peer until one can provide the file.
 // Returns true if the file was pulled successfully.
-func (m *lookupFileManager) pullFromPeer(ctx context.Context, fileID string) bool {
+func (m *managedFileManager) pullFromPeer(ctx context.Context, fileID string) bool {
 	hd := home.New(m.homeDir)
-	destDir := hd.LookupFileDir(fileID)
+	destDir := hd.ManagedFileDir(fileID)
 
 	for _, peerID := range m.peerIDs() {
 		pullCtx, cancel := context.WithTimeout(ctx, pullTimeout)
 		err := m.transferrer.PullFile(pullCtx, peerID, fileID, destDir)
 		cancel()
 		if err != nil {
-			m.logger.Debug("pull lookup file from peer failed", "file_id", fileID, "peer", peerID, "error", err)
+			m.logger.Debug("pull managed file from peer failed", "file_id", fileID, "peer", peerID, "error", err)
 			continue
 		}
-		m.logger.Info("pulled lookup file from peer", "file_id", fileID, "peer", peerID)
+		m.logger.Info("pulled managed file from peer", "file_id", fileID, "peer", peerID)
 		return true
 	}
-	m.logger.Warn("failed to pull lookup file from any peer", "file_id", fileID)
+	m.logger.Warn("failed to pull managed file from any peer", "file_id", fileID)
 	return false
 }
 
 // RepairFile attempts to pull a specific file from a peer. Called on-demand
-// when a lookup file is in the manifest but missing from local disk.
+// when a managed file is in the manifest but missing from local disk.
 // Returns true if the file was successfully repaired.
-func (m *lookupFileManager) RepairFile(fileID string) bool {
+func (m *managedFileManager) RepairFile(fileID string) bool {
 	if m.fileExists(fileID) {
 		return true
 	}
-	m.logger.Info("on-demand repair: pulling missing lookup file", "file_id", fileID)
+	m.logger.Info("on-demand repair: pulling missing managed file", "file_id", fileID)
 	return m.pullFromPeer(context.Background(), fileID)
 }
 
 // RunPeriodicReconciliation checks for manifest-vs-disk drift on a timer.
 // Runs until ctx is cancelled.
-func (m *lookupFileManager) RunPeriodicReconciliation(ctx context.Context) {
+func (m *managedFileManager) RunPeriodicReconciliation(ctx context.Context) {
 	ticker := time.NewTicker(periodicReconcileEvery)
 	defer ticker.Stop()
 
@@ -110,8 +110,8 @@ func (m *lookupFileManager) RunPeriodicReconciliation(ctx context.Context) {
 }
 
 // reconcileOnce does a single manifest-vs-disk pass, pulling any missing files.
-func (m *lookupFileManager) reconcileOnce(ctx context.Context) {
-	files, err := m.cfgStore.ListLookupFiles(ctx)
+func (m *managedFileManager) reconcileOnce(ctx context.Context) {
+	files, err := m.cfgStore.ListManagedFiles(ctx)
 	if err != nil {
 		m.logger.Debug("periodic reconcile: list from store", "error", err)
 		return
@@ -139,11 +139,11 @@ func (m *lookupFileManager) reconcileOnce(ctx context.Context) {
 	}
 }
 
-// reconcileLookupFilesStartup retries pulling missing files with exponential
+// reconcileManagedFilesStartup retries pulling missing files with exponential
 // backoff. Peers may not be ready immediately after a cluster restart, so we
 // keep trying. Once all files are present (or we give up), the periodic loop
 // takes over.
-func reconcileLookupFilesStartup(ctx context.Context, mgr *lookupFileManager) {
+func reconcileManagedFilesStartup(ctx context.Context, mgr *managedFileManager) {
 	delay := reconcileBaseDelay
 
 	for attempt := range reconcileMaxAttempts {
@@ -184,8 +184,8 @@ func reconcileLookupFilesStartup(ctx context.Context, mgr *lookupFileManager) {
 }
 
 // missingFileCount returns the number of manifest files not on local disk.
-func (m *lookupFileManager) missingFileCount(ctx context.Context) int {
-	files, err := m.cfgStore.ListLookupFiles(ctx)
+func (m *managedFileManager) missingFileCount(ctx context.Context) int {
+	files, err := m.cfgStore.ListManagedFiles(ctx)
 	if err != nil {
 		return 0
 	}

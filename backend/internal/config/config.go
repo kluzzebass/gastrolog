@@ -82,11 +82,11 @@ type Store interface {
 	PutRoute(ctx context.Context, cfg RouteConfig) error
 	DeleteRoute(ctx context.Context, id uuid.UUID) error
 
-	// Lookup files
-	GetLookupFile(ctx context.Context, id uuid.UUID) (*LookupFileConfig, error)
-	ListLookupFiles(ctx context.Context) ([]LookupFileConfig, error)
-	PutLookupFile(ctx context.Context, cfg LookupFileConfig) error
-	DeleteLookupFile(ctx context.Context, id uuid.UUID) error
+	// Managed files
+	GetManagedFile(ctx context.Context, id uuid.UUID) (*ManagedFileConfig, error)
+	ListManagedFiles(ctx context.Context) ([]ManagedFileConfig, error)
+	PutManagedFile(ctx context.Context, cfg ManagedFileConfig) error
+	DeleteManagedFile(ctx context.Context, id uuid.UUID) error
 
 	// Server settings — typed access to Auth, Query, Scheduler, TLS, Lookup, SetupWizardDismissed.
 	LoadServerSettings(ctx context.Context) (ServerSettings, error)
@@ -179,7 +179,7 @@ type Config struct {
 	Routes            []RouteConfig           `json:"routes,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
 	Nodes             []NodeConfig            `json:"nodes,omitempty"`
-	LookupFiles       []LookupFileConfig      `json:"lookupFiles,omitempty"`
+	ManagedFiles      []ManagedFileConfig      `json:"managedFiles,omitempty"`
 
 	// Server-level settings.
 	Auth                 AuthConfig      `json:"auth,omitzero"`
@@ -638,10 +638,10 @@ func StringPtr(s string) *string { return new(s) }
 //go:fix inline
 func UUIDPtr(id uuid.UUID) *uuid.UUID { return new(id) }
 
-// LookupFileConfig describes an uploaded lookup file managed by the system.
+// ManagedFileConfig describes an uploaded managed file managed by the system.
 // Only metadata is stored in the config; the file itself lives on disk at
 // <home>/lookups/<ID>/<Name>.
-type LookupFileConfig struct {
+type ManagedFileConfig struct {
 	ID         uuid.UUID `json:"id"`
 	Name       string    `json:"name"`       // original filename
 	SHA256     string    `json:"sha256"`     // hex-encoded content hash

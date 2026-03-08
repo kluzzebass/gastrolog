@@ -40,7 +40,7 @@ type Store struct {
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
 	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
 	nodes         map[uuid.UUID]config.NodeConfig    // keyed by node ID
-	lookupFiles   map[uuid.UUID]config.LookupFileConfig
+	managedFiles   map[uuid.UUID]config.ManagedFileConfig
 	clusterTLS    *config.ClusterTLS
 }
 
@@ -59,7 +59,7 @@ func NewStore() *Store {
 		users:         make(map[uuid.UUID]config.User),
 		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
 		nodes:         make(map[uuid.UUID]config.NodeConfig),
-		lookupFiles:   make(map[uuid.UUID]config.LookupFileConfig),
+		managedFiles:   make(map[uuid.UUID]config.ManagedFileConfig),
 	}
 }
 
@@ -68,7 +68,7 @@ func (s *Store) isEmpty() bool {
 	return len(s.filters) == 0 && len(s.rotationPolicies) == 0 &&
 		len(s.retentionPolicies) == 0 && len(s.vaults) == 0 &&
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
-		len(s.lookupFiles) == 0 && !s.ss.hasServerSettings &&
+		len(s.managedFiles) == 0 && !s.ss.hasServerSettings &&
 		s.clusterTLS == nil
 }
 
@@ -132,12 +132,12 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 		slices.SortFunc(cfg.Routes, func(a, b config.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
-	if len(s.lookupFiles) > 0 {
-		cfg.LookupFiles = make([]config.LookupFileConfig, 0, len(s.lookupFiles))
-		for _, lf := range s.lookupFiles {
-			cfg.LookupFiles = append(cfg.LookupFiles, lf)
+	if len(s.managedFiles) > 0 {
+		cfg.ManagedFiles = make([]config.ManagedFileConfig, 0, len(s.managedFiles))
+		for _, lf := range s.managedFiles {
+			cfg.ManagedFiles = append(cfg.ManagedFiles, lf)
 		}
-		slices.SortFunc(cfg.LookupFiles, func(a, b config.LookupFileConfig) int { return cmpUUID(a.ID, b.ID) })
+		slices.SortFunc(cfg.ManagedFiles, func(a, b config.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.certs) > 0 {
@@ -428,44 +428,44 @@ func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-// Lookup files
+// Managed files
 
-func (s *Store) GetLookupFile(ctx context.Context, id uuid.UUID) (*config.LookupFileConfig, error) {
+func (s *Store) GetManagedFile(ctx context.Context, id uuid.UUID) (*config.ManagedFileConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	lf, ok := s.lookupFiles[id]
+	lf, ok := s.managedFiles[id]
 	if !ok {
 		return nil, nil
 	}
 	return &lf, nil
 }
 
-func (s *Store) ListLookupFiles(ctx context.Context) ([]config.LookupFileConfig, error) {
+func (s *Store) ListManagedFiles(ctx context.Context) ([]config.ManagedFileConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]config.LookupFileConfig, 0, len(s.lookupFiles))
-	for _, lf := range s.lookupFiles {
+	result := make([]config.ManagedFileConfig, 0, len(s.managedFiles))
+	for _, lf := range s.managedFiles {
 		result = append(result, lf)
 	}
-	slices.SortFunc(result, func(a, b config.LookupFileConfig) int { return cmpUUID(a.ID, b.ID) })
+	slices.SortFunc(result, func(a, b config.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
 	return result, nil
 }
 
-func (s *Store) PutLookupFile(ctx context.Context, cfg config.LookupFileConfig) error {
+func (s *Store) PutManagedFile(ctx context.Context, cfg config.ManagedFileConfig) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.lookupFiles[cfg.ID] = cfg
+	s.managedFiles[cfg.ID] = cfg
 	return nil
 }
 
-func (s *Store) DeleteLookupFile(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteManagedFile(ctx context.Context, id uuid.UUID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	delete(s.lookupFiles, id)
+	delete(s.managedFiles, id)
 	return nil
 }
 

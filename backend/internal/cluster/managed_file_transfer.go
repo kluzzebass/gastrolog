@@ -15,25 +15,25 @@ import (
 	"google.golang.org/grpc"
 )
 
-const lookupChunkSize = 64 * 1024 // 64 KB per streamed chunk
+const managedFileChunkSize = 64 * 1024 // 64 KB per streamed chunk
 
-// LookupTransferrer handles cross-node distribution of lookup files.
+// ManagedFileTransferrer handles cross-node distribution of managed files.
 // Uses the shared PeerConns pool, following the same pattern as
 // ChunkTransferrer and SearchForwarder.
-type LookupTransferrer struct {
+type ManagedFileTransferrer struct {
 	peers *PeerConns
 }
 
-// NewLookupTransferrer creates a LookupTransferrer using the shared PeerConns pool.
-func NewLookupTransferrer(peers *PeerConns) *LookupTransferrer {
-	return &LookupTransferrer{peers: peers}
+// NewManagedFileTransferrer creates a ManagedFileTransferrer using the shared PeerConns pool.
+func NewManagedFileTransferrer(peers *PeerConns) *ManagedFileTransferrer {
+	return &ManagedFileTransferrer{peers: peers}
 }
 
-// PullFile downloads a lookup file from a peer node and writes it to destDir.
+// PullFile downloads a managed file from a peer node and writes it to destDir.
 // The file is streamed chunk-by-chunk (never fully buffered) and verified
 // against the expected SHA256 hash before the temp file is renamed to its
 // final location.
-func (lt *LookupTransferrer) PullFile(ctx context.Context, nodeID, fileID, destDir string) error {
+func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, destDir string) error {
 	conn, err := lt.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -41,10 +41,10 @@ func (lt *LookupTransferrer) PullFile(ctx context.Context, nodeID, fileID, destD
 
 	stream, err := conn.NewStream(ctx,
 		&grpc.StreamDesc{
-			StreamName:    "PullLookupFile",
+			StreamName:    "PullManagedFile",
 			ServerStreams: true,
 		},
-		"/gastrolog.v1.ClusterService/PullLookupFile",
+		"/gastrolog.v1.ClusterService/PullManagedFile",
 	)
 	if err != nil {
 		lt.peers.Invalidate(nodeID)
@@ -52,7 +52,7 @@ func (lt *LookupTransferrer) PullFile(ctx context.Context, nodeID, fileID, destD
 	}
 
 	// Send the request.
-	if err := stream.SendMsg(&gastrologv1.PullLookupFileRequest{FileId: fileID}); err != nil {
+	if err := stream.SendMsg(&gastrologv1.PullManagedFileRequest{FileId: fileID}); err != nil {
 		lt.peers.Invalidate(nodeID)
 		return fmt.Errorf("send pull request to %s: %w", nodeID, err)
 	}
@@ -80,7 +80,7 @@ func (lt *LookupTransferrer) PullFile(ctx context.Context, nodeID, fileID, destD
 	var filename, expectedHash string
 
 	for {
-		chunk := &gastrologv1.PullLookupFileChunk{}
+		chunk := &gastrologv1.PullManagedFileChunk{}
 		if err := stream.RecvMsg(chunk); err != nil {
 			if errors.Is(err, io.EOF) {
 				break
@@ -122,15 +122,15 @@ func (lt *LookupTransferrer) PullFile(ctx context.Context, nodeID, fileID, destD
 	return nil
 }
 
-// ListPeerFiles asks a peer which lookup files it has on disk.
-func (lt *LookupTransferrer) ListPeerFiles(ctx context.Context, nodeID string) ([]string, error) {
+// ListPeerFiles asks a peer which managed files it has on disk.
+func (lt *ManagedFileTransferrer) ListPeerFiles(ctx context.Context, nodeID string) ([]string, error) {
 	conn, err := lt.peers.Conn(nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
 	}
 
-	resp := &gastrologv1.ListPeerLookupFilesResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ListPeerLookupFiles", &gastrologv1.ListPeerLookupFilesRequest{}, resp); err != nil {
+	resp := &gastrologv1.ListPeerManagedFilesResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ListPeerManagedFiles", &gastrologv1.ListPeerManagedFilesRequest{}, resp); err != nil {
 		lt.peers.Invalidate(nodeID)
 		return nil, fmt.Errorf("list peer files on %s: %w", nodeID, err)
 	}

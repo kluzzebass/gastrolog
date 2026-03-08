@@ -29,6 +29,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/frontend"
+	"gastrolog/internal/home"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
@@ -161,7 +162,7 @@ type Server struct {
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
-	repairLookupFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
+	repairManagedFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -395,13 +396,11 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 }
 
 // loadInitialLookupConfig loads GeoIP and ASN databases from persisted config at startup.
-// It also migrates any legacy flat MMDB files into managed lookup file entities.
+// It also migrates any legacy flat MMDB files into managed file entities.
 func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
 	if s.cfgStore == nil {
 		return
 	}
-
-	s.migrateLegacyMMDB()
 
 	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
 	defer cancel()
@@ -412,38 +411,9 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	s.applyLookupConfig(ss.Lookup, geoipTable, asnTable)
 }
 
-// migrateLegacyMMDB checks for MMDB files in the flat <home>/lookups/ directory
-// and registers them as managed lookup file entities if they aren't already tracked.
-func (s *Server) migrateLegacyMMDB() {
-	if s.homeDir == "" {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
-	defer cancel()
-
-	lookupDir := filepath.Join(s.homeDir, "lookups")
-	for _, filename := range []string{"GeoLite2-City.mmdb", "GeoLite2-ASN.mmdb"} {
-		flatPath := filepath.Join(lookupDir, filename)
-		if !fileExists(flatPath) {
-			continue
-		}
-		// Already managed?
-		if path := s.ResolveLookupFilePath(ctx, filename); path != "" {
-			continue
-		}
-		s.logger.Info("migrating legacy MMDB file to managed lookup", "file", filename)
-		if lf, err := s.RegisterFile(ctx, flatPath); err != nil {
-			s.logger.Warn("migrate legacy MMDB: register failed", "file", filename, "error", err)
-		} else {
-			s.logger.Info("migrated legacy MMDB", "file", filename, "file_id", lf.ID)
-		}
-	}
-}
-
 // effectiveLookupPaths resolves the actual MMDB paths to use.
 // Manual paths (config overrides) take precedence; otherwise paths are resolved
-// from the lookup file manifest, falling back to the legacy flat directory.
+// from the managed file manifest, falling back to the legacy flat directory.
 func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn string) {
 	geoip = cfg.GeoIPDBPath
 	asn = cfg.ASNDBPath
@@ -455,7 +425,7 @@ func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn strin
 	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
 	defer cancel()
 
-	// Resolve from manifest (managed lookup files).
+	// Resolve from manifest (managed files).
 	if geoip == "" {
 		geoip = s.resolveMMDBPath(ctx, "GeoLite2-City.mmdb")
 	}
@@ -466,19 +436,9 @@ func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn strin
 	return geoip, asn
 }
 
-// resolveMMDBPath finds an MMDB file by checking the lookup file manifest first,
-// then falling back to the legacy flat lookups directory.
+// resolveMMDBPath finds an MMDB file via the managed file manifest.
 func (s *Server) resolveMMDBPath(ctx context.Context, filename string) string {
-	// Check managed lookup files first.
-	if path := s.ResolveLookupFilePath(ctx, filename); path != "" {
-		return path
-	}
-	// Legacy fallback: flat <home>/lookups/<filename>.
-	candidate := filepath.Join(s.homeDir, "lookups", filename)
-	if _, err := os.Stat(candidate); err == nil {
-		return candidate
-	}
-	return ""
+	return s.ResolveManagedFilePath(ctx, filename)
 }
 
 // applyLookupConfig loads (or reloads) GeoIP and ASN databases from the given config.
@@ -552,9 +512,10 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 		return
 	}
 
-	lookupDir := filepath.Join(s.homeDir, "lookups")
-	if err := os.MkdirAll(lookupDir, 0o750); err != nil {
-		s.logger.Warn("maxmind update: create lookup dir", "error", err)
+	hd := home.New(s.homeDir)
+	downloadDir := hd.ManagedFilesDir()
+	if err := os.MkdirAll(downloadDir, 0o750); err != nil {
+		s.logger.Warn("maxmind update: create download dir", "error", err)
 		return
 	}
 
@@ -562,19 +523,19 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 
 	var anySuccess bool
 	for _, edition := range []string{"GeoLite2-City", "GeoLite2-ASN"} {
-		if err := lookup.DownloadDB(ctx, ss.Lookup.MaxMind.AccountID, ss.Lookup.MaxMind.LicenseKey, edition, lookupDir); err != nil {
+		if err := lookup.DownloadDB(ctx, ss.Lookup.MaxMind.AccountID, ss.Lookup.MaxMind.LicenseKey, edition, downloadDir); err != nil {
 			s.logger.Warn("maxmind update: download failed", "edition", edition, "error", err)
 			continue
 		}
 		s.logger.Info("maxmind update: downloaded", "edition", edition)
 		anySuccess = true
 
-		// Register as a managed lookup file entity so it distributes to all nodes.
-		flatPath := filepath.Join(lookupDir, edition+".mmdb")
-		if lf, err := s.RegisterFile(ctx, flatPath); err != nil {
+		// Register as a managed file entity so it distributes to all nodes.
+		flatPath := filepath.Join(downloadDir, edition+".mmdb")
+		if lf, err := s.RegisterFile(ctx, flatPath, ""); err != nil {
 			s.logger.Warn("maxmind update: register file failed", "edition", edition, "error", err)
 		} else {
-			s.logger.Info("maxmind update: registered as lookup file", "edition", edition, "file_id", lf.ID)
+			s.logger.Info("maxmind update: registered as managed file", "edition", edition, "file_id", lf.ID)
 		}
 	}
 
@@ -621,12 +582,6 @@ func (s *Server) reloadASN(path string, table *lookup.ASN) {
 		return
 	}
 	s.logger.Info("maxmind update: reloaded ASN", "build", info.BuildTime.Format("2006-01-02"))
-}
-
-// fileExists returns true if the path exists and is a regular file.
-func fileExists(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
 }
 
 // Serve starts the server on the given listener.

@@ -3,21 +3,28 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useSettings, usePutSettings, MAXMIND_KEEP } from "../../api/hooks/useSettings";
-import { useUploadLookupFile } from "../../api/hooks/useUploadLookupFile";
+import { useConfig } from "../../api/hooks/useConfig";
+import { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 import { useToast } from "../Toast";
 import { FormField, TextInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 import { Button } from "./Buttons";
 import { ExpandableCard } from "./ExpandableCard";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
+import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/config_pb";
 
 // eslint-disable-next-line sonarjs/cognitive-complexity -- inherently complex settings form with multiple expandable cards and dirty tracking
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useSettings();
+  const { data: config } = useConfig();
   const putConfig = usePutSettings();
-  const uploadFile = useUploadLookupFile();
+  const uploadFile = useUploadManagedFile();
   const { addToast } = useToast();
+
+  const managedFiles = config?.managedFiles ?? [];
+  const geoipFile = managedFiles.find((f) => f.name.includes("City"));
+  const asnFile = managedFiles.find((f) => f.name.includes("ASN") || f.name.includes("ISP"));
 
   const [autoDownload, setAutoDownload] = useState(false);
   const [accountId, setAccountId] = useState("");
@@ -122,7 +129,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   placeholder={
                     data?.lookup?.maxmind?.licenseConfigured
                       ? "(configured — leave blank to keep)"
-                      : "123456"
+                      : ""
                   }
                   dark={dark}
                   mono
@@ -140,7 +147,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
                   placeholder={
                     data?.lookup?.maxmind?.licenseConfigured
                       ? "(configured — leave blank to keep)"
-                      : "Enter license key"
+                      : ""
                   }
                   dark={dark}
                 />
@@ -163,8 +170,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             expanded={isExpanded("geoip")}
             onToggle={() => toggle("geoip")}
             monoTitle={false}
-            typeBadge={autoDownload ? "auto" : undefined}
-            typeBadgeAccent={autoDownload}
+            typeBadge={geoipFile ? "active" : autoDownload ? "auto" : undefined}
+            typeBadgeAccent={!!geoipFile || autoDownload}
           >
             <div className="flex flex-col gap-4">
               <p
@@ -177,7 +184,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
               <MmdbDropZone
                 dark={dark}
                 label="GeoLite2-City / GeoIP2-City"
-                expectedSuffix="City"
+                currentFile={geoipFile}
                 uploadFile={uploadFile}
                 addToast={addToast}
               />
@@ -190,8 +197,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
             expanded={isExpanded("asn")}
             onToggle={() => toggle("asn")}
             monoTitle={false}
-            typeBadge={autoDownload ? "auto" : undefined}
-            typeBadgeAccent={autoDownload}
+            typeBadge={asnFile ? "active" : autoDownload ? "auto" : undefined}
+            typeBadgeAccent={!!asnFile || autoDownload}
           >
             <div className="flex flex-col gap-4">
               <p
@@ -204,7 +211,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
               <MmdbDropZone
                 dark={dark}
                 label="GeoLite2-ASN / GeoIP2-ISP"
-                expectedSuffix="ASN"
+                currentFile={asnFile}
                 uploadFile={uploadFile}
                 addToast={addToast}
               />
@@ -233,117 +240,112 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 function MmdbDropZone({
   dark,
   label,
-  expectedSuffix: _expectedSuffix,
+  currentFile,
   uploadFile,
   addToast,
 }: Readonly<{
   dark: boolean;
   label: string;
-  expectedSuffix: string;
-  uploadFile: ReturnType<typeof useUploadLookupFile>;
+  currentFile?: ManagedFileInfo;
+  uploadFile: ReturnType<typeof useUploadManagedFile>;
   addToast: (msg: string, type: "info" | "error") => void;
 }>) {
   const c = useThemeClass(dark);
   const [dragging, setDragging] = useState(false);
-  const [uploadedName, setUploadedName] = useState<string | null>(null);
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.currentTarget.classList.remove("ring-2", "ring-copper");
-    setDragging(false);
-
-    const file = e.dataTransfer.files[0];
-    if (!file) return;
+  const doUpload = (file: File) => {
     if (!file.name.endsWith(".mmdb")) {
       addToast("Only .mmdb files are accepted", "error");
       return;
     }
-
     uploadFile.mutate(file, {
       onSuccess: (result) => {
-        setUploadedName(result.name);
         addToast(`Uploaded ${result.name} (${formatBytes(result.size)})`, "info");
       },
       onError: (err) => {
         addToast(err instanceof Error ? err.message : "Upload failed", "error");
       },
     });
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) doUpload(file);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.name.endsWith(".mmdb")) {
-      addToast("Only .mmdb files are accepted", "error");
-      return;
-    }
-
-    uploadFile.mutate(file, {
-      onSuccess: (result) => {
-        setUploadedName(result.name);
-        addToast(`Uploaded ${result.name} (${formatBytes(result.size)})`, "info");
-      },
-      onError: (err) => {
-        addToast(err instanceof Error ? err.message : "Upload failed", "error");
-      },
-    });
-    // Reset so the same file can be re-uploaded.
+    if (file) doUpload(file);
     e.target.value = "";
   };
 
   return (
-    <div
-      role="button"
-      tabIndex={0}
-      onDragOver={handleDragOver}
-      onDragEnter={(e) => { handleDragEnter(e); setDragging(true); }}
-      onDragLeave={(e) => { handleDragLeave(e); if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
-      onDrop={handleDrop}
-      className={`relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed px-4 py-5 transition-all cursor-pointer ${
-        dragging
-          ? "ring-2 ring-copper border-copper"
-          : c("border-ink-border hover:border-copper-dim", "border-light-border hover:border-copper")
-      } ${c("bg-ink-surface/50", "bg-light-surface/50")}`}
-      onClick={() => {
-        const input = document.getElementById(`mmdb-upload-${label}`) as HTMLInputElement | null;
-        input?.click();
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
+    <div className="flex flex-col gap-2">
+      {currentFile && (
+        <div className={`flex items-center gap-2 px-3 py-2 rounded text-[0.8em] ${c("bg-ink-surface", "bg-light-surface")}`}>
+          <span className={`font-mono ${c("text-text-bright", "text-light-text-bright")}`}>
+            {currentFile.name}
+          </span>
+          <span className={c("text-text-ghost", "text-light-text-ghost")}>
+            {formatBytes(Number(currentFile.size))}
+          </span>
+          {currentFile.uploadedAt && (
+            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+              &middot; {new Date(currentFile.uploadedAt).toLocaleDateString()}
+            </span>
+          )}
+        </div>
+      )}
+
+      <div
+        role="button"
+        tabIndex={0}
+        onDragOver={handleDragOver}
+        onDragEnter={(e) => { handleDragEnter(e); setDragging(true); }}
+        onDragLeave={(e) => { handleDragLeave(e); if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
+        onDrop={handleDrop}
+        className={`relative flex flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed px-4 py-4 transition-all cursor-pointer ${
+          dragging
+            ? "ring-2 ring-copper border-copper"
+            : c("border-ink-border hover:border-copper-dim", "border-light-border hover:border-copper")
+        } ${c("bg-ink-surface/50", "bg-light-surface/50")}`}
+        onClick={() => {
           const input = document.getElementById(`mmdb-upload-${label}`) as HTMLInputElement | null;
           input?.click();
-        }
-      }}
-    >
-      <input
-        id={`mmdb-upload-${label}`}
-        type="file"
-        accept=".mmdb"
-        className="hidden"
-        onChange={handleFileInput}
-      />
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            const input = document.getElementById(`mmdb-upload-${label}`) as HTMLInputElement | null;
+            input?.click();
+          }
+        }}
+      >
+        <input
+          id={`mmdb-upload-${label}`}
+          type="file"
+          accept=".mmdb"
+          className="hidden"
+          onChange={handleFileInput}
+        />
 
-      {uploadFile.isPending ? (
-        <span className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
-          Uploading...
-        </span>
-      ) : (
-        <>
-          <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
-            Drop {label} .mmdb file here
+        {uploadFile.isPending ? (
+          <span className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
+            Uploading...
           </span>
-          <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            or click to browse
-          </span>
-        </>
-      )}
-
-      {uploadedName && !uploadFile.isPending && (
-        <span className={`text-[0.75em] mt-1 ${c("text-copper-dim", "text-copper")}`}>
-          Uploaded: {uploadedName}
-        </span>
-      )}
+        ) : (
+          <>
+            <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
+              {currentFile ? "Replace" : "Drop"} {label} .mmdb
+            </span>
+            <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              or click to browse
+            </span>
+          </>
+        )}
+      </div>
     </div>
   );
 }

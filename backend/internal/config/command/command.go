@@ -412,8 +412,8 @@ func ExtractDeleteRoute(cmd *gastrologv1.DeleteRouteCommand) (uuid.UUID, error) 
 // Lookup Files
 // ---------------------------------------------------------------------------
 
-func putLookupFileCmd(cfg config.LookupFileConfig) *gastrologv1.PutLookupFileCommand {
-	return &gastrologv1.PutLookupFileCommand{
+func putManagedFileCmd(cfg config.ManagedFileConfig) *gastrologv1.PutManagedFileCommand {
+	return &gastrologv1.PutManagedFileCommand{
 		Id:         cfg.ID.String(),
 		Name:       cfg.Name,
 		Sha256:     cfg.SHA256,
@@ -422,33 +422,33 @@ func putLookupFileCmd(cfg config.LookupFileConfig) *gastrologv1.PutLookupFileCom
 	}
 }
 
-// NewPutLookupFile creates a ConfigCommand for PutLookupFile.
-func NewPutLookupFile(cfg config.LookupFileConfig) *gastrologv1.ConfigCommand {
+// NewPutManagedFile creates a ConfigCommand for PutManagedFile.
+func NewPutManagedFile(cfg config.ManagedFileConfig) *gastrologv1.ConfigCommand {
 	return &gastrologv1.ConfigCommand{
-		Command: &gastrologv1.ConfigCommand_PutLookupFile{PutLookupFile: putLookupFileCmd(cfg)},
+		Command: &gastrologv1.ConfigCommand_PutManagedFile{PutManagedFile: putManagedFileCmd(cfg)},
 	}
 }
 
-// NewDeleteLookupFile creates a ConfigCommand for DeleteLookupFile.
-func NewDeleteLookupFile(id uuid.UUID) *gastrologv1.ConfigCommand {
+// NewDeleteManagedFile creates a ConfigCommand for DeleteManagedFile.
+func NewDeleteManagedFile(id uuid.UUID) *gastrologv1.ConfigCommand {
 	return &gastrologv1.ConfigCommand{
-		Command: &gastrologv1.ConfigCommand_DeleteLookupFile{
-			DeleteLookupFile: &gastrologv1.DeleteLookupFileCommand{Id: id.String()},
+		Command: &gastrologv1.ConfigCommand_DeleteManagedFile{
+			DeleteManagedFile: &gastrologv1.DeleteManagedFileCommand{Id: id.String()},
 		},
 	}
 }
 
-// ExtractPutLookupFile converts a PutLookupFileCommand back to a LookupFileConfig.
-func ExtractPutLookupFile(cmd *gastrologv1.PutLookupFileCommand) (config.LookupFileConfig, error) {
+// ExtractPutManagedFile converts a PutManagedFileCommand back to a ManagedFileConfig.
+func ExtractPutManagedFile(cmd *gastrologv1.PutManagedFileCommand) (config.ManagedFileConfig, error) {
 	id, err := uuid.Parse(cmd.GetId())
 	if err != nil {
-		return config.LookupFileConfig{}, fmt.Errorf("parse lookup file id: %w", err)
+		return config.ManagedFileConfig{}, fmt.Errorf("parse managed file id: %w", err)
 	}
 	var uploadedAt time.Time
 	if cmd.GetUploadedAt() != "" {
 		uploadedAt, _ = time.Parse(time.RFC3339Nano, cmd.GetUploadedAt())
 	}
-	return config.LookupFileConfig{
+	return config.ManagedFileConfig{
 		ID:         id,
 		Name:       cmd.GetName(),
 		SHA256:     cmd.GetSha256(),
@@ -457,8 +457,8 @@ func ExtractPutLookupFile(cmd *gastrologv1.PutLookupFileCommand) (config.LookupF
 	}, nil
 }
 
-// ExtractDeleteLookupFile extracts the UUID from a DeleteLookupFileCommand.
-func ExtractDeleteLookupFile(cmd *gastrologv1.DeleteLookupFileCommand) (uuid.UUID, error) {
+// ExtractDeleteManagedFile extracts the UUID from a DeleteManagedFileCommand.
+func ExtractDeleteManagedFile(cmd *gastrologv1.DeleteManagedFileCommand) (uuid.UUID, error) {
 	return uuid.Parse(cmd.GetId())
 }
 
@@ -963,8 +963,8 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	for _, rt := range cfg.Routes {
 		snap.Routes = append(snap.Routes, putRouteCmd(rt))
 	}
-	for _, lf := range cfg.LookupFiles {
-		snap.LookupFiles = append(snap.LookupFiles, putLookupFileCmd(lf))
+	for _, lf := range cfg.ManagedFiles {
+		snap.ManagedFiles = append(snap.ManagedFiles, putManagedFileCmd(lf))
 	}
 	for _, c := range cfg.Certs {
 		snap.Certificates = append(snap.Certificates, putCertificateCmd(c))
@@ -1052,12 +1052,12 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 		}
 		cfg.Routes = append(cfg.Routes, rc)
 	}
-	for _, lf := range snap.GetLookupFiles() {
-		lfc, err := ExtractPutLookupFile(lf)
+	for _, lf := range snap.GetManagedFiles() {
+		lfc, err := ExtractPutManagedFile(lf)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore lookup file: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("restore managed file: %w", err)
 		}
-		cfg.LookupFiles = append(cfg.LookupFiles, lfc)
+		cfg.ManagedFiles = append(cfg.ManagedFiles, lfc)
 	}
 	for _, c := range snap.GetCertificates() {
 		cc, err := ExtractPutCertificate(c)

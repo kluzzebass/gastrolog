@@ -108,11 +108,11 @@ service ConfigService {
   // GetRouteStats returns live routing statistics.
   rpc GetRouteStats(GetRouteStatsRequest) returns (GetRouteStatsResponse);
 
-  // ListLookupFiles returns all uploaded lookup files.
-  rpc ListLookupFiles(ListLookupFilesRequest) returns (ListLookupFilesResponse);
+  // ListManagedFiles returns all managed files.
+  rpc ListManagedFiles(ListManagedFilesRequest) returns (ListManagedFilesResponse);
 
-  // DeleteLookupFile removes an uploaded lookup file.
-  rpc DeleteLookupFile(DeleteLookupFileRequest) returns (DeleteLookupFileResponse);
+  // DeleteManagedFile removes an managed file.
+  rpc DeleteManagedFile(DeleteManagedFileRequest) returns (DeleteManagedFileResponse);
 }
 
 message GetConfigRequest {}
@@ -125,7 +125,7 @@ message GetConfigResponse {
   repeated RetentionPolicyConfig retention_policies = 5;
   repeated NodeConfig node_configs = 6;
   repeated RouteConfig routes = 7;
-  repeated LookupFileInfo lookup_files = 8;
+  repeated ManagedFileInfo managed_files = 8;
 }
 
 message RetentionRule {
@@ -601,9 +601,9 @@ message PerRouteStats {
   int64 records_forwarded = 3; // subset sent to remote nodes
 }
 
-// --- Lookup Files ---
+// --- Managed Files ---
 
-message LookupFileInfo {
+message ManagedFileInfo {
   string id = 1;
   string name = 2;          // original filename
   string sha256 = 3;        // hex-encoded content hash
@@ -611,14 +611,14 @@ message LookupFileInfo {
   string uploaded_at = 5;   // RFC3339 timestamp
 }
 
-message ListLookupFilesRequest {}
+message ListManagedFilesRequest {}
 
-message ListLookupFilesResponse {
-  repeated LookupFileInfo files = 1;
+message ListManagedFilesResponse {
+  repeated ManagedFileInfo files = 1;
 }
 
-message DeleteLookupFileRequest {
+message DeleteManagedFileRequest {
   string id = 1;
 }
 
-message DeleteLookupFileResponse {}
+message DeleteManagedFileResponse {}

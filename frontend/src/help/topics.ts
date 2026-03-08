@@ -87,6 +87,7 @@ export const helpTopics: HelpTopic[] = [
     id: 'settings', title: 'Settings', load: md(() => import('./settings.md?raw')),
     children: [
       { id: 'service-settings', title: 'Cluster', load: md(() => import('./service-settings.md?raw')) },
+      { id: 'managed-files', title: 'Files', load: md(() => import('./managed-files.md?raw')) },
       { id: 'lookups-settings', title: 'Lookups', load: md(() => import('./lookups-settings.md?raw')) },
     ],
   },

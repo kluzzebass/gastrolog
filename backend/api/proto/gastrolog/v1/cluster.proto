@@ -290,25 +290,25 @@ message ImportRecordMessage {
   ExportRecord record = 2;
 }
 
-// --- Lookup file distribution ---
+// --- Managed file distribution ---
 
-// PullLookupFileRequest asks a peer to stream a lookup file's contents.
-message PullLookupFileRequest {
+// PullManagedFileRequest asks a peer to stream a managed file's contents.
+message PullManagedFileRequest {
   string file_id = 1;
 }
 
-// PullLookupFileChunk carries a chunk of file data during streaming transfer.
+// PullManagedFileChunk carries a chunk of file data during streaming transfer.
 // The first chunk includes the filename and expected SHA256 hash.
-message PullLookupFileChunk {
+message PullManagedFileChunk {
   bytes data = 1;            // chunk of file content (up to 64KB)
   string name = 2;           // original filename (first chunk only)
   string sha256 = 3;         // expected hash (first chunk only)
 }
 
-// ListPeerLookupFilesRequest asks a peer which lookup files it has on disk.
-message ListPeerLookupFilesRequest {}
+// ListPeerManagedFilesRequest asks a peer which managed files it has on disk.
+message ListPeerManagedFilesRequest {}
 
-// ListPeerLookupFilesResponse returns the file IDs present on a peer.
-message ListPeerLookupFilesResponse {
+// ListPeerManagedFilesResponse returns the file IDs present on a peer.
+message ListPeerManagedFilesResponse {
   repeated string file_ids = 1;
 }

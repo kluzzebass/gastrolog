@@ -66,7 +66,7 @@ type GetConfigResponse struct {
 	RetentionPolicies []*RetentionPolicyConfig `protobuf:"bytes,5,rep,name=retention_policies,json=retentionPolicies,proto3" json:"retention_policies,omitempty"`
 	NodeConfigs       []*NodeConfig            `protobuf:"bytes,6,rep,name=node_configs,json=nodeConfigs,proto3" json:"node_configs,omitempty"`
 	Routes            []*RouteConfig           `protobuf:"bytes,7,rep,name=routes,proto3" json:"routes,omitempty"`
-	LookupFiles       []*LookupFileInfo        `protobuf:"bytes,8,rep,name=lookup_files,json=lookupFiles,proto3" json:"lookup_files,omitempty"`
+	ManagedFiles      []*ManagedFileInfo       `protobuf:"bytes,8,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -150,9 +150,9 @@ func (x *GetConfigResponse) GetRoutes() []*RouteConfig {
 	return nil
 }
 
-func (x *GetConfigResponse) GetLookupFiles() []*LookupFileInfo {
+func (x *GetConfigResponse) GetManagedFiles() []*ManagedFileInfo {
 	if x != nil {
-		return x.LookupFiles
+		return x.ManagedFiles
 	}
 	return nil
 }
@@ -5243,7 +5243,7 @@ func (x *PerRouteStats) GetRecordsForwarded() int64 {
 	return 0
 }
 
-type LookupFileInfo struct {
+type ManagedFileInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // original filename
@@ -5254,20 +5254,20 @@ type LookupFileInfo struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LookupFileInfo) Reset() {
-	*x = LookupFileInfo{}
+func (x *ManagedFileInfo) Reset() {
+	*x = ManagedFileInfo{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LookupFileInfo) String() string {
+func (x *ManagedFileInfo) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LookupFileInfo) ProtoMessage() {}
+func (*ManagedFileInfo) ProtoMessage() {}
 
-func (x *LookupFileInfo) ProtoReflect() protoreflect.Message {
+func (x *ManagedFileInfo) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5279,66 +5279,66 @@ func (x *LookupFileInfo) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LookupFileInfo.ProtoReflect.Descriptor instead.
-func (*LookupFileInfo) Descriptor() ([]byte, []int) {
+// Deprecated: Use ManagedFileInfo.ProtoReflect.Descriptor instead.
+func (*ManagedFileInfo) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{100}
 }
 
-func (x *LookupFileInfo) GetId() string {
+func (x *ManagedFileInfo) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *LookupFileInfo) GetName() string {
+func (x *ManagedFileInfo) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *LookupFileInfo) GetSha256() string {
+func (x *ManagedFileInfo) GetSha256() string {
 	if x != nil {
 		return x.Sha256
 	}
 	return ""
 }
 
-func (x *LookupFileInfo) GetSize() int64 {
+func (x *ManagedFileInfo) GetSize() int64 {
 	if x != nil {
 		return x.Size
 	}
 	return 0
 }
 
-func (x *LookupFileInfo) GetUploadedAt() string {
+func (x *ManagedFileInfo) GetUploadedAt() string {
 	if x != nil {
 		return x.UploadedAt
 	}
 	return ""
 }
 
-type ListLookupFilesRequest struct {
+type ListManagedFilesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListLookupFilesRequest) Reset() {
-	*x = ListLookupFilesRequest{}
+func (x *ListManagedFilesRequest) Reset() {
+	*x = ListManagedFilesRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListLookupFilesRequest) String() string {
+func (x *ListManagedFilesRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListLookupFilesRequest) ProtoMessage() {}
+func (*ListManagedFilesRequest) ProtoMessage() {}
 
-func (x *ListLookupFilesRequest) ProtoReflect() protoreflect.Message {
+func (x *ListManagedFilesRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5350,32 +5350,32 @@ func (x *ListLookupFilesRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListLookupFilesRequest.ProtoReflect.Descriptor instead.
-func (*ListLookupFilesRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListManagedFilesRequest.ProtoReflect.Descriptor instead.
+func (*ListManagedFilesRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{101}
 }
 
-type ListLookupFilesResponse struct {
+type ListManagedFilesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Files         []*LookupFileInfo      `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
+	Files         []*ManagedFileInfo     `protobuf:"bytes,1,rep,name=files,proto3" json:"files,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ListLookupFilesResponse) Reset() {
-	*x = ListLookupFilesResponse{}
+func (x *ListManagedFilesResponse) Reset() {
+	*x = ListManagedFilesResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ListLookupFilesResponse) String() string {
+func (x *ListManagedFilesResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ListLookupFilesResponse) ProtoMessage() {}
+func (*ListManagedFilesResponse) ProtoMessage() {}
 
-func (x *ListLookupFilesResponse) ProtoReflect() protoreflect.Message {
+func (x *ListManagedFilesResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5387,39 +5387,39 @@ func (x *ListLookupFilesResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ListLookupFilesResponse.ProtoReflect.Descriptor instead.
-func (*ListLookupFilesResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use ListManagedFilesResponse.ProtoReflect.Descriptor instead.
+func (*ListManagedFilesResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{102}
 }
 
-func (x *ListLookupFilesResponse) GetFiles() []*LookupFileInfo {
+func (x *ListManagedFilesResponse) GetFiles() []*ManagedFileInfo {
 	if x != nil {
 		return x.Files
 	}
 	return nil
 }
 
-type DeleteLookupFileRequest struct {
+type DeleteManagedFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DeleteLookupFileRequest) Reset() {
-	*x = DeleteLookupFileRequest{}
+func (x *DeleteManagedFileRequest) Reset() {
+	*x = DeleteManagedFileRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeleteLookupFileRequest) String() string {
+func (x *DeleteManagedFileRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeleteLookupFileRequest) ProtoMessage() {}
+func (*DeleteManagedFileRequest) ProtoMessage() {}
 
-func (x *DeleteLookupFileRequest) ProtoReflect() protoreflect.Message {
+func (x *DeleteManagedFileRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5431,38 +5431,38 @@ func (x *DeleteLookupFileRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeleteLookupFileRequest.ProtoReflect.Descriptor instead.
-func (*DeleteLookupFileRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeleteManagedFileRequest.ProtoReflect.Descriptor instead.
+func (*DeleteManagedFileRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{103}
 }
 
-func (x *DeleteLookupFileRequest) GetId() string {
+func (x *DeleteManagedFileRequest) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-type DeleteLookupFileResponse struct {
+type DeleteManagedFileResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DeleteLookupFileResponse) Reset() {
-	*x = DeleteLookupFileResponse{}
+func (x *DeleteManagedFileResponse) Reset() {
+	*x = DeleteManagedFileResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DeleteLookupFileResponse) String() string {
+func (x *DeleteManagedFileResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DeleteLookupFileResponse) ProtoMessage() {}
+func (*DeleteManagedFileResponse) ProtoMessage() {}
 
-func (x *DeleteLookupFileResponse) ProtoReflect() protoreflect.Message {
+func (x *DeleteManagedFileResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5474,8 +5474,8 @@ func (x *DeleteLookupFileResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DeleteLookupFileResponse.ProtoReflect.Descriptor instead.
-func (*DeleteLookupFileResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use DeleteManagedFileResponse.ProtoReflect.Descriptor instead.
+func (*DeleteManagedFileResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{104}
 }
 
@@ -5484,7 +5484,7 @@ var File_gastrolog_v1_config_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"\x19gastrolog/v1/config.proto\x12\fgastrolog.v1\"\x12\n" +
-	"\x10GetConfigRequest\"\x8e\x04\n" +
+	"\x10GetConfigRequest\"\x91\x04\n" +
 	"\x11GetConfigResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -5492,8 +5492,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\afilters\x18\x04 \x03(\v2\x1a.gastrolog.v1.FilterConfigR\afilters\x12R\n" +
 	"\x12retention_policies\x18\x05 \x03(\v2#.gastrolog.v1.RetentionPolicyConfigR\x11retentionPolicies\x12;\n" +
 	"\fnode_configs\x18\x06 \x03(\v2\x18.gastrolog.v1.NodeConfigR\vnodeConfigs\x121\n" +
-	"\x06routes\x18\a \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12?\n" +
-	"\flookup_files\x18\b \x03(\v2\x1c.gastrolog.v1.LookupFileInfoR\vlookupFiles\"~\n" +
+	"\x06routes\x18\a \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12B\n" +
+	"\rmanaged_files\x18\b \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\"~\n" +
 	"\rRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12%\n" +
@@ -5849,20 +5849,20 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\rPerRouteStats\x12\x19\n" +
 	"\broute_id\x18\x01 \x01(\tR\arouteId\x12'\n" +
 	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
-	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x81\x01\n" +
-	"\x0eLookupFileInfo\x12\x0e\n" +
+	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x82\x01\n" +
+	"\x0fManagedFileInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x1f\n" +
 	"\vuploaded_at\x18\x05 \x01(\tR\n" +
-	"uploadedAt\"\x18\n" +
-	"\x16ListLookupFilesRequest\"M\n" +
-	"\x17ListLookupFilesResponse\x122\n" +
-	"\x05files\x18\x01 \x03(\v2\x1c.gastrolog.v1.LookupFileInfoR\x05files\")\n" +
-	"\x17DeleteLookupFileRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x1a\n" +
-	"\x18DeleteLookupFileResponse2\xef\x19\n" +
+	"uploadedAt\"\x19\n" +
+	"\x17ListManagedFilesRequest\"O\n" +
+	"\x18ListManagedFilesResponse\x123\n" +
+	"\x05files\x18\x01 \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\x05files\"*\n" +
+	"\x18DeleteManagedFileRequest\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\x1b\n" +
+	"\x19DeleteManagedFileResponse2\xf5\x19\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12X\n" +
 	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +
@@ -5898,9 +5898,9 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\vDeleteRoute\x12 .gastrolog.v1.DeleteRouteRequest\x1a!.gastrolog.v1.DeleteRouteResponse\x12U\n" +
 	"\fGenerateName\x12!.gastrolog.v1.GenerateNameRequest\x1a\".gastrolog.v1.GenerateNameResponse\x12T\n" +
 	"\vWatchConfig\x12 .gastrolog.v1.WatchConfigRequest\x1a!.gastrolog.v1.WatchConfigResponse0\x01\x12X\n" +
-	"\rGetRouteStats\x12\".gastrolog.v1.GetRouteStatsRequest\x1a#.gastrolog.v1.GetRouteStatsResponse\x12^\n" +
-	"\x0fListLookupFiles\x12$.gastrolog.v1.ListLookupFilesRequest\x1a%.gastrolog.v1.ListLookupFilesResponse\x12a\n" +
-	"\x10DeleteLookupFile\x12%.gastrolog.v1.DeleteLookupFileRequest\x1a&.gastrolog.v1.DeleteLookupFileResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rGetRouteStats\x12\".gastrolog.v1.GetRouteStatsRequest\x1a#.gastrolog.v1.GetRouteStatsResponse\x12a\n" +
+	"\x10ListManagedFiles\x12%.gastrolog.v1.ListManagedFilesRequest\x1a&.gastrolog.v1.ListManagedFilesResponse\x12d\n" +
+	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_config_proto_rawDescOnce sync.Once
@@ -6016,11 +6016,11 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*GetRouteStatsResponse)(nil),         // 97: gastrolog.v1.GetRouteStatsResponse
 	(*VaultRouteStats)(nil),               // 98: gastrolog.v1.VaultRouteStats
 	(*PerRouteStats)(nil),                 // 99: gastrolog.v1.PerRouteStats
-	(*LookupFileInfo)(nil),                // 100: gastrolog.v1.LookupFileInfo
-	(*ListLookupFilesRequest)(nil),        // 101: gastrolog.v1.ListLookupFilesRequest
-	(*ListLookupFilesResponse)(nil),       // 102: gastrolog.v1.ListLookupFilesResponse
-	(*DeleteLookupFileRequest)(nil),       // 103: gastrolog.v1.DeleteLookupFileRequest
-	(*DeleteLookupFileResponse)(nil),      // 104: gastrolog.v1.DeleteLookupFileResponse
+	(*ManagedFileInfo)(nil),               // 100: gastrolog.v1.ManagedFileInfo
+	(*ListManagedFilesRequest)(nil),       // 101: gastrolog.v1.ListManagedFilesRequest
+	(*ListManagedFilesResponse)(nil),      // 102: gastrolog.v1.ListManagedFilesResponse
+	(*DeleteManagedFileRequest)(nil),      // 103: gastrolog.v1.DeleteManagedFileRequest
+	(*DeleteManagedFileResponse)(nil),     // 104: gastrolog.v1.DeleteManagedFileResponse
 	nil,                                   // 105: gastrolog.v1.VaultConfig.ParamsEntry
 	nil,                                   // 106: gastrolog.v1.IngesterConfig.ParamsEntry
 	nil,                                   // 107: gastrolog.v1.TestIngesterRequest.ParamsEntry
@@ -6035,7 +6035,7 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	9,   // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.RetentionPolicyConfig
 	89,  // 5: gastrolog.v1.GetConfigResponse.node_configs:type_name -> gastrolog.v1.NodeConfig
 	5,   // 6: gastrolog.v1.GetConfigResponse.routes:type_name -> gastrolog.v1.RouteConfig
-	100, // 7: gastrolog.v1.GetConfigResponse.lookup_files:type_name -> gastrolog.v1.LookupFileInfo
+	100, // 7: gastrolog.v1.GetConfigResponse.managed_files:type_name -> gastrolog.v1.ManagedFileInfo
 	105, // 8: gastrolog.v1.VaultConfig.params:type_name -> gastrolog.v1.VaultConfig.ParamsEntry
 	2,   // 9: gastrolog.v1.VaultConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
 	4,   // 10: gastrolog.v1.RouteConfig.destinations:type_name -> gastrolog.v1.RouteDestination
@@ -6074,7 +6074,7 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	89,  // 43: gastrolog.v1.PutNodeConfigRequest.config:type_name -> gastrolog.v1.NodeConfig
 	98,  // 44: gastrolog.v1.GetRouteStatsResponse.vault_stats:type_name -> gastrolog.v1.VaultRouteStats
 	99,  // 45: gastrolog.v1.GetRouteStatsResponse.route_stats:type_name -> gastrolog.v1.PerRouteStats
-	100, // 46: gastrolog.v1.ListLookupFilesResponse.files:type_name -> gastrolog.v1.LookupFileInfo
+	100, // 46: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
 	87,  // 47: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
 	0,   // 48: gastrolog.v1.ConfigService.GetConfig:input_type -> gastrolog.v1.GetConfigRequest
 	10,  // 49: gastrolog.v1.ConfigService.ListIngesters:input_type -> gastrolog.v1.ListIngestersRequest
@@ -6110,8 +6110,8 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	92,  // 79: gastrolog.v1.ConfigService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
 	94,  // 80: gastrolog.v1.ConfigService.WatchConfig:input_type -> gastrolog.v1.WatchConfigRequest
 	96,  // 81: gastrolog.v1.ConfigService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
-	101, // 82: gastrolog.v1.ConfigService.ListLookupFiles:input_type -> gastrolog.v1.ListLookupFilesRequest
-	103, // 83: gastrolog.v1.ConfigService.DeleteLookupFile:input_type -> gastrolog.v1.DeleteLookupFileRequest
+	101, // 82: gastrolog.v1.ConfigService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
+	103, // 83: gastrolog.v1.ConfigService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
 	1,   // 84: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
 	11,  // 85: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
 	14,  // 86: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
@@ -6146,8 +6146,8 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	93,  // 115: gastrolog.v1.ConfigService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
 	95,  // 116: gastrolog.v1.ConfigService.WatchConfig:output_type -> gastrolog.v1.WatchConfigResponse
 	97,  // 117: gastrolog.v1.ConfigService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
-	102, // 118: gastrolog.v1.ConfigService.ListLookupFiles:output_type -> gastrolog.v1.ListLookupFilesResponse
-	104, // 119: gastrolog.v1.ConfigService.DeleteLookupFile:output_type -> gastrolog.v1.DeleteLookupFileResponse
+	102, // 118: gastrolog.v1.ConfigService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
+	104, // 119: gastrolog.v1.ConfigService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
 	84,  // [84:120] is the sub-list for method output_type
 	48,  // [48:84] is the sub-list for method input_type
 	48,  // [48:48] is the sub-list for extension type_name

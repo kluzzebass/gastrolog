@@ -13,6 +13,7 @@ import {
   UsersIcon,
   LookupIcon,
   ClusterIcon,
+  FilesIcon,
 } from "../icons";
 import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
@@ -23,6 +24,7 @@ import { PoliciesSettings } from "./PoliciesSettings";
 import { RetentionPoliciesSettings } from "./RetentionPoliciesSettings";
 import { UsersSettings } from "./UsersSettings";
 import { LookupsSettings } from "./LookupsSettings";
+import { FilesSettings } from "./FilesSettings";
 import { NodesSettings } from "./NodesSettings";
 import { ServiceSettings } from "./ServiceSettings";
 import { HelpButton } from "../HelpButton";
@@ -31,6 +33,7 @@ export type SettingsTab =
   | "service"
   | "nodes"
   | "certificates"
+  | "files"
   | "lookups"
   | "vaults"
   | "ingesters"
@@ -61,6 +64,7 @@ const allTabs: TabDef[] = [
   { id: "service", label: "Cluster", icon: ClusterIcon, helpTopicId: "service-settings" },
   { id: "nodes", label: "Nodes", icon: ServiceIcon, helpTopicId: "clustering-nodes" },
   { id: "certificates", label: "Certificates", icon: LockIcon, helpTopicId: "certificates" },
+  { id: "files", label: "Files", icon: FilesIcon, helpTopicId: "managed-files" },
   { id: "lookups", label: "Lookups", icon: LookupIcon, helpTopicId: "lookups-settings" },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
@@ -136,6 +140,7 @@ export function SettingsDialog({
           {tab === "service" && <ServiceSettings dark={dark} noAuth={noAuth} />}
           {tab === "nodes" && <NodesSettings dark={dark} />}
           {tab === "certificates" && <CertificatesSettings dark={dark} />}
+          {tab === "files" && <FilesSettings dark={dark} />}
           {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} />}

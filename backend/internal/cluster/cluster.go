@@ -134,11 +134,11 @@ type Server struct {
 	// reindexVaultExecutor rebuilds all indexes for a local vault.
 	reindexVaultExecutor ReindexVaultExecutor
 
-	// lookupFileReader opens a lookup file for streaming to peers.
-	lookupFileReader LookupFileReader
+	// managedFileReader opens a managed file for streaming to peers.
+	managedFileReader ManagedFileReader
 
-	// lookupFileIDs returns which lookup files exist on this node.
-	lookupFileIDs LookupFileIDsLister
+	// managedFileIDs returns which managed files exist on this node.
+	managedFileIDs ManagedFileIDsLister
 
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.

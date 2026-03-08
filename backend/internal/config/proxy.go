@@ -305,40 +305,40 @@ func (p *StoreProxy) DeleteRoute(ctx context.Context, id uuid.UUID) error {
 	return p.inner.DeleteRoute(ctx, id)
 }
 
-func (p *StoreProxy) GetLookupFile(ctx context.Context, id uuid.UUID) (*LookupFileConfig, error) {
+func (p *StoreProxy) GetManagedFile(ctx context.Context, id uuid.UUID) (*ManagedFileConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return nil, err
 	}
-	return p.inner.GetLookupFile(ctx, id)
+	return p.inner.GetManagedFile(ctx, id)
 }
 
-func (p *StoreProxy) ListLookupFiles(ctx context.Context) ([]LookupFileConfig, error) {
+func (p *StoreProxy) ListManagedFiles(ctx context.Context) ([]ManagedFileConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return nil, err
 	}
-	return p.inner.ListLookupFiles(ctx)
+	return p.inner.ListManagedFiles(ctx)
 }
 
-func (p *StoreProxy) PutLookupFile(ctx context.Context, cfg LookupFileConfig) error {
+func (p *StoreProxy) PutManagedFile(ctx context.Context, cfg ManagedFileConfig) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return err
 	}
-	return p.inner.PutLookupFile(ctx, cfg)
+	return p.inner.PutManagedFile(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteLookupFile(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteManagedFile(ctx context.Context, id uuid.UUID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return err
 	}
-	return p.inner.DeleteLookupFile(ctx, id)
+	return p.inner.DeleteManagedFile(ctx, id)
 }
 
 func (p *StoreProxy) LoadServerSettings(ctx context.Context) (ServerSettings, error) {
