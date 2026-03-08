@@ -394,10 +394,14 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 }
 
 // loadInitialLookupConfig loads GeoIP and ASN databases from persisted config at startup.
+// It also migrates any legacy flat MMDB files into managed lookup file entities.
 func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
 	if s.cfgStore == nil {
 		return
 	}
+
+	s.migrateLegacyMMDB()
+
 	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
 	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
@@ -407,30 +411,73 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	s.applyLookupConfig(ss.Lookup, geoipTable, asnTable)
 }
 
+// migrateLegacyMMDB checks for MMDB files in the flat <home>/lookups/ directory
+// and registers them as managed lookup file entities if they aren't already tracked.
+func (s *Server) migrateLegacyMMDB() {
+	if s.homeDir == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
+
+	lookupDir := filepath.Join(s.homeDir, "lookups")
+	for _, filename := range []string{"GeoLite2-City.mmdb", "GeoLite2-ASN.mmdb"} {
+		flatPath := filepath.Join(lookupDir, filename)
+		if !fileExists(flatPath) {
+			continue
+		}
+		// Already managed?
+		if path := s.ResolveLookupFilePath(ctx, filename); path != "" {
+			continue
+		}
+		s.logger.Info("migrating legacy MMDB file to managed lookup", "file", filename)
+		if lf, err := s.RegisterFile(ctx, flatPath); err != nil {
+			s.logger.Warn("migrate legacy MMDB: register failed", "file", filename, "error", err)
+		} else {
+			s.logger.Info("migrated legacy MMDB", "file", filename, "file_id", lf.ID)
+		}
+	}
+}
+
 // effectiveLookupPaths resolves the actual MMDB paths to use.
-// Manual paths take precedence; otherwise auto-downloaded paths are used when enabled.
+// Manual paths (config overrides) take precedence; otherwise paths are resolved
+// from the lookup file manifest, falling back to the legacy flat directory.
 func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn string) {
 	geoip = cfg.GeoIPDBPath
 	asn = cfg.ASNDBPath
 
-	if s.homeDir == "" || !cfg.MaxMind.AutoDownload {
+	if s.homeDir == "" {
 		return geoip, asn
 	}
 
-	lookupDir := filepath.Join(s.homeDir, "lookups")
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
+
+	// Resolve from manifest (managed lookup files).
 	if geoip == "" {
-		candidate := filepath.Join(lookupDir, "GeoLite2-City.mmdb")
-		if _, err := os.Stat(candidate); err == nil {
-			geoip = candidate
-		}
+		geoip = s.resolveMMDBPath(ctx, "GeoLite2-City.mmdb")
 	}
 	if asn == "" {
-		candidate := filepath.Join(lookupDir, "GeoLite2-ASN.mmdb")
-		if _, err := os.Stat(candidate); err == nil {
-			asn = candidate
-		}
+		asn = s.resolveMMDBPath(ctx, "GeoLite2-ASN.mmdb")
 	}
+
 	return geoip, asn
+}
+
+// resolveMMDBPath finds an MMDB file by checking the lookup file manifest first,
+// then falling back to the legacy flat lookups directory.
+func (s *Server) resolveMMDBPath(ctx context.Context, filename string) string {
+	// Check managed lookup files first.
+	if path := s.ResolveLookupFilePath(ctx, filename); path != "" {
+		return path
+	}
+	// Legacy fallback: flat <home>/lookups/<filename>.
+	candidate := filepath.Join(s.homeDir, "lookups", filename)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
 }
 
 // applyLookupConfig loads (or reloads) GeoIP and ASN databases from the given config.
@@ -484,10 +531,8 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.Ge
 	scheduler.Describe("maxmind-update", "Download MaxMind GeoLite2 databases")
 
 	// If databases don't exist yet, trigger an immediate one-time download.
-	lookupDir := filepath.Join(s.homeDir, "lookups")
-	geoipExists := fileExists(filepath.Join(lookupDir, "GeoLite2-City.mmdb"))
-	asnExists := fileExists(filepath.Join(lookupDir, "GeoLite2-ASN.mmdb"))
-	if !geoipExists || !asnExists {
+	geoipPath, asnPath := s.effectiveLookupPaths(cfg)
+	if geoipPath == "" || asnPath == "" {
 		_ = scheduler.RunOnce("maxmind-update-initial", updateFn)
 	}
 }
@@ -518,9 +563,17 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 	for _, edition := range []string{"GeoLite2-City", "GeoLite2-ASN"} {
 		if err := lookup.DownloadDB(ctx, ss.Lookup.MaxMind.AccountID, ss.Lookup.MaxMind.LicenseKey, edition, lookupDir); err != nil {
 			s.logger.Warn("maxmind update: download failed", "edition", edition, "error", err)
+			continue
+		}
+		s.logger.Info("maxmind update: downloaded", "edition", edition)
+		anySuccess = true
+
+		// Register as a managed lookup file entity so it distributes to all nodes.
+		flatPath := filepath.Join(lookupDir, edition+".mmdb")
+		if lf, err := s.RegisterFile(ctx, flatPath); err != nil {
+			s.logger.Warn("maxmind update: register file failed", "edition", edition, "error", err)
 		} else {
-			s.logger.Info("maxmind update: downloaded", "edition", edition)
-			anySuccess = true
+			s.logger.Info("maxmind update: registered as lookup file", "edition", edition, "file_id", lf.ID)
 		}
 	}
 

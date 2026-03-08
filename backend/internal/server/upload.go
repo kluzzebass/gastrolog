@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -55,6 +56,7 @@ func (s *Server) handleLookupFileUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	defer file.Close() //nolint:errcheck // best-effort close on multipart file
 
+	// Stream the upload to a temp file.
 	hd := home.New(s.homeDir)
 	lookupsDir := hd.LookupsDir()
 	if err := os.MkdirAll(lookupsDir, 0o750); err != nil {
@@ -62,67 +64,147 @@ func (s *Server) handleLookupFileUpload(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Stream to temp file, computing SHA256 along the way.
 	tmp, err := os.CreateTemp(lookupsDir, ".upload-*")
 	if err != nil {
 		http.Error(w, "create temp file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	tmpPath := tmp.Name()
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmpPath) // clean up on any error path; no-op after rename
-	}()
+	defer func() { _ = os.Remove(tmpPath) }() // no-op after rename
 
-	h := sha256.New()
-	size, err := io.Copy(tmp, io.TeeReader(file, h))
-	if err != nil {
+	if _, err := io.Copy(tmp, file); err != nil {
+		_ = tmp.Close()
 		http.Error(w, "write upload: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	_ = tmp.Close()
 
-	hash := hex.EncodeToString(h.Sum(nil))
-	fileID := uuid.Must(uuid.NewV7())
-
-	// Move to final location: <home>/lookups/<file_id>/<original_filename>
-	fileDir := hd.LookupFileDir(fileID.String())
-	if err := os.MkdirAll(fileDir, 0o750); err != nil {
-		http.Error(w, "create file directory: "+err.Error(), http.StatusInternalServerError)
+	// Give the temp file the original filename so RegisterFile can use it.
+	namedTmp := filepath.Join(lookupsDir, ".upload-"+filepath.Base(header.Filename))
+	if err := os.Rename(tmpPath, namedTmp); err != nil { //nolint:gosec // trusted paths
+		http.Error(w, "rename temp: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer func() { _ = os.Remove(namedTmp) }() // no-op after RegisterFile moves it
 
-	finalPath := filepath.Join(fileDir, filepath.Base(header.Filename))
-	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: paths constructed from trusted home dir + filepath.Base
-		http.Error(w, "move upload: "+err.Error(), http.StatusInternalServerError)
+	lf, err := s.RegisterFile(r.Context(), namedTmp)
+	if err != nil {
+		http.Error(w, "register file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Commit metadata to Raft.
-	now := time.Now().UTC()
-	lf := config.LookupFileConfig{
-		ID:         fileID,
-		Name:       filepath.Base(header.Filename),
-		SHA256:     hash,
-		Size:       size,
-		UploadedAt: now,
-	}
-	if err := s.cfgStore.PutLookupFile(r.Context(), lf); err != nil {
-		_ = os.RemoveAll(fileDir) // best-effort cleanup on Raft failure
-		http.Error(w, "save metadata: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	s.configSignal.Notify()
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(map[string]any{ //nolint:errchkjson // best-effort response encoding
-		"file_id":     fileID.String(),
+		"file_id":     lf.ID.String(),
 		"name":        lf.Name,
 		"sha256":      lf.SHA256,
 		"size":        lf.Size,
-		"uploaded_at": now.Format(time.RFC3339),
+		"uploaded_at": lf.UploadedAt.Format(time.RFC3339),
 	})
+}
+
+// RegisterFile registers a local file as a lookup file entity. It computes the
+// SHA256 hash, moves the file into the managed directory structure
+// (<home>/lookups/<file_id>/<filename>), and commits metadata to Raft.
+// The original file at srcPath is consumed (moved, not copied).
+// If a lookup file with the same name already exists, it is replaced.
+func (s *Server) RegisterFile(ctx context.Context, srcPath string) (config.LookupFileConfig, error) {
+	if s.homeDir == "" {
+		return config.LookupFileConfig{}, errors.New("no home directory")
+	}
+
+	filename := filepath.Base(srcPath)
+
+	// Compute SHA256 and size by streaming through the file.
+	f, err := os.Open(srcPath) //nolint:gosec // path from trusted caller
+	if err != nil {
+		return config.LookupFileConfig{}, fmt.Errorf("open %s: %w", srcPath, err)
+	}
+	h := sha256.New()
+	size, err := io.Copy(h, f)
+	_ = f.Close()
+	if err != nil {
+		return config.LookupFileConfig{}, fmt.Errorf("hash %s: %w", srcPath, err)
+	}
+	hash := hex.EncodeToString(h.Sum(nil))
+
+	// Delete any existing lookup file with the same name (replacement upload).
+	if err := s.deleteExistingByName(ctx, filename); err != nil {
+		return config.LookupFileConfig{}, fmt.Errorf("delete existing: %w", err)
+	}
+
+	fileID := uuid.Must(uuid.NewV7())
+	hd := home.New(s.homeDir)
+	fileDir := hd.LookupFileDir(fileID.String())
+	if err := os.MkdirAll(fileDir, 0o750); err != nil {
+		return config.LookupFileConfig{}, fmt.Errorf("create dir: %w", err)
+	}
+
+	finalPath := filepath.Join(fileDir, filename)
+	if err := os.Rename(srcPath, finalPath); err != nil {
+		_ = os.RemoveAll(fileDir)
+		return config.LookupFileConfig{}, fmt.Errorf("move file: %w", err)
+	}
+
+	now := time.Now().UTC()
+	lf := config.LookupFileConfig{
+		ID:         fileID,
+		Name:       filename,
+		SHA256:     hash,
+		Size:       size,
+		UploadedAt: now,
+	}
+	if err := s.cfgStore.PutLookupFile(ctx, lf); err != nil {
+		_ = os.RemoveAll(fileDir)
+		return config.LookupFileConfig{}, fmt.Errorf("commit metadata: %w", err)
+	}
+	s.configSignal.Notify()
+
+	return lf, nil
+}
+
+// deleteExistingByName removes lookup file entities whose filename matches,
+// so replacement uploads don't leave orphans in the manifest.
+func (s *Server) deleteExistingByName(ctx context.Context, filename string) error {
+	files, err := s.cfgStore.ListLookupFiles(ctx)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		if f.Name == filename {
+			if err := s.cfgStore.DeleteLookupFile(ctx, f.ID); err != nil {
+				return err
+			}
+			// Clean up disk for the old file.
+			s.cleanupLookupFile(f.ID)
+		}
+	}
+	return nil
+}
+
+// ResolveLookupFilePath returns the on-disk path for a lookup file entity
+// matched by filename. Returns empty string if not found.
+func (s *Server) ResolveLookupFilePath(ctx context.Context, filename string) string {
+	if s.homeDir == "" {
+		return ""
+	}
+	files, err := s.cfgStore.ListLookupFiles(ctx)
+	if err != nil {
+		return ""
+	}
+	// Walk in reverse order (UUIDv7 sorted = creation order) to prefer the latest.
+	for i := len(files) - 1; i >= 0; i-- {
+		if files[i].Name == filename {
+			hd := home.New(s.homeDir)
+			dir := hd.LookupFileDir(files[i].ID.String())
+			path := filepath.Join(dir, filename)
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+		}
+	}
+	return ""
 }
 
 // registerUploadHandler adds the lookup file upload endpoint to the mux.
