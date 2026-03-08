@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -48,13 +47,18 @@ func (s *ConfigServer) ListIngesters(
 			nodeID = s.localNodeID
 		}
 		_, isLocal := localIDs[ing.ID]
-		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterInfo{
-			Id:      ing.ID.String(),
-			Name:    ing.Name,
-			Type:    ing.Type,
-			Running: isLocal && s.orch.IsRunning(),
-			NodeId:  nodeID,
-		})
+		info := &apiv1.IngesterInfo{
+			Id:     ing.ID.String(),
+			Name:   ing.Name,
+			Type:   ing.Type,
+			NodeId: nodeID,
+		}
+		if isLocal {
+			info.Running = s.orch.IsRunning()
+		} else if ps := s.findPeerIngesterStats(ing.ID); ps != nil {
+			info.Running = ps.Running
+		}
+		resp.Ingesters = append(resp.Ingesters, info)
 	}
 
 	return connect.NewResponse(resp), nil
@@ -84,19 +88,23 @@ func (s *ConfigServer) GetIngesterStatus(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
 	}
 
-	isLocal := slices.Contains(s.orch.ListIngesters(), id)
-
 	resp := &apiv1.GetIngesterStatusResponse{
-		Id:      req.Msg.Id,
-		Type:    ingCfg.Type,
-		Running: isLocal && s.orch.IsRunning(),
+		Id:   req.Msg.Id,
+		Type: ingCfg.Type,
 	}
 
-	// Populate stats from orchestrator (only available for local ingesters).
+	// Local ingester: get live stats from orchestrator.
 	if stats := s.orch.GetIngesterStats(id); stats != nil {
+		resp.Running = s.orch.IsRunning()
 		resp.MessagesIngested = stats.MessagesIngested.Load()
 		resp.Errors = stats.Errors.Load()
 		resp.BytesIngested = stats.BytesIngested.Load()
+	} else if ps := s.findPeerIngesterStats(id); ps != nil {
+		// Remote ingester: use peer broadcast stats.
+		resp.Running = ps.Running
+		resp.MessagesIngested = int64(ps.MessagesIngested) //nolint:gosec // G115: broadcast uses uint64
+		resp.Errors = int64(ps.Errors)                     //nolint:gosec // G115: broadcast uses uint64
+		resp.BytesIngested = int64(ps.BytesIngested)       //nolint:gosec // G115: broadcast uses uint64
 	}
 
 	return connect.NewResponse(resp), nil
@@ -251,4 +259,12 @@ func (s *ConfigServer) TestIngester(
 		Success: true,
 		Message: msg,
 	}), nil
+}
+
+// findPeerIngesterStats returns broadcast stats for a remote ingester, or nil.
+func (s *ConfigServer) findPeerIngesterStats(id uuid.UUID) *apiv1.IngesterNodeStats {
+	if s.peerStats == nil {
+		return nil
+	}
+	return s.peerStats.FindIngesterStats(id.String())
 }
