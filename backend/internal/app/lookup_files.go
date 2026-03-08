@@ -4,12 +4,20 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"time"
 
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/home"
 
 	"github.com/google/uuid"
+)
+
+const (
+	pullTimeout          = 2 * time.Minute  // per-peer pull timeout
+	reconcileBaseDelay   = 5 * time.Second  // initial retry delay
+	reconcileMaxDelay    = 2 * time.Minute  // max retry delay
+	reconcileMaxAttempts = 10               // give up after this many rounds
 )
 
 // lookupFileManager handles lookup file distribution across cluster nodes.
@@ -34,7 +42,7 @@ func (m *lookupFileManager) OnPut(_ context.Context, fileID uuid.UUID) {
 	}
 
 	// Pull from a peer in the background — don't block Raft apply.
-	go m.pullFromPeer(fid)
+	go m.pullFromPeer(context.Background(), fid)
 }
 
 // OnDelete removes the lookup file from local disk.
@@ -52,50 +60,90 @@ func (m *lookupFileManager) OnDelete(fileID uuid.UUID) {
 }
 
 // pullFromPeer tries each peer until one can provide the file.
-func (m *lookupFileManager) pullFromPeer(fileID string) {
-	ctx := context.Background()
+// Returns true if the file was pulled successfully.
+func (m *lookupFileManager) pullFromPeer(ctx context.Context, fileID string) bool {
 	hd := home.New(m.homeDir)
 	destDir := hd.LookupFileDir(fileID)
 
 	for _, peerID := range m.peerIDs() {
-		if err := m.transferrer.PullFile(ctx, peerID, fileID, destDir); err != nil {
+		pullCtx, cancel := context.WithTimeout(ctx, pullTimeout)
+		err := m.transferrer.PullFile(pullCtx, peerID, fileID, destDir)
+		cancel()
+		if err != nil {
 			m.logger.Debug("pull lookup file from peer failed", "file_id", fileID, "peer", peerID, "error", err)
 			continue
 		}
 		m.logger.Info("pulled lookup file from peer", "file_id", fileID, "peer", peerID)
-		return
+		return true
 	}
-	m.logger.Error("failed to pull lookup file from any peer", "file_id", fileID)
+	m.logger.Warn("failed to pull lookup file from any peer", "file_id", fileID)
+	return false
 }
 
-// Reconcile compares local lookup files against the Raft manifest and pulls
-// any missing files from peers. Called on startup after the orchestrator is ready.
-func (m *lookupFileManager) Reconcile(ctx context.Context, manifestFileIDs []string) {
-	for _, fid := range manifestFileIDs {
+// reconcileLookupFiles loads the manifest from the config store and retries
+// pulling missing files with exponential backoff. Peers may not be ready
+// immediately after a cluster restart, so we keep trying.
+func reconcileLookupFiles(ctx context.Context, cfgStore config.Store, mgr *lookupFileManager, logger *slog.Logger) {
+	delay := reconcileBaseDelay
+
+	for attempt := range reconcileMaxAttempts {
 		if ctx.Err() != nil {
 			return
 		}
-		if m.fileExists(fid) {
-			continue
-		}
-		m.logger.Info("reconcile: missing lookup file, pulling from peer", "file_id", fid)
-		m.pullFromPeer(fid)
-	}
-}
 
-// reconcileLookupFiles loads the manifest from the config store and reconciles.
-func reconcileLookupFiles(ctx context.Context, cfgStore config.Store, mgr *lookupFileManager, logger *slog.Logger) {
-	files, err := cfgStore.ListLookupFiles(ctx)
-	if err != nil {
-		logger.Error("reconcile lookup files: list from store", "error", err)
-		return
+		files, err := cfgStore.ListLookupFiles(ctx)
+		if err != nil {
+			logger.Error("reconcile lookup files: list from store", "error", err)
+			return
+		}
+
+		var missing []string
+		for _, f := range files {
+			fid := f.ID.String()
+			if !mgr.fileExists(fid) {
+				missing = append(missing, fid)
+			}
+		}
+		if len(missing) == 0 {
+			if attempt > 0 {
+				logger.Info("reconcile lookup files: all files present")
+			}
+			return
+		}
+
+		logger.Info("reconcile lookup files: pulling missing files",
+			"missing", len(missing), "total", len(files), "attempt", attempt+1)
+
+		for _, fid := range missing {
+			if ctx.Err() != nil {
+				return
+			}
+			mgr.pullFromPeer(ctx, fid)
+		}
+
+		// Check if everything landed before sleeping.
+		allPresent := true
+		for _, fid := range missing {
+			if !mgr.fileExists(fid) {
+				allPresent = false
+				break
+			}
+		}
+		if allPresent {
+			logger.Info("reconcile lookup files: all files present")
+			return
+		}
+
+		logger.Info("reconcile lookup files: some files still missing, retrying",
+			"delay", delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		delay = min(delay*2, reconcileMaxDelay)
 	}
-	if len(files) == 0 {
-		return
-	}
-	ids := make([]string, len(files))
-	for i, f := range files {
-		ids[i] = f.ID.String()
-	}
-	mgr.Reconcile(ctx, ids)
+
+	logger.Error("reconcile lookup files: gave up after max attempts",
+		"attempts", reconcileMaxAttempts)
 }
