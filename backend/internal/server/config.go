@@ -311,6 +311,7 @@ func (s *ConfigServer) GetSettings(
 			GeoipDbPath: ss.Lookup.GeoIPDBPath,
 			AsnDbPath:   ss.Lookup.ASNDBPath,
 			Maxmind:     mm,
+			HttpLookups: httpLookupsToProto(ss.Lookup.HTTPLookups),
 		},
 		Cluster: &apiv1.ClusterSettings{
 			BroadcastInterval: ss.Cluster.BroadcastInterval,
@@ -598,6 +599,57 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
 			lookup.MaxMind.LicenseKey = *mm.LicenseKey
 		}
 	}
+	if l.HttpLookups != nil {
+		lookup.HTTPLookups = httpLookupsFromProto(l.HttpLookups)
+	}
+}
+
+func httpLookupsToProto(lookups []config.HTTPLookupConfig) []*apiv1.HTTPLookupEntry {
+	if len(lookups) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.HTTPLookupEntry, len(lookups))
+	for i, l := range lookups {
+		params := make([]*apiv1.HTTPLookupParam, len(l.Parameters))
+		for j, p := range l.Parameters {
+			params[j] = &apiv1.HTTPLookupParam{Name: p.Name, Description: p.Description}
+		}
+		out[i] = &apiv1.HTTPLookupEntry{
+			Name:          l.Name,
+			UrlTemplate:   l.URLTemplate,
+			Headers:       l.Headers,
+			ResponsePaths: l.ResponsePaths,
+			Parameters:    params,
+			Timeout:       l.Timeout,
+			CacheTtl:      l.CacheTTL,
+			CacheSize:     int32(l.CacheSize), //nolint:gosec // reasonable config value
+		}
+	}
+	return out
+}
+
+func httpLookupsFromProto(entries []*apiv1.HTTPLookupEntry) []config.HTTPLookupConfig {
+	out := make([]config.HTTPLookupConfig, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" || e.UrlTemplate == "" {
+			continue
+		}
+		params := make([]config.HTTPLookupParam, len(e.Parameters))
+		for j, p := range e.Parameters {
+			params[j] = config.HTTPLookupParam{Name: p.Name, Description: p.Description}
+		}
+		out = append(out, config.HTTPLookupConfig{
+			Name:          e.Name,
+			URLTemplate:   e.UrlTemplate,
+			Headers:       e.Headers,
+			ResponsePaths: e.ResponsePaths,
+			Parameters:    params,
+			Timeout:       e.Timeout,
+			CacheTTL:      e.CacheTtl,
+			CacheSize:     int(e.CacheSize),
+		})
+	}
+	return out
 }
 
 func mergeCluster(c *apiv1.PutClusterSettings, cluster *config.ClusterConfig) *connect.Error {
@@ -636,6 +688,47 @@ func validateTokenDurations(auth config.AuthConfig) *connect.Error {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("refresh token duration (%s) must be longer than token duration (%s)", auth.RefreshTokenDuration, auth.TokenDuration))
 	}
 	return nil
+}
+
+// TestHTTPLookup tests an HTTP lookup configuration.
+// Test values are URL template variables: each key corresponds to a {key} placeholder
+// in the URL template. All variables are substituted, then a single request is made.
+func (s *ConfigServer) TestHTTPLookup(
+	ctx context.Context,
+	req *connect.Request[apiv1.TestHTTPLookupRequest],
+) (*connect.Response[apiv1.TestHTTPLookupResponse], error) {
+	cfg := req.Msg.GetConfig()
+	if cfg == nil || cfg.UrlTemplate == "" {
+		return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+			Error: "URL template is required",
+		}), nil
+	}
+
+	lcfg := lookup.HTTPConfig{
+		URLTemplate:   cfg.UrlTemplate,
+		Headers:       cfg.Headers,
+		ResponsePaths: cfg.ResponsePaths,
+		CacheSize:     int(cfg.CacheSize),
+	}
+	if cfg.Timeout != "" {
+		d, err := time.ParseDuration(cfg.Timeout)
+		if err != nil {
+			return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+				Error: fmt.Sprintf("invalid timeout %q: %v", cfg.Timeout, err),
+			}), nil
+		}
+		lcfg.Timeout = d
+	}
+
+	h := lookup.NewHTTP(lcfg)
+	result := h.TestFetch(ctx, req.Msg.Values)
+
+	return connect.NewResponse(&apiv1.TestHTTPLookupResponse{
+		Success: true,
+		Results: []*apiv1.TestHTTPLookupResult{{
+			Fields: result,
+		}},
+	}), nil
 }
 
 // formatBytes formats a byte count as a human-readable string.

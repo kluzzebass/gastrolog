@@ -113,6 +113,9 @@ service ConfigService {
 
   // DeleteManagedFile removes an managed file.
   rpc DeleteManagedFile(DeleteManagedFileRequest) returns (DeleteManagedFileResponse);
+
+  // TestHTTPLookup tests an HTTP lookup configuration with a sample value.
+  rpc TestHTTPLookup(TestHTTPLookupRequest) returns (TestHTTPLookupResponse);
 }
 
 message GetConfigRequest {}
@@ -345,6 +348,26 @@ message LookupSettings {
   string geoip_db_path = 1;
   string asn_db_path = 2;
   MaxMindSettings maxmind = 3;
+  repeated HTTPLookupEntry http_lookups = 4;
+}
+
+// HTTPLookupParam defines a named parameter for an HTTP lookup table.
+// Parameters are positional — query fields map to params in order.
+message HTTPLookupParam {
+  string name = 1;        // URL template placeholder name, e.g. "lat"
+  string description = 2; // human-readable description for UI/tab completion
+}
+
+// HTTPLookupEntry defines an HTTP API lookup table for field enrichment.
+message HTTPLookupEntry {
+  string name = 1;          // registry name (e.g. "users")
+  string url_template = 2;  // e.g. "http://api/users/{value}"
+  map<string, string> headers = 3; // optional auth/custom headers
+  string timeout = 4;       // Go duration string, optional
+  string cache_ttl = 5;     // Go duration string, optional
+  int32 cache_size = 6;     // optional, default 10000
+  repeated string response_paths = 7; // JSONPath expressions, e.g. "$.data.user"
+  repeated HTTPLookupParam parameters = 8; // ordered param definitions for URL template
 }
 
 message ClusterSettings {
@@ -408,6 +431,7 @@ message PutLookupSettings {
   optional string geoip_db_path = 1;
   optional string asn_db_path = 2;
   PutMaxMindSettings maxmind = 3;
+  repeated HTTPLookupEntry http_lookups = 4; // replaces the full list when present
 }
 
 message PutClusterSettings {
@@ -622,3 +646,20 @@ message DeleteManagedFileRequest {
 }
 
 message DeleteManagedFileResponse {}
+
+message TestHTTPLookupRequest {
+  HTTPLookupEntry config = 1;          // the lookup configuration to test
+  map<string, string> values = 2;      // test values: key=label, value=lookup input; 0 entries = config validation only
+}
+
+message TestHTTPLookupResponse {
+  bool success = 1;
+  string error = 2;                    // non-empty on failure
+  repeated TestHTTPLookupResult results = 3; // one per test value
+}
+
+message TestHTTPLookupResult {
+  string label = 1;                    // the key from the request values map
+  string value = 2;                    // the input value that was looked up
+  map<string, string> fields = 3;      // extracted fields (empty on miss)
+}

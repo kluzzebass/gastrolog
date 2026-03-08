@@ -394,7 +394,7 @@ func TestApplyRecordLookup(t *testing.T) {
 		return nil
 	}
 
-	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	op := &querylang.LookupOp{Table: "rdns", Fields: []string{"src_ip"}}
 	applyRecordLookup(context.Background(), records, op, resolve)
 
 	if records[0].Attrs["src_ip_hostname"] != "dns.google" {
@@ -413,7 +413,7 @@ func TestApplyRecordLookupNilResolver(t *testing.T) {
 		makeRec(baseTime, chunk.Attributes{"src_ip": "8.8.8.8"}, ""),
 	}
 
-	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	op := &querylang.LookupOp{Table: "rdns", Fields: []string{"src_ip"}}
 	applyRecordLookup(context.Background(), records, op, nil) // should not panic
 
 	if _, ok := records[0].Attrs["src_ip_hostname"]; ok {
@@ -428,7 +428,7 @@ func TestApplyRecordLookupUnknownTable(t *testing.T) {
 
 	resolve := func(name string) lookup.LookupTable { return nil }
 
-	op := &querylang.LookupOp{Table: "nonexistent", Field: "src_ip"}
+	op := &querylang.LookupOp{Table: "nonexistent", Fields: []string{"src_ip"}}
 	applyRecordLookup(context.Background(), records, op, resolve)
 
 	if _, ok := records[0].Attrs["src_ip_hostname"]; ok {
@@ -460,7 +460,7 @@ func TestApplyTableLookup(t *testing.T) {
 		return nil
 	}
 
-	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	op := &querylang.LookupOp{Table: "rdns", Fields: []string{"src_ip"}}
 	result := applyTableLookup(context.Background(), table, op, resolve)
 
 	if len(result.Columns) != 3 {
@@ -492,7 +492,7 @@ func TestApplyTableLookupMissingColumn(t *testing.T) {
 	}
 	resolve := func(name string) lookup.LookupTable { return lt }
 
-	op := &querylang.LookupOp{Table: "rdns", Field: "src_ip"}
+	op := &querylang.LookupOp{Table: "rdns", Fields: []string{"src_ip"}}
 	result := applyTableLookup(context.Background(), table, op, resolve)
 
 	// Should be unchanged — src_ip column doesn't exist.

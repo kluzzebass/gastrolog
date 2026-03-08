@@ -1028,7 +1028,7 @@ func (p *parser) parseRawOp() (*RawOp, error) {
 	return &RawOp{}, nil
 }
 
-// parseLookupOp parses: "lookup" TABLE FIELD
+// parseLookupOp parses: "lookup" TABLE FIELD [FIELD ...]
 func (p *parser) parseLookupOp() (*LookupOp, error) {
 	if err := p.advance(); err != nil { // consume "lookup"
 		return nil, err
@@ -1045,12 +1045,16 @@ func (p *parser) parseLookupOp() (*LookupOp, error) {
 	if p.cur.Kind != TokWord {
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected field name after 'lookup %s', got %s", table, p.cur.Kind)
 	}
-	field := p.cur.Lit
-	if err := p.advance(); err != nil { // consume field name
-		return nil, err
+
+	var fields []string
+	for p.cur.Kind == TokWord {
+		fields = append(fields, p.cur.Lit)
+		if err := p.advance(); err != nil {
+			return nil, err
+		}
 	}
 
-	return &LookupOp{Table: table, Field: field}, nil
+	return &LookupOp{Table: table, Fields: fields}, nil
 }
 
 // parseBarchartOp parses: "barchart" (no arguments).

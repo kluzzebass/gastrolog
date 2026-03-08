@@ -331,14 +331,15 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		"asn":   asnTable,
 	}
 
-	s.loadInitialLookupConfig(geoipTable, asnTable)
+	s.loadInitialLookupConfig(geoipTable, asnTable, lookupRegistry)
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
-		s.applyLookupConfig(cfg, geoipTable, asnTable)
+		s.applyLookupConfig(cfg, geoipTable, asnTable, lookupRegistry)
+
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	if s.joinClusterFn != nil {
@@ -395,9 +396,9 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	return queryTimeout, maxFollowDuration, maxResultCount
 }
 
-// loadInitialLookupConfig loads GeoIP and ASN databases from persisted config at startup.
+// loadInitialLookupConfig loads GeoIP, ASN, CIDR, and HTTP lookup tables from persisted config at startup.
 // It also migrates any legacy flat MMDB files into managed file entities.
-func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *lookup.ASN, registry lookup.Registry) {
 	if s.cfgStore == nil {
 		return
 	}
@@ -408,7 +409,7 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	if err != nil {
 		return
 	}
-	s.applyLookupConfig(ss.Lookup, geoipTable, asnTable)
+	s.applyLookupConfig(ss.Lookup, geoipTable, asnTable, registry)
 }
 
 // effectiveLookupPaths resolves the actual MMDB paths to use.
@@ -441,9 +442,9 @@ func (s *Server) resolveMMDBPath(ctx context.Context, filename string) string {
 	return s.ResolveManagedFilePath(ctx, filename)
 }
 
-// applyLookupConfig loads (or reloads) GeoIP and ASN databases from the given config.
+// applyLookupConfig loads (or reloads) GeoIP, ASN, CIDR, and HTTP lookup tables from the given config.
 // It also manages the maxmind-update cron job for automatic downloads.
-func (s *Server) applyLookupConfig(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+func (s *Server) applyLookupConfig(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN, registry lookup.Registry) {
 	geoipPath, asnPath := s.effectiveLookupPaths(cfg)
 
 	if geoipPath != "" {
@@ -463,8 +464,45 @@ func (s *Server) applyLookupConfig(cfg config.LookupConfig, geoipTable *lookup.G
 		}
 	}
 
+	// Register HTTP lookup tables from config.
+	s.registerHTTPLookups(cfg, registry)
+
 	// Manage the maxmind-update cron job.
 	s.manageMaxMindJob(cfg, geoipTable, asnTable)
+}
+
+// registerHTTPLookups registers HTTP API lookup tables from config into the registry.
+func (s *Server) registerHTTPLookups(cfg config.LookupConfig, registry lookup.Registry) {
+	for _, hcfg := range cfg.HTTPLookups {
+		if hcfg.Name == "" || hcfg.URLTemplate == "" {
+			continue
+		}
+
+		paramNames := make([]string, len(hcfg.Parameters))
+		for j, p := range hcfg.Parameters {
+			paramNames[j] = p.Name
+		}
+		lcfg := lookup.HTTPConfig{
+			URLTemplate:  hcfg.URLTemplate,
+			Headers:      hcfg.Headers,
+			ResponsePaths: hcfg.ResponsePaths,
+			Parameters:   paramNames,
+			CacheSize:    hcfg.CacheSize,
+		}
+		if hcfg.Timeout != "" {
+			if d, err := time.ParseDuration(hcfg.Timeout); err == nil {
+				lcfg.Timeout = d
+			}
+		}
+		if hcfg.CacheTTL != "" {
+			if d, err := time.ParseDuration(hcfg.CacheTTL); err == nil {
+				lcfg.CacheTTL = d
+			}
+		}
+
+		registry[hcfg.Name] = lookup.NewHTTP(lcfg)
+		s.logger.Info("registered HTTP lookup table", "name", hcfg.Name, "url", hcfg.URLTemplate)
+	}
 }
 
 // manageMaxMindJob adds or removes the maxmind-update cron job based on config.

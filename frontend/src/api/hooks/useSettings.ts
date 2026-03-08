@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { configClient } from "../client";
 import { useConfigMutation } from "./useConfig";
 
@@ -51,6 +51,15 @@ type PutSettingsArgs = {
       accountId?: string;
       licenseKey?: string;
     };
+    httpLookups?: {
+      name: string;
+      urlTemplate: string;
+      headers?: Record<string, string>;
+      responsePaths?: string[];
+      timeout?: string;
+      cacheTtl?: string;
+      cacheSize?: number;
+    }[];
   };
   cluster?: {
     broadcastInterval?: string;
@@ -81,6 +90,7 @@ function buildLookupReq(lookup: NonNullable<PutSettingsArgs["lookup"]>): Record<
       mm.licenseKey = lookup.maxmind.licenseKey;
     req.maxmind = mm;
   }
+  if (lookup.httpLookups) req.httpLookups = lookup.httpLookups;
   return req;
 }
 
@@ -97,4 +107,29 @@ export function usePutSettings() {
       req.setupWizardDismissed = args.setupWizardDismissed;
     return configClient.putSettings(req as Parameters<typeof configClient.putSettings>[0]);
   }, [["settings"], ["certificates"]]);
+}
+
+type TestHTTPLookupArgs = {
+  config: {
+    name: string;
+    urlTemplate: string;
+    headers?: Record<string, string>;
+    responsePaths?: string[];
+    timeout?: string;
+    cacheTtl?: string;
+    cacheSize?: number;
+  };
+  values: Record<string, string>;
+};
+
+export function useTestHTTPLookup() {
+  return useMutation({
+    mutationFn: async (args: TestHTTPLookupArgs) => {
+      const response = await configClient.testHTTPLookup({
+        config: args.config,
+        values: args.values,
+      });
+      return response;
+    },
+  });
 }

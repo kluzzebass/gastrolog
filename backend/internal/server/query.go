@@ -1165,7 +1165,7 @@ func pipeOpNote(op querylang.PipeOp) string {
 		}
 		return "Removes duplicate records keyed on EventID within a 1s window."
 	case *querylang.LookupOp:
-		return fmt.Sprintf("Enriches each record by looking up %s in the %s table.", o.Field, o.Table)
+		return fmt.Sprintf("Enriches each record by looking up %s in the %s table.", strings.Join(o.Fields, ", "), o.Table)
 	case *querylang.RawOp:
 		return "Forces table output format. No data transformation."
 	case *querylang.BarchartOp:

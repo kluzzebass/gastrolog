@@ -399,7 +399,7 @@ func applyTableFields(table *TableResult, op *querylang.FieldsOp) {
 
 // --- lookup operators ---
 
-// applyRecordLookup enriches records by looking up a field value in a table.
+// applyRecordLookup enriches records by looking up field values in a table.
 func applyRecordLookup(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, resolve lookup.Resolver) {
 	if resolve == nil {
 		return
@@ -408,12 +408,20 @@ func applyRecordLookup(ctx context.Context, records []chunk.Record, op *querylan
 	if table == nil {
 		return
 	}
+
+	if pt, ok := table.(lookup.ParameterizedLookup); ok && len(pt.Parameters()) > 0 {
+		applyRecordLookupParameterized(ctx, records, op, pt)
+		return
+	}
+	applyRecordLookupSingle(ctx, records, op, table)
+}
+
+// applyRecordLookupParameterized collects all field values per record, makes one call, prefixes with table name.
+func applyRecordLookupParameterized(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, pt lookup.ParameterizedLookup) {
+	params := pt.Parameters()
 	for i := range records {
-		val, ok := records[i].Attrs[op.Field]
-		if !ok || val == "" {
-			continue
-		}
-		result := table.Lookup(ctx, val)
+		values := collectParamValues(params, op.Fields, records[i].Attrs)
+		result := pt.LookupValues(ctx, values)
 		if result == nil {
 			continue
 		}
@@ -421,12 +429,47 @@ func applyRecordLookup(ctx context.Context, records []chunk.Record, op *querylan
 			records[i].Attrs = make(chunk.Attributes)
 		}
 		for suffix, v := range result {
-			records[i].Attrs[op.Field+"_"+suffix] = v
+			records[i].Attrs[op.Table+"_"+suffix] = v
 		}
 	}
 }
 
-// applyTableLookup enriches table rows by looking up a column value in a table.
+// applyRecordLookupSingle performs per-field independent lookups.
+func applyRecordLookupSingle(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, table lookup.LookupTable) {
+	for i := range records {
+		for _, field := range op.Fields {
+			val, ok := records[i].Attrs[field]
+			if !ok || val == "" {
+				continue
+			}
+			result := table.Lookup(ctx, val)
+			if result == nil {
+				continue
+			}
+			if records[i].Attrs == nil {
+				records[i].Attrs = make(chunk.Attributes)
+			}
+			for suffix, v := range result {
+				records[i].Attrs[field+"_"+suffix] = v
+			}
+		}
+	}
+}
+
+// collectParamValues maps query fields positionally to parameter names and collects values from attrs.
+func collectParamValues(params, fields []string, attrs chunk.Attributes) map[string]string {
+	values := make(map[string]string, len(params))
+	for j, param := range params {
+		if j < len(fields) {
+			if v, ok := attrs[fields[j]]; ok {
+				values[param] = v
+			}
+		}
+	}
+	return values
+}
+
+// applyTableLookup enriches table rows by looking up column values in a table.
 func applyTableLookup(ctx context.Context, table *TableResult, op *querylang.LookupOp, resolve lookup.Resolver) *TableResult {
 	if resolve == nil {
 		return table
@@ -436,48 +479,104 @@ func applyTableLookup(ctx context.Context, table *TableResult, op *querylang.Loo
 		return table
 	}
 
-	// Find source column index.
-	srcIdx := -1
-	for i, c := range table.Columns {
-		if c == op.Field {
-			srcIdx = i
-			break
-		}
+	if pt, ok := lt.(lookup.ParameterizedLookup); ok && len(pt.Parameters()) > 0 {
+		return applyTableLookupParameterized(ctx, table, op, pt)
 	}
-	if srcIdx < 0 {
-		return table
-	}
+	return applyTableLookupSingle(ctx, table, op, lt)
+}
 
-	// Append new columns for each suffix.
-	suffixes := lt.Suffixes()
+// applyTableLookupParameterized collects all field values per row, makes one call, prefixes with table name.
+func applyTableLookupParameterized(ctx context.Context, table *TableResult, op *querylang.LookupOp, pt lookup.ParameterizedLookup) *TableResult {
+	params := pt.Parameters()
+	srcIdxs := findColumnIndices(table.Columns, op.Fields)
+
+	suffixes := pt.Suffixes()
+	baseCol := len(table.Columns)
 	for _, suffix := range suffixes {
-		table.Columns = append(table.Columns, op.Field+"_"+suffix)
+		table.Columns = append(table.Columns, op.Table+"_"+suffix)
 	}
 
 	for i, row := range table.Rows {
-		// Extend row to match new column count.
 		for range suffixes {
 			table.Rows[i] = append(table.Rows[i], "")
 		}
-		if srcIdx >= len(row) {
-			continue
+		values := make(map[string]string, len(params))
+		for j, param := range params {
+			if j < len(srcIdxs) && srcIdxs[j] >= 0 && srcIdxs[j] < len(row) {
+				values[param] = row[srcIdxs[j]]
+			}
 		}
-		val := row[srcIdx]
-		if val == "" {
-			continue
-		}
-		result := lt.Lookup(ctx, val)
+		result := pt.LookupValues(ctx, values)
 		if result == nil {
 			continue
 		}
 		for j, suffix := range suffixes {
 			if v, ok := result[suffix]; ok {
-				table.Rows[i][len(row)+j] = v
+				table.Rows[i][baseCol+j] = v
 			}
 		}
 	}
-
 	return table
+}
+
+// applyTableLookupSingle performs per-field independent lookups.
+func applyTableLookupSingle(ctx context.Context, table *TableResult, op *querylang.LookupOp, lt lookup.LookupTable) *TableResult {
+	suffixes := lt.Suffixes()
+	for _, field := range op.Fields {
+		srcIdx := -1
+		for i, c := range table.Columns {
+			if c == field {
+				srcIdx = i
+				break
+			}
+		}
+		if srcIdx < 0 {
+			continue
+		}
+		table = applyTableLookupField(ctx, table, lt, field, srcIdx, suffixes)
+	}
+	return table
+}
+
+// applyTableLookupField enriches table rows for a single source field.
+func applyTableLookupField(ctx context.Context, table *TableResult, lt lookup.LookupTable, field string, srcIdx int, suffixes []string) *TableResult {
+	baseCol := len(table.Columns)
+	for _, suffix := range suffixes {
+		table.Columns = append(table.Columns, field+"_"+suffix)
+	}
+	for i, row := range table.Rows {
+		for range suffixes {
+			table.Rows[i] = append(table.Rows[i], "")
+		}
+		if srcIdx >= len(row) || row[srcIdx] == "" {
+			continue
+		}
+		result := lt.Lookup(ctx, row[srcIdx])
+		if result == nil {
+			continue
+		}
+		for j, suffix := range suffixes {
+			if v, ok := result[suffix]; ok {
+				table.Rows[i][baseCol+j] = v
+			}
+		}
+	}
+	return table
+}
+
+// findColumnIndices returns the column index for each field name, or -1 if not found.
+func findColumnIndices(columns []string, fields []string) []int {
+	idxs := make([]int, len(fields))
+	for j, field := range fields {
+		idxs[j] = -1
+		for i, c := range columns {
+			if c == field {
+				idxs[j] = i
+				break
+			}
+		}
+	}
+	return idxs
 }
 
 // --- helpers ---
@@ -582,8 +681,8 @@ type transformStep struct {
 	rename  *querylang.RenameOp
 	fields  *querylang.FieldsOp
 	lookupT lookup.LookupTable
-	lookupF string // lookup field name
-
+	lookupF []string // lookup field names
+	lookupN string   // lookup table name (for parameterized prefix)
 }
 
 type stepKind int
@@ -621,7 +720,8 @@ func NewRecordTransform(ops []querylang.PipeOp, resolve lookup.Resolver) *Record
 			rt.steps = append(rt.steps, transformStep{
 				kind:    stepLookup,
 				lookupT: lt,
-				lookupF: o.Field,
+				lookupF: o.Fields,
+				lookupN: o.Table,
 			})
 		case *querylang.DedupOp:
 			// Dedup is not streamable — handled by batch path only.
@@ -712,11 +812,33 @@ func (s *transformStep) applyLookup(ctx context.Context, rec *chunk.Record) {
 	if s.lookupT == nil {
 		return
 	}
-	val, ok := rec.Attrs[s.lookupF]
-	if !ok || val == "" {
+
+	if pt, ok := s.lookupT.(lookup.ParameterizedLookup); ok && len(pt.Parameters()) > 0 {
+		s.applyLookupParameterized(ctx, rec, pt)
 		return
 	}
-	result := s.lookupT.Lookup(ctx, val)
+
+	for _, field := range s.lookupF {
+		val, ok := rec.Attrs[field]
+		if !ok || val == "" {
+			continue
+		}
+		result := s.lookupT.Lookup(ctx, val)
+		if result == nil {
+			continue
+		}
+		if rec.Attrs == nil {
+			rec.Attrs = make(chunk.Attributes)
+		}
+		for suffix, v := range result {
+			rec.Attrs[field+"_"+suffix] = v
+		}
+	}
+}
+
+func (s *transformStep) applyLookupParameterized(ctx context.Context, rec *chunk.Record, pt lookup.ParameterizedLookup) {
+	values := collectParamValues(pt.Parameters(), s.lookupF, rec.Attrs)
+	result := pt.LookupValues(ctx, values)
 	if result == nil {
 		return
 	}
@@ -724,7 +846,7 @@ func (s *transformStep) applyLookup(ctx context.Context, rec *chunk.Record) {
 		rec.Attrs = make(chunk.Attributes)
 	}
 	for suffix, v := range result {
-		rec.Attrs[s.lookupF+"_"+suffix] = v
+		rec.Attrs[s.lookupN+"_"+suffix] = v
 	}
 }
 

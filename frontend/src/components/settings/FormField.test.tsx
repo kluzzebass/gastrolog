@@ -165,7 +165,7 @@ describe("ParamsEditor", () => {
     const { getAllByText } = render(
       <ParamsEditor params={{ host: "localhost", port: "8080" }} onChange={onChange} dark={true} />,
     );
-    fireEvent.click(getAllByText("×")[0]!);
+    fireEvent.click(getAllByText("Remove")[0]!);
     expect(onChange).toHaveBeenCalledWith({ port: "8080" });
   });
 

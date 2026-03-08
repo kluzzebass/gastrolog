@@ -1290,8 +1290,8 @@ func TestParsePipelineLookup(t *testing.T) {
 	if lu.Table != "rdns" {
 		t.Errorf("Table = %q, want 'rdns'", lu.Table)
 	}
-	if lu.Field != "src_ip" {
-		t.Errorf("Field = %q, want 'src_ip'", lu.Field)
+	if len(lu.Fields) != 1 || lu.Fields[0] != "src_ip" {
+		t.Errorf("Fields = %v, want [src_ip]", lu.Fields)
 	}
 }
 
@@ -1613,15 +1613,17 @@ func TestParsePipelineTimechartTable(t *testing.T) {
 
 func TestParsePipelineLookupTable(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		table      string
-		field      string
+		name   string
+		input  string
+		table  string
+		fields []string
 	}{
-		{"basic", "error | lookup rdns src_ip", "rdns", "src_ip"},
-		{"after eval", `error | eval ip = "1.2.3.4" | lookup rdns ip`, "rdns", "ip"},
-		{"after stats", "error | stats count by src_ip | lookup rdns src_ip", "rdns", "src_ip"},
-		{"bare pipe", "| lookup rdns host", "rdns", "host"},
+		{"basic", "error | lookup rdns src_ip", "rdns", []string{"src_ip"}},
+		{"after eval", `error | eval ip = "1.2.3.4" | lookup rdns ip`, "rdns", []string{"ip"}},
+		{"after stats", "error | stats count by src_ip | lookup rdns src_ip", "rdns", []string{"src_ip"}},
+		{"bare pipe", "| lookup rdns host", "rdns", []string{"host"}},
+		{"multi field", "error | lookup rdns src_ip dst_ip", "rdns", []string{"src_ip", "dst_ip"}},
+		{"three fields", "error | lookup postman a b c", "postman", []string{"a", "b", "c"}},
 	}
 
 	for _, tt := range tests {
@@ -1643,8 +1645,13 @@ func TestParsePipelineLookupTable(t *testing.T) {
 			if lu.Table != tt.table {
 				t.Errorf("Table = %q, want %q", lu.Table, tt.table)
 			}
-			if lu.Field != tt.field {
-				t.Errorf("Field = %q, want %q", lu.Field, tt.field)
+			if len(lu.Fields) != len(tt.fields) {
+				t.Fatalf("Fields = %v, want %v", lu.Fields, tt.fields)
+			}
+			for i, f := range tt.fields {
+				if lu.Fields[i] != f {
+					t.Errorf("Fields[%d] = %q, want %q", i, lu.Fields[i], f)
+				}
 			}
 		})
 	}

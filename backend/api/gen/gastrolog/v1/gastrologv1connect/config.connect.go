@@ -137,6 +137,9 @@ const (
 	// ConfigServiceDeleteManagedFileProcedure is the fully-qualified name of the ConfigService's
 	// DeleteManagedFile RPC.
 	ConfigServiceDeleteManagedFileProcedure = "/gastrolog.v1.ConfigService/DeleteManagedFile"
+	// ConfigServiceTestHTTPLookupProcedure is the fully-qualified name of the ConfigService's
+	// TestHTTPLookup RPC.
+	ConfigServiceTestHTTPLookupProcedure = "/gastrolog.v1.ConfigService/TestHTTPLookup"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -213,6 +216,8 @@ type ConfigServiceClient interface {
 	ListManagedFiles(context.Context, *connect.Request[v1.ListManagedFilesRequest]) (*connect.Response[v1.ListManagedFilesResponse], error)
 	// DeleteManagedFile removes an managed file.
 	DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error)
+	// TestHTTPLookup tests an HTTP lookup configuration with a sample value.
+	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -442,6 +447,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteManagedFile")),
 			connect.WithClientOptions(opts...),
 		),
+		testHTTPLookup: connect.NewClient[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse](
+			httpClient,
+			baseURL+ConfigServiceTestHTTPLookupProcedure,
+			connect.WithSchema(configServiceMethods.ByName("TestHTTPLookup")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -483,6 +494,7 @@ type configServiceClient struct {
 	getRouteStats         *connect.Client[v1.GetRouteStatsRequest, v1.GetRouteStatsResponse]
 	listManagedFiles      *connect.Client[v1.ListManagedFilesRequest, v1.ListManagedFilesResponse]
 	deleteManagedFile     *connect.Client[v1.DeleteManagedFileRequest, v1.DeleteManagedFileResponse]
+	testHTTPLookup        *connect.Client[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -665,6 +677,11 @@ func (c *configServiceClient) DeleteManagedFile(ctx context.Context, req *connec
 	return c.deleteManagedFile.CallUnary(ctx, req)
 }
 
+// TestHTTPLookup calls gastrolog.v1.ConfigService.TestHTTPLookup.
+func (c *configServiceClient) TestHTTPLookup(ctx context.Context, req *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error) {
+	return c.testHTTPLookup.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -739,6 +756,8 @@ type ConfigServiceHandler interface {
 	ListManagedFiles(context.Context, *connect.Request[v1.ListManagedFilesRequest]) (*connect.Response[v1.ListManagedFilesResponse], error)
 	// DeleteManagedFile removes an managed file.
 	DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error)
+	// TestHTTPLookup tests an HTTP lookup configuration with a sample value.
+	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -964,6 +983,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteManagedFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceTestHTTPLookupHandler := connect.NewUnaryHandler(
+		ConfigServiceTestHTTPLookupProcedure,
+		svc.TestHTTPLookup,
+		connect.WithSchema(configServiceMethods.ByName("TestHTTPLookup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -1038,6 +1063,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceListManagedFilesHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteManagedFileProcedure:
 			configServiceDeleteManagedFileHandler.ServeHTTP(w, r)
+		case ConfigServiceTestHTTPLookupProcedure:
+			configServiceTestHTTPLookupHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1189,4 +1216,8 @@ func (UnimplementedConfigServiceHandler) ListManagedFiles(context.Context, *conn
 
 func (UnimplementedConfigServiceHandler) DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteManagedFile is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.TestHTTPLookup is not implemented"))
 }

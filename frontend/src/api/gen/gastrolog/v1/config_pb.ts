@@ -2057,6 +2057,11 @@ export class LookupSettings extends Message<LookupSettings> {
    */
   maxmind?: MaxMindSettings;
 
+  /**
+   * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 4;
+   */
+  httpLookups: HTTPLookupEntry[] = [];
+
   constructor(data?: PartialMessage<LookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2068,6 +2073,7 @@ export class LookupSettings extends Message<LookupSettings> {
     { no: 1, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "maxmind", kind: "message", T: MaxMindSettings },
+    { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
@@ -2084,6 +2090,153 @@ export class LookupSettings extends Message<LookupSettings> {
 
   static equals(a: LookupSettings | PlainMessage<LookupSettings> | undefined, b: LookupSettings | PlainMessage<LookupSettings> | undefined): boolean {
     return proto3.util.equals(LookupSettings, a, b);
+  }
+}
+
+/**
+ * HTTPLookupParam defines a named parameter for an HTTP lookup table.
+ * Parameters are positional — query fields map to params in order.
+ *
+ * @generated from message gastrolog.v1.HTTPLookupParam
+ */
+export class HTTPLookupParam extends Message<HTTPLookupParam> {
+  /**
+   * URL template placeholder name, e.g. "lat"
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * human-readable description for UI/tab completion
+   *
+   * @generated from field: string description = 2;
+   */
+  description = "";
+
+  constructor(data?: PartialMessage<HTTPLookupParam>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HTTPLookupParam";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "description", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HTTPLookupParam {
+    return new HTTPLookupParam().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HTTPLookupParam {
+    return new HTTPLookupParam().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HTTPLookupParam {
+    return new HTTPLookupParam().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HTTPLookupParam | PlainMessage<HTTPLookupParam> | undefined, b: HTTPLookupParam | PlainMessage<HTTPLookupParam> | undefined): boolean {
+    return proto3.util.equals(HTTPLookupParam, a, b);
+  }
+}
+
+/**
+ * HTTPLookupEntry defines an HTTP API lookup table for field enrichment.
+ *
+ * @generated from message gastrolog.v1.HTTPLookupEntry
+ */
+export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
+  /**
+   * registry name (e.g. "users")
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * e.g. "http://api/users/{value}"
+   *
+   * @generated from field: string url_template = 2;
+   */
+  urlTemplate = "";
+
+  /**
+   * optional auth/custom headers
+   *
+   * @generated from field: map<string, string> headers = 3;
+   */
+  headers: { [key: string]: string } = {};
+
+  /**
+   * Go duration string, optional
+   *
+   * @generated from field: string timeout = 4;
+   */
+  timeout = "";
+
+  /**
+   * Go duration string, optional
+   *
+   * @generated from field: string cache_ttl = 5;
+   */
+  cacheTtl = "";
+
+  /**
+   * optional, default 10000
+   *
+   * @generated from field: int32 cache_size = 6;
+   */
+  cacheSize = 0;
+
+  /**
+   * JSONPath expressions, e.g. "$.data.user"
+   *
+   * @generated from field: repeated string response_paths = 7;
+   */
+  responsePaths: string[] = [];
+
+  /**
+   * ordered param definitions for URL template
+   *
+   * @generated from field: repeated gastrolog.v1.HTTPLookupParam parameters = 8;
+   */
+  parameters: HTTPLookupParam[] = [];
+
+  constructor(data?: PartialMessage<HTTPLookupEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.HTTPLookupEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "url_template", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "headers", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 4, name: "timeout", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "cache_size", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 7, name: "response_paths", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 8, name: "parameters", kind: "message", T: HTTPLookupParam, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HTTPLookupEntry {
+    return new HTTPLookupEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HTTPLookupEntry {
+    return new HTTPLookupEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HTTPLookupEntry {
+    return new HTTPLookupEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: HTTPLookupEntry | PlainMessage<HTTPLookupEntry> | undefined, b: HTTPLookupEntry | PlainMessage<HTTPLookupEntry> | undefined): boolean {
+    return proto3.util.equals(HTTPLookupEntry, a, b);
   }
 }
 
@@ -2542,6 +2695,13 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
    */
   maxmind?: PutMaxMindSettings;
 
+  /**
+   * replaces the full list when present
+   *
+   * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 4;
+   */
+  httpLookups: HTTPLookupEntry[] = [];
+
   constructor(data?: PartialMessage<PutLookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2553,6 +2713,7 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
     { no: 1, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 3, name: "maxmind", kind: "message", T: PutMaxMindSettings },
+    { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {
@@ -4586,6 +4747,161 @@ export class DeleteManagedFileResponse extends Message<DeleteManagedFileResponse
 
   static equals(a: DeleteManagedFileResponse | PlainMessage<DeleteManagedFileResponse> | undefined, b: DeleteManagedFileResponse | PlainMessage<DeleteManagedFileResponse> | undefined): boolean {
     return proto3.util.equals(DeleteManagedFileResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TestHTTPLookupRequest
+ */
+export class TestHTTPLookupRequest extends Message<TestHTTPLookupRequest> {
+  /**
+   * the lookup configuration to test
+   *
+   * @generated from field: gastrolog.v1.HTTPLookupEntry config = 1;
+   */
+  config?: HTTPLookupEntry;
+
+  /**
+   * test values: key=label, value=lookup input; 0 entries = config validation only
+   *
+   * @generated from field: map<string, string> values = 2;
+   */
+  values: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<TestHTTPLookupRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestHTTPLookupRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: HTTPLookupEntry },
+    { no: 2, name: "values", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestHTTPLookupRequest {
+    return new TestHTTPLookupRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestHTTPLookupRequest {
+    return new TestHTTPLookupRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestHTTPLookupRequest {
+    return new TestHTTPLookupRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestHTTPLookupRequest | PlainMessage<TestHTTPLookupRequest> | undefined, b: TestHTTPLookupRequest | PlainMessage<TestHTTPLookupRequest> | undefined): boolean {
+    return proto3.util.equals(TestHTTPLookupRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TestHTTPLookupResponse
+ */
+export class TestHTTPLookupResponse extends Message<TestHTTPLookupResponse> {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success = false;
+
+  /**
+   * non-empty on failure
+   *
+   * @generated from field: string error = 2;
+   */
+  error = "";
+
+  /**
+   * one per test value
+   *
+   * @generated from field: repeated gastrolog.v1.TestHTTPLookupResult results = 3;
+   */
+  results: TestHTTPLookupResult[] = [];
+
+  constructor(data?: PartialMessage<TestHTTPLookupResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestHTTPLookupResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "results", kind: "message", T: TestHTTPLookupResult, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestHTTPLookupResponse {
+    return new TestHTTPLookupResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestHTTPLookupResponse {
+    return new TestHTTPLookupResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestHTTPLookupResponse {
+    return new TestHTTPLookupResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestHTTPLookupResponse | PlainMessage<TestHTTPLookupResponse> | undefined, b: TestHTTPLookupResponse | PlainMessage<TestHTTPLookupResponse> | undefined): boolean {
+    return proto3.util.equals(TestHTTPLookupResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TestHTTPLookupResult
+ */
+export class TestHTTPLookupResult extends Message<TestHTTPLookupResult> {
+  /**
+   * the key from the request values map
+   *
+   * @generated from field: string label = 1;
+   */
+  label = "";
+
+  /**
+   * the input value that was looked up
+   *
+   * @generated from field: string value = 2;
+   */
+  value = "";
+
+  /**
+   * extracted fields (empty on miss)
+   *
+   * @generated from field: map<string, string> fields = 3;
+   */
+  fields: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<TestHTTPLookupResult>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestHTTPLookupResult";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "label", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "value", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "fields", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestHTTPLookupResult {
+    return new TestHTTPLookupResult().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestHTTPLookupResult {
+    return new TestHTTPLookupResult().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestHTTPLookupResult {
+    return new TestHTTPLookupResult().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestHTTPLookupResult | PlainMessage<TestHTTPLookupResult> | undefined, b: TestHTTPLookupResult | PlainMessage<TestHTTPLookupResult> | undefined): boolean {
+    return proto3.util.equals(TestHTTPLookupResult, a, b);
   }
 }
 

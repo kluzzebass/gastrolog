@@ -252,9 +252,29 @@ type TLSConfig struct {
 
 // LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
 type LookupConfig struct {
-	GeoIPDBPath string        `json:"geoip_db_path,omitempty"` // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
-	ASNDBPath   string        `json:"asn_db_path,omitempty"`   // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
-	MaxMind     MaxMindConfig `json:"maxmind,omitzero"`
+	GeoIPDBPath string             `json:"geoip_db_path,omitempty"` // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
+	ASNDBPath   string             `json:"asn_db_path,omitempty"`   // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
+	MaxMind     MaxMindConfig      `json:"maxmind,omitzero"`
+	HTTPLookups []HTTPLookupConfig `json:"http_lookups,omitempty"`
+}
+
+// HTTPLookupParam defines a named parameter for URL template substitution.
+type HTTPLookupParam struct {
+	Name        string `json:"name"`                  // URL template placeholder, e.g. "lat"
+	Description string `json:"description,omitempty"` // human-readable description
+}
+
+// HTTPLookupConfig defines an HTTP API lookup table that enriches records
+// by calling an external HTTP endpoint.
+type HTTPLookupConfig struct {
+	Name          string            `json:"name"`                     // registry name (e.g. "users")
+	URLTemplate   string            `json:"url_template"`             // e.g. "http://api/weather?lat={lat}&lon={lon}"
+	Headers       map[string]string `json:"headers,omitempty"`        // optional auth headers
+	ResponsePaths []string          `json:"response_paths,omitempty"` // JSONPath expressions, e.g. ["$.data.user"]
+	Parameters    []HTTPLookupParam `json:"parameters,omitempty"`     // ordered params for URL template
+	Timeout       string            `json:"timeout,omitempty"`        // Go duration string, optional
+	CacheTTL      string            `json:"cache_ttl,omitempty"`      // Go duration string, optional
+	CacheSize     int               `json:"cache_size,omitempty"`     // optional, default 10000
 }
 
 // MaxMindConfig holds credentials and state for automatic MaxMind database downloading.

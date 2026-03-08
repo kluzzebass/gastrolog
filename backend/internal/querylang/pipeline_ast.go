@@ -299,18 +299,18 @@ func (RawOp) pipeOp() {}
 
 func (RawOp) String() string { return "raw" }
 
-// LookupOp represents: lookup <table> <field>
-// Enriches records by looking up a field value in an external table.
-// Output fields are named <field>_<suffix> (e.g. src_ip_hostname).
+// LookupOp represents: lookup <table> <field> [<field> ...]
+// Enriches records by looking up field values in an external table.
+// Fields are positional — they map to the table's declared parameters in order.
 type LookupOp struct {
-	Table string // lookup table name (e.g. "rdns")
-	Field string // field to look up (e.g. "src_ip")
+	Table  string   // lookup table name (e.g. "rdns", "weather")
+	Fields []string // record field names, mapped positionally to table params
 }
 
 func (LookupOp) pipeOp() {}
 
 func (l *LookupOp) String() string {
-	return fmt.Sprintf("lookup %s %s", l.Table, l.Field)
+	return fmt.Sprintf("lookup %s %s", l.Table, strings.Join(l.Fields, " "))
 }
 
 // BarchartOp represents: barchart

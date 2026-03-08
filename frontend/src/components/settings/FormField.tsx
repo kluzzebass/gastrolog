@@ -296,12 +296,12 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
           />
           <button
             onClick={() => handleRemove(key)}
-            className={`px-1.5 py-1 text-[0.75em] rounded transition-colors ${c(
-              "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+            className={`px-3 py-1 text-[0.8em] rounded border transition-colors ${c(
+              "border-ink-border text-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
+              "border-light-border text-light-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
             )}`}
           >
-            &times;
+            Remove
           </button>
         </div>
       ))}
@@ -330,12 +330,12 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
         />
         <button
           onClick={handleAdd}
-          className={`px-1.5 py-1 text-[0.75em] rounded transition-colors ${c(
-            "text-text-ghost hover:text-copper hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-copper hover:bg-light-hover",
+          className={`px-3 py-1 text-[0.8em] rounded border transition-colors ${c(
+            "border-ink-border text-text-muted hover:text-copper hover:border-copper-dim hover:bg-ink-hover",
+            "border-light-border text-light-text-muted hover:text-copper hover:border-copper hover:bg-light-hover",
           )}`}
         >
-          +
+          Add
         </button>
       </div>
     </div>
