@@ -28,7 +28,7 @@ Never present derived or approximate data as if it were authoritative. If it com
 
 ## Issue tracking
 
-This project uses **dcat** for issue tracking. Run `dcat prime` for instructions, then `dcat list --agent-only` for the issue list. Work on bugs first, high priority first.
+This project uses **dcat** for issue tracking. Run `dcat prime --opinionated` for instructions, then `dcat list --agent-only` for the issue list. Work on bugs first, high priority first.
 
 ALWAYS run `dcat update --status in_progress $issueId` when starting work.
 
