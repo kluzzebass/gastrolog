@@ -1,7 +1,6 @@
 package querylang
 
 import (
-	"fmt"
 	"math"
 	"testing"
 )
@@ -276,29 +275,6 @@ func TestEvalNestedFuncAndArith(t *testing.T) {
 	}
 	if !v.IsNum || v.Num != 1.5 {
 		t.Errorf("expected 1.5, got %v", v)
-	}
-}
-
-func TestEvalCustomFunc(t *testing.T) {
-	t.Parallel()
-	eval := NewEvaluator()
-	eval.RegisterFunc("double", func(args []Value) (Value, error) {
-		if len(args) != 1 {
-			return Value{}, fmt.Errorf("double requires 1 arg")
-		}
-		n, ok := args[0].ToNum()
-		if !ok {
-			return MissingValue(), nil
-		}
-		return NumValue(n * 2), nil
-	})
-
-	v, err := eval.Eval(&FuncCall{Name: "double", Args: []PipeExpr{&NumberLit{Value: "21"}}}, Row{})
-	if err != nil {
-		t.Fatalf("Eval error: %v", err)
-	}
-	if !v.IsNum || v.Num != 42 {
-		t.Errorf("expected 42, got %v", v)
 	}
 }
 

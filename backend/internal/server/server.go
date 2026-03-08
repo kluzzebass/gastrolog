@@ -863,11 +863,6 @@ func (s *Server) initiateShutdown(drain bool) {
 	}
 }
 
-// ShutdownChan returns a channel that is closed when shutdown is initiated.
-func (s *Server) ShutdownChan() <-chan struct{} {
-	return s.shutdown
-}
-
 // Handler returns an http.Handler for the server.
 // This is useful for testing or embedding in another server.
 func (s *Server) Handler() http.Handler {

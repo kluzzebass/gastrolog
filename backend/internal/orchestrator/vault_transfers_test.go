@@ -16,10 +16,24 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
+// sliceIterator adapts a []chunk.Record into a chunk.RecordIterator.
+func sliceIterator(records []chunk.Record) chunk.RecordIterator {
+	i := 0
+	return func() (chunk.Record, error) {
+		if i >= len(records) {
+			return chunk.Record{}, chunk.ErrNoMoreRecords
+		}
+		rec := records[i]
+		i++
+		return rec, nil
+	}
+}
+
 // mockTransferrer records calls to TransferRecords.
 type mockTransferrer struct {
 	calls   []transferCall
-	failErr error // if set, TransferRecords returns this error
+	failErr error        // if set, TransferRecords returns this error
+	gate    chan struct{} // if non-nil, TransferRecords blocks until closed
 }
 
 type transferCall struct {
@@ -29,6 +43,9 @@ type transferCall struct {
 }
 
 func (m *mockTransferrer) TransferRecords(_ context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+	if m.gate != nil {
+		<-m.gate
+	}
 	if m.failErr != nil {
 		return m.failErr
 	}
@@ -357,7 +374,7 @@ func TestImportRecordsMemory(t *testing.T) {
 		}
 	}
 
-	meta, err := cm.ImportRecords(chunk.SliceIterator(records))
+	meta, err := cm.ImportRecords(sliceIterator(records))
 	if err != nil {
 		t.Fatalf("ImportRecords: %v", err)
 	}
@@ -410,7 +427,7 @@ func TestImportRecordsFile(t *testing.T) {
 		}
 	}
 
-	meta, err := cm.ImportRecords(chunk.SliceIterator(records))
+	meta, err := cm.ImportRecords(sliceIterator(records))
 	if err != nil {
 		t.Fatalf("ImportRecords: %v", err)
 	}
@@ -454,7 +471,7 @@ func TestImportRecordsZeroWriteTS(t *testing.T) {
 		{Raw: []byte("test")}, // WriteTS is zero
 	}
 
-	_, err := cm.ImportRecords(chunk.SliceIterator(records))
+	_, err := cm.ImportRecords(sliceIterator(records))
 	if !errors.Is(err, chunk.ErrMissingWriteTS) {
 		t.Errorf("expected ErrMissingWriteTS, got: %v", err)
 	}
@@ -464,7 +481,7 @@ func TestImportRecordsEmpty(t *testing.T) {
 	t.Parallel()
 	cm := newMemVault(t)
 
-	meta, err := cm.ImportRecords(chunk.SliceIterator(nil))
+	meta, err := cm.ImportRecords(sliceIterator(nil))
 	if err != nil {
 		t.Fatalf("ImportRecords(nil): %v", err)
 	}
@@ -555,6 +572,9 @@ func TestDrainVault_Basic(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, mock := drainSetup(t, 5)
 
+	// Gate the mock so the worker blocks until we've checked IsDraining.
+	mock.gate = make(chan struct{})
+
 	// Start drain.
 	if err := orch.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
 		t.Fatalf("DrainVault: %v", err)
@@ -563,6 +583,9 @@ func TestDrainVault_Basic(t *testing.T) {
 	if !orch.IsDraining(vaultID) {
 		t.Fatal("expected IsDraining to be true")
 	}
+
+	// Release the worker so it can complete.
+	close(mock.gate)
 
 	// Wait for the drain worker to complete.
 	jobs := orch.Scheduler().ListJobs()

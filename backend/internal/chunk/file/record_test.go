@@ -479,7 +479,7 @@ func BenchmarkEncodeIdxEntry(b *testing.B) {
 	buf := make([]byte, IdxEntrySize)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		EncodeIdxEntry(entry, buf)
 	}
 }
@@ -497,7 +497,7 @@ func BenchmarkDecodeIdxEntry(b *testing.B) {
 	EncodeIdxEntry(entry, buf)
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = DecodeIdxEntry(buf)
 	}
 }

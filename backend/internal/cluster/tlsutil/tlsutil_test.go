@@ -1,8 +1,10 @@
 package tlsutil_test
 
 import (
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"testing"
 
@@ -153,22 +155,21 @@ func TestJoinTokenRoundTrip(t *testing.T) {
 		t.Error("empty CA hash")
 	}
 
-	// Verify the CA fingerprint matches.
-	ok, err := tlsutil.VerifyCAFingerprint(ca.CertPEM, caHash)
-	if err != nil {
-		t.Fatalf("VerifyCAFingerprint: %v", err)
+	// Verify the CA fingerprint matches by computing SHA-256 of the CA DER.
+	block, _ := pem.Decode(ca.CertPEM)
+	if block == nil {
+		t.Fatal("failed to decode CA PEM")
 	}
-	if !ok {
+	actual := sha256.Sum256(block.Bytes)
+	if hex.EncodeToString(actual[:]) != caHash {
 		t.Error("CA fingerprint mismatch")
 	}
 
 	// Verify a different CA doesn't match.
 	ca2, _ := tlsutil.GenerateCA()
-	ok, err = tlsutil.VerifyCAFingerprint(ca2.CertPEM, caHash)
-	if err != nil {
-		t.Fatalf("VerifyCAFingerprint (different CA): %v", err)
-	}
-	if ok {
+	block2, _ := pem.Decode(ca2.CertPEM)
+	actual2 := sha256.Sum256(block2.Bytes)
+	if hex.EncodeToString(actual2[:]) == caHash {
 		t.Error("expected CA fingerprint mismatch for different CA")
 	}
 }

@@ -174,18 +174,6 @@ func ParseJoinToken(token string) (secret, caHash string, err error) {
 	return secret, caHash, nil
 }
 
-// VerifyCAFingerprint checks whether the given CA certificate PEM matches
-// the expected SHA-256 hash (hex-encoded).
-func VerifyCAFingerprint(caCertPEM []byte, expectedHash string) (bool, error) {
-	block, _ := pem.Decode(caCertPEM)
-	if block == nil {
-		return false, errors.New("decode CA PEM: no PEM block found")
-	}
-
-	actual := sha256.Sum256(block.Bytes)
-	return hex.EncodeToString(actual[:]) == expectedHash, nil
-}
-
 // parseCA decodes PEM-encoded CA certificate and private key.
 func parseCA(certPEM, keyPEM []byte) (*x509.Certificate, *ecdsa.PrivateKey, error) {
 	block, _ := pem.Decode(certPEM)

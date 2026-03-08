@@ -18,9 +18,9 @@ type mockRDNS struct {
 	responses map[string]string // ip → hostname
 }
 
-func newMockRDNS(responses map[string]string, opts ...RDNSOption) *mockRDNS {
+func newMockRDNS(responses map[string]string) *mockRDNS {
 	// Use a resolver that will fail (we override Lookup).
-	r := NewRDNS(opts...)
+	r := NewRDNS()
 	m := &mockRDNS{RDNS: r, responses: responses}
 	return m
 }
@@ -145,48 +145,6 @@ func TestRDNSCacheNegative(t *testing.T) {
 	result := m.Lookup(context.Background(), "10.0.0.1")
 	if result != nil {
 		t.Errorf("expected cached negative, got %v", result)
-	}
-}
-
-func TestRDNSCacheEviction(t *testing.T) {
-	t.Parallel()
-	m := newMockRDNS(map[string]string{
-		"1.1.1.1": "one.one.one.one",
-		"2.2.2.2": "two.two.two.two",
-		"3.3.3.3": "three.three.three.three",
-	}, WithCacheSize(2))
-
-	_ = m.Lookup(context.Background(), "1.1.1.1")
-	_ = m.Lookup(context.Background(), "2.2.2.2")
-
-	// Cache is full (2 entries). Next insert should clear and re-add.
-	_ = m.Lookup(context.Background(), "3.3.3.3")
-
-	// After eviction, 3.3.3.3 should be cached, others may not be.
-	m.mu.Lock()
-	if len(m.cache) > 2 {
-		t.Errorf("cache should have at most 2 entries after eviction, got %d", len(m.cache))
-	}
-	m.mu.Unlock()
-}
-
-func TestRDNSCacheExpiry(t *testing.T) {
-	t.Parallel()
-	m := newMockRDNS(map[string]string{
-		"4.4.4.4": "four.example.com",
-	}, WithTTL(1*time.Millisecond, 1*time.Millisecond))
-
-	_ = m.Lookup(context.Background(), "4.4.4.4")
-
-	// Wait for TTL to expire.
-	time.Sleep(5 * time.Millisecond)
-
-	// Remove the response, so re-resolve returns empty.
-	m.responses = map[string]string{}
-
-	result := m.Lookup(context.Background(), "4.4.4.4")
-	if result != nil {
-		t.Errorf("expected nil after TTL expiry, got %v", result)
 	}
 }
 

@@ -138,19 +138,6 @@ func CursorIterator(c RecordCursor) RecordIterator {
 	}
 }
 
-// SliceIterator adapts a []Record into a RecordIterator.
-func SliceIterator(records []Record) RecordIterator {
-	i := 0
-	return func() (Record, error) {
-		if i >= len(records) {
-			return Record{}, ErrNoMoreRecords
-		}
-		rec := records[i]
-		i++
-		return rec, nil
-	}
-}
-
 // MetaStore persists chunk metadata.
 type MetaStore interface {
 	Save(meta ChunkMeta) error

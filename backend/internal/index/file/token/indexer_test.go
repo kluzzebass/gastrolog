@@ -2,6 +2,7 @@ package token
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"os"
 	"path/filepath"
@@ -288,65 +289,6 @@ func TestIndexerBuildReadOnlyDir(t *testing.T) {
 	}
 }
 
-func TestSignature(t *testing.T) {
-	t.Parallel()
-	entries := []index.TokenIndexEntry{
-		{Token: "test", Positions: []uint64{0}},
-	}
-
-	data := encodeIndex(entries)
-	if data[0] != format.Signature {
-		t.Fatalf("expected signature byte 0x%02x, got 0x%02x", format.Signature, data[0])
-	}
-	if data[1] != format.TypeTokenIndex {
-		t.Fatalf("expected type byte '%c', got 0x%02x", format.TypeTokenIndex, data[1])
-	}
-}
-
-func TestEncodeDecodeRoundTrip(t *testing.T) {
-	t.Parallel()
-	entries := []index.TokenIndexEntry{
-		{Token: "alpha", Positions: []uint64{0, 128, 256}},
-		{Token: "beta", Positions: []uint64{64, 192}},
-	}
-
-	data := encodeIndex(entries)
-	got, err := decodeIndex(data)
-	if err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-
-	if len(got) != len(entries) {
-		t.Fatalf("expected %d entries, got %d", len(entries), len(got))
-	}
-
-	for i := range entries {
-		if got[i].Token != entries[i].Token {
-			t.Fatalf("entry %d: expected token %q, got %q", i, entries[i].Token, got[i].Token)
-		}
-		if len(got[i].Positions) != len(entries[i].Positions) {
-			t.Fatalf("entry %d: expected %d positions, got %d", i, len(entries[i].Positions), len(got[i].Positions))
-		}
-		for j := range entries[i].Positions {
-			if got[i].Positions[j] != entries[i].Positions[j] {
-				t.Fatalf("entry %d pos %d: expected %d, got %d", i, j, entries[i].Positions[j], got[i].Positions[j])
-			}
-		}
-	}
-}
-
-func TestEncodeDecodeEmpty(t *testing.T) {
-	t.Parallel()
-	data := encodeIndex(nil)
-	got, err := decodeIndex(data)
-	if err != nil {
-		t.Fatalf("decode empty: %v", err)
-	}
-	if len(got) != 0 {
-		t.Fatalf("expected 0 entries, got %d", len(got))
-	}
-}
-
 func TestDecodeErrors(t *testing.T) {
 	t.Parallel()
 	// Too small.
@@ -382,21 +324,30 @@ func TestDecodeErrors(t *testing.T) {
 	}
 
 	// Key size mismatch: header says 1 key but no key data.
-	bad3 := encodeIndex(nil)
-	bad3[format.HeaderSize] = 1
+	// Build a valid empty index header, then set key count to 1.
+	bad3 := make([]byte, headerSize)
+	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: format.FlagComplete}
+	h.EncodeInto(bad3)
+	binary.LittleEndian.PutUint32(bad3[format.HeaderSize:], 1) // claim 1 key, but no key data
 	if _, err := decodeIndex(bad3); err != ErrKeySizeMismatch {
 		t.Fatalf("expected ErrKeySizeMismatch, got %v", err)
 	}
 
 	// Posting size mismatch: valid header+key with truncated postings.
-	bad4 := encodeIndex([]index.TokenIndexEntry{
-		{Token: "test", Positions: []uint64{0, 64}},
-	})
-	// Truncate to remove posting data
-	keyStart := headerSize
-	tokenLen := 4 // "test"
-	keyEntrySize := tokenLenSize + tokenLen + postingOffsetSize + postingCountSize
-	bad4 = bad4[:keyStart+keyEntrySize]
+	// Manually construct: header + 1 key entry ("test", offset=0, count=2) but no posting data.
+	tokenBytes := []byte("test")
+	keyEntrySize := tokenLenSize + len(tokenBytes) + postingOffsetSize + postingCountSize
+	bad4 := make([]byte, headerSize+keyEntrySize)
+	h.EncodeInto(bad4)
+	binary.LittleEndian.PutUint32(bad4[format.HeaderSize:], 1) // 1 key
+	cursor := headerSize
+	binary.LittleEndian.PutUint16(bad4[cursor:], uint16(len(tokenBytes)))
+	cursor += tokenLenSize
+	copy(bad4[cursor:], tokenBytes)
+	cursor += len(tokenBytes)
+	binary.LittleEndian.PutUint32(bad4[cursor:], 0) // posting offset = 0
+	cursor += postingOffsetSize
+	binary.LittleEndian.PutUint32(bad4[cursor:], 2) // posting count = 2, but no posting data follows
 	if _, err := decodeIndex(bad4); err != ErrPostingSizeMismatch {
 		t.Fatalf("expected ErrPostingSizeMismatch, got %v", err)
 	}
@@ -528,28 +479,6 @@ func TestIndexerPositionsAscending(t *testing.T) {
 					entry.Token, i, entry.Positions[i], entry.Positions[i-1])
 			}
 		}
-	}
-}
-
-func TestDecodeExtraTrailingBytes(t *testing.T) {
-	t.Parallel()
-	entries := []index.TokenIndexEntry{
-		{Token: "test", Positions: []uint64{0, 64}},
-	}
-
-	data := encodeIndex(entries)
-	data = append(data, 0xDE, 0xAD, 0xBE, 0xEF)
-
-	got, err := decodeIndex(data)
-	if err != nil {
-		t.Fatalf("decode with trailing bytes: %v", err)
-	}
-
-	if len(got) != 1 {
-		t.Fatalf("expected 1 entry, got %d", len(got))
-	}
-	if len(got[0].Positions) != 2 {
-		t.Fatalf("expected 2 positions, got %d", len(got[0].Positions))
 	}
 }
 

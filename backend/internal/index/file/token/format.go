@@ -1,13 +1,11 @@
 package token
 
 import (
-	"cmp"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
@@ -35,68 +33,6 @@ var (
 	ErrPostingSizeMismatch = errors.New("token index posting list size mismatch")
 	ErrIndexIncomplete     = errors.New("token index incomplete (missing complete flag)")
 )
-
-// encodeIndex encodes token index entries into binary format.
-// NOTE: This allocates the entire index in memory. For large indexes,
-// use encodeIndexToFile instead.
-func encodeIndex(entries []index.TokenIndexEntry) []byte {
-	// Sort entries by Token for deterministic output and binary search.
-	sorted := make([]index.TokenIndexEntry, len(entries))
-	copy(sorted, entries)
-	slices.SortFunc(sorted, func(a, b index.TokenIndexEntry) int {
-		return cmp.Compare(a.Token, b.Token)
-	})
-
-	// Count total positions and token bytes for sizing.
-	totalPositions := 0
-	totalTokenBytes := 0
-	for _, e := range sorted {
-		totalPositions += len(e.Positions)
-		totalTokenBytes += len(e.Token)
-	}
-
-	// Key entry: tokenLen (2) + token (variable) + postingOffset (4) + postingCount (4)
-	keyTableSize := len(sorted)*(tokenLenSize+postingOffsetSize+postingCountSize) + totalTokenBytes
-	postingBlobSize := totalPositions * positionSize
-	buf := make([]byte, headerSize+keyTableSize+postingBlobSize)
-
-	// Write header.
-	cursor := 0
-	h := format.Header{Type: format.TypeTokenIndex, Version: currentVersion, Flags: format.FlagComplete}
-	cursor += h.EncodeInto(buf[cursor:])
-
-	binary.LittleEndian.PutUint32(buf[cursor:cursor+keyCountSize], uint32(len(sorted))) //nolint:gosec // G115: entry count bounded by index token count
-	cursor += keyCountSize
-
-	// Write key table and posting blob.
-	keyCursor := cursor
-	postingCursor := headerSize + keyTableSize
-	postingOffset := 0
-
-	for _, e := range sorted {
-		tokenBytes := []byte(e.Token)
-		binary.LittleEndian.PutUint16(buf[keyCursor:keyCursor+tokenLenSize], uint16(len(tokenBytes))) //nolint:gosec // G115: token length bounded by tokenizer max token length
-		keyCursor += tokenLenSize
-
-		copy(buf[keyCursor:keyCursor+len(tokenBytes)], tokenBytes)
-		keyCursor += len(tokenBytes)
-
-		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingOffsetSize], uint32(postingOffset))
-		keyCursor += postingOffsetSize
-
-		binary.LittleEndian.PutUint32(buf[keyCursor:keyCursor+postingCountSize], uint32(len(e.Positions))) //nolint:gosec // G115: position count bounded by chunk record count
-		keyCursor += postingCountSize
-
-		for _, pos := range e.Positions {
-			binary.LittleEndian.PutUint32(buf[postingCursor:postingCursor+positionSize], uint32(pos))
-			postingCursor += positionSize
-		}
-
-		postingOffset += len(e.Positions) * positionSize
-	}
-
-	return buf
-}
 
 // decodeIndex decodes binary token index data back into entries.
 func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {

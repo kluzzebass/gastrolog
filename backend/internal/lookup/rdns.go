@@ -27,27 +27,9 @@ type RDNS struct {
 	cache map[string]rdnsEntry
 }
 
-// RDNSOption configures the RDNS table.
-type RDNSOption func(*RDNS)
-
-// WithTTL sets the positive and negative TTLs.
-func WithTTL(positive, negative time.Duration) RDNSOption {
-	return func(r *RDNS) {
-		r.posTTL = positive
-		r.negTTL = negative
-	}
-}
-
-// WithCacheSize sets the max cache entries.
-func WithCacheSize(n int) RDNSOption {
-	return func(r *RDNS) {
-		r.cacheSize = n
-	}
-}
-
 // NewRDNS creates a reverse DNS lookup table.
-func NewRDNS(opts ...RDNSOption) *RDNS {
-	r := &RDNS{
+func NewRDNS() *RDNS {
+	return &RDNS{
 		resolver:  net.DefaultResolver,
 		timeout:   2 * time.Second,
 		posTTL:    5 * time.Minute,
@@ -55,10 +37,6 @@ func NewRDNS(opts ...RDNSOption) *RDNS {
 		cacheSize: 10_000,
 		cache:     make(map[string]rdnsEntry),
 	}
-	for _, opt := range opts {
-		opt(r)
-	}
-	return r
 }
 
 // Suffixes returns the output suffixes for RDNS lookups.

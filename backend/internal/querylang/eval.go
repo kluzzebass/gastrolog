@@ -69,11 +69,6 @@ func NewEvaluator() *Evaluator {
 	return e
 }
 
-// RegisterFunc adds a scalar function. Overwrites any existing function with the same name.
-func (e *Evaluator) RegisterFunc(name string, fn ScalarFunc) {
-	e.funcs[strings.ToLower(name)] = fn
-}
-
 // Eval evaluates a pipe expression against a row.
 func (e *Evaluator) Eval(expr PipeExpr, row Row) (Value, error) {
 	switch ex := expr.(type) {

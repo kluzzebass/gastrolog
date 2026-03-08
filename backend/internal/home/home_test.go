@@ -29,14 +29,6 @@ func TestDefault(t *testing.T) {
 	}
 }
 
-func TestUsersPath(t *testing.T) {
-	t.Parallel()
-	d := New("/data")
-	if got := d.UsersPath(); got != "/data/users.json" {
-		t.Errorf("got %s", got)
-	}
-}
-
 func TestVaultDir(t *testing.T) {
 	t.Parallel()
 	d := New("/data")

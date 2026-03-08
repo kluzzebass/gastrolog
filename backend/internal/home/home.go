@@ -9,7 +9,6 @@
 //	  node_id                          (persistent UUIDv7 node identity)
 //	  node_name                        (human-readable petname, mirrors config store)
 //	  config.json   or  config.db      (config store, type-dependent)
-//	  users.json                       (user credentials, JSON file store only)
 //	  raft/
 //	    raft.db                        (boltdb: raft log + stable store)
 //	    snapshots/                     (raft file snapshot store)
@@ -51,11 +50,6 @@ func Default() (Dir, error) {
 // Root returns the home directory path.
 func (d Dir) Root() string {
 	return d.root
-}
-
-// UsersPath returns the path to the users JSON file.
-func (d Dir) UsersPath() string {
-	return filepath.Join(d.root, "users.json")
 }
 
 // VaultDir returns the directory for a specific vault's chunk/index data.

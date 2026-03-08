@@ -105,13 +105,6 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	if !searchDone.Load() {
 		t.Error("Search should have completed")
 	}
-
-	// Wait for shutdown channel to be closed (drain happens in background)
-	select {
-	case <-srv.ShutdownChan():
-	case <-time.After(2 * time.Second):
-		t.Fatal("Shutdown channel should be closed after drain")
-	}
 }
 
 func TestDrainRejectsNewRequests(t *testing.T) {
@@ -228,13 +221,6 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	}))
 	if err != nil {
 		t.Fatalf("Shutdown failed: %v", err)
-	}
-
-	// Shutdown channel should be closed quickly (no drain wait)
-	select {
-	case <-srv.ShutdownChan():
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Shutdown channel should be closed immediately without drain")
 	}
 }
 
