@@ -102,6 +102,7 @@ message NodeStats {
   int64 route_stats_routed = 30;
   bool route_stats_filter_active = 31;
   repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
+  repeated gastrolog.v1.PerRouteStats route_per_route_stats = 33;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

@@ -41,6 +41,12 @@ type VaultRouteStats struct {
 	Forwarded atomic.Int64 // records sent to remote node for this vault
 }
 
+// PerRouteStats tracks per-route routing metrics.
+type PerRouteStats struct {
+	Matched   atomic.Int64 // records matched by this route
+	Forwarded atomic.Int64 // records forwarded to remote node by this route
+}
+
 // ingesterInfo holds metadata about an ingester for logging purposes.
 // The Ingester interface is a bare Run() — metadata lives alongside it.
 type ingesterInfo struct {
@@ -134,8 +140,9 @@ type Orchestrator struct {
 	filterSet *FilterSet
 
 	// Route stats (atomic, no lock needed for reads/writes).
-	routeStats     RouteStats
+	routeStats      RouteStats
 	vaultRouteStats sync.Map // uuid.UUID → *VaultRouteStats
+	perRouteStats   sync.Map // uuid.UUID → *PerRouteStats
 
 	// Record forwarder for cross-node delivery (nil in single-node mode).
 	forwarder RecordForwarder
@@ -331,6 +338,17 @@ func (o *Orchestrator) VaultRouteStatsList() map[uuid.UUID]*VaultRouteStats {
 	result := make(map[uuid.UUID]*VaultRouteStats)
 	o.vaultRouteStats.Range(func(key, value any) bool {
 		result[key.(uuid.UUID)] = value.(*VaultRouteStats)
+		return true
+	})
+	return result
+}
+
+// PerRouteStatsList returns per-route routing stats for all routes
+// that have matched at least one record.
+func (o *Orchestrator) PerRouteStatsList() map[uuid.UUID]*PerRouteStats {
+	result := make(map[uuid.UUID]*PerRouteStats)
+	o.perRouteStats.Range(func(key, value any) bool {
+		result[key.(uuid.UUID)] = value.(*PerRouteStats)
 		return true
 	})
 	return result

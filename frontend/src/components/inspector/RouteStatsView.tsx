@@ -23,12 +23,23 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
     }
   }
 
+  const routeNames = new Map<string, string>();
+  if (config?.routes) {
+    for (const r of config.routes) {
+      routeNames.set(r.id, r.name || r.id.slice(0, 8));
+    }
+  }
+
   const dropRate =
     stats.totalIngested > 0
       ? ((Number(stats.totalDropped) / Number(stats.totalIngested)) * 100).toFixed(1)
       : "0.0";
 
   const sorted = [...(stats.vaultStats ?? [])].sort(
+    (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
+  );
+
+  const sortedRoutes = [...(stats.routeStats ?? [])].sort(
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
   );
 
@@ -107,6 +118,57 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   {Number(vs.recordsForwarded) > 0 ? (
                     <Badge variant="info" dark={dark}>
                       {formatCount(vs.recordsForwarded)}
+                    </Badge>
+                  ) : (
+                    <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                      0
+                    </span>
+                  )}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Per-route breakdown */}
+      {sortedRoutes.length > 0 && (
+        <div>
+          <h3
+            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Per-route delivery
+          </h3>
+          <div
+            className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
+          >
+            <div
+              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-ghost border-ink-border-subtle bg-ink-well", "text-light-text-ghost border-light-border-subtle bg-light-well")}`}
+            >
+              <span>Route</span>
+              <span className="text-right">Matched</span>
+              <span className="text-right">Forwarded</span>
+            </div>
+            {sortedRoutes.map((rs) => (
+              <div
+                key={rs.routeId}
+                className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
+              >
+                <span
+                  className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
+                  title={rs.routeId}
+                >
+                  {routeNames.get(rs.routeId) ?? rs.routeId.slice(0, 8)}
+                </span>
+                <span
+                  className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
+                >
+                  {formatCount(rs.recordsMatched)}
+                </span>
+                <span className="font-mono text-right">
+                  {Number(rs.recordsForwarded) > 0 ? (
+                    <Badge variant="info" dark={dark}>
+                      {formatCount(rs.recordsForwarded)}
                     </Badge>
                   ) : (
                     <span className={c("text-text-ghost", "text-light-text-ghost")}>

@@ -32,11 +32,19 @@ type StatsRouteSnapshot struct {
 	Routed         int64
 	FilterActive   bool
 	VaultStats     []StatsVaultRouteSnapshot
+	RouteStats     []StatsPerRouteSnapshot
 }
 
 // StatsVaultRouteSnapshot captures per-vault route stats.
 type StatsVaultRouteSnapshot struct {
 	VaultID   string
+	Matched   int64
+	Forwarded int64
+}
+
+// StatsPerRouteSnapshot captures per-route stats.
+type StatsPerRouteSnapshot struct {
+	RouteID   string
 	Matched   int64
 	Forwarded int64
 }
@@ -182,6 +190,13 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 				VaultId:          vs.VaultID,
 				RecordsMatched:   vs.Matched,
 				RecordsForwarded: vs.Forwarded,
+			})
+		}
+		for _, ps := range rs.RouteStats {
+			stats.RoutePerRouteStats = append(stats.RoutePerRouteStats, &gastrologv1.PerRouteStats{
+				RouteId:          ps.RouteID,
+				RecordsMatched:   ps.Matched,
+				RecordsForwarded: ps.Forwarded,
 			})
 		}
 	}

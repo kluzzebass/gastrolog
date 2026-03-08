@@ -79,6 +79,13 @@ func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 			Forwarded: vs.Forwarded.Load(),
 		})
 	}
+	for routeID, rs := range a.orch.PerRouteStatsList() {
+		snap.RouteStats = append(snap.RouteStats, cluster.StatsPerRouteSnapshot{
+			RouteID:   routeID.String(),
+			Matched:   rs.Matched.Load(),
+			Forwarded: rs.Forwarded.Load(),
+		})
+	}
 	return snap
 }
 

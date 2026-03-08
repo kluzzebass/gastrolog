@@ -31,24 +31,27 @@ func (s *ConfigServer) GetRouteStats(
 		}
 	}
 
+	// Merge per-route stats into a map for dedup across nodes.
+	routeMap := make(map[string]*apiv1.PerRouteStats)
+	for routeID, ps := range s.orch.PerRouteStatsList() {
+		routeMap[routeID.String()] = &apiv1.PerRouteStats{
+			RouteId:          routeID.String(),
+			RecordsMatched:   ps.Matched.Load(),
+			RecordsForwarded: ps.Forwarded.Load(),
+		}
+	}
+
 	// Add peer stats if in cluster mode.
 	if s.peerRouteStats != nil {
-		pIngested, pDropped, pRouted, pFilterActive, pVaultStats := s.peerRouteStats.AggregateRouteStats()
+		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
 		totalIngested += pIngested
 		totalDropped += pDropped
 		totalRouted += pRouted
 		if pFilterActive {
 			filterActive = true
 		}
-		for _, vs := range pVaultStats {
-			existing, ok := vaultMap[vs.VaultId]
-			if !ok {
-				vaultMap[vs.VaultId] = vs
-			} else {
-				existing.RecordsMatched += vs.RecordsMatched
-				existing.RecordsForwarded += vs.RecordsForwarded
-			}
-		}
+		mergeVaultRouteStats(vaultMap, pVaultStats)
+		mergePerRouteStats(routeMap, pRouteStats)
 	}
 
 	resp := &apiv1.GetRouteStatsResponse{
@@ -60,6 +63,33 @@ func (s *ConfigServer) GetRouteStats(
 	for _, vs := range vaultMap {
 		resp.VaultStats = append(resp.VaultStats, vs)
 	}
+	for _, rs := range routeMap {
+		resp.RouteStats = append(resp.RouteStats, rs)
+	}
 
 	return connect.NewResponse(resp), nil
+}
+
+func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.VaultRouteStats) {
+	for _, vs := range stats {
+		existing, ok := m[vs.VaultId]
+		if !ok {
+			m[vs.VaultId] = vs
+			continue
+		}
+		existing.RecordsMatched += vs.RecordsMatched
+		existing.RecordsForwarded += vs.RecordsForwarded
+	}
+}
+
+func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRouteStats) {
+	for _, rs := range stats {
+		existing, ok := m[rs.RouteId]
+		if !ok {
+			m[rs.RouteId] = rs
+			continue
+		}
+		existing.RecordsMatched += rs.RecordsMatched
+		existing.RecordsForwarded += rs.RecordsForwarded
+	}
 }

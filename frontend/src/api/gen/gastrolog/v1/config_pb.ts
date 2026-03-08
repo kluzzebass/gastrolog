@@ -4232,6 +4232,13 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
    */
   vaultStats: VaultRouteStats[] = [];
 
+  /**
+   * Per-route counters.
+   *
+   * @generated from field: repeated gastrolog.v1.PerRouteStats route_stats = 6;
+   */
+  routeStats: PerRouteStats[] = [];
+
   constructor(data?: PartialMessage<GetRouteStatsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4245,6 +4252,7 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
     { no: 3, name: "total_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "filter_set_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
+    { no: 6, name: "route_stats", kind: "message", T: PerRouteStats, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetRouteStatsResponse {
@@ -4314,6 +4322,59 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
 
   static equals(a: VaultRouteStats | PlainMessage<VaultRouteStats> | undefined, b: VaultRouteStats | PlainMessage<VaultRouteStats> | undefined): boolean {
     return proto3.util.equals(VaultRouteStats, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PerRouteStats
+ */
+export class PerRouteStats extends Message<PerRouteStats> {
+  /**
+   * @generated from field: string route_id = 1;
+   */
+  routeId = "";
+
+  /**
+   * records matched by this route
+   *
+   * @generated from field: int64 records_matched = 2;
+   */
+  recordsMatched = protoInt64.zero;
+
+  /**
+   * subset sent to remote nodes
+   *
+   * @generated from field: int64 records_forwarded = 3;
+   */
+  recordsForwarded = protoInt64.zero;
+
+  constructor(data?: PartialMessage<PerRouteStats>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PerRouteStats";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "route_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PerRouteStats {
+    return new PerRouteStats().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PerRouteStats {
+    return new PerRouteStats().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PerRouteStats {
+    return new PerRouteStats().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PerRouteStats | PlainMessage<PerRouteStats> | undefined, b: PerRouteStats | PlainMessage<PerRouteStats> | undefined): boolean {
+    return proto3.util.equals(PerRouteStats, a, b);
   }
 }
 

@@ -577,10 +577,19 @@ message GetRouteStatsResponse {
 
   // Per-vault destination counters.
   repeated VaultRouteStats vault_stats = 5;
+
+  // Per-route counters.
+  repeated PerRouteStats route_stats = 6;
 }
 
 message VaultRouteStats {
   string vault_id = 1;
   int64 records_matched = 2;   // records routed to this vault
   int64 records_forwarded = 3; // subset sent to a remote node
+}
+
+message PerRouteStats {
+  string route_id = 1;
+  int64 records_matched = 2;   // records matched by this route
+  int64 records_forwarded = 3; // subset sent to remote nodes
 }

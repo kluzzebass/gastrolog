@@ -86,13 +86,14 @@ func (p *PeerState) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNo
 
 // AggregateRouteStats sums route stats from all live peers.
 // Returns per-peer totals merged into a single snapshot.
-func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats) {
+func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	now := time.Now()
 
-	// Merge per-vault stats across peers by vault ID.
+	// Merge per-vault and per-route stats across peers.
 	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
+	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 
 	for _, e := range p.entries {
 		if now.Sub(e.received) > p.ttl || e.stats == nil {
@@ -117,10 +118,26 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 				existing.RecordsForwarded += vs.RecordsForwarded
 			}
 		}
+		for _, rs := range e.stats.RoutePerRouteStats {
+			existing, ok := routeMap[rs.RouteId]
+			if !ok {
+				routeMap[rs.RouteId] = &gastrologv1.PerRouteStats{
+					RouteId:          rs.RouteId,
+					RecordsMatched:   rs.RecordsMatched,
+					RecordsForwarded: rs.RecordsForwarded,
+				}
+			} else {
+				existing.RecordsMatched += rs.RecordsMatched
+				existing.RecordsForwarded += rs.RecordsForwarded
+			}
+		}
 	}
 
 	for _, vs := range vaultMap {
 		vaultStats = append(vaultStats, vs)
+	}
+	for _, rs := range routeMap {
+		routeStats = append(routeStats, rs)
 	}
 	return
 }

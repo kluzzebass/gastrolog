@@ -241,8 +241,9 @@ type mnPeerRouteStats struct {
 	nodes map[string]*orchestrator.Orchestrator // remote node orchs
 }
 
-func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats) {
+func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {
 	vaultMap := make(map[string]*gastrologv1.VaultRouteStats)
+	routeMap := make(map[string]*gastrologv1.PerRouteStats)
 	for _, orch := range p.nodes {
 		rs := orch.GetRouteStats()
 		ingested += rs.Ingested.Load()
@@ -265,9 +266,26 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 				existing.RecordsForwarded += vs.Forwarded.Load()
 			}
 		}
+		for routeID, ps := range orch.PerRouteStatsList() {
+			id := routeID.String()
+			existing, ok := routeMap[id]
+			if !ok {
+				routeMap[id] = &gastrologv1.PerRouteStats{
+					RouteId:          id,
+					RecordsMatched:   ps.Matched.Load(),
+					RecordsForwarded: ps.Forwarded.Load(),
+				}
+			} else {
+				existing.RecordsMatched += ps.Matched.Load()
+				existing.RecordsForwarded += ps.Forwarded.Load()
+			}
+		}
 	}
 	for _, vs := range vaultMap {
 		vaultStats = append(vaultStats, vs)
+	}
+	for _, rs := range routeMap {
+		routeStats = append(routeStats, rs)
 	}
 	return
 }
@@ -1258,6 +1276,64 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	}
 	if vsMap[d2.vaultID.String()] != 7 {
 		t.Errorf("data-2 vault matched = %d, want 7", vsMap[d2.vaultID.String()])
+	}
+}
+
+func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+	ctx := context.Background()
+
+	d1 := h.Node(t, "data-1")
+	d2 := h.Node(t, "data-2")
+
+	// Create two distinct route IDs.
+	routeA := uuid.New()
+	routeB := uuid.New()
+
+	// data-1: route A catches everything.
+	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: d1.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*", RouteID: routeA},
+	}))
+	// data-2: route B catches everything.
+	d2.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
+		{VaultID: d2.vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*", RouteID: routeB},
+	}))
+
+	for range 5 {
+		if err := d1.orch.Ingest(chunk.Record{Raw: []byte("from-d1")}); err != nil {
+			t.Fatalf("Ingest on data-1: %v", err)
+		}
+	}
+	for range 8 {
+		if err := d2.orch.Ingest(chunk.Record{Raw: []byte("from-d2")}); err != nil {
+			t.Fatalf("Ingest on data-2: %v", err)
+		}
+	}
+
+	resp, err := h.configClient.GetRouteStats(ctx, connect.NewRequest(&gastrologv1.GetRouteStatsRequest{}))
+	if err != nil {
+		t.Fatalf("GetRouteStats: %v", err)
+	}
+
+	if resp.Msg.TotalIngested != 13 {
+		t.Errorf("TotalIngested = %d, want 13", resp.Msg.TotalIngested)
+	}
+
+	// Should have 2 per-route entries.
+	if len(resp.Msg.RouteStats) != 2 {
+		t.Fatalf("expected 2 route stats, got %d", len(resp.Msg.RouteStats))
+	}
+
+	rsMap := make(map[string]int64)
+	for _, rs := range resp.Msg.RouteStats {
+		rsMap[rs.RouteId] = rs.RecordsMatched
+	}
+	if rsMap[routeA.String()] != 5 {
+		t.Errorf("route A matched = %d, want 5", rsMap[routeA.String()])
+	}
+	if rsMap[routeB.String()] != 8 {
+		t.Errorf("route B matched = %d, want 8", rsMap[routeB.String()])
 	}
 }
 

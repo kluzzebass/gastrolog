@@ -7,7 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkAnalysis, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
-import { VaultRouteStats } from "./config_pb.js";
+import { PerRouteStats, VaultRouteStats } from "./config_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
@@ -540,6 +540,11 @@ export class NodeStats extends Message<NodeStats> {
    */
   routeVaultStats: VaultRouteStats[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.PerRouteStats route_per_route_stats = 33;
+   */
+  routePerRouteStats: PerRouteStats[] = [];
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -580,6 +585,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 30, name: "route_stats_routed", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
+    { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

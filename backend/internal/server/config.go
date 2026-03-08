@@ -29,7 +29,7 @@ type PeerIngesterStatsProvider interface {
 // PeerRouteStatsProvider aggregates route stats from all cluster peer broadcasts.
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerRouteStatsProvider interface {
-	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats)
+	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
 }
 
 // ConfigServer implements the ConfigService.

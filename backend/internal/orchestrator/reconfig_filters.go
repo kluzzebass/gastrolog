@@ -102,7 +102,7 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 				continue // single-node mode, skip remote
 			}
 			var err error
-			fs, err = fs.AddOrUpdateWithNode(destID, filterExpr, nodeID)
+			fs, err = fs.AddOrUpdateWithNodeAndRoute(destID, filterExpr, nodeID, route.ID)
 			if err != nil {
 				return fmt.Errorf("invalid filter for route %s, vault %s: %w", route.ID, destID, err)
 			}

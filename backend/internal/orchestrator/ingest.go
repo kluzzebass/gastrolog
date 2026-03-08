@@ -54,6 +54,13 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	for _, t := range matches {
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
+		if t.RouteID != uuid.Nil {
+			rs := o.getOrCreatePerRouteStats(t.RouteID)
+			rs.Matched.Add(1)
+			if t.NodeID != "" {
+				rs.Forwarded.Add(1)
+			}
+		}
 		if t.NodeID != "" {
 			vs.Forwarded.Add(1)
 			o.forwardRemote(t, rec)
@@ -73,6 +80,15 @@ func (o *Orchestrator) getOrCreateVaultRouteStats(vaultID uuid.UUID) *VaultRoute
 	}
 	v, _ := o.vaultRouteStats.LoadOrStore(vaultID, &VaultRouteStats{})
 	return v.(*VaultRouteStats)
+}
+
+// getOrCreatePerRouteStats returns the per-route stats, creating if needed.
+func (o *Orchestrator) getOrCreatePerRouteStats(routeID uuid.UUID) *PerRouteStats {
+	if v, ok := o.perRouteStats.Load(routeID); ok {
+		return v.(*PerRouteStats)
+	}
+	v, _ := o.perRouteStats.LoadOrStore(routeID, &PerRouteStats{})
+	return v.(*PerRouteStats)
 }
 
 // appendLocal appends a record to a local vault.

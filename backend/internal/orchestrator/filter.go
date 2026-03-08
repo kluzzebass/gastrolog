@@ -32,12 +32,14 @@ type CompiledFilter struct {
 	Expr    string         // original filter expression (for config reconstruction)
 	DNF     *querylang.DNF // only set for FilterExpr
 	NodeID  string         // owning node (empty = local vault)
+	RouteID uuid.UUID      // which route produced this filter (zero = legacy/direct)
 }
 
 // MatchResult pairs a vault ID with the node that owns it.
 type MatchResult struct {
 	VaultID uuid.UUID
-	NodeID  string // empty = local vault
+	NodeID  string    // empty = local vault
+	RouteID uuid.UUID // which route caused this match (zero = legacy/direct)
 }
 
 // CompileFilter parses a filter string and returns a compiled filter.
@@ -137,6 +139,30 @@ func (fs *FilterSet) AddOrUpdateWithNode(vaultID uuid.UUID, filterExpr, nodeID s
 	return NewFilterSet(filters), nil
 }
 
+// AddOrUpdateWithNodeAndRoute is like AddOrUpdateWithNode but also sets the
+// RouteID on the compiled filter. Use this when building filters from route
+// configuration so per-route stats can be tracked.
+func (fs *FilterSet) AddOrUpdateWithNodeAndRoute(vaultID uuid.UUID, filterExpr, nodeID string, routeID uuid.UUID) (*FilterSet, error) {
+	f, err := CompileFilter(vaultID, filterExpr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid filter for vault %s: %w", vaultID, err)
+	}
+	f.NodeID = nodeID
+	f.RouteID = routeID
+
+	var filters []*CompiledFilter
+	if fs != nil {
+		for _, existing := range fs.filters {
+			if existing.VaultID != vaultID {
+				filters = append(filters, existing)
+			}
+		}
+	}
+	filters = append(filters, f)
+
+	return NewFilterSet(filters), nil
+}
+
 // Without returns a new FilterSet excluding filters for the given vault IDs.
 // Returns nil if the resulting set is empty. Safe to call on a nil receiver.
 func (fs *FilterSet) Without(vaultIDs ...uuid.UUID) *FilterSet {
@@ -215,10 +241,10 @@ func (fs *FilterSet) MatchWithNode(attrs chunk.Attributes) []MatchResult {
 		case FilterNone:
 			// Skip
 		case FilterCatchAll:
-			result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID})
+			result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID, RouteID: f.RouteID})
 		case FilterExpr:
 			if querylang.MatchAttrs(f.DNF, attrs) {
-				result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID})
+				result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID, RouteID: f.RouteID})
 				matchedExpr = true
 			}
 		case FilterCatchRest:
@@ -229,7 +255,7 @@ func (fs *FilterSet) MatchWithNode(attrs chunk.Attributes) []MatchResult {
 	if !matchedExpr {
 		for _, f := range fs.filters {
 			if f.Kind == FilterCatchRest {
-				result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID})
+				result = append(result, MatchResult{VaultID: f.VaultID, NodeID: f.NodeID, RouteID: f.RouteID})
 			}
 		}
 	}
