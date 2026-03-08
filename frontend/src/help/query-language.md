@@ -156,7 +156,7 @@ Multi-word values must be quoted: `start="3 hours ago"`. Single-word values like
 
 ## Scoping
 
-- `vault=NAME` — search only the named vault
+- `vault_id=UUID` — search only the specified vault
 - `chunk=ID` — search only the named chunk
 - `pos=N` — exact record position within a chunk
 
@@ -178,9 +178,9 @@ Records where level is "error" and host is "web-01", in attributes or message te
 Boolean expression with grouping and negation.
 
 ```
-vault=prod level=error reverse=true limit=50
+vault_id=01936... level=error reverse=true limit=50
 ```
-Latest 50 errors from the "prod" vault.
+Latest 50 errors from a specific vault (by UUID).
 
 ```
 start=2024-01-15T00:00:00Z end=2024-01-16T00:00:00Z level=error

@@ -11,7 +11,7 @@ For the query syntax, see [Query Language](help:query-language). To aggregate re
 3. The remaining chunks are scanned — sealed chunks use their [indexes](help:indexers) to jump to matching records, while the active chunk is scanned directly
 4. If you're searching across multiple vaults, results are merged by timestamp
 
-When no `vault=` filter is specified, all vaults are searched in parallel. In a [cluster](help:clustering), this includes vaults on remote [nodes](help:clustering-nodes) — searches are forwarded automatically and results are merged by timestamp.
+When no `vault_id=` filter is specified, all vaults are searched in parallel. In a [cluster](help:clustering), this includes vaults on remote [nodes](help:clustering-nodes) — searches are forwarded automatically and results are merged by timestamp.
 
 ## Pagination
 

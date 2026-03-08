@@ -122,7 +122,7 @@ func (o *Orchestrator) QueryEngine(key uuid.UUID) *query.Engine {
 }
 
 // MultiVaultQueryEngine returns a query engine that searches across all vaults.
-// Vault predicates in queries (e.g., "vault=prod") filter which vaults are searched.
+// Vault predicates in queries (e.g., "vault_id=<uuid>") filter which vaults are searched.
 func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(o, o.logger)
 }

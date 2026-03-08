@@ -229,7 +229,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("invalid vault_id: %w", err)
 	}
 
-	scopedExpr := fmt.Sprintf("vault=%s %s", vaultID, req.GetQuery())
+	scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, req.GetQuery())
 	q, pipeline, err := server.ParseExpression(scopedExpr)
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)

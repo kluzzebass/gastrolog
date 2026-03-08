@@ -59,7 +59,7 @@ func NewQueryServer(orch *orchestrator.Orchestrator, cfgStore config.Store, remo
 }
 
 // Search executes a query and streams matching records.
-// Searches across all vaults; use vault=X in query expression to filter.
+// Searches across all vaults; use vault_id=X in query expression to filter.
 func (s *QueryServer) Search(
 	ctx context.Context,
 	req *connect.Request[apiv1.SearchRequest],
@@ -906,7 +906,7 @@ func followError(err error) error {
 }
 
 // Explain returns the query execution plan without executing.
-// Explains the plan for all vaults; use vault=X in query expression to filter.
+// Explains the plan for all vaults; use vault_id=X in query expression to filter.
 func (s *QueryServer) Explain(
 	ctx context.Context,
 	req *connect.Request[apiv1.ExplainRequest],
