@@ -89,6 +89,23 @@ func (a *orchStatsAdapter) RouteStats() cluster.StatsRouteSnapshot {
 	return snap
 }
 
+// forwardingStatsAdapter combines the sending and receiving sides of record
+// forwarding into a single ForwardingStatsProvider.
+type forwardingStatsAdapter struct {
+	srv *cluster.Server
+	fwd *cluster.RecordForwarder // nil when forwarding is not wired
+}
+
+func (a *forwardingStatsAdapter) ForwardingStats() (sent, received int64) {
+	if a.fwd != nil {
+		sent = a.fwd.Sent()
+	}
+	if a.srv != nil {
+		received = a.srv.ForwardedReceived()
+	}
+	return
+}
+
 // jobBroadcastAdapter bridges the scheduler to the cluster.JobsProvider interface.
 type jobBroadcastAdapter struct {
 	scheduler *orchestrator.Scheduler

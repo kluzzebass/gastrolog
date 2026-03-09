@@ -143,12 +143,15 @@ type Server struct {
 
 	// forwardedReceived counts records received via ForwardRecords RPCs.
 	forwardedReceived atomic.Int64
-	// forwardedWritten counts records successfully appended via ForwardRecords RPCs.
-	forwardedWritten atomic.Int64
 
 	// peerConns is the shared connection pool for all peer communication.
 	// Created in SetRaft once the raft instance is available.
 	peerConns *PeerConns
+}
+
+// ForwardedReceived returns the number of records received via ForwardRecords RPCs.
+func (s *Server) ForwardedReceived() int64 {
+	return s.forwardedReceived.Load()
 }
 
 // New creates a new cluster Server and binds the listen port immediately.

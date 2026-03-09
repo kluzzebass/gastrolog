@@ -103,6 +103,10 @@ message NodeStats {
   bool route_stats_filter_active = 31;
   repeated gastrolog.v1.VaultRouteStats route_vault_stats = 32;
   repeated gastrolog.v1.PerRouteStats route_per_route_stats = 33;
+
+  // Forwarding stats — records sent and received via ForwardRecords RPCs.
+  int64 forwarded_sent = 34;
+  int64 forwarded_received = 35;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

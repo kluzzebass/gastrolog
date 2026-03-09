@@ -65,6 +65,11 @@ type RaftStatsProvider interface {
 	LocalStats() map[string]string
 }
 
+// ForwardingStatsProvider exposes record forwarding counters.
+type ForwardingStatsProvider interface {
+	ForwardingStats() (sent, received int64)
+}
+
 // JobsProvider returns the current job list for broadcast.
 // Defined at the consumer site to avoid importing orchestrator/server.
 type JobsProvider interface {
@@ -76,6 +81,7 @@ type StatsCollectorConfig struct {
 	Broadcaster       *Broadcaster
 	RaftStats         RaftStatsProvider
 	Stats             StatsProvider
+	Forwarding        ForwardingStatsProvider // optional; nil if no forwarding
 	Jobs              JobsProvider // optional; nil in single-node mode
 	NodeID            string
 	NodeNameFn        func() string // lazily resolved node name
@@ -199,6 +205,11 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 				RecordsForwarded: ps.Forwarded,
 			})
 		}
+	}
+
+	// Forwarding stats.
+	if c.cfg.Forwarding != nil {
+		stats.ForwardedSent, stats.ForwardedReceived = c.cfg.Forwarding.ForwardingStats()
 	}
 
 	// Raft stats.

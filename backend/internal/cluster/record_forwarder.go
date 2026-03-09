@@ -5,8 +5,10 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -54,22 +56,34 @@ const (
 type RecordForwarder struct {
 	peers  *PeerConns
 	logger *slog.Logger
+	cw     *chanwatch.Watcher
 
-	mu     sync.Mutex
-	nodes  map[string]*nodeForwarder // keyed by node ID
-	wg     sync.WaitGroup
-	closed bool
-	stop   chan struct{} // closed on Close() to unblock backoff sleeps
+	sent atomic.Int64 // records successfully sent via ForwardRecords RPCs
+
+	mu       sync.Mutex
+	nodes    map[string]*nodeForwarder // keyed by node ID
+	wg       sync.WaitGroup
+	closed   bool
+	stop     chan struct{}          // closed on Close() to unblock backoff sleeps
+	cwCancel context.CancelFunc    // cancels the chanwatch goroutine
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
 func NewRecordForwarder(peers *PeerConns, logger *slog.Logger) *RecordForwarder {
-	return &RecordForwarder{
+	rf := &RecordForwarder{
 		peers:  peers,
 		logger: logger,
+		cw:     chanwatch.New(logger, 1*time.Second),
 		nodes:  make(map[string]*nodeForwarder),
 		stop:   make(chan struct{}),
 	}
+	// Run the channel pressure watcher until Close().
+	ctx, cancel := context.WithCancel(context.Background())
+	rf.cwCancel = cancel
+	rf.wg.Go(func() {
+		rf.cw.Run(ctx)
+	})
+	return rf
 }
 
 // Forward enqueues records for delivery to the given node. Non-blocking:
@@ -107,6 +121,9 @@ func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
 		done: make(chan struct{}),
 	}
 	rf.nodes[nodeID] = nf
+	rf.cw.Watch("forward:"+nodeID, func() (int, int) {
+		return len(nf.ch), cap(nf.ch)
+	}, 0.9)
 	rf.wg.Add(1)
 	go rf.flushLoop(nodeID, nf)
 	return nf
@@ -193,6 +210,7 @@ func (rf *RecordForwarder) drainChannel(nf *nodeForwarder, batch []forwardEntry)
 // sendBatchWithBackoff wraps sendBatch with backoff tracking.
 func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder, entries []forwardEntry) {
 	if rf.sendBatch(nodeID, nf, entries) {
+		rf.sent.Add(int64(len(entries)))
 		// Success — reset backoff and log recovery if we were failing.
 		if nf.failures > 0 {
 			rf.logger.Info("forward: connection restored",
@@ -302,12 +320,18 @@ func (rf *RecordForwarder) stopping() bool {
 	}
 }
 
+// Sent returns the total number of records successfully sent via forwarding.
+func (rf *RecordForwarder) Sent() int64 {
+	return rf.sent.Load()
+}
+
 // Close shuts down all per-node forwarders. Connection cleanup is handled
 // by PeerConns.
 func (rf *RecordForwarder) Close() error {
 	rf.mu.Lock()
 	rf.closed = true
 	close(rf.stop) // unblock any backoff sleeps
+	rf.cwCancel()  // stop the channel pressure watcher
 	for _, nf := range rf.nodes {
 		close(nf.ch)
 	}

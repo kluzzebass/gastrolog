@@ -545,6 +545,18 @@ export class NodeStats extends Message<NodeStats> {
    */
   routePerRouteStats: PerRouteStats[] = [];
 
+  /**
+   * Forwarding stats — records sent and received via ForwardRecords RPCs.
+   *
+   * @generated from field: int64 forwarded_sent = 34;
+   */
+  forwardedSent = protoInt64.zero;
+
+  /**
+   * @generated from field: int64 forwarded_received = 35;
+   */
+  forwardedReceived = protoInt64.zero;
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -586,6 +598,8 @@ export class NodeStats extends Message<NodeStats> {
     { no: 31, name: "route_stats_filter_active", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 32, name: "route_vault_stats", kind: "message", T: VaultRouteStats, repeated: true },
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
+    { no: 34, name: "forwarded_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 35, name: "forwarded_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {

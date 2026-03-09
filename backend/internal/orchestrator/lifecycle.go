@@ -3,7 +3,9 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
 	"github.com/google/uuid"
@@ -64,6 +66,16 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Launch digest + write pipeline.
 	o.digestWg.Go(func() { o.digestLoop(ctx) })
 	o.writeWg.Go(func() { o.writeLoop() })
+
+	// Channel pressure watchdog.
+	cw := chanwatch.New(o.logger, 1*time.Second)
+	cw.Watch("ingestCh", func() (int, int) {
+		return len(o.ingestCh), cap(o.ingestCh)
+	}, 0.9)
+	cw.Watch("digestedCh", func() (int, int) {
+		return len(o.digestedCh), cap(o.digestedCh)
+	}, 0.9)
+	go cw.Run(ctx)
 
 	return nil
 }
@@ -227,18 +239,6 @@ func (o *Orchestrator) writeLoop() {
 		// Send ack if requested.
 		if dr.ack != nil {
 			dr.ack <- err
-		}
-
-		// Periodic sanity log: every 10000 records, log pipeline health.
-		total := o.routeStats.Ingested.Load()
-		if total > 0 && total%10000 == 0 {
-			o.logger.Info("write pipeline health",
-				"ingested", total,
-				"routed", o.routeStats.Routed.Load(),
-				"dropped", o.routeStats.Dropped.Load(),
-				"vaults", len(o.vaults),
-				"has_filters", o.filterSet != nil,
-			)
 		}
 	}
 }

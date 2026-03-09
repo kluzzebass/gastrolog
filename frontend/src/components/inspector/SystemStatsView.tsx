@@ -162,6 +162,16 @@ function CompactView({
         </section>
       )}
 
+      {/* Forwarding stats */}
+      <section>
+        <CompactDivider dark={dark} />
+        <CompactSectionLabel label="Forwarding" dark={dark} />
+        <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+          <CompactStatRow label="Sent" value={Number(stats.forwardedSent).toLocaleString()} mono dark={dark} />
+          <CompactStatRow label="Received" value={Number(stats.forwardedReceived).toLocaleString()} mono dark={dark} />
+        </div>
+      </section>
+
       {/* Raft stats */}
       {stats.raftState && (
         <section>

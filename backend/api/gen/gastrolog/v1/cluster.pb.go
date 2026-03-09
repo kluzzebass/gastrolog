@@ -496,8 +496,11 @@ type NodeStats struct {
 	RouteStatsFilterActive bool               `protobuf:"varint,31,opt,name=route_stats_filter_active,json=routeStatsFilterActive,proto3" json:"route_stats_filter_active,omitempty"`
 	RouteVaultStats        []*VaultRouteStats `protobuf:"bytes,32,rep,name=route_vault_stats,json=routeVaultStats,proto3" json:"route_vault_stats,omitempty"`
 	RoutePerRouteStats     []*PerRouteStats   `protobuf:"bytes,33,rep,name=route_per_route_stats,json=routePerRouteStats,proto3" json:"route_per_route_stats,omitempty"`
-	unknownFields          protoimpl.UnknownFields
-	sizeCache              protoimpl.SizeCache
+	// Forwarding stats — records sent and received via ForwardRecords RPCs.
+	ForwardedSent     int64 `protobuf:"varint,34,opt,name=forwarded_sent,json=forwardedSent,proto3" json:"forwarded_sent,omitempty"`
+	ForwardedReceived int64 `protobuf:"varint,35,opt,name=forwarded_received,json=forwardedReceived,proto3" json:"forwarded_received,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *NodeStats) Reset() {
@@ -759,6 +762,20 @@ func (x *NodeStats) GetRoutePerRouteStats() []*PerRouteStats {
 		return x.RoutePerRouteStats
 	}
 	return nil
+}
+
+func (x *NodeStats) GetForwardedSent() int64 {
+	if x != nil {
+		return x.ForwardedSent
+	}
+	return 0
+}
+
+func (x *NodeStats) GetForwardedReceived() int64 {
+	if x != nil {
+		return x.ForwardedReceived
+	}
+	return 0
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
@@ -2622,7 +2639,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tnode_jobs\x18\v \x01(\v2\x16.gastrolog.v1.NodeJobsH\x00R\bnodeJobsB\t\n" +
 	"\apayload\"1\n" +
 	"\bNodeJobs\x12%\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\x8f\v\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x11.gastrolog.v1.JobR\x04jobs\"\xe5\v\n" +
 	"\tNodeStats\x12\x1f\n" +
 	"\vcpu_percent\x18\x01 \x01(\x01R\n" +
 	"cpuPercent\x12!\n" +
@@ -2664,7 +2681,9 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x12route_stats_routed\x18\x1e \x01(\x03R\x10routeStatsRouted\x129\n" +
 	"\x19route_stats_filter_active\x18\x1f \x01(\bR\x16routeStatsFilterActive\x12I\n" +
 	"\x11route_vault_stats\x18  \x03(\v2\x1d.gastrolog.v1.VaultRouteStatsR\x0frouteVaultStats\x12N\n" +
-	"\x15route_per_route_stats\x18! \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\x12routePerRouteStats\"\xbd\x01\n" +
+	"\x15route_per_route_stats\x18! \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\x12routePerRouteStats\x12%\n" +
+	"\x0eforwarded_sent\x18\" \x01(\x03R\rforwardedSent\x12-\n" +
+	"\x12forwarded_received\x18# \x01(\x03R\x11forwardedReceived\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +

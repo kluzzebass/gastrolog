@@ -43,6 +43,7 @@ import (
 	ingestself "gastrolog/internal/ingester/self"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
@@ -155,8 +156,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// records block (instead of failing) while vaults are being registered.
 	orchReady := make(chan struct{})
 	var searchForwarder *cluster.SearchForwarder
+	var recordForwarder *cluster.RecordForwarder
 	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
-		searchForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger)
+		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger)
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -169,7 +171,16 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 	close(orchReady)
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, nodeID, cfg.ServerAddr, cfg.PprofAddr)
+	// Monitor slog capture channel pressure.
+	if cfg.SlogCapture != nil {
+		slogCW := chanwatch.New(logger, 1*time.Second)
+		slogCW.Watch("slogCaptureCh", func() (int, int) {
+			return len(cfg.SlogCapture), cap(cfg.SlogCapture)
+		}, 0.9)
+		go slogCW.Run(ctx)
+	}
+
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, nodeID, cfg.ServerAddr, cfg.PprofAddr)
 
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
@@ -230,7 +241,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // wireClusterForwarding sets up cross-node record, search, context, vault,
 // and explain forwarding on the cluster server. Returns the search forwarder
 // for the HTTP server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger) *cluster.SearchForwarder {
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
 	peerConns := clusterSrv.PeerConns()
 
 	recordForwarder := cluster.NewRecordForwarder(
@@ -297,7 +308,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))
 
-	return searchForwarder
+	return searchForwarder, recordForwarder
 }
 
 // wireManagedFileTransfer sets up cluster-side handlers for streaming managed
@@ -349,7 +360,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, nodeID string, apiAddr string, pprofAddr string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, nodeID string, apiAddr string, pprofAddr string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
@@ -375,6 +386,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config
 		Broadcaster: broadcaster,
 		RaftStats:   clusterSrv,
 		Stats:       &orchStatsAdapter{orch: orch},
+		Forwarding:  &forwardingStatsAdapter{srv: clusterSrv, fwd: recordForwarder},
 		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:      nodeID,
 		NodeNameFn: func() string {

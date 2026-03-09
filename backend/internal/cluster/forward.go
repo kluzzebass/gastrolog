@@ -196,17 +196,6 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 		written++
 	}
 
-	prevWritten := s.forwardedWritten.Load()
-	totalWritten := s.forwardedWritten.Add(written)
-	// Log on first batch and every 10k forwarded records.
-	if prevWritten == 0 || totalWritten/(10_000) != prevWritten/(10_000) {
-		s.cfg.Logger.Info("forwarded records health",
-			"received_total", s.forwardedReceived.Load(),
-			"written_total", totalWritten,
-			"vault", vaultID,
-		)
-	}
-
 	return &gastrologv1.ForwardRecordsResponse{RecordsWritten: written}, nil
 }
 

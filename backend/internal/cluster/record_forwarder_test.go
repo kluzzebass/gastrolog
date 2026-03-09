@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
 	"github.com/google/uuid"
@@ -115,11 +116,19 @@ func TestFlushTimerDrains(t *testing.T) {
 
 func TestForwardEnqueuesAndCloses(t *testing.T) {
 	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
 	rf := &RecordForwarder{
-		logger: discardLogger(),
-		nodes:  make(map[string]*nodeForwarder),
-		stop:   make(chan struct{}),
+		logger:   discardLogger(),
+		nodes:    make(map[string]*nodeForwarder),
+		stop:     make(chan struct{}),
+		cwCancel: cancel,
+		cw:       chanwatch.New(discardLogger(), 1*time.Second),
 	}
+	rf.wg.Add(1)
+	go func() {
+		defer rf.wg.Done()
+		rf.cw.Run(ctx)
+	}()
 
 	nodeID := "test-node"
 	nf := &nodeForwarder{
