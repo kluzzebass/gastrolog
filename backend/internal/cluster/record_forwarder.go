@@ -90,8 +90,10 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 		select {
 		case nf.ch <- forwardEntry{vaultID: vaultID, record: rec}:
 		default:
-			rf.logger.Info("forward buffer full, dropping record",
-				"node", nodeID, "vault", vaultID)
+			if !rf.stopping() {
+				rf.logger.Info("forward buffer full, dropping record",
+					"node", nodeID, "vault", vaultID)
+			}
 		}
 	}
 	return nil
@@ -206,9 +208,11 @@ func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder
 	}
 
 	// Failure — bump backoff. The batch is dropped.
-	rf.logger.Warn("forward: batch dropped",
-		"node", nodeID, "records", len(entries),
-		"failures", nf.failures+1)
+	if !rf.stopping() {
+		rf.logger.Warn("forward: batch dropped",
+			"node", nodeID, "records", len(entries),
+			"failures", nf.failures+1)
+	}
 	nf.failures++
 	if nf.failures == 1 {
 		nf.backoff = backoffMin
@@ -279,10 +283,23 @@ func (rf *RecordForwarder) sendBatch(nodeID string, nf *nodeForwarder, entries [
 // nf is passed directly by the caller (always within the flushLoop goroutine)
 // to avoid a racy map lookup → read of nf.failures across goroutines.
 func (rf *RecordForwarder) logFailure(nodeID string, nf *nodeForwarder, msg string, err error) {
+	if rf.stopping() {
+		return // suppress noise during shutdown
+	}
 	rf.logger.Info("forward: "+msg,
 		"node", nodeID, "error", err,
 		"consecutive_failures", nf.failures,
 		"backoff", nf.backoff)
+}
+
+// stopping returns true if the forwarder is shutting down.
+func (rf *RecordForwarder) stopping() bool {
+	select {
+	case <-rf.stop:
+		return true
+	default:
+		return false
+	}
 }
 
 // Close shuts down all per-node forwarders. Connection cleanup is handled
