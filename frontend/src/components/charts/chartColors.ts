@@ -6,7 +6,7 @@ export const SERIES_COLORS = [
   ...SEVERITY_LEVELS.map((l) => SEVERITIES[l].cssVar),
 ];
 
-export { SEVERITY_COLOR_MAP };
+
 
 /** OKLch palette for arbitrary (non-severity) group values. */
 export const GROUP_PALETTE = [
@@ -46,3 +46,5 @@ export const formatChartValue = (v: number): string => {
   if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}K`;
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 };
+
+export {SEVERITY_COLOR_MAP} from "../../lib/severity";

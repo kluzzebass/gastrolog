@@ -30,6 +30,7 @@ export function VirtualLogList({
   onTokenToggle,
   onSpanClick,
 }: Readonly<VirtualLogListProps>) {
+  // eslint-disable-next-line react-hooks/incompatible-library -- third-party library
   const virtualizer = useVirtualizer({
     count: records.length,
     getScrollElement: () => scrollRef.current,

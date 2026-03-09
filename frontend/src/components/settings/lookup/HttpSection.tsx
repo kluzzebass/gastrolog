@@ -245,12 +245,12 @@ export function HttpCards({
               </div>
               {testResults[i] && (
                 <div className={`mt-2 rounded px-3 py-2 text-[0.8em] ${
-                  testResults[i]!.success
+                  testResults[i].success
                     ? "bg-severity-ok/10 text-severity-ok"
                     : "bg-severity-error/10 text-severity-error"
                 }`}>
-                  {testResults[i]!.success ? (() => {
-                    const fields = testResults[i]!.results?.[0]?.fields ?? {};
+                  {testResults[i].success ? (() => {
+                    const fields = testResults[i].results?.[0]?.fields ?? {};
                     const entries = Object.entries(fields);
                     return entries.length > 0 ? (
                       <div className={`font-mono text-[0.9em] ${c("text-text-bright", "text-light-text-bright")}`}>
@@ -262,7 +262,7 @@ export function HttpCards({
                       <span>no results</span>
                     );
                   })() : (
-                    <span>{testResults[i]!.error}</span>
+                    <span>{testResults[i].error}</span>
                   )}
                 </div>
               )}
@@ -274,7 +274,7 @@ export function HttpCards({
   );
 }
 
-function HttpCachingFields({ dark, draft, setDraft }: { dark: boolean; draft: HTTPLookupDraft; setDraft: (fn: (d: HTTPLookupDraft) => HTTPLookupDraft) => void }) {
+function HttpCachingFields({ dark, draft, setDraft }: Readonly<{ dark: boolean; draft: HTTPLookupDraft; setDraft: (fn: (d: HTTPLookupDraft) => HTTPLookupDraft) => void }>) {
   return (
     <div className="grid grid-cols-3 gap-3">
       <FormField label="Timeout" dark={dark}>

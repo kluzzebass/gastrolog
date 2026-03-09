@@ -131,6 +131,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseBarchartOp()
 	case "donut":
 		return p.parseDonutOp()
+	case "scatter":
+		return p.parseScatterOp()
 	case "map":
 		return p.parseMapOp()
 	default:
@@ -1055,6 +1057,28 @@ func (p *parser) parseLookupOp() (*LookupOp, error) {
 	}
 
 	return &LookupOp{Table: table, Fields: fields}, nil
+}
+
+// parseScatterOp parses: "scatter" X_FIELD Y_FIELD
+func (p *parser) parseScatterOp() (*ScatterOp, error) {
+	if err := p.advance(); err != nil { // consume "scatter"
+		return nil, err
+	}
+	if p.cur.Kind != TokWord {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected x-axis field after 'scatter', got %s", p.cur.Kind)
+	}
+	xField := p.cur.Lit
+	if err := p.advance(); err != nil { // consume x field
+		return nil, err
+	}
+	if p.cur.Kind != TokWord {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected y-axis field after 'scatter %s', got %s", xField, p.cur.Kind)
+	}
+	yField := p.cur.Lit
+	if err := p.advance(); err != nil { // consume y field
+		return nil, err
+	}
+	return &ScatterOp{XField: xField, YField: yField}, nil
 }
 
 // parseBarchartOp parses: "barchart" (no arguments).

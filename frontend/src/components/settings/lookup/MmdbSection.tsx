@@ -152,7 +152,9 @@ export function MmdbCards({
     <>
       {lookups.map((m, i) => {
         const resolvedFile = m.fileId ? managedFiles.find((f) => f.id === m.fileId) : undefined;
-        const dbLabel = m.dbType === "city" ? "GeoIP City" : m.dbType === "asn" ? "ASN" : m.dbType;
+        let dbLabel = m.dbType;
+        if (m.dbType === "city") dbLabel = "GeoIP City";
+        else if (m.dbType === "asn") dbLabel = "ASN";
         return (
           <SettingsCard
             key={`mmdb-${i}`}
@@ -164,7 +166,10 @@ export function MmdbCards({
             onDelete={() => handleDelete(i)}
             status={
               <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                {dbLabel}{resolvedFile ? ` — ${resolvedFile.name}` : m.fileId ? "" : " (auto-download)"}
+                {dbLabel}{(() => {
+                  if (resolvedFile) return ` — ${resolvedFile.name}`;
+                  return m.fileId ? "" : " (auto-download)";
+                })()}
               </span>
             }
             footer={
@@ -207,7 +212,7 @@ export function MmdbCards({
   );
 }
 
-function MmdbDbTypeRadio({ dark, value, onChange, name }: { dark: boolean; value: string; onChange: (v: string) => void; name: string }) {
+function MmdbDbTypeRadio({ dark, value, onChange, name }: Readonly<{ dark: boolean; value: string; onChange: (v: string) => void; name: string }>) {
   const c = useThemeClass(dark);
   return (
     <FormField label="Database Type" dark={dark}>

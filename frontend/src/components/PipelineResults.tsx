@@ -5,6 +5,7 @@ import { tableResultToHistogramData } from "../utils/histogramData";
 import { AutoRefreshControls } from "./AutoRefreshControls";
 import { BarChart } from "./charts/BarChart";
 import { DonutChart } from "./charts/DonutChart";
+import { ScatterChart } from "./charts/ScatterChart";
 import { WorldMapChart } from "./charts/WorldMapChart";
 import { ExportButton } from "./ExportButton";
 import { HistogramChart } from "./HistogramChart";
@@ -146,6 +147,13 @@ function PipelineResultBody({
       </div>
     );
   }
+  if (resultType === "scatter" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4">
+        <ScatterChart columns={columns} rows={rowData} dark={dark} />
+      </div>
+    );
+  }
   if (resultType === "map-choropleth" && viewMode === "chart") {
     return (
       <div className="px-5 py-4">
@@ -201,6 +209,7 @@ export function PipelineResults({
     resultType === "timechart" ||
     resultType === "barchart" ||
     resultType === "donut" ||
+    resultType === "scatter" ||
     resultType === "map-choropleth" ||
     resultType === "map-scatter";
 

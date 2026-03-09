@@ -229,10 +229,10 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
           style={{ borderWidth: 1, borderColor: "transparent" }}
         >
           {(() => {
-            const offsets = spans.reduce<number[]>((acc, s, j) => {
-              acc.push(j === 0 ? 0 : acc[j - 1]! + spans[j - 1]!.text.length);
-              return acc;
-            }, []);
+            const offsets: number[] = [];
+            for (let j = 0; j < spans.length; j++) {
+              offsets.push(j === 0 ? 0 : offsets[j - 1]! + spans[j - 1]!.text.length);
+            }
             return spans.map((span, i) => (
               <span
                 key={`o${offsets[i]}`}

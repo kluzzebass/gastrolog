@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, type MutableRefObject } from "react";
+import { useState, useEffect, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record, refreshAuth } from "../client";
 
@@ -58,174 +58,153 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
     }
   }, [maxRecords]);
 
-  const cancelReconnect = useCallback(() => {
+  const cancelReconnect = () => {
     if (reconnectTimer.current !== null) {
       clearTimeout(reconnectTimer.current);
       reconnectTimer.current = null;
     }
-  }, []);
+  };
 
-  const connectStream = useCallback(
-    // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming reconnect state machine
-    async (queryStr: string, attempt: number) => {
-      // Cancel any previous stream.
-      if (abortRef.current) {
-        abortRef.current.abort();
-      }
-      abortRef.current = new AbortController();
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming reconnect state machine
+  const connectStream = async (queryStr: string, attempt: number) => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+    }
+    abortRef.current = new AbortController();
 
-      const stripped = queryStr
-        .replace(/\bstart=\S+/g, "")
-        .replace(/\bend=\S+/g, "")
-        .replace(/\s+/g, " ")
-        .trim();
+    const stripped = queryStr
+      .replace(/\bstart=\S+/g, "")
+      .replace(/\bend=\S+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
-      const query = new Query();
-      query.expression = stripped;
+    const query = new Query();
+    query.expression = stripped;
 
-      try {
-        const buffer = bufferRef.current;
+    try {
+      const buffer = bufferRef.current;
 
-        for await (const response of queryClient.follow(
-          { query },
-          { signal: abortRef.current.signal },
-        )) {
-          // Connection is live — reset reconnect state on first message.
-          if (attempt > 0) {
-            setState((prev) => ({
-              ...prev,
-              reconnecting: false,
-              reconnectAttempt: 0,
-              error: null,
-            }));
-            attempt = 0;
-          }
-
-          buffer.unshift(...response.records);
-          if (buffer.length > maxRecordsRef.current) {
-            buffer.length = maxRecordsRef.current;
-          }
-
-          newCountRef.current += response.records.length;
-          dirtyRef.current = true;
-          if (flushRef.current === null) {
-            flushRef.current = requestAnimationFrame(() => {
-              flushRef.current = null;
-              if (dirtyRef.current) {
-                dirtyRef.current = false;
-                setState((prev) => ({
-                  ...prev,
-                  records: [...buffer],
-                  newCount: newCountRef.current,
-                }));
-              }
-            });
-          }
-        }
-
-        // Stream ended unexpectedly — schedule reconnect.
-        scheduleReconnect(queryStr, 0);
-      } catch (err) {
-        if (isAbortError(err)) {
-          return;
-        }
-        // InvalidArgument: bad query (e.g. pipeline queries not supported) — fatal.
-        if (
-          err instanceof ConnectError &&
-          err.code === Code.InvalidArgument
-        ) {
+      for await (const response of queryClient.follow(
+        { query },
+        { signal: abortRef.current.signal },
+      )) {
+        if (attempt > 0) {
           setState((prev) => ({
             ...prev,
-            error: err,
             reconnecting: false,
-            isFollowing: false,
+            reconnectAttempt: 0,
+            error: null,
           }));
-          onErrorRef.current?.(err);
-          return;
+          attempt = 0;
         }
-        // Unauthenticated during streaming (e.g. token expired while tab
-        // was backgrounded): silently refresh and reconnect.
-        if (
-          err instanceof ConnectError &&
-          err.code === Code.Unauthenticated
-        ) {
-          const refreshed = await refreshAuth();
-          if (refreshed) {
-            scheduleReconnect(queryStr, 0);
-            return;
-          }
-          // Refresh failed — stop following, interceptor will redirect
-          // to login on the next request.
-          setState((prev) => ({
-            ...prev,
-            isFollowing: false,
-            reconnecting: false,
-          }));
-          return;
+
+        buffer.unshift(...response.records);
+        if (buffer.length > maxRecordsRef.current) {
+          buffer.length = maxRecordsRef.current;
         }
-        // Schedule reconnect with backoff — surface error to caller.
-        onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
-        scheduleReconnect(queryStr, attempt);
+
+        newCountRef.current += response.records.length;
+        dirtyRef.current = true;
+        if (flushRef.current === null) {
+          flushRef.current = requestAnimationFrame(() => {
+            flushRef.current = null;
+            if (dirtyRef.current) {
+              dirtyRef.current = false;
+              setState((prev) => ({
+                ...prev,
+                records: [...buffer],
+                newCount: newCountRef.current,
+              }));
+            }
+          });
+        }
       }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- stable by design: all mutable
-    // state accessed via refs (bufferRef, maxRecordsRef, newCountRef, onErrorRef, abortRef).
-    // scheduleReconnect is captured via const hoisting and is also stable ([connectStream] deps).
-    [],
-  );
 
-  const scheduleReconnect = useCallback(
-    (queryStr: string, attempt: number) => {
-      const nextAttempt = attempt + 1;
-      const delay = Math.min(INITIAL_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
+      scheduleReconnect(queryStr, 0);
+    } catch (err) {
+      if (isAbortError(err)) {
+        return;
+      }
+      if (
+        err instanceof ConnectError &&
+        err.code === Code.InvalidArgument
+      ) {
+        setState((prev) => ({
+          ...prev,
+          error: err,
+          reconnecting: false,
+          isFollowing: false,
+        }));
+        onErrorRef.current?.(err);
+        return;
+      }
+      if (
+        err instanceof ConnectError &&
+        err.code === Code.Unauthenticated
+      ) {
+        const refreshed = await refreshAuth();
+        if (refreshed) {
+          scheduleReconnect(queryStr, 0);
+          return;
+        }
+        setState((prev) => ({
+          ...prev,
+          isFollowing: false,
+          reconnecting: false,
+        }));
+        return;
+      }
+      onErrorRef.current?.(err instanceof Error ? err : new Error(String(err)));
+      scheduleReconnect(queryStr, attempt);
+    }
+  };
 
-      abortRef.current = null;
-      setState((prev) => ({
-        ...prev,
-        reconnecting: true,
-        reconnectAttempt: nextAttempt,
-        error: null,
-      }));
+  const scheduleReconnect = (queryStr: string, attempt: number) => {
+    const nextAttempt = attempt + 1;
+    const delay = Math.min(INITIAL_BACKOFF_MS * 2 ** attempt, MAX_BACKOFF_MS);
 
-      reconnectTimer.current = setTimeout(() => {
-        reconnectTimer.current = null;
-        connectStream(queryStr, nextAttempt);
-      }, delay);
-    },
-    [connectStream],
-  );
+    abortRef.current = null;
+    setState((prev) => ({
+      ...prev,
+      reconnecting: true,
+      reconnectAttempt: nextAttempt,
+      error: null,
+    }));
 
-  const follow = useCallback(
-    // eslint-disable-next-line @typescript-eslint/require-await -- matches async interface expected by callers
-    async (queryStr: string) => {
-      cancelReconnect();
-      queryRef.current = queryStr;
-      bufferRef.current = [];
-      newCountRef.current = 0;
+    reconnectTimer.current = setTimeout(() => {
+      reconnectTimer.current = null;
+      connectStream(queryStr, nextAttempt);
+    }, delay);
+  };
 
-      setState({
-        records: [],
-        isFollowing: true,
-        reconnecting: false,
-        reconnectAttempt: 0,
-        error: null,
-        newCount: 0,
-      });
+  // eslint-disable-next-line @typescript-eslint/require-await -- matches async interface expected by callers
+  const follow = async (queryStr: string) => {
+    cancelReconnect();
+    queryRef.current = queryStr;
+    bufferRef.current = [];
+    newCountRef.current = 0;
 
-      connectStream(queryStr, 0);
-    },
-    [connectStream, cancelReconnect],
-  );
+    setState({
+      records: [],
+      isFollowing: true,
+      reconnecting: false,
+      reconnectAttempt: 0,
+      error: null,
+      newCount: 0,
+    });
 
-  const cancelFlush = useCallback(() => {
+    connectStream(queryStr, 0);
+  };
+
+  const cancelFlush = () => {
     if (flushRef.current !== null) {
       cancelAnimationFrame(flushRef.current);
       flushRef.current = null;
     }
     dirtyRef.current = false;
-  }, []);
+  };
 
-  const stop = useCallback(() => {
+  const stop = () => {
     cancelReconnect();
     cancelFlush();
     if (abortRef.current) {
@@ -239,9 +218,9 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
       reconnectAttempt: 0,
       error: null,
     }));
-  }, [cancelReconnect, cancelFlush]);
+  };
 
-  const reset = useCallback(() => {
+  const reset = () => {
     cancelReconnect();
     cancelFlush();
     if (abortRef.current) {
@@ -258,12 +237,12 @@ export function useFollow(options?: { onError?: (err: Error) => void; maxRecords
       error: null,
       newCount: 0,
     });
-  }, [cancelReconnect, cancelFlush]);
+  };
 
-  const resetNewCount = useCallback(() => {
+  const resetNewCount = () => {
     newCountRef.current = 0;
     setState((prev) => ({ ...prev, newCount: 0 }));
-  }, []);
+  };
 
   return {
     ...state,

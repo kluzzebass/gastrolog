@@ -40,6 +40,18 @@ export function EntityListPane({ entityType, dark }: Readonly<EntityListPaneProp
   }
 }
 
+function useToggleSet() {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggle = (id: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  return { expanded, toggle };
+}
+
 // ---- Node context helper ----
 
 function useNodeContext() {
@@ -69,20 +81,12 @@ function useNodeContext() {
 
 function VaultsList({ dark }: Readonly<{ dark: boolean }>) {
   const { data: vaults, isLoading } = useVaults();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { expanded, toggle } = useToggleSet();
 
   if (isLoading) return <Loading dark={dark} />;
   if (!vaults || vaults.length === 0) return <Empty dark={dark}>No vaults configured.</Empty>;
 
   const sorted = [...vaults].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   return (
     <div className="flex flex-col gap-3">
@@ -104,20 +108,12 @@ function VaultsList({ dark }: Readonly<{ dark: boolean }>) {
 
 function IngestersList({ dark }: Readonly<{ dark: boolean }>) {
   const { data: ingesters, isLoading } = useIngesters();
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const { expanded, toggle } = useToggleSet();
 
   if (isLoading) return <Loading dark={dark} />;
   if (!ingesters || ingesters.length === 0) return <Empty dark={dark}>No ingesters configured.</Empty>;
 
   const sorted = [...ingesters].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
-
-  const toggle = (id: string) =>
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
 
   return (
     <div className="flex flex-col gap-3">
@@ -240,20 +236,20 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
               {nodeScheduled.map((job, i) => (
                 <div
                   key={job.id}
-                  className={`${i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}`}
+                  className={i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}
                 >
                   <ScheduledRow job={job} dark={dark} />
                 </div>
               ))}
               {nodeTasks.length > 0 && (
-                <div className={`px-4 pt-2 ${nodeScheduled.length > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}`}>
+                <div className={`px-4 pt-2 ${nodeScheduled.length > 0 ? "border-t " + c("border-ink-border-subtle", "border-light-border-subtle") : ""}`}>
                   <SectionLabel dark={dark}>Tasks</SectionLabel>
                 </div>
               )}
               {nodeTasks.map((job, i) => (
                 <div
                   key={job.id}
-                  className={`${i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}`}
+                  className={i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}
                 >
                   <JobRow job={job} dark={dark} />
                 </div>
@@ -358,7 +354,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
   // Single-node: show local stats directly.
   if (!multiNode) {
-    const localStats = cluster?.nodes?.find((n) => n.id === localNodeId)?.stats ?? null;
+    const localStats = cluster?.nodes.find((n) => n.id === localNodeId)?.stats ?? null;
     return (
       <div className="flex flex-col gap-3">
         <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />

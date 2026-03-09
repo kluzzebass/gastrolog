@@ -20,7 +20,7 @@ export function NodeBadge({
 
   const localNodeId = settings?.nodeId ?? "";
   const isLocal = nodeId === localNodeId;
-  const node = config?.nodeConfigs?.find((n) => n.id === nodeId);
+  const node = config?.nodeConfigs.find((n) => n.id === nodeId);
   const label = node?.name || nodeId;
 
   return (

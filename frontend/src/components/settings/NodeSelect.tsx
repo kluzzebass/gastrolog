@@ -28,7 +28,7 @@ export function NodeSelect({
 
   if (!clusterStatus?.clusterEnabled) return null;
 
-  const nodes = clusterStatus.nodes ?? [];
+  const nodes = clusterStatus.nodes;
   if (nodes.length === 0) return null;
 
   const options = nodes.map((n) => ({

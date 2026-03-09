@@ -1,7 +1,6 @@
 import { useState, useReducer } from "react";
 import { useExpandedCard } from "../../hooks/useExpandedCards";
 import { useConfig, usePutIngester, useDeleteIngester, useGenerateName } from "../../api/hooks";
-import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
@@ -75,7 +74,6 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
 }
 
 export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
-  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putIngester = usePutIngester();
   const deleteIngester = useDeleteIngester();

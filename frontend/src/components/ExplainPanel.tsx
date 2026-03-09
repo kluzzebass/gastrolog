@@ -153,7 +153,7 @@ function PipelineStagesBar({
         {stages.map((stage, i) => (
           <div
             key={`stage-${i}-${stage.operator}`}
-            className={`flex items-start gap-3 text-[0.8em] ${i > 0 ? `pt-2 border-t ${c("border-ink-border-subtle/50", "border-light-border-subtle/50")}` : ""}`}
+            className={`flex items-start gap-3 text-[0.8em] ${i > 0 ? "pt-2 border-t " + c("border-ink-border-subtle/50", "border-light-border-subtle/50") : ""}`}
           >
             {/* Stage number + operator */}
             <div className="flex items-center gap-2 shrink-0 w-32">
@@ -202,10 +202,10 @@ function ExpressionBox({
       className={`w-full font-mono text-[0.8em] px-3 py-1.5 rounded mb-3 whitespace-pre-wrap break-all ${c("bg-ink-surface text-text-normal", "bg-light-surface text-light-text-normal")}`}
     >
       {(() => {
-        const offsets = segments.reduce<number[]>((acc, s, j) => {
-          acc.push(j === 0 ? 0 : acc[j - 1]! + segments[j - 1]!.text.length);
-          return acc;
-        }, []);
+        const offsets: number[] = [];
+        for (let j = 0; j < segments.length; j++) {
+          offsets.push(j === 0 ? 0 : offsets[j - 1]! + segments[j - 1]!.text.length);
+        }
         return segments.map((seg, i) => {
           const key = `seg-${offsets[i]}`;
           return seg.highlighted ? (

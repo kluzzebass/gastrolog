@@ -124,7 +124,7 @@ export function httpLookupEqual(draft: HTTPLookupDraft, saved: HTTPLookupEntry):
     draft.cacheTtl !== saved.cacheTtl ||
     draft.cacheSize !== saved.cacheSize
   ) return false;
-  if (!paramsEqual(draft.parameters, saved.parameters ?? [])) return false;
+  if (!paramsEqual(draft.parameters, saved.parameters)) return false;
   const dKeys = Object.keys(draft.headers);
   const sKeys = Object.keys(saved.headers);
   if (dKeys.length !== sKeys.length) return false;
@@ -150,5 +150,5 @@ export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileL
     draft.query !== saved.query ||
     !arraysEqual(draft.responsePaths, saved.responsePaths)
   ) return false;
-  return paramsEqual(draft.parameters, saved.parameters ?? []);
+  return paramsEqual(draft.parameters, saved.parameters);
 }

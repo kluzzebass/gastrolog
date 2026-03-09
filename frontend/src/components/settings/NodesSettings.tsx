@@ -51,27 +51,28 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
     (configData?.nodeConfigs ?? []).map((nc) => [nc.id, nc]),
   );
 
-  const nodes = clusterEnabled
-    ? (clusterData?.nodes ?? []).map((cn) => ({
-        id: cn.id,
-        name: nodeConfigMap.get(cn.id)?.name ?? cn.name,
-        role: cn.role,
-        suffrage: cn.suffrage,
-        isLeader: cn.isLeader,
-        hasStats: !!cn.stats,
-      }))
-    : localNodeId
-      ? [
-          {
-            id: localNodeId,
-            name: settingsData?.nodeName ?? "",
-            role: ClusterNodeRole.UNSPECIFIED,
-            suffrage: ClusterNodeSuffrage.UNSPECIFIED,
-            isLeader: false,
-            hasStats: true,
-          },
-        ]
-      : [];
+  let nodes: { id: string; name: string; role: ClusterNodeRole; suffrage: ClusterNodeSuffrage; isLeader: boolean; hasStats: boolean }[];
+  if (clusterEnabled) {
+    nodes = (clusterData?.nodes ?? []).map((cn) => ({
+      id: cn.id,
+      name: nodeConfigMap.get(cn.id)?.name ?? cn.name,
+      role: cn.role,
+      suffrage: cn.suffrage,
+      isLeader: cn.isLeader,
+      hasStats: !!cn.stats,
+    }));
+  } else if (localNodeId) {
+    nodes = [{
+      id: localNodeId,
+      name: settingsData?.nodeName ?? "",
+      role: ClusterNodeRole.UNSPECIFIED,
+      suffrage: ClusterNodeSuffrage.UNSPECIFIED,
+      isLeader: false,
+      hasStats: true,
+    }];
+  } else {
+    nodes = [];
+  }
 
   const voterCount = nodes.filter((n) => n.suffrage === ClusterNodeSuffrage.VOTER).length;
 

@@ -77,7 +77,7 @@ export function FileDropZone({
           </span>
           {"uploadedAt" in displayFile && displayFile.uploadedAt && (
             <span className={c("text-text-ghost", "text-light-text-ghost")}>
-              &middot; {new Date(displayFile.uploadedAt as string).toLocaleDateString()}
+              &middot; {new Date(displayFile.uploadedAt).toLocaleDateString()}
             </span>
           )}
         </div>

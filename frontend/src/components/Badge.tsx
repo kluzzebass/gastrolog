@@ -41,7 +41,7 @@ export function Badge({ variant, dark, children, className }: Readonly<BadgeProp
 
   return (
     <span
-      className={`px-1.5 py-0.5 text-[0.75em] font-mono rounded whitespace-nowrap ${colorCls}${className ? ` ${className}` : ""}`}
+      className={`px-1.5 py-0.5 text-[0.75em] font-mono rounded whitespace-nowrap ${colorCls}${className ? " " + className : ""}`}
     >
       {children}
     </span>

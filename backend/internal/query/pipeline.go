@@ -63,7 +63,7 @@ func classifyPipes(pipeline *querylang.Pipeline) (*pipelinePhases, error) {
 			p.timechartOp = op
 		case *querylang.RawOp:
 			p.hasRaw = true
-		case *querylang.BarchartOp, *querylang.DonutOp, *querylang.MapOp:
+		case *querylang.BarchartOp, *querylang.DonutOp, *querylang.ScatterOp, *querylang.MapOp:
 			if p.vizOp != nil {
 				return nil, errors.New("pipeline can contain at most one visualization operator")
 			}

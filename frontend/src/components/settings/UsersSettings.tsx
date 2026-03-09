@@ -1,4 +1,4 @@
-import { useState, useReducer } from "react";
+import { useReducer } from "react";
 import { useExpandedCard } from "../../hooks/useExpandedCards";
 import {
   useListUsers,

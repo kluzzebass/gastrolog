@@ -109,6 +109,23 @@ interface QueryBarProps {
   errorMessage?: string | null;
 }
 
+function caretOffsetFromClick(e: React.MouseEvent, fallback: number): number {
+  const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+  if (!range) return fallback;
+  const container = (e.currentTarget as HTMLElement).querySelector(".truncate");
+  if (!container) return fallback;
+  let pos = 0;
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+  let node: Text | null;
+  while ((node = walker.nextNode() as Text | null)) {
+    if (node === range.startContainer) {
+      return pos + range.startOffset;
+    }
+    pos += node.length;
+  }
+  return fallback;
+}
+
 export function QueryBar({
   dark,
   draft,
@@ -180,26 +197,7 @@ export function QueryBar({
     : [];
 
   const expand = (e?: React.MouseEvent) => {
-    let offset = draft.length;
-    if (e && document.caretRangeFromPoint) {
-      const range = document.caretRangeFromPoint(e.clientX, e.clientY);
-      if (range) {
-        // Walk text nodes inside the truncate span to compute the absolute offset.
-        const container = (e.currentTarget as HTMLElement).querySelector(".truncate");
-        if (container) {
-          let pos = 0;
-          const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-          let node: Text | null;
-          while ((node = walker.nextNode() as Text | null)) {
-            if (node === range.startContainer) {
-              offset = pos + range.startOffset;
-              break;
-            }
-            pos += node.length;
-          }
-        }
-      }
-    }
+    const offset = e ? caretOffsetFromClick(e, draft.length) : draft.length;
     setFocused(true);
     requestAnimationFrame(() => {
       const ta = queryInputRef.current;

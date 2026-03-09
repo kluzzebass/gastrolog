@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, type MutableRefObject } from "react";
+import { useState, useRef, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { queryClient, Query, Record, TableResult, refreshAuth } from "../client";
 import { HistogramBucket } from "../gen/gastrolog/v1/query_pb";
@@ -13,15 +13,10 @@ interface SearchState {
   histogram: HistogramBucket[] | null;
 }
 
-/**
- * Extract bare-word tokens from a query string for UI highlighting.
- * This is a lightweight client-side extraction only — the server owns
- * all real query parsing via the `expression` field.
- */
-export function extractTokens(queryStr: string): string[] {
-  // Strip pipeline segments — only the filter part before the first unquoted pipe
-  // should produce highlight tokens.
-  let filterPart = queryStr;
+const OPERATORS = new Set(["AND", "OR", "NOT"]);
+const DIRECTIVE_PREFIXES = ["reverse=", "start=", "end=", "last=", "vault_id=", "limit="];
+
+function stripPipeline(queryStr: string): string {
   let inQuote: string | null = null;
   for (let i = 0; i < queryStr.length; i++) {
     const ch = queryStr[i]!;
@@ -31,50 +26,42 @@ export function extractTokens(queryStr: string): string[] {
     } else if (ch === '"' || ch === "'") {
       inQuote = ch;
     } else if (ch === "|") {
-      filterPart = queryStr.slice(0, i);
-      break;
+      return queryStr.slice(0, i);
     }
   }
+  return queryStr;
+}
+
+function isDirective(lower: string): boolean {
+  return DIRECTIVE_PREFIXES.some((p) => lower.startsWith(p));
+}
+
+function tokenFromPart(part: string): string | null {
+  part = part.replace(/[()]/g, "");
+  if (!part) return null;
+  if (OPERATORS.has(part.toUpperCase())) return null;
+  const lower = part.toLowerCase();
+  if (isDirective(lower)) return null;
+  if (part.includes("=")) {
+    const value = part.slice(part.indexOf("=") + 1);
+    return value && value !== "*" ? value.toLowerCase() : null;
+  }
+  return lower;
+}
+
+/**
+ * Extract bare-word tokens from a query string for UI highlighting.
+ * This is a lightweight client-side extraction only — the server owns
+ * all real query parsing via the `expression` field.
+ */
+export function extractTokens(queryStr: string): string[] {
+  const filterPart = stripPipeline(queryStr);
   const parts = filterPart.trim().split(/\s+/).filter(Boolean);
   const tokens: string[] = [];
-
-  for (let part of parts) {
-    // Strip parentheses
-    part = part.replace(/[()]/g, "");
-    if (!part) continue;
-
-    // Skip operators
-    const upper = part.toUpperCase();
-    if (upper === "AND" || upper === "OR" || upper === "NOT") {
-      continue;
-    }
-
-    // Skip query directives (not searchable content)
-    const lower = part.toLowerCase();
-    if (
-      lower.startsWith("reverse=") ||
-      lower.startsWith("start=") ||
-      lower.startsWith("end=") ||
-      lower.startsWith("last=") ||
-      lower.startsWith("vault_id=") ||
-      lower.startsWith("limit=")
-    ) {
-      continue;
-    }
-
-    // Extract values from key=value pairs for highlighting
-    if (part.includes("=")) {
-      const eqIdx = part.indexOf("=");
-      const value = part.slice(eqIdx + 1);
-      if (value && value !== "*") {
-        tokens.push(value.toLowerCase());
-      }
-      continue;
-    }
-
-    tokens.push(lower);
+  for (const part of parts) {
+    const token = tokenFromPart(part);
+    if (token) tokens.push(token);
   }
-
   return tokens;
 }
 
@@ -97,9 +84,8 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const search = useCallback(
-    // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming search with append/silent/auth-retry
-    async (queryStr: string, append = false, keepPrevious = false, silent = false) => {
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- streaming search with append/silent/auth-retry
+  const search = async (queryStr: string, append = false, keepPrevious = false, silent = false) => {
       // Cancel any in-flight request on new searches (not appends).
       if (abortRef.current) {
         if (!append) {
@@ -236,22 +222,16 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         }));
         onErrorRef.current?.(error);
       }
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reads from stateRef (fresh via ref), not stale closure
-    [],
-  );
+  };
 
-  const loadMore = useCallback(
-    (queryStr: string) => {
-      const cur = stateRef.current;
-      if (cur.hasMore && cur.resumeToken) {
-        search(queryStr, true);
-      }
-    },
-    [search],
-  );
+  const loadMore = (queryStr: string) => {
+    const cur = stateRef.current;
+    if (cur.hasMore && cur.resumeToken) {
+      search(queryStr, true);
+    }
+  };
 
-  const reset = useCallback(() => {
+  const reset = () => {
     if (abortRef.current) {
       abortRef.current.abort();
     }
@@ -264,11 +244,11 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       tableResult: null,
       histogram: null,
     });
-  }, []);
+  };
 
   // Adopt externally-provided records (e.g. from follow mode).
   // Sets records without executing a search.
-  const setRecords = useCallback((records: Record[]) => {
+  const setRecords = (records: Record[]) => {
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
@@ -282,15 +262,15 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       tableResult: null,
       histogram: null,
     });
-  }, []);
+  };
 
-  const cancel = useCallback(() => {
+  const cancel = () => {
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
     }
     setState((prev) => ({ ...prev, isSearching: false }));
-  }, []);
+  };
 
   return {
     ...state,

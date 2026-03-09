@@ -29,7 +29,7 @@ type ParsedState =
   | { mode: "nodes"; nodeId: string }
   | { mode: "entities"; entityType: EntityType };
 
-const entityTypes: EntityType[] = ["vaults", "ingesters", "routes", "jobs", "system"];
+const entityTypes = new Set<EntityType>(["vaults", "ingesters", "routes", "jobs", "system"]);
 
 function parseParam(param: string): ParsedState {
   if (param.startsWith("nodes:")) {
@@ -37,7 +37,7 @@ function parseParam(param: string): ParsedState {
   }
   if (param.startsWith("entities:")) {
     const et = param.slice(9) as EntityType;
-    if (entityTypes.includes(et)) {
+    if (entityTypes.has(et)) {
       return { mode: "entities", entityType: et };
     }
     return { mode: "entities", entityType: "vaults" };
@@ -103,7 +103,7 @@ export function InspectorDialog({
   const { data: ingesters } = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
-  const routeCount = config?.routes?.length ?? 0;
+  const routeCount = config?.routes.length ?? 0;
   const entityCounts: Record<EntityType, number> = {
     vaults: vaults?.length ?? 0,
     ingesters: ingesters?.length ?? 0,

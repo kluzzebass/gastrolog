@@ -22,6 +22,212 @@ function formatUUID(bytes: Uint8Array): string {
 }
 
 
+interface DetailStyles {
+  headerCls: string;
+  keyCls: string;
+  borderCls: string;
+  valCls: string;
+  c: ReturnType<typeof useThemeClass>;
+}
+
+function buildStyles(c: ReturnType<typeof useThemeClass>): DetailStyles {
+  const headerCls = `pt-4 pb-1.5 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`;
+  const keyCls = `py-1 pr-2 w-[1%] text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-ghost", "text-light-text-ghost")}`;
+  const borderCls = `border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`;
+  const valCls = `py-1 text-[0.8em] font-mono align-top ${borderCls}`;
+  return { headerCls, keyCls, borderCls, valCls, c };
+}
+
+function ValueCell({
+  value,
+  onClick,
+  styles,
+}: Readonly<{
+  value: string;
+  onClick?: () => void;
+  styles: DetailStyles;
+}>) {
+  const cls = onClick
+    ? `cursor-pointer transition-colors ${styles.c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`
+    : styles.c("text-text-normal", "text-light-text-normal");
+  return (
+    <td className={styles.valCls}>
+      {onClick ? (
+        <button
+          type="button"
+          onClick={onClick}
+          className={`break-all text-left ${cls}`}
+        >
+          {value}
+        </button>
+      ) : (
+        <span className={`break-all ${cls}`}>
+          {value}
+        </span>
+      )}
+    </td>
+  );
+}
+
+function MessageSection({
+  rawText,
+  rawBytes,
+  visibleText,
+  isLarge,
+  displayLineCount,
+  collapsed,
+  setCollapsed,
+  dark,
+  highlightMode,
+  onSpanClick,
+  styles,
+}: Readonly<{
+  rawText: string;
+  rawBytes: number;
+  visibleText: string;
+  isLarge: boolean;
+  displayLineCount: number;
+  collapsed: boolean;
+  setCollapsed: (fn: (v: boolean) => boolean) => void;
+  dark: boolean;
+  highlightMode: HighlightMode;
+  onSpanClick: (v: string) => void;
+  styles: DetailStyles;
+}>) {
+  const { headerCls, borderCls, c } = styles;
+  return (
+    <>
+      <tr>
+        <th colSpan={2} className={headerCls}>
+          <span className="flex items-center gap-2">
+            {`Message (${formatBytes(rawBytes)})`}
+            <CopyButton text={rawText} dark={dark} />
+          </span>
+        </th>
+      </tr>
+      <tr>
+        <td colSpan={2} className={`pb-1 max-w-0 ${borderCls}`}>
+          <pre
+            className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre overflow-x-auto leading-relaxed app-scroll ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
+            onClick={(e) => {
+              if (!e.altKey) return;
+              const el = (e.target as HTMLElement).closest<HTMLElement>("[data-click-value]");
+              if (el) {
+                e.stopPropagation();
+                onSpanClick(el.dataset.clickValue!);
+              }
+            }}
+          >
+            {(() => {
+              const spans = syntaxHighlight(visibleText, highlightMode);
+              const offsets: number[] = [];
+              for (let j = 0; j < spans.length; j++) {
+                offsets.push(j === 0 ? 0 : offsets[j - 1]! + spans[j - 1]!.text.length);
+              }
+              return spans.map((span, i) => {
+                const style = span.color ? { color: span.color } : undefined;
+                const key = `msg-${offsets[i]}`;
+                if (span.url) {
+                  return (
+                    <a
+                      key={key}
+                      href={span.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={style}
+                      className="underline decoration-current/30 hover:decoration-current/60"
+                    >
+                      {span.text}
+                    </a>
+                  );
+                }
+                if (span.clickValue) {
+                  return (
+                    <span
+                      key={key}
+                      style={style}
+                      className="cursor-pointer hover:brightness-125"
+                      data-click-value={span.clickValue}
+                      title="⌥ click to add filter"
+                    >
+                      {span.text}
+                    </span>
+                  );
+                }
+                return (
+                  <span key={key} style={style}>
+                    {span.text}
+                  </span>
+                );
+              });
+            })()}
+          </pre>
+          {isLarge && (
+            <button
+              type="button"
+              onClick={() => setCollapsed((v) => !v)}
+              className={`mt-1 text-[0.8em] font-mono px-2 py-0.5 rounded transition-colors ${c("text-copper hover:bg-copper/10", "text-copper hover:bg-copper/10")}`}
+            >
+              {collapsed
+                ? `Show all (${displayLineCount.toLocaleString()} lines)`
+                : "Collapse"}
+            </button>
+          )}
+        </td>
+      </tr>
+    </>
+  );
+}
+
+function ReferenceSection({
+  record,
+  onVaultSelect,
+  onChunkSelect,
+  onPosSelect,
+  styles,
+}: Readonly<{
+  record: ProtoRecord;
+  onVaultSelect: (vaultId: string) => void;
+  onChunkSelect: (chunkId: string) => void;
+  onPosSelect: (chunkId: string, pos: string) => void;
+  styles: DetailStyles;
+}>) {
+  const { headerCls, keyCls, borderCls } = styles;
+  return (
+    <>
+      <tr>
+        <th colSpan={2} className={headerCls}>Reference</th>
+      </tr>
+      <tr>
+        <td className={`${keyCls} ${borderCls}`}>vault</td>
+        <ValueCell
+          value={record.ref?.vaultId ?? "N/A"}
+          onClick={record.ref?.vaultId ? () => onVaultSelect(record.ref!.vaultId) : undefined}
+          styles={styles}
+        />
+      </tr>
+      <tr>
+        <td className={`${keyCls} ${borderCls}`}>chunk</td>
+        <ValueCell
+          value={record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A"}
+          onClick={record.ref?.chunkId ? () => onChunkSelect(record.ref!.chunkId) : undefined}
+          styles={styles}
+        />
+      </tr>
+      <tr>
+        <td className={`${keyCls} ${borderCls}`}>pos</td>
+        <ValueCell
+          value={record.ref?.pos.toString() ?? "N/A"}
+          onClick={record.ref?.chunkId
+            ? () => onPosSelect(record.ref!.chunkId, record.ref!.pos.toString())
+            : undefined}
+          styles={styles}
+        />
+      </tr>
+    </>
+  );
+}
+
 export function DetailPanelContent({
   record,
   dark,
@@ -47,7 +253,6 @@ export function DetailPanelContent({
   const rawText = new TextDecoder().decode(record.raw);
   const rawBytes = record.raw.length;
 
-  // Pretty-print JSON for the detail view.
   let displayText = rawText;
   if (rawText.trimStart().startsWith("{")) {
     try {
@@ -72,34 +277,8 @@ export function DetailPanelContent({
     { label: "Source", date: record.sourceTs ? record.sourceTs.toDate() : null },
   ];
 
-  const headerCls = `pt-4 pb-1.5 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`;
-  const keyCls = `py-1 pr-2 w-[1%] text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-ghost", "text-light-text-ghost")}`;
-  const borderCls = `border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`;
-
-  const valCls = `py-1 text-[0.8em] font-mono align-top ${borderCls}`;
-
-  function valueCell(value: string, onClick?: () => void) {
-    const cls = onClick
-      ? `cursor-pointer transition-colors ${c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`
-      : c("text-text-normal", "text-light-text-normal");
-    return (
-      <td className={valCls}>
-        {onClick ? (
-          <button
-            type="button"
-            onClick={onClick}
-            className={`break-all text-left ${cls}`}
-          >
-            {value}
-          </button>
-        ) : (
-          <span className={`break-all ${cls}`}>
-            {value}
-          </span>
-        )}
-      </td>
-    );
-  }
+  const styles = buildStyles(c);
+  const { headerCls, keyCls, borderCls } = styles;
 
   return (
     <div className="p-4">
@@ -112,7 +291,7 @@ export function DetailPanelContent({
           {tsRows.map(({ label, date }) => (
             <tr key={label}>
               <td className={`${keyCls} ${borderCls}`}>{label}</td>
-              <td className={valCls}>
+              <td className={styles.valCls}>
                 {date ? (
                   <>
                     <div className={`break-all ${c("text-text-normal", "text-light-text-normal")}`}>
@@ -131,85 +310,19 @@ export function DetailPanelContent({
             </tr>
           ))}
 
-          {/* — Message — */}
-          <tr>
-            <th colSpan={2} className={headerCls}>
-              <span className="flex items-center gap-2">
-                {`Message (${formatBytes(rawBytes)})`}
-                <CopyButton text={rawText} dark={dark} />
-              </span>
-            </th>
-          </tr>
-          <tr>
-            <td colSpan={2} className={`pb-1 max-w-0 ${borderCls}`}>
-              <pre
-                className={`text-[0.85em] font-mono p-3 rounded border whitespace-pre overflow-x-auto leading-relaxed app-scroll ${c("border-ink-border-subtle bg-ink text-text-normal", "border-light-border-subtle bg-light-bg text-light-text-normal")}`}
-                onClick={(e) => {
-                  if (!e.altKey) return;
-                  const el = (e.target as HTMLElement).closest<HTMLElement>("[data-click-value]");
-                  if (el) {
-                    e.stopPropagation();
-                    onSpanClick(el.dataset.clickValue!);
-                  }
-                }}
-              >
-                {(() => {
-                  const spans = syntaxHighlight(visibleText, highlightMode);
-                  const offsets = spans.reduce<number[]>((acc, span, j) => {
-                    acc.push(j === 0 ? 0 : acc[j - 1]! + spans[j - 1]!.text.length);
-                    return acc;
-                  }, []);
-                  return spans.map((span, i) => {
-                    const style = span.color ? { color: span.color } : undefined;
-                    const key = `msg-${offsets[i]}`;
-                    if (span.url) {
-                      return (
-                        <a
-                          key={key}
-                          href={span.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          style={style}
-                          className="underline decoration-current/30 hover:decoration-current/60"
-                        >
-                          {span.text}
-                        </a>
-                      );
-                    }
-                    if (span.clickValue) {
-                      return (
-                        <span
-                          key={key}
-                          style={style}
-                          className="cursor-pointer hover:brightness-125"
-                          data-click-value={span.clickValue}
-                          title="⌥ click to add filter"
-                        >
-                          {span.text}
-                        </span>
-                      );
-                    }
-                    return (
-                      <span key={key} style={style}>
-                        {span.text}
-                      </span>
-                    );
-                  });
-                })()}
-              </pre>
-              {isLarge && (
-                <button
-                  type="button"
-                  onClick={() => setCollapsed((v) => !v)}
-                  className={`mt-1 text-[0.8em] font-mono px-2 py-0.5 rounded transition-colors ${c("text-copper hover:bg-copper/10", "text-copper hover:bg-copper/10")}`}
-                >
-                  {collapsed
-                    ? `Show all (${displayLines.length.toLocaleString()} lines)`
-                    : "Collapse"}
-                </button>
-              )}
-            </td>
-          </tr>
+          <MessageSection
+            rawText={rawText}
+            rawBytes={rawBytes}
+            visibleText={visibleText}
+            isLarge={isLarge}
+            displayLineCount={displayLines.length}
+            collapsed={collapsed}
+            setCollapsed={setCollapsed}
+            dark={dark}
+            highlightMode={highlightMode}
+            onSpanClick={onSpanClick}
+            styles={styles}
+          />
 
           {/* — Attributes — */}
           {Object.keys(record.attrs).length > 0 && (
@@ -220,7 +333,7 @@ export function DetailPanelContent({
               {Object.entries(record.attrs).map(([k, v]) => (
                 <tr key={k}>
                   <td className={`${keyCls} ${borderCls}`}>{k}</td>
-                  {valueCell(v, onFieldSelect ? () => onFieldSelect(k, v) : undefined)}
+                  <ValueCell value={v} onClick={() => onFieldSelect(k, v)} styles={styles} />
                 </tr>
               ))}
             </>
@@ -235,39 +348,19 @@ export function DetailPanelContent({
               {kvPairs.map(({ key, value }) => (
                 <tr key={`kv-${key}-${value}`}>
                   <td className={`${keyCls} ${borderCls}`}>{key}</td>
-                  {valueCell(value, onFieldSelect ? () => onFieldSelect(key, value) : undefined)}
+                  <ValueCell value={value} onClick={() => onFieldSelect(key, value)} styles={styles} />
                 </tr>
               ))}
             </>
           )}
 
-          {/* — Reference — */}
-          <tr>
-            <th colSpan={2} className={headerCls}>Reference</th>
-          </tr>
-          <tr>
-            <td className={`${keyCls} ${borderCls}`}>vault</td>
-            {valueCell(
-              record.ref?.vaultId ?? "N/A",
-              record.ref?.vaultId ? () => onVaultSelect?.(record.ref!.vaultId) : undefined,
-            )}
-          </tr>
-          <tr>
-            <td className={`${keyCls} ${borderCls}`}>chunk</td>
-            {valueCell(
-              record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A",
-              record.ref?.chunkId ? () => onChunkSelect?.(record.ref!.chunkId) : undefined,
-            )}
-          </tr>
-          <tr>
-            <td className={`${keyCls} ${borderCls}`}>pos</td>
-            {valueCell(
-              record.ref?.pos.toString() ?? "N/A",
-              record.ref?.chunkId
-                ? () => onPosSelect?.(record.ref!.chunkId, record.ref!.pos.toString())
-                : undefined,
-            )}
-          </tr>
+          <ReferenceSection
+            record={record}
+            onVaultSelect={onVaultSelect}
+            onChunkSelect={onChunkSelect}
+            onPosSelect={onPosSelect}
+            styles={styles}
+          />
 
           {/* — Event Identity — */}
           {record.ingesterId.length === 16 && !record.ingesterId.every((b) => b === 0) && (
@@ -296,17 +389,19 @@ export function DetailPanelContent({
               </tr>
               <tr>
                 <td className={`${keyCls} ${borderCls}`}>ingester_id</td>
-                {valueCell(
-                  formatUUID(record.ingesterId),
-                  onFieldSelect ? () => onFieldSelect("ingester_id", formatUUID(record.ingesterId)) : undefined,
-                )}
+                <ValueCell
+                  value={formatUUID(record.ingesterId)}
+                  onClick={() => onFieldSelect("ingester_id", formatUUID(record.ingesterId))}
+                  styles={styles}
+                />
               </tr>
               <tr>
                 <td className={`${keyCls} ${borderCls}`}>ingest_seq</td>
-                {valueCell(
-                  record.ingestSeq.toString(),
-                  onFieldSelect ? () => onFieldSelect("ingest_seq", record.ingestSeq.toString()) : undefined,
-                )}
+                <ValueCell
+                  value={record.ingestSeq.toString()}
+                  onClick={() => onFieldSelect("ingest_seq", record.ingestSeq.toString())}
+                  styles={styles}
+                />
               </tr>
             </>
           )}

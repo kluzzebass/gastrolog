@@ -98,7 +98,9 @@ export function ChunkTimeline({
 
   if (bars.length === 0) return null;
 
-  const laneBarHeight = laneCount <= 1 ? 12 : laneCount <= 8 ? 7 : 4;
+  let laneBarHeight = 4;
+  if (laneCount <= 1) laneBarHeight = 12;
+  else if (laneCount <= 8) laneBarHeight = 7;
   const laneGap = 2;
   const totalBarHeight =
     laneCount * laneBarHeight + Math.max(0, laneCount - 1) * laneGap;

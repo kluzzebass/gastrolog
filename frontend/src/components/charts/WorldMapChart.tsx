@@ -380,7 +380,7 @@ export function WorldMapChart({
     } else {
       instance.setOption({ series: [{ center: savedCenter, zoom: savedZoom }] });
     }
-  }, []);
+  }, [isScatter]);
 
   const onEvents = {
     geoRoam: () => {

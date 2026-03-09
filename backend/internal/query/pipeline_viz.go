@@ -19,6 +19,10 @@ func ValidateVizOp(op querylang.PipeOp, table *TableResult) string {
 		if validateDonut(table) {
 			return "donut"
 		}
+	case *querylang.ScatterOp:
+		if validateScatterPlot(v, table) {
+			return "scatter"
+		}
 	case *querylang.MapOp:
 		return validateMap(v, table)
 	}
@@ -104,6 +108,27 @@ func validateScatter(op *querylang.MapOp, table *TableResult) bool {
 		valid++
 	}
 	return valid >= 2
+}
+
+// validateScatterPlot checks that x and y columns exist and non-empty values are numeric.
+func validateScatterPlot(op *querylang.ScatterOp, table *TableResult) bool {
+	xIdx := columnIndex(table.Columns, op.XField)
+	yIdx := columnIndex(table.Columns, op.YField)
+	if xIdx < 0 || yIdx < 0 {
+		return false
+	}
+	if len(table.Rows) < 2 {
+		return false
+	}
+	for _, row := range table.Rows {
+		if _, err := strconv.ParseFloat(row[xIdx], 64); err != nil {
+			return false
+		}
+		if _, err := strconv.ParseFloat(row[yIdx], 64); err != nil {
+			return false
+		}
+	}
+	return true
 }
 
 // lastColumnNumeric returns true if every row's last column is parseable as a float.

@@ -1,4 +1,4 @@
-import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { describe, test, expect, mock } from "bun:test";
 import { render, fireEvent } from "@testing-library/react";
 import { Checkbox } from "./settings/Checkbox";
 import { ExpandableCard } from "./settings/ExpandableCard";
@@ -317,7 +317,7 @@ describe("Button accessibility", () => {
 
 // ── Toast ARIA ───────────────────────────────────────────────────────
 
-function ToastTrigger({ message, level }: { message: string; level?: "error" | "warn" | "info" }) {
+function ToastTrigger({ message, level }: Readonly<{ message: string; level?: "error" | "warn" | "info" }>) {
   const { addToast } = useToast();
   return <button onClick={() => addToast(message, level)}>trigger</button>;
 }

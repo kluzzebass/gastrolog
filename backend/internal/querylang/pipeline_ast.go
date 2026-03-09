@@ -371,6 +371,20 @@ func (m *MapOp) String() string {
 	}
 }
 
+// ScatterOp represents: scatter <x_field> <y_field>
+// Forces the pipeline result to render as a scatter plot.
+// Validates: x and y columns exist and are numeric.
+type ScatterOp struct {
+	XField string
+	YField string
+}
+
+func (ScatterOp) pipeOp() {}
+
+func (s *ScatterOp) String() string {
+	return "scatter " + s.XField + " " + s.YField
+}
+
 // PipeExpr is the interface for expressions used in pipe operators.
 // These are distinct from filter Expr — they represent computed values,
 // not boolean search predicates.

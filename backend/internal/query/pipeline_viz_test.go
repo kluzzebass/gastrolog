@@ -287,3 +287,64 @@ func TestValidateMapScatter(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateScatterPlot(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		op     *querylang.ScatterOp
+		table  *TableResult
+		wantOK bool
+	}{
+		{
+			name: "valid scatter",
+			op:   &querylang.ScatterOp{XField: "latency", YField: "bytes"},
+			table: &TableResult{
+				Columns: []string{"host", "latency", "bytes"},
+				Rows:    [][]string{{"a", "12.5", "1024"}, {"b", "8.3", "2048"}},
+			},
+			wantOK: true,
+		},
+		{
+			name: "missing x column",
+			op:   &querylang.ScatterOp{XField: "missing", YField: "bytes"},
+			table: &TableResult{
+				Columns: []string{"latency", "bytes"},
+				Rows:    [][]string{{"12.5", "1024"}, {"8.3", "2048"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "non-numeric values",
+			op:   &querylang.ScatterOp{XField: "latency", YField: "bytes"},
+			table: &TableResult{
+				Columns: []string{"latency", "bytes"},
+				Rows:    [][]string{{"fast", "1024"}, {"8.3", "2048"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "too few rows",
+			op:   &querylang.ScatterOp{XField: "latency", YField: "bytes"},
+			table: &TableResult{
+				Columns: []string{"latency", "bytes"},
+				Rows:    [][]string{{"12.5", "1024"}},
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := ValidateVizOp(tt.op, tt.table)
+			got := result != ""
+			if got != tt.wantOK {
+				t.Errorf("ValidateVizOp(scatter) = %q, wantOK=%v", result, tt.wantOK)
+			}
+			if got && result != "scatter" {
+				t.Errorf("expected result_type 'scatter', got %q", result)
+			}
+		})
+	}
+}

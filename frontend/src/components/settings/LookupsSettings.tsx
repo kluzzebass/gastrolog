@@ -42,8 +42,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         name: h.name,
         urlTemplate: h.urlTemplate,
         headers: { ...h.headers },
-        responsePaths: [...(h.responsePaths ?? [])],
-        parameters: (h.parameters ?? []).map((p) => ({ name: p.name, description: p.description })),
+        responsePaths: [...h.responsePaths],
+        parameters: h.parameters.map((p) => ({ name: p.name, description: p.description })),
         timeout: h.timeout,
         cacheTtl: h.cacheTtl,
         cacheSize: h.cacheSize,
@@ -54,8 +54,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         name: j.name,
         fileId: j.fileId,
         query: j.query,
-        responsePaths: [...(j.responsePaths ?? [])],
-        parameters: (j.parameters ?? []).map((p) => ({ name: p.name, description: p.description })),
+        responsePaths: [...j.responsePaths],
+        parameters: j.parameters.map((p) => ({ name: p.name, description: p.description })),
       })),
     );
     setCsvLookups(
@@ -63,7 +63,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         name: c.name,
         fileId: c.fileId,
         keyColumn: c.keyColumn,
-        valueColumns: [...(c.valueColumns ?? [])],
+        valueColumns: [...c.valueColumns],
       })),
     );
     setInitialized(true);

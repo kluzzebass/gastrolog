@@ -14,7 +14,7 @@ import {
 } from "../api/hooks";
 import { histogramBucketsToData } from "../utils/histogramData";
 import { useVaults, useStats, useLogout, useCurrentUser } from "../api/hooks";
-import { Record as ProtoRecord, getToken } from "../api/client";
+import { Record as ProtoRecord } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
 import { timeRangeMs, sameRecord } from "../utils";
@@ -205,6 +205,31 @@ export function useSearchView() {
 
   // Global keyboard shortcuts: Escape to deselect, Arrow keys to navigate records.
   useEffect(() => {
+    const navigateRecords = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+      const list = isFollowMode ? followRecordsRef.current : recordsRef.current;
+      if (list.length === 0) return;
+
+      e.preventDefault();
+      const dir = e.key === "ArrowUp" ? -1 : 1;
+      const sel = selectedRecordRef.current;
+      if (!sel) {
+        setSelectedRecord(dir === 1 ? list[0]! : list.at(-1)!);
+        return;
+      }
+      const idx = list.findIndex((r) => sameRecord(r, sel));
+      if (idx === -1) {
+        setSelectedRecord(dir === 1 ? list[0]! : list.at(-1)!);
+        return;
+      }
+      const next = idx + dir;
+      if (next >= 0 && next < list.length) {
+        setSelectedRecord(list[next]!);
+      }
+    };
+
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showPlan) {
@@ -216,31 +241,8 @@ export function useSearchView() {
         return;
       }
 
-      // Arrow key navigation — skip when focus is in an input/textarea.
-      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-      const list = isFollowMode ? followRecordsRef.current : recordsRef.current;
-      if (!list || list.length === 0) return;
-
-      e.preventDefault();
-      const dir = e.key === "ArrowUp" ? -1 : 1;
-      const sel = selectedRecordRef.current;
-      if (!sel) {
-        // Nothing selected — select first or last depending on direction.
-        setSelectedRecord(dir === 1 ? list[0]! : list[list.length - 1]!);
-        return;
-      }
-      const idx = list.findIndex((r) => sameRecord(r, sel));
-      if (idx === -1) {
-        // Selected record not in current list — select first/last.
-        setSelectedRecord(dir === 1 ? list[0]! : list[list.length - 1]!);
-        return;
-      }
-      const next = idx + dir;
-      if (next >= 0 && next < list.length) {
-        setSelectedRecord(list[next]!);
+      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+        navigateRecords(e);
       }
     };
     globalThis.addEventListener("keydown", handler);
@@ -337,7 +339,7 @@ export function useSearchView() {
   }
 
   // Fire search or follow depending on the current route.
-  // eslint-disable-next-line sonarjs/cognitive-complexity -- query effect handles multiple route/mode transitions
+   
   useEffect(() => {
     expressionRef.current = q;
     queryHistory.add(q);

@@ -47,18 +47,20 @@ export function SettingsSection({
     <div>
       {addLabel && (
         <div className="flex items-center justify-end mb-5">
-          {adding ? (
-            <Button onClick={onToggleAdd}>Cancel</Button>
-          ) : addOptions && onAddSelect ? (
-            <DropdownButton
-              label={addLabel}
-              items={addOptions}
-              onSelect={onAddSelect}
-              dark={dark}
-            />
-          ) : (
-            <Button onClick={onToggleAdd}>{addLabel}</Button>
-          )}
+          {(() => {
+            if (adding) return <Button onClick={onToggleAdd}>Cancel</Button>;
+            if (addOptions && onAddSelect) {
+              return (
+                <DropdownButton
+                  label={addLabel}
+                  items={addOptions}
+                  onSelect={onAddSelect}
+                  dark={dark}
+                />
+              );
+            }
+            return <Button onClick={onToggleAdd}>{addLabel}</Button>;
+          })()}
         </div>
       )}
 

@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCard } from "../../hooks/useExpandedCards";
 import {
   useConfig,
@@ -30,7 +29,6 @@ import type { RetentionRuleEdit } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 
 export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
-  const c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putVault = usePutVault();
   const deleteVault = useDeleteVault();

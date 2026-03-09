@@ -50,10 +50,10 @@ export function ContextRecord({
       </span>
       <span className="font-mono text-[0.9em] truncate whitespace-pre self-center pl-1.5 text-left">
         {(() => {
-          const offsets = parts.reduce<number[]>((acc, span, j) => {
-            acc.push(j === 0 ? 0 : acc[j - 1]! + parts[j - 1]!.text.length);
-            return acc;
-          }, []);
+          const offsets: number[] = [];
+          for (let j = 0; j < parts.length; j++) {
+            offsets.push(j === 0 ? 0 : offsets[j - 1]! + parts[j - 1]!.text.length);
+          }
           return parts.map((part, i) => (
             <span
               key={`o${offsets[i]}`}

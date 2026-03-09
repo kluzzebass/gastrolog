@@ -7,7 +7,7 @@ import { useMediaQuery } from "./useMediaQuery";
 let listeners: Array<(e: MediaQueryListEvent) => void> = [];
 let currentMatches = false;
 
-const origMatchMedia = globalThis.matchMedia;
+const _origMatchMedia = globalThis.matchMedia;
 globalThis.matchMedia = (query: string) =>
   ({
     matches: currentMatches,

@@ -35,11 +35,11 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       ? ((Number(stats.totalDropped) / Number(stats.totalIngested)) * 100).toFixed(1)
       : "0.0";
 
-  const sorted = [...(stats.vaultStats ?? [])].sort(
+  const sorted = [...stats.vaultStats].sort(
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
   );
 
-  const sortedRoutes = [...(stats.routeStats ?? [])].sort(
+  const sortedRoutes = [...stats.routeStats].sort(
     (a, b) => Number(b.recordsMatched) - Number(a.recordsMatched),
   );
 
