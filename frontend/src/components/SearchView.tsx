@@ -26,10 +26,6 @@ export function SearchView() {
 
       <HeaderBar
         dark={sv.dark}
-        statsLoading={sv.statsLoading}
-        cpuPercent={sv.cpuPercent}
-        memoryBytes={sv.memoryBytes}
-        totalBytes={sv.totalBytes}
         inspectorGlow={sv.inspectorGlow}
         onShowHelp={() => sv.openHelp()}
         onShowInspector={() => sv.openInspector()}

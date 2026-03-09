@@ -1,14 +1,14 @@
+import { useState, useRef } from "react";
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import { SlidersIcon } from "./icons";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { useClusterStatus } from "../api/hooks/useClusterStatus";
+import { formatBytes } from "../utils/units";
+import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
 
 interface HeaderBarProps {
   dark: boolean;
-  statsLoading: boolean;
-  cpuPercent: number;
-  memoryBytes: bigint;
-  totalBytes: bigint;
   inspectorGlow: boolean;
   onShowHelp: () => void;
   onShowInspector: () => void;
@@ -21,10 +21,6 @@ interface HeaderBarProps {
 
 export function HeaderBar({
   dark,
-  statsLoading,
-  cpuPercent,
-  memoryBytes,
-  totalBytes,
   onShowHelp,
   inspectorGlow,
   onShowInspector,
@@ -35,6 +31,24 @@ export function HeaderBar({
   onLogout,
 }: Readonly<HeaderBarProps>) {
   const c = useThemeClass(dark);
+  const { data: cluster, isLoading } = useClusterStatus();
+  const nodes = cluster?.nodes ?? [];
+
+  // Aggregate stats across all nodes.
+  let totalCpu = 0;
+  let totalMemory = 0;
+  let totalStorage = 0;
+  for (const node of nodes) {
+    const s = node.stats;
+    if (!s) continue;
+    totalCpu += s.cpuPercent;
+    totalMemory += Number(s.memoryRss);
+    for (const v of s.vaults) {
+      totalStorage += Number(v.dataBytes);
+    }
+  }
+
+  const loading = isLoading || nodes.length === 0;
 
   return (
     <header
@@ -52,38 +66,32 @@ export function HeaderBar({
       <div className="flex items-center gap-3 lg:gap-6">
         {/* Stats ribbon */}
         <div className="hidden lg:flex items-center gap-5">
-          <StatPill
+          <HoverStat
             label="CPU"
-            value={statsLoading ? "..." : `${cpuPercent.toFixed(1)}%`}
+            value={loading ? "..." : `${totalCpu.toFixed(1)}%`}
             dark={dark}
+            nodes={nodes}
+            renderNodeValue={(n) => `${n.stats?.cpuPercent.toFixed(1) ?? "—"}%`}
           />
-          <span
-            className={`text-xs ${c("text-ink-border", "text-light-border")}`}
-          >
-            |
-          </span>
-          <StatPill
+          <span className={`text-xs ${c("text-ink-border", "text-light-border")}`}>|</span>
+          <HoverStat
             label="Memory"
-            value={
-              statsLoading
-                ? "..."
-                : `${(Number(memoryBytes) / 1024 / 1024).toFixed(0)} MB`
-            }
+            value={loading ? "..." : formatBytes(totalMemory)}
             dark={dark}
+            nodes={nodes}
+            renderNodeValue={(n) => formatBytes(Number(n.stats?.memoryRss ?? 0))}
           />
-          <span
-            className={`text-xs ${c("text-ink-border", "text-light-border")}`}
-          >
-            |
-          </span>
-          <StatPill
+          <span className={`text-xs ${c("text-ink-border", "text-light-border")}`}>|</span>
+          <HoverStat
             label="Storage"
-            value={
-              statsLoading
-                ? "..."
-                : `${(Number(totalBytes) / 1024 / 1024).toFixed(1)} MB`
-            }
+            value={loading ? "..." : formatBytes(totalStorage)}
             dark={dark}
+            nodes={nodes}
+            renderNodeValue={(n) => {
+              let bytes = 0;
+              for (const v of n.stats?.vaults ?? []) bytes += Number(v.dataBytes);
+              return formatBytes(bytes);
+            }}
           />
         </div>
 
@@ -180,5 +188,68 @@ export function HeaderBar({
         )}
       </div>
     </header>
+  );
+}
+
+// ---- Hoverable stat with per-node tooltip ----
+
+function HoverStat({
+  label,
+  value,
+  dark,
+  nodes,
+  renderNodeValue,
+}: Readonly<{
+  label: string;
+  value: string;
+  dark: boolean;
+  nodes: ClusterNode[];
+  renderNodeValue: (node: ClusterNode) => string;
+}>) {
+  const [hover, setHover] = useState(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout>>(null);
+  const c = useThemeClass(dark);
+
+  const showTooltip = () => {
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    setHover(true);
+  };
+
+  const hideTooltip = () => {
+    timeoutRef.current = setTimeout(() => setHover(false), 150);
+  };
+
+  // Only show tooltip in multi-node mode.
+  const multiNode = nodes.length > 1;
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={multiNode ? showTooltip : undefined}
+      onMouseLeave={multiNode ? hideTooltip : undefined}
+    >
+      <StatPill label={label} value={value} dark={dark} />
+      {hover && multiNode && (
+        <div
+          className={`absolute top-full right-0 mt-2 z-50 rounded-lg border shadow-lg py-2 px-3 min-w-40 ${c(
+            "bg-ink-raised border-ink-border-subtle",
+            "bg-light-raised border-light-border-subtle",
+          )}`}
+          onMouseEnter={showTooltip}
+          onMouseLeave={hideTooltip}
+        >
+          {nodes.map((node) => (
+            <div key={node.id} className="flex items-baseline justify-between gap-4 py-0.5">
+              <span className={`text-[0.75em] truncate max-w-24 ${c("text-text-muted", "text-light-text-muted")}`}>
+                {node.name || node.id.slice(0, 8)}
+              </span>
+              <span className={`text-[0.75em] font-mono shrink-0 ${c("text-text-bright", "text-light-text-bright")}`}>
+                {node.stats ? renderNodeValue(node) : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
