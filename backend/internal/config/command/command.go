@@ -900,6 +900,7 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 		Scheduler:            cfg.Scheduler,
 		TLS:                  cfg.TLS,
 		Lookup:               cfg.Lookup,
+		MaxMind:              cfg.MaxMind,
 		Cluster:              cfg.Cluster,
 		SetupWizardDismissed: cfg.SetupWizardDismissed,
 	})
@@ -967,6 +968,7 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 			cfg.Scheduler = ss.Scheduler
 			cfg.TLS = ss.TLS
 			cfg.Lookup = ss.Lookup
+			cfg.MaxMind = ss.MaxMind
 			cfg.Cluster = ss.Cluster
 			cfg.SetupWizardDismissed = ss.SetupWizardDismissed
 		}

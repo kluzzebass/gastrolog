@@ -593,7 +593,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 
 // Restore replaces the FSM's state with a snapshot.
 // Raft guarantees this is never called concurrently with Apply or Snapshot.
-func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot restore is inherently complex
+func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // snapshot restore is inherently complex
 	defer func() { _ = rc.Close() }()
 
 	data, err := io.ReadAll(rc)
@@ -656,11 +656,17 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit // snapshot re
 				Scheduler:            cfg.Scheduler,
 				TLS:                  cfg.TLS,
 				Lookup:               cfg.Lookup,
+				MaxMind:              cfg.MaxMind,
 				Cluster:              cfg.Cluster,
 				SetupWizardDismissed: cfg.SetupWizardDismissed,
 			}); err != nil {
 				return fmt.Errorf("restore server settings: %w", err)
 			}
+		}
+	}
+	for _, mf := range cfg.ManagedFiles {
+		if err := newStore.PutManagedFile(ctx, mf); err != nil {
+			return fmt.Errorf("restore managed file %s: %w", mf.ID, err)
 		}
 	}
 	for _, cert := range cfg.Certs {
