@@ -412,3 +412,69 @@ func TestValidateLinechart(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoDetectVizType(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		table    *TableResult
+		wantType string
+	}{
+		{
+			name: "auto donut: 2 cols 3 rows numeric",
+			table: &TableResult{
+				Columns: []string{"level", "count"},
+				Rows:    [][]string{{"info", "100"}, {"error", "20"}, {"warn", "15"}},
+			},
+			wantType: "donut",
+		},
+		{
+			name: "no auto donut: 3 cols",
+			table: &TableResult{
+				Columns: []string{"a", "b", "count"},
+				Rows:    [][]string{{"x", "y", "10"}, {"x", "z", "20"}},
+			},
+			wantType: "",
+		},
+		{
+			name: "no auto donut: 1 row",
+			table: &TableResult{
+				Columns: []string{"level", "count"},
+				Rows:    [][]string{{"info", "100"}},
+			},
+			wantType: "",
+		},
+		{
+			name: "no auto donut: too many rows",
+			table: &TableResult{
+				Columns: []string{"status", "count"},
+				Rows: func() [][]string {
+					rows := make([][]string, 13)
+					for i := range rows {
+						rows[i] = []string{"s", "1"}
+					}
+					return rows
+				}(),
+			},
+			wantType: "",
+		},
+		{
+			name: "no auto donut: last col not numeric",
+			table: &TableResult{
+				Columns: []string{"level", "label"},
+				Rows:    [][]string{{"info", "high"}, {"error", "low"}},
+			},
+			wantType: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := AutoDetectVizType(tt.table)
+			if got != tt.wantType {
+				t.Errorf("AutoDetectVizType() = %q, want %q", got, tt.wantType)
+			}
+		})
+	}
+}

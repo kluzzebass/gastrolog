@@ -50,6 +50,21 @@ func validateDonut(table *TableResult) bool {
 	return lastColumnNumeric(table)
 }
 
+// AutoDetectVizType returns a visualization type string if the table shape
+// strongly suggests a specific chart, or "" for default table display.
+// Called when no explicit viz operator is present.
+const maxAutoDonutRows = 12
+
+func AutoDetectVizType(table *TableResult) string {
+	// Auto-donut: exactly 2 columns, 2–12 rows, last column numeric.
+	if len(table.Columns) == 2 && len(table.Rows) >= 2 && len(table.Rows) <= maxAutoDonutRows {
+		if lastColumnNumeric(table) {
+			return "donut"
+		}
+	}
+	return ""
+}
+
 // validateMap dispatches by mode. Returns the result_type string or "".
 func validateMap(op *querylang.MapOp, table *TableResult) string {
 	switch op.Mode {

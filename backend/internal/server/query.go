@@ -1735,6 +1735,13 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 		}
 	}
 
+	// Auto-detect visualization when no explicit operator was given.
+	if resultType == "table" && vizOp == nil {
+		if vizType := query.AutoDetectVizType(result); vizType != "" {
+			resultType = vizType
+		}
+	}
+
 	return &apiv1.TableResult{
 		Columns:    result.Columns,
 		Rows:       rows,

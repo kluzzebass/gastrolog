@@ -418,6 +418,12 @@ export function useSearchView() {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Ref-stabilize loadMore and resetFollowNewCount so effects don't churn.
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+  const resetFollowNewCountRef = useRef(resetFollowNewCount);
+  resetFollowNewCountRef.current = resetFollowNewCount;
+
   // Infinite scroll: observe a sentinel div at the bottom of the results.
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -431,7 +437,7 @@ export function useSearchView() {
       (entries) => {
         if (entries[0]?.isIntersecting && hasMore && !isSearching && loadMoreGateRef.current) {
           loadMoreGateRef.current = false;
-          loadMore(expressionRef.current);
+          loadMoreRef.current(expressionRef.current);
         }
       },
       { root: scrollEl, rootMargin: "0px 0px 200px 0px" },
@@ -441,7 +447,7 @@ export function useSearchView() {
       observer.disconnect();
       scrollEl?.removeEventListener("scroll", openGate);
     };
-  }, [hasMore, isSearching, loadMore]);
+  }, [hasMore, isSearching]);
 
   // Follow mode: track scroll position and auto-reset new-record counter.
   useEffect(() => {
@@ -453,11 +459,11 @@ export function useSearchView() {
     const onScroll = () => {
       const scrolled = el.scrollTop > 50;
       setIsScrolledDown(scrolled);
-      if (!scrolled) resetFollowNewCount();
+      if (!scrolled) resetFollowNewCountRef.current();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => el.removeEventListener("scroll", onScroll);
-  }, [isFollowMode, resetFollowNewCount]);
+  }, [isFollowMode]);
 
   // After search completes, scroll the selected row into view.
   const prevSearchingRef = useRef(false);
@@ -651,13 +657,19 @@ export function useSearchView() {
   const isPipelineResult = effectiveTableResult !== null;
   const queryIsPipeline = hasPipeOutsideQuotes(q);
 
+  // Ref-stabilize search and q so the polling interval doesn't reset on every render.
+  const searchRef = useRef(search);
+  searchRef.current = search;
+  const qRef = useRef(q);
+  qRef.current = q;
+
   useEffect(() => {
     if (!pollInterval || isFollowMode) return;
     const id = setInterval(() => {
-      search(q, false, false, true);
+      searchRef.current(qRef.current, false, false, true);
     }, pollInterval);
     return () => clearInterval(id);
-  }, [pollInterval, isFollowMode, q, search]);
+  }, [pollInterval, isFollowMode]);
 
   const displayRecords = isFollowMode ? followRecords : records;
   const hasResults = displayRecords.length > 0;

@@ -340,6 +340,8 @@ The `donut` operator forces a donut chart. Requires exactly 2 columns and at lea
 * | stats count by level | donut
 ```
 
+A donut chart is also auto-selected when the result has exactly 2 columns, 2–12 rows, and the last column is numeric — no explicit `donut` operator needed.
+
 ### Scatter
 
 The `scatter` operator renders a scatter plot. You specify the X and Y columns — both must be numeric. Any remaining columns from the table act as labels in tooltips.
@@ -375,6 +377,7 @@ Pipeline results are shown depending on the query:
 - **Record list** — when there is no `stats` operator. Records are displayed in the standard log entry view with any computed or filtered fields.
 - **Single value** — when `stats` produces a single column and single row (e.g. `| stats count`). Displayed as a large formatted number.
 - **Explicit chart** — when a visualization operator (`linechart`, `barchart`, `donut`, `scatter`, `map`) is present. The operator determines the chart type.
+- **Donut chart** — auto-selected when the result has exactly 2 columns, 2–12 rows, and a numeric last column.
 - **Table** — when there is no `bin()` in the group clause and no visualization operator. Displays rows and columns with sort and export controls.
 - **Time series chart** — when `bin()` is present. Hover to inspect individual data points. A Chart/Table toggle lets you switch to a raw data view.
 
