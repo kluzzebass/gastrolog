@@ -54,6 +54,7 @@ export const helpTopics: HelpTopic[] = [
     children: [
       { id: 'query-language', title: 'Query Language', load: md(() => import('./query-language.md?raw')) },
       { id: 'pipeline', title: 'Pipeline Queries', load: md(() => import('./pipeline.md?raw')) },
+      { id: 'visualizations', title: 'Visualizations', load: md(() => import('./visualizations.md?raw')) },
       { id: 'scalar-functions', title: 'Scalar Functions', load: md(() => import('./scalar-functions.md?raw')) },
       { id: 'lookup-tables', title: 'Lookup Tables', load: md(() => import('./lookup-tables.md?raw')) },
       { id: 'saved-queries', title: 'Saved Queries', load: md(() => import('./saved-queries.md?raw')) },

@@ -6,6 +6,18 @@ Pipeline queries extend the [query language](help:query-language) with pipe oper
 filter | operator | operator ...
 ```
 
+## Operator Types
+
+Pipeline operators fall into different categories based on how they process data. This determines which operators work in follow mode and how they execute across a [cluster](help:clustering).
+
+| Category | Operators | Follow mode | Behavior |
+|----------|-----------|:-----------:|----------|
+| **Streaming** | `where`, `eval`, `fields`, `rename`, `dedup`, `lookup` | Yes | Process records one at a time as they arrive, without buffering. |
+| **Short-circuit** | `head` | Yes | Stops iteration early after collecting N records. Can avoid scanning the entire result set. |
+| **Materializing** | `stats`, `timechart` | No | Collect all matching records before producing output. In a cluster, each node aggregates independently and results are merged on the coordinator. `stats` and `timechart` occupy the same slot — you can use one or the other, never both. |
+| **Coordinator-only** | `sort`, `tail`, `slice` | No | Buffer all records on the coordinating node. Cannot be distributed across the cluster. |
+| **Visualization** | `linechart`, `barchart`, `donut`, `heatmap`, `scatter`, `map`, `raw` | No | Control how results are displayed but do not transform data. Must appear at the end of a pipeline, after `stats` or `timechart`. See [Visualizations](help:visualizations). |
+
 ## Stats Operator
 
 The `stats` operator aggregates matching records into a table. It requires at least one aggregation function, and optionally groups results with a `by` clause.
@@ -207,13 +219,19 @@ Drop mode — remove these fields:
 
 ## Timechart Operator
 
-The `timechart` operator counts records per time bucket with severity breakdown. Uses index-based binary search — no record scanning needed for unfiltered queries.
+The `timechart` operator is a specialized form of `stats` that counts records per time bucket with severity breakdown.
 
 ```
 | timechart 50
 ```
 
 The argument is the number of buckets. Bin width is computed automatically from the query's time range. Results include per-bucket severity counts (error, warn, info, debug, trace) when severity information is available.
+
+### Performance
+
+For unfiltered queries (no filter expression or `where` operators), `timechart` is significantly faster than `stats count by bin()` — it uses index-based binary search to compute bucket counts without scanning any records. For filtered queries, `timechart` falls back to full record scanning (capped at 1M records), similar to `stats`.
+
+Prefer `timechart` over `stats count by bin()` when you only need record counts over time and want the fastest possible result. Use `stats` when you need custom aggregations (`avg`, `sum`, `max`, etc.) or non-time grouping.
 
 Timechart cannot be combined with `stats` and is not supported in follow mode.
 
@@ -312,76 +330,6 @@ After stats, `raw` forces the result into a flat table even when `bin()` would n
 * | stats count by bin(5m) | raw
 ```
 
-## Visualization Operators
-
-By default, pipeline results choose a display based on the data shape (table, time series chart, single value). The following operators let you explicitly request a chart type. They must appear after `stats` or `timechart`. If the data doesn't match the chart's requirements, the result falls back to a table.
-
-### Linechart
-
-The `linechart` operator forces a line chart. Requires the first column to contain timestamps, at least one numeric column, and at least 2 rows. Use it when `stats ... by bin()` auto-selects a stacked bar chart but you'd prefer smooth lines.
-
-```
-* | stats count by bin(5m) | linechart
-```
-
-### Barchart
-
-The `barchart` operator forces a bar chart. Requires at least 2 columns and 2 rows, with the last column numeric.
-
-```
-* | stats count by status | sort -count | barchart
-```
-
-### Donut
-
-The `donut` operator forces a donut chart. Requires exactly 2 columns and at least 2 rows, with the last column numeric.
-
-```
-* | stats count by level | donut
-```
-
-A donut chart is also auto-selected when the result has exactly 2 columns, 2–12 rows, and the last column is numeric — no explicit `donut` operator needed.
-
-### Heatmap
-
-The `heatmap` operator renders a color-intensity grid. Requires exactly 3 columns (two categorical axes and one numeric value) and at least 4 rows.
-
-```
-* | stats count by bin(1h), level | heatmap
-```
-
-Good for spotting patterns like error rates by hour-of-day, status codes by endpoint, or latency by region and time. Color intensity maps to the numeric value.
-
-A heatmap is also auto-selected when the result has exactly 3 columns, 4+ rows, the last column is numeric, and both axes have 2–30 distinct values.
-
-### Scatter
-
-The `scatter` operator renders a scatter plot. You specify the X and Y columns — both must be numeric. Any remaining columns from the table act as labels in tooltips.
-
-```
-* | stats avg(duration) as avg_ms, avg(bytes) as avg_bytes by host | scatter avg_ms avg_bytes
-```
-
-Requires at least 2 rows and both columns must contain numeric values.
-
-### Map
-
-The `map` operator renders geographic data. It has two modes:
-
-**Choropleth** — shades countries by value. The specified column must contain ISO 3166-1 alpha-2 country codes (e.g. `US`, `DE`, `JP`).
-
-```
-* | stats count by client_ip_country | map choropleth client_ip_country
-```
-
-**Scatter** — plots points on a world map. Both columns must be numeric (latitude and longitude).
-
-```
-* | stats count by lat, lon | map scatter lat lon
-```
-
-Visualization operators are not supported in follow mode.
-
 ## Result Display
 
 Pipeline results are shown depending on the query:
@@ -460,34 +408,4 @@ Rename columns for readability:
 
 ```
 * | stats count, avg(duration) by method | rename count as requests, avg_duration as latency_ms
-```
-
-Error distribution as a donut chart:
-
-```
-* | stats count by level | donut
-```
-
-Top status codes as a bar chart:
-
-```
-* | stats count by status | sort -count | head 10 | barchart
-```
-
-Latency vs. throughput scatter plot:
-
-```
-* | stats avg(duration) as latency, sum(bytes) as throughput by host | scatter latency throughput
-```
-
-Error rate by hour and status as a heatmap:
-
-```
-* | stats count by bin(1h), status | heatmap
-```
-
-Requests by country on a world map:
-
-```
-* | lookup geoip client_ip | stats count by client_ip_country | map choropleth client_ip_country
 ```
