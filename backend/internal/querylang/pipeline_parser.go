@@ -127,6 +127,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseRawOp()
 	case "lookup":
 		return p.parseLookupOp()
+	case "linechart":
+		return p.parseLinechartOp()
 	case "barchart":
 		return p.parseBarchartOp()
 	case "donut":
@@ -1079,6 +1081,14 @@ func (p *parser) parseScatterOp() (*ScatterOp, error) {
 		return nil, err
 	}
 	return &ScatterOp{XField: xField, YField: yField}, nil
+}
+
+// parseLinechartOp parses: "linechart" (no arguments).
+func (p *parser) parseLinechartOp() (*LinechartOp, error) {
+	if err := p.advance(); err != nil { // consume "linechart"
+		return nil, err
+	}
+	return &LinechartOp{}, nil
 }
 
 // parseBarchartOp parses: "barchart" (no arguments).

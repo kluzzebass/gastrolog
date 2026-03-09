@@ -45,7 +45,7 @@ var pipeKeywordSet = map[string]bool{
 	"stats": true, "where": true, "eval": true, "sort": true,
 	"head": true, "tail": true, "slice": true, "rename": true,
 	"fields": true, "timechart": true, "dedup": true, "raw": true,
-	"lookup": true, "barchart": true, "donut": true, "scatter": true, "map": true,
+	"lookup": true, "linechart": true, "barchart": true, "donut": true, "scatter": true, "map": true,
 }
 
 // aggFuncSet contains aggregation function names.
@@ -299,7 +299,7 @@ func classifyPipeSegment(tokens []rawToken) []Span {
 		// Detect field = expr patterns and function calls.
 		classifyEvalBody(tokens, spans, restNonWS)
 
-	case "stats", "timechart", "barchart", "donut", "scatter", "map":
+	case "stats", "timechart", "linechart", "barchart", "donut", "scatter", "map":
 		// Detect function calls, "by"/"as" keywords, field references.
 		classifyStatsBody(tokens, spans, restNonWS)
 

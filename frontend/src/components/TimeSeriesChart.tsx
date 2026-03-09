@@ -153,7 +153,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
     series: series.map((s) => ({
       name: s.name,
       type: "line" as const,
-      smooth: true,
+      smooth: false,
       symbol: "circle",
       symbolSize: 4,
       showSymbol: false,

@@ -313,6 +313,15 @@ func (l *LookupOp) String() string {
 	return fmt.Sprintf("lookup %s %s", l.Table, strings.Join(l.Fields, " "))
 }
 
+// LinechartOp represents: linechart
+// Forces the pipeline result to render as a line chart.
+// Validates: first column parseable as time, ≥1 numeric column, ≥2 rows.
+type LinechartOp struct{}
+
+func (LinechartOp) pipeOp() {}
+
+func (LinechartOp) String() string { return "linechart" }
+
 // BarchartOp represents: barchart
 // Forces the pipeline result to render as a bar chart.
 // Validates: ≥2 columns, ≥2 rows, last column numeric.

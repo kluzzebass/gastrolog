@@ -348,3 +348,67 @@ func TestValidateScatterPlot(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateLinechart(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		table  *TableResult
+		wantOK bool
+	}{
+		{
+			name: "valid time series",
+			table: &TableResult{
+				Columns: []string{"_time", "count"},
+				Rows:    [][]string{{"2026-01-01T00:00:00Z", "10"}, {"2026-01-01T01:00:00Z", "20"}},
+			},
+			wantOK: true,
+		},
+		{
+			name: "valid multi-series",
+			table: &TableResult{
+				Columns: []string{"_time", "requests", "errors"},
+				Rows:    [][]string{{"2026-01-01T00:00:00Z", "100", "5"}, {"2026-01-01T01:00:00Z", "200", "8"}},
+			},
+			wantOK: true,
+		},
+		{
+			name: "first column not time",
+			table: &TableResult{
+				Columns: []string{"host", "count"},
+				Rows:    [][]string{{"web-1", "10"}, {"web-2", "20"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "too few rows",
+			table: &TableResult{
+				Columns: []string{"_time", "count"},
+				Rows:    [][]string{{"2026-01-01T00:00:00Z", "10"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "last column not numeric",
+			table: &TableResult{
+				Columns: []string{"_time", "status"},
+				Rows:    [][]string{{"2026-01-01T00:00:00Z", "ok"}, {"2026-01-01T01:00:00Z", "fail"}},
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := ValidateVizOp(&querylang.LinechartOp{}, tt.table)
+			got := result != ""
+			if got != tt.wantOK {
+				t.Errorf("ValidateVizOp(linechart) = %q, wantOK=%v", result, tt.wantOK)
+			}
+			if got && result != "linechart" {
+				t.Errorf("expected result_type 'linechart', got %q", result)
+			}
+		})
+	}
+}

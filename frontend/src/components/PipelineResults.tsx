@@ -133,6 +133,13 @@ function PipelineResultBody({
     }
     return <TableView columns={columns} rows={rowData} dark={dark} />;
   }
+  if (resultType === "linechart" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4 relative">
+        <TimeSeriesChart columns={columns} rows={rowData} dark={dark} />
+      </div>
+    );
+  }
   if (resultType === "barchart" && viewMode === "chart") {
     return (
       <div className="px-5 py-4">
@@ -207,6 +214,7 @@ export function PipelineResults({
   const hasChartView =
     resultType === "timeseries" ||
     resultType === "timechart" ||
+    resultType === "linechart" ||
     resultType === "barchart" ||
     resultType === "donut" ||
     resultType === "scatter" ||

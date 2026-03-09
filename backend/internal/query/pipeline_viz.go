@@ -2,6 +2,7 @@ package query
 
 import (
 	"strconv"
+	"time"
 
 	"gastrolog/internal/querylang"
 )
@@ -11,6 +12,10 @@ import (
 // string if validation fails (caller should fall back to "table").
 func ValidateVizOp(op querylang.PipeOp, table *TableResult) string {
 	switch v := op.(type) {
+	case *querylang.LinechartOp:
+		if validateLinechart(table) {
+			return "linechart"
+		}
 	case *querylang.BarchartOp:
 		if validateBarchart(table) {
 			return "barchart"
@@ -150,6 +155,40 @@ func columnIndex(columns []string, name string) int {
 		}
 	}
 	return -1
+}
+
+// validateLinechart checks: ≥2 columns, ≥2 rows, first column parseable as
+// time (RFC3339 or common formats), and at least one remaining numeric column.
+func validateLinechart(table *TableResult) bool {
+	if len(table.Columns) < 2 || len(table.Rows) < 2 {
+		return false
+	}
+	// First column must look like timestamps.
+	for _, row := range table.Rows {
+		if !looksLikeTime(row[0]) {
+			return false
+		}
+	}
+	// At least one remaining column must be numeric.
+	return lastColumnNumeric(table)
+}
+
+// looksLikeTime returns true if the string is parseable as a time value.
+func looksLikeTime(s string) bool {
+	for _, layout := range timeLayouts {
+		if _, err := time.Parse(layout, s); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+var timeLayouts = []string{
+	time.RFC3339,
+	time.RFC3339Nano,
+	"2006-01-02T15:04:05",
+	"2006-01-02 15:04:05",
+	"2006-01-02",
 }
 
 // looksLikeISO2 returns true if the string is exactly 2 uppercase ASCII letters.

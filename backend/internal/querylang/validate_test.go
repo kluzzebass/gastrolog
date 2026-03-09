@@ -174,6 +174,18 @@ func TestValidateExpression(t *testing.T) {
 			wantValid:  true,
 			wantOffset: -1,
 		},
+		{
+			name:       "no space before pipe after directive",
+			expr:       "last=3h reverse=true| stats count by bin(5m), level | linechart",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:       "no space before pipe after filter",
+			expr:       "level=error| stats count",
+			wantValid:  true,
+			wantOffset: -1,
+		},
 	}
 
 	for _, tt := range tests {

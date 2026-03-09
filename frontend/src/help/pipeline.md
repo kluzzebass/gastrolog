@@ -316,6 +316,14 @@ After stats, `raw` forces the result into a flat table even when `bin()` would n
 
 By default, pipeline results choose a display based on the data shape (table, time series chart, single value). The following operators let you explicitly request a chart type. They must appear after `stats` or `timechart`. If the data doesn't match the chart's requirements, the result falls back to a table.
 
+### Linechart
+
+The `linechart` operator forces a line chart. Requires the first column to contain timestamps, at least one numeric column, and at least 2 rows. Use it when `stats ... by bin()` auto-selects a stacked bar chart but you'd prefer smooth lines.
+
+```
+* | stats count by bin(5m) | linechart
+```
+
 ### Barchart
 
 The `barchart` operator forces a bar chart. Requires at least 2 columns and 2 rows, with the last column numeric.
@@ -366,7 +374,7 @@ Pipeline results are shown depending on the query:
 
 - **Record list** — when there is no `stats` operator. Records are displayed in the standard log entry view with any computed or filtered fields.
 - **Single value** — when `stats` produces a single column and single row (e.g. `| stats count`). Displayed as a large formatted number.
-- **Explicit chart** — when a visualization operator (`barchart`, `donut`, `scatter`, `map`) is present. The operator determines the chart type.
+- **Explicit chart** — when a visualization operator (`linechart`, `barchart`, `donut`, `scatter`, `map`) is present. The operator determines the chart type.
 - **Table** — when there is no `bin()` in the group clause and no visualization operator. Displays rows and columns with sort and export controls.
 - **Time series chart** — when `bin()` is present. Hover to inspect individual data points. A Chart/Table toggle lets you switch to a raw data view.
 

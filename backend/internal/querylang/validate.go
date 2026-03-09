@@ -99,9 +99,16 @@ func stripDirectives(expr string) (string, []directiveRange) {
 			break
 		}
 
-		// Scan the next token (non-whitespace run).
+		// If we're at a pipe, copy it through and continue.
+		if expr[pos] == '|' {
+			pos++
+			result.WriteString(expr[wsStart:pos])
+			continue
+		}
+
+		// Scan the next token (non-whitespace run, stopping at pipe or whitespace).
 		tokStart := pos
-		for pos < len(expr) && expr[pos] != ' ' && expr[pos] != '\t' && expr[pos] != '\n' && expr[pos] != '\r' {
+		for pos < len(expr) && expr[pos] != ' ' && expr[pos] != '\t' && expr[pos] != '\n' && expr[pos] != '\r' && expr[pos] != '|' {
 			pos++
 		}
 		token := expr[tokStart:pos]

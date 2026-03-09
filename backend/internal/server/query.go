@@ -1401,7 +1401,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "barchart", "donut", "scatter", "map"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "linechart", "barchart", "donut", "scatter", "map"},
 		PipeFunctions: funcs,
 		LookupTables:  s.lookupNames,
 	}), nil
@@ -1719,7 +1719,7 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 			}
 		}
 		switch pipe.(type) {
-		case *querylang.BarchartOp, *querylang.DonutOp, *querylang.ScatterOp, *querylang.MapOp:
+		case *querylang.LinechartOp, *querylang.BarchartOp, *querylang.DonutOp, *querylang.ScatterOp, *querylang.MapOp:
 			vizOp = pipe
 		}
 	}
