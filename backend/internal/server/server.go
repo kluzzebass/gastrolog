@@ -323,23 +323,18 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
 
-	geoipTable := lookup.NewGeoIP()
-	asnTable := lookup.NewASN()
 	lookupRegistry := lookup.Registry{
-		"rdns":  lookup.NewRDNS(),
-		"geoip": geoipTable,
-		"asn":   asnTable,
+		"rdns": lookup.NewRDNS(),
 	}
 
-	s.loadInitialLookupConfig(geoipTable, asnTable, lookupRegistry)
+	s.loadInitialLookupConfig(lookupRegistry)
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
-		s.applyLookupConfig(cfg, geoipTable, asnTable, lookupRegistry)
-
+		s.applyLookupConfig(cfg, lookupRegistry)
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	if s.joinClusterFn != nil {
@@ -396,9 +391,8 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	return queryTimeout, maxFollowDuration, maxResultCount
 }
 
-// loadInitialLookupConfig loads GeoIP, ASN, CIDR, and HTTP lookup tables from persisted config at startup.
-// It also migrates any legacy flat MMDB files into managed file entities.
-func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *lookup.ASN, registry lookup.Registry) {
+// loadInitialLookupConfig loads MMDB, HTTP, and JSON lookup tables from persisted config at startup.
+func (s *Server) loadInitialLookupConfig(registry lookup.Registry) {
 	if s.cfgStore == nil {
 		return
 	}
@@ -409,32 +403,7 @@ func (s *Server) loadInitialLookupConfig(geoipTable *lookup.GeoIP, asnTable *loo
 	if err != nil {
 		return
 	}
-	s.applyLookupConfig(ss.Lookup, geoipTable, asnTable, registry)
-}
-
-// effectiveLookupPaths resolves the actual MMDB paths to use.
-// Manual paths (config overrides) take precedence; otherwise paths are resolved
-// from the managed file manifest, falling back to the legacy flat directory.
-func (s *Server) effectiveLookupPaths(cfg config.LookupConfig) (geoip, asn string) {
-	geoip = cfg.GeoIPDBPath
-	asn = cfg.ASNDBPath
-
-	if s.homeDir == "" {
-		return geoip, asn
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
-	defer cancel()
-
-	// Resolve from manifest (managed files).
-	if geoip == "" {
-		geoip = s.resolveMMDBPath(ctx, "GeoLite2-City.mmdb")
-	}
-	if asn == "" {
-		asn = s.resolveMMDBPath(ctx, "GeoLite2-ASN.mmdb")
-	}
-
-	return geoip, asn
+	s.applyLookupConfig(ss.Lookup, registry)
 }
 
 // resolveMMDBPath finds an MMDB file via the managed file manifest.
@@ -442,33 +411,89 @@ func (s *Server) resolveMMDBPath(ctx context.Context, filename string) string {
 	return s.ResolveManagedFilePath(ctx, filename)
 }
 
-// applyLookupConfig loads (or reloads) GeoIP, ASN, CIDR, and HTTP lookup tables from the given config.
+// applyLookupConfig loads (or reloads) MMDB, HTTP, and JSON lookup tables from the given config.
 // It also manages the maxmind-update cron job for automatic downloads.
-func (s *Server) applyLookupConfig(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN, registry lookup.Registry) {
-	geoipPath, asnPath := s.effectiveLookupPaths(cfg)
-
-	if geoipPath != "" {
-		if info, err := geoipTable.Load(geoipPath); err != nil {
-			s.logger.Warn("failed to load GeoIP database", "path", geoipPath, "error", err)
-		} else {
-			s.logger.Info("loaded GeoIP database", "path", geoipPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-			_ = geoipTable.WatchFile(geoipPath)
-		}
-	}
-	if asnPath != "" {
-		if info, err := asnTable.Load(asnPath); err != nil {
-			s.logger.Warn("failed to load ASN database", "path", asnPath, "error", err)
-		} else {
-			s.logger.Info("loaded ASN database", "path", asnPath, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-			_ = asnTable.WatchFile(asnPath)
-		}
-	}
+func (s *Server) applyLookupConfig(cfg config.LookupConfig, registry lookup.Registry) {
+	// Register MMDB lookup tables (GeoIP City / ASN) from config.
+	s.registerMMDBLookups(cfg, registry)
 
 	// Register HTTP lookup tables from config.
 	s.registerHTTPLookups(cfg, registry)
 
+	// Register JSON file lookup tables from config.
+	s.registerJSONFileLookups(cfg, registry)
+
 	// Manage the maxmind-update cron job.
-	s.manageMaxMindJob(cfg, geoipTable, asnTable)
+	s.manageMaxMindJob(cfg, registry)
+}
+
+// registerMMDBLookups registers MMDB-backed lookup tables (GeoIP City / ASN) from config.
+// Follows the same lifecycle pattern as registerJSONFileLookups: close+remove stale, create+load new.
+func (s *Server) registerMMDBLookups(cfg config.LookupConfig, registry lookup.Registry) {
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
+
+	// Build keep set of names that should exist.
+	keep := make(map[string]struct{}, len(cfg.MMDBLookups))
+	for _, mcfg := range cfg.MMDBLookups {
+		if mcfg.Name != "" {
+			keep[mcfg.Name] = struct{}{}
+		}
+	}
+
+	// Close and remove any MMDB lookups no longer in config.
+	for name, table := range registry {
+		if m, ok := table.(*lookup.MMDB); ok {
+			if _, exists := keep[name]; !exists {
+				m.Close()
+				delete(registry, name)
+				s.logger.Info("removed MMDB lookup table", "name", name)
+			}
+		}
+	}
+
+	for _, mcfg := range cfg.MMDBLookups {
+		if mcfg.Name == "" {
+			continue
+		}
+
+		// Resolve MMDB path: from managed file ID, or auto-downloaded by db_type.
+		var mmdbPath string
+		if mcfg.FileID != "" {
+			mmdbPath = s.ResolveManagedFileByID(ctx, mcfg.FileID)
+		} else {
+			// No file_id → use auto-downloaded database by type.
+			mmdbPath = s.resolveMMDBPath(ctx, mmdbFileName(mcfg.DBType))
+		}
+		// Close existing table if any.
+		if existing, ok := registry[mcfg.Name]; ok {
+			if m, ok := existing.(*lookup.MMDB); ok {
+				m.Close()
+			}
+		}
+		m := lookup.NewMMDB(mcfg.DBType)
+		if mmdbPath != "" {
+			if info, err := m.Load(mmdbPath); err != nil {
+				s.logger.Warn("failed to load MMDB", "name", mcfg.Name, "path", mmdbPath, "error", err)
+			} else {
+				s.logger.Info("loaded MMDB lookup", "name", mcfg.Name, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
+				_ = m.WatchFile(mmdbPath)
+			}
+		}
+		registry[mcfg.Name] = m
+	}
+}
+
+// mmdbFileName returns the auto-download filename for a given MMDB db type.
+func mmdbFileName(dbType string) string {
+	switch dbType {
+	case "city":
+		return "GeoLite2-City.mmdb"
+	case "asn":
+		return "GeoLite2-ASN.mmdb"
+	default:
+		return ""
+	}
 }
 
 // registerHTTPLookups registers HTTP API lookup tables from config into the registry.
@@ -505,8 +530,72 @@ func (s *Server) registerHTTPLookups(cfg config.LookupConfig, registry lookup.Re
 	}
 }
 
+// registerJSONFileLookups registers JSON file-backed lookup tables from config into the registry.
+// It also cleans up any previously registered JSON file lookups that are no longer in the config.
+func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry lookup.Registry) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Build set of names that should exist.
+	keep := make(map[string]struct{}, len(cfg.JSONFileLookups))
+	for _, jcfg := range cfg.JSONFileLookups {
+		if jcfg.Name != "" {
+			keep[jcfg.Name] = struct{}{}
+		}
+	}
+
+	// Close and remove any JSON file lookups no longer in config.
+	for name, table := range registry {
+		if jf, ok := table.(*lookup.JSONFile); ok {
+			if _, exists := keep[name]; !exists {
+				jf.Close()
+				delete(registry, name)
+				s.logger.Info("removed JSON file lookup table", "name", name)
+			}
+		}
+	}
+
+	for _, jcfg := range cfg.JSONFileLookups {
+		if jcfg.Name == "" || jcfg.FileID == "" {
+			continue
+		}
+
+		// Close any existing JSON file lookup with the same name (stops its watcher).
+		if existing, ok := registry[jcfg.Name]; ok {
+			if jf, ok := existing.(*lookup.JSONFile); ok {
+				jf.Close()
+			}
+		}
+
+		filePath := s.ResolveManagedFileByID(ctx, jcfg.FileID)
+		if filePath == "" {
+			s.logger.Warn("JSON lookup file not found", "name", jcfg.Name, "file_id", jcfg.FileID)
+			continue
+		}
+
+		paramNames := make([]string, len(jcfg.Parameters))
+		for k, p := range jcfg.Parameters {
+			paramNames[k] = p.Name
+		}
+		jf := lookup.NewJSONFile(lookup.JSONFileConfig{
+			Query:         jcfg.Query,
+			ResponsePaths: jcfg.ResponsePaths,
+			Parameters:    paramNames,
+		})
+
+		if err := jf.Load(filePath); err != nil {
+			s.logger.Warn("failed to load JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)
+			continue
+		}
+		_ = jf.WatchFile(filePath)
+
+		registry[jcfg.Name] = jf
+		s.logger.Info("registered JSON file lookup table", "name", jcfg.Name, "path", filePath)
+	}
+}
+
 // manageMaxMindJob adds or removes the maxmind-update cron job based on config.
-func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+func (s *Server) manageMaxMindJob(cfg config.LookupConfig, registry lookup.Registry) {
 	scheduler := s.orch.Scheduler()
 	if scheduler == nil {
 		return
@@ -518,7 +607,7 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.Ge
 		return
 	}
 
-	updateFn := func() { s.runMaxMindUpdate(geoipTable, asnTable) }
+	updateFn := func() { s.runMaxMindUpdate(registry) }
 
 	// Add recurring cron job: 03:00 on Tuesdays and Fridays.
 	if err := scheduler.AddJob("maxmind-update", "0 3 * * 2,5", updateFn); err != nil {
@@ -529,15 +618,22 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, geoipTable *lookup.Ge
 	}
 	scheduler.Describe("maxmind-update", "Download MaxMind GeoLite2 databases")
 
-	// If databases don't exist yet, trigger an immediate one-time download.
-	geoipPath, asnPath := s.effectiveLookupPaths(cfg)
-	if geoipPath == "" || asnPath == "" {
+	// If any MMDB entry has no file available yet, trigger an immediate download.
+	needsDownload := false
+	for _, mcfg := range cfg.MMDBLookups {
+		if mcfg.FileID == "" {
+			needsDownload = true
+			break
+		}
+	}
+	if needsDownload {
 		_ = scheduler.RunOnce("maxmind-update-initial", updateFn)
 	}
 }
 
-// runMaxMindUpdate downloads both MaxMind editions and updates the config timestamp.
-func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN) {
+// runMaxMindUpdate downloads both MaxMind editions, registers them as managed files,
+// and reloads any MMDB registry entries that use auto-downloaded databases.
+func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 	loadCtx, loadCancel := context.WithTimeout(context.Background(), configLoadTimeout)
 	ss, err := s.cfgStore.LoadServerSettings(loadCtx)
 	loadCancel()
@@ -581,13 +677,11 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 		return
 	}
 
-	// Reload databases from effective paths.
+	// Re-apply config to reload MMDB entries that use auto-downloaded databases.
 	reloadCtx, reloadCancel := context.WithTimeout(ctx, configLoadTimeout)
 	ss, _ = s.cfgStore.LoadServerSettings(reloadCtx)
 	reloadCancel()
-	geoipPath, asnPath := s.effectiveLookupPaths(ss.Lookup)
-	s.reloadGeoIP(geoipPath, geoipTable)
-	s.reloadASN(asnPath, asnTable)
+	s.registerMMDBLookups(ss.Lookup, registry)
 
 	// Update the last-update timestamp.
 	saveCtx, saveCancel := context.WithTimeout(ctx, configLoadTimeout)
@@ -596,30 +690,6 @@ func (s *Server) runMaxMindUpdate(geoipTable *lookup.GeoIP, asnTable *lookup.ASN
 	if err := s.cfgStore.SaveServerSettings(saveCtx, ss); err != nil {
 		s.logger.Warn("maxmind update: save timestamp failed", "error", err)
 	}
-}
-
-func (s *Server) reloadGeoIP(path string, table *lookup.GeoIP) {
-	if path == "" {
-		return
-	}
-	info, err := table.Load(path)
-	if err != nil {
-		s.logger.Warn("maxmind update: reload GeoIP failed", "error", err)
-		return
-	}
-	s.logger.Info("maxmind update: reloaded GeoIP", "build", info.BuildTime.Format("2006-01-02"))
-}
-
-func (s *Server) reloadASN(path string, table *lookup.ASN) {
-	if path == "" {
-		return
-	}
-	info, err := table.Load(path)
-	if err != nil {
-		s.logger.Warn("maxmind update: reload ASN failed", "error", err)
-		return
-	}
-	s.logger.Info("maxmind update: reloaded ASN", "build", info.BuildTime.Format("2006-01-02"))
 }
 
 // Serve starts the server on the given listener.

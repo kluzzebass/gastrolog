@@ -345,10 +345,19 @@ message TLSSettings {
 }
 
 message LookupSettings {
-  string geoip_db_path = 1;
-  string asn_db_path = 2;
+  string geoip_db_path = 1;  // deprecated: use mmdb_lookups
+  string asn_db_path = 2;    // deprecated: use mmdb_lookups
   MaxMindSettings maxmind = 3;
   repeated HTTPLookupEntry http_lookups = 4;
+  repeated JSONFileLookupEntry json_file_lookups = 5;
+  repeated MMDBLookupEntry mmdb_lookups = 6;
+}
+
+// MMDBLookupEntry defines a named MMDB-backed lookup table (GeoIP City or ASN).
+message MMDBLookupEntry {
+  string name = 1;     // registry name (e.g. "geoip", "asn", "custom-geo")
+  string db_type = 2;  // "city" or "asn" — determines which fields are decoded
+  string file_id = 3;  // managed file ID (UUID); empty = use auto-downloaded database
 }
 
 // HTTPLookupParam defines a named parameter for an HTTP lookup table.
@@ -368,6 +377,16 @@ message HTTPLookupEntry {
   int32 cache_size = 6;     // optional, default 10000
   repeated string response_paths = 7; // JSONPath expressions, e.g. "$.data.user"
   repeated HTTPLookupParam parameters = 8; // ordered param definitions for URL template
+}
+
+// JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
+// The JSON file is memory-mapped and queried via JSONPath expressions at lookup time.
+message JSONFileLookupEntry {
+  string name = 1;                            // registry name (e.g. "hosts")
+  string file_id = 2;                        // managed file ID (UUID)
+  string query = 3;                          // JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
+  repeated string response_paths = 4;        // optional: JSONPath to extract from results; empty = flatten
+  repeated HTTPLookupParam parameters = 5;   // ordered param definitions for query template placeholders
 }
 
 message ClusterSettings {
@@ -428,10 +447,12 @@ message PutMaxMindSettings {
 }
 
 message PutLookupSettings {
-  optional string geoip_db_path = 1;
-  optional string asn_db_path = 2;
+  optional string geoip_db_path = 1;  // deprecated: use mmdb_lookups
+  optional string asn_db_path = 2;    // deprecated: use mmdb_lookups
   PutMaxMindSettings maxmind = 3;
   repeated HTTPLookupEntry http_lookups = 4; // replaces the full list when present
+  repeated JSONFileLookupEntry json_file_lookups = 5; // replaces the full list when present
+  repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
 }
 
 message PutClusterSettings {

@@ -2043,11 +2043,15 @@ export class TLSSettings extends Message<TLSSettings> {
  */
 export class LookupSettings extends Message<LookupSettings> {
   /**
+   * deprecated: use mmdb_lookups
+   *
    * @generated from field: string geoip_db_path = 1;
    */
   geoipDbPath = "";
 
   /**
+   * deprecated: use mmdb_lookups
+   *
    * @generated from field: string asn_db_path = 2;
    */
   asnDbPath = "";
@@ -2062,6 +2066,16 @@ export class LookupSettings extends Message<LookupSettings> {
    */
   httpLookups: HTTPLookupEntry[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.JSONFileLookupEntry json_file_lookups = 5;
+   */
+  jsonFileLookups: JSONFileLookupEntry[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.MMDBLookupEntry mmdb_lookups = 6;
+   */
+  mmdbLookups: MMDBLookupEntry[] = [];
+
   constructor(data?: PartialMessage<LookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2074,6 +2088,8 @@ export class LookupSettings extends Message<LookupSettings> {
     { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "maxmind", kind: "message", T: MaxMindSettings },
     { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
+    { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
+    { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
@@ -2090,6 +2106,63 @@ export class LookupSettings extends Message<LookupSettings> {
 
   static equals(a: LookupSettings | PlainMessage<LookupSettings> | undefined, b: LookupSettings | PlainMessage<LookupSettings> | undefined): boolean {
     return proto3.util.equals(LookupSettings, a, b);
+  }
+}
+
+/**
+ * MMDBLookupEntry defines a named MMDB-backed lookup table (GeoIP City or ASN).
+ *
+ * @generated from message gastrolog.v1.MMDBLookupEntry
+ */
+export class MMDBLookupEntry extends Message<MMDBLookupEntry> {
+  /**
+   * registry name (e.g. "geoip", "asn", "custom-geo")
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * "city" or "asn" — determines which fields are decoded
+   *
+   * @generated from field: string db_type = 2;
+   */
+  dbType = "";
+
+  /**
+   * managed file ID (UUID); empty = use auto-downloaded database
+   *
+   * @generated from field: string file_id = 3;
+   */
+  fileId = "";
+
+  constructor(data?: PartialMessage<MMDBLookupEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MMDBLookupEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "db_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MMDBLookupEntry {
+    return new MMDBLookupEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MMDBLookupEntry {
+    return new MMDBLookupEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MMDBLookupEntry {
+    return new MMDBLookupEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MMDBLookupEntry | PlainMessage<MMDBLookupEntry> | undefined, b: MMDBLookupEntry | PlainMessage<MMDBLookupEntry> | undefined): boolean {
+    return proto3.util.equals(MMDBLookupEntry, a, b);
   }
 }
 
@@ -2237,6 +2310,80 @@ export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
 
   static equals(a: HTTPLookupEntry | PlainMessage<HTTPLookupEntry> | undefined, b: HTTPLookupEntry | PlainMessage<HTTPLookupEntry> | undefined): boolean {
     return proto3.util.equals(HTTPLookupEntry, a, b);
+  }
+}
+
+/**
+ * JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
+ * The JSON file is memory-mapped and queried via JSONPath expressions at lookup time.
+ *
+ * @generated from message gastrolog.v1.JSONFileLookupEntry
+ */
+export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
+  /**
+   * registry name (e.g. "hosts")
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * managed file ID (UUID)
+   *
+   * @generated from field: string file_id = 2;
+   */
+  fileId = "";
+
+  /**
+   * JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
+   *
+   * @generated from field: string query = 3;
+   */
+  query = "";
+
+  /**
+   * optional: JSONPath to extract from results; empty = flatten
+   *
+   * @generated from field: repeated string response_paths = 4;
+   */
+  responsePaths: string[] = [];
+
+  /**
+   * ordered param definitions for query template placeholders
+   *
+   * @generated from field: repeated gastrolog.v1.HTTPLookupParam parameters = 5;
+   */
+  parameters: HTTPLookupParam[] = [];
+
+  constructor(data?: PartialMessage<JSONFileLookupEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.JSONFileLookupEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "response_paths", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "parameters", kind: "message", T: HTTPLookupParam, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JSONFileLookupEntry {
+    return new JSONFileLookupEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): JSONFileLookupEntry {
+    return new JSONFileLookupEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): JSONFileLookupEntry {
+    return new JSONFileLookupEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: JSONFileLookupEntry | PlainMessage<JSONFileLookupEntry> | undefined, b: JSONFileLookupEntry | PlainMessage<JSONFileLookupEntry> | undefined): boolean {
+    return proto3.util.equals(JSONFileLookupEntry, a, b);
   }
 }
 
@@ -2681,11 +2828,15 @@ export class PutMaxMindSettings extends Message<PutMaxMindSettings> {
  */
 export class PutLookupSettings extends Message<PutLookupSettings> {
   /**
+   * deprecated: use mmdb_lookups
+   *
    * @generated from field: optional string geoip_db_path = 1;
    */
   geoipDbPath?: string;
 
   /**
+   * deprecated: use mmdb_lookups
+   *
    * @generated from field: optional string asn_db_path = 2;
    */
   asnDbPath?: string;
@@ -2702,6 +2853,20 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
    */
   httpLookups: HTTPLookupEntry[] = [];
 
+  /**
+   * replaces the full list when present
+   *
+   * @generated from field: repeated gastrolog.v1.JSONFileLookupEntry json_file_lookups = 5;
+   */
+  jsonFileLookups: JSONFileLookupEntry[] = [];
+
+  /**
+   * replaces the full list when present
+   *
+   * @generated from field: repeated gastrolog.v1.MMDBLookupEntry mmdb_lookups = 6;
+   */
+  mmdbLookups: MMDBLookupEntry[] = [];
+
   constructor(data?: PartialMessage<PutLookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2714,6 +2879,8 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
     { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 3, name: "maxmind", kind: "message", T: PutMaxMindSettings },
     { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
+    { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
+    { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {

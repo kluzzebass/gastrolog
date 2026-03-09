@@ -13,7 +13,7 @@ import (
 
 func TestGeoIP_Suffixes(t *testing.T) {
 	t.Parallel()
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
 	got := g.Suffixes()
@@ -30,31 +30,31 @@ func TestGeoIP_Suffixes(t *testing.T) {
 
 func TestGeoIP_LookupNilReader(t *testing.T) {
 	t.Parallel()
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
-	// Before any Load, Lookup should return nil.
-	if got := g.Lookup(context.Background(), "1.2.3.4"); got != nil {
-		t.Errorf("Lookup with nil reader = %v, want nil", got)
+	// Before any Load, LookupValues should return nil.
+	if got := g.LookupValues(context.Background(), map[string]string{"value": "1.2.3.4"}); got != nil {
+		t.Errorf("LookupValues with nil reader = %v, want nil", got)
 	}
 }
 
 func TestGeoIP_LookupInvalidIP(t *testing.T) {
 	t.Parallel()
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
-	if got := g.Lookup(context.Background(), ""); got != nil {
-		t.Errorf("Lookup empty = %v, want nil", got)
+	if got := g.LookupValues(context.Background(), map[string]string{"value": ""}); got != nil {
+		t.Errorf("LookupValues empty = %v, want nil", got)
 	}
-	if got := g.Lookup(context.Background(), "not-an-ip"); got != nil {
-		t.Errorf("Lookup garbage = %v, want nil", got)
+	if got := g.LookupValues(context.Background(), map[string]string{"value": "not-an-ip"}); got != nil {
+		t.Errorf("LookupValues garbage = %v, want nil", got)
 	}
 }
 
 func TestGeoIP_LoadBadPath(t *testing.T) {
 	t.Parallel()
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
 	if _, err := g.Load("/nonexistent/path.mmdb"); err == nil {
@@ -70,7 +70,7 @@ func TestGeoIP_LoadBadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
 	if _, err := g.Load(tmp); err == nil {
@@ -150,7 +150,7 @@ func TestGeoIP_LoadAndLookup(t *testing.T) {
 	t.Parallel()
 	path := generateTestMMDB(t)
 
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
 	info, err := g.Load(path)
@@ -165,9 +165,9 @@ func TestGeoIP_LoadAndLookup(t *testing.T) {
 		t.Error("BuildTime is zero")
 	}
 
-	got := g.Lookup(context.Background(), "8.8.8.8")
+	got := g.LookupValues(context.Background(), map[string]string{"value": "8.8.8.8"})
 	if got == nil {
-		t.Fatal("Lookup(8.8.8.8) = nil, want non-nil result")
+		t.Fatal("LookupValues(8.8.8.8) = nil, want non-nil result")
 	}
 	if got["country"] != "US" {
 		t.Errorf("country = %q, want %q", got["country"], "US")
@@ -196,7 +196,7 @@ func TestGeoIP_ReaderSwap(t *testing.T) {
 	t.Parallel()
 	path := generateTestMMDB(t)
 
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
 	// Load twice — the first reader should be closed without error.
@@ -208,9 +208,9 @@ func TestGeoIP_ReaderSwap(t *testing.T) {
 	}
 
 	// Should still work after swap.
-	got := g.Lookup(context.Background(), "8.8.8.8")
+	got := g.LookupValues(context.Background(), map[string]string{"value": "8.8.8.8"})
 	if got == nil {
-		t.Fatal("Lookup after swap = nil")
+		t.Fatal("LookupValues after swap = nil")
 	}
 }
 
@@ -218,7 +218,7 @@ func TestGeoIP_PartialAndMiss(t *testing.T) {
 	t.Parallel()
 	path := generateTestMMDB(t)
 
-	g := NewGeoIP()
+	g := NewMMDB("city")
 	defer g.Close()
 
 	if _, err := g.Load(path); err != nil {
@@ -226,9 +226,9 @@ func TestGeoIP_PartialAndMiss(t *testing.T) {
 	}
 
 	// 1.1.1.1 has country only — no city.
-	got := g.Lookup(context.Background(), "1.1.1.1")
+	got := g.LookupValues(context.Background(), map[string]string{"value": "1.1.1.1"})
 	if got == nil {
-		t.Fatal("Lookup(1.1.1.1) = nil, want non-nil")
+		t.Fatal("LookupValues(1.1.1.1) = nil, want non-nil")
 	}
 	if got["country"] != "AU" {
 		t.Errorf("country = %q, want %q", got["country"], "AU")
@@ -238,7 +238,7 @@ func TestGeoIP_PartialAndMiss(t *testing.T) {
 	}
 
 	// 10.0.0.1 (private IP) — complete miss, should return nil.
-	if got := g.Lookup(context.Background(), "10.0.0.1"); got != nil {
-		t.Errorf("Lookup(10.0.0.1) = %v, want nil", got)
+	if got := g.LookupValues(context.Background(), map[string]string{"value": "10.0.0.1"}); got != nil {
+		t.Errorf("LookupValues(10.0.0.1) = %v, want nil", got)
 	}
 }

@@ -308,10 +308,12 @@ func (s *ConfigServer) GetSettings(
 			HttpsPort:           ss.TLS.HTTPSPort,
 		},
 		Lookup: &apiv1.LookupSettings{
-			GeoipDbPath: ss.Lookup.GeoIPDBPath,
-			AsnDbPath:   ss.Lookup.ASNDBPath,
-			Maxmind:     mm,
-			HttpLookups: httpLookupsToProto(ss.Lookup.HTTPLookups),
+			GeoipDbPath:     ss.Lookup.GeoIPDBPath,
+			AsnDbPath:       ss.Lookup.ASNDBPath,
+			Maxmind:         mm,
+			HttpLookups:     httpLookupsToProto(ss.Lookup.HTTPLookups),
+			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
+			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
 		},
 		Cluster: &apiv1.ClusterSettings{
 			BroadcastInterval: ss.Cluster.BroadcastInterval,
@@ -602,6 +604,12 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
 	if l.HttpLookups != nil {
 		lookup.HTTPLookups = httpLookupsFromProto(l.HttpLookups)
 	}
+	if l.JsonFileLookups != nil {
+		lookup.JSONFileLookups = jsonFileLookupsFromProto(l.JsonFileLookups)
+	}
+	if l.MmdbLookups != nil {
+		lookup.MMDBLookups = mmdbLookupsFromProto(l.MmdbLookups)
+	}
 }
 
 func httpLookupsToProto(lookups []config.HTTPLookupConfig) []*apiv1.HTTPLookupEntry {
@@ -647,6 +655,78 @@ func httpLookupsFromProto(entries []*apiv1.HTTPLookupEntry) []config.HTTPLookupC
 			Timeout:       e.Timeout,
 			CacheTTL:      e.CacheTtl,
 			CacheSize:     int(e.CacheSize),
+		})
+	}
+	return out
+}
+
+func jsonFileLookupsToProto(lookups []config.JSONFileLookupConfig) []*apiv1.JSONFileLookupEntry {
+	if len(lookups) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.JSONFileLookupEntry, len(lookups))
+	for i, l := range lookups {
+		params := make([]*apiv1.HTTPLookupParam, len(l.Parameters))
+		for j, p := range l.Parameters {
+			params[j] = &apiv1.HTTPLookupParam{Name: p.Name, Description: p.Description}
+		}
+		out[i] = &apiv1.JSONFileLookupEntry{
+			Name:          l.Name,
+			FileId:        l.FileID,
+			Query:         l.Query,
+			ResponsePaths: l.ResponsePaths,
+			Parameters:    params,
+		}
+	}
+	return out
+}
+
+func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []config.JSONFileLookupConfig {
+	out := make([]config.JSONFileLookupConfig, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" || e.FileId == "" {
+			continue
+		}
+		params := make([]config.HTTPLookupParam, len(e.Parameters))
+		for j, p := range e.Parameters {
+			params[j] = config.HTTPLookupParam{Name: p.Name, Description: p.Description}
+		}
+		out = append(out, config.JSONFileLookupConfig{
+			Name:          e.Name,
+			FileID:        e.FileId,
+			Query:         e.Query,
+			ResponsePaths: e.ResponsePaths,
+			Parameters:    params,
+		})
+	}
+	return out
+}
+
+func mmdbLookupsToProto(lookups []config.MMDBLookupConfig) []*apiv1.MMDBLookupEntry {
+	if len(lookups) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.MMDBLookupEntry, len(lookups))
+	for i, l := range lookups {
+		out[i] = &apiv1.MMDBLookupEntry{
+			Name:   l.Name,
+			DbType: l.DBType,
+			FileId: l.FileID,
+		}
+	}
+	return out
+}
+
+func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []config.MMDBLookupConfig {
+	out := make([]config.MMDBLookupConfig, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" {
+			continue
+		}
+		out = append(out, config.MMDBLookupConfig{
+			Name:   e.Name,
+			DBType: e.DbType,
+			FileID: e.FileId,
 		})
 	}
 	return out

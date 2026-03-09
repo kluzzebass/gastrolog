@@ -409,19 +409,19 @@ func applyRecordLookup(ctx context.Context, records []chunk.Record, op *querylan
 		return
 	}
 
-	if pt, ok := table.(lookup.ParameterizedLookup); ok && len(pt.Parameters()) > 0 {
-		applyRecordLookupParameterized(ctx, records, op, pt)
+	if len(table.Parameters()) > 1 {
+		applyRecordLookupParameterized(ctx, records, op, table)
 		return
 	}
 	applyRecordLookupSingle(ctx, records, op, table)
 }
 
 // applyRecordLookupParameterized collects all field values per record, makes one call, prefixes with table name.
-func applyRecordLookupParameterized(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, pt lookup.ParameterizedLookup) {
-	params := pt.Parameters()
+func applyRecordLookupParameterized(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, table lookup.LookupTable) {
+	params := table.Parameters()
 	for i := range records {
 		values := collectParamValues(params, op.Fields, records[i].Attrs)
-		result := pt.LookupValues(ctx, values)
+		result := table.LookupValues(ctx, values)
 		if result == nil {
 			continue
 		}
@@ -436,13 +436,14 @@ func applyRecordLookupParameterized(ctx context.Context, records []chunk.Record,
 
 // applyRecordLookupSingle performs per-field independent lookups.
 func applyRecordLookupSingle(ctx context.Context, records []chunk.Record, op *querylang.LookupOp, table lookup.LookupTable) {
+	param := table.Parameters()[0]
 	for i := range records {
 		for _, field := range op.Fields {
 			val, ok := records[i].Attrs[field]
 			if !ok || val == "" {
 				continue
 			}
-			result := table.Lookup(ctx, val)
+			result := table.LookupValues(ctx, map[string]string{param: val})
 			if result == nil {
 				continue
 			}
@@ -479,18 +480,18 @@ func applyTableLookup(ctx context.Context, table *TableResult, op *querylang.Loo
 		return table
 	}
 
-	if pt, ok := lt.(lookup.ParameterizedLookup); ok && len(pt.Parameters()) > 0 {
-		return applyTableLookupParameterized(ctx, table, op, pt)
+	if len(lt.Parameters()) > 1 {
+		return applyTableLookupParameterized(ctx, table, op, lt)
 	}
 	return applyTableLookupSingle(ctx, table, op, lt)
 }
 
 // applyTableLookupParameterized collects all field values per row, makes one call, prefixes with table name.
-func applyTableLookupParameterized(ctx context.Context, table *TableResult, op *querylang.LookupOp, pt lookup.ParameterizedLookup) *TableResult {
-	params := pt.Parameters()
+func applyTableLookupParameterized(ctx context.Context, table *TableResult, op *querylang.LookupOp, lt lookup.LookupTable) *TableResult {
+	params := lt.Parameters()
 	srcIdxs := findColumnIndices(table.Columns, op.Fields)
 
-	suffixes := pt.Suffixes()
+	suffixes := lt.Suffixes()
 	baseCol := len(table.Columns)
 	for _, suffix := range suffixes {
 		table.Columns = append(table.Columns, op.Table+"_"+suffix)
@@ -506,7 +507,7 @@ func applyTableLookupParameterized(ctx context.Context, table *TableResult, op *
 				values[param] = row[srcIdxs[j]]
 			}
 		}
-		result := pt.LookupValues(ctx, values)
+		result := lt.LookupValues(ctx, values)
 		if result == nil {
 			continue
 		}
@@ -551,7 +552,7 @@ func applyTableLookupField(ctx context.Context, table *TableResult, lt lookup.Lo
 		if srcIdx >= len(row) || row[srcIdx] == "" {
 			continue
 		}
-		result := lt.Lookup(ctx, row[srcIdx])
+		result := lt.LookupValues(ctx, map[string]string{lt.Parameters()[0]: row[srcIdx]})
 		if result == nil {
 			continue
 		}
@@ -813,17 +814,18 @@ func (s *transformStep) applyLookup(ctx context.Context, rec *chunk.Record) {
 		return
 	}
 
-	if pt, ok := s.lookupT.(lookup.ParameterizedLookup); ok && len(pt.Parameters()) > 0 {
-		s.applyLookupParameterized(ctx, rec, pt)
+	if len(s.lookupT.Parameters()) > 1 {
+		s.applyLookupParameterized(ctx, rec, s.lookupT)
 		return
 	}
 
+	param := s.lookupT.Parameters()[0]
 	for _, field := range s.lookupF {
 		val, ok := rec.Attrs[field]
 		if !ok || val == "" {
 			continue
 		}
-		result := s.lookupT.Lookup(ctx, val)
+		result := s.lookupT.LookupValues(ctx, map[string]string{param: val})
 		if result == nil {
 			continue
 		}
@@ -836,9 +838,9 @@ func (s *transformStep) applyLookup(ctx context.Context, rec *chunk.Record) {
 	}
 }
 
-func (s *transformStep) applyLookupParameterized(ctx context.Context, rec *chunk.Record, pt lookup.ParameterizedLookup) {
-	values := collectParamValues(pt.Parameters(), s.lookupF, rec.Attrs)
-	result := pt.LookupValues(ctx, values)
+func (s *transformStep) applyLookupParameterized(ctx context.Context, rec *chunk.Record, table lookup.LookupTable) {
+	values := collectParamValues(table.Parameters(), s.lookupF, rec.Attrs)
+	result := table.LookupValues(ctx, values)
 	if result == nil {
 		return
 	}

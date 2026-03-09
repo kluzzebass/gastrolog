@@ -365,8 +365,10 @@ type staticTable struct {
 	suffixes []string
 }
 
-func (s *staticTable) Lookup(_ context.Context, value string) map[string]string {
-	return s.data[value]
+func (s *staticTable) Parameters() []string { return []string{"value"} }
+
+func (s *staticTable) LookupValues(_ context.Context, values map[string]string) map[string]string {
+	return s.data[values["value"]]
 }
 
 func (s *staticTable) Suffixes() []string {

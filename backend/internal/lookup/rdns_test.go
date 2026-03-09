@@ -25,7 +25,8 @@ func newMockRDNS(responses map[string]string) *mockRDNS {
 	return m
 }
 
-func (m *mockRDNS) Lookup(ctx context.Context, value string) map[string]string {
+func (m *mockRDNS) LookupValues(ctx context.Context, values map[string]string) map[string]string {
+	value := values["value"]
 	if value == "" {
 		return nil
 	}
@@ -79,7 +80,7 @@ func TestRDNSLookupHit(t *testing.T) {
 		"8.8.8.8": "dns.google",
 	})
 
-	result := m.Lookup(context.Background(), "8.8.8.8")
+	result := m.LookupValues(context.Background(), map[string]string{"value": "8.8.8.8"})
 	if result == nil {
 		t.Fatal("expected result, got nil")
 	}
@@ -92,7 +93,7 @@ func TestRDNSLookupMiss(t *testing.T) {
 	t.Parallel()
 	m := newMockRDNS(map[string]string{})
 
-	result := m.Lookup(context.Background(), "192.168.1.1")
+	result := m.LookupValues(context.Background(), map[string]string{"value": "192.168.1.1"})
 	if result != nil {
 		t.Errorf("expected nil for unknown IP, got %v", result)
 	}
@@ -102,7 +103,7 @@ func TestRDNSLookupEmpty(t *testing.T) {
 	t.Parallel()
 	m := newMockRDNS(map[string]string{})
 
-	result := m.Lookup(context.Background(), "")
+	result := m.LookupValues(context.Background(), map[string]string{"value": ""})
 	if result != nil {
 		t.Errorf("expected nil for empty input, got %v", result)
 	}
@@ -119,14 +120,14 @@ func TestRDNSCacheHit(t *testing.T) {
 	m.responses = map[string]string{}
 	// Warm the cache.
 	m.responses = origResponses
-	_ = m.Lookup(context.Background(), "1.2.3.4")
+	_ = m.LookupValues(context.Background(), map[string]string{"value": "1.2.3.4"})
 
 	// Clear responses so a new resolve would return nothing.
 	m.responses = map[string]string{}
 	callCount++
 
 	// Second call should use cache.
-	result := m.Lookup(context.Background(), "1.2.3.4")
+	result := m.LookupValues(context.Background(), map[string]string{"value": "1.2.3.4"})
 	if result == nil || result["hostname"] != "host.example.com" {
 		t.Errorf("cached lookup failed: got %v", result)
 	}
@@ -137,12 +138,12 @@ func TestRDNSCacheNegative(t *testing.T) {
 	m := newMockRDNS(map[string]string{})
 
 	// First call caches negative.
-	_ = m.Lookup(context.Background(), "10.0.0.1")
+	_ = m.LookupValues(context.Background(), map[string]string{"value": "10.0.0.1"})
 
 	// Add a response — but cache should still return nil.
 	m.responses["10.0.0.1"] = "now-resolvable.example.com"
 
-	result := m.Lookup(context.Background(), "10.0.0.1")
+	result := m.LookupValues(context.Background(), map[string]string{"value": "10.0.0.1"})
 	if result != nil {
 		t.Errorf("expected cached negative, got %v", result)
 	}

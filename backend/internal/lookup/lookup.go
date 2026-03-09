@@ -8,26 +8,23 @@ import (
 
 // LookupTable enriches records by looking up field values in an external source.
 // Implementations must be safe for concurrent use.
+//
+// Every table exposes ordered Parameters (at least one). Single-input tables
+// (RDNS, GeoIP, ASN) return ["value"]; multi-input tables (HTTP, JSON file)
+// return their configured parameter names. The pipeline uses len(Parameters())
+// to decide between per-field iteration and positional multi-field mapping.
 type LookupTable interface {
-	// Lookup returns key→value pairs for the given input value.
+	// LookupValues performs a lookup with named inputs.
 	// Returns nil on miss (enrichment misses are normal, not errors).
-	Lookup(ctx context.Context, value string) map[string]string
+	LookupValues(ctx context.Context, values map[string]string) map[string]string
+
+	// Parameters returns the ordered parameter names for this table.
+	// Single-input tables return ["value"].
+	Parameters() []string
 
 	// Suffixes returns the list of output keys this table produces
 	// (e.g. ["hostname"] for RDNS).
 	Suffixes() []string
-}
-
-// ParameterizedLookup is optionally implemented by tables that accept
-// multiple named input values (e.g. HTTP APIs with several URL placeholders).
-// The pipeline maps query fields positionally to Parameters() and makes a
-// single LookupValues call instead of per-field Lookup calls.
-type ParameterizedLookup interface {
-	LookupTable
-	// Parameters returns the ordered parameter names for this table.
-	Parameters() []string
-	// LookupValues performs a single lookup with multiple named inputs.
-	LookupValues(ctx context.Context, values map[string]string) map[string]string
 }
 
 // Resolver looks up a table by name. Returns nil if unknown.

@@ -60,6 +60,18 @@ type PutSettingsArgs = {
       cacheTtl?: string;
       cacheSize?: number;
     }[];
+    jsonFileLookups?: {
+      name: string;
+      fileId: string;
+      query?: string;
+      responsePaths?: string[];
+      parameters?: { name: string; description: string }[];
+    }[];
+    mmdbLookups?: {
+      name: string;
+      dbType: string;
+      fileId?: string;
+    }[];
   };
   cluster?: {
     broadcastInterval?: string;
@@ -91,6 +103,8 @@ function buildLookupReq(lookup: NonNullable<PutSettingsArgs["lookup"]>): Record<
     req.maxmind = mm;
   }
   if (lookup.httpLookups) req.httpLookups = lookup.httpLookups;
+  if (lookup.jsonFileLookups) req.jsonFileLookups = lookup.jsonFileLookups;
+  if (lookup.mmdbLookups) req.mmdbLookups = lookup.mmdbLookups;
   return req;
 }
 

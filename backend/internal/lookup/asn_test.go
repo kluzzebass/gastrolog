@@ -13,7 +13,7 @@ import (
 
 func TestASN_Suffixes(t *testing.T) {
 	t.Parallel()
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
 	got := a.Suffixes()
@@ -30,30 +30,30 @@ func TestASN_Suffixes(t *testing.T) {
 
 func TestASN_LookupNilReader(t *testing.T) {
 	t.Parallel()
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
-	if got := a.Lookup(context.Background(), "1.2.3.4"); got != nil {
+	if got := a.LookupValues(context.Background(), map[string]string{"value": "1.2.3.4"}); got != nil {
 		t.Errorf("Lookup with nil reader = %v, want nil", got)
 	}
 }
 
 func TestASN_LookupInvalidIP(t *testing.T) {
 	t.Parallel()
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
-	if got := a.Lookup(context.Background(), ""); got != nil {
+	if got := a.LookupValues(context.Background(), map[string]string{"value": ""}); got != nil {
 		t.Errorf("Lookup empty = %v, want nil", got)
 	}
-	if got := a.Lookup(context.Background(), "not-an-ip"); got != nil {
+	if got := a.LookupValues(context.Background(), map[string]string{"value": "not-an-ip"}); got != nil {
 		t.Errorf("Lookup garbage = %v, want nil", got)
 	}
 }
 
 func TestASN_LoadBadPath(t *testing.T) {
 	t.Parallel()
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
 	if _, err := a.Load("/nonexistent/path.mmdb"); err == nil {
@@ -68,7 +68,7 @@ func TestASN_LoadBadFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
 	if _, err := a.Load(tmp); err == nil {
@@ -125,7 +125,7 @@ func TestASN_LoadAndLookup(t *testing.T) {
 	t.Parallel()
 	path := generateTestASNDB(t)
 
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
 	info, err := a.Load(path)
@@ -140,7 +140,7 @@ func TestASN_LoadAndLookup(t *testing.T) {
 		t.Error("BuildTime is zero")
 	}
 
-	got := a.Lookup(context.Background(), "8.8.8.8")
+	got := a.LookupValues(context.Background(), map[string]string{"value": "8.8.8.8"})
 	if got == nil {
 		t.Fatal("Lookup(8.8.8.8) = nil, want non-nil result")
 	}
@@ -151,7 +151,7 @@ func TestASN_LoadAndLookup(t *testing.T) {
 		t.Errorf("as_org = %q, want %q", got["as_org"], "GOOGLE")
 	}
 
-	got = a.Lookup(context.Background(), "1.1.1.1")
+	got = a.LookupValues(context.Background(), map[string]string{"value": "1.1.1.1"})
 	if got == nil {
 		t.Fatal("Lookup(1.1.1.1) = nil, want non-nil result")
 	}
@@ -167,7 +167,7 @@ func TestASN_ReaderSwap(t *testing.T) {
 	t.Parallel()
 	path := generateTestASNDB(t)
 
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
 	// Load twice — the first reader should be closed without error.
@@ -179,7 +179,7 @@ func TestASN_ReaderSwap(t *testing.T) {
 	}
 
 	// Should still work after swap.
-	got := a.Lookup(context.Background(), "8.8.8.8")
+	got := a.LookupValues(context.Background(), map[string]string{"value": "8.8.8.8"})
 	if got == nil {
 		t.Fatal("Lookup after swap = nil")
 	}
@@ -189,7 +189,7 @@ func TestASN_Miss(t *testing.T) {
 	t.Parallel()
 	path := generateTestASNDB(t)
 
-	a := NewASN()
+	a := NewMMDB("asn")
 	defer a.Close()
 
 	if _, err := a.Load(path); err != nil {
@@ -197,7 +197,7 @@ func TestASN_Miss(t *testing.T) {
 	}
 
 	// 10.0.0.1 (private IP) — complete miss, should return nil.
-	if got := a.Lookup(context.Background(), "10.0.0.1"); got != nil {
+	if got := a.LookupValues(context.Background(), map[string]string{"value": "10.0.0.1"}); got != nil {
 		t.Errorf("Lookup(10.0.0.1) = %v, want nil", got)
 	}
 }

@@ -39,13 +39,17 @@ func NewRDNS() *RDNS {
 	}
 }
 
+// Parameters returns the single input parameter name.
+func (r *RDNS) Parameters() []string { return []string{"value"} }
+
 // Suffixes returns the output suffixes for RDNS lookups.
 func (r *RDNS) Suffixes() []string {
 	return []string{"hostname"}
 }
 
-// Lookup resolves an IP address to a hostname. Returns nil on failure.
-func (r *RDNS) Lookup(ctx context.Context, value string) map[string]string {
+// LookupValues resolves an IP address to a hostname. Returns nil on failure.
+func (r *RDNS) LookupValues(ctx context.Context, values map[string]string) map[string]string {
+	value := values["value"]
 	if value == "" {
 		return nil
 	}

@@ -252,10 +252,19 @@ type TLSConfig struct {
 
 // LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
 type LookupConfig struct {
-	GeoIPDBPath string             `json:"geoip_db_path,omitempty"` // Path to MaxMind GeoIP2/GeoLite2-City MMDB file
-	ASNDBPath   string             `json:"asn_db_path,omitempty"`   // Path to MaxMind GeoIP2/GeoLite2-ASN MMDB file
-	MaxMind     MaxMindConfig      `json:"maxmind,omitzero"`
-	HTTPLookups []HTTPLookupConfig `json:"http_lookups,omitempty"`
+	GeoIPDBPath     string                 `json:"geoip_db_path,omitempty"` // deprecated: use MMDBLookups
+	ASNDBPath       string                 `json:"asn_db_path,omitempty"`   // deprecated: use MMDBLookups
+	MaxMind         MaxMindConfig          `json:"maxmind,omitzero"`
+	HTTPLookups     []HTTPLookupConfig     `json:"http_lookups,omitempty"`
+	JSONFileLookups []JSONFileLookupConfig `json:"json_file_lookups,omitempty"`
+	MMDBLookups     []MMDBLookupConfig     `json:"mmdb_lookups,omitempty"`
+}
+
+// MMDBLookupConfig defines a named MMDB-backed lookup table (GeoIP City or ASN).
+type MMDBLookupConfig struct {
+	Name   string `json:"name"`              // registry name (e.g. "geoip", "asn")
+	DBType string `json:"db_type"`           // "city" or "asn"
+	FileID string `json:"file_id,omitempty"` // managed file ID; empty = use auto-downloaded
 }
 
 // HTTPLookupParam defines a named parameter for URL template substitution.
@@ -275,6 +284,15 @@ type HTTPLookupConfig struct {
 	Timeout       string            `json:"timeout,omitempty"`        // Go duration string, optional
 	CacheTTL      string            `json:"cache_ttl,omitempty"`      // Go duration string, optional
 	CacheSize     int               `json:"cache_size,omitempty"`     // optional, default 10000
+}
+
+// JSONFileLookupConfig defines a JSON file-backed lookup table.
+type JSONFileLookupConfig struct {
+	Name          string            `json:"name"`                      // registry name (e.g. "hosts")
+	FileID        string            `json:"file_id"`                   // managed file ID (UUID)
+	Query         string            `json:"query"`                     // JSONPath query template with {name} placeholders
+	ResponsePaths []string          `json:"response_paths,omitempty"`  // JSONPath expressions to extract from results
+	Parameters    []HTTPLookupParam `json:"parameters,omitempty"`      // ordered params for query template placeholders
 }
 
 // MaxMindConfig holds credentials and state for automatic MaxMind database downloading.

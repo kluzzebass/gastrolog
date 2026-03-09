@@ -84,10 +84,15 @@ func NewHTTP(cfg HTTPConfig) *HTTP {
 		}
 	}
 
+	params := cfg.Parameters
+	if len(params) == 0 {
+		params = []string{"value"}
+	}
+
 	return &HTTP{
 		urlTemplate:   cfg.URLTemplate,
 		responsePaths: paths,
-		parameters:    cfg.Parameters,
+		parameters:    params,
 		client:        &http.Client{Timeout: timeout},
 		headers:      cfg.Headers,
 		cacheTTL:     cacheTTL,
@@ -104,7 +109,7 @@ func (h *HTTP) Suffixes() []string {
 	return h.suffixes
 }
 
-// Parameters returns the ordered parameter names, or nil for legacy {value} mode.
+// Parameters returns the ordered parameter names (at least ["value"]).
 func (h *HTTP) Parameters() []string {
 	return h.parameters
 }
@@ -161,45 +166,6 @@ func (h *HTTP) LookupValues(ctx context.Context, values map[string]string) map[s
 	return result
 }
 
-// Lookup calls the HTTP endpoint with the given value and returns the response
-// fields as a string map. Returns nil on error, timeout, or empty response.
-func (h *HTTP) Lookup(ctx context.Context, value string) map[string]string {
-	if value == "" {
-		return nil
-	}
-
-	// Check cache.
-	h.mu.Lock()
-	if entry, ok := h.cache[value]; ok {
-		if time.Now().Before(entry.expires) {
-			h.mu.Unlock()
-			return entry.result // nil for cached negative
-		}
-	}
-	h.mu.Unlock()
-
-	result := h.fetch(ctx, value)
-
-	// Cache the result (including nil for negative caching).
-	h.mu.Lock()
-	if len(h.cache) >= h.cacheSize {
-		clear(h.cache)
-	}
-	h.cache[value] = httpEntry{result: result, expires: time.Now().Add(h.cacheTTL)}
-
-	// Discover suffixes from first successful response.
-	if result != nil && h.suffixes == nil {
-		keys := make([]string, 0, len(result))
-		for k := range result {
-			keys = append(keys, k)
-		}
-		h.suffixes = keys
-	}
-	h.mu.Unlock()
-
-	return result
-}
-
 // TestFetch makes a single HTTP request, bypassing the empty-value guard and cache.
 // Values are substituted as {key} placeholders in the URL template.
 func (h *HTTP) TestFetch(ctx context.Context, values map[string]string) map[string]string {
@@ -207,12 +173,6 @@ func (h *HTTP) TestFetch(ctx context.Context, values map[string]string) map[stri
 	for k, v := range values {
 		reqURL = strings.ReplaceAll(reqURL, "{"+k+"}", url.PathEscape(v))
 	}
-	return h.doFetch(ctx, reqURL)
-}
-
-// fetch makes the HTTP GET request substituting {value} in the URL template.
-func (h *HTTP) fetch(ctx context.Context, value string) map[string]string {
-	reqURL := strings.ReplaceAll(h.urlTemplate, "{value}", url.PathEscape(value))
 	return h.doFetch(ctx, reqURL)
 }
 

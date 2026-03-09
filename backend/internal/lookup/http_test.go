@@ -17,7 +17,7 @@ func TestHTTPLookup_Basic(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "123")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "123"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -42,13 +42,13 @@ func TestHTTPLookup_CacheHit(t *testing.T) {
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}", CacheTTL: time.Minute})
 
 	// First call hits the server.
-	r1 := h.Lookup(context.Background(), "456")
+	r1 := h.LookupValues(context.Background(), map[string]string{"value": "456"})
 	if r1 == nil || r1["name"] != "Bob" {
 		t.Fatal("first lookup failed")
 	}
 
 	// Second call should come from cache.
-	r2 := h.Lookup(context.Background(), "456")
+	r2 := h.LookupValues(context.Background(), map[string]string{"value": "456"})
 	if r2 == nil || r2["name"] != "Bob" {
 		t.Fatal("second lookup failed")
 	}
@@ -69,9 +69,9 @@ func TestHTTPLookup_CacheTTLExpiry(t *testing.T) {
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}", CacheTTL: time.Millisecond})
 
-	h.Lookup(context.Background(), "789")
+	h.LookupValues(context.Background(), map[string]string{"value": "789"})
 	time.Sleep(5 * time.Millisecond) // Let TTL expire.
-	h.Lookup(context.Background(), "789")
+	h.LookupValues(context.Background(), map[string]string{"value": "789"})
 
 	if calls.Load() != 2 {
 		t.Errorf("expected 2 HTTP calls after TTL expiry, got %d", calls.Load())
@@ -85,7 +85,7 @@ func TestHTTPLookup_HTTPError(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "err")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "err"})
 
 	if result != nil {
 		t.Errorf("expected nil result on HTTP error, got %v", result)
@@ -100,7 +100,7 @@ func TestHTTPLookup_Timeout(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}", Timeout: 50 * time.Millisecond})
-	result := h.Lookup(context.Background(), "slow")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "slow"})
 
 	if result != nil {
 		t.Errorf("expected nil result on timeout, got %v", result)
@@ -115,7 +115,7 @@ func TestHTTPLookup_NonStringValues(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -142,7 +142,7 @@ func TestHTTPLookup_NestedObjectsSerialized(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -171,7 +171,7 @@ func TestHTTPLookup_URLTemplateSubstitution(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/users/{value}/info"})
-	h.Lookup(context.Background(), "user42")
+	h.LookupValues(context.Background(), map[string]string{"value": "user42"})
 
 	if receivedPath != "/users/user42/info" {
 		t.Errorf("path = %q, want /users/user42/info", receivedPath)
@@ -191,7 +191,7 @@ func TestHTTPLookup_URLEncoding(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/lookup/{value}"})
-	h.Lookup(context.Background(), "hello world/foo")
+	h.LookupValues(context.Background(), map[string]string{"value": "hello world/foo"})
 
 	if receivedPath != "/lookup/hello%20world%2Ffoo" {
 		t.Errorf("path = %q, want /lookup/hello%%20world%%2Ffoo", receivedPath)
@@ -215,7 +215,7 @@ func TestHTTPLookup_CustomHeaders(t *testing.T) {
 			"X-Custom":      "custom-value",
 		},
 	})
-	h.Lookup(context.Background(), "x")
+	h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if gotAuth != "Bearer secret-token" {
 		t.Errorf("Authorization = %q, want Bearer secret-token", gotAuth)
@@ -239,7 +239,7 @@ func TestHTTPLookup_SuffixesDiscovery(t *testing.T) {
 		t.Errorf("suffixes before lookup = %v, want empty", s)
 	}
 
-	h.Lookup(context.Background(), "x")
+	h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	suffixes := h.Suffixes()
 	if len(suffixes) != 2 {
@@ -264,7 +264,7 @@ func TestHTTPLookup_EmptyResponse(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
 		t.Errorf("expected nil for empty response, got %v", result)
@@ -273,7 +273,7 @@ func TestHTTPLookup_EmptyResponse(t *testing.T) {
 
 func TestHTTPLookup_EmptyValue(t *testing.T) {
 	h := NewHTTP(HTTPConfig{URLTemplate: "http://localhost/{value}"})
-	result := h.Lookup(context.Background(), "")
+	result := h.LookupValues(context.Background(), map[string]string{"value": ""})
 
 	if result != nil {
 		t.Errorf("expected nil for empty value, got %v", result)
@@ -288,7 +288,7 @@ func TestHTTPLookup_InvalidJSON(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
 		t.Errorf("expected nil for invalid JSON, got %v", result)
@@ -303,7 +303,7 @@ func TestHTTPLookup_RejectsNonJSON(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
 		t.Errorf("expected nil for non-JSON content type, got %v", result)
@@ -317,7 +317,7 @@ func TestHTTPLookup_RejectsMissingContentType(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
 		t.Errorf("expected nil for missing content type, got %v", result)
@@ -335,7 +335,7 @@ func TestHTTPLookup_ResponsePath(t *testing.T) {
 		URLTemplate:  srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.user"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -359,7 +359,7 @@ func TestHTTPLookup_ResponsePathArray(t *testing.T) {
 		URLTemplate:  srv.URL + "/{value}",
 		ResponsePaths: []string{"$.results[0]"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -380,7 +380,7 @@ func TestHTTPLookup_ResponsePathMiss(t *testing.T) {
 		URLTemplate:  srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.user"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result != nil {
 		t.Errorf("expected nil for missing path, got %v", result)
@@ -398,7 +398,7 @@ func TestHTTPLookup_MultipleResponsePaths(t *testing.T) {
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.user", "$.account"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -425,7 +425,7 @@ func TestHTTPLookup_ResponsePathScalar(t *testing.T) {
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.headers.host"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -449,7 +449,7 @@ func TestHTTPLookup_ResponsePathArrayFlat(t *testing.T) {
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.data.tags"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -476,7 +476,7 @@ func TestHTTPLookup_ResponsePathArrayOfObjects(t *testing.T) {
 		URLTemplate:   srv.URL + "/{value}",
 		ResponsePaths: []string{"$.items"},
 	})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -497,7 +497,7 @@ func TestHTTPLookup_AcceptsContentTypeWithCharset(t *testing.T) {
 	defer srv.Close()
 
 	h := NewHTTP(HTTPConfig{URLTemplate: srv.URL + "/{value}"})
-	result := h.Lookup(context.Background(), "x")
+	result := h.LookupValues(context.Background(), map[string]string{"value": "x"})
 
 	if result == nil {
 		t.Fatal("expected non-nil result")

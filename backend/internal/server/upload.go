@@ -216,6 +216,35 @@ func (s *Server) ResolveManagedFilePath(ctx context.Context, filename string) st
 	return ""
 }
 
+// ResolveManagedFileByID returns the on-disk path for a managed file by its ID.
+// Triggers on-demand repair if the file is missing from disk. Returns empty string
+// if not found.
+func (s *Server) ResolveManagedFileByID(ctx context.Context, fileID string) string {
+	if s.homeDir == "" || fileID == "" {
+		return ""
+	}
+	files, err := s.cfgStore.ListManagedFiles(ctx)
+	if err != nil {
+		return ""
+	}
+	for i := len(files) - 1; i >= 0; i-- {
+		if files[i].ID.String() == fileID {
+			hd := home.New(s.homeDir)
+			dir := hd.ManagedFileDir(fileID)
+			path := filepath.Join(dir, files[i].Name)
+			if _, err := os.Stat(path); err == nil {
+				return path
+			}
+			if s.repairManagedFile != nil && s.repairManagedFile(fileID) {
+				if _, err := os.Stat(path); err == nil {
+					return path
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // registerUploadHandler adds the managed file upload endpoint to the mux.
 func (s *Server) registerUploadHandler(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/managed-files/upload", s.handleManagedFileUpload)
