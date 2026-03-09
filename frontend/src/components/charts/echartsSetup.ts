@@ -3,7 +3,7 @@
  * Import the configured `echarts` instance from here, never from "echarts" directly.
  */
 import * as echarts from "echarts/core";
-import { BarChart, PieChart, LineChart, MapChart, ScatterChart } from "echarts/charts";
+import { BarChart, PieChart, LineChart, MapChart, ScatterChart, HeatmapChart } from "echarts/charts";
 import {
   GridComponent,
   TooltipComponent,
@@ -21,6 +21,7 @@ echarts.use([
   LineChart,
   MapChart,
   ScatterChart,
+  HeatmapChart,
   GridComponent,
   TooltipComponent,
   LegendComponent,

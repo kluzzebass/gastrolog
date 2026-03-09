@@ -133,6 +133,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseBarchartOp()
 	case "donut":
 		return p.parseDonutOp()
+	case "heatmap":
+		return p.parseHeatmapOp()
 	case "scatter":
 		return p.parseScatterOp()
 	case "map":
@@ -1105,6 +1107,14 @@ func (p *parser) parseDonutOp() (*DonutOp, error) {
 		return nil, err
 	}
 	return &DonutOp{}, nil
+}
+
+// parseHeatmapOp parses: "heatmap" (no arguments).
+func (p *parser) parseHeatmapOp() (*HeatmapOp, error) {
+	if err := p.advance(); err != nil { // consume "heatmap"
+		return nil, err
+	}
+	return &HeatmapOp{}, nil
 }
 
 // parseMapOp parses: "map" ("choropleth" FIELD | "scatter" LAT LON)

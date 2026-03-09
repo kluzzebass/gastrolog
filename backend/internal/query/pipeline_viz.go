@@ -24,6 +24,10 @@ func ValidateVizOp(op querylang.PipeOp, table *TableResult) string {
 		if validateDonut(table) {
 			return "donut"
 		}
+	case *querylang.HeatmapOp:
+		if validateHeatmap(table) {
+			return "heatmap"
+		}
 	case *querylang.ScatterOp:
 		if validateScatterPlot(v, table) {
 			return "scatter"
@@ -50,6 +54,14 @@ func validateDonut(table *TableResult) bool {
 	return lastColumnNumeric(table)
 }
 
+// validateHeatmap checks: exactly 3 columns, ≥4 rows, last column numeric.
+func validateHeatmap(table *TableResult) bool {
+	if len(table.Columns) != 3 || len(table.Rows) < 4 {
+		return false
+	}
+	return lastColumnNumeric(table)
+}
+
 // AutoDetectVizType returns a visualization type string if the table shape
 // strongly suggests a specific chart, or "" for default table display.
 // Called when no explicit viz operator is present.
@@ -62,7 +74,25 @@ func AutoDetectVizType(table *TableResult) string {
 			return "donut"
 		}
 	}
+	// Auto-heatmap: exactly 3 columns, ≥4 rows, last column numeric,
+	// and both axes have moderate distinct counts (2–30 each).
+	if len(table.Columns) == 3 && len(table.Rows) >= 4 && lastColumnNumeric(table) {
+		d0 := distinctCount(table, 0)
+		d1 := distinctCount(table, 1)
+		if d0 >= 2 && d0 <= 30 && d1 >= 2 && d1 <= 30 {
+			return "heatmap"
+		}
+	}
 	return ""
+}
+
+// distinctCount returns the number of distinct values in the given column index.
+func distinctCount(table *TableResult, col int) int {
+	seen := make(map[string]struct{}, len(table.Rows))
+	for _, row := range table.Rows {
+		seen[row[col]] = struct{}{}
+	}
+	return len(seen)
 }
 
 // validateMap dispatches by mode. Returns the result_type string or "".

@@ -340,6 +340,15 @@ func (DonutOp) pipeOp() {}
 
 func (DonutOp) String() string { return "donut" }
 
+// HeatmapOp represents: heatmap (no arguments).
+// Forces the pipeline result to render as a heatmap.
+// Validates: exactly 3 columns (x, y, value), ≥4 rows, last column numeric.
+type HeatmapOp struct{}
+
+func (HeatmapOp) pipeOp() {}
+
+func (HeatmapOp) String() string { return "heatmap" }
+
 // MapMode identifies a map subcommand.
 type MapMode int
 

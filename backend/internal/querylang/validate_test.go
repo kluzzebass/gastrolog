@@ -186,6 +186,12 @@ func TestValidateExpression(t *testing.T) {
 			wantValid:  true,
 			wantOffset: -1,
 		},
+		{
+			name:       "heatmap",
+			expr:       "error | stats count by hour, status | heatmap",
+			wantValid:  true,
+			wantOffset: -1,
+		},
 	}
 
 	for _, tt := range tests {

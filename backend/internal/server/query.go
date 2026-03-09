@@ -721,6 +721,9 @@ func (s *QueryServer) Follow(
 			case *querylang.DonutOp:
 				return connect.NewError(connect.CodeInvalidArgument,
 					errors.New("donut operator is not supported in follow mode"))
+			case *querylang.HeatmapOp:
+				return connect.NewError(connect.CodeInvalidArgument,
+					errors.New("heatmap operator is not supported in follow mode"))
 			case *querylang.MapOp:
 				return connect.NewError(connect.CodeInvalidArgument,
 					errors.New("map operator is not supported in follow mode"))
@@ -1069,6 +1072,8 @@ func pipeOpName(op querylang.PipeOp) string {
 		return "barchart"
 	case *querylang.DonutOp:
 		return "donut"
+	case *querylang.HeatmapOp:
+		return "heatmap"
 	case *querylang.DedupOp:
 		return "dedup"
 	case *querylang.MapOp:
@@ -1172,6 +1177,8 @@ func pipeOpNote(op querylang.PipeOp) string {
 		return "Renders results as a bar chart. No data transformation."
 	case *querylang.DonutOp:
 		return "Renders results as a donut chart. No data transformation."
+	case *querylang.HeatmapOp:
+		return "Renders results as a heatmap. No data transformation."
 	case *querylang.MapOp:
 		if o.Mode == querylang.MapChoropleth {
 			return fmt.Sprintf("Renders a choropleth map by %s. No data transformation.", o.CountryField)
@@ -1401,7 +1408,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "linechart", "barchart", "donut", "scatter", "map"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "linechart", "barchart", "donut", "heatmap", "scatter", "map"},
 		PipeFunctions: funcs,
 		LookupTables:  s.lookupNames,
 	}), nil
@@ -1719,7 +1726,7 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 			}
 		}
 		switch pipe.(type) {
-		case *querylang.LinechartOp, *querylang.BarchartOp, *querylang.DonutOp, *querylang.ScatterOp, *querylang.MapOp:
+		case *querylang.LinechartOp, *querylang.BarchartOp, *querylang.DonutOp, *querylang.HeatmapOp, *querylang.ScatterOp, *querylang.MapOp:
 			vizOp = pipe
 		}
 	}

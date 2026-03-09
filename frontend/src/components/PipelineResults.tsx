@@ -5,6 +5,7 @@ import { tableResultToHistogramData } from "../utils/histogramData";
 import { AutoRefreshControls } from "./AutoRefreshControls";
 import { BarChart } from "./charts/BarChart";
 import { DonutChart } from "./charts/DonutChart";
+import { HeatmapChart } from "./charts/HeatmapChart";
 import { ScatterChart } from "./charts/ScatterChart";
 import { WorldMapChart } from "./charts/WorldMapChart";
 import { ExportButton } from "./ExportButton";
@@ -154,6 +155,13 @@ function PipelineResultBody({
       </div>
     );
   }
+  if (resultType === "heatmap" && viewMode === "chart") {
+    return (
+      <div className="px-5 py-4">
+        <HeatmapChart columns={columns} rows={rowData} dark={dark} />
+      </div>
+    );
+  }
   if (resultType === "scatter" && viewMode === "chart") {
     return (
       <div className="px-5 py-4">
@@ -217,6 +225,7 @@ export function PipelineResults({
     resultType === "linechart" ||
     resultType === "barchart" ||
     resultType === "donut" ||
+    resultType === "heatmap" ||
     resultType === "scatter" ||
     resultType === "map-choropleth" ||
     resultType === "map-scatter";

@@ -413,6 +413,73 @@ func TestValidateLinechart(t *testing.T) {
 	}
 }
 
+func TestValidateHeatmap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		table  *TableResult
+		wantOK bool
+	}{
+		{
+			name: "valid 3 cols 4 rows",
+			table: &TableResult{
+				Columns: []string{"hour", "status", "count"},
+				Rows: [][]string{
+					{"00", "200", "50"}, {"00", "404", "5"},
+					{"01", "200", "60"}, {"01", "404", "3"},
+				},
+			},
+			wantOK: true,
+		},
+		{
+			name: "too few columns",
+			table: &TableResult{
+				Columns: []string{"hour", "count"},
+				Rows:    [][]string{{"00", "50"}, {"01", "60"}, {"02", "70"}, {"03", "80"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "too many columns",
+			table: &TableResult{
+				Columns: []string{"a", "b", "c", "d"},
+				Rows:    [][]string{{"1", "2", "3", "4"}, {"5", "6", "7", "8"}, {"9", "10", "11", "12"}, {"13", "14", "15", "16"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "too few rows",
+			table: &TableResult{
+				Columns: []string{"hour", "status", "count"},
+				Rows:    [][]string{{"00", "200", "50"}, {"00", "404", "5"}, {"01", "200", "60"}},
+			},
+			wantOK: false,
+		},
+		{
+			name: "last col not numeric",
+			table: &TableResult{
+				Columns: []string{"hour", "status", "label"},
+				Rows:    [][]string{{"00", "200", "ok"}, {"00", "404", "bad"}, {"01", "200", "ok"}, {"01", "404", "bad"}},
+			},
+			wantOK: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			result := ValidateVizOp(&querylang.HeatmapOp{}, tt.table)
+			got := result != ""
+			if got != tt.wantOK {
+				t.Errorf("ValidateVizOp(heatmap) = %q, wantOK=%v", result, tt.wantOK)
+			}
+			if got && result != "heatmap" {
+				t.Errorf("expected result_type 'heatmap', got %q", result)
+			}
+		})
+	}
+}
+
 func TestAutoDetectVizType(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -455,6 +522,33 @@ func TestAutoDetectVizType(t *testing.T) {
 					}
 					return rows
 				}(),
+			},
+			wantType: "",
+		},
+		{
+			name: "auto heatmap: 3 cols moderate distinct",
+			table: &TableResult{
+				Columns: []string{"hour", "status", "count"},
+				Rows: [][]string{
+					{"00", "200", "50"}, {"00", "404", "5"},
+					{"01", "200", "60"}, {"01", "404", "3"},
+				},
+			},
+			wantType: "heatmap",
+		},
+		{
+			name: "no auto heatmap: 4 cols",
+			table: &TableResult{
+				Columns: []string{"a", "b", "c", "count"},
+				Rows:    [][]string{{"1", "2", "3", "10"}, {"4", "5", "6", "20"}, {"7", "8", "9", "30"}, {"10", "11", "12", "40"}},
+			},
+			wantType: "",
+		},
+		{
+			name: "no auto heatmap: too few rows",
+			table: &TableResult{
+				Columns: []string{"hour", "status", "count"},
+				Rows:    [][]string{{"00", "200", "50"}, {"00", "404", "5"}, {"01", "200", "60"}},
 			},
 			wantType: "",
 		},
