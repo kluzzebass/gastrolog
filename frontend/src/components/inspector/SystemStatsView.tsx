@@ -1,12 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useHealth, useStats } from "../../api/hooks";
-import { Status } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../../utils/units";
-import { Badge } from "../Badge";
-import type { BadgeVariant } from "../Badge";
 
 /**
  * System stats view for a single node, using gossip-broadcast NodeStats.
@@ -29,73 +24,6 @@ export function SystemStatsView({
   return (
     <div className={`text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
       Waiting for data...
-    </div>
-  );
-}
-
-/**
- * Self-contained local node system stats. Calls useHealth/useStats internally
- * so the parent doesn't need to pass data.
- */
-export function LocalSystemStats({ dark }: Readonly<{ dark: boolean }>) {
-  const health = useHealth();
-  const stats = useStats();
-
-  if (health.isLoading && stats.isLoading) {
-    return <LoadingPlaceholder dark={dark} />;
-  }
-
-  return (
-    <div className="flex flex-col gap-6">
-      {health.data && <SystemSection dark={dark} health={health.data} stats={stats.data} />}
-      {stats.data && <MemorySection dark={dark} stats={stats.data} />}
-      {health.data && <IngestQueueSection dark={dark} health={health.data} />}
-    </div>
-  );
-}
-
-// ---- Shared building blocks ----
-
-function SectionHeader({
-  dark,
-  children,
-}: Readonly<{ dark: boolean; children: React.ReactNode }>) {
-  const c = useThemeClass(dark);
-  return (
-    <div
-      className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-    >
-      {children}
-    </div>
-  );
-}
-
-function StatRow({
-  dark,
-  label,
-  value,
-  isError,
-}: Readonly<{
-  dark: boolean;
-  label: string;
-  value: React.ReactNode;
-  isError?: boolean;
-}>) {
-  const c = useThemeClass(dark);
-  return (
-    <div className="flex items-center gap-3 text-[0.85em]">
-      <span className={`w-40 ${c("text-text-muted", "text-light-text-muted")}`}>
-        {label}
-      </span>
-      <span
-        className={`font-mono ${
-          isError
-            ? "text-severity-error"
-            : c("text-text-bright", "text-light-text-bright")
-        }`}
-      >
-        {value}
-      </span>
     </div>
   );
 }
@@ -192,7 +120,7 @@ function CompactView({
   );
 }
 
-// ---- Compact view building blocks (from old ClusterPanel) ----
+// ---- Compact view building blocks ----
 
 function CompactStatRow({
   label,
@@ -242,8 +170,6 @@ function CompactDivider({ dark }: Readonly<{ dark: boolean }>) {
   );
 }
 
-// ---- Rich view sections (from old MetricsPanel) ----
-
 function formatUptime(seconds: bigint): string {
   const s = Number(seconds);
   if (s < 60) return `${s}s`;
@@ -254,135 +180,6 @@ function formatUptime(seconds: bigint): string {
   const d = Math.floor(h / 24);
   const rh = h % 24;
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
-}
-
-function statusLabel(s: Status): { text: string; variant: BadgeVariant } {
-  switch (s) {
-    case Status.HEALTHY:
-      return { text: "healthy", variant: "info" };
-    case Status.DEGRADED:
-      return { text: "degraded", variant: "warn" };
-    case Status.UNHEALTHY:
-      return { text: "unhealthy", variant: "error" };
-    default:
-      return { text: "unknown", variant: "warn" };
-  }
-}
-
-function SystemSection({
-  dark,
-  health,
-  stats,
-}: Readonly<{ dark: boolean; health: { status: Status; version: string; uptimeSeconds: bigint }; stats?: StatsData }>) {
-  const badge = statusLabel(health.status);
-  return (
-    <section>
-      <SectionHeader dark={dark}>System</SectionHeader>
-      <div className="flex flex-col gap-1.5">
-        <StatRow
-          dark={dark}
-          label="Status"
-          value={<Badge variant={badge.variant} dark={dark}>{badge.text}</Badge>}
-        />
-        <StatRow dark={dark} label="Version" value={health.version} />
-        <StatRow dark={dark} label="Uptime" value={formatUptime(health.uptimeSeconds)} />
-        {stats && (
-          <StatRow
-            dark={dark}
-            label="CPU"
-            value={`${stats.processCpuPercent.toFixed(1)}%`}
-          />
-        )}
-      </div>
-    </section>
-  );
-}
-
-type MemoryStatsData = {
-  rssBytes: bigint;
-  heapAllocBytes: bigint;
-  heapInuseBytes: bigint;
-  heapIdleBytes: bigint;
-  heapReleasedBytes: bigint;
-  stackInuseBytes: bigint;
-  sysBytes: bigint;
-  heapObjects: bigint;
-  numGc: number;
-};
-
-type StatsData = {
-  processCpuPercent: number;
-  processMemoryBytes: bigint;
-  processMemoryStats?: MemoryStatsData;
-};
-
-function MemorySection({
-  dark,
-  stats,
-}: Readonly<{ dark: boolean; stats: StatsData }>) {
-  const mem = stats.processMemoryStats;
-  return (
-    <section>
-      <SectionHeader dark={dark}>Memory</SectionHeader>
-      <div className="flex flex-col gap-1.5">
-        <StatRow dark={dark} label="RSS (peak)" value={mem ? formatBytes(Number(mem.rssBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Heap alloc" value={mem ? formatBytes(Number(mem.heapAllocBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Heap in-use" value={mem ? formatBytes(Number(mem.heapInuseBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Heap idle" value={mem ? formatBytes(Number(mem.heapIdleBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Heap released" value={mem ? formatBytes(Number(mem.heapReleasedBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Stack in-use" value={mem ? formatBytes(Number(mem.stackInuseBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Virtual (sys)" value={mem ? formatBytes(Number(mem.sysBytes)) : "\u2014"} />
-        <StatRow dark={dark} label="Heap objects" value={mem ? Number(mem.heapObjects).toLocaleString() : "\u2014"} />
-        <StatRow dark={dark} label="GC cycles" value={mem ? mem.numGc.toLocaleString() : "\u2014"} />
-      </div>
-    </section>
-  );
-}
-
-function IngestQueueSection({
-  dark,
-  health,
-}: Readonly<{ dark: boolean; health: { ingestQueueDepth: bigint; ingestQueueCapacity: bigint } }>) {
-  const c = useThemeClass(dark);
-  const depth = Number(health.ingestQueueDepth);
-  const capacity = Number(health.ingestQueueCapacity);
-
-  if (capacity === 0) return null;
-
-  const pct = (depth / capacity) * 100;
-  let barColor: string;
-  if (pct >= 90) barColor = "bg-severity-error";
-  else if (pct >= 75) barColor = "bg-severity-warn";
-  else barColor = "bg-copper";
-
-  return (
-    <section>
-      <SectionHeader dark={dark}>Ingest Queue</SectionHeader>
-      <div className="flex flex-col gap-2">
-        <StatRow
-          dark={dark}
-          label="Depth"
-          value={`${depth.toLocaleString()} / ${capacity.toLocaleString()}`}
-        />
-        <div className="flex items-center gap-3">
-          <span className={`w-40 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
-            Fill
-          </span>
-          <div className="flex-1 flex items-center gap-2">
-            <div className={`h-2 flex-1 rounded-full overflow-hidden ${c("bg-ink-hover", "bg-light-hover")}`}>
-              <div
-                className={`h-full rounded-full transition-all ${barColor}`}
-                style={{ width: `${Math.min(pct, 100)}%` }}
-              />
-            </div>
-            <span className={`font-mono text-[0.8em] w-10 text-right ${c("text-text-muted", "text-light-text-muted")}`}>
-              {pct.toFixed(0)}%
-            </span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
 }
 
 // ---- Cluster aggregate view ----
@@ -472,5 +269,3 @@ export function ClusterSummaryView({
     </div>
   );
 }
-
-

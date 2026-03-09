@@ -15,7 +15,7 @@ import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
 import { formatTimestamp, elapsed, countdown, useTick } from "./JobCard";
-import { LocalSystemStats, SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
+import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
 import type { EntityType } from "./InspectorDialog";
@@ -358,10 +358,11 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
   // Single-node: show local stats directly.
   if (!multiNode) {
+    const localStats = cluster?.nodes?.find((n) => n.id === localNodeId)?.stats ?? null;
     return (
       <div className="flex flex-col gap-3">
         <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />
-        <LocalSystemStats dark={dark} />
+        <SystemStatsView nodeStats={localStats} dark={dark} />
       </div>
     );
   }
@@ -412,11 +413,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
             }
           >
             <div className="p-3">
-              {isLocal ? (
-                <LocalSystemStats dark={dark} />
-              ) : (
-                <SystemStatsView nodeStats={node.stats ?? null} dark={dark} />
-              )}
+              <SystemStatsView nodeStats={node.stats ?? null} dark={dark} />
             </div>
           </ExpandableCard>
         );
