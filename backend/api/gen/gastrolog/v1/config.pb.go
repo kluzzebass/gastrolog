@@ -2456,9 +2456,6 @@ func (x *TLSSettings) GetHttpsPort() string {
 
 type LookupSettings struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	GeoipDbPath     string                 `protobuf:"bytes,1,opt,name=geoip_db_path,json=geoipDbPath,proto3" json:"geoip_db_path,omitempty"` // deprecated: use mmdb_lookups
-	AsnDbPath       string                 `protobuf:"bytes,2,opt,name=asn_db_path,json=asnDbPath,proto3" json:"asn_db_path,omitempty"`       // deprecated: use mmdb_lookups
-	Maxmind         *MaxMindSettings       `protobuf:"bytes,3,opt,name=maxmind,proto3" json:"maxmind,omitempty"`
 	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,4,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`
 	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,5,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"`
 	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,6,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`
@@ -2494,27 +2491,6 @@ func (x *LookupSettings) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LookupSettings.ProtoReflect.Descriptor instead.
 func (*LookupSettings) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{46}
-}
-
-func (x *LookupSettings) GetGeoipDbPath() string {
-	if x != nil {
-		return x.GeoipDbPath
-	}
-	return ""
-}
-
-func (x *LookupSettings) GetAsnDbPath() string {
-	if x != nil {
-		return x.AsnDbPath
-	}
-	return ""
-}
-
-func (x *LookupSettings) GetMaxmind() *MaxMindSettings {
-	if x != nil {
-		return x.Maxmind
-	}
-	return nil
 }
 
 func (x *LookupSettings) GetHttpLookups() []*HTTPLookupEntry {
@@ -2887,6 +2863,7 @@ type GetSettingsResponse struct {
 	NodeId               string                 `protobuf:"bytes,7,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	NodeName             string                 `protobuf:"bytes,8,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
 	Cluster              *ClusterSettings       `protobuf:"bytes,9,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	Maxmind              *MaxMindSettings       `protobuf:"bytes,10,opt,name=maxmind,proto3" json:"maxmind,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -2980,6 +2957,13 @@ func (x *GetSettingsResponse) GetNodeName() string {
 func (x *GetSettingsResponse) GetCluster() *ClusterSettings {
 	if x != nil {
 		return x.Cluster
+	}
+	return nil
+}
+
+func (x *GetSettingsResponse) GetMaxmind() *MaxMindSettings {
+	if x != nil {
+		return x.Maxmind
 	}
 	return nil
 }
@@ -3370,9 +3354,6 @@ func (x *PutMaxMindSettings) GetLicenseKey() string {
 
 type PutLookupSettings struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
-	GeoipDbPath     *string                `protobuf:"bytes,1,opt,name=geoip_db_path,json=geoipDbPath,proto3,oneof" json:"geoip_db_path,omitempty"` // deprecated: use mmdb_lookups
-	AsnDbPath       *string                `protobuf:"bytes,2,opt,name=asn_db_path,json=asnDbPath,proto3,oneof" json:"asn_db_path,omitempty"`       // deprecated: use mmdb_lookups
-	Maxmind         *PutMaxMindSettings    `protobuf:"bytes,3,opt,name=maxmind,proto3" json:"maxmind,omitempty"`
 	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,4,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`               // replaces the full list when present
 	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,5,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"` // replaces the full list when present
 	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,6,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`               // replaces the full list when present
@@ -3408,27 +3389,6 @@ func (x *PutLookupSettings) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PutLookupSettings.ProtoReflect.Descriptor instead.
 func (*PutLookupSettings) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{59}
-}
-
-func (x *PutLookupSettings) GetGeoipDbPath() string {
-	if x != nil && x.GeoipDbPath != nil {
-		return *x.GeoipDbPath
-	}
-	return ""
-}
-
-func (x *PutLookupSettings) GetAsnDbPath() string {
-	if x != nil && x.AsnDbPath != nil {
-		return *x.AsnDbPath
-	}
-	return ""
-}
-
-func (x *PutLookupSettings) GetMaxmind() *PutMaxMindSettings {
-	if x != nil {
-		return x.Maxmind
-	}
-	return nil
 }
 
 func (x *PutLookupSettings) GetHttpLookups() []*HTTPLookupEntry {
@@ -3505,6 +3465,7 @@ type PutSettingsRequest struct {
 	Lookup               *PutLookupSettings     `protobuf:"bytes,5,opt,name=lookup,proto3" json:"lookup,omitempty"`
 	SetupWizardDismissed *bool                  `protobuf:"varint,6,opt,name=setup_wizard_dismissed,json=setupWizardDismissed,proto3,oneof" json:"setup_wizard_dismissed,omitempty"`
 	Cluster              *PutClusterSettings    `protobuf:"bytes,7,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	Maxmind              *PutMaxMindSettings    `protobuf:"bytes,8,opt,name=maxmind,proto3" json:"maxmind,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -3584,6 +3545,13 @@ func (x *PutSettingsRequest) GetSetupWizardDismissed() bool {
 func (x *PutSettingsRequest) GetCluster() *PutClusterSettings {
 	if x != nil {
 		return x.Cluster
+	}
+	return nil
+}
+
+func (x *PutSettingsRequest) GetMaxmind() *PutMaxMindSettings {
+	if x != nil {
+		return x.Maxmind
 	}
 	return nil
 }
@@ -6157,14 +6125,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x123\n" +
 	"\x16http_to_https_redirect\x18\x03 \x01(\bR\x13httpToHttpsRedirect\x12\x1d\n" +
 	"\n" +
-	"https_port\x18\x04 \x01(\tR\thttpsPort\"\xe0\x02\n" +
-	"\x0eLookupSettings\x12\"\n" +
-	"\rgeoip_db_path\x18\x01 \x01(\tR\vgeoipDbPath\x12\x1e\n" +
-	"\vasn_db_path\x18\x02 \x01(\tR\tasnDbPath\x127\n" +
-	"\amaxmind\x18\x03 \x01(\v2\x1d.gastrolog.v1.MaxMindSettingsR\amaxmind\x12@\n" +
+	"https_port\x18\x04 \x01(\tR\thttpsPort\"\xf5\x01\n" +
+	"\x0eLookupSettings\x12@\n" +
 	"\fhttp_lookups\x18\x04 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
 	"\x11json_file_lookups\x18\x05 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
-	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\"W\n" +
+	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"W\n" +
 	"\x0fMMDBLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\adb_type\x18\x02 \x01(\tR\x06dbType\x12\x17\n" +
@@ -6196,7 +6161,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"parameters\x18\x05 \x03(\v2\x1d.gastrolog.v1.HTTPLookupParamR\n" +
 	"parameters\"@\n" +
 	"\x0fClusterSettings\x12-\n" +
-	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\"\xbf\x03\n" +
+	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\"\xf8\x03\n" +
 	"\x13GetSettingsResponse\x12.\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1a.gastrolog.v1.AuthSettingsR\x04auth\x121\n" +
 	"\x05query\x18\x02 \x01(\v2\x1b.gastrolog.v1.QuerySettingsR\x05query\x12=\n" +
@@ -6206,7 +6171,9 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x16setup_wizard_dismissed\x18\x06 \x01(\bR\x14setupWizardDismissed\x12\x17\n" +
 	"\anode_id\x18\a \x01(\tR\x06nodeId\x12\x1b\n" +
 	"\tnode_name\x18\b \x01(\tR\bnodeName\x127\n" +
-	"\acluster\x18\t \x01(\v2\x1d.gastrolog.v1.ClusterSettingsR\acluster\"\xbc\x03\n" +
+	"\acluster\x18\t \x01(\v2\x1d.gastrolog.v1.ClusterSettingsR\acluster\x127\n" +
+	"\amaxmind\x18\n" +
+	" \x01(\v2\x1d.gastrolog.v1.MaxMindSettingsR\amaxmind\"\xbc\x03\n" +
 	"\x19PutPasswordPolicySettings\x12\"\n" +
 	"\n" +
 	"min_length\x18\x01 \x01(\x05H\x00R\tminLength\x88\x01\x01\x121\n" +
@@ -6260,19 +6227,14 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"licenseKey\x88\x01\x01B\x10\n" +
 	"\x0e_auto_downloadB\r\n" +
 	"\v_account_idB\x0e\n" +
-	"\f_license_key\"\x92\x03\n" +
-	"\x11PutLookupSettings\x12'\n" +
-	"\rgeoip_db_path\x18\x01 \x01(\tH\x00R\vgeoipDbPath\x88\x01\x01\x12#\n" +
-	"\vasn_db_path\x18\x02 \x01(\tH\x01R\tasnDbPath\x88\x01\x01\x12:\n" +
-	"\amaxmind\x18\x03 \x01(\v2 .gastrolog.v1.PutMaxMindSettingsR\amaxmind\x12@\n" +
+	"\f_license_key\"\xf8\x01\n" +
+	"\x11PutLookupSettings\x12@\n" +
 	"\fhttp_lookups\x18\x04 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
 	"\x11json_file_lookups\x18\x05 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
-	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookupsB\x10\n" +
-	"\x0e_geoip_db_pathB\x0e\n" +
-	"\f_asn_db_path\"_\n" +
+	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"_\n" +
 	"\x12PutClusterSettings\x122\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01B\x15\n" +
-	"\x13_broadcast_interval\"\xba\x03\n" +
+	"\x13_broadcast_interval\"\xf6\x03\n" +
 	"\x12PutSettingsRequest\x121\n" +
 	"\x04auth\x18\x01 \x01(\v2\x1d.gastrolog.v1.PutAuthSettingsR\x04auth\x124\n" +
 	"\x05query\x18\x02 \x01(\v2\x1e.gastrolog.v1.PutQuerySettingsR\x05query\x12@\n" +
@@ -6280,7 +6242,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x03tls\x18\x04 \x01(\v2\x1c.gastrolog.v1.PutTLSSettingsR\x03tls\x127\n" +
 	"\x06lookup\x18\x05 \x01(\v2\x1f.gastrolog.v1.PutLookupSettingsR\x06lookup\x129\n" +
 	"\x16setup_wizard_dismissed\x18\x06 \x01(\bH\x00R\x14setupWizardDismissed\x88\x01\x01\x12:\n" +
-	"\acluster\x18\a \x01(\v2 .gastrolog.v1.PutClusterSettingsR\aclusterB\x19\n" +
+	"\acluster\x18\a \x01(\v2 .gastrolog.v1.PutClusterSettingsR\acluster\x12:\n" +
+	"\amaxmind\x18\b \x01(\v2 .gastrolog.v1.PutMaxMindSettingsR\amaxmindB\x19\n" +
 	"\x17_setup_wizard_dismissed\"\xa3\x01\n" +
 	"\x13PutSettingsResponse\x12G\n" +
 	"\x10geoip_validation\x18\x01 \x01(\v2\x1c.gastrolog.v1.MmdbValidationR\x0fgeoipValidation\x12C\n" +
@@ -6626,30 +6589,30 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	5,   // 17: gastrolog.v1.PutRouteRequest.config:type_name -> gastrolog.v1.RouteConfig
 	6,   // 18: gastrolog.v1.PutIngesterRequest.config:type_name -> gastrolog.v1.IngesterConfig
 	40,  // 19: gastrolog.v1.AuthSettings.password_policy:type_name -> gastrolog.v1.PasswordPolicySettings
-	41,  // 20: gastrolog.v1.LookupSettings.maxmind:type_name -> gastrolog.v1.MaxMindSettings
-	49,  // 21: gastrolog.v1.LookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
-	50,  // 22: gastrolog.v1.LookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
-	47,  // 23: gastrolog.v1.LookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
-	114, // 24: gastrolog.v1.HTTPLookupEntry.headers:type_name -> gastrolog.v1.HTTPLookupEntry.HeadersEntry
-	48,  // 25: gastrolog.v1.HTTPLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
-	48,  // 26: gastrolog.v1.JSONFileLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
-	42,  // 27: gastrolog.v1.GetSettingsResponse.auth:type_name -> gastrolog.v1.AuthSettings
-	43,  // 28: gastrolog.v1.GetSettingsResponse.query:type_name -> gastrolog.v1.QuerySettings
-	44,  // 29: gastrolog.v1.GetSettingsResponse.scheduler:type_name -> gastrolog.v1.SchedulerSettings
-	45,  // 30: gastrolog.v1.GetSettingsResponse.tls:type_name -> gastrolog.v1.TLSSettings
-	46,  // 31: gastrolog.v1.GetSettingsResponse.lookup:type_name -> gastrolog.v1.LookupSettings
-	51,  // 32: gastrolog.v1.GetSettingsResponse.cluster:type_name -> gastrolog.v1.ClusterSettings
+	49,  // 20: gastrolog.v1.LookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
+	50,  // 21: gastrolog.v1.LookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
+	47,  // 22: gastrolog.v1.LookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
+	114, // 23: gastrolog.v1.HTTPLookupEntry.headers:type_name -> gastrolog.v1.HTTPLookupEntry.HeadersEntry
+	48,  // 24: gastrolog.v1.HTTPLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
+	48,  // 25: gastrolog.v1.JSONFileLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
+	42,  // 26: gastrolog.v1.GetSettingsResponse.auth:type_name -> gastrolog.v1.AuthSettings
+	43,  // 27: gastrolog.v1.GetSettingsResponse.query:type_name -> gastrolog.v1.QuerySettings
+	44,  // 28: gastrolog.v1.GetSettingsResponse.scheduler:type_name -> gastrolog.v1.SchedulerSettings
+	45,  // 29: gastrolog.v1.GetSettingsResponse.tls:type_name -> gastrolog.v1.TLSSettings
+	46,  // 30: gastrolog.v1.GetSettingsResponse.lookup:type_name -> gastrolog.v1.LookupSettings
+	51,  // 31: gastrolog.v1.GetSettingsResponse.cluster:type_name -> gastrolog.v1.ClusterSettings
+	41,  // 32: gastrolog.v1.GetSettingsResponse.maxmind:type_name -> gastrolog.v1.MaxMindSettings
 	53,  // 33: gastrolog.v1.PutAuthSettings.password_policy:type_name -> gastrolog.v1.PutPasswordPolicySettings
-	58,  // 34: gastrolog.v1.PutLookupSettings.maxmind:type_name -> gastrolog.v1.PutMaxMindSettings
-	49,  // 35: gastrolog.v1.PutLookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
-	50,  // 36: gastrolog.v1.PutLookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
-	47,  // 37: gastrolog.v1.PutLookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
-	54,  // 38: gastrolog.v1.PutSettingsRequest.auth:type_name -> gastrolog.v1.PutAuthSettings
-	55,  // 39: gastrolog.v1.PutSettingsRequest.query:type_name -> gastrolog.v1.PutQuerySettings
-	56,  // 40: gastrolog.v1.PutSettingsRequest.scheduler:type_name -> gastrolog.v1.PutSchedulerSettings
-	57,  // 41: gastrolog.v1.PutSettingsRequest.tls:type_name -> gastrolog.v1.PutTLSSettings
-	59,  // 42: gastrolog.v1.PutSettingsRequest.lookup:type_name -> gastrolog.v1.PutLookupSettings
-	60,  // 43: gastrolog.v1.PutSettingsRequest.cluster:type_name -> gastrolog.v1.PutClusterSettings
+	49,  // 34: gastrolog.v1.PutLookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
+	50,  // 35: gastrolog.v1.PutLookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
+	47,  // 36: gastrolog.v1.PutLookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
+	54,  // 37: gastrolog.v1.PutSettingsRequest.auth:type_name -> gastrolog.v1.PutAuthSettings
+	55,  // 38: gastrolog.v1.PutSettingsRequest.query:type_name -> gastrolog.v1.PutQuerySettings
+	56,  // 39: gastrolog.v1.PutSettingsRequest.scheduler:type_name -> gastrolog.v1.PutSchedulerSettings
+	57,  // 40: gastrolog.v1.PutSettingsRequest.tls:type_name -> gastrolog.v1.PutTLSSettings
+	59,  // 41: gastrolog.v1.PutSettingsRequest.lookup:type_name -> gastrolog.v1.PutLookupSettings
+	60,  // 42: gastrolog.v1.PutSettingsRequest.cluster:type_name -> gastrolog.v1.PutClusterSettings
+	58,  // 43: gastrolog.v1.PutSettingsRequest.maxmind:type_name -> gastrolog.v1.PutMaxMindSettings
 	63,  // 44: gastrolog.v1.PutSettingsResponse.geoip_validation:type_name -> gastrolog.v1.MmdbValidation
 	63,  // 45: gastrolog.v1.PutSettingsResponse.asn_validation:type_name -> gastrolog.v1.MmdbValidation
 	68,  // 46: gastrolog.v1.GetSavedQueriesResponse.queries:type_name -> gastrolog.v1.SavedQuery
@@ -6759,7 +6722,6 @@ func file_gastrolog_v1_config_proto_init() {
 	file_gastrolog_v1_config_proto_msgTypes[56].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[57].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[58].OneofWrappers = []any{}
-	file_gastrolog_v1_config_proto_msgTypes[59].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[60].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[61].OneofWrappers = []any{}
 	type x struct{}

@@ -43,7 +43,6 @@ export const lookupTypes = [
   { value: "mmdb", label: "MMDB (GeoIP / ASN)" },
   { value: "http", label: "HTTP" },
   { value: "json", label: "JSON File" },
-  { value: "maxmind", label: "MaxMind Auto-Download" },
 ];
 
 export const mmdbDbTypes = [

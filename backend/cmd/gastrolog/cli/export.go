@@ -31,7 +31,7 @@ type exportDoc struct {
 	Query                *queryExport     `json:"query,omitempty"`
 	Scheduler            *schedulerExport `json:"scheduler,omitempty"`
 	TLS                  *tlsExport       `json:"tls,omitempty"`
-	Lookup               *lookupExport    `json:"lookup,omitempty"`
+	MaxMind              *maxmindExport   `json:"maxmind,omitempty"`
 	SetupWizardDismissed bool             `json:"setup_wizard_dismissed,omitempty"`
 
 }
@@ -86,12 +86,6 @@ type tlsExport struct {
 	HTTPSPort           string `json:"https_port,omitempty"`
 }
 
-type lookupExport struct {
-	GeoIPDBPath string         `json:"geoip_db_path,omitempty"`
-	ASNDBPath   string         `json:"asn_db_path,omitempty"`
-	MaxMind     *maxmindExport `json:"maxmind,omitempty"`
-}
-
 type maxmindExport struct {
 	AutoDownload bool   `json:"auto_download,omitempty"`
 	AccountID    string `json:"account_id,omitempty"`
@@ -101,7 +95,7 @@ type maxmindExport struct {
 
 // settingsToExport converts the nested proto GetSettingsResponse into
 // the hierarchical export types. Zero-value sub-objects are returned as nil.
-func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *queryExport, sched *schedulerExport, tls *tlsExport, lookup *lookupExport, setupDismissed bool) {
+func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *queryExport, sched *schedulerExport, tls *tlsExport, maxmind *maxmindExport, setupDismissed bool) {
 	// Auth + PasswordPolicy
 	if a := sc.GetAuth(); a != nil {
 		auth = &authExport{
@@ -162,25 +156,16 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 		}
 	}
 
-	// Lookup + MaxMind
-	if l := sc.GetLookup(); l != nil {
-		lookup = &lookupExport{
-			GeoIPDBPath: l.GetGeoipDbPath(),
-			ASNDBPath:   l.GetAsnDbPath(),
+	// MaxMind
+	if mm := sc.GetMaxmind(); mm != nil {
+		me := maxmindExport{
+			AutoDownload: mm.GetAutoDownload(),
+			AccountID:    mm.GetAccountId(),
+			LicenseKey:   mm.GetLicenseKey(),
+			LastUpdate:   mm.GetLastUpdate(),
 		}
-		if mm := l.GetMaxmind(); mm != nil {
-			me := maxmindExport{
-				AutoDownload: mm.GetAutoDownload(),
-				AccountID:    mm.GetAccountId(),
-				LicenseKey:   mm.GetLicenseKey(),
-				LastUpdate:   mm.GetLastUpdate(),
-			}
-			if me != (maxmindExport{}) {
-				lookup.MaxMind = &me
-			}
-		}
-		if *lookup == (lookupExport{}) {
-			lookup = nil
+		if me != (maxmindExport{}) {
+			maxmind = &me
 		}
 	}
 
@@ -238,7 +223,7 @@ func newExportCmd() *cobra.Command {
 				})
 			}
 
-			auth, query, sched, tls, lookup, setupDismissed := settingsToExport(scResp.Msg)
+			auth, query, sched, tls, maxmind, setupDismissed := settingsToExport(scResp.Msg)
 
 			doc := &exportDoc{
 				Filters:              cfgResp.Msg.Filters,
@@ -253,7 +238,7 @@ func newExportCmd() *cobra.Command {
 				Query:                query,
 				Scheduler:            sched,
 				TLS:                  tls,
-				Lookup:               lookup,
+				MaxMind:              maxmind,
 				SetupWizardDismissed: setupDismissed,
 			}
 

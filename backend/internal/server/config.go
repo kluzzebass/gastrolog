@@ -42,7 +42,7 @@ type ConfigServer struct {
 	peerRouteStats        PeerRouteStatsProvider
 	localNodeID           string
 	onTLSConfigChange     func()
-	onLookupConfigChange  func(config.LookupConfig)
+	onLookupConfigChange  func(config.LookupConfig, config.MaxMindConfig)
 	afterConfigApply      func(raftfsm.Notification)
 	configSignal          *notify.Signal
 }
@@ -76,8 +76,8 @@ func (s *ConfigServer) SetOnTLSConfigChange(fn func()) {
 	s.onTLSConfigChange = fn
 }
 
-// SetOnLookupConfigChange sets a callback invoked when lookup config changes (e.g. GeoIP DB path).
-func (s *ConfigServer) SetOnLookupConfigChange(fn func(config.LookupConfig)) {
+// SetOnLookupConfigChange sets a callback invoked when lookup or MaxMind config changes.
+func (s *ConfigServer) SetOnLookupConfigChange(fn func(config.LookupConfig, config.MaxMindConfig)) {
 	s.onLookupConfigChange = fn
 }
 
@@ -264,11 +264,11 @@ func (s *ConfigServer) GetSettings(
 	}
 
 	mm := &apiv1.MaxMindSettings{
-		AutoDownload:     ss.Lookup.MaxMind.AutoDownload,
-		LicenseConfigured: ss.Lookup.MaxMind.AccountID != "" && ss.Lookup.MaxMind.LicenseKey != "",
+		AutoDownload:      ss.MaxMind.AutoDownload,
+		LicenseConfigured: ss.MaxMind.AccountID != "" && ss.MaxMind.LicenseKey != "",
 	}
-	if !ss.Lookup.MaxMind.LastUpdate.IsZero() {
-		mm.LastUpdate = ss.Lookup.MaxMind.LastUpdate.Format(time.RFC3339)
+	if !ss.MaxMind.LastUpdate.IsZero() {
+		mm.LastUpdate = ss.MaxMind.LastUpdate.Format(time.RFC3339)
 	}
 
 	authSettings := &apiv1.AuthSettings{
@@ -287,8 +287,8 @@ func (s *ConfigServer) GetSettings(
 
 	if req.Msg.IncludeSecrets {
 		authSettings.JwtSecret = ss.Auth.JWTSecret
-		mm.AccountId = ss.Lookup.MaxMind.AccountID
-		mm.LicenseKey = ss.Lookup.MaxMind.LicenseKey
+		mm.AccountId = ss.MaxMind.AccountID
+		mm.LicenseKey = ss.MaxMind.LicenseKey
 	}
 
 	resp := &apiv1.GetSettingsResponse{
@@ -308,13 +308,11 @@ func (s *ConfigServer) GetSettings(
 			HttpsPort:           ss.TLS.HTTPSPort,
 		},
 		Lookup: &apiv1.LookupSettings{
-			GeoipDbPath:     ss.Lookup.GeoIPDBPath,
-			AsnDbPath:       ss.Lookup.ASNDBPath,
-			Maxmind:         mm,
 			HttpLookups:     httpLookupsToProto(ss.Lookup.HTTPLookups),
 			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
 			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
 		},
+		Maxmind: mm,
 		Cluster: &apiv1.ClusterSettings{
 			BroadcastInterval: ss.Cluster.BroadcastInterval,
 		},
@@ -359,37 +357,12 @@ func (s *ConfigServer) PutSettings(
 		s.onTLSConfigChange()
 	}
 
-	lookupChanged := req.Msg.Lookup != nil
+	lookupChanged := req.Msg.Lookup != nil || req.Msg.Maxmind != nil
 	if s.onLookupConfigChange != nil && lookupChanged {
-		s.onLookupConfigChange(ss.Lookup)
+		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
 	}
 
-	resp := &apiv1.PutSettingsResponse{}
-
-	// Validate MMDB paths that were explicitly set in this request.
-	if l := req.Msg.Lookup; l != nil {
-		if l.GeoipDbPath != nil && *l.GeoipDbPath != "" {
-			resp.GeoipValidation = validateMMDBPath(*l.GeoipDbPath)
-		}
-		if l.AsnDbPath != nil && *l.AsnDbPath != "" {
-			resp.AsnValidation = validateMMDBPath(*l.AsnDbPath)
-		}
-	}
-
-	return connect.NewResponse(resp), nil
-}
-
-func validateMMDBPath(path string) *apiv1.MmdbValidation {
-	info, err := lookup.ValidateMMDB(path)
-	if err != nil {
-		return &apiv1.MmdbValidation{Error: err.Error()}
-	}
-	return &apiv1.MmdbValidation{
-		Valid:        true,
-		DatabaseType: info.DatabaseType,
-		BuildTime:    info.BuildTime.Format(time.RFC3339),
-		NodeCount:    uint32(info.NodeCount), //nolint:gosec // NodeCount fits in uint32 for all real MMDB files
-	}
+	return connect.NewResponse(&apiv1.PutSettingsResponse{}), nil
 }
 
 // PutNodeConfig creates or updates a node configuration.
@@ -495,6 +468,9 @@ func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *config.ServerSetting
 	if msg.Lookup != nil {
 		mergeLookup(msg.Lookup, &ss.Lookup)
 	}
+	if msg.Maxmind != nil {
+		mergeMaxMind(msg.Maxmind, &ss.MaxMind)
+	}
 	if msg.Cluster != nil {
 		if err := mergeCluster(msg.Cluster, &ss.Cluster); err != nil {
 			return err
@@ -584,23 +560,6 @@ func mergeTLS(t *apiv1.PutTLSSettings, tlsCfg *config.TLSConfig) {
 }
 
 func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
-	if l.GeoipDbPath != nil {
-		lookup.GeoIPDBPath = *l.GeoipDbPath
-	}
-	if l.AsnDbPath != nil {
-		lookup.ASNDBPath = *l.AsnDbPath
-	}
-	if mm := l.Maxmind; mm != nil {
-		if mm.AutoDownload != nil {
-			lookup.MaxMind.AutoDownload = *mm.AutoDownload
-		}
-		if mm.AccountId != nil {
-			lookup.MaxMind.AccountID = *mm.AccountId
-		}
-		if mm.LicenseKey != nil {
-			lookup.MaxMind.LicenseKey = *mm.LicenseKey
-		}
-	}
 	if l.HttpLookups != nil {
 		lookup.HTTPLookups = httpLookupsFromProto(l.HttpLookups)
 	}
@@ -609,6 +568,18 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
 	}
 	if l.MmdbLookups != nil {
 		lookup.MMDBLookups = mmdbLookupsFromProto(l.MmdbLookups)
+	}
+}
+
+func mergeMaxMind(mm *apiv1.PutMaxMindSettings, cfg *config.MaxMindConfig) {
+	if mm.AutoDownload != nil {
+		cfg.AutoDownload = *mm.AutoDownload
+	}
+	if mm.AccountId != nil {
+		cfg.AccountID = *mm.AccountId
+	}
+	if mm.LicenseKey != nil {
+		cfg.LicenseKey = *mm.LicenseKey
 	}
 }
 

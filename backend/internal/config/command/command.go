@@ -487,47 +487,9 @@ func ExtractPutServerSettings(value string) (config.ServerSettings, error) {
 	if err := json.Unmarshal([]byte(value), &ss); err != nil {
 		return config.ServerSettings{}, fmt.Errorf("parse server settings: %w", err)
 	}
-	// Migrate flat MaxMind fields to nested MaxMindConfig if present.
-	ss.Lookup = migrateLookupConfig(ss.Lookup, value)
 	// Migrate flat password policy fields to nested PasswordPolicy if present.
 	ss.Auth = migratePasswordPolicy(ss.Auth, value)
 	return ss, nil
-}
-
-// legacyLookupJSON captures the old flat MaxMind fields for migration.
-type legacyLookupJSON struct {
-	Lookup struct {
-		GeoIPDBPath         string    `json:"geoip_db_path"`
-		ASNDBPath           string    `json:"asn_db_path"`
-		MaxMindAutoDownload bool      `json:"maxmind_auto_download"`
-		MaxMindAccountID    string    `json:"maxmind_account_id"`
-		MaxMindLicenseKey   string    `json:"maxmind_license_key"`
-		MaxMindLastUpdate   time.Time `json:"maxmind_last_update"`
-	} `json:"lookup"`
-}
-
-// migrateLookupConfig checks if the JSON has old flat MaxMind fields and migrates them
-// into the nested MaxMindConfig.
-func migrateLookupConfig(lc config.LookupConfig, raw string) config.LookupConfig {
-	// If MaxMind is already populated, no migration needed.
-	if lc.MaxMind.AutoDownload || lc.MaxMind.AccountID != "" || lc.MaxMind.LicenseKey != "" || !lc.MaxMind.LastUpdate.IsZero() {
-		return lc
-	}
-	// Try to extract legacy flat fields.
-	var legacy legacyLookupJSON
-	if err := json.Unmarshal([]byte(raw), &legacy); err != nil {
-		return lc
-	}
-	ll := legacy.Lookup
-	if ll.MaxMindAutoDownload || ll.MaxMindAccountID != "" || ll.MaxMindLicenseKey != "" || !ll.MaxMindLastUpdate.IsZero() {
-		lc.MaxMind = config.MaxMindConfig{
-			AutoDownload: ll.MaxMindAutoDownload,
-			AccountID:    ll.MaxMindAccountID,
-			LicenseKey:   ll.MaxMindLicenseKey,
-			LastUpdate:   ll.MaxMindLastUpdate,
-		}
-	}
-	return lc
 }
 
 // legacyAuthJSON captures old flat password policy fields for migration.

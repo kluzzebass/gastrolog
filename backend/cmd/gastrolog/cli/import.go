@@ -254,7 +254,7 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 // buildSettingsRequest converts the hierarchical export fields into a PutSettingsRequest.
 // Returns nil when no server settings are present.
 func buildSettingsRequest(doc *exportDoc) *v1.PutSettingsRequest {
-	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil && doc.Lookup == nil && !doc.SetupWizardDismissed {
+	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil && doc.MaxMind == nil && !doc.SetupWizardDismissed {
 		return nil
 	}
 	req := &v1.PutSettingsRequest{}
@@ -270,8 +270,8 @@ func buildSettingsRequest(doc *exportDoc) *v1.PutSettingsRequest {
 	if doc.TLS != nil {
 		req.Tls = buildTLSSettings(doc.TLS)
 	}
-	if doc.Lookup != nil {
-		req.Lookup = buildLookupSettings(doc.Lookup)
+	if doc.MaxMind != nil {
+		req.Maxmind = buildMaxMindSettings(doc.MaxMind)
 	}
 	if doc.SetupWizardDismissed {
 		req.SetupWizardDismissed = &doc.SetupWizardDismissed
@@ -358,27 +358,17 @@ func buildTLSSettings(t *tlsExport) *v1.PutTLSSettings {
 	return pt
 }
 
-func buildLookupSettings(l *lookupExport) *v1.PutLookupSettings {
-	pl := &v1.PutLookupSettings{}
-	if l.GeoIPDBPath != "" {
-		pl.GeoipDbPath = &l.GeoIPDBPath
+func buildMaxMindSettings(mm *maxmindExport) *v1.PutMaxMindSettings {
+	pmm := &v1.PutMaxMindSettings{}
+	if mm.AutoDownload {
+		pmm.AutoDownload = &mm.AutoDownload
 	}
-	if l.ASNDBPath != "" {
-		pl.AsnDbPath = &l.ASNDBPath
+	if mm.AccountID != "" {
+		pmm.AccountId = &mm.AccountID
 	}
-	if mm := l.MaxMind; mm != nil {
-		pmm := &v1.PutMaxMindSettings{}
-		if mm.AutoDownload {
-			pmm.AutoDownload = &mm.AutoDownload
-		}
-		if mm.AccountID != "" {
-			pmm.AccountId = &mm.AccountID
-		}
-		if mm.LicenseKey != "" {
-			pmm.LicenseKey = &mm.LicenseKey
-		}
-		pl.Maxmind = pmm
+	if mm.LicenseKey != "" {
+		pmm.LicenseKey = &mm.LicenseKey
 	}
-	return pl
+	return pmm
 }
 

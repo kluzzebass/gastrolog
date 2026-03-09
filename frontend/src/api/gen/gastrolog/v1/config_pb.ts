@@ -2043,25 +2043,6 @@ export class TLSSettings extends Message<TLSSettings> {
  */
 export class LookupSettings extends Message<LookupSettings> {
   /**
-   * deprecated: use mmdb_lookups
-   *
-   * @generated from field: string geoip_db_path = 1;
-   */
-  geoipDbPath = "";
-
-  /**
-   * deprecated: use mmdb_lookups
-   *
-   * @generated from field: string asn_db_path = 2;
-   */
-  asnDbPath = "";
-
-  /**
-   * @generated from field: gastrolog.v1.MaxMindSettings maxmind = 3;
-   */
-  maxmind?: MaxMindSettings;
-
-  /**
    * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 4;
    */
   httpLookups: HTTPLookupEntry[] = [];
@@ -2084,9 +2065,6 @@ export class LookupSettings extends Message<LookupSettings> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.LookupSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "maxmind", kind: "message", T: MaxMindSettings },
     { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
     { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
@@ -2475,6 +2453,11 @@ export class GetSettingsResponse extends Message<GetSettingsResponse> {
    */
   cluster?: ClusterSettings;
 
+  /**
+   * @generated from field: gastrolog.v1.MaxMindSettings maxmind = 10;
+   */
+  maxmind?: MaxMindSettings;
+
   constructor(data?: PartialMessage<GetSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2492,6 +2475,7 @@ export class GetSettingsResponse extends Message<GetSettingsResponse> {
     { no: 7, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "cluster", kind: "message", T: ClusterSettings },
+    { no: 10, name: "maxmind", kind: "message", T: MaxMindSettings },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetSettingsResponse {
@@ -2828,25 +2812,6 @@ export class PutMaxMindSettings extends Message<PutMaxMindSettings> {
  */
 export class PutLookupSettings extends Message<PutLookupSettings> {
   /**
-   * deprecated: use mmdb_lookups
-   *
-   * @generated from field: optional string geoip_db_path = 1;
-   */
-  geoipDbPath?: string;
-
-  /**
-   * deprecated: use mmdb_lookups
-   *
-   * @generated from field: optional string asn_db_path = 2;
-   */
-  asnDbPath?: string;
-
-  /**
-   * @generated from field: gastrolog.v1.PutMaxMindSettings maxmind = 3;
-   */
-  maxmind?: PutMaxMindSettings;
-
-  /**
    * replaces the full list when present
    *
    * @generated from field: repeated gastrolog.v1.HTTPLookupEntry http_lookups = 4;
@@ -2875,9 +2840,6 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutLookupSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "geoip_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 2, name: "asn_db_path", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 3, name: "maxmind", kind: "message", T: PutMaxMindSettings },
     { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
     { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
@@ -2976,6 +2938,11 @@ export class PutSettingsRequest extends Message<PutSettingsRequest> {
    */
   cluster?: PutClusterSettings;
 
+  /**
+   * @generated from field: gastrolog.v1.PutMaxMindSettings maxmind = 8;
+   */
+  maxmind?: PutMaxMindSettings;
+
   constructor(data?: PartialMessage<PutSettingsRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2991,6 +2958,7 @@ export class PutSettingsRequest extends Message<PutSettingsRequest> {
     { no: 5, name: "lookup", kind: "message", T: PutLookupSettings },
     { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
     { no: 7, name: "cluster", kind: "message", T: PutClusterSettings },
+    { no: 8, name: "maxmind", kind: "message", T: PutMaxMindSettings },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSettingsRequest {

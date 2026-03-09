@@ -333,8 +333,8 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
-	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig) {
-		s.applyLookupConfig(cfg, lookupRegistry)
+	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig, mm config.MaxMindConfig) {
+		s.applyLookupConfig(cfg, mm, lookupRegistry)
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	if s.joinClusterFn != nil {
@@ -403,7 +403,7 @@ func (s *Server) loadInitialLookupConfig(registry lookup.Registry) {
 	if err != nil {
 		return
 	}
-	s.applyLookupConfig(ss.Lookup, registry)
+	s.applyLookupConfig(ss.Lookup, ss.MaxMind, registry)
 }
 
 // resolveMMDBPath finds an MMDB file via the managed file manifest.
@@ -413,7 +413,7 @@ func (s *Server) resolveMMDBPath(ctx context.Context, filename string) string {
 
 // applyLookupConfig loads (or reloads) MMDB, HTTP, and JSON lookup tables from the given config.
 // It also manages the maxmind-update cron job for automatic downloads.
-func (s *Server) applyLookupConfig(cfg config.LookupConfig, registry lookup.Registry) {
+func (s *Server) applyLookupConfig(cfg config.LookupConfig, mm config.MaxMindConfig, registry lookup.Registry) {
 	// Register MMDB lookup tables (GeoIP City / ASN) from config.
 	s.registerMMDBLookups(cfg, registry)
 
@@ -424,7 +424,7 @@ func (s *Server) applyLookupConfig(cfg config.LookupConfig, registry lookup.Regi
 	s.registerJSONFileLookups(cfg, registry)
 
 	// Manage the maxmind-update cron job.
-	s.manageMaxMindJob(cfg, registry)
+	s.manageMaxMindJob(mm, registry)
 }
 
 // registerMMDBLookups registers MMDB-backed lookup tables (GeoIP City / ASN) from config.
@@ -595,14 +595,14 @@ func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry looku
 }
 
 // manageMaxMindJob adds or removes the maxmind-update cron job based on config.
-func (s *Server) manageMaxMindJob(cfg config.LookupConfig, registry lookup.Registry) {
+func (s *Server) manageMaxMindJob(mm config.MaxMindConfig, registry lookup.Registry) {
 	scheduler := s.orch.Scheduler()
 	if scheduler == nil {
 		return
 	}
 
-	hasCredentials := cfg.MaxMind.AccountID != "" && cfg.MaxMind.LicenseKey != ""
-	if !cfg.MaxMind.AutoDownload || !hasCredentials || s.homeDir == "" {
+	hasCredentials := mm.AccountID != "" && mm.LicenseKey != ""
+	if !mm.AutoDownload || !hasCredentials || s.homeDir == "" {
 		scheduler.RemoveJob("maxmind-update")
 		return
 	}
@@ -619,11 +619,17 @@ func (s *Server) manageMaxMindJob(cfg config.LookupConfig, registry lookup.Regis
 	scheduler.Describe("maxmind-update", "Download MaxMind GeoLite2 databases")
 
 	// If any MMDB entry has no file available yet, trigger an immediate download.
+	// Load current lookup config to check MMDB entries.
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	ss, err := s.cfgStore.LoadServerSettings(loadCtx)
+	loadCancel()
 	needsDownload := false
-	for _, mcfg := range cfg.MMDBLookups {
-		if mcfg.FileID == "" {
-			needsDownload = true
-			break
+	if err == nil {
+		for _, mcfg := range ss.Lookup.MMDBLookups {
+			if mcfg.FileID == "" {
+				needsDownload = true
+				break
+			}
 		}
 	}
 	if needsDownload {
@@ -642,7 +648,7 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 		return
 	}
 
-	if !ss.Lookup.MaxMind.AutoDownload || ss.Lookup.MaxMind.AccountID == "" || ss.Lookup.MaxMind.LicenseKey == "" {
+	if !ss.MaxMind.AutoDownload || ss.MaxMind.AccountID == "" || ss.MaxMind.LicenseKey == "" {
 		return
 	}
 
@@ -657,7 +663,7 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 
 	var anySuccess bool
 	for _, edition := range []string{"GeoLite2-City", "GeoLite2-ASN"} {
-		if err := lookup.DownloadDB(ctx, ss.Lookup.MaxMind.AccountID, ss.Lookup.MaxMind.LicenseKey, edition, downloadDir); err != nil {
+		if err := lookup.DownloadDB(ctx, ss.MaxMind.AccountID, ss.MaxMind.LicenseKey, edition, downloadDir); err != nil {
 			s.logger.Warn("maxmind update: download failed", "edition", edition, "error", err)
 			continue
 		}
@@ -686,7 +692,7 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 	// Update the last-update timestamp.
 	saveCtx, saveCancel := context.WithTimeout(ctx, configLoadTimeout)
 	defer saveCancel()
-	ss.Lookup.MaxMind.LastUpdate = time.Now()
+	ss.MaxMind.LastUpdate = time.Now()
 	if err := s.cfgStore.SaveServerSettings(saveCtx, ss); err != nil {
 		s.logger.Warn("maxmind update: save timestamp failed", "error", err)
 	}

@@ -40,12 +40,10 @@ export function MaxMindCard({
   const save = async () => {
     try {
       await putConfig.mutateAsync({
-        lookup: {
-          maxmind: {
-            autoDownload,
-            accountId: accountId || undefined,
-            licenseKey: licenseKey || MAXMIND_KEEP,
-          },
+        maxmind: {
+          autoDownload,
+          accountId: accountId || undefined,
+          licenseKey: licenseKey || MAXMIND_KEEP,
         },
       });
       setJustSaved(true);
@@ -61,7 +59,7 @@ export function MaxMindCard({
   const handleDelete = async () => {
     try {
       await putConfig.mutateAsync({
-        lookup: { maxmind: { autoDownload: false } },
+        maxmind: { autoDownload: false },
       });
       setVisible(false);
       setAutoDownload(false);

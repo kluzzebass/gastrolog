@@ -2,10 +2,8 @@ import { useState } from "react";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useConfig, useGenerateName } from "../../api/hooks/useConfig";
 import { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
-import { MaxMindCard } from "./lookup/MaxMindCard";
 import { MmdbAddForm, MmdbCards } from "./lookup/MmdbSection";
 import { HttpAddForm, HttpCards } from "./lookup/HttpSection";
 import { JsonAddForm, JsonCards } from "./lookup/JsonSection";
@@ -17,13 +15,11 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const uploadFile = useUploadManagedFile();
   const { addToast } = useToast();
   const generateName = useGenerateName();
-  const { toggle } = useExpandedCard();
 
   const managedFiles = config?.managedFiles ?? [];
 
   // -- State -----------------------------------------------------------------
   const [initialized, setInitialized] = useState(false);
-  const [maxmindVisible, setMaxmindVisible] = useState(false);
   const [mmdbLookups, setMmdbLookups] = useState<MMDBLookupDraft[]>([]);
   const [httpLookups, setHttpLookups] = useState<HTTPLookupDraft[]>([]);
   const [jsonFileLookups, setJsonFileLookups] = useState<JSONFileLookupDraft[]>([]);
@@ -32,8 +28,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   // -- Init from server (once) -----------------------------------------------
   if (data && !initialized) {
-    const mm = data.lookup?.maxmind;
-    setMaxmindVisible((mm?.autoDownload ?? false) || (mm?.licenseConfigured ?? false));
     setMmdbLookups(
       (data.lookup?.mmdbLookups ?? []).map((m) => ({
         name: m.name,
@@ -67,11 +61,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   // -- Add form handler ------------------------------------------------------
   const handleAddSelect = (type: string) => {
-    if (type === "maxmind") {
-      if (!maxmindVisible) setMaxmindVisible(true);
-      toggle("maxmind");
-      return;
-    }
     setAddingType(type);
     if (type !== "mmdb") {
       generateName.mutateAsync().then(setNamePlaceholder);
@@ -79,7 +68,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const closeAdd = () => setAddingType(null);
-  const isEmpty = !maxmindVisible && mmdbLookups.length === 0 && httpLookups.length === 0 && jsonFileLookups.length === 0;
+  const isEmpty = mmdbLookups.length === 0 && httpLookups.length === 0 && jsonFileLookups.length === 0;
   const sectionProps = { dark, managedFiles, uploadFile, addToast };
 
   // -- Render -----------------------------------------------------------------
@@ -125,13 +114,6 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
       )}
 
       {/* Entity cards */}
-      <MaxMindCard
-        dark={dark}
-        visible={maxmindVisible}
-        setVisible={setMaxmindVisible}
-        savedMaxmind={data?.lookup?.maxmind}
-        addToast={addToast}
-      />
       <MmdbCards
         {...sectionProps}
         lookups={mmdbLookups}

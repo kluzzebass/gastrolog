@@ -42,7 +42,7 @@ func NewConfigCommand() *cobra.Command {
 		newQueryCmd(),
 		newSchedulerCmd(),
 		newTLSCmd(),
-		newLookupCmd(),
+		newMaxMindCmd(),
 		newExportCmd(),
 		newImportCmd(),
 		newClusterCmd(),

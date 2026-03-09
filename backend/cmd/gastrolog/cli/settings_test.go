@@ -23,7 +23,7 @@ func TestNavigateDescriptor(t *testing.T) {
 		{"top-level scheduler", []string{"scheduler"}, "gastrolog.v1.SchedulerSettings"},
 		{"top-level tls", []string{"tls"}, "gastrolog.v1.TLSSettings"},
 		{"top-level lookup", []string{"lookup"}, "gastrolog.v1.LookupSettings"},
-		{"nested maxmind", []string{"lookup", "maxmind"}, "gastrolog.v1.MaxMindSettings"},
+		{"top-level maxmind", []string{"maxmind"}, "gastrolog.v1.MaxMindSettings"},
 		{"nonexistent path", []string{"nonexistent"}, ""},
 		{"nonexistent nested", []string{"auth", "nonexistent"}, ""},
 		{"scalar field (not message)", []string{"setup_wizard_dismissed"}, ""},
@@ -59,7 +59,7 @@ func TestNavigateDescriptorPut(t *testing.T) {
 		{"put auth", []string{"auth"}, "gastrolog.v1.PutAuthSettings"},
 		{"put auth.password_policy", []string{"auth", "password_policy"}, "gastrolog.v1.PutPasswordPolicySettings"},
 		{"put query", []string{"query"}, "gastrolog.v1.PutQuerySettings"},
-		{"put lookup.maxmind", []string{"lookup", "maxmind"}, "gastrolog.v1.PutMaxMindSettings"},
+		{"put maxmind", []string{"maxmind"}, "gastrolog.v1.PutMaxMindSettings"},
 	}
 
 	for _, tt := range tests {
@@ -122,10 +122,10 @@ func TestNavigateMessage(t *testing.T) {
 		t.Fatal("expected nil for unset tls sub-message")
 	}
 
-	// Navigate to unset lookup.maxmind should return nil.
-	mm := navigateMessage(msg, []string{"lookup", "maxmind"})
+	// Navigate to unset maxmind should return nil.
+	mm := navigateMessage(msg, []string{"maxmind"})
 	if mm != nil {
-		t.Fatal("expected nil for unset lookup.maxmind")
+		t.Fatal("expected nil for unset maxmind")
 	}
 }
 
@@ -169,18 +169,18 @@ func TestEnsureSubMessage(t *testing.T) {
 		t.Fatalf("expected 12, got %v", req.Auth.PasswordPolicy.MinLength)
 	}
 
-	// Ensure lookup.maxmind creates both levels.
-	mm := ensureSubMessage(msg, []string{"lookup", "maxmind"})
+	// Ensure top-level maxmind creates the sub-message (was previously nested under lookup).
+	mm := ensureSubMessage(msg, []string{"maxmind"})
 	if mm == nil {
 		t.Fatal("expected non-nil maxmind sub-message")
 	}
 	fd = mm.Descriptor().Fields().ByName("auto_download")
 	mm.Set(fd, protoreflect.ValueOfBool(true))
 
-	if req.Lookup == nil || req.Lookup.Maxmind == nil {
-		t.Fatal("expected Lookup.Maxmind to be set")
+	if req.Maxmind == nil {
+		t.Fatal("expected Maxmind to be set")
 	}
-	if *req.Lookup.Maxmind.AutoDownload != true {
+	if *req.Maxmind.AutoDownload != true {
 		t.Fatal("expected auto_download to be true")
 	}
 }
@@ -301,7 +301,7 @@ func TestSettingsGroupsFieldMappings(t *testing.T) {
 }
 
 func TestFindGroup(t *testing.T) {
-	for _, name := range []string{"auth", "password-policy", "query", "scheduler", "tls", "lookup", "maxmind"} {
+	for _, name := range []string{"auth", "password-policy", "query", "scheduler", "tls", "maxmind"} {
 		g, err := findGroup(name)
 		if err != nil {
 			t.Fatalf("findGroup(%q): %v", name, err)

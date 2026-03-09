@@ -2,11 +2,13 @@ import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig } from "../../api/hooks/useConfig";
+import { useSettings } from "../../api/hooks/useSettings";
 import { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 import { useDeleteManagedFile } from "../../api/hooks/useManagedFiles";
 import { useToast } from "../Toast";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { ExpandableCard } from "./ExpandableCard";
+import { MaxMindCard } from "./lookup/MaxMindCard";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/config_pb";
 
@@ -40,9 +42,18 @@ function groupByName(files: ManagedFileInfo[]): FileGroup[] {
 export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useConfig();
+  const { data: settings } = useSettings();
   const uploadFile = useUploadManagedFile();
   const deleteFile = useDeleteManagedFile();
   const { addToast } = useToast();
+
+  const savedMaxmind = settings?.maxmind;
+  const [maxmindVisible, setMaxmindVisible] = useState(false);
+  const [maxmindInit, setMaxmindInit] = useState(false);
+  if (savedMaxmind && !maxmindInit) {
+    setMaxmindVisible(savedMaxmind.autoDownload || savedMaxmind.licenseConfigured);
+    setMaxmindInit(true);
+  }
 
   const files = data?.managedFiles ?? [];
   const groups = groupByName(files);
@@ -133,7 +144,27 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
         )}
       </div>
 
-      {groups.length === 0 && (
+      <MaxMindCard
+        dark={dark}
+        visible={maxmindVisible}
+        setVisible={setMaxmindVisible}
+        savedMaxmind={savedMaxmind}
+        addToast={addToast}
+      />
+
+      {!maxmindVisible && (
+        <button
+          onClick={() => setMaxmindVisible(true)}
+          className={`w-full rounded-lg border border-dashed px-4 py-3 text-[0.8em] transition-colors ${c(
+            "border-ink-border text-text-ghost hover:border-copper-dim hover:text-text-muted",
+            "border-light-border text-light-text-ghost hover:border-copper hover:text-light-text-muted",
+          )}`}
+        >
+          Enable MaxMind Auto-Download
+        </button>
+      )}
+
+      {groups.length === 0 && !maxmindVisible && (
         <p className={`text-[0.8em] text-center py-4 ${c("text-text-ghost", "text-light-text-ghost")}`}>
           No managed files. Upload a file above to get started.
         </p>

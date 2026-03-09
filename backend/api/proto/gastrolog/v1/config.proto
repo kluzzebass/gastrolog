@@ -345,9 +345,7 @@ message TLSSettings {
 }
 
 message LookupSettings {
-  string geoip_db_path = 1;  // deprecated: use mmdb_lookups
-  string asn_db_path = 2;    // deprecated: use mmdb_lookups
-  MaxMindSettings maxmind = 3;
+  reserved 1, 2, 3;  // 1: geoip_db_path, 2: asn_db_path, 3: maxmind (moved to GetSettingsResponse)
   repeated HTTPLookupEntry http_lookups = 4;
   repeated JSONFileLookupEntry json_file_lookups = 5;
   repeated MMDBLookupEntry mmdb_lookups = 6;
@@ -403,6 +401,7 @@ message GetSettingsResponse {
   string node_id = 7;
   string node_name = 8;
   ClusterSettings cluster = 9;
+  MaxMindSettings maxmind = 10;
 }
 
 // Sub-messages for PutSettingsRequest (optional fields for merge semantics).
@@ -447,9 +446,7 @@ message PutMaxMindSettings {
 }
 
 message PutLookupSettings {
-  optional string geoip_db_path = 1;  // deprecated: use mmdb_lookups
-  optional string asn_db_path = 2;    // deprecated: use mmdb_lookups
-  PutMaxMindSettings maxmind = 3;
+  reserved 1, 2, 3;  // 1: geoip_db_path, 2: asn_db_path, 3: maxmind (moved to PutSettingsRequest)
   repeated HTTPLookupEntry http_lookups = 4; // replaces the full list when present
   repeated JSONFileLookupEntry json_file_lookups = 5; // replaces the full list when present
   repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
@@ -467,6 +464,7 @@ message PutSettingsRequest {
   PutLookupSettings lookup = 5;
   optional bool setup_wizard_dismissed = 6;
   PutClusterSettings cluster = 7;
+  PutMaxMindSettings maxmind = 8;
 }
 
 message PutSettingsResponse {

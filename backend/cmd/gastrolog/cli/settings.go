@@ -74,11 +74,7 @@ var settingsGroups = []settingsGroup{
 		{flag: "http-redirect", label: "http_to_https_redirect", getKey: "http_to_https_redirect", setKey: "http_to_https_redirect", desc: "Redirect HTTP to HTTPS"},
 		{flag: "https-port", label: "https_port", getKey: "https_port", setKey: "https_port", desc: "HTTPS port (empty = HTTP port + 1)"},
 	}},
-	{name: "lookup", short: "Configure GeoIP/ASN lookups", getPath: []string{"lookup"}, setPath: []string{"lookup"}, fields: []settingsField{
-		{flag: "geoip-db", label: "geoip_db_path", getKey: "geoip_db_path", setKey: "geoip_db_path", desc: "Path to GeoIP MMDB file"},
-		{flag: "asn-db", label: "asn_db_path", getKey: "asn_db_path", setKey: "asn_db_path", desc: "Path to ASN MMDB file"},
-	}},
-	{name: "maxmind", short: "Configure MaxMind database downloads", getPath: []string{"lookup", "maxmind"}, setPath: []string{"lookup", "maxmind"}, fields: []settingsField{
+	{name: "maxmind", short: "Configure MaxMind database downloads", getPath: []string{"maxmind"}, setPath: []string{"maxmind"}, fields: []settingsField{
 		{flag: "auto-download", label: "auto_download", getKey: "auto_download", setKey: "auto_download", desc: "Auto-download MaxMind databases"},
 		{flag: "account-id", label: "account_id", setKey: "account_id", desc: "MaxMind account ID (write-only)"},
 		{flag: "license-key", label: "license_key", getKey: "license_configured", setKey: "license_key", desc: "MaxMind license key", secret: true},
@@ -98,11 +94,7 @@ func newQueryCmd() *cobra.Command     { return newGroupCmd("query") }
 func newSchedulerCmd() *cobra.Command { return newGroupCmd("scheduler") }
 func newTLSCmd() *cobra.Command       { return newGroupCmd("tls") }
 
-func newLookupCmd() *cobra.Command {
-	cmd := newGroupCmd("lookup")
-	cmd.AddCommand(newGroupCmd("maxmind"))
-	return cmd
-}
+func newMaxMindCmd() *cobra.Command { return newGroupCmd("maxmind") }
 
 func newGroupCmd(name string) *cobra.Command {
 	g, err := findGroup(name)

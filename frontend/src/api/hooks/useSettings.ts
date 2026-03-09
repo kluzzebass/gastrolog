@@ -44,13 +44,6 @@ type PutSettingsArgs = {
     httpsPort?: string;
   };
   lookup?: {
-    geoipDbPath?: string;
-    asnDbPath?: string;
-    maxmind?: {
-      autoDownload?: boolean;
-      accountId?: string;
-      licenseKey?: string;
-    };
     httpLookups?: {
       name: string;
       urlTemplate: string;
@@ -73,6 +66,11 @@ type PutSettingsArgs = {
       fileId?: string;
     }[];
   };
+  maxmind?: {
+    autoDownload?: boolean;
+    accountId?: string;
+    licenseKey?: string;
+  };
   cluster?: {
     broadcastInterval?: string;
   };
@@ -89,22 +87,12 @@ function buildAuthReq(auth: NonNullable<PutSettingsArgs["auth"]>): Record<string
   return req;
 }
 
-/** Build the lookup sub-request, filtering out the MaxMind license sentinel value. */
-function buildLookupReq(lookup: NonNullable<PutSettingsArgs["lookup"]>): Record<string, unknown> {
+/** Build the maxmind sub-request, filtering out the license sentinel value. */
+function buildMaxMindReq(mm: NonNullable<PutSettingsArgs["maxmind"]>): Record<string, unknown> {
   const req: Record<string, unknown> = {};
-  if (lookup.geoipDbPath !== undefined) req.geoipDbPath = lookup.geoipDbPath;
-  if (lookup.asnDbPath !== undefined) req.asnDbPath = lookup.asnDbPath;
-  if (lookup.maxmind) {
-    const mm: Record<string, unknown> = {};
-    if (lookup.maxmind.autoDownload !== undefined) mm.autoDownload = lookup.maxmind.autoDownload;
-    if (lookup.maxmind.accountId !== undefined) mm.accountId = lookup.maxmind.accountId;
-    if (lookup.maxmind.licenseKey !== undefined && lookup.maxmind.licenseKey !== MAXMIND_KEEP)
-      mm.licenseKey = lookup.maxmind.licenseKey;
-    req.maxmind = mm;
-  }
-  if (lookup.httpLookups) req.httpLookups = lookup.httpLookups;
-  if (lookup.jsonFileLookups) req.jsonFileLookups = lookup.jsonFileLookups;
-  if (lookup.mmdbLookups) req.mmdbLookups = lookup.mmdbLookups;
+  if (mm.autoDownload !== undefined) req.autoDownload = mm.autoDownload;
+  if (mm.accountId !== undefined) req.accountId = mm.accountId;
+  if (mm.licenseKey !== undefined && mm.licenseKey !== MAXMIND_KEEP) req.licenseKey = mm.licenseKey;
   return req;
 }
 
@@ -115,7 +103,8 @@ export function usePutSettings() {
     if (args.query) req.query = args.query;
     if (args.scheduler) req.scheduler = args.scheduler;
     if (args.tls) req.tls = args.tls;
-    if (args.lookup) req.lookup = buildLookupReq(args.lookup);
+    if (args.lookup) req.lookup = args.lookup;
+    if (args.maxmind) req.maxmind = buildMaxMindReq(args.maxmind);
     if (args.cluster) req.cluster = args.cluster;
     if (args.setupWizardDismissed !== undefined)
       req.setupWizardDismissed = args.setupWizardDismissed;

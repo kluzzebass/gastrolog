@@ -61,9 +61,7 @@ Configure the database path in [Settings → Lookups](settings:lookups) → ASN.
 
 ## Configuration
 
-The `geoip` and `asn` tables each need a path to a MaxMind `.mmdb` file. Set these in [Settings → Lookups](settings:lookups). Free GeoLite2 databases are available from [MaxMind](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data) with a free account.
-
-Database files are hot-reloaded when modified on disk — no restart required. Hot-reload watches the file directly and does not follow symlinks.
+The `geoip` and `asn` tables each need a MaxMind `.mmdb` database. Upload one in [Settings → Files](settings:files), or enable [MaxMind Auto-Download](settings:files) to fetch the free GeoLite2 databases automatically. Create MMDB lookups in [Settings → Lookups](settings:lookups).
 
 ## Combining Tables
 

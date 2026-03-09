@@ -150,6 +150,7 @@ type ServerSettings struct {
 	TLS                  TLSConfig       `json:"tls,omitzero"`
 	Lookup               LookupConfig    `json:"lookup,omitzero"`
 	Cluster              ClusterConfig   `json:"cluster,omitzero"`
+	MaxMind              MaxMindConfig   `json:"maxmind,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
 }
 
@@ -188,6 +189,7 @@ type Config struct {
 	TLS                  TLSConfig       `json:"tls,omitzero"`
 	Lookup               LookupConfig    `json:"lookup,omitzero"`
 	Cluster              ClusterConfig   `json:"cluster,omitzero"`
+	MaxMind              MaxMindConfig   `json:"maxmind,omitzero"`
 	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
 
 	// Cluster TLS material (mTLS certs for cluster gRPC port).
@@ -250,11 +252,8 @@ type TLSConfig struct {
 	HTTPSPort string `json:"https_port,omitempty"`
 }
 
-// LookupConfig holds configuration for lookup tables (e.g. GeoIP enrichment).
+// LookupConfig holds configuration for lookup tables.
 type LookupConfig struct {
-	GeoIPDBPath     string                 `json:"geoip_db_path,omitempty"` // deprecated: use MMDBLookups
-	ASNDBPath       string                 `json:"asn_db_path,omitempty"`   // deprecated: use MMDBLookups
-	MaxMind         MaxMindConfig          `json:"maxmind,omitzero"`
 	HTTPLookups     []HTTPLookupConfig     `json:"http_lookups,omitempty"`
 	JSONFileLookups []JSONFileLookupConfig `json:"json_file_lookups,omitempty"`
 	MMDBLookups     []MMDBLookupConfig     `json:"mmdb_lookups,omitempty"`
