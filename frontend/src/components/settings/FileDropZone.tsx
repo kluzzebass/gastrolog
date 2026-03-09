@@ -32,7 +32,8 @@ export function FileDropZone({
   const displayFile = currentFile ?? pendingFile;
 
   const doUpload = (file: File) => {
-    if (!file.name.endsWith(accept)) {
+    const exts = accept.split(",").map((s) => s.trim());
+    if (!exts.some((ext) => file.name.endsWith(ext))) {
       addToast(`Only ${accept} files are accepted`, "error");
       return;
     }

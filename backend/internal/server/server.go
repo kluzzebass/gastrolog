@@ -331,7 +331,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal)
+	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal, s.ResolveManagedFileByID)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig, mm config.MaxMindConfig) {
 		s.applyLookupConfig(cfg, mm, lookupRegistry)
@@ -422,6 +422,9 @@ func (s *Server) applyLookupConfig(cfg config.LookupConfig, mm config.MaxMindCon
 
 	// Register JSON file lookup tables from config.
 	s.registerJSONFileLookups(cfg, registry)
+
+	// Register CSV lookup tables from config.
+	s.registerCSVLookups(cfg, registry)
 
 	// Manage the maxmind-update cron job.
 	s.manageMaxMindJob(mm, registry)
@@ -591,6 +594,62 @@ func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry looku
 
 		registry[jcfg.Name] = jf
 		s.logger.Info("registered JSON file lookup table", "name", jcfg.Name, "path", filePath)
+	}
+}
+
+// registerCSVLookups registers CSV file-backed lookup tables from config.
+func (s *Server) registerCSVLookups(cfg config.LookupConfig, registry lookup.Registry) {
+	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	defer cancel()
+
+	keep := make(map[string]struct{}, len(cfg.CSVLookups))
+	for _, ccfg := range cfg.CSVLookups {
+		if ccfg.Name != "" {
+			keep[ccfg.Name] = struct{}{}
+		}
+	}
+
+	// Close and remove any CSV lookups no longer in config.
+	for name, table := range registry {
+		if ct, ok := table.(*lookup.CSV); ok {
+			if _, exists := keep[name]; !exists {
+				ct.Close()
+				delete(registry, name)
+				s.logger.Info("removed CSV lookup table", "name", name)
+			}
+		}
+	}
+
+	for _, ccfg := range cfg.CSVLookups {
+		if ccfg.Name == "" || ccfg.FileID == "" {
+			continue
+		}
+
+		if existing, ok := registry[ccfg.Name]; ok {
+			if ct, ok := existing.(*lookup.CSV); ok {
+				ct.Close()
+			}
+		}
+
+		filePath := s.ResolveManagedFileByID(ctx, ccfg.FileID)
+		if filePath == "" {
+			s.logger.Warn("CSV lookup file not found", "name", ccfg.Name, "file_id", ccfg.FileID)
+			continue
+		}
+
+		ct := lookup.NewCSV(lookup.CSVConfig{
+			KeyColumn:    ccfg.KeyColumn,
+			ValueColumns: ccfg.ValueColumns,
+		})
+
+		if err := ct.Load(filePath); err != nil {
+			s.logger.Warn("failed to load CSV lookup file", "name", ccfg.Name, "path", filePath, "error", err)
+			continue
+		}
+		_ = ct.WatchFile(filePath)
+
+		registry[ccfg.Name] = ct
+		s.logger.Info("registered CSV lookup table", "name", ccfg.Name, "path", filePath)
 	}
 }
 

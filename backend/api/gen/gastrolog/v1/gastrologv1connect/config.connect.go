@@ -140,6 +140,9 @@ const (
 	// ConfigServiceTestHTTPLookupProcedure is the fully-qualified name of the ConfigService's
 	// TestHTTPLookup RPC.
 	ConfigServiceTestHTTPLookupProcedure = "/gastrolog.v1.ConfigService/TestHTTPLookup"
+	// ConfigServicePreviewCSVLookupProcedure is the fully-qualified name of the ConfigService's
+	// PreviewCSVLookup RPC.
+	ConfigServicePreviewCSVLookupProcedure = "/gastrolog.v1.ConfigService/PreviewCSVLookup"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -218,6 +221,8 @@ type ConfigServiceClient interface {
 	DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error)
 	// TestHTTPLookup tests an HTTP lookup configuration with a sample value.
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
+	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
+	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -453,6 +458,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("TestHTTPLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		previewCSVLookup: connect.NewClient[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse](
+			httpClient,
+			baseURL+ConfigServicePreviewCSVLookupProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PreviewCSVLookup")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -495,6 +506,7 @@ type configServiceClient struct {
 	listManagedFiles      *connect.Client[v1.ListManagedFilesRequest, v1.ListManagedFilesResponse]
 	deleteManagedFile     *connect.Client[v1.DeleteManagedFileRequest, v1.DeleteManagedFileResponse]
 	testHTTPLookup        *connect.Client[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse]
+	previewCSVLookup      *connect.Client[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -682,6 +694,11 @@ func (c *configServiceClient) TestHTTPLookup(ctx context.Context, req *connect.R
 	return c.testHTTPLookup.CallUnary(ctx, req)
 }
 
+// PreviewCSVLookup calls gastrolog.v1.ConfigService.PreviewCSVLookup.
+func (c *configServiceClient) PreviewCSVLookup(ctx context.Context, req *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error) {
+	return c.previewCSVLookup.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -758,6 +775,8 @@ type ConfigServiceHandler interface {
 	DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error)
 	// TestHTTPLookup tests an HTTP lookup configuration with a sample value.
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
+	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
+	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -989,6 +1008,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("TestHTTPLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServicePreviewCSVLookupHandler := connect.NewUnaryHandler(
+		ConfigServicePreviewCSVLookupProcedure,
+		svc.PreviewCSVLookup,
+		connect.WithSchema(configServiceMethods.ByName("PreviewCSVLookup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -1065,6 +1090,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceDeleteManagedFileHandler.ServeHTTP(w, r)
 		case ConfigServiceTestHTTPLookupProcedure:
 			configServiceTestHTTPLookupHandler.ServeHTTP(w, r)
+		case ConfigServicePreviewCSVLookupProcedure:
+			configServicePreviewCSVLookupHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1220,4 +1247,8 @@ func (UnimplementedConfigServiceHandler) DeleteManagedFile(context.Context, *con
 
 func (UnimplementedConfigServiceHandler) TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.TestHTTPLookup is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PreviewCSVLookup is not implemented"))
 }

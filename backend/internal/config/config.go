@@ -257,6 +257,7 @@ type LookupConfig struct {
 	HTTPLookups     []HTTPLookupConfig     `json:"http_lookups,omitempty"`
 	JSONFileLookups []JSONFileLookupConfig `json:"json_file_lookups,omitempty"`
 	MMDBLookups     []MMDBLookupConfig     `json:"mmdb_lookups,omitempty"`
+	CSVLookups      []CSVLookupConfig      `json:"csv_lookups,omitempty"`
 }
 
 // MMDBLookupConfig defines a named MMDB-backed lookup table (GeoIP City or ASN).
@@ -292,6 +293,14 @@ type JSONFileLookupConfig struct {
 	Query         string            `json:"query"`                     // JSONPath query template with {name} placeholders
 	ResponsePaths []string          `json:"response_paths,omitempty"`  // JSONPath expressions to extract from results
 	Parameters    []HTTPLookupParam `json:"parameters,omitempty"`      // ordered params for query template placeholders
+}
+
+// CSVLookupConfig defines a CSV file-backed lookup table.
+type CSVLookupConfig struct {
+	Name         string   `json:"name"`                    // registry name (e.g. "assets")
+	FileID       string   `json:"file_id"`                 // managed file ID (UUID)
+	KeyColumn    string   `json:"key_column,omitempty"`    // column header for lookup key; empty = first column
+	ValueColumns []string `json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
 }
 
 // MaxMindConfig holds credentials and state for automatic MaxMind database downloading.

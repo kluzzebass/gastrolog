@@ -1,4 +1,4 @@
-import type { HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
 import type { useUploadManagedFile } from "../../../api/hooks/useUploadManagedFile";
 
 // ---------------------------------------------------------------------------
@@ -35,6 +35,13 @@ export interface MMDBLookupDraft {
   fileId: string; // managed file ID; empty = auto-download
 }
 
+export interface CSVLookupDraft {
+  name: string;
+  fileId: string;
+  keyColumn: string;
+  valueColumns: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -43,6 +50,7 @@ export const lookupTypes = [
   { value: "mmdb", label: "MMDB (GeoIP / ASN)" },
   { value: "http", label: "HTTP" },
   { value: "json", label: "JSON File" },
+  { value: "csv", label: "CSV File" },
 ];
 
 export const mmdbDbTypes = [
@@ -66,6 +74,10 @@ export function emptyJsonDraft(): JSONFileLookupDraft {
 
 export function emptyMmdbDraft(): MMDBLookupDraft {
   return { name: "", dbType: "city", fileId: "" };
+}
+
+export function emptyCsvDraft(): CSVLookupDraft {
+  return { name: "", fileId: "", keyColumn: "", valueColumns: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +132,15 @@ export function httpLookupEqual(draft: HTTPLookupDraft, saved: HTTPLookupEntry):
     if (draft.headers[k] !== saved.headers[k]) return false;
   }
   return true;
+}
+
+export function csvLookupEqual(draft: CSVLookupDraft, saved: CSVLookupEntry): boolean {
+  return (
+    draft.name === saved.name &&
+    draft.fileId === saved.fileId &&
+    draft.keyColumn === saved.keyColumn &&
+    arraysEqual(draft.valueColumns, saved.valueColumns)
+  );
 }
 
 export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileLookupEntry): boolean {

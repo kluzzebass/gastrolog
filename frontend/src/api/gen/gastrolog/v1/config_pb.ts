@@ -2057,6 +2057,11 @@ export class LookupSettings extends Message<LookupSettings> {
    */
   mmdbLookups: MMDBLookupEntry[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.CSVLookupEntry csv_lookups = 7;
+   */
+  csvLookups: CSVLookupEntry[] = [];
+
   constructor(data?: PartialMessage<LookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2068,6 +2073,7 @@ export class LookupSettings extends Message<LookupSettings> {
     { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
     { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
+    { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
@@ -2362,6 +2368,72 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
 
   static equals(a: JSONFileLookupEntry | PlainMessage<JSONFileLookupEntry> | undefined, b: JSONFileLookupEntry | PlainMessage<JSONFileLookupEntry> | undefined): boolean {
     return proto3.util.equals(JSONFileLookupEntry, a, b);
+  }
+}
+
+/**
+ * CSVLookupEntry defines a CSV file-backed lookup table for key→row enrichment.
+ * The CSV is loaded into memory and keyed by a configurable column.
+ *
+ * @generated from message gastrolog.v1.CSVLookupEntry
+ */
+export class CSVLookupEntry extends Message<CSVLookupEntry> {
+  /**
+   * registry name (e.g. "assets")
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * managed file ID (UUID)
+   *
+   * @generated from field: string file_id = 2;
+   */
+  fileId = "";
+
+  /**
+   * column header for lookup key; empty = first column
+   *
+   * @generated from field: string key_column = 3;
+   */
+  keyColumn = "";
+
+  /**
+   * columns to include in output; empty = all non-key
+   *
+   * @generated from field: repeated string value_columns = 4;
+   */
+  valueColumns: string[] = [];
+
+  constructor(data?: PartialMessage<CSVLookupEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CSVLookupEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CSVLookupEntry {
+    return new CSVLookupEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CSVLookupEntry {
+    return new CSVLookupEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CSVLookupEntry {
+    return new CSVLookupEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CSVLookupEntry | PlainMessage<CSVLookupEntry> | undefined, b: CSVLookupEntry | PlainMessage<CSVLookupEntry> | undefined): boolean {
+    return proto3.util.equals(CSVLookupEntry, a, b);
   }
 }
 
@@ -2832,6 +2904,13 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
    */
   mmdbLookups: MMDBLookupEntry[] = [];
 
+  /**
+   * replaces the full list when present
+   *
+   * @generated from field: repeated gastrolog.v1.CSVLookupEntry csv_lookups = 7;
+   */
+  csvLookups: CSVLookupEntry[] = [];
+
   constructor(data?: PartialMessage<PutLookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2843,6 +2922,7 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
     { no: 4, name: "http_lookups", kind: "message", T: HTTPLookupEntry, repeated: true },
     { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
+    { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {
@@ -5037,6 +5117,179 @@ export class TestHTTPLookupResult extends Message<TestHTTPLookupResult> {
 
   static equals(a: TestHTTPLookupResult | PlainMessage<TestHTTPLookupResult> | undefined, b: TestHTTPLookupResult | PlainMessage<TestHTTPLookupResult> | undefined): boolean {
     return proto3.util.equals(TestHTTPLookupResult, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PreviewCSVLookupRequest
+ */
+export class PreviewCSVLookupRequest extends Message<PreviewCSVLookupRequest> {
+  /**
+   * managed file ID (UUID)
+   *
+   * @generated from field: string file_id = 1;
+   */
+  fileId = "";
+
+  /**
+   * column to use as key; empty = first column
+   *
+   * @generated from field: string key_column = 2;
+   */
+  keyColumn = "";
+
+  /**
+   * columns to include; empty = all non-key
+   *
+   * @generated from field: repeated string value_columns = 3;
+   */
+  valueColumns: string[] = [];
+
+  /**
+   * maximum sample rows to return; 0 = default (10)
+   *
+   * @generated from field: int32 max_rows = 4;
+   */
+  maxRows = 0;
+
+  constructor(data?: PartialMessage<PreviewCSVLookupRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PreviewCSVLookupRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 4, name: "max_rows", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewCSVLookupRequest {
+    return new PreviewCSVLookupRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PreviewCSVLookupRequest {
+    return new PreviewCSVLookupRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PreviewCSVLookupRequest {
+    return new PreviewCSVLookupRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PreviewCSVLookupRequest | PlainMessage<PreviewCSVLookupRequest> | undefined, b: PreviewCSVLookupRequest | PlainMessage<PreviewCSVLookupRequest> | undefined): boolean {
+    return proto3.util.equals(PreviewCSVLookupRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PreviewCSVLookupResponse
+ */
+export class PreviewCSVLookupResponse extends Message<PreviewCSVLookupResponse> {
+  /**
+   * all column headers from the CSV file
+   *
+   * @generated from field: repeated string columns = 1;
+   */
+  columns: string[] = [];
+
+  /**
+   * resolved key column name
+   *
+   * @generated from field: string key_column = 2;
+   */
+  keyColumn = "";
+
+  /**
+   * sample data rows (up to max_rows)
+   *
+   * @generated from field: repeated gastrolog.v1.CSVPreviewRow rows = 3;
+   */
+  rows: CSVPreviewRow[] = [];
+
+  /**
+   * total number of data rows (excluding header)
+   *
+   * @generated from field: int32 total_rows = 4;
+   */
+  totalRows = 0;
+
+  /**
+   * non-empty on failure
+   *
+   * @generated from field: string error = 5;
+   */
+  error = "";
+
+  constructor(data?: PartialMessage<PreviewCSVLookupResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PreviewCSVLookupResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 2, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "rows", kind: "message", T: CSVPreviewRow, repeated: true },
+    { no: 4, name: "total_rows", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 5, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewCSVLookupResponse {
+    return new PreviewCSVLookupResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PreviewCSVLookupResponse {
+    return new PreviewCSVLookupResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PreviewCSVLookupResponse {
+    return new PreviewCSVLookupResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PreviewCSVLookupResponse | PlainMessage<PreviewCSVLookupResponse> | undefined, b: PreviewCSVLookupResponse | PlainMessage<PreviewCSVLookupResponse> | undefined): boolean {
+    return proto3.util.equals(PreviewCSVLookupResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.CSVPreviewRow
+ */
+export class CSVPreviewRow extends Message<CSVPreviewRow> {
+  /**
+   * cell values in column order
+   *
+   * @generated from field: repeated string values = 1;
+   */
+  values: string[] = [];
+
+  constructor(data?: PartialMessage<CSVPreviewRow>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CSVPreviewRow";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "values", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CSVPreviewRow {
+    return new CSVPreviewRow().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CSVPreviewRow {
+    return new CSVPreviewRow().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CSVPreviewRow {
+    return new CSVPreviewRow().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CSVPreviewRow | PlainMessage<CSVPreviewRow> | undefined, b: CSVPreviewRow | PlainMessage<CSVPreviewRow> | undefined): boolean {
+    return proto3.util.equals(CSVPreviewRow, a, b);
   }
 }
 

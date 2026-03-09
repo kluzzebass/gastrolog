@@ -116,6 +116,9 @@ service ConfigService {
 
   // TestHTTPLookup tests an HTTP lookup configuration with a sample value.
   rpc TestHTTPLookup(TestHTTPLookupRequest) returns (TestHTTPLookupResponse);
+
+  // PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
+  rpc PreviewCSVLookup(PreviewCSVLookupRequest) returns (PreviewCSVLookupResponse);
 }
 
 message GetConfigRequest {}
@@ -349,6 +352,7 @@ message LookupSettings {
   repeated HTTPLookupEntry http_lookups = 4;
   repeated JSONFileLookupEntry json_file_lookups = 5;
   repeated MMDBLookupEntry mmdb_lookups = 6;
+  repeated CSVLookupEntry csv_lookups = 7;
 }
 
 // MMDBLookupEntry defines a named MMDB-backed lookup table (GeoIP City or ASN).
@@ -385,6 +389,15 @@ message JSONFileLookupEntry {
   string query = 3;                          // JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
   repeated string response_paths = 4;        // optional: JSONPath to extract from results; empty = flatten
   repeated HTTPLookupParam parameters = 5;   // ordered param definitions for query template placeholders
+}
+
+// CSVLookupEntry defines a CSV file-backed lookup table for key→row enrichment.
+// The CSV is loaded into memory and keyed by a configurable column.
+message CSVLookupEntry {
+  string name = 1;                       // registry name (e.g. "assets")
+  string file_id = 2;                   // managed file ID (UUID)
+  string key_column = 3;                // column header for lookup key; empty = first column
+  repeated string value_columns = 4;    // columns to include in output; empty = all non-key
 }
 
 message ClusterSettings {
@@ -450,6 +463,7 @@ message PutLookupSettings {
   repeated HTTPLookupEntry http_lookups = 4; // replaces the full list when present
   repeated JSONFileLookupEntry json_file_lookups = 5; // replaces the full list when present
   repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
+  repeated CSVLookupEntry csv_lookups = 7; // replaces the full list when present
 }
 
 message PutClusterSettings {
@@ -681,4 +695,23 @@ message TestHTTPLookupResult {
   string label = 1;                    // the key from the request values map
   string value = 2;                    // the input value that was looked up
   map<string, string> fields = 3;      // extracted fields (empty on miss)
+}
+
+message PreviewCSVLookupRequest {
+  string file_id = 1;                    // managed file ID (UUID)
+  string key_column = 2;                 // column to use as key; empty = first column
+  repeated string value_columns = 3;     // columns to include; empty = all non-key
+  int32 max_rows = 4;                    // maximum sample rows to return; 0 = default (10)
+}
+
+message PreviewCSVLookupResponse {
+  repeated string columns = 1;           // all column headers from the CSV file
+  string key_column = 2;                 // resolved key column name
+  repeated CSVPreviewRow rows = 3;       // sample data rows (up to max_rows)
+  int32 total_rows = 4;                  // total number of data rows (excluding header)
+  string error = 5;                      // non-empty on failure
+}
+
+message CSVPreviewRow {
+  repeated string values = 1;            // cell values in column order
 }

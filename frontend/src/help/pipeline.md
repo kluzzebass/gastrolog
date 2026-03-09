@@ -273,7 +273,7 @@ Lookup works on both raw records and table rows after `stats`:
 | `geoip` | MaxMind GeoLite2-City / GeoIP2-City | `country`, `city`, `subdivision`, `latitude`, `longitude`, `timezone`, `accuracy_radius` |
 | `asn` | MaxMind GeoLite2-ASN / GeoIP2-ISP | `asn`, `as_org` |
 
-The `rdns` table works out of the box. The `geoip` and `asn` tables require configuring MMDB database paths in [Settings → Lookups](settings:lookups).
+The `rdns` table works out of the box. The `geoip` and `asn` tables require configuring MMDB database paths in [Settings → Lookups](settings:lookups). Custom tables (CSV, JSON file, HTTP) are also configured in Lookups.
 
 ### Examples
 

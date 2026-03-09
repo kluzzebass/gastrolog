@@ -65,6 +65,12 @@ type PutSettingsArgs = {
       dbType: string;
       fileId?: string;
     }[];
+    csvLookups?: {
+      name: string;
+      fileId: string;
+      keyColumn?: string;
+      valueColumns?: string[];
+    }[];
   };
   maxmind?: {
     autoDownload?: boolean;
@@ -131,6 +137,27 @@ export function useTestHTTPLookup() {
       const response = await configClient.testHTTPLookup({
         config: args.config,
         values: args.values,
+      });
+      return response;
+    },
+  });
+}
+
+type PreviewCSVLookupArgs = {
+  fileId: string;
+  keyColumn?: string;
+  valueColumns?: string[];
+  maxRows?: number;
+};
+
+export function usePreviewCSVLookup() {
+  return useMutation({
+    mutationFn: async (args: PreviewCSVLookupArgs) => {
+      const response = await configClient.previewCSVLookup({
+        fileId: args.fileId,
+        keyColumn: args.keyColumn ?? "",
+        valueColumns: args.valueColumns ?? [],
+        maxRows: args.maxRows ?? 10,
       });
       return response;
     },

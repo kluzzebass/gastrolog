@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"time"
 
 	"connectrpc.com/connect"
@@ -45,22 +48,24 @@ type ConfigServer struct {
 	onLookupConfigChange  func(config.LookupConfig, config.MaxMindConfig)
 	afterConfigApply      func(raftfsm.Notification)
 	configSignal          *notify.Signal
+	resolveManagedFile    func(ctx context.Context, fileID string) string
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, peerStats PeerIngesterStatsProvider, peerRouteStats PeerRouteStatsProvider, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal) *ConfigServer {
+func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, peerStats PeerIngesterStatsProvider, peerRouteStats PeerRouteStatsProvider, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal, resolveManagedFile func(ctx context.Context, fileID string) string) *ConfigServer {
 	return &ConfigServer{
-		orch:             orch,
-		cfgStore:         cfgStore,
-		factories:        factories,
-		certManager:      certManager,
-		peerStats:        peerStats,
-		peerRouteStats:   peerRouteStats,
-		localNodeID:      localNodeID,
-		afterConfigApply: afterConfigApply,
-		configSignal:     configSignal,
+		orch:               orch,
+		cfgStore:           cfgStore,
+		factories:          factories,
+		certManager:        certManager,
+		peerStats:          peerStats,
+		peerRouteStats:     peerRouteStats,
+		localNodeID:        localNodeID,
+		afterConfigApply:   afterConfigApply,
+		configSignal:       configSignal,
+		resolveManagedFile: resolveManagedFile,
 	}
 }
 
@@ -311,6 +316,7 @@ func (s *ConfigServer) GetSettings(
 			HttpLookups:     httpLookupsToProto(ss.Lookup.HTTPLookups),
 			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
 			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
+			CsvLookups:      csvLookupsToProto(ss.Lookup.CSVLookups),
 		},
 		Maxmind: mm,
 		Cluster: &apiv1.ClusterSettings{
@@ -569,6 +575,9 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *config.LookupConfig) {
 	if l.MmdbLookups != nil {
 		lookup.MMDBLookups = mmdbLookupsFromProto(l.MmdbLookups)
 	}
+	if l.CsvLookups != nil {
+		lookup.CSVLookups = csvLookupsFromProto(l.CsvLookups)
+	}
 }
 
 func mergeMaxMind(mm *apiv1.PutMaxMindSettings, cfg *config.MaxMindConfig) {
@@ -703,6 +712,38 @@ func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []config.MMDBLookupC
 	return out
 }
 
+func csvLookupsToProto(lookups []config.CSVLookupConfig) []*apiv1.CSVLookupEntry {
+	if len(lookups) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.CSVLookupEntry, len(lookups))
+	for i, l := range lookups {
+		out[i] = &apiv1.CSVLookupEntry{
+			Name:         l.Name,
+			FileId:       l.FileID,
+			KeyColumn:    l.KeyColumn,
+			ValueColumns: l.ValueColumns,
+		}
+	}
+	return out
+}
+
+func csvLookupsFromProto(entries []*apiv1.CSVLookupEntry) []config.CSVLookupConfig {
+	out := make([]config.CSVLookupConfig, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" || e.FileId == "" {
+			continue
+		}
+		out = append(out, config.CSVLookupConfig{
+			Name:         e.Name,
+			FileID:       e.FileId,
+			KeyColumn:    e.KeyColumn,
+			ValueColumns: e.ValueColumns,
+		})
+	}
+	return out
+}
+
 func mergeCluster(c *apiv1.PutClusterSettings, cluster *config.ClusterConfig) *connect.Error {
 	if c.BroadcastInterval != nil {
 		if _, err := time.ParseDuration(*c.BroadcastInterval); err != nil {
@@ -779,6 +820,80 @@ func (s *ConfigServer) TestHTTPLookup(
 		Results: []*apiv1.TestHTTPLookupResult{{
 			Fields: result,
 		}},
+	}), nil
+}
+
+// PreviewCSVLookup reads a managed CSV file and returns column headers,
+// sample rows, and total row count for the settings UI preview.
+func (s *ConfigServer) PreviewCSVLookup(
+	ctx context.Context,
+	req *connect.Request[apiv1.PreviewCSVLookupRequest],
+) (*connect.Response[apiv1.PreviewCSVLookupResponse], error) {
+	fileID := req.Msg.GetFileId()
+	if fileID == "" {
+		return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
+			Error: "file_id is required",
+		}), nil
+	}
+
+	filePath := s.resolveManagedFile(ctx, fileID)
+	if filePath == "" {
+		return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
+			Error: "file not found",
+		}), nil
+	}
+
+	f, err := os.Open(filePath) //nolint:gosec // path from validated managed file
+	if err != nil {
+		return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
+			Error: fmt.Sprintf("open file: %v", err),
+		}), nil
+	}
+	defer func() { _ = f.Close() }()
+
+	reader := csv.NewReader(f)
+	reader.FieldsPerRecord = -1
+	reader.ReuseRecord = false
+
+	header, err := reader.Read()
+	if err != nil {
+		return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
+			Error: fmt.Sprintf("read header: %v", err),
+		}), nil
+	}
+
+	// Resolve key column.
+	keyCol := req.Msg.GetKeyColumn()
+	if keyCol == "" && len(header) > 0 {
+		keyCol = header[0]
+	}
+
+	maxRows := int(req.Msg.GetMaxRows())
+	if maxRows <= 0 {
+		maxRows = 10
+	}
+
+	var rows []*apiv1.CSVPreviewRow
+	totalRows := 0
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			break
+		}
+		totalRows++
+		if len(rows) < maxRows {
+			rows = append(rows, &apiv1.CSVPreviewRow{Values: record})
+		}
+	}
+
+	return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
+		Columns:   header,
+		KeyColumn: keyCol,
+		Rows:      rows,
+		TotalRows: int32(totalRows),
 	}), nil
 }
 

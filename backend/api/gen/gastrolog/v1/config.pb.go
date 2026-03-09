@@ -2459,6 +2459,7 @@ type LookupSettings struct {
 	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,4,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`
 	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,5,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"`
 	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,6,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`
+	CsvLookups      []*CSVLookupEntry      `protobuf:"bytes,7,rep,name=csv_lookups,json=csvLookups,proto3" json:"csv_lookups,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -2510,6 +2511,13 @@ func (x *LookupSettings) GetJsonFileLookups() []*JSONFileLookupEntry {
 func (x *LookupSettings) GetMmdbLookups() []*MMDBLookupEntry {
 	if x != nil {
 		return x.MmdbLookups
+	}
+	return nil
+}
+
+func (x *LookupSettings) GetCsvLookups() []*CSVLookupEntry {
+	if x != nil {
+		return x.CsvLookups
 	}
 	return nil
 }
@@ -2808,6 +2816,76 @@ func (x *JSONFileLookupEntry) GetParameters() []*HTTPLookupParam {
 	return nil
 }
 
+// CSVLookupEntry defines a CSV file-backed lookup table for key→row enrichment.
+// The CSV is loaded into memory and keyed by a configurable column.
+type CSVLookupEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                     // registry name (e.g. "assets")
+	FileId        string                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID (UUID)
+	KeyColumn     string                 `protobuf:"bytes,3,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`          // column header for lookup key; empty = first column
+	ValueColumns  []string               `protobuf:"bytes,4,rep,name=value_columns,json=valueColumns,proto3" json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CSVLookupEntry) Reset() {
+	*x = CSVLookupEntry{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CSVLookupEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CSVLookupEntry) ProtoMessage() {}
+
+func (x *CSVLookupEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CSVLookupEntry.ProtoReflect.Descriptor instead.
+func (*CSVLookupEntry) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *CSVLookupEntry) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CSVLookupEntry) GetFileId() string {
+	if x != nil {
+		return x.FileId
+	}
+	return ""
+}
+
+func (x *CSVLookupEntry) GetKeyColumn() string {
+	if x != nil {
+		return x.KeyColumn
+	}
+	return ""
+}
+
+func (x *CSVLookupEntry) GetValueColumns() []string {
+	if x != nil {
+		return x.ValueColumns
+	}
+	return nil
+}
+
 type ClusterSettings struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	BroadcastInterval string                 `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3" json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s". Default: "5s".
@@ -2817,7 +2895,7 @@ type ClusterSettings struct {
 
 func (x *ClusterSettings) Reset() {
 	*x = ClusterSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2829,7 +2907,7 @@ func (x *ClusterSettings) String() string {
 func (*ClusterSettings) ProtoMessage() {}
 
 func (x *ClusterSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[51]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2842,7 +2920,7 @@ func (x *ClusterSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterSettings.ProtoReflect.Descriptor instead.
 func (*ClusterSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{51}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{52}
 }
 
 func (x *ClusterSettings) GetBroadcastInterval() string {
@@ -2870,7 +2948,7 @@ type GetSettingsResponse struct {
 
 func (x *GetSettingsResponse) Reset() {
 	*x = GetSettingsResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2882,7 +2960,7 @@ func (x *GetSettingsResponse) String() string {
 func (*GetSettingsResponse) ProtoMessage() {}
 
 func (x *GetSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[52]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2895,7 +2973,7 @@ func (x *GetSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSettingsResponse.ProtoReflect.Descriptor instead.
 func (*GetSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{52}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{53}
 }
 
 func (x *GetSettingsResponse) GetAuth() *AuthSettings {
@@ -2982,7 +3060,7 @@ type PutPasswordPolicySettings struct {
 
 func (x *PutPasswordPolicySettings) Reset() {
 	*x = PutPasswordPolicySettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2994,7 +3072,7 @@ func (x *PutPasswordPolicySettings) String() string {
 func (*PutPasswordPolicySettings) ProtoMessage() {}
 
 func (x *PutPasswordPolicySettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[53]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3007,7 +3085,7 @@ func (x *PutPasswordPolicySettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutPasswordPolicySettings.ProtoReflect.Descriptor instead.
 func (*PutPasswordPolicySettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{53}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{54}
 }
 
 func (x *PutPasswordPolicySettings) GetMinLength() int32 {
@@ -3064,7 +3142,7 @@ type PutAuthSettings struct {
 
 func (x *PutAuthSettings) Reset() {
 	*x = PutAuthSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3076,7 +3154,7 @@ func (x *PutAuthSettings) String() string {
 func (*PutAuthSettings) ProtoMessage() {}
 
 func (x *PutAuthSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[54]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3089,7 +3167,7 @@ func (x *PutAuthSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutAuthSettings.ProtoReflect.Descriptor instead.
 func (*PutAuthSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{54}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *PutAuthSettings) GetTokenDuration() string {
@@ -3131,7 +3209,7 @@ type PutQuerySettings struct {
 
 func (x *PutQuerySettings) Reset() {
 	*x = PutQuerySettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3143,7 +3221,7 @@ func (x *PutQuerySettings) String() string {
 func (*PutQuerySettings) ProtoMessage() {}
 
 func (x *PutQuerySettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[55]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3156,7 +3234,7 @@ func (x *PutQuerySettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutQuerySettings.ProtoReflect.Descriptor instead.
 func (*PutQuerySettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{55}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{56}
 }
 
 func (x *PutQuerySettings) GetTimeout() string {
@@ -3189,7 +3267,7 @@ type PutSchedulerSettings struct {
 
 func (x *PutSchedulerSettings) Reset() {
 	*x = PutSchedulerSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3201,7 +3279,7 @@ func (x *PutSchedulerSettings) String() string {
 func (*PutSchedulerSettings) ProtoMessage() {}
 
 func (x *PutSchedulerSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[56]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3214,7 +3292,7 @@ func (x *PutSchedulerSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutSchedulerSettings.ProtoReflect.Descriptor instead.
 func (*PutSchedulerSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{56}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{57}
 }
 
 func (x *PutSchedulerSettings) GetMaxConcurrentJobs() int32 {
@@ -3236,7 +3314,7 @@ type PutTLSSettings struct {
 
 func (x *PutTLSSettings) Reset() {
 	*x = PutTLSSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3248,7 +3326,7 @@ func (x *PutTLSSettings) String() string {
 func (*PutTLSSettings) ProtoMessage() {}
 
 func (x *PutTLSSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[57]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3261,7 +3339,7 @@ func (x *PutTLSSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutTLSSettings.ProtoReflect.Descriptor instead.
 func (*PutTLSSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{57}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{58}
 }
 
 func (x *PutTLSSettings) GetDefaultCert() string {
@@ -3303,7 +3381,7 @@ type PutMaxMindSettings struct {
 
 func (x *PutMaxMindSettings) Reset() {
 	*x = PutMaxMindSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3315,7 +3393,7 @@ func (x *PutMaxMindSettings) String() string {
 func (*PutMaxMindSettings) ProtoMessage() {}
 
 func (x *PutMaxMindSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[58]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3328,7 +3406,7 @@ func (x *PutMaxMindSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutMaxMindSettings.ProtoReflect.Descriptor instead.
 func (*PutMaxMindSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{58}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{59}
 }
 
 func (x *PutMaxMindSettings) GetAutoDownload() bool {
@@ -3357,13 +3435,14 @@ type PutLookupSettings struct {
 	HttpLookups     []*HTTPLookupEntry     `protobuf:"bytes,4,rep,name=http_lookups,json=httpLookups,proto3" json:"http_lookups,omitempty"`               // replaces the full list when present
 	JsonFileLookups []*JSONFileLookupEntry `protobuf:"bytes,5,rep,name=json_file_lookups,json=jsonFileLookups,proto3" json:"json_file_lookups,omitempty"` // replaces the full list when present
 	MmdbLookups     []*MMDBLookupEntry     `protobuf:"bytes,6,rep,name=mmdb_lookups,json=mmdbLookups,proto3" json:"mmdb_lookups,omitempty"`               // replaces the full list when present
+	CsvLookups      []*CSVLookupEntry      `protobuf:"bytes,7,rep,name=csv_lookups,json=csvLookups,proto3" json:"csv_lookups,omitempty"`                  // replaces the full list when present
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PutLookupSettings) Reset() {
 	*x = PutLookupSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3375,7 +3454,7 @@ func (x *PutLookupSettings) String() string {
 func (*PutLookupSettings) ProtoMessage() {}
 
 func (x *PutLookupSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[59]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3388,7 +3467,7 @@ func (x *PutLookupSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutLookupSettings.ProtoReflect.Descriptor instead.
 func (*PutLookupSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{59}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{60}
 }
 
 func (x *PutLookupSettings) GetHttpLookups() []*HTTPLookupEntry {
@@ -3412,6 +3491,13 @@ func (x *PutLookupSettings) GetMmdbLookups() []*MMDBLookupEntry {
 	return nil
 }
 
+func (x *PutLookupSettings) GetCsvLookups() []*CSVLookupEntry {
+	if x != nil {
+		return x.CsvLookups
+	}
+	return nil
+}
+
 type PutClusterSettings struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	BroadcastInterval *string                `protobuf:"bytes,1,opt,name=broadcast_interval,json=broadcastInterval,proto3,oneof" json:"broadcast_interval,omitempty"`
@@ -3421,7 +3507,7 @@ type PutClusterSettings struct {
 
 func (x *PutClusterSettings) Reset() {
 	*x = PutClusterSettings{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3433,7 +3519,7 @@ func (x *PutClusterSettings) String() string {
 func (*PutClusterSettings) ProtoMessage() {}
 
 func (x *PutClusterSettings) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[60]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3446,7 +3532,7 @@ func (x *PutClusterSettings) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutClusterSettings.ProtoReflect.Descriptor instead.
 func (*PutClusterSettings) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{60}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{61}
 }
 
 func (x *PutClusterSettings) GetBroadcastInterval() string {
@@ -3472,7 +3558,7 @@ type PutSettingsRequest struct {
 
 func (x *PutSettingsRequest) Reset() {
 	*x = PutSettingsRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3484,7 +3570,7 @@ func (x *PutSettingsRequest) String() string {
 func (*PutSettingsRequest) ProtoMessage() {}
 
 func (x *PutSettingsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[61]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3497,7 +3583,7 @@ func (x *PutSettingsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutSettingsRequest.ProtoReflect.Descriptor instead.
 func (*PutSettingsRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{61}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{62}
 }
 
 func (x *PutSettingsRequest) GetAuth() *PutAuthSettings {
@@ -3566,7 +3652,7 @@ type PutSettingsResponse struct {
 
 func (x *PutSettingsResponse) Reset() {
 	*x = PutSettingsResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3578,7 +3664,7 @@ func (x *PutSettingsResponse) String() string {
 func (*PutSettingsResponse) ProtoMessage() {}
 
 func (x *PutSettingsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[62]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3591,7 +3677,7 @@ func (x *PutSettingsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutSettingsResponse.ProtoReflect.Descriptor instead.
 func (*PutSettingsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{62}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{63}
 }
 
 func (x *PutSettingsResponse) GetGeoipValidation() *MmdbValidation {
@@ -3622,7 +3708,7 @@ type MmdbValidation struct {
 
 func (x *MmdbValidation) Reset() {
 	*x = MmdbValidation{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[64]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3634,7 +3720,7 @@ func (x *MmdbValidation) String() string {
 func (*MmdbValidation) ProtoMessage() {}
 
 func (x *MmdbValidation) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[63]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[64]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3647,7 +3733,7 @@ func (x *MmdbValidation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MmdbValidation.ProtoReflect.Descriptor instead.
 func (*MmdbValidation) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{63}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{64}
 }
 
 func (x *MmdbValidation) GetValid() bool {
@@ -3693,7 +3779,7 @@ type GetPreferencesRequest struct {
 
 func (x *GetPreferencesRequest) Reset() {
 	*x = GetPreferencesRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[64]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[65]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3705,7 +3791,7 @@ func (x *GetPreferencesRequest) String() string {
 func (*GetPreferencesRequest) ProtoMessage() {}
 
 func (x *GetPreferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[64]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[65]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3718,7 +3804,7 @@ func (x *GetPreferencesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPreferencesRequest.ProtoReflect.Descriptor instead.
 func (*GetPreferencesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{64}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{65}
 }
 
 type GetPreferencesResponse struct {
@@ -3732,7 +3818,7 @@ type GetPreferencesResponse struct {
 
 func (x *GetPreferencesResponse) Reset() {
 	*x = GetPreferencesResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[65]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[66]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3744,7 +3830,7 @@ func (x *GetPreferencesResponse) String() string {
 func (*GetPreferencesResponse) ProtoMessage() {}
 
 func (x *GetPreferencesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[65]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[66]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3757,7 +3843,7 @@ func (x *GetPreferencesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetPreferencesResponse.ProtoReflect.Descriptor instead.
 func (*GetPreferencesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{65}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{66}
 }
 
 func (x *GetPreferencesResponse) GetTheme() string {
@@ -3792,7 +3878,7 @@ type PutPreferencesRequest struct {
 
 func (x *PutPreferencesRequest) Reset() {
 	*x = PutPreferencesRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[66]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[67]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3804,7 +3890,7 @@ func (x *PutPreferencesRequest) String() string {
 func (*PutPreferencesRequest) ProtoMessage() {}
 
 func (x *PutPreferencesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[66]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[67]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3817,7 +3903,7 @@ func (x *PutPreferencesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutPreferencesRequest.ProtoReflect.Descriptor instead.
 func (*PutPreferencesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{66}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{67}
 }
 
 func (x *PutPreferencesRequest) GetTheme() string {
@@ -3849,7 +3935,7 @@ type PutPreferencesResponse struct {
 
 func (x *PutPreferencesResponse) Reset() {
 	*x = PutPreferencesResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[67]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[68]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3861,7 +3947,7 @@ func (x *PutPreferencesResponse) String() string {
 func (*PutPreferencesResponse) ProtoMessage() {}
 
 func (x *PutPreferencesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[67]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[68]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3874,7 +3960,7 @@ func (x *PutPreferencesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutPreferencesResponse.ProtoReflect.Descriptor instead.
 func (*PutPreferencesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{67}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{68}
 }
 
 type SavedQuery struct {
@@ -3887,7 +3973,7 @@ type SavedQuery struct {
 
 func (x *SavedQuery) Reset() {
 	*x = SavedQuery{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[68]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[69]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3899,7 +3985,7 @@ func (x *SavedQuery) String() string {
 func (*SavedQuery) ProtoMessage() {}
 
 func (x *SavedQuery) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[68]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[69]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3912,7 +3998,7 @@ func (x *SavedQuery) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SavedQuery.ProtoReflect.Descriptor instead.
 func (*SavedQuery) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{68}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{69}
 }
 
 func (x *SavedQuery) GetName() string {
@@ -3937,7 +4023,7 @@ type GetSavedQueriesRequest struct {
 
 func (x *GetSavedQueriesRequest) Reset() {
 	*x = GetSavedQueriesRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[69]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[70]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3949,7 +4035,7 @@ func (x *GetSavedQueriesRequest) String() string {
 func (*GetSavedQueriesRequest) ProtoMessage() {}
 
 func (x *GetSavedQueriesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[69]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[70]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3962,7 +4048,7 @@ func (x *GetSavedQueriesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSavedQueriesRequest.ProtoReflect.Descriptor instead.
 func (*GetSavedQueriesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{69}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{70}
 }
 
 type GetSavedQueriesResponse struct {
@@ -3974,7 +4060,7 @@ type GetSavedQueriesResponse struct {
 
 func (x *GetSavedQueriesResponse) Reset() {
 	*x = GetSavedQueriesResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[70]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[71]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3986,7 +4072,7 @@ func (x *GetSavedQueriesResponse) String() string {
 func (*GetSavedQueriesResponse) ProtoMessage() {}
 
 func (x *GetSavedQueriesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[70]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[71]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3999,7 +4085,7 @@ func (x *GetSavedQueriesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetSavedQueriesResponse.ProtoReflect.Descriptor instead.
 func (*GetSavedQueriesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{70}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{71}
 }
 
 func (x *GetSavedQueriesResponse) GetQueries() []*SavedQuery {
@@ -4018,7 +4104,7 @@ type PutSavedQueryRequest struct {
 
 func (x *PutSavedQueryRequest) Reset() {
 	*x = PutSavedQueryRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[71]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[72]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4030,7 +4116,7 @@ func (x *PutSavedQueryRequest) String() string {
 func (*PutSavedQueryRequest) ProtoMessage() {}
 
 func (x *PutSavedQueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[71]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[72]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4043,7 +4129,7 @@ func (x *PutSavedQueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutSavedQueryRequest.ProtoReflect.Descriptor instead.
 func (*PutSavedQueryRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{71}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{72}
 }
 
 func (x *PutSavedQueryRequest) GetQuery() *SavedQuery {
@@ -4061,7 +4147,7 @@ type PutSavedQueryResponse struct {
 
 func (x *PutSavedQueryResponse) Reset() {
 	*x = PutSavedQueryResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[72]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[73]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4073,7 +4159,7 @@ func (x *PutSavedQueryResponse) String() string {
 func (*PutSavedQueryResponse) ProtoMessage() {}
 
 func (x *PutSavedQueryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[72]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[73]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4086,7 +4172,7 @@ func (x *PutSavedQueryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutSavedQueryResponse.ProtoReflect.Descriptor instead.
 func (*PutSavedQueryResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{72}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{73}
 }
 
 type DeleteSavedQueryRequest struct {
@@ -4098,7 +4184,7 @@ type DeleteSavedQueryRequest struct {
 
 func (x *DeleteSavedQueryRequest) Reset() {
 	*x = DeleteSavedQueryRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[73]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[74]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4110,7 +4196,7 @@ func (x *DeleteSavedQueryRequest) String() string {
 func (*DeleteSavedQueryRequest) ProtoMessage() {}
 
 func (x *DeleteSavedQueryRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[73]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[74]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4123,7 +4209,7 @@ func (x *DeleteSavedQueryRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSavedQueryRequest.ProtoReflect.Descriptor instead.
 func (*DeleteSavedQueryRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{73}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{74}
 }
 
 func (x *DeleteSavedQueryRequest) GetName() string {
@@ -4141,7 +4227,7 @@ type DeleteSavedQueryResponse struct {
 
 func (x *DeleteSavedQueryResponse) Reset() {
 	*x = DeleteSavedQueryResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[74]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[75]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4153,7 +4239,7 @@ func (x *DeleteSavedQueryResponse) String() string {
 func (*DeleteSavedQueryResponse) ProtoMessage() {}
 
 func (x *DeleteSavedQueryResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[74]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[75]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4166,7 +4252,7 @@ func (x *DeleteSavedQueryResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSavedQueryResponse.ProtoReflect.Descriptor instead.
 func (*DeleteSavedQueryResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{74}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{75}
 }
 
 type ListCertificatesRequest struct {
@@ -4177,7 +4263,7 @@ type ListCertificatesRequest struct {
 
 func (x *ListCertificatesRequest) Reset() {
 	*x = ListCertificatesRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[75]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[76]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4189,7 +4275,7 @@ func (x *ListCertificatesRequest) String() string {
 func (*ListCertificatesRequest) ProtoMessage() {}
 
 func (x *ListCertificatesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[75]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[76]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4202,7 +4288,7 @@ func (x *ListCertificatesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCertificatesRequest.ProtoReflect.Descriptor instead.
 func (*ListCertificatesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{75}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{76}
 }
 
 type ListCertificatesResponse struct {
@@ -4214,7 +4300,7 @@ type ListCertificatesResponse struct {
 
 func (x *ListCertificatesResponse) Reset() {
 	*x = ListCertificatesResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[76]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4226,7 +4312,7 @@ func (x *ListCertificatesResponse) String() string {
 func (*ListCertificatesResponse) ProtoMessage() {}
 
 func (x *ListCertificatesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[76]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4239,7 +4325,7 @@ func (x *ListCertificatesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListCertificatesResponse.ProtoReflect.Descriptor instead.
 func (*ListCertificatesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{76}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{77}
 }
 
 func (x *ListCertificatesResponse) GetCertificates() []*CertificateInfo {
@@ -4259,7 +4345,7 @@ type CertificateInfo struct {
 
 func (x *CertificateInfo) Reset() {
 	*x = CertificateInfo{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[77]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[78]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4271,7 +4357,7 @@ func (x *CertificateInfo) String() string {
 func (*CertificateInfo) ProtoMessage() {}
 
 func (x *CertificateInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[77]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[78]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4284,7 +4370,7 @@ func (x *CertificateInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CertificateInfo.ProtoReflect.Descriptor instead.
 func (*CertificateInfo) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{77}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{78}
 }
 
 func (x *CertificateInfo) GetId() string {
@@ -4310,7 +4396,7 @@ type GetCertificateRequest struct {
 
 func (x *GetCertificateRequest) Reset() {
 	*x = GetCertificateRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[78]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[79]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4322,7 +4408,7 @@ func (x *GetCertificateRequest) String() string {
 func (*GetCertificateRequest) ProtoMessage() {}
 
 func (x *GetCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[78]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[79]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4335,7 +4421,7 @@ func (x *GetCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCertificateRequest.ProtoReflect.Descriptor instead.
 func (*GetCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{78}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{79}
 }
 
 func (x *GetCertificateRequest) GetId() string {
@@ -4360,7 +4446,7 @@ type GetCertificateResponse struct {
 
 func (x *GetCertificateResponse) Reset() {
 	*x = GetCertificateResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[79]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[80]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4372,7 +4458,7 @@ func (x *GetCertificateResponse) String() string {
 func (*GetCertificateResponse) ProtoMessage() {}
 
 func (x *GetCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[79]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[80]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4385,7 +4471,7 @@ func (x *GetCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetCertificateResponse.ProtoReflect.Descriptor instead.
 func (*GetCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{79}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{80}
 }
 
 func (x *GetCertificateResponse) GetId() string {
@@ -4445,7 +4531,7 @@ type PutCertificateRequest struct {
 
 func (x *PutCertificateRequest) Reset() {
 	*x = PutCertificateRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[80]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[81]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4457,7 +4543,7 @@ func (x *PutCertificateRequest) String() string {
 func (*PutCertificateRequest) ProtoMessage() {}
 
 func (x *PutCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[80]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[81]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4470,7 +4556,7 @@ func (x *PutCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutCertificateRequest.ProtoReflect.Descriptor instead.
 func (*PutCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{80}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{81}
 }
 
 func (x *PutCertificateRequest) GetId() string {
@@ -4530,7 +4616,7 @@ type PutCertificateResponse struct {
 
 func (x *PutCertificateResponse) Reset() {
 	*x = PutCertificateResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[81]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[82]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4542,7 +4628,7 @@ func (x *PutCertificateResponse) String() string {
 func (*PutCertificateResponse) ProtoMessage() {}
 
 func (x *PutCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[81]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[82]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4555,7 +4641,7 @@ func (x *PutCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutCertificateResponse.ProtoReflect.Descriptor instead.
 func (*PutCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{81}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{82}
 }
 
 type DeleteCertificateRequest struct {
@@ -4567,7 +4653,7 @@ type DeleteCertificateRequest struct {
 
 func (x *DeleteCertificateRequest) Reset() {
 	*x = DeleteCertificateRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[82]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[83]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4579,7 +4665,7 @@ func (x *DeleteCertificateRequest) String() string {
 func (*DeleteCertificateRequest) ProtoMessage() {}
 
 func (x *DeleteCertificateRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[82]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[83]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4592,7 +4678,7 @@ func (x *DeleteCertificateRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCertificateRequest.ProtoReflect.Descriptor instead.
 func (*DeleteCertificateRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{82}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{83}
 }
 
 func (x *DeleteCertificateRequest) GetId() string {
@@ -4610,7 +4696,7 @@ type DeleteCertificateResponse struct {
 
 func (x *DeleteCertificateResponse) Reset() {
 	*x = DeleteCertificateResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[83]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[84]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4622,7 +4708,7 @@ func (x *DeleteCertificateResponse) String() string {
 func (*DeleteCertificateResponse) ProtoMessage() {}
 
 func (x *DeleteCertificateResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[83]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[84]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4635,7 +4721,7 @@ func (x *DeleteCertificateResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCertificateResponse.ProtoReflect.Descriptor instead.
 func (*DeleteCertificateResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{83}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{84}
 }
 
 type PauseVaultRequest struct {
@@ -4647,7 +4733,7 @@ type PauseVaultRequest struct {
 
 func (x *PauseVaultRequest) Reset() {
 	*x = PauseVaultRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[84]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[85]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4659,7 +4745,7 @@ func (x *PauseVaultRequest) String() string {
 func (*PauseVaultRequest) ProtoMessage() {}
 
 func (x *PauseVaultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[84]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[85]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4672,7 +4758,7 @@ func (x *PauseVaultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseVaultRequest.ProtoReflect.Descriptor instead.
 func (*PauseVaultRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{84}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{85}
 }
 
 func (x *PauseVaultRequest) GetId() string {
@@ -4690,7 +4776,7 @@ type PauseVaultResponse struct {
 
 func (x *PauseVaultResponse) Reset() {
 	*x = PauseVaultResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[85]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[86]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4702,7 +4788,7 @@ func (x *PauseVaultResponse) String() string {
 func (*PauseVaultResponse) ProtoMessage() {}
 
 func (x *PauseVaultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[85]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[86]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4715,7 +4801,7 @@ func (x *PauseVaultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PauseVaultResponse.ProtoReflect.Descriptor instead.
 func (*PauseVaultResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{85}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{86}
 }
 
 type ResumeVaultRequest struct {
@@ -4727,7 +4813,7 @@ type ResumeVaultRequest struct {
 
 func (x *ResumeVaultRequest) Reset() {
 	*x = ResumeVaultRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[86]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[87]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4739,7 +4825,7 @@ func (x *ResumeVaultRequest) String() string {
 func (*ResumeVaultRequest) ProtoMessage() {}
 
 func (x *ResumeVaultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[86]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[87]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4752,7 +4838,7 @@ func (x *ResumeVaultRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeVaultRequest.ProtoReflect.Descriptor instead.
 func (*ResumeVaultRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{86}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{87}
 }
 
 func (x *ResumeVaultRequest) GetId() string {
@@ -4770,7 +4856,7 @@ type ResumeVaultResponse struct {
 
 func (x *ResumeVaultResponse) Reset() {
 	*x = ResumeVaultResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[87]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[88]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4782,7 +4868,7 @@ func (x *ResumeVaultResponse) String() string {
 func (*ResumeVaultResponse) ProtoMessage() {}
 
 func (x *ResumeVaultResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[87]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[88]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4795,7 +4881,7 @@ func (x *ResumeVaultResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResumeVaultResponse.ProtoReflect.Descriptor instead.
 func (*ResumeVaultResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{87}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{88}
 }
 
 type TestIngesterRequest struct {
@@ -4808,7 +4894,7 @@ type TestIngesterRequest struct {
 
 func (x *TestIngesterRequest) Reset() {
 	*x = TestIngesterRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[88]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[89]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4820,7 +4906,7 @@ func (x *TestIngesterRequest) String() string {
 func (*TestIngesterRequest) ProtoMessage() {}
 
 func (x *TestIngesterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[88]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[89]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4833,7 +4919,7 @@ func (x *TestIngesterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestIngesterRequest.ProtoReflect.Descriptor instead.
 func (*TestIngesterRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{88}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{89}
 }
 
 func (x *TestIngesterRequest) GetType() string {
@@ -4860,7 +4946,7 @@ type TestIngesterResponse struct {
 
 func (x *TestIngesterResponse) Reset() {
 	*x = TestIngesterResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[89]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[90]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4872,7 +4958,7 @@ func (x *TestIngesterResponse) String() string {
 func (*TestIngesterResponse) ProtoMessage() {}
 
 func (x *TestIngesterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[89]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[90]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4885,7 +4971,7 @@ func (x *TestIngesterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestIngesterResponse.ProtoReflect.Descriptor instead.
 func (*TestIngesterResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{89}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{90}
 }
 
 func (x *TestIngesterResponse) GetSuccess() bool {
@@ -4910,7 +4996,7 @@ type GetIngesterDefaultsRequest struct {
 
 func (x *GetIngesterDefaultsRequest) Reset() {
 	*x = GetIngesterDefaultsRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[90]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[91]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4922,7 +5008,7 @@ func (x *GetIngesterDefaultsRequest) String() string {
 func (*GetIngesterDefaultsRequest) ProtoMessage() {}
 
 func (x *GetIngesterDefaultsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[90]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[91]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4935,7 +5021,7 @@ func (x *GetIngesterDefaultsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetIngesterDefaultsRequest.ProtoReflect.Descriptor instead.
 func (*GetIngesterDefaultsRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{90}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{91}
 }
 
 type IngesterTypeDefaults struct {
@@ -4947,7 +5033,7 @@ type IngesterTypeDefaults struct {
 
 func (x *IngesterTypeDefaults) Reset() {
 	*x = IngesterTypeDefaults{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[91]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[92]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4959,7 +5045,7 @@ func (x *IngesterTypeDefaults) String() string {
 func (*IngesterTypeDefaults) ProtoMessage() {}
 
 func (x *IngesterTypeDefaults) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[91]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[92]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4972,7 +5058,7 @@ func (x *IngesterTypeDefaults) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IngesterTypeDefaults.ProtoReflect.Descriptor instead.
 func (*IngesterTypeDefaults) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{91}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{92}
 }
 
 func (x *IngesterTypeDefaults) GetParams() map[string]string {
@@ -4991,7 +5077,7 @@ type GetIngesterDefaultsResponse struct {
 
 func (x *GetIngesterDefaultsResponse) Reset() {
 	*x = GetIngesterDefaultsResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[92]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[93]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5003,7 +5089,7 @@ func (x *GetIngesterDefaultsResponse) String() string {
 func (*GetIngesterDefaultsResponse) ProtoMessage() {}
 
 func (x *GetIngesterDefaultsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[92]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[93]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5016,7 +5102,7 @@ func (x *GetIngesterDefaultsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetIngesterDefaultsResponse.ProtoReflect.Descriptor instead.
 func (*GetIngesterDefaultsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{92}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{93}
 }
 
 func (x *GetIngesterDefaultsResponse) GetTypes() map[string]*IngesterTypeDefaults {
@@ -5036,7 +5122,7 @@ type NodeConfig struct {
 
 func (x *NodeConfig) Reset() {
 	*x = NodeConfig{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[93]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[94]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5048,7 +5134,7 @@ func (x *NodeConfig) String() string {
 func (*NodeConfig) ProtoMessage() {}
 
 func (x *NodeConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[93]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[94]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5061,7 +5147,7 @@ func (x *NodeConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NodeConfig.ProtoReflect.Descriptor instead.
 func (*NodeConfig) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{93}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{94}
 }
 
 func (x *NodeConfig) GetId() string {
@@ -5087,7 +5173,7 @@ type PutNodeConfigRequest struct {
 
 func (x *PutNodeConfigRequest) Reset() {
 	*x = PutNodeConfigRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[94]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5099,7 +5185,7 @@ func (x *PutNodeConfigRequest) String() string {
 func (*PutNodeConfigRequest) ProtoMessage() {}
 
 func (x *PutNodeConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[94]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5112,7 +5198,7 @@ func (x *PutNodeConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutNodeConfigRequest.ProtoReflect.Descriptor instead.
 func (*PutNodeConfigRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{94}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{95}
 }
 
 func (x *PutNodeConfigRequest) GetConfig() *NodeConfig {
@@ -5130,7 +5216,7 @@ type PutNodeConfigResponse struct {
 
 func (x *PutNodeConfigResponse) Reset() {
 	*x = PutNodeConfigResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[95]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5142,7 +5228,7 @@ func (x *PutNodeConfigResponse) String() string {
 func (*PutNodeConfigResponse) ProtoMessage() {}
 
 func (x *PutNodeConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[95]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5155,7 +5241,7 @@ func (x *PutNodeConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutNodeConfigResponse.ProtoReflect.Descriptor instead.
 func (*PutNodeConfigResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{95}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{96}
 }
 
 type GenerateNameRequest struct {
@@ -5166,7 +5252,7 @@ type GenerateNameRequest struct {
 
 func (x *GenerateNameRequest) Reset() {
 	*x = GenerateNameRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[96]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[97]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5178,7 +5264,7 @@ func (x *GenerateNameRequest) String() string {
 func (*GenerateNameRequest) ProtoMessage() {}
 
 func (x *GenerateNameRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[96]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[97]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5191,7 +5277,7 @@ func (x *GenerateNameRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateNameRequest.ProtoReflect.Descriptor instead.
 func (*GenerateNameRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{96}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{97}
 }
 
 type GenerateNameResponse struct {
@@ -5203,7 +5289,7 @@ type GenerateNameResponse struct {
 
 func (x *GenerateNameResponse) Reset() {
 	*x = GenerateNameResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[97]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[98]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5215,7 +5301,7 @@ func (x *GenerateNameResponse) String() string {
 func (*GenerateNameResponse) ProtoMessage() {}
 
 func (x *GenerateNameResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[97]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[98]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5228,7 +5314,7 @@ func (x *GenerateNameResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GenerateNameResponse.ProtoReflect.Descriptor instead.
 func (*GenerateNameResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{97}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{98}
 }
 
 func (x *GenerateNameResponse) GetName() string {
@@ -5246,7 +5332,7 @@ type WatchConfigRequest struct {
 
 func (x *WatchConfigRequest) Reset() {
 	*x = WatchConfigRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[98]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[99]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5258,7 +5344,7 @@ func (x *WatchConfigRequest) String() string {
 func (*WatchConfigRequest) ProtoMessage() {}
 
 func (x *WatchConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[98]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[99]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5271,7 +5357,7 @@ func (x *WatchConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchConfigRequest.ProtoReflect.Descriptor instead.
 func (*WatchConfigRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{98}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{99}
 }
 
 type WatchConfigResponse struct {
@@ -5282,7 +5368,7 @@ type WatchConfigResponse struct {
 
 func (x *WatchConfigResponse) Reset() {
 	*x = WatchConfigResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[99]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5294,7 +5380,7 @@ func (x *WatchConfigResponse) String() string {
 func (*WatchConfigResponse) ProtoMessage() {}
 
 func (x *WatchConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[99]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5307,7 +5393,7 @@ func (x *WatchConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchConfigResponse.ProtoReflect.Descriptor instead.
 func (*WatchConfigResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{99}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{100}
 }
 
 type GetRouteStatsRequest struct {
@@ -5318,7 +5404,7 @@ type GetRouteStatsRequest struct {
 
 func (x *GetRouteStatsRequest) Reset() {
 	*x = GetRouteStatsRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[100]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[101]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5330,7 +5416,7 @@ func (x *GetRouteStatsRequest) String() string {
 func (*GetRouteStatsRequest) ProtoMessage() {}
 
 func (x *GetRouteStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[100]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[101]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5343,7 +5429,7 @@ func (x *GetRouteStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRouteStatsRequest.ProtoReflect.Descriptor instead.
 func (*GetRouteStatsRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{100}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{101}
 }
 
 type GetRouteStatsResponse struct {
@@ -5363,7 +5449,7 @@ type GetRouteStatsResponse struct {
 
 func (x *GetRouteStatsResponse) Reset() {
 	*x = GetRouteStatsResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[101]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[102]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5375,7 +5461,7 @@ func (x *GetRouteStatsResponse) String() string {
 func (*GetRouteStatsResponse) ProtoMessage() {}
 
 func (x *GetRouteStatsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[101]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[102]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5388,7 +5474,7 @@ func (x *GetRouteStatsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetRouteStatsResponse.ProtoReflect.Descriptor instead.
 func (*GetRouteStatsResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{101}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{102}
 }
 
 func (x *GetRouteStatsResponse) GetTotalIngested() int64 {
@@ -5444,7 +5530,7 @@ type VaultRouteStats struct {
 
 func (x *VaultRouteStats) Reset() {
 	*x = VaultRouteStats{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[102]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[103]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5456,7 +5542,7 @@ func (x *VaultRouteStats) String() string {
 func (*VaultRouteStats) ProtoMessage() {}
 
 func (x *VaultRouteStats) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[102]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[103]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5469,7 +5555,7 @@ func (x *VaultRouteStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use VaultRouteStats.ProtoReflect.Descriptor instead.
 func (*VaultRouteStats) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{102}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{103}
 }
 
 func (x *VaultRouteStats) GetVaultId() string {
@@ -5504,7 +5590,7 @@ type PerRouteStats struct {
 
 func (x *PerRouteStats) Reset() {
 	*x = PerRouteStats{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[103]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[104]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5516,7 +5602,7 @@ func (x *PerRouteStats) String() string {
 func (*PerRouteStats) ProtoMessage() {}
 
 func (x *PerRouteStats) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[103]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[104]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5529,7 +5615,7 @@ func (x *PerRouteStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PerRouteStats.ProtoReflect.Descriptor instead.
 func (*PerRouteStats) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{103}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{104}
 }
 
 func (x *PerRouteStats) GetRouteId() string {
@@ -5566,7 +5652,7 @@ type ManagedFileInfo struct {
 
 func (x *ManagedFileInfo) Reset() {
 	*x = ManagedFileInfo{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[104]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[105]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5578,7 +5664,7 @@ func (x *ManagedFileInfo) String() string {
 func (*ManagedFileInfo) ProtoMessage() {}
 
 func (x *ManagedFileInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[104]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[105]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5591,7 +5677,7 @@ func (x *ManagedFileInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManagedFileInfo.ProtoReflect.Descriptor instead.
 func (*ManagedFileInfo) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{104}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{105}
 }
 
 func (x *ManagedFileInfo) GetId() string {
@@ -5637,7 +5723,7 @@ type ListManagedFilesRequest struct {
 
 func (x *ListManagedFilesRequest) Reset() {
 	*x = ListManagedFilesRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[105]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[106]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5649,7 +5735,7 @@ func (x *ListManagedFilesRequest) String() string {
 func (*ListManagedFilesRequest) ProtoMessage() {}
 
 func (x *ListManagedFilesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[105]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[106]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5662,7 +5748,7 @@ func (x *ListManagedFilesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListManagedFilesRequest.ProtoReflect.Descriptor instead.
 func (*ListManagedFilesRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{105}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{106}
 }
 
 type ListManagedFilesResponse struct {
@@ -5674,7 +5760,7 @@ type ListManagedFilesResponse struct {
 
 func (x *ListManagedFilesResponse) Reset() {
 	*x = ListManagedFilesResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[106]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[107]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5686,7 +5772,7 @@ func (x *ListManagedFilesResponse) String() string {
 func (*ListManagedFilesResponse) ProtoMessage() {}
 
 func (x *ListManagedFilesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[106]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[107]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5699,7 +5785,7 @@ func (x *ListManagedFilesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListManagedFilesResponse.ProtoReflect.Descriptor instead.
 func (*ListManagedFilesResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{106}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{107}
 }
 
 func (x *ListManagedFilesResponse) GetFiles() []*ManagedFileInfo {
@@ -5718,7 +5804,7 @@ type DeleteManagedFileRequest struct {
 
 func (x *DeleteManagedFileRequest) Reset() {
 	*x = DeleteManagedFileRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[107]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[108]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5730,7 +5816,7 @@ func (x *DeleteManagedFileRequest) String() string {
 func (*DeleteManagedFileRequest) ProtoMessage() {}
 
 func (x *DeleteManagedFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[107]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[108]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5743,7 +5829,7 @@ func (x *DeleteManagedFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteManagedFileRequest.ProtoReflect.Descriptor instead.
 func (*DeleteManagedFileRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{107}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{108}
 }
 
 func (x *DeleteManagedFileRequest) GetId() string {
@@ -5761,7 +5847,7 @@ type DeleteManagedFileResponse struct {
 
 func (x *DeleteManagedFileResponse) Reset() {
 	*x = DeleteManagedFileResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[108]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[109]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5773,7 +5859,7 @@ func (x *DeleteManagedFileResponse) String() string {
 func (*DeleteManagedFileResponse) ProtoMessage() {}
 
 func (x *DeleteManagedFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[108]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[109]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5786,7 +5872,7 @@ func (x *DeleteManagedFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteManagedFileResponse.ProtoReflect.Descriptor instead.
 func (*DeleteManagedFileResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{108}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{109}
 }
 
 type TestHTTPLookupRequest struct {
@@ -5799,7 +5885,7 @@ type TestHTTPLookupRequest struct {
 
 func (x *TestHTTPLookupRequest) Reset() {
 	*x = TestHTTPLookupRequest{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[109]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[110]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5811,7 +5897,7 @@ func (x *TestHTTPLookupRequest) String() string {
 func (*TestHTTPLookupRequest) ProtoMessage() {}
 
 func (x *TestHTTPLookupRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[109]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[110]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5824,7 +5910,7 @@ func (x *TestHTTPLookupRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestHTTPLookupRequest.ProtoReflect.Descriptor instead.
 func (*TestHTTPLookupRequest) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{109}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{110}
 }
 
 func (x *TestHTTPLookupRequest) GetConfig() *HTTPLookupEntry {
@@ -5852,7 +5938,7 @@ type TestHTTPLookupResponse struct {
 
 func (x *TestHTTPLookupResponse) Reset() {
 	*x = TestHTTPLookupResponse{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[110]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[111]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5864,7 +5950,7 @@ func (x *TestHTTPLookupResponse) String() string {
 func (*TestHTTPLookupResponse) ProtoMessage() {}
 
 func (x *TestHTTPLookupResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[110]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[111]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5877,7 +5963,7 @@ func (x *TestHTTPLookupResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestHTTPLookupResponse.ProtoReflect.Descriptor instead.
 func (*TestHTTPLookupResponse) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{110}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{111}
 }
 
 func (x *TestHTTPLookupResponse) GetSuccess() bool {
@@ -5912,7 +5998,7 @@ type TestHTTPLookupResult struct {
 
 func (x *TestHTTPLookupResult) Reset() {
 	*x = TestHTTPLookupResult{}
-	mi := &file_gastrolog_v1_config_proto_msgTypes[111]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[112]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -5924,7 +6010,7 @@ func (x *TestHTTPLookupResult) String() string {
 func (*TestHTTPLookupResult) ProtoMessage() {}
 
 func (x *TestHTTPLookupResult) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_config_proto_msgTypes[111]
+	mi := &file_gastrolog_v1_config_proto_msgTypes[112]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -5937,7 +6023,7 @@ func (x *TestHTTPLookupResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TestHTTPLookupResult.ProtoReflect.Descriptor instead.
 func (*TestHTTPLookupResult) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{111}
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{112}
 }
 
 func (x *TestHTTPLookupResult) GetLabel() string {
@@ -5957,6 +6043,194 @@ func (x *TestHTTPLookupResult) GetValue() string {
 func (x *TestHTTPLookupResult) GetFields() map[string]string {
 	if x != nil {
 		return x.Fields
+	}
+	return nil
+}
+
+type PreviewCSVLookupRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID (UUID)
+	KeyColumn     string                 `protobuf:"bytes,2,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`          // column to use as key; empty = first column
+	ValueColumns  []string               `protobuf:"bytes,3,rep,name=value_columns,json=valueColumns,proto3" json:"value_columns,omitempty"` // columns to include; empty = all non-key
+	MaxRows       int32                  `protobuf:"varint,4,opt,name=max_rows,json=maxRows,proto3" json:"max_rows,omitempty"`               // maximum sample rows to return; 0 = default (10)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreviewCSVLookupRequest) Reset() {
+	*x = PreviewCSVLookupRequest{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[113]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewCSVLookupRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewCSVLookupRequest) ProtoMessage() {}
+
+func (x *PreviewCSVLookupRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[113]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewCSVLookupRequest.ProtoReflect.Descriptor instead.
+func (*PreviewCSVLookupRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *PreviewCSVLookupRequest) GetFileId() string {
+	if x != nil {
+		return x.FileId
+	}
+	return ""
+}
+
+func (x *PreviewCSVLookupRequest) GetKeyColumn() string {
+	if x != nil {
+		return x.KeyColumn
+	}
+	return ""
+}
+
+func (x *PreviewCSVLookupRequest) GetValueColumns() []string {
+	if x != nil {
+		return x.ValueColumns
+	}
+	return nil
+}
+
+func (x *PreviewCSVLookupRequest) GetMaxRows() int32 {
+	if x != nil {
+		return x.MaxRows
+	}
+	return 0
+}
+
+type PreviewCSVLookupResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Columns       []string               `protobuf:"bytes,1,rep,name=columns,proto3" json:"columns,omitempty"`                       // all column headers from the CSV file
+	KeyColumn     string                 `protobuf:"bytes,2,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`  // resolved key column name
+	Rows          []*CSVPreviewRow       `protobuf:"bytes,3,rep,name=rows,proto3" json:"rows,omitempty"`                             // sample data rows (up to max_rows)
+	TotalRows     int32                  `protobuf:"varint,4,opt,name=total_rows,json=totalRows,proto3" json:"total_rows,omitempty"` // total number of data rows (excluding header)
+	Error         string                 `protobuf:"bytes,5,opt,name=error,proto3" json:"error,omitempty"`                           // non-empty on failure
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreviewCSVLookupResponse) Reset() {
+	*x = PreviewCSVLookupResponse{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[114]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewCSVLookupResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewCSVLookupResponse) ProtoMessage() {}
+
+func (x *PreviewCSVLookupResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[114]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewCSVLookupResponse.ProtoReflect.Descriptor instead.
+func (*PreviewCSVLookupResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{114}
+}
+
+func (x *PreviewCSVLookupResponse) GetColumns() []string {
+	if x != nil {
+		return x.Columns
+	}
+	return nil
+}
+
+func (x *PreviewCSVLookupResponse) GetKeyColumn() string {
+	if x != nil {
+		return x.KeyColumn
+	}
+	return ""
+}
+
+func (x *PreviewCSVLookupResponse) GetRows() []*CSVPreviewRow {
+	if x != nil {
+		return x.Rows
+	}
+	return nil
+}
+
+func (x *PreviewCSVLookupResponse) GetTotalRows() int32 {
+	if x != nil {
+		return x.TotalRows
+	}
+	return 0
+}
+
+func (x *PreviewCSVLookupResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type CSVPreviewRow struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Values        []string               `protobuf:"bytes,1,rep,name=values,proto3" json:"values,omitempty"` // cell values in column order
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CSVPreviewRow) Reset() {
+	*x = CSVPreviewRow{}
+	mi := &file_gastrolog_v1_config_proto_msgTypes[115]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CSVPreviewRow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CSVPreviewRow) ProtoMessage() {}
+
+func (x *CSVPreviewRow) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_config_proto_msgTypes[115]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CSVPreviewRow.ProtoReflect.Descriptor instead.
+func (*CSVPreviewRow) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{115}
+}
+
+func (x *CSVPreviewRow) GetValues() []string {
+	if x != nil {
+		return x.Values
 	}
 	return nil
 }
@@ -6125,11 +6399,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\aenabled\x18\x02 \x01(\bR\aenabled\x123\n" +
 	"\x16http_to_https_redirect\x18\x03 \x01(\bR\x13httpToHttpsRedirect\x12\x1d\n" +
 	"\n" +
-	"https_port\x18\x04 \x01(\tR\thttpsPort\"\xf5\x01\n" +
+	"https_port\x18\x04 \x01(\tR\thttpsPort\"\xb4\x02\n" +
 	"\x0eLookupSettings\x12@\n" +
 	"\fhttp_lookups\x18\x04 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
 	"\x11json_file_lookups\x18\x05 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
-	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"W\n" +
+	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\x12=\n" +
+	"\vcsv_lookups\x18\a \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
+	"csvLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"W\n" +
 	"\x0fMMDBLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\adb_type\x18\x02 \x01(\tR\x06dbType\x12\x17\n" +
@@ -6159,7 +6435,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0eresponse_paths\x18\x04 \x03(\tR\rresponsePaths\x12=\n" +
 	"\n" +
 	"parameters\x18\x05 \x03(\v2\x1d.gastrolog.v1.HTTPLookupParamR\n" +
-	"parameters\"@\n" +
+	"parameters\"\x81\x01\n" +
+	"\x0eCSVLookupEntry\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
+	"\afile_id\x18\x02 \x01(\tR\x06fileId\x12\x1d\n" +
+	"\n" +
+	"key_column\x18\x03 \x01(\tR\tkeyColumn\x12#\n" +
+	"\rvalue_columns\x18\x04 \x03(\tR\fvalueColumns\"@\n" +
 	"\x0fClusterSettings\x12-\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tR\x11broadcastInterval\"\xf8\x03\n" +
 	"\x13GetSettingsResponse\x12.\n" +
@@ -6227,11 +6509,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"licenseKey\x88\x01\x01B\x10\n" +
 	"\x0e_auto_downloadB\r\n" +
 	"\v_account_idB\x0e\n" +
-	"\f_license_key\"\xf8\x01\n" +
+	"\f_license_key\"\xb7\x02\n" +
 	"\x11PutLookupSettings\x12@\n" +
 	"\fhttp_lookups\x18\x04 \x03(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\vhttpLookups\x12M\n" +
 	"\x11json_file_lookups\x18\x05 \x03(\v2!.gastrolog.v1.JSONFileLookupEntryR\x0fjsonFileLookups\x12@\n" +
-	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"_\n" +
+	"\fmmdb_lookups\x18\x06 \x03(\v2\x1d.gastrolog.v1.MMDBLookupEntryR\vmmdbLookups\x12=\n" +
+	"\vcsv_lookups\x18\a \x03(\v2\x1c.gastrolog.v1.CSVLookupEntryR\n" +
+	"csvLookupsJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"_\n" +
 	"\x12PutClusterSettings\x122\n" +
 	"\x12broadcast_interval\x18\x01 \x01(\tH\x00R\x11broadcastInterval\x88\x01\x01B\x15\n" +
 	"\x13_broadcast_interval\"\xf6\x03\n" +
@@ -6392,7 +6676,23 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x06fields\x18\x03 \x03(\v2..gastrolog.v1.TestHTTPLookupResult.FieldsEntryR\x06fields\x1a9\n" +
 	"\vFieldsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\xd2\x1a\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x91\x01\n" +
+	"\x17PreviewCSVLookupRequest\x12\x17\n" +
+	"\afile_id\x18\x01 \x01(\tR\x06fileId\x12\x1d\n" +
+	"\n" +
+	"key_column\x18\x02 \x01(\tR\tkeyColumn\x12#\n" +
+	"\rvalue_columns\x18\x03 \x03(\tR\fvalueColumns\x12\x19\n" +
+	"\bmax_rows\x18\x04 \x01(\x05R\amaxRows\"\xb9\x01\n" +
+	"\x18PreviewCSVLookupResponse\x12\x18\n" +
+	"\acolumns\x18\x01 \x03(\tR\acolumns\x12\x1d\n" +
+	"\n" +
+	"key_column\x18\x02 \x01(\tR\tkeyColumn\x12/\n" +
+	"\x04rows\x18\x03 \x03(\v2\x1b.gastrolog.v1.CSVPreviewRowR\x04rows\x12\x1d\n" +
+	"\n" +
+	"total_rows\x18\x04 \x01(\x05R\ttotalRows\x12\x14\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\"'\n" +
+	"\rCSVPreviewRow\x12\x16\n" +
+	"\x06values\x18\x01 \x03(\tR\x06values2\xb5\x1b\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12X\n" +
 	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +
@@ -6431,7 +6731,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\rGetRouteStats\x12\".gastrolog.v1.GetRouteStatsRequest\x1a#.gastrolog.v1.GetRouteStatsResponse\x12a\n" +
 	"\x10ListManagedFiles\x12%.gastrolog.v1.ListManagedFilesRequest\x1a&.gastrolog.v1.ListManagedFilesResponse\x12d\n" +
 	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponse\x12[\n" +
-	"\x0eTestHTTPLookup\x12#.gastrolog.v1.TestHTTPLookupRequest\x1a$.gastrolog.v1.TestHTTPLookupResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\x0eTestHTTPLookup\x12#.gastrolog.v1.TestHTTPLookupRequest\x1a$.gastrolog.v1.TestHTTPLookupResponse\x12a\n" +
+	"\x10PreviewCSVLookup\x12%.gastrolog.v1.PreviewCSVLookupRequest\x1a&.gastrolog.v1.PreviewCSVLookupResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_config_proto_rawDescOnce sync.Once
@@ -6445,7 +6746,7 @@ func file_gastrolog_v1_config_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_config_proto_rawDescData
 }
 
-var file_gastrolog_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 120)
+var file_gastrolog_v1_config_proto_msgTypes = make([]protoimpl.MessageInfo, 124)
 var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*GetConfigRequest)(nil),              // 0: gastrolog.v1.GetConfigRequest
 	(*GetConfigResponse)(nil),             // 1: gastrolog.v1.GetConfigResponse
@@ -6498,75 +6799,79 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*HTTPLookupParam)(nil),               // 48: gastrolog.v1.HTTPLookupParam
 	(*HTTPLookupEntry)(nil),               // 49: gastrolog.v1.HTTPLookupEntry
 	(*JSONFileLookupEntry)(nil),           // 50: gastrolog.v1.JSONFileLookupEntry
-	(*ClusterSettings)(nil),               // 51: gastrolog.v1.ClusterSettings
-	(*GetSettingsResponse)(nil),           // 52: gastrolog.v1.GetSettingsResponse
-	(*PutPasswordPolicySettings)(nil),     // 53: gastrolog.v1.PutPasswordPolicySettings
-	(*PutAuthSettings)(nil),               // 54: gastrolog.v1.PutAuthSettings
-	(*PutQuerySettings)(nil),              // 55: gastrolog.v1.PutQuerySettings
-	(*PutSchedulerSettings)(nil),          // 56: gastrolog.v1.PutSchedulerSettings
-	(*PutTLSSettings)(nil),                // 57: gastrolog.v1.PutTLSSettings
-	(*PutMaxMindSettings)(nil),            // 58: gastrolog.v1.PutMaxMindSettings
-	(*PutLookupSettings)(nil),             // 59: gastrolog.v1.PutLookupSettings
-	(*PutClusterSettings)(nil),            // 60: gastrolog.v1.PutClusterSettings
-	(*PutSettingsRequest)(nil),            // 61: gastrolog.v1.PutSettingsRequest
-	(*PutSettingsResponse)(nil),           // 62: gastrolog.v1.PutSettingsResponse
-	(*MmdbValidation)(nil),                // 63: gastrolog.v1.MmdbValidation
-	(*GetPreferencesRequest)(nil),         // 64: gastrolog.v1.GetPreferencesRequest
-	(*GetPreferencesResponse)(nil),        // 65: gastrolog.v1.GetPreferencesResponse
-	(*PutPreferencesRequest)(nil),         // 66: gastrolog.v1.PutPreferencesRequest
-	(*PutPreferencesResponse)(nil),        // 67: gastrolog.v1.PutPreferencesResponse
-	(*SavedQuery)(nil),                    // 68: gastrolog.v1.SavedQuery
-	(*GetSavedQueriesRequest)(nil),        // 69: gastrolog.v1.GetSavedQueriesRequest
-	(*GetSavedQueriesResponse)(nil),       // 70: gastrolog.v1.GetSavedQueriesResponse
-	(*PutSavedQueryRequest)(nil),          // 71: gastrolog.v1.PutSavedQueryRequest
-	(*PutSavedQueryResponse)(nil),         // 72: gastrolog.v1.PutSavedQueryResponse
-	(*DeleteSavedQueryRequest)(nil),       // 73: gastrolog.v1.DeleteSavedQueryRequest
-	(*DeleteSavedQueryResponse)(nil),      // 74: gastrolog.v1.DeleteSavedQueryResponse
-	(*ListCertificatesRequest)(nil),       // 75: gastrolog.v1.ListCertificatesRequest
-	(*ListCertificatesResponse)(nil),      // 76: gastrolog.v1.ListCertificatesResponse
-	(*CertificateInfo)(nil),               // 77: gastrolog.v1.CertificateInfo
-	(*GetCertificateRequest)(nil),         // 78: gastrolog.v1.GetCertificateRequest
-	(*GetCertificateResponse)(nil),        // 79: gastrolog.v1.GetCertificateResponse
-	(*PutCertificateRequest)(nil),         // 80: gastrolog.v1.PutCertificateRequest
-	(*PutCertificateResponse)(nil),        // 81: gastrolog.v1.PutCertificateResponse
-	(*DeleteCertificateRequest)(nil),      // 82: gastrolog.v1.DeleteCertificateRequest
-	(*DeleteCertificateResponse)(nil),     // 83: gastrolog.v1.DeleteCertificateResponse
-	(*PauseVaultRequest)(nil),             // 84: gastrolog.v1.PauseVaultRequest
-	(*PauseVaultResponse)(nil),            // 85: gastrolog.v1.PauseVaultResponse
-	(*ResumeVaultRequest)(nil),            // 86: gastrolog.v1.ResumeVaultRequest
-	(*ResumeVaultResponse)(nil),           // 87: gastrolog.v1.ResumeVaultResponse
-	(*TestIngesterRequest)(nil),           // 88: gastrolog.v1.TestIngesterRequest
-	(*TestIngesterResponse)(nil),          // 89: gastrolog.v1.TestIngesterResponse
-	(*GetIngesterDefaultsRequest)(nil),    // 90: gastrolog.v1.GetIngesterDefaultsRequest
-	(*IngesterTypeDefaults)(nil),          // 91: gastrolog.v1.IngesterTypeDefaults
-	(*GetIngesterDefaultsResponse)(nil),   // 92: gastrolog.v1.GetIngesterDefaultsResponse
-	(*NodeConfig)(nil),                    // 93: gastrolog.v1.NodeConfig
-	(*PutNodeConfigRequest)(nil),          // 94: gastrolog.v1.PutNodeConfigRequest
-	(*PutNodeConfigResponse)(nil),         // 95: gastrolog.v1.PutNodeConfigResponse
-	(*GenerateNameRequest)(nil),           // 96: gastrolog.v1.GenerateNameRequest
-	(*GenerateNameResponse)(nil),          // 97: gastrolog.v1.GenerateNameResponse
-	(*WatchConfigRequest)(nil),            // 98: gastrolog.v1.WatchConfigRequest
-	(*WatchConfigResponse)(nil),           // 99: gastrolog.v1.WatchConfigResponse
-	(*GetRouteStatsRequest)(nil),          // 100: gastrolog.v1.GetRouteStatsRequest
-	(*GetRouteStatsResponse)(nil),         // 101: gastrolog.v1.GetRouteStatsResponse
-	(*VaultRouteStats)(nil),               // 102: gastrolog.v1.VaultRouteStats
-	(*PerRouteStats)(nil),                 // 103: gastrolog.v1.PerRouteStats
-	(*ManagedFileInfo)(nil),               // 104: gastrolog.v1.ManagedFileInfo
-	(*ListManagedFilesRequest)(nil),       // 105: gastrolog.v1.ListManagedFilesRequest
-	(*ListManagedFilesResponse)(nil),      // 106: gastrolog.v1.ListManagedFilesResponse
-	(*DeleteManagedFileRequest)(nil),      // 107: gastrolog.v1.DeleteManagedFileRequest
-	(*DeleteManagedFileResponse)(nil),     // 108: gastrolog.v1.DeleteManagedFileResponse
-	(*TestHTTPLookupRequest)(nil),         // 109: gastrolog.v1.TestHTTPLookupRequest
-	(*TestHTTPLookupResponse)(nil),        // 110: gastrolog.v1.TestHTTPLookupResponse
-	(*TestHTTPLookupResult)(nil),          // 111: gastrolog.v1.TestHTTPLookupResult
-	nil,                                   // 112: gastrolog.v1.VaultConfig.ParamsEntry
-	nil,                                   // 113: gastrolog.v1.IngesterConfig.ParamsEntry
-	nil,                                   // 114: gastrolog.v1.HTTPLookupEntry.HeadersEntry
-	nil,                                   // 115: gastrolog.v1.TestIngesterRequest.ParamsEntry
-	nil,                                   // 116: gastrolog.v1.IngesterTypeDefaults.ParamsEntry
-	nil,                                   // 117: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
-	nil,                                   // 118: gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
-	nil,                                   // 119: gastrolog.v1.TestHTTPLookupResult.FieldsEntry
+	(*CSVLookupEntry)(nil),                // 51: gastrolog.v1.CSVLookupEntry
+	(*ClusterSettings)(nil),               // 52: gastrolog.v1.ClusterSettings
+	(*GetSettingsResponse)(nil),           // 53: gastrolog.v1.GetSettingsResponse
+	(*PutPasswordPolicySettings)(nil),     // 54: gastrolog.v1.PutPasswordPolicySettings
+	(*PutAuthSettings)(nil),               // 55: gastrolog.v1.PutAuthSettings
+	(*PutQuerySettings)(nil),              // 56: gastrolog.v1.PutQuerySettings
+	(*PutSchedulerSettings)(nil),          // 57: gastrolog.v1.PutSchedulerSettings
+	(*PutTLSSettings)(nil),                // 58: gastrolog.v1.PutTLSSettings
+	(*PutMaxMindSettings)(nil),            // 59: gastrolog.v1.PutMaxMindSettings
+	(*PutLookupSettings)(nil),             // 60: gastrolog.v1.PutLookupSettings
+	(*PutClusterSettings)(nil),            // 61: gastrolog.v1.PutClusterSettings
+	(*PutSettingsRequest)(nil),            // 62: gastrolog.v1.PutSettingsRequest
+	(*PutSettingsResponse)(nil),           // 63: gastrolog.v1.PutSettingsResponse
+	(*MmdbValidation)(nil),                // 64: gastrolog.v1.MmdbValidation
+	(*GetPreferencesRequest)(nil),         // 65: gastrolog.v1.GetPreferencesRequest
+	(*GetPreferencesResponse)(nil),        // 66: gastrolog.v1.GetPreferencesResponse
+	(*PutPreferencesRequest)(nil),         // 67: gastrolog.v1.PutPreferencesRequest
+	(*PutPreferencesResponse)(nil),        // 68: gastrolog.v1.PutPreferencesResponse
+	(*SavedQuery)(nil),                    // 69: gastrolog.v1.SavedQuery
+	(*GetSavedQueriesRequest)(nil),        // 70: gastrolog.v1.GetSavedQueriesRequest
+	(*GetSavedQueriesResponse)(nil),       // 71: gastrolog.v1.GetSavedQueriesResponse
+	(*PutSavedQueryRequest)(nil),          // 72: gastrolog.v1.PutSavedQueryRequest
+	(*PutSavedQueryResponse)(nil),         // 73: gastrolog.v1.PutSavedQueryResponse
+	(*DeleteSavedQueryRequest)(nil),       // 74: gastrolog.v1.DeleteSavedQueryRequest
+	(*DeleteSavedQueryResponse)(nil),      // 75: gastrolog.v1.DeleteSavedQueryResponse
+	(*ListCertificatesRequest)(nil),       // 76: gastrolog.v1.ListCertificatesRequest
+	(*ListCertificatesResponse)(nil),      // 77: gastrolog.v1.ListCertificatesResponse
+	(*CertificateInfo)(nil),               // 78: gastrolog.v1.CertificateInfo
+	(*GetCertificateRequest)(nil),         // 79: gastrolog.v1.GetCertificateRequest
+	(*GetCertificateResponse)(nil),        // 80: gastrolog.v1.GetCertificateResponse
+	(*PutCertificateRequest)(nil),         // 81: gastrolog.v1.PutCertificateRequest
+	(*PutCertificateResponse)(nil),        // 82: gastrolog.v1.PutCertificateResponse
+	(*DeleteCertificateRequest)(nil),      // 83: gastrolog.v1.DeleteCertificateRequest
+	(*DeleteCertificateResponse)(nil),     // 84: gastrolog.v1.DeleteCertificateResponse
+	(*PauseVaultRequest)(nil),             // 85: gastrolog.v1.PauseVaultRequest
+	(*PauseVaultResponse)(nil),            // 86: gastrolog.v1.PauseVaultResponse
+	(*ResumeVaultRequest)(nil),            // 87: gastrolog.v1.ResumeVaultRequest
+	(*ResumeVaultResponse)(nil),           // 88: gastrolog.v1.ResumeVaultResponse
+	(*TestIngesterRequest)(nil),           // 89: gastrolog.v1.TestIngesterRequest
+	(*TestIngesterResponse)(nil),          // 90: gastrolog.v1.TestIngesterResponse
+	(*GetIngesterDefaultsRequest)(nil),    // 91: gastrolog.v1.GetIngesterDefaultsRequest
+	(*IngesterTypeDefaults)(nil),          // 92: gastrolog.v1.IngesterTypeDefaults
+	(*GetIngesterDefaultsResponse)(nil),   // 93: gastrolog.v1.GetIngesterDefaultsResponse
+	(*NodeConfig)(nil),                    // 94: gastrolog.v1.NodeConfig
+	(*PutNodeConfigRequest)(nil),          // 95: gastrolog.v1.PutNodeConfigRequest
+	(*PutNodeConfigResponse)(nil),         // 96: gastrolog.v1.PutNodeConfigResponse
+	(*GenerateNameRequest)(nil),           // 97: gastrolog.v1.GenerateNameRequest
+	(*GenerateNameResponse)(nil),          // 98: gastrolog.v1.GenerateNameResponse
+	(*WatchConfigRequest)(nil),            // 99: gastrolog.v1.WatchConfigRequest
+	(*WatchConfigResponse)(nil),           // 100: gastrolog.v1.WatchConfigResponse
+	(*GetRouteStatsRequest)(nil),          // 101: gastrolog.v1.GetRouteStatsRequest
+	(*GetRouteStatsResponse)(nil),         // 102: gastrolog.v1.GetRouteStatsResponse
+	(*VaultRouteStats)(nil),               // 103: gastrolog.v1.VaultRouteStats
+	(*PerRouteStats)(nil),                 // 104: gastrolog.v1.PerRouteStats
+	(*ManagedFileInfo)(nil),               // 105: gastrolog.v1.ManagedFileInfo
+	(*ListManagedFilesRequest)(nil),       // 106: gastrolog.v1.ListManagedFilesRequest
+	(*ListManagedFilesResponse)(nil),      // 107: gastrolog.v1.ListManagedFilesResponse
+	(*DeleteManagedFileRequest)(nil),      // 108: gastrolog.v1.DeleteManagedFileRequest
+	(*DeleteManagedFileResponse)(nil),     // 109: gastrolog.v1.DeleteManagedFileResponse
+	(*TestHTTPLookupRequest)(nil),         // 110: gastrolog.v1.TestHTTPLookupRequest
+	(*TestHTTPLookupResponse)(nil),        // 111: gastrolog.v1.TestHTTPLookupResponse
+	(*TestHTTPLookupResult)(nil),          // 112: gastrolog.v1.TestHTTPLookupResult
+	(*PreviewCSVLookupRequest)(nil),       // 113: gastrolog.v1.PreviewCSVLookupRequest
+	(*PreviewCSVLookupResponse)(nil),      // 114: gastrolog.v1.PreviewCSVLookupResponse
+	(*CSVPreviewRow)(nil),                 // 115: gastrolog.v1.CSVPreviewRow
+	nil,                                   // 116: gastrolog.v1.VaultConfig.ParamsEntry
+	nil,                                   // 117: gastrolog.v1.IngesterConfig.ParamsEntry
+	nil,                                   // 118: gastrolog.v1.HTTPLookupEntry.HeadersEntry
+	nil,                                   // 119: gastrolog.v1.TestIngesterRequest.ParamsEntry
+	nil,                                   // 120: gastrolog.v1.IngesterTypeDefaults.ParamsEntry
+	nil,                                   // 121: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
+	nil,                                   // 122: gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
+	nil,                                   // 123: gastrolog.v1.TestHTTPLookupResult.FieldsEntry
 }
 var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	3,   // 0: gastrolog.v1.GetConfigResponse.vaults:type_name -> gastrolog.v1.VaultConfig
@@ -6574,13 +6879,13 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	8,   // 2: gastrolog.v1.GetConfigResponse.rotation_policies:type_name -> gastrolog.v1.RotationPolicyConfig
 	7,   // 3: gastrolog.v1.GetConfigResponse.filters:type_name -> gastrolog.v1.FilterConfig
 	9,   // 4: gastrolog.v1.GetConfigResponse.retention_policies:type_name -> gastrolog.v1.RetentionPolicyConfig
-	93,  // 5: gastrolog.v1.GetConfigResponse.node_configs:type_name -> gastrolog.v1.NodeConfig
+	94,  // 5: gastrolog.v1.GetConfigResponse.node_configs:type_name -> gastrolog.v1.NodeConfig
 	5,   // 6: gastrolog.v1.GetConfigResponse.routes:type_name -> gastrolog.v1.RouteConfig
-	104, // 7: gastrolog.v1.GetConfigResponse.managed_files:type_name -> gastrolog.v1.ManagedFileInfo
-	112, // 8: gastrolog.v1.VaultConfig.params:type_name -> gastrolog.v1.VaultConfig.ParamsEntry
+	105, // 7: gastrolog.v1.GetConfigResponse.managed_files:type_name -> gastrolog.v1.ManagedFileInfo
+	116, // 8: gastrolog.v1.VaultConfig.params:type_name -> gastrolog.v1.VaultConfig.ParamsEntry
 	2,   // 9: gastrolog.v1.VaultConfig.retention_rules:type_name -> gastrolog.v1.RetentionRule
 	4,   // 10: gastrolog.v1.RouteConfig.destinations:type_name -> gastrolog.v1.RouteDestination
-	113, // 11: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
+	117, // 11: gastrolog.v1.IngesterConfig.params:type_name -> gastrolog.v1.IngesterConfig.ParamsEntry
 	12,  // 12: gastrolog.v1.ListIngestersResponse.ingesters:type_name -> gastrolog.v1.IngesterInfo
 	7,   // 13: gastrolog.v1.PutFilterRequest.config:type_name -> gastrolog.v1.FilterConfig
 	8,   // 14: gastrolog.v1.PutRotationPolicyRequest.config:type_name -> gastrolog.v1.RotationPolicyConfig
@@ -6592,123 +6897,128 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	49,  // 20: gastrolog.v1.LookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
 	50,  // 21: gastrolog.v1.LookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
 	47,  // 22: gastrolog.v1.LookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
-	114, // 23: gastrolog.v1.HTTPLookupEntry.headers:type_name -> gastrolog.v1.HTTPLookupEntry.HeadersEntry
-	48,  // 24: gastrolog.v1.HTTPLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
-	48,  // 25: gastrolog.v1.JSONFileLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
-	42,  // 26: gastrolog.v1.GetSettingsResponse.auth:type_name -> gastrolog.v1.AuthSettings
-	43,  // 27: gastrolog.v1.GetSettingsResponse.query:type_name -> gastrolog.v1.QuerySettings
-	44,  // 28: gastrolog.v1.GetSettingsResponse.scheduler:type_name -> gastrolog.v1.SchedulerSettings
-	45,  // 29: gastrolog.v1.GetSettingsResponse.tls:type_name -> gastrolog.v1.TLSSettings
-	46,  // 30: gastrolog.v1.GetSettingsResponse.lookup:type_name -> gastrolog.v1.LookupSettings
-	51,  // 31: gastrolog.v1.GetSettingsResponse.cluster:type_name -> gastrolog.v1.ClusterSettings
-	41,  // 32: gastrolog.v1.GetSettingsResponse.maxmind:type_name -> gastrolog.v1.MaxMindSettings
-	53,  // 33: gastrolog.v1.PutAuthSettings.password_policy:type_name -> gastrolog.v1.PutPasswordPolicySettings
-	49,  // 34: gastrolog.v1.PutLookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
-	50,  // 35: gastrolog.v1.PutLookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
-	47,  // 36: gastrolog.v1.PutLookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
-	54,  // 37: gastrolog.v1.PutSettingsRequest.auth:type_name -> gastrolog.v1.PutAuthSettings
-	55,  // 38: gastrolog.v1.PutSettingsRequest.query:type_name -> gastrolog.v1.PutQuerySettings
-	56,  // 39: gastrolog.v1.PutSettingsRequest.scheduler:type_name -> gastrolog.v1.PutSchedulerSettings
-	57,  // 40: gastrolog.v1.PutSettingsRequest.tls:type_name -> gastrolog.v1.PutTLSSettings
-	59,  // 41: gastrolog.v1.PutSettingsRequest.lookup:type_name -> gastrolog.v1.PutLookupSettings
-	60,  // 42: gastrolog.v1.PutSettingsRequest.cluster:type_name -> gastrolog.v1.PutClusterSettings
-	58,  // 43: gastrolog.v1.PutSettingsRequest.maxmind:type_name -> gastrolog.v1.PutMaxMindSettings
-	63,  // 44: gastrolog.v1.PutSettingsResponse.geoip_validation:type_name -> gastrolog.v1.MmdbValidation
-	63,  // 45: gastrolog.v1.PutSettingsResponse.asn_validation:type_name -> gastrolog.v1.MmdbValidation
-	68,  // 46: gastrolog.v1.GetSavedQueriesResponse.queries:type_name -> gastrolog.v1.SavedQuery
-	68,  // 47: gastrolog.v1.PutSavedQueryRequest.query:type_name -> gastrolog.v1.SavedQuery
-	77,  // 48: gastrolog.v1.ListCertificatesResponse.certificates:type_name -> gastrolog.v1.CertificateInfo
-	115, // 49: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
-	116, // 50: gastrolog.v1.IngesterTypeDefaults.params:type_name -> gastrolog.v1.IngesterTypeDefaults.ParamsEntry
-	117, // 51: gastrolog.v1.GetIngesterDefaultsResponse.types:type_name -> gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
-	93,  // 52: gastrolog.v1.PutNodeConfigRequest.config:type_name -> gastrolog.v1.NodeConfig
-	102, // 53: gastrolog.v1.GetRouteStatsResponse.vault_stats:type_name -> gastrolog.v1.VaultRouteStats
-	103, // 54: gastrolog.v1.GetRouteStatsResponse.route_stats:type_name -> gastrolog.v1.PerRouteStats
-	104, // 55: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
-	49,  // 56: gastrolog.v1.TestHTTPLookupRequest.config:type_name -> gastrolog.v1.HTTPLookupEntry
-	118, // 57: gastrolog.v1.TestHTTPLookupRequest.values:type_name -> gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
-	111, // 58: gastrolog.v1.TestHTTPLookupResponse.results:type_name -> gastrolog.v1.TestHTTPLookupResult
-	119, // 59: gastrolog.v1.TestHTTPLookupResult.fields:type_name -> gastrolog.v1.TestHTTPLookupResult.FieldsEntry
-	91,  // 60: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
-	0,   // 61: gastrolog.v1.ConfigService.GetConfig:input_type -> gastrolog.v1.GetConfigRequest
-	10,  // 62: gastrolog.v1.ConfigService.ListIngesters:input_type -> gastrolog.v1.ListIngestersRequest
-	13,  // 63: gastrolog.v1.ConfigService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
-	15,  // 64: gastrolog.v1.ConfigService.PutFilter:input_type -> gastrolog.v1.PutFilterRequest
-	17,  // 65: gastrolog.v1.ConfigService.DeleteFilter:input_type -> gastrolog.v1.DeleteFilterRequest
-	19,  // 66: gastrolog.v1.ConfigService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
-	21,  // 67: gastrolog.v1.ConfigService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
-	23,  // 68: gastrolog.v1.ConfigService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
-	25,  // 69: gastrolog.v1.ConfigService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
-	27,  // 70: gastrolog.v1.ConfigService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
-	29,  // 71: gastrolog.v1.ConfigService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
-	35,  // 72: gastrolog.v1.ConfigService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
-	37,  // 73: gastrolog.v1.ConfigService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
-	39,  // 74: gastrolog.v1.ConfigService.GetSettings:input_type -> gastrolog.v1.GetSettingsRequest
-	61,  // 75: gastrolog.v1.ConfigService.PutSettings:input_type -> gastrolog.v1.PutSettingsRequest
-	64,  // 76: gastrolog.v1.ConfigService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
-	66,  // 77: gastrolog.v1.ConfigService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
-	69,  // 78: gastrolog.v1.ConfigService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
-	71,  // 79: gastrolog.v1.ConfigService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
-	73,  // 80: gastrolog.v1.ConfigService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
-	75,  // 81: gastrolog.v1.ConfigService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
-	78,  // 82: gastrolog.v1.ConfigService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
-	80,  // 83: gastrolog.v1.ConfigService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
-	82,  // 84: gastrolog.v1.ConfigService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
-	84,  // 85: gastrolog.v1.ConfigService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
-	86,  // 86: gastrolog.v1.ConfigService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
-	88,  // 87: gastrolog.v1.ConfigService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
-	90,  // 88: gastrolog.v1.ConfigService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
-	94,  // 89: gastrolog.v1.ConfigService.PutNodeConfig:input_type -> gastrolog.v1.PutNodeConfigRequest
-	31,  // 90: gastrolog.v1.ConfigService.PutRoute:input_type -> gastrolog.v1.PutRouteRequest
-	33,  // 91: gastrolog.v1.ConfigService.DeleteRoute:input_type -> gastrolog.v1.DeleteRouteRequest
-	96,  // 92: gastrolog.v1.ConfigService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
-	98,  // 93: gastrolog.v1.ConfigService.WatchConfig:input_type -> gastrolog.v1.WatchConfigRequest
-	100, // 94: gastrolog.v1.ConfigService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
-	105, // 95: gastrolog.v1.ConfigService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
-	107, // 96: gastrolog.v1.ConfigService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
-	109, // 97: gastrolog.v1.ConfigService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
-	1,   // 98: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
-	11,  // 99: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
-	14,  // 100: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
-	16,  // 101: gastrolog.v1.ConfigService.PutFilter:output_type -> gastrolog.v1.PutFilterResponse
-	18,  // 102: gastrolog.v1.ConfigService.DeleteFilter:output_type -> gastrolog.v1.DeleteFilterResponse
-	20,  // 103: gastrolog.v1.ConfigService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
-	22,  // 104: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
-	24,  // 105: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
-	26,  // 106: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
-	28,  // 107: gastrolog.v1.ConfigService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
-	30,  // 108: gastrolog.v1.ConfigService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
-	36,  // 109: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
-	38,  // 110: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
-	52,  // 111: gastrolog.v1.ConfigService.GetSettings:output_type -> gastrolog.v1.GetSettingsResponse
-	62,  // 112: gastrolog.v1.ConfigService.PutSettings:output_type -> gastrolog.v1.PutSettingsResponse
-	65,  // 113: gastrolog.v1.ConfigService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
-	67,  // 114: gastrolog.v1.ConfigService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
-	70,  // 115: gastrolog.v1.ConfigService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
-	72,  // 116: gastrolog.v1.ConfigService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
-	74,  // 117: gastrolog.v1.ConfigService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
-	76,  // 118: gastrolog.v1.ConfigService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
-	79,  // 119: gastrolog.v1.ConfigService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
-	81,  // 120: gastrolog.v1.ConfigService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
-	83,  // 121: gastrolog.v1.ConfigService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
-	85,  // 122: gastrolog.v1.ConfigService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
-	87,  // 123: gastrolog.v1.ConfigService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
-	89,  // 124: gastrolog.v1.ConfigService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
-	92,  // 125: gastrolog.v1.ConfigService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
-	95,  // 126: gastrolog.v1.ConfigService.PutNodeConfig:output_type -> gastrolog.v1.PutNodeConfigResponse
-	32,  // 127: gastrolog.v1.ConfigService.PutRoute:output_type -> gastrolog.v1.PutRouteResponse
-	34,  // 128: gastrolog.v1.ConfigService.DeleteRoute:output_type -> gastrolog.v1.DeleteRouteResponse
-	97,  // 129: gastrolog.v1.ConfigService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
-	99,  // 130: gastrolog.v1.ConfigService.WatchConfig:output_type -> gastrolog.v1.WatchConfigResponse
-	101, // 131: gastrolog.v1.ConfigService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
-	106, // 132: gastrolog.v1.ConfigService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
-	108, // 133: gastrolog.v1.ConfigService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
-	110, // 134: gastrolog.v1.ConfigService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
-	98,  // [98:135] is the sub-list for method output_type
-	61,  // [61:98] is the sub-list for method input_type
-	61,  // [61:61] is the sub-list for extension type_name
-	61,  // [61:61] is the sub-list for extension extendee
-	0,   // [0:61] is the sub-list for field type_name
+	51,  // 23: gastrolog.v1.LookupSettings.csv_lookups:type_name -> gastrolog.v1.CSVLookupEntry
+	118, // 24: gastrolog.v1.HTTPLookupEntry.headers:type_name -> gastrolog.v1.HTTPLookupEntry.HeadersEntry
+	48,  // 25: gastrolog.v1.HTTPLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
+	48,  // 26: gastrolog.v1.JSONFileLookupEntry.parameters:type_name -> gastrolog.v1.HTTPLookupParam
+	42,  // 27: gastrolog.v1.GetSettingsResponse.auth:type_name -> gastrolog.v1.AuthSettings
+	43,  // 28: gastrolog.v1.GetSettingsResponse.query:type_name -> gastrolog.v1.QuerySettings
+	44,  // 29: gastrolog.v1.GetSettingsResponse.scheduler:type_name -> gastrolog.v1.SchedulerSettings
+	45,  // 30: gastrolog.v1.GetSettingsResponse.tls:type_name -> gastrolog.v1.TLSSettings
+	46,  // 31: gastrolog.v1.GetSettingsResponse.lookup:type_name -> gastrolog.v1.LookupSettings
+	52,  // 32: gastrolog.v1.GetSettingsResponse.cluster:type_name -> gastrolog.v1.ClusterSettings
+	41,  // 33: gastrolog.v1.GetSettingsResponse.maxmind:type_name -> gastrolog.v1.MaxMindSettings
+	54,  // 34: gastrolog.v1.PutAuthSettings.password_policy:type_name -> gastrolog.v1.PutPasswordPolicySettings
+	49,  // 35: gastrolog.v1.PutLookupSettings.http_lookups:type_name -> gastrolog.v1.HTTPLookupEntry
+	50,  // 36: gastrolog.v1.PutLookupSettings.json_file_lookups:type_name -> gastrolog.v1.JSONFileLookupEntry
+	47,  // 37: gastrolog.v1.PutLookupSettings.mmdb_lookups:type_name -> gastrolog.v1.MMDBLookupEntry
+	51,  // 38: gastrolog.v1.PutLookupSettings.csv_lookups:type_name -> gastrolog.v1.CSVLookupEntry
+	55,  // 39: gastrolog.v1.PutSettingsRequest.auth:type_name -> gastrolog.v1.PutAuthSettings
+	56,  // 40: gastrolog.v1.PutSettingsRequest.query:type_name -> gastrolog.v1.PutQuerySettings
+	57,  // 41: gastrolog.v1.PutSettingsRequest.scheduler:type_name -> gastrolog.v1.PutSchedulerSettings
+	58,  // 42: gastrolog.v1.PutSettingsRequest.tls:type_name -> gastrolog.v1.PutTLSSettings
+	60,  // 43: gastrolog.v1.PutSettingsRequest.lookup:type_name -> gastrolog.v1.PutLookupSettings
+	61,  // 44: gastrolog.v1.PutSettingsRequest.cluster:type_name -> gastrolog.v1.PutClusterSettings
+	59,  // 45: gastrolog.v1.PutSettingsRequest.maxmind:type_name -> gastrolog.v1.PutMaxMindSettings
+	64,  // 46: gastrolog.v1.PutSettingsResponse.geoip_validation:type_name -> gastrolog.v1.MmdbValidation
+	64,  // 47: gastrolog.v1.PutSettingsResponse.asn_validation:type_name -> gastrolog.v1.MmdbValidation
+	69,  // 48: gastrolog.v1.GetSavedQueriesResponse.queries:type_name -> gastrolog.v1.SavedQuery
+	69,  // 49: gastrolog.v1.PutSavedQueryRequest.query:type_name -> gastrolog.v1.SavedQuery
+	78,  // 50: gastrolog.v1.ListCertificatesResponse.certificates:type_name -> gastrolog.v1.CertificateInfo
+	119, // 51: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
+	120, // 52: gastrolog.v1.IngesterTypeDefaults.params:type_name -> gastrolog.v1.IngesterTypeDefaults.ParamsEntry
+	121, // 53: gastrolog.v1.GetIngesterDefaultsResponse.types:type_name -> gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
+	94,  // 54: gastrolog.v1.PutNodeConfigRequest.config:type_name -> gastrolog.v1.NodeConfig
+	103, // 55: gastrolog.v1.GetRouteStatsResponse.vault_stats:type_name -> gastrolog.v1.VaultRouteStats
+	104, // 56: gastrolog.v1.GetRouteStatsResponse.route_stats:type_name -> gastrolog.v1.PerRouteStats
+	105, // 57: gastrolog.v1.ListManagedFilesResponse.files:type_name -> gastrolog.v1.ManagedFileInfo
+	49,  // 58: gastrolog.v1.TestHTTPLookupRequest.config:type_name -> gastrolog.v1.HTTPLookupEntry
+	122, // 59: gastrolog.v1.TestHTTPLookupRequest.values:type_name -> gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
+	112, // 60: gastrolog.v1.TestHTTPLookupResponse.results:type_name -> gastrolog.v1.TestHTTPLookupResult
+	123, // 61: gastrolog.v1.TestHTTPLookupResult.fields:type_name -> gastrolog.v1.TestHTTPLookupResult.FieldsEntry
+	115, // 62: gastrolog.v1.PreviewCSVLookupResponse.rows:type_name -> gastrolog.v1.CSVPreviewRow
+	92,  // 63: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry.value:type_name -> gastrolog.v1.IngesterTypeDefaults
+	0,   // 64: gastrolog.v1.ConfigService.GetConfig:input_type -> gastrolog.v1.GetConfigRequest
+	10,  // 65: gastrolog.v1.ConfigService.ListIngesters:input_type -> gastrolog.v1.ListIngestersRequest
+	13,  // 66: gastrolog.v1.ConfigService.GetIngesterStatus:input_type -> gastrolog.v1.GetIngesterStatusRequest
+	15,  // 67: gastrolog.v1.ConfigService.PutFilter:input_type -> gastrolog.v1.PutFilterRequest
+	17,  // 68: gastrolog.v1.ConfigService.DeleteFilter:input_type -> gastrolog.v1.DeleteFilterRequest
+	19,  // 69: gastrolog.v1.ConfigService.PutRotationPolicy:input_type -> gastrolog.v1.PutRotationPolicyRequest
+	21,  // 70: gastrolog.v1.ConfigService.DeleteRotationPolicy:input_type -> gastrolog.v1.DeleteRotationPolicyRequest
+	23,  // 71: gastrolog.v1.ConfigService.PutRetentionPolicy:input_type -> gastrolog.v1.PutRetentionPolicyRequest
+	25,  // 72: gastrolog.v1.ConfigService.DeleteRetentionPolicy:input_type -> gastrolog.v1.DeleteRetentionPolicyRequest
+	27,  // 73: gastrolog.v1.ConfigService.PutVault:input_type -> gastrolog.v1.PutVaultRequest
+	29,  // 74: gastrolog.v1.ConfigService.DeleteVault:input_type -> gastrolog.v1.DeleteVaultRequest
+	35,  // 75: gastrolog.v1.ConfigService.PutIngester:input_type -> gastrolog.v1.PutIngesterRequest
+	37,  // 76: gastrolog.v1.ConfigService.DeleteIngester:input_type -> gastrolog.v1.DeleteIngesterRequest
+	39,  // 77: gastrolog.v1.ConfigService.GetSettings:input_type -> gastrolog.v1.GetSettingsRequest
+	62,  // 78: gastrolog.v1.ConfigService.PutSettings:input_type -> gastrolog.v1.PutSettingsRequest
+	65,  // 79: gastrolog.v1.ConfigService.GetPreferences:input_type -> gastrolog.v1.GetPreferencesRequest
+	67,  // 80: gastrolog.v1.ConfigService.PutPreferences:input_type -> gastrolog.v1.PutPreferencesRequest
+	70,  // 81: gastrolog.v1.ConfigService.GetSavedQueries:input_type -> gastrolog.v1.GetSavedQueriesRequest
+	72,  // 82: gastrolog.v1.ConfigService.PutSavedQuery:input_type -> gastrolog.v1.PutSavedQueryRequest
+	74,  // 83: gastrolog.v1.ConfigService.DeleteSavedQuery:input_type -> gastrolog.v1.DeleteSavedQueryRequest
+	76,  // 84: gastrolog.v1.ConfigService.ListCertificates:input_type -> gastrolog.v1.ListCertificatesRequest
+	79,  // 85: gastrolog.v1.ConfigService.GetCertificate:input_type -> gastrolog.v1.GetCertificateRequest
+	81,  // 86: gastrolog.v1.ConfigService.PutCertificate:input_type -> gastrolog.v1.PutCertificateRequest
+	83,  // 87: gastrolog.v1.ConfigService.DeleteCertificate:input_type -> gastrolog.v1.DeleteCertificateRequest
+	85,  // 88: gastrolog.v1.ConfigService.PauseVault:input_type -> gastrolog.v1.PauseVaultRequest
+	87,  // 89: gastrolog.v1.ConfigService.ResumeVault:input_type -> gastrolog.v1.ResumeVaultRequest
+	89,  // 90: gastrolog.v1.ConfigService.TestIngester:input_type -> gastrolog.v1.TestIngesterRequest
+	91,  // 91: gastrolog.v1.ConfigService.GetIngesterDefaults:input_type -> gastrolog.v1.GetIngesterDefaultsRequest
+	95,  // 92: gastrolog.v1.ConfigService.PutNodeConfig:input_type -> gastrolog.v1.PutNodeConfigRequest
+	31,  // 93: gastrolog.v1.ConfigService.PutRoute:input_type -> gastrolog.v1.PutRouteRequest
+	33,  // 94: gastrolog.v1.ConfigService.DeleteRoute:input_type -> gastrolog.v1.DeleteRouteRequest
+	97,  // 95: gastrolog.v1.ConfigService.GenerateName:input_type -> gastrolog.v1.GenerateNameRequest
+	99,  // 96: gastrolog.v1.ConfigService.WatchConfig:input_type -> gastrolog.v1.WatchConfigRequest
+	101, // 97: gastrolog.v1.ConfigService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
+	106, // 98: gastrolog.v1.ConfigService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
+	108, // 99: gastrolog.v1.ConfigService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
+	110, // 100: gastrolog.v1.ConfigService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
+	113, // 101: gastrolog.v1.ConfigService.PreviewCSVLookup:input_type -> gastrolog.v1.PreviewCSVLookupRequest
+	1,   // 102: gastrolog.v1.ConfigService.GetConfig:output_type -> gastrolog.v1.GetConfigResponse
+	11,  // 103: gastrolog.v1.ConfigService.ListIngesters:output_type -> gastrolog.v1.ListIngestersResponse
+	14,  // 104: gastrolog.v1.ConfigService.GetIngesterStatus:output_type -> gastrolog.v1.GetIngesterStatusResponse
+	16,  // 105: gastrolog.v1.ConfigService.PutFilter:output_type -> gastrolog.v1.PutFilterResponse
+	18,  // 106: gastrolog.v1.ConfigService.DeleteFilter:output_type -> gastrolog.v1.DeleteFilterResponse
+	20,  // 107: gastrolog.v1.ConfigService.PutRotationPolicy:output_type -> gastrolog.v1.PutRotationPolicyResponse
+	22,  // 108: gastrolog.v1.ConfigService.DeleteRotationPolicy:output_type -> gastrolog.v1.DeleteRotationPolicyResponse
+	24,  // 109: gastrolog.v1.ConfigService.PutRetentionPolicy:output_type -> gastrolog.v1.PutRetentionPolicyResponse
+	26,  // 110: gastrolog.v1.ConfigService.DeleteRetentionPolicy:output_type -> gastrolog.v1.DeleteRetentionPolicyResponse
+	28,  // 111: gastrolog.v1.ConfigService.PutVault:output_type -> gastrolog.v1.PutVaultResponse
+	30,  // 112: gastrolog.v1.ConfigService.DeleteVault:output_type -> gastrolog.v1.DeleteVaultResponse
+	36,  // 113: gastrolog.v1.ConfigService.PutIngester:output_type -> gastrolog.v1.PutIngesterResponse
+	38,  // 114: gastrolog.v1.ConfigService.DeleteIngester:output_type -> gastrolog.v1.DeleteIngesterResponse
+	53,  // 115: gastrolog.v1.ConfigService.GetSettings:output_type -> gastrolog.v1.GetSettingsResponse
+	63,  // 116: gastrolog.v1.ConfigService.PutSettings:output_type -> gastrolog.v1.PutSettingsResponse
+	66,  // 117: gastrolog.v1.ConfigService.GetPreferences:output_type -> gastrolog.v1.GetPreferencesResponse
+	68,  // 118: gastrolog.v1.ConfigService.PutPreferences:output_type -> gastrolog.v1.PutPreferencesResponse
+	71,  // 119: gastrolog.v1.ConfigService.GetSavedQueries:output_type -> gastrolog.v1.GetSavedQueriesResponse
+	73,  // 120: gastrolog.v1.ConfigService.PutSavedQuery:output_type -> gastrolog.v1.PutSavedQueryResponse
+	75,  // 121: gastrolog.v1.ConfigService.DeleteSavedQuery:output_type -> gastrolog.v1.DeleteSavedQueryResponse
+	77,  // 122: gastrolog.v1.ConfigService.ListCertificates:output_type -> gastrolog.v1.ListCertificatesResponse
+	80,  // 123: gastrolog.v1.ConfigService.GetCertificate:output_type -> gastrolog.v1.GetCertificateResponse
+	82,  // 124: gastrolog.v1.ConfigService.PutCertificate:output_type -> gastrolog.v1.PutCertificateResponse
+	84,  // 125: gastrolog.v1.ConfigService.DeleteCertificate:output_type -> gastrolog.v1.DeleteCertificateResponse
+	86,  // 126: gastrolog.v1.ConfigService.PauseVault:output_type -> gastrolog.v1.PauseVaultResponse
+	88,  // 127: gastrolog.v1.ConfigService.ResumeVault:output_type -> gastrolog.v1.ResumeVaultResponse
+	90,  // 128: gastrolog.v1.ConfigService.TestIngester:output_type -> gastrolog.v1.TestIngesterResponse
+	93,  // 129: gastrolog.v1.ConfigService.GetIngesterDefaults:output_type -> gastrolog.v1.GetIngesterDefaultsResponse
+	96,  // 130: gastrolog.v1.ConfigService.PutNodeConfig:output_type -> gastrolog.v1.PutNodeConfigResponse
+	32,  // 131: gastrolog.v1.ConfigService.PutRoute:output_type -> gastrolog.v1.PutRouteResponse
+	34,  // 132: gastrolog.v1.ConfigService.DeleteRoute:output_type -> gastrolog.v1.DeleteRouteResponse
+	98,  // 133: gastrolog.v1.ConfigService.GenerateName:output_type -> gastrolog.v1.GenerateNameResponse
+	100, // 134: gastrolog.v1.ConfigService.WatchConfig:output_type -> gastrolog.v1.WatchConfigResponse
+	102, // 135: gastrolog.v1.ConfigService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
+	107, // 136: gastrolog.v1.ConfigService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
+	109, // 137: gastrolog.v1.ConfigService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
+	111, // 138: gastrolog.v1.ConfigService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
+	114, // 139: gastrolog.v1.ConfigService.PreviewCSVLookup:output_type -> gastrolog.v1.PreviewCSVLookupResponse
+	102, // [102:140] is the sub-list for method output_type
+	64,  // [64:102] is the sub-list for method input_type
+	64,  // [64:64] is the sub-list for extension type_name
+	64,  // [64:64] is the sub-list for extension extendee
+	0,   // [0:64] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_config_proto_init() }
@@ -6716,21 +7026,21 @@ func file_gastrolog_v1_config_proto_init() {
 	if File_gastrolog_v1_config_proto != nil {
 		return
 	}
-	file_gastrolog_v1_config_proto_msgTypes[53].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[54].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[55].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[56].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[57].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[58].OneofWrappers = []any{}
-	file_gastrolog_v1_config_proto_msgTypes[60].OneofWrappers = []any{}
+	file_gastrolog_v1_config_proto_msgTypes[59].OneofWrappers = []any{}
 	file_gastrolog_v1_config_proto_msgTypes[61].OneofWrappers = []any{}
+	file_gastrolog_v1_config_proto_msgTypes[62].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_config_proto_rawDesc), len(file_gastrolog_v1_config_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   120,
+			NumMessages:   124,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
