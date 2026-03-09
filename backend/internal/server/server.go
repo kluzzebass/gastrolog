@@ -324,7 +324,8 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
 
 	lookupRegistry := lookup.Registry{
-		"rdns": lookup.NewRDNS(),
+		"rdns":      lookup.NewRDNS(),
+		"useragent": lookup.NewUserAgent(),
 	}
 
 	s.loadInitialLookupConfig(lookupRegistry)
