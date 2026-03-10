@@ -1,4 +1,4 @@
-// Package vaulttest provides a shared conformance test suite for config.Store
+// Package storetest provides a shared conformance test suite for config.Store
 // implementations. Each backend (memory, raft) wires this suite to
 // verify it satisfies the full Store contract.
 package storetest
@@ -15,7 +15,7 @@ import (
 
 func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
 
-// TestVault runs the full conformance suite against a Vault implementation.
+// TestStore runs the full conformance suite against a Store implementation.
 // newStore must return a fresh, empty store for each sub-test.
 func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("LoadEmpty", func(t *testing.T) {

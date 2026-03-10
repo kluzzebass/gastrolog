@@ -38,14 +38,13 @@ export function MaxMindCard({
       licenseKey !== "");
 
   const save = async () => {
+    const maxmind = {
+      autoDownload,
+      accountId: accountId || undefined,
+      licenseKey: licenseKey || MAXMIND_KEEP,
+    };
     try {
-      await putConfig.mutateAsync({
-        maxmind: {
-          autoDownload,
-          accountId: accountId || undefined,
-          licenseKey: licenseKey || MAXMIND_KEEP,
-        },
-      });
+      await putConfig.mutateAsync({ maxmind });
       setJustSaved(true);
       requestAnimationFrame(() => setJustSaved(false));
       setAccountId("");

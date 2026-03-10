@@ -152,36 +152,43 @@ export function SetupWizard() {
       retentionRules.push({ retentionPolicyId: retentionId, action: "expire" });
     }
 
+    // Build policy promises outside try so the compiler can optimize conditionals.
+    const policyPromises: Promise<unknown>[] = [
+      configClient.putFilter({
+        config: { id: filterId, name: "catch-all", expression: "*" },
+      }),
+    ];
+    if (rotationId) {
+      policyPromises.push(
+        configClient.putRotationPolicy({
+          config: {
+            id: rotationId,
+            name: rotationName,
+            maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
+            maxBytes: rotationMaxBytes,
+            maxRecords: rotationMaxRecords,
+            cron: rotation.cron,
+          },
+        }),
+      );
+    }
+    if (retentionId) {
+      policyPromises.push(
+        configClient.putRetentionPolicy({
+          config: {
+            id: retentionId,
+            name: retentionName,
+            maxChunks: retentionMaxChunks,
+            maxAgeSeconds: parseDurationToSeconds(retentionMaxAge),
+            maxBytes: retentionMaxBytes,
+          },
+        }),
+      );
+    }
+
     try {
       // 1. Create independent policies in parallel.
-      await Promise.all([
-        configClient.putFilter({
-          config: { id: filterId, name: "catch-all", expression: "*" },
-        }),
-        rotationId
-          ? configClient.putRotationPolicy({
-              config: {
-                id: rotationId,
-                name: rotationName,
-                maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
-                maxBytes: rotationMaxBytes,
-                maxRecords: rotationMaxRecords,
-                cron: rotation.cron,
-              },
-            })
-          : undefined,
-        retentionId
-          ? configClient.putRetentionPolicy({
-              config: {
-                id: retentionId,
-                name: retentionName,
-                maxChunks: retentionMaxChunks,
-                maxAgeSeconds: parseDurationToSeconds(retentionMaxAge),
-                maxBytes: retentionMaxBytes,
-              },
-            })
-          : undefined,
-      ]);
+      await Promise.all(policyPromises);
 
       // 2. Create vault (references rotation + retention from step 1).
       await configClient.putVault({
