@@ -10,8 +10,8 @@ GastroLog is a log aggregation and search service. It collects logs from various
 - **Chunk-based storage** — Append-only segments that seal automatically and trigger index builds, with optional zstd compression and tiered retention
 - **Full-text search** — Token, attribute, and key-value indexes with a purpose-built query language supporting boolean logic, comparisons, regex, and globs
 - **Pipeline analytics** — Pipe-based query transformations (`| stats`, `| eval`, `| sort`, `| head`, `| where`, `| rename`, `| fields`, `| lookup`, `| raw`) with 10 aggregation functions, 20+ scalar functions, time bucketing, and arithmetic expressions
-- **Field enrichment** — `lookup` operator with reverse DNS, GeoIP (MaxMind MMDB with auto-download), and ASN lookup tables
-- **Visualizations** — Time series charts, world map (choropleth and scatter), single-value displays, sortable tables with CSV/JSON export, and auto-refresh polling
+- **Field enrichment** — `lookup` operator with reverse DNS, GeoIP, ASN (MaxMind MMDB with auto-download), user-agent parsing, and custom lookup tables from CSV files, JSON files, and HTTP endpoints
+- **Visualizations** — Line charts, bar charts, donut charts, heatmaps, scatter plots, world maps (choropleth and point), single-value displays, and sortable tables with CSV/JSON export — auto-detected or explicitly selected
 - **Multi-store routing** — Route messages to different stores based on filter expressions
 - **Rotation and retention policies** — Per-store control over chunk size, data lifecycle, and migration between stores
 - **Embedded web UI** — Single binary serves both the API and the frontend
