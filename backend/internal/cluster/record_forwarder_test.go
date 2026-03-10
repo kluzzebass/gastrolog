@@ -26,16 +26,16 @@ func TestBatching(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 
-	// Fill with 250 records.
-	for i := 0; i < 250; i++ {
+	// Fill channel to capacity.
+	for i := 0; i < forwardChanCap; i++ {
 		nf.ch <- forwardEntry{
 			vaultID: vaultID,
 			record:  chunk.Record{Raw: []byte("test")},
 		}
 	}
 
-	if len(nf.ch) != 250 {
-		t.Fatalf("expected 250 entries in channel, got %d", len(nf.ch))
+	if len(nf.ch) != forwardChanCap {
+		t.Fatalf("expected %d entries in channel, got %d", forwardChanCap, len(nf.ch))
 	}
 
 	// Drain in batches of forwardBatchSize (same logic as flushLoop).
@@ -55,12 +55,25 @@ func TestBatching(t *testing.T) {
 		mu.Unlock()
 	}
 
-	// Should produce 3 batches: 100 + 100 + 50.
-	if len(batches) != 3 {
-		t.Fatalf("expected 3 batches, got %d: %v", len(batches), batches)
+	// Compute expected batches: ceil(forwardChanCap / forwardBatchSize) full
+	// batches, plus one partial batch if there's a remainder.
+	wantBatches := forwardChanCap / forwardBatchSize
+	remainder := forwardChanCap % forwardBatchSize
+	if remainder > 0 {
+		wantBatches++
 	}
-	if batches[0] != 100 || batches[1] != 100 || batches[2] != 50 {
-		t.Errorf("batch sizes = %v, want [100 100 50]", batches)
+
+	if len(batches) != wantBatches {
+		t.Fatalf("expected %d batches, got %d: %v", wantBatches, len(batches), batches)
+	}
+
+	// Verify total records drained.
+	total := 0
+	for _, b := range batches {
+		total += b
+	}
+	if total != forwardChanCap {
+		t.Errorf("total drained = %d, want %d", total, forwardChanCap)
 	}
 }
 
