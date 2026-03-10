@@ -153,6 +153,8 @@ A single-node cluster can also add nodes from **Settings > Nodes > Join Cluster*
 
 ### Multi-node Docker Compose
 
+A 3-node cluster tolerates 1 node failure while maintaining quorum (2-node clusters provide **no** fault tolerance — see the [clustering docs](frontend/src/help/clustering.md#two-node-warning) for details).
+
 ```yaml
 services:
   node1:
@@ -169,9 +171,18 @@ services:
     volumes: [node2:/config]
     depends_on: [node1]
 
+  node3:
+    image: ghcr.io/kluzzebass/gastrolog:latest
+    command: server --addr :4564 --cluster-addr :4566
+      --join-addr node1:4566 --join-token ${JOIN_TOKEN}
+    ports: ["4584:4564"]
+    volumes: [node3:/config]
+    depends_on: [node1]
+
 volumes:
   node1:
   node2:
+  node3:
 ```
 
 ### How it works
