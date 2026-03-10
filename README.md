@@ -15,7 +15,7 @@ GastroLog is a log aggregation and search service. It collects logs from various
 - **Multi-store routing** — Route messages to different stores based on filter expressions
 - **Rotation and retention policies** — Per-store control over chunk size, data lifecycle, and migration between stores
 - **Embedded web UI** — Single binary serves both the API and the frontend
-- **Clustering** — Multi-node Raft consensus for config replication, automatic cross-node search, non-voter read replicas, auto-generated mTLS
+- **Clustering** — Multi-node Raft consensus for config replication, transparent write forwarding to the leader, automatic cross-node query fan-out with merged results, record forwarding between ingest and storage nodes, non-voter read replicas, and auto-generated mTLS for all inter-node communication
 - **Built-in authentication** — JWT-based with user management
 
 ## Quick Start
