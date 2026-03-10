@@ -22,9 +22,11 @@ gastrolog server --join-addr 10.0.0.1:4566 --join-token <token>
 
 The join token is displayed in the leader's [Nodes settings tab](settings:nodes) [![icon:help]()](help:clustering-nodes) and includes cryptographic material for mutual TLS enrollment.
 
+> **Warning:** When a node joins a cluster, its local configuration is **replaced** by the cluster's replicated state. Any ingesters, vaults, filters, policies, or users configured on the joining node will be lost. Existing vault data on disk is not deleted, but the vault configurations pointing to it will be gone unless they also exist in the cluster.
+
 ### At runtime (UI)
 
-A running single-node server can join an existing cluster without restarting. Go to **Settings > [Nodes](settings:nodes)** and use the **Join Cluster** form. The node's local configuration is replaced by the cluster's replicated state.
+A running single-node server can join an existing cluster without restarting. Go to **Settings > [Nodes](settings:nodes)** and use the **Join Cluster** form. The same config replacement warning above applies — the node's local configuration is replaced by the cluster's replicated state.
 
 ## Cluster Transport
 

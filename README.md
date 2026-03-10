@@ -127,6 +127,8 @@ The built-in help system documents the full query language, all operators, and s
 
 Every GastroLog node auto-bootstraps as a single-node Raft cluster on first start, with auto-generated mTLS for inter-node communication. To form a multi-node cluster, join additional nodes to an existing one.
 
+> **Note:** When a node joins a cluster, its local configuration is replaced by the cluster's replicated state. Any ingesters, vaults, filters, or users configured on the joining node before it joins will be lost.
+
 ### Joining via CLI
 
 The first node prints a join token on startup:
