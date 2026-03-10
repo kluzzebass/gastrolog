@@ -2,6 +2,20 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.7.1 — 2026-03-10
+
+### Features
+- **`--vaults` server flag** — overrides the base directory for vault storage, separate from `--home`. Useful in Docker where config and data live on different volume mounts. Defaults to `--home` when not set
+- **`gastrolog login` and `gastrolog register`** — promoted to top-level commands for easier scripting (`export GASTROLOG_TOKEN=$(gastrolog login ...)`)
+- **`gastrolog cluster join-token`** — prints the cluster join token; now works from any node, not just the leader
+- **CLI restructure** — `cluster`, `user`, and `job` commands moved from under `config` to top-level; `--addr`, `--token`, and `--output` are now global flags available on all commands
+- **`server --listen`** — replaces `server --addr` to avoid collision with the client `--addr` flag
+
+### Fixes
+- React Compiler compatibility — fixed conditional expressions inside try/catch, lazy `useState` initializers, and `useRef` pattern for tracking previous values (react-doctor score 86 → 90)
+- Join token is now available from any cluster node via replicated Raft config, not just the leader
+- AI agent primer (`gastrolog prime`) no longer contains fabricated query commands
+
 ## v0.7.0 — 2026-03-10
 
 ### Breaking Changes
