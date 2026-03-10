@@ -99,6 +99,7 @@ gastrolog version           Print version
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--listen` | Listen address (host:port) | `:4564` |
+| `--vaults` | Vault storage directory | `<home>/vaults` |
 | `--bootstrap` | Bootstrap with default config | `false` |
 | `--no-auth` | Disable authentication (all requests treated as admin) | `false` |
 | `--cluster-addr` | Cluster gRPC listen address | `:4566` |

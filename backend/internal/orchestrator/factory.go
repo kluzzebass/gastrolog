@@ -56,6 +56,11 @@ type Factories struct {
 	// the "_state_dir" param so that ingesters can persist state (e.g. bookmarks).
 	HomeDir string
 
+	// VaultsDir overrides the base directory for vault storage. When non-empty,
+	// relative vault paths are resolved against this directory instead of HomeDir.
+	// Defaults to HomeDir if not set.
+	VaultsDir string
+
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever
 	// requires configuration, add a factory here.
@@ -126,9 +131,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		if factories.Logger != nil {
 			cmLogger = factories.Logger.With("vault", vaultCfg.ID)
 		}
-		// Resolve relative vault dir against HomeDir and inject _expect_existing
+		// Resolve relative vault dir against VaultsDir and inject _expect_existing
 		// so file vaults can warn about missing directories.
-		cmParams := resolveVaultDir(vaultCfg.Params, factories.HomeDir, vaultCfg.Name)
+		cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
 		cmParams["_expect_existing"] = "true"
 		cm, err := cmFactory(cmParams, cmLogger)
 		if err != nil {

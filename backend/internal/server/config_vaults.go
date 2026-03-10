@@ -28,11 +28,11 @@ import (
 // When both directories exist on disk, os.SameFile provides an additional
 // inode-level check that catches symlinks and bind mounts.
 func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, newNodeID, dir string) error {
-	homeDir := s.factories.HomeDir
+	vaultsDir := s.factories.VaultsDir
 
-	// Resolve relative path against homeDir (same logic as orchestrator).
-	if !filepath.IsAbs(dir) && homeDir != "" {
-		dir = filepath.Join(homeDir, dir)
+	// Resolve relative path against vaultsDir (same logic as orchestrator).
+	if !filepath.IsAbs(dir) && vaultsDir != "" {
+		dir = filepath.Join(vaultsDir, dir)
 	}
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -59,9 +59,9 @@ func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, 
 		if otherDir == "" {
 			continue
 		}
-		// Resolve the other vault's dir against homeDir too.
-		if !filepath.IsAbs(otherDir) && homeDir != "" {
-			otherDir = filepath.Join(homeDir, otherDir)
+		// Resolve the other vault's dir against vaultsDir too.
+		if !filepath.IsAbs(otherDir) && vaultsDir != "" {
+			otherDir = filepath.Join(vaultsDir, otherDir)
 		}
 		absOther, err := filepath.Abs(otherDir)
 		if err != nil {

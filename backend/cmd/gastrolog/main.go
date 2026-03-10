@@ -78,6 +78,7 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := app.RunConfig{
 				HomeFlag:    mustString(cmd, "home"),
+				VaultsFlag:  mustString(cmd, "vaults"),
 				ConfigType:  mustString(cmd, "config-type"),
 				ServerAddr:  mustString(cmd, "listen"),
 				Bootstrap:   mustBool(cmd, "bootstrap"),
@@ -101,6 +102,7 @@ func main() {
 	}
 
 	serverCmd.Flags().String("listen", ":4564", "listen address (host:port)")
+	serverCmd.Flags().String("vaults", "", "vault storage directory (default: <home>/vaults)")
 	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
 	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")

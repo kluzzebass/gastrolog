@@ -56,6 +56,7 @@ var Version = "dev"
 // RunConfig groups all CLI flags for the server command.
 type RunConfig struct {
 	HomeFlag    string
+	VaultsFlag  string
 	ConfigType  string
 	ServerAddr  string
 	Bootstrap   bool
@@ -149,7 +150,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	orch.RegisterDigester(digestlevel.New())
 	orch.RegisterDigester(digesttimestamp.New())
 
-	factories := buildFactories(logger, homeDir, cfgStore, orch, cfg.SlogCapture, cfg.SlogCaptureHandler)
+	vaultsDir := cfg.VaultsFlag
+	if vaultsDir == "" {
+		vaultsDir = homeDir // default: vaults resolve relative to home
+	}
+
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, cfg.SlogCapture, cfg.SlogCaptureHandler)
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	// orchReady is closed after startOrchestrator completes so that forwarded
@@ -777,7 +783,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	return nil
 }
 
-func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -813,8 +819,9 @@ func buildFactories(logger *slog.Logger, homeDir string, cfgStore config.Store, 
 			"file":   indexfile.NewFactory(),
 			"memory": indexmem.NewFactory(),
 		},
-		Logger:  logger,
-		HomeDir: homeDir,
+		Logger:    logger,
+		HomeDir:   homeDir,
+		VaultsDir: vaultsDir,
 	}
 }
 

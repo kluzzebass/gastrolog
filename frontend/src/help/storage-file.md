@@ -6,12 +6,12 @@ Persists logs to disk. Each [chunk](help:general-concepts) becomes a directory c
 
 | Setting | Description | Default |
 |---------|-------------|---------|
-| Directory | Vault directory (required) | |
+| Directory | Vault directory | `<vaults>/<name>` |
 | Compress sealed chunks | Compress sealed chunks with zstd | off |
 
 ## What You Should Know
 
-- The directory you configure is entirely yours to choose — it's not derived from any global setting
+- When left empty, the directory defaults to `vaults/<name>` under the `--vaults` directory (which itself defaults to `--home`)
 - Only one process can open a vault directory at a time (enforced by a lock file). In a [cluster](help:clustering), each node must have its own vault directories on local storage
 - If GastroLog crashes, it recovers on restart — at most the last partially-written record is lost
 - Maximum log file size within a chunk is **4 GB** (32-bit offsets in the file format)

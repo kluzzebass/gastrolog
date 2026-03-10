@@ -12,18 +12,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// resolveVaultDir resolves a file vault's "dir" parameter relative to homeDir.
+// resolveVaultDir resolves a file vault's "dir" parameter relative to vaultsDir.
 // If dir is empty, defaults to "vaults/<vaultName>". Relative paths are joined
-// with homeDir. The returned map is always a new copy — the caller's params are
-// never mutated. The stored config retains the original relative path so each
-// node resolves independently against its own home directory.
-func resolveVaultDir(params map[string]string, homeDir, vaultName string) map[string]string {
+// with vaultsDir (which defaults to homeDir when --vaults is not set). The
+// returned map is always a new copy — the caller's params are never mutated.
+// The stored config retains the original relative path so each node resolves
+// independently against its own directory.
+func resolveVaultDir(params map[string]string, vaultsDir, vaultName string) map[string]string {
 	dir := params["dir"]
 	if dir == "" {
 		dir = filepath.Join("vaults", vaultName)
 	}
-	if !filepath.IsAbs(dir) && homeDir != "" {
-		dir = filepath.Join(homeDir, dir)
+	if !filepath.IsAbs(dir) && vaultsDir != "" {
+		dir = filepath.Join(vaultsDir, dir)
 	}
 	out := maps.Clone(params)
 	if out == nil {
@@ -57,7 +58,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	if cmLogger != nil {
 		cmLogger = cmLogger.With("vault", vaultCfg.ID)
 	}
-	cmParams := resolveVaultDir(vaultCfg.Params, factories.HomeDir, vaultCfg.Name)
+	cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
 	cm, err := cmFactory(cmParams, cmLogger)
 	if err != nil {
 		return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
