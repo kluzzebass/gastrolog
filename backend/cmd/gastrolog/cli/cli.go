@@ -14,17 +14,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewConfigCommand returns the "config" command with all subcommands wired in.
+// AddClientFlags registers the shared connection and output flags as persistent
+// flags on cmd. These are available to all subcommands in the tree.
+// Can also be registered on rootCmd — server's local --addr flag shadows it.
+func AddClientFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().String("addr", "http://localhost:4564", "server address")
+	cmd.PersistentFlags().String("token", "", "authentication token (or GASTROLOG_TOKEN env)")
+	cmd.PersistentFlags().StringP("output", "o", "table", "output format: table or json")
+}
+
+// NewConfigCommand returns the "config" command for entity and settings management.
 func NewConfigCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "config",
 		Short: "Manage gastrolog server configuration",
-		Long:  "Connect to a running gastrolog server and manage vaults, ingesters, filters, policies, certificates, users, and server settings.",
+		Long:  "Connect to a running gastrolog server and manage vaults, ingesters, filters, routes, policies, certificates, and server settings.",
 	}
-
-	cmd.PersistentFlags().String("addr", "http://localhost:4564", "server address")
-	cmd.PersistentFlags().String("token", "", "authentication token (or GASTROLOG_TOKEN env)")
-	cmd.PersistentFlags().StringP("output", "o", "table", "output format: table or json")
 
 	cmd.AddCommand(
 		newFilterCmd(),
@@ -34,10 +39,8 @@ func NewConfigCommand() *cobra.Command {
 		newIngesterCmd(),
 		newRouteCmd(),
 		newFileCmd(),
-		newJobCmd(),
 		newNodeCmd(),
 		newCertCmd(),
-		newUserCmd(),
 		newAuthCmd(),
 		newQueryCmd(),
 		newSchedulerCmd(),
@@ -45,10 +48,45 @@ func NewConfigCommand() *cobra.Command {
 		newMaxMindCmd(),
 		newExportCmd(),
 		newImportCmd(),
-		newClusterCmd(),
 	)
 
 	return cmd
+}
+
+// NewClusterCommand returns the "cluster" command for cluster lifecycle management.
+func NewClusterCommand() *cobra.Command {
+	return newClusterCmd()
+}
+
+// NewJobCommand returns the "job" command for async job monitoring.
+func NewJobCommand() *cobra.Command {
+	return newJobCmd()
+}
+
+// NewUserCommand returns the "user" command for user CRUD (without login/register).
+func NewUserCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "user",
+		Short: "Manage users",
+	}
+	cmd.AddCommand(
+		newUserListCmd(),
+		newUserGetCmd(),
+		newUserCreateCmd(),
+		newUserDeleteCmd(),
+		newUserResetPasswordCmd(),
+	)
+	return cmd
+}
+
+// NewLoginCommand returns the top-level "login" command.
+func NewLoginCommand() *cobra.Command {
+	return newUserLoginCmd()
+}
+
+// NewRegisterCommand returns the top-level "register" command.
+func NewRegisterCommand() *cobra.Command {
+	return newUserRegisterCmd()
 }
 
 // clientFromCmd builds a Connect RPC client from the persistent flags on cmd.

@@ -74,6 +74,13 @@ gastrolog server
 
 ```
 gastrolog server [flags]    Start the service
+gastrolog config <entity>   Manage vaults, ingesters, routes, filters, policies, settings
+gastrolog cluster <action>  Cluster lifecycle (status, health, join, shutdown, promote/demote)
+gastrolog user <action>     Manage users (list, create, delete, reset-password)
+gastrolog login             Get a JWT token (for scripting remote access)
+gastrolog register          Bootstrap the first admin user
+gastrolog job <action>      Monitor async jobs
+gastrolog prime             Print AI agent primer
 gastrolog version           Print version
 ```
 
@@ -82,6 +89,8 @@ gastrolog version           Print version
 | Flag | Description | Default |
 |------|-------------|---------|
 | `--home` | Home directory (config database, user credentials) | `~/.config/gastrolog` (Linux), `~/Library/Application Support/gastrolog` (macOS) |
+| `--addr` | Server address for CLI commands | `http://localhost:4564` |
+| `--token` | Authentication token (or `GASTROLOG_TOKEN` env) | *(none)* |
 | `--config-type` | Config store: `raft`, `memory` | `raft` |
 | `--pprof` | pprof HTTP address (e.g. `localhost:6060`) | disabled |
 
@@ -89,13 +98,23 @@ gastrolog version           Print version
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `--addr` | Listen address (host:port) | `:4564` |
+| `--listen` | Listen address (host:port) | `:4564` |
 | `--bootstrap` | Bootstrap with default config | `false` |
 | `--no-auth` | Disable authentication (all requests treated as admin) | `false` |
 | `--cluster-addr` | Cluster gRPC listen address | `:4566` |
 | `--join-addr` | Leader's cluster address to join an existing cluster | *(none)* |
 | `--join-token` | Join token from the leader node | *(none)* |
 | `--voteless` | Join as a non-voter (read replica) | `false` |
+
+## AI Agent Integration
+
+If you're using an AI coding agent (Claude Code, Cursor, Copilot, etc.) to build an application that sends logs to GastroLog, run:
+
+```sh
+gastrolog prime
+```
+
+This prints a structured guide covering ingester types, log format best practices, query language syntax, and step-by-step setup — designed to be piped directly into your agent's context. No need to read the docs; the agent gets everything it needs from `prime`.
 
 ## Query Language
 
@@ -141,11 +160,11 @@ Start additional nodes with `--join-addr` and `--join-token`:
 
 ```sh
 # Node 2 (voter)
-gastrolog server --addr :4574 --cluster-addr :4575 \
+gastrolog server --listen :4574 --cluster-addr :4575 \
   --join-addr localhost:4566 --join-token <TOKEN>
 
 # Node 3 (non-voter / read replica)
-gastrolog server --addr :4584 --cluster-addr :4585 \
+gastrolog server --listen :4584 --cluster-addr :4585 \
   --join-addr localhost:4566 --join-token <TOKEN> --voteless
 ```
 
@@ -161,13 +180,13 @@ A 3-node cluster tolerates 1 node failure while maintaining quorum (2-node clust
 services:
   node1:
     image: ghcr.io/kluzzebass/gastrolog:latest
-    command: server --addr :4564 --cluster-addr :4566
+    command: server --listen :4564 --cluster-addr :4566
     ports: ["4564:4564", "4566:4566"]
     volumes: [node1:/config]
 
   node2:
     image: ghcr.io/kluzzebass/gastrolog:latest
-    command: server --addr :4564 --cluster-addr :4566
+    command: server --listen :4564 --cluster-addr :4566
       --join-addr node1:4566 --join-token ${JOIN_TOKEN}
     ports: ["4574:4564"]
     volumes: [node2:/config]
@@ -175,7 +194,7 @@ services:
 
   node3:
     image: ghcr.io/kluzzebass/gastrolog:latest
-    command: server --addr :4564 --cluster-addr :4566
+    command: server --listen :4564 --cluster-addr :4566
       --join-addr node1:4566 --join-token ${JOIN_TOKEN}
     ports: ["4584:4564"]
     volumes: [node3:/config]

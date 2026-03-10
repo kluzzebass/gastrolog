@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCard } from "../../../hooks/useExpandedCards";
@@ -52,12 +52,12 @@ function CsvFileFields({
 }>) {
   const c = useThemeClass(dark);
   const preview = usePreviewCSVLookup();
-  const [lastFileId, setLastFileId] = useState("");
+  const lastFileIdRef = useRef("");
 
   // Auto-fetch preview when fileId changes.
   useEffect(() => {
-    if (fileId && fileId !== lastFileId) {
-      setLastFileId(fileId);
+    if (fileId && fileId !== lastFileIdRef.current) {
+      lastFileIdRef.current = fileId;
       preview.mutate({ fileId });
     }
   }, [fileId]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -247,7 +247,7 @@ export function CsvAddForm({
   namePlaceholder: string;
 }) {
   const putConfig = usePutSettings();
-  const [draft, setDraft] = useState<CSVLookupDraft>(emptyCsvDraft());
+  const [draft, setDraft] = useState<CSVLookupDraft>(() => emptyCsvDraft());
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || namePlaceholder };

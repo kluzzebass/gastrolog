@@ -24,7 +24,7 @@ export function MmdbAddForm({
   existingLookups: MMDBLookupDraft[];
 }) {
   const putConfig = usePutSettings();
-  const [draft, setDraft] = useState<MMDBLookupDraft>(emptyMmdbDraft());
+  const [draft, setDraft] = useState<MMDBLookupDraft>(() => emptyMmdbDraft());
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || mmdbDefaultName[draft.dbType] || draft.dbType };

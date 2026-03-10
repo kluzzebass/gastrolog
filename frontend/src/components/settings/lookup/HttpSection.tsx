@@ -39,7 +39,7 @@ export function HttpAddForm({
   namePlaceholder: string;
 }) {
   const putConfig = usePutSettings();
-  const [draft, setDraft] = useState<HTTPLookupDraft>(emptyHttpDraft());
+  const [draft, setDraft] = useState<HTTPLookupDraft>(() => emptyHttpDraft());
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || namePlaceholder };

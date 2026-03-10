@@ -70,6 +70,7 @@ func main() {
 	rootCmd.PersistentFlags().String("home", "", "home directory (default: platform config dir)")
 	rootCmd.PersistentFlags().String("config-type", "raft", "config store type: raft or memory")
 	rootCmd.PersistentFlags().String("pprof", "", "pprof HTTP server address (e.g. localhost:6060)")
+	cli.AddClientFlags(rootCmd)
 
 	serverCmd := &cobra.Command{
 		Use:   "server",
@@ -78,7 +79,7 @@ func main() {
 			cfg := app.RunConfig{
 				HomeFlag:    mustString(cmd, "home"),
 				ConfigType:  mustString(cmd, "config-type"),
-				ServerAddr:  mustString(cmd, "addr"),
+				ServerAddr:  mustString(cmd, "listen"),
 				Bootstrap:   mustBool(cmd, "bootstrap"),
 				NoAuth:      mustBool(cmd, "no-auth"),
 				ClusterAddr: mustString(cmd, "cluster-addr"),
@@ -99,7 +100,7 @@ func main() {
 		},
 	}
 
-	serverCmd.Flags().String("addr", ":4564", "listen address (host:port)")
+	serverCmd.Flags().String("listen", ":4564", "listen address (host:port)")
 	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
 	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
@@ -116,7 +117,17 @@ func main() {
 		},
 	}
 
-	rootCmd.AddCommand(serverCmd, versionCmd, cli.NewConfigCommand(), cli.NewPrimeCommand())
+	rootCmd.AddCommand(
+		serverCmd,
+		versionCmd,
+		cli.NewConfigCommand(),
+		cli.NewPrimeCommand(),
+		cli.NewClusterCommand(),
+		cli.NewJobCommand(),
+		cli.NewUserCommand(),
+		cli.NewLoginCommand(),
+		cli.NewRegisterCommand(),
+	)
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		if ctx.Err() != nil {

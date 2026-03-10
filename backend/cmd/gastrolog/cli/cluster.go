@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ func newClusterCmd() *cobra.Command {
 	cmd.AddCommand(
 		newClusterStatusCmd(),
 		newClusterHealthCmd(),
+		newClusterJoinTokenCmd(),
 		newClusterShutdownCmd(),
 		newClusterRemoveNodeCmd(),
 		newClusterPromoteCmd(),
@@ -114,6 +116,26 @@ func newClusterHealthCmd() *cobra.Command {
 				{"Uptime", fmt.Sprintf("%ds", resp.Msg.UptimeSeconds)},
 				{"Ingest Queue", fmt.Sprintf("%d/%d", resp.Msg.IngestQueueDepth, resp.Msg.IngestQueueCapacity)},
 			})
+			return nil
+		},
+	}
+}
+
+func newClusterJoinTokenCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "join-token",
+		Short: "Print the cluster join token",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			resp, err := client.Lifecycle.GetClusterStatus(context.Background(), connect.NewRequest(&v1.GetClusterStatusRequest{}))
+			if err != nil {
+				return err
+			}
+			token := resp.Msg.JoinToken
+			if token == "" {
+				return errors.New("no join token available (cluster TLS may not be initialized)")
+			}
+			fmt.Println(token)
 			return nil
 		},
 	}

@@ -2,6 +2,91 @@
 
 All notable changes to GastroLog are documented here.
 
+## v0.7.0 — 2026-03-10
+
+### Breaking Changes
+- **Full data reset required** — configuration is now stored in a Raft FSM instead of SQLite. There is no migration path from v0.6.0; all configuration must be recreated. Vault data files on disk are unaffected and can be reattached to new vault configs.
+- **API changes** — stores renamed to vaults, `store=` query directive renamed to `vault_id=`, and settings proto messages restructured from flat fields to nested sub-messages. External API clients will need updating.
+
+### Features
+
+#### Clustering
+- **Multi-node Raft consensus** — every node auto-bootstraps as a single-node cluster; additional nodes join at startup (`--join-addr`) or at runtime via the UI with no restart required
+- **Auto-generated mTLS** — cluster transport is encrypted with automatically bootstrapped certificates and TOFU enrollment for joining nodes
+- **Cross-node search** — queries automatically fan out to all nodes and merge results, with deduplication for overlapping records
+- **Cross-node record forwarding** — records ingested on one node are forwarded to the node that owns the target vault
+- **Cross-node follow mode** — live tail streams from remote vaults via ForwardFollow RPC
+- **Cross-node pipeline queries** — `stats`, `timechart`, and other aggregation operators fan out to remote nodes
+- **Cross-node volume histogram** — the severity histogram aggregates across all cluster nodes
+- **Non-voter read replicas** — join with `--voteless` to participate in search without voting in leader elections
+- **Runtime cluster management** — join, leave, promote, and demote nodes without restarts
+- **No Quorum indicator** — header bar shows a warning when the cluster has no leader; searches continue, config writes are blocked
+- **Push-based config updates** — `WatchConfig` server stream replaces polling; config changes propagate near-instantly across all nodes
+- **Peer broadcasting** — nodes share runtime stats (CPU, memory, ingestion rates, queue depth, route stats, active jobs) periodically
+- **Cross-node vault migration** — reassigning a vault to another node automatically drains its chunks to the target node via client-streaming RPC, with path resolution on the destination
+
+#### Ingesters
+- **MQTT ingester** — subscribe to MQTT topics (v3.1.1 and v5) with configurable QoS, topic filters, and TLS
+- **Self ingester** — captures GastroLog's own internal log output into the pipeline, with configurable minimum level
+- **Test connection button** — all ingester forms now have a button to verify connectivity before saving
+
+#### Lookup Tables
+- **CSV file lookups** — upload CSV files with column picker for key and value mapping
+- **JSON file lookups** — upload JSON files with path-based key resolution
+- **HTTP API lookups** — query external HTTP endpoints with parameterized multi-value support
+- **User-agent lookup** — parse user-agent strings into browser, OS, and device fields
+- **Managed file system** — lookup files (MMDB, CSV, JSON) are uploaded, versioned, and automatically distributed across cluster nodes
+- **Drag-and-drop MMDB upload** — GeoIP and ASN database files can be uploaded directly in settings
+
+#### Visualizations
+- **Line chart** — explicit `| linechart` operator for time series data
+- **Donut chart** — `| donut` operator with auto-detection for 2-column, 2–12 row results
+- **Heatmap** — `| heatmap` operator with auto-detection for 3-column results with numeric values
+- **Scatter plot** — `| scatter x y` operator for correlating two numeric dimensions
+
+#### Inspector
+- **Reworked layout** — togglable node/entity organization for cluster-wide or per-entity views
+- **Gantt-style chunk timeline** — swimlane visualization of vault chunk lifecycles
+- **Route statistics** — per-route record counts and throughput, aggregated across cluster nodes
+- **Cluster overview panel** — Raft state, leader info, term, commit index, and log stats
+- **Per-node details** — API address, pprof address, and forwarding channel stats per node
+
+#### Query & Search
+- **Backend-driven field discovery** — `GetFields` RPC replaces client-side field extraction, works across cluster nodes
+- **Explain plan enhancements** — pipeline stages and distributed fan-out details shown in explain output
+- **Virtualized log list** — large result sets render smoothly with windowed virtualization
+- **Reworked click interactions** — clicking log record fields populates the search bar with properly quoted expressions
+
+#### Settings & UI
+- **Routes** — new entity type for directing ingested records to vaults based on filter expressions, with multiple destinations per route (fan-out, round-robin, or failover distribution) and per-route traffic statistics
+- **Nodes settings tab** — rename nodes, view cluster topology, manage suffrage
+- **Node affinity** — vaults and ingesters show which node they belong to, with a node selector in create/edit forms
+- **Optional vault data deletion** — deleting a file vault can optionally remove the data directory
+- **Pet name generator** — new entities get auto-generated friendly names
+- **Dropdown Add buttons** — entity type selection uses a dropdown menu instead of a two-step dialog
+
+#### CLI
+- **Config CLI** — `gastrolog config` subcommand for entity and settings management via unix socket or TCP with JWT auth
+- **Cluster CLI** — `gastrolog cluster` for cluster lifecycle: status, health, join, shutdown, promote/demote, join-token
+- **User CLI** — `gastrolog user` for user CRUD, `gastrolog login` and `gastrolog register` as top-level commands for scripting (`export GASTROLOG_TOKEN=$(gastrolog login ...)`)
+- **Job CLI** — `gastrolog job` for async job monitoring
+- **Node CLI** — `gastrolog config node list|get|rename` for cluster node management
+- **AI agent primer** — `gastrolog prime` prints a concise system overview for LLM context injection, covering entities, CLI usage, and common tasks
+
+### Performance
+- **Histogram rework** — per-bucket sampling handles large record counts without capping or stalling
+- **Token matching with early exit** — `IterTokens` avoids full token list materialization
+- **Lazy-loaded Mermaid** — diagram library loaded on demand, reducing initial bundle size
+- **Parallelized setup wizard** — independent API calls run concurrently
+
+### Fixes
+- Docker container log ingester now correctly reassembles partial log frames split at the 16KB boundary
+- Detail pane no longer lags when viewing large JSON log messages
+- Clicking a JSON field in the log viewer now uses the full dotted path (e.g. `request.headers.host` instead of just `host`)
+- KV values containing query metacharacters are now properly quoted when inserted into the search bar
+- `findGroup` and `NewOrchestrator` return errors instead of panicking on invalid input
+- SIGINT and SIGTERM are treated as clean shutdown (exit code 0)
+
 ## v0.6.0 — 2026-02-26
 
 ### Features

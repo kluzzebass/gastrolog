@@ -163,7 +163,7 @@ message RouteConfig {
   string name = 2;
   string filter_id = 3;                       // references FilterConfig.id
   repeated RouteDestination destinations = 4;
-  string distribution = 5;                     // "fanout" (default) or "round-robin"
+  string distribution = 5;                     // "fanout" (default), "round-robin", or "failover"
   bool enabled = 6;
 }
 

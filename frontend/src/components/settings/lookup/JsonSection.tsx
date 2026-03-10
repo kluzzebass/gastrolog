@@ -39,7 +39,7 @@ export function JsonAddForm({
   namePlaceholder: string;
 }) {
   const putConfig = usePutSettings();
-  const [draft, setDraft] = useState<JSONFileLookupDraft>(emptyJsonDraft());
+  const [draft, setDraft] = useState<JSONFileLookupDraft>(() => emptyJsonDraft());
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || namePlaceholder };
