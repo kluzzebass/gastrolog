@@ -336,7 +336,7 @@ func (s *Store) PutVault(ctx context.Context, cfg config.VaultConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID, _ bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

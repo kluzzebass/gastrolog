@@ -10,6 +10,7 @@ interface SettingsCardProps {
   onToggle?: () => void;
   onDelete?: () => void;
   deleteLabel?: string;
+  deleteConfirmExtra?: React.ReactNode;
   children: React.ReactNode;
   status?: React.ReactNode;
   headerRight?: React.ReactNode;
@@ -24,6 +25,7 @@ export function SettingsCard({
   onToggle,
   onDelete,
   deleteLabel,
+  deleteConfirmExtra,
   children,
   status,
   headerRight,
@@ -62,6 +64,7 @@ export function SettingsCard({
                 <span className="text-[0.8em] text-severity-error">
                   Confirm?
                 </span>
+                {deleteConfirmExtra}
                 <button
                   onClick={() => {
                     onDelete();

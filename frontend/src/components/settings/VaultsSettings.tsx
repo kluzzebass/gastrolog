@@ -40,6 +40,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
 
   const { isExpanded, toggle: toggleCard, setExpanded } = useExpandedCard();
   const [adding, setAdding] = useState(false);
+  const [deleteDataFlags, setDeleteDataFlags] = useState<Record<string, boolean>>({});
   const [migrateTarget, setMigrateTarget] = useState<
     Record<string, { name: string; type: string; dir: string }>
   >({});
@@ -137,7 +138,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       enabled: edit.enabled,
       nodeId: edit.nodeId,
     }),
-    onDeleteTransform: (id) => ({ id, force: true }),
+    onDeleteTransform: (id) => ({ id, force: true, deleteData: deleteDataFlags[id] ?? false }),
     clearEdit,
   });
 
@@ -271,6 +272,16 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             onToggle={() => toggleCard(vault.id)}
             onDelete={() => handleDelete(vault.id)}
             deleteLabel="Delete"
+            deleteConfirmExtra={vault.type === "file" ? (
+              <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
+                <input
+                  type="checkbox"
+                  checked={deleteDataFlags[vault.id] ?? false}
+                  onChange={(e) => setDeleteDataFlags((prev) => ({ ...prev, [vault.id]: e.target.checked }))}
+                />
+                Delete data files
+              </label>
+            ) : undefined}
             footer={
               <>
                 {activeJob && (

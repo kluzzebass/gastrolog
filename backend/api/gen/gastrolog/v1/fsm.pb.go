@@ -1085,8 +1085,10 @@ func (x *PutVaultCommand) GetNodeId() string {
 }
 
 type DeleteVaultCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	// When true, the vault's data directory is deleted from disk on the owning node.
+	DeleteData    bool `protobuf:"varint,2,opt,name=delete_data,json=deleteData,proto3" json:"delete_data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1126,6 +1128,13 @@ func (x *DeleteVaultCommand) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *DeleteVaultCommand) GetDeleteData() bool {
+	if x != nil {
+		return x.DeleteData
+	}
+	return false
 }
 
 type PutIngesterCommand struct {
@@ -2707,9 +2716,11 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\anode_id\x18\t \x01(\tR\x06nodeId\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x04\x10\x05\"$\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x04\x10\x05\"E\n" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x80\x02\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\vdelete_data\x18\x02 \x01(\bR\n" +
+	"deleteData\"\x80\x02\n" +
 	"\x12PutIngesterCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +

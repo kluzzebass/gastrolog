@@ -696,6 +696,13 @@ export class DeleteVaultCommand extends Message<DeleteVaultCommand> {
    */
   id = "";
 
+  /**
+   * When true, the vault's data directory is deleted from disk on the owning node.
+   *
+   * @generated from field: bool delete_data = 2;
+   */
+  deleteData = false;
+
   constructor(data?: PartialMessage<DeleteVaultCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -705,6 +712,7 @@ export class DeleteVaultCommand extends Message<DeleteVaultCommand> {
   static readonly typeName = "gastrolog.v1.DeleteVaultCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "delete_data", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteVaultCommand {

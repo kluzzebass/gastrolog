@@ -155,7 +155,7 @@ func TestApplyDeleteVault(t *testing.T) {
 	fsm := New()
 	id := newID()
 	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: id, Name: "v", Type: "file"}))
-	applyCmd(t, fsm, command.NewDeleteVault(id))
+	applyCmd(t, fsm, command.NewDeleteVault(id, false))
 
 	got, err := fsm.Store().GetVault(context.Background(), id)
 	if err != nil {

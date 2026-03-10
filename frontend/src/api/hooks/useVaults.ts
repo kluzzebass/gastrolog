@@ -189,8 +189,8 @@ export function usePutVault() {
 export function useDeleteVault() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { id: string; force?: boolean }) => {
-      await configClient.deleteVault({ id: args.id, force: args.force ?? false });
+    mutationFn: async (args: { id: string; force?: boolean; deleteData?: boolean }) => {
+      await configClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["config"] });

@@ -91,6 +91,7 @@ describe("useDeleteVault", () => {
     expect(m(mocks.configClient, "deleteVault")).toHaveBeenCalledWith({
       id: "v1",
       force: true,
+      deleteData: false,
     });
   });
 });

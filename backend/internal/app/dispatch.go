@@ -180,7 +180,7 @@ func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) {
 	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		d.logger.Error("dispatch: force remove vault", "id", n.ID, "name", n.Name, "error", err)
 	}
-	if n.Dir != "" && (n.NodeID == "" || n.NodeID == d.localNodeID) {
+	if n.DeleteData && n.Dir != "" && (n.NodeID == "" || n.NodeID == d.localNodeID) {
 		if err := os.RemoveAll(n.Dir); err != nil {
 			d.logger.Error("dispatch: remove vault directory", "id", n.ID, "name", n.Name, "dir", n.Dir, "error", err)
 		}

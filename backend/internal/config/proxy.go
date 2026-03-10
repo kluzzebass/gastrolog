@@ -224,13 +224,13 @@ func (p *StoreProxy) PutVault(ctx context.Context, cfg VaultConfig) error {
 	return p.inner.PutVault(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteVault(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteVault(ctx context.Context, id uuid.UUID, deleteData bool) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return err
 	}
-	return p.inner.DeleteVault(ctx, id)
+	return p.inner.DeleteVault(ctx, id, deleteData)
 }
 
 func (p *StoreProxy) GetIngester(ctx context.Context, id uuid.UUID) (*IngesterConfig, error) {

@@ -23,7 +23,7 @@ import (
 func (s *VaultServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		if s.cfgStore != nil {
-			if err := s.cfgStore.DeleteVault(ctx, srcID); err != nil {
+			if err := s.cfgStore.DeleteVault(ctx, srcID, true); err != nil {
 				s.logger.Warn("cleanup: delete vault config", "vault", srcID, "error", err)
 			}
 		}
@@ -452,7 +452,7 @@ func (s *VaultServer) createVault(ctx context.Context, cfg config.VaultConfig) *
 	if err := s.orch.AddVault(ctx, cfg, s.factories); err != nil {
 		// Rollback config entry on orchestrator failure.
 		if s.cfgStore != nil {
-			if delErr := s.cfgStore.DeleteVault(ctx, cfg.ID); delErr != nil {
+			if delErr := s.cfgStore.DeleteVault(ctx, cfg.ID, false); delErr != nil {
 				s.logger.Warn("rollback: delete vault config", "vault", cfg.ID, "error", delErr)
 			}
 		}

@@ -236,8 +236,8 @@ func (s *Store) PutVault(ctx context.Context, cfg config.VaultConfig) error {
 	return s.apply(command.NewPutVault(cfg))
 }
 
-func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID) error {
-	return s.apply(command.NewDeleteVault(id))
+func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID, deleteData bool) error {
+	return s.apply(command.NewDeleteVault(id, deleteData))
 }
 
 func (s *Store) PutIngester(ctx context.Context, cfg config.IngesterConfig) error {

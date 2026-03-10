@@ -44,12 +44,13 @@ const (
 
 // Notification describes a config mutation that the FSM just applied.
 type Notification struct {
-	Kind   NotifyKind
-	ID     uuid.UUID // entity ID (zero for settings)
-	Name   string    // entity name (populated on deletes where config is read pre-delete)
-	Key    string    // settings key (empty for entity mutations)
-	NodeID string    // owning node (populated on vault/ingester deletes)
-	Dir    string    // file vault directory (populated on file vault deletes)
+	Kind       NotifyKind
+	ID         uuid.UUID // entity ID (zero for settings)
+	Name       string    // entity name (populated on deletes where config is read pre-delete)
+	Key        string    // settings key (empty for entity mutations)
+	NodeID     string    // owning node (populated on vault/ingester deletes)
+	Dir        string    // file vault directory (populated on file vault deletes)
+	DeleteData bool      // when true, vault data directory should be removed from disk
 }
 
 // Option configures the FSM at construction time.
@@ -323,7 +324,7 @@ func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultC
 	}
 	// Read vault config before deleting — the dispatcher needs NodeID and
 	// Dir to clean up the directory on the correct node.
-	note := &Notification{Kind: NotifyVaultDeleted, ID: id}
+	note := &Notification{Kind: NotifyVaultDeleted, ID: id, DeleteData: pb.GetDeleteData()}
 	if existing, _ := f.store.GetVault(ctx, id); existing != nil {
 		note.Name = existing.Name
 		note.NodeID = existing.NodeID
@@ -331,7 +332,7 @@ func (f *FSM) applyDeleteVault(ctx context.Context, pb *gastrologv1.DeleteVaultC
 			note.Dir = existing.Params["dir"]
 		}
 	}
-	if err := f.store.DeleteVault(ctx, id); err != nil {
+	if err := f.store.DeleteVault(ctx, id, false); err != nil {
 		return nil, err
 	}
 	return note, nil

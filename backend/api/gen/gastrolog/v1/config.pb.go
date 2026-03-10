@@ -1595,9 +1595,12 @@ func (*PutVaultResponse) Descriptor() ([]byte, []int) {
 }
 
 type DeleteVaultRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Force         bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Force bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
+	// When true, the vault's data directory is also deleted from disk.
+	// Only meaningful for file vaults. Defaults to false (preserve data).
+	DeleteData    bool `protobuf:"varint,3,opt,name=delete_data,json=deleteData,proto3" json:"delete_data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1642,6 +1645,13 @@ func (x *DeleteVaultRequest) GetId() string {
 func (x *DeleteVaultRequest) GetForce() bool {
 	if x != nil {
 		return x.Force
+	}
+	return false
+}
+
+func (x *DeleteVaultRequest) GetDeleteData() bool {
+	if x != nil {
+		return x.DeleteData
 	}
 	return false
 }
@@ -6345,10 +6355,12 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x1dDeleteRetentionPolicyResponse\"D\n" +
 	"\x0fPutVaultRequest\x121\n" +
 	"\x06config\x18\x01 \x01(\v2\x19.gastrolog.v1.VaultConfigR\x06config\"\x12\n" +
-	"\x10PutVaultResponse\":\n" +
+	"\x10PutVaultResponse\"[\n" +
 	"\x12DeleteVaultRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
-	"\x05force\x18\x02 \x01(\bR\x05force\"\x15\n" +
+	"\x05force\x18\x02 \x01(\bR\x05force\x12\x1f\n" +
+	"\vdelete_data\x18\x03 \x01(\bR\n" +
+	"deleteData\"\x15\n" +
 	"\x13DeleteVaultResponse\"D\n" +
 	"\x0fPutRouteRequest\x121\n" +
 	"\x06config\x18\x01 \x01(\v2\x19.gastrolog.v1.RouteConfigR\x06config\"\x12\n" +

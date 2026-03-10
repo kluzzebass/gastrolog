@@ -110,6 +110,8 @@ message PutVaultCommand {
 
 message DeleteVaultCommand {
   string id = 1;
+  // When true, the vault's data directory is deleted from disk on the owning node.
+  bool delete_data = 2;
 }
 
 // --- Ingesters ---

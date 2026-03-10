@@ -194,7 +194,7 @@ func (s *ConfigServer) DeleteVault(
 		}
 	}
 
-	if err := s.cfgStore.DeleteVault(ctx, id); err != nil {
+	if err := s.cfgStore.DeleteVault(ctx, id, req.Msg.GetDeleteData()); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 

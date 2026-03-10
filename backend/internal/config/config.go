@@ -68,7 +68,7 @@ type Store interface {
 	GetVault(ctx context.Context, id uuid.UUID) (*VaultConfig, error)
 	ListVaults(ctx context.Context) ([]VaultConfig, error)
 	PutVault(ctx context.Context, cfg VaultConfig) error
-	DeleteVault(ctx context.Context, id uuid.UUID) error
+	DeleteVault(ctx context.Context, id uuid.UUID, deleteData bool) error
 
 	// Ingesters
 	GetIngester(ctx context.Context, id uuid.UUID) (*IngesterConfig, error)

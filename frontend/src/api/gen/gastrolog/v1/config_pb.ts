@@ -1325,6 +1325,14 @@ export class DeleteVaultRequest extends Message<DeleteVaultRequest> {
    */
   force = false;
 
+  /**
+   * When true, the vault's data directory is also deleted from disk.
+   * Only meaningful for file vaults. Defaults to false (preserve data).
+   *
+   * @generated from field: bool delete_data = 3;
+   */
+  deleteData = false;
+
   constructor(data?: PartialMessage<DeleteVaultRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1335,6 +1343,7 @@ export class DeleteVaultRequest extends Message<DeleteVaultRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "force", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "delete_data", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteVaultRequest {

@@ -271,6 +271,9 @@ message PutVaultResponse {}
 message DeleteVaultRequest {
   string id = 1;
   bool force = 2;
+  // When true, the vault's data directory is also deleted from disk.
+  // Only meaningful for file vaults. Defaults to false (preserve data).
+  bool delete_data = 3;
 }
 
 message DeleteVaultResponse {}

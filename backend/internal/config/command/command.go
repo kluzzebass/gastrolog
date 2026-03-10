@@ -235,10 +235,10 @@ func NewPutVault(cfg config.VaultConfig) *gastrologv1.ConfigCommand {
 }
 
 // NewDeleteVault creates a ConfigCommand for DeleteVault.
-func NewDeleteVault(id uuid.UUID) *gastrologv1.ConfigCommand {
+func NewDeleteVault(id uuid.UUID, deleteData bool) *gastrologv1.ConfigCommand {
 	return &gastrologv1.ConfigCommand{
 		Command: &gastrologv1.ConfigCommand_DeleteVault{
-			DeleteVault: &gastrologv1.DeleteVaultCommand{Id: id.String()},
+			DeleteVault: &gastrologv1.DeleteVaultCommand{Id: id.String(), DeleteData: deleteData},
 		},
 	}
 }
