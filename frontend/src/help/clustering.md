@@ -61,6 +61,22 @@ Raft requires a **majority of voters** (quorum) to be online for writes and lead
 
 For production clusters, **3 or 5 voters** is recommended. Even numbers (2, 4) don't improve fault tolerance and increase the risk of split-brain tie votes.
 
+### Two-Node Warning
+
+A 2-node cluster with 2 voters provides **no fault tolerance** — both nodes must be online for quorum (majority of 2 is 2). If either node goes down, the surviving node cannot elect a leader and the cluster loses write availability. This is actually **worse** than a single node, which is always its own quorum.
+
+If you need two nodes for data distribution, consider making one a **nonvoter** (read replica). This keeps the quorum at 1, so the voter can still accept writes when the nonvoter goes down — at the cost of having no automatic failover.
+
+### Quorum Loss (Read-Only Mode)
+
+When a cluster loses quorum (not enough voters online to form a majority), no leader can be elected and all configuration changes are blocked. The cluster enters a **read-only** state:
+
+- **Searches, follows, and explains continue working** — queries are served from each node's local vault data without requiring Raft consensus.
+- **Configuration reads continue working** — settings, vault configs, and ingester configs are served from each node's local FSM replica.
+- **Configuration writes fail** — creating, updating, or deleting vaults, ingesters, filters, routes, policies, and users all require a leader and will time out.
+
+The header bar shows a **No Quorum** indicator when the cluster has no leader. To recover, bring enough voter nodes back online to restore quorum. See the [Nodes](settings:nodes) [![icon:help]()](help:clustering-nodes) settings for the current cluster topology.
+
 ## Data vs. Configuration
 
 Clustering replicates **configuration only** — not log data. Each node has its own independent vaults and chunk storage. When you create a vault in a cluster, it is assigned to a specific node. Queries that span multiple nodes are automatically forwarded to the relevant peers and results are merged.

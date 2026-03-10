@@ -49,6 +49,7 @@ export function HeaderBar({
   }
 
   const loading = isLoading || nodes.length === 0;
+  const noQuorum = !isLoading && cluster?.clusterEnabled && nodes.length > 1 && !cluster.leaderId;
 
   return (
     <header
@@ -61,6 +62,14 @@ export function HeaderBar({
         >
           GastroLog
         </h1>
+        {noQuorum && (
+          <span
+            className="px-2.5 py-1 text-[0.7em] font-mono font-semibold rounded bg-severity-warn/15 text-severity-warn"
+            title="Cluster has no leader — configuration changes are blocked. Searches continue working."
+          >
+            No Quorum
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-3 lg:gap-6">
