@@ -11,18 +11,57 @@ import (
 	v1 "gastrolog/api/gen/gastrolog/v1"
 )
 
-func newUserCmd() *cobra.Command {
+func newUserRegisterCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "user",
-		Short: "Manage users",
+		Use:   "register",
+		Short: "Register the first admin user (only works when no users exist)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			username, _ := cmd.Flags().GetString("username")
+			password, _ := cmd.Flags().GetString("password")
+
+			client := clientFromCmd(cmd)
+			resp, err := client.Auth.Register(context.Background(), connect.NewRequest(&v1.RegisterRequest{
+				Username: username,
+				Password: password,
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Registered admin user %q (token: %s)\n", username, resp.Msg.Token)
+			return nil
+		},
 	}
-	cmd.AddCommand(
-		newUserListCmd(),
-		newUserGetCmd(),
-		newUserCreateCmd(),
-		newUserDeleteCmd(),
-		newUserResetPasswordCmd(),
-	)
+	cmd.Flags().String("username", "", "username (required)")
+	cmd.Flags().String("password", "", "password (required)")
+	_ = cmd.MarkFlagRequired("username")
+	_ = cmd.MarkFlagRequired("password")
+	return cmd
+}
+
+func newUserLoginCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "login",
+		Short: "Log in and print a JWT token",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			username, _ := cmd.Flags().GetString("username")
+			password, _ := cmd.Flags().GetString("password")
+
+			client := clientFromCmd(cmd)
+			resp, err := client.Auth.Login(context.Background(), connect.NewRequest(&v1.LoginRequest{
+				Username: username,
+				Password: password,
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Println(resp.Msg.Token.Token)
+			return nil
+		},
+	}
+	cmd.Flags().String("username", "", "username (required)")
+	cmd.Flags().String("password", "", "password (required)")
+	_ = cmd.MarkFlagRequired("username")
+	_ = cmd.MarkFlagRequired("password")
 	return cmd
 }
 

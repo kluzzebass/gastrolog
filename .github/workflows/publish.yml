@@ -1,0 +1,153 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p docker-build
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "gastrolog-linux-*" \
+            --dir docker-build/
+
+      - name: Prepare Docker context
+        run: |
+          chmod +x docker-build/gastrolog-linux-*
+          cat > docker-build/Dockerfile << 'DOCKERFILE'
+          FROM scratch
+          ARG TARGETARCH
+          COPY gastrolog-linux-${TARGETARCH} /gastrolog
+          EXPOSE 4564
+          ENTRYPOINT ["/gastrolog"]
+          CMD ["server", "--home", "/config"]
+          DOCKERFILE
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: docker-build/
+          file: docker-build/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.event.release.tag_name }}
+            ghcr.io/${{ github.repository }}:latest
+
+  homebrew:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "${{ github.event.release.tag_name }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "checksums.txt"
+
+      - name: Extract version and checksums
+        id: version
+        run: |
+          VERSION="${{ github.event.release.tag_name }}"
+          VERSION_NUM=${VERSION#v}
+          SHA256_DARWIN_X86=$(grep "gastrolog-darwin-amd64" checksums.txt | cut -d' ' -f1)
+          SHA256_DARWIN_ARM=$(grep "gastrolog-darwin-arm64" checksums.txt | cut -d' ' -f1)
+          SHA256_LINUX_X86=$(grep "gastrolog-linux-amd64" checksums.txt | cut -d' ' -f1)
+          SHA256_LINUX_ARM=$(grep "gastrolog-linux-arm64" checksums.txt | cut -d' ' -f1)
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_number=$VERSION_NUM" >> $GITHUB_OUTPUT
+          echo "sha256_darwin_x86=$SHA256_DARWIN_X86" >> $GITHUB_OUTPUT
+          echo "sha256_darwin_arm=$SHA256_DARWIN_ARM" >> $GITHUB_OUTPUT
+          echo "sha256_linux_x86=$SHA256_LINUX_X86" >> $GITHUB_OUTPUT
+          echo "sha256_linux_arm=$SHA256_LINUX_ARM" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: kluzzebass/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_NUM: ${{ steps.version.outputs.version_number }}
+          SHA256_DARWIN_X86: ${{ steps.version.outputs.sha256_darwin_x86 }}
+          SHA256_DARWIN_ARM: ${{ steps.version.outputs.sha256_darwin_arm }}
+          SHA256_LINUX_X86: ${{ steps.version.outputs.sha256_linux_x86 }}
+          SHA256_LINUX_ARM: ${{ steps.version.outputs.sha256_linux_arm }}
+        run: |
+          cd homebrew-tap
+          cat > gastrolog.rb << EOF
+          class Gastrolog < Formula
+            desc "Log aggregation service"
+            homepage "https://github.com/kluzzebass/gastrolog"
+            version "$VERSION_NUM"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-darwin-amd64"
+                sha256 "$SHA256_DARWIN_X86"
+              end
+
+              on_arm do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-darwin-arm64"
+                sha256 "$SHA256_DARWIN_ARM"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-linux-amd64"
+                sha256 "$SHA256_LINUX_X86"
+              end
+
+              on_arm do
+                url "https://github.com/kluzzebass/gastrolog/releases/download/$VERSION/gastrolog-linux-arm64"
+                sha256 "$SHA256_LINUX_ARM"
+              end
+            end
+
+            def install
+              bin.install Dir["gastrolog-*"].first => "gastrolog"
+            end
+
+            test do
+              assert_match version.to_s, shell_output("#{bin}/gastrolog version")
+            end
+          end
+          EOF
+
+      - name: Commit and push Homebrew formula
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gastrolog.rb
+          git commit -m "Update gastrolog to ${{ steps.version.outputs.version }}"
+          git push

@@ -1,130 +1,222 @@
-GASTROLOG LOGGING GUIDE
+GASTROLOG — AI AGENT PRIMER
 
-## What is GastroLog?
+Clustered log aggregation service. Raft consensus for config replication,
+local vault storage, cross-node query fan-out. Single binary, embedded web UI.
 
-GastroLog is a clustered log aggregation service. It runs as one or more
-nodes that replicate configuration via Raft consensus. Applications send
-logs to it via ingesters, and users query them with a pipeline query
-language. You don't need to install anything in your application — just
-configure your app to send logs to a running gastrolog instance.
+Every command supports --help for full flag details.
 
-Even a single node runs as a one-node Raft cluster. Additional nodes join
-via `--join-addr` and a join token. Vaults and ingesters are assigned to specific nodes, and queries
-automatically fan out across all nodes.
+═══════════════════════════════════════════════════
+ENTITIES
+═══════════════════════════════════════════════════
 
-## How to Send Logs
+  Ingester   Receives logs (syslog, HTTP, OTLP, Docker, tail, Kafka, MQTT, RELP, Fluent Forward)
+  Vault      Stores logs in time-ordered chunks (file or memory backend)
+  Route      Connects ingesters → vaults. Without a route, logs are dropped.
+  Filter     Match expression for routes. Routes without a filter accept everything.
+  Rotation   Policy for when to seal chunks (size, age, cron)
+  Retention  Policy for when to expire/migrate chunks (age, size, count)
+  Node       Cluster member. Auto-created on join.
 
-Pick the ingester that matches your deployment:
+  Data flow: Ingester → Route (filter?) → Vault → Chunks → Indexes → Queryable
 
-| Scenario                  | Ingester     | How to send                                      |
-|---------------------------|--------------|--------------------------------------------------|
-| Local app, log to file    | tail         | Write to a file, gastrolog tails it               |
-| Containerized app         | docker       | gastrolog reads container streams directly        |
-| HTTP push (Loki-compat)   | http         | POST JSON to /loki/api/v1/push                   |
-| Syslog (RFC 3164/5424)    | syslog       | Send UDP/TCP syslog to gastrolog's listen address |
-| OpenTelemetry             | otlp         | Use OTLP HTTP or gRPC exporter                   |
-| Fluentd/Fluent Bit        | fluentfwd    | Forward protocol over TCP                         |
-| Kafka topic               | kafka        | Produce to a Kafka topic gastrolog consumes       |
-| MQTT broker               | mqtt         | Publish to an MQTT topic gastrolog subscribes to  |
-| RELP (rsyslog)            | relp         | Reliable Event Logging Protocol over TCP          |
+  All entities are managed via `gastrolog config <entity> <action>`.
+  All entities accept --help: `gastrolog config vault create --help`
 
-For most applications: **just write structured logs to stdout/stderr** and
-let the infrastructure (Docker ingester, file tail, syslog) handle delivery.
+═══════════════════════════════════════════════════
+CLI CONNECTION
+═══════════════════════════════════════════════════
 
-## Log Format Best Practices
+  The CLI connects to a running gastrolog server. All commands that talk
+  to the server accept --addr, --token, and --home flags.
 
-GastroLog auto-extracts structure from your logs. No special SDK needed.
+  1. Unix socket (default, no auth needed):
+     Located at <home>/gastrolog.sock
+     Default home: ~/.config/gastrolog (Linux), ~/Library/Application Support/gastrolog (macOS)
+     Override with: --home /path/to/home
 
-1. **Use JSON or key=value format** — fields become queryable automatically:
-   `{"level":"error","msg":"connection failed","host":"db-1","latency_ms":450}`
-   `level=error msg="connection failed" host=db-1 latency_ms=450`
+  2. TCP (when --addr is set or unix socket unavailable):
+     gastrolog --addr http://host:4564 config vault list
+     gastrolog --addr http://host:4564 cluster status
 
-2. **Include a level/severity field** — gastrolog normalizes it for filtering:
-   Recognized values: error, warn, info, debug, trace (case-insensitive)
+  Authentication (TCP only — unix socket bypasses auth):
+     gastrolog --token <JWT> config vault list
+     # or
+     export GASTROLOG_TOKEN=<JWT>
 
-3. **Include timestamps** — gastrolog extracts source timestamps automatically,
-   but explicit fields ensure precision across time zones
+  To authenticate remotely, log in to get a JWT:
+     gastrolog login --addr http://host:4564 --username admin --password <pw>
+     # → prints a JWT to stdout
 
-4. **Plain text works too** — gastrolog indexes all tokens for full-text search.
-   Structure just makes filtering and aggregation more powerful.
+     export GASTROLOG_TOKEN=$(gastrolog login --username admin --password <pw>)
 
-## Query Language Quick Reference
+  On the same machine, the unix socket bypasses auth entirely. This means
+  you can create users, manage config, and run queries without a token:
+     gastrolog user create --username admin --password <pw> --role admin
 
-Basic search:
-  error                          — full-text token search
-  level=error                    — key=value filter
-  level=error AND host=db-*      — boolean + glob
-  /timeout.*connection/          — regex search
-  level=error | stats count()    — pipeline aggregation
+  First user (no auth required, only works when no users exist):
+     gastrolog register --username admin --password <pw>
+     # → prints a JWT token for immediate use
 
-Time bounds:
-  start=-1h                      — last hour
-  start=2024-01-15T00:00:00Z     — absolute RFC 3339
-  start=yesterday end=today      — keywords
+  After the first user, `user create` requires admin auth (or unix socket).
 
-Pipeline operators:
-  | stats count() by level       — aggregate
-  | where latency_ms > 500       — filter
-  | eval duration=latency_ms/1000 — compute fields
-  | sort -latency_ms             — sort descending
-  | timechart count() by level   — time-series chart
-  | head 10                      — limit results
+═══════════════════════════════════════════════════
+DEPENDENCY ORDER
+═══════════════════════════════════════════════════
 
-## Ingester-Provided Attributes
+  1. Vault must exist before a route can reference it
+  2. Filter must exist before a route can reference it
+  3. Route must exist for logs to flow from ingester to vault
+  4. Ingester can exist without a route, but logs will be dropped
 
-These fields are added automatically by each ingester:
+  Delete constraints:
+  - Vault: blocked if referenced by a route destination
+  - Filter: blocked if referenced by a route
+  - Rotation/retention policy: auto-cleared from vaults on delete
 
-- **syslog**: remote_ip, facility, severity, hostname, app_name, proc_id
-- **http**: stream labels (job, env, host, etc.)
-- **otlp**: resource/scope attributes, trace_id, span_id, severity
-- **docker**: container_id, container_name, image, stream (stdout/stderr)
-- **kafka**: kafka_topic, kafka_partition, kafka_offset
-- **tail**: file (absolute path)
-- **fluentfwd**: tag, plus all record keys
+═══════════════════════════════════════════════════
+SERVER
+═══════════════════════════════════════════════════
 
-## CLI Quick Reference
+  # Start a single node (auto-bootstraps as 1-node Raft cluster)
+  gastrolog server
 
-  gastrolog server               — start the service
-  gastrolog config vault list    — list vaults (log stores)
-  gastrolog config ingester list — list ingesters
-  gastrolog config cluster health — check server health
-  gastrolog config query "error" — run a query from the CLI
+  # Start with test data (memory vault + chatterbox ingester)
+  gastrolog server --bootstrap
 
-## Key Concepts
+  # Start on custom ports
+  gastrolog server --listen :8080 --cluster-addr :8081
 
-- **Ingester**: receives logs from an external source (syslog, HTTP, Docker, etc.)
-- **Vault**: a log store. Incoming records are written to chunks within a vault.
-- **Route**: connects ingesters to vaults. A route has a filter and one or more
-  destination vaults. Without a route, an ingester's logs go nowhere.
-- **Filter**: a match expression that controls which records a route accepts.
-  Routes without a filter accept everything.
-- **Rotation policy**: controls when a vault seals its active chunk and starts
-  a new one (e.g., by size or age).
-- **Retention policy**: controls what happens to sealed chunks after they age
-  out (delete, or migrate to another vault for cold storage).
-- **Chunk**: a sealed, immutable block of log records within a vault.
-- **Pipeline**: a query followed by transformation operators (stats, where, eval, etc.)
+  # Disable auth (dev/testing)
+  gastrolog server --no-auth
 
-## Setting Up a Log Flow
+═══════════════════════════════════════════════════
+CLUSTERING
+═══════════════════════════════════════════════════
 
-The minimal path from log source to queryable data:
+  Every node is a single-node cluster on first start. Join others to form
+  a multi-node cluster. 3 voters recommended (tolerates 1 failure).
 
-  1. Create an ingester (receives logs from your application)
-  2. Create a vault (stores the logs)
-  3. Create a route (connects the ingester to the vault)
+  # Get the join token from node 1 (also printed in its startup log)
+  gastrolog cluster join-token
 
-For production, you'll also want:
+  # Join node 2 to node 1's cluster
+  gastrolog server --join-addr node1:4566 --join-token <TOKEN>
 
-  4. Create a rotation policy (auto-seal chunks by size/age)
-  5. Assign the rotation policy to the vault
-  6. Create retention policies (auto-delete or migrate old chunks)
-  7. Create filters if you need to split logs across vaults by content
+  # Join as read-only replica (no vote, no leader eligibility)
+  gastrolog server --join-addr node1:4566 --join-token <TOKEN> --voteless
 
-Example — minimal setup via CLI:
+  # List nodes
+  gastrolog config node list
 
-  gastrolog config ingester create --name my-syslog --type syslog
+  WARNING: Joining replaces the joining node's local config with the
+  cluster's replicated state. Vault data files on disk survive.
+
+═══════════════════════════════════════════════════
+VAULTS
+═══════════════════════════════════════════════════
+
+  Types: file (persistent, on disk), memory (volatile, for testing)
+
+  gastrolog config vault list
   gastrolog config vault create --name app-logs --type file
-  gastrolog config route create --name default --destination app-logs
+  gastrolog config vault create --name ephemeral --type memory
+  gastrolog config vault create --help    # full flag list
+  gastrolog config vault delete app-logs
+  gastrolog config vault seal app-logs    # seal active chunk
+  gastrolog config vault reindex app-logs # rebuild indexes
 
-Logs flowing into the syslog ingester are now routed to the app-logs vault
-and immediately queryable.
+  Vaults are node-scoped. Created on the node handling the request.
+
+═══════════════════════════════════════════════════
+INGESTERS
+═══════════════════════════════════════════════════
+
+  Types: syslog, http, otlp, tail, docker, fluentfwd, kafka, mqtt, relp,
+         chatterbox (test data), metrics (self-monitoring), self (internal logs)
+
+  gastrolog config ingester list
+  gastrolog config ingester create --name my-syslog --type syslog --param udp_addr=:514
+  gastrolog config ingester create --name my-http --type http --param addr=:3100
+  gastrolog config ingester create --name my-tail --type tail --param 'paths=["/var/log/app.log"]'
+  gastrolog config ingester create --name my-docker --type docker
+  gastrolog config ingester create --name my-otlp --type otlp
+  gastrolog config ingester create --name my-kafka --type kafka --param brokers=localhost:9092 --param topic=logs
+  gastrolog config ingester create --name my-mqtt --type mqtt --param broker=tcp://localhost:1883 --param topics=logs/#
+  gastrolog config ingester create --help    # full flag list
+  gastrolog config ingester test --type syslog --param udp_addr=:514  # test without creating
+  gastrolog config ingester delete my-syslog
+
+  Ingesters are node-scoped. Each type has its own params — use --help.
+
+═══════════════════════════════════════════════════
+ROUTES
+═══════════════════════════════════════════════════
+
+  gastrolog config route list
+  gastrolog config route create --name default --destination app-logs
+  gastrolog config route create --name errors --filter errors-only --destination error-vault
+  gastrolog config route create --name balanced --destination vault-1 --destination vault-2 --distribution round-robin
+  gastrolog config route create --help    # full flag list
+  gastrolog config route delete default
+
+  Distribution modes: fanout (all destinations), round-robin (rotate), failover (first available)
+  Routes without a --filter accept all records.
+
+═══════════════════════════════════════════════════
+FILTERS
+═══════════════════════════════════════════════════
+
+  gastrolog config filter create --name errors-only --expression 'level=error'
+  gastrolog config filter create --name web-traffic --expression 'service=web AND status>=400'
+  gastrolog config filter delete errors-only
+
+  Expressions use the query language: key=value, AND, OR, NOT, >=, <=, globs, regex.
+
+═══════════════════════════════════════════════════
+POLICIES
+═══════════════════════════════════════════════════
+
+  # Rotation: when to seal chunks
+  gastrolog config rotation-policy create --name hourly-100mb --max-bytes 104857600 --max-age 1h
+  gastrolog config rotation-policy create --name cron-midnight --cron '0 0 * * *'
+
+  # Retention: when to expire/migrate old chunks
+  gastrolog config retention-policy create --name keep-30d --max-age 720h
+  gastrolog config retention-policy create --name max-10gb --max-bytes 10737418240
+
+  Assign policies to vaults via the UI or vault update.
+
+═══════════════════════════════════════════════════
+COMMON TASKS
+═══════════════════════════════════════════════════
+
+  --- Minimal log flow (3 commands) ---
+  gastrolog config vault create --name logs --type file
+  gastrolog config ingester create --name syslog-in --type syslog --param udp_addr=:514
+  gastrolog config route create --name default --destination logs
+
+  --- Split errors to separate vault ---
+  gastrolog config vault create --name error-logs --type file
+  gastrolog config filter create --name errors --expression 'level=error'
+  gastrolog config route create --name error-route --filter errors --destination error-logs
+
+  --- Docker container logging ---
+  gastrolog config vault create --name containers --type file
+  gastrolog config ingester create --name docker --type docker
+  gastrolog config route create --name docker-route --destination containers
+
+  --- Export/import config (backup or migration) ---
+  gastrolog config export > config.json
+  gastrolog config import < config.json
+
+═══════════════════════════════════════════════════
+LOG FORMAT ADVICE
+═══════════════════════════════════════════════════
+
+  Use JSON or key=value — fields become queryable automatically:
+    {"level":"error","msg":"connection failed","host":"db-1","latency_ms":450}
+    level=error msg="connection failed" host=db-1 latency_ms=450
+
+  Include a level field (error/warn/info/debug/trace).
+  Plain text works too — all tokens are indexed for full-text search.
+  No SDK needed. Just write to stdout and let the ingester handle delivery.

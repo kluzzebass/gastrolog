@@ -161,7 +161,7 @@ func newRouteCreateCmd() *cobra.Command {
 	cmd.Flags().String("name", "", "route name (required)")
 	cmd.Flags().String("filter", "", "filter name or ID")
 	cmd.Flags().StringSlice("destination", nil, "destination vault name or ID (repeatable)")
-	cmd.Flags().String("distribution", "fanout", "distribution: fanout or round-robin")
+	cmd.Flags().String("distribution", "fanout", "distribution: fanout, round-robin, or failover")
 	cmd.Flags().Bool("enabled", true, "enable the route")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd

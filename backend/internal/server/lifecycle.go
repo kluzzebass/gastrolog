@@ -198,11 +198,9 @@ func (s *LifecycleServer) GetClusterStatus(
 		ClusterAddress: s.clusterAddress,
 	}
 
-	// Expose join token when this node is leader (join info is only useful from the leader).
-	if leaderID == s.nodeID {
-		if cfg, err := s.cfgStore.Load(ctx); err == nil && cfg != nil && cfg.ClusterTLS != nil {
-			resp.JoinToken = cfg.ClusterTLS.JoinToken
-		}
+	// Expose join token from the replicated config (available on all nodes).
+	if cfg, err := s.cfgStore.Load(ctx); err == nil && cfg != nil && cfg.ClusterTLS != nil {
+		resp.JoinToken = cfg.ClusterTLS.JoinToken
 	}
 
 	return connect.NewResponse(resp), nil
