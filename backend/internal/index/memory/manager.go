@@ -58,8 +58,7 @@ type Manager struct {
 	logger *slog.Logger
 }
 
-// NewManager creates an in-memory index manager.
-// If logger is nil, logging is disabled.
+// NewManager creates an in-memory index manager without JSON index support.
 func NewManager(
 	indexers []index.Indexer,
 	tokenStore IndexStore[index.TokenIndexEntry],
@@ -67,14 +66,7 @@ func NewManager(
 	kvStore KVIndexStore,
 	logger *slog.Logger,
 ) *Manager {
-	return &Manager{
-		indexers:   indexers,
-		tokenStore: tokenStore,
-		attrStore:  attrStore,
-		kvStore:    kvStore,
-		builder:    index.NewBuildHelper(),
-		logger:     logging.Default(logger).With("component", "index-manager", "type", "memory"),
-	}
+	return NewManagerWithJSON(indexers, tokenStore, attrStore, kvStore, nil, logger)
 }
 
 // NewManagerWithJSON creates an in-memory index manager with JSON index support.

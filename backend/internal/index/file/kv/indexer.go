@@ -68,6 +68,7 @@ type Indexer struct {
 	extractors []tokenizer.KVExtractor
 }
 
+// NewIndexer creates a KV indexer with default configuration.
 func NewIndexer(dir string, manager chunk.ChunkManager, logger *slog.Logger) *Indexer {
 	return NewIndexerWithConfig(dir, manager, logger, Config{})
 }

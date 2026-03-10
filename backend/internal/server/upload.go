@@ -250,21 +250,6 @@ func (s *Server) registerUploadHandler(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/managed-files/upload", s.handleManagedFileUpload)
 }
 
-// handleManagedFileDelete is the local-disk cleanup triggered by FSM notification.
-// Called on every node (including the uploader) when a managed file is deleted.
-func (s *Server) cleanupManagedFile(fileID uuid.UUID) {
-	if s.homeDir == "" {
-		return
-	}
-	hd := home.New(s.homeDir)
-	dir := hd.ManagedFileDir(fileID.String())
-	if err := os.RemoveAll(dir); err != nil { //nolint:gosec,nolintlint // G703: trusted UUID path
-		s.logger.Warn("cleanup managed file", "file_id", fileID, "error", err)
-	} else {
-		s.logger.Info("removed managed file", "file_id", fileID, "dir", dir)
-	}
-}
-
 // ManagedFileExists checks whether a managed file exists on disk.
 func (s *Server) ManagedFileExists(fileID string) bool {
 	if s.homeDir == "" {

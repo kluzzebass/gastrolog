@@ -23,6 +23,7 @@ require (
 	github.com/hashicorp/raft-boltdb/v2 v2.3.1
 	github.com/klauspost/compress v1.18.4
 	github.com/maxmind/mmdbwriter v1.2.0
+	github.com/mileusna/useragent v1.3.5
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/spf13/cobra v1.10.2
 	github.com/theory/jsonpath v0.11.0
@@ -67,7 +68,6 @@ require (
 	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
-	github.com/mileusna/useragent v1.3.5 // indirect
 	github.com/moby/docker-image-spec v1.3.1 // indirect
 	github.com/moby/sys/atomicwriter v0.1.0 // indirect
 	github.com/moby/term v0.5.2 // indirect
