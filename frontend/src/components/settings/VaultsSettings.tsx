@@ -83,7 +83,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
 
   const policyOptions = [
     { value: "", label: "(none)" },
-    ...policies.map((p) => ({ value: p.id, label: p.name || p.id })),
+    ...policies
+      .map((p) => ({ value: p.id, label: p.name || p.id }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
 
   const defaults = (id: string) => {

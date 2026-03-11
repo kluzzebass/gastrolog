@@ -47,7 +47,9 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
 
   const filterOptions = [
     { value: "", label: "(none)" },
-    ...filters.map((f) => ({ value: f.id, label: f.name || f.id })),
+    ...filters
+      .map((f) => ({ value: f.id, label: f.name || f.id }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
 
   const distributionOptions = [
@@ -326,10 +328,9 @@ function DestinationsEditor({
             }}
             options={[
               { value: "", label: "Add destination\u2026" },
-              ...availableVaults.map((v) => ({
-                value: v.id,
-                label: v.name || v.id,
-              })),
+              ...availableVaults
+                .map((v) => ({ value: v.id, label: v.name || v.id }))
+                .sort((a, b) => a.label.localeCompare(b.label)),
             ]}
             dark={dark}
           />

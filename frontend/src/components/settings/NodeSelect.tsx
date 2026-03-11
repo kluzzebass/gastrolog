@@ -31,10 +31,9 @@ export function NodeSelect({
   const nodes = clusterStatus.nodes;
   if (nodes.length === 0) return null;
 
-  const options = nodes.map((n) => ({
-    value: n.id,
-    label: n.name || n.id,
-  }));
+  const options = nodes
+    .map((n) => ({ value: n.id, label: n.name || n.id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   return (
     <FormField label="Node" dark={dark}>

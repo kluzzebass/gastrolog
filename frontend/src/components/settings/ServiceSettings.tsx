@@ -463,7 +463,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   )}`}
                 >
                   <option value="">-- none --</option>
-                  {certs.map((cert) => (
+                  {certs
+                    .toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+                    .map((cert) => (
                     <option key={cert.id} value={cert.id}>
                       {cert.name || cert.id}
                     </option>

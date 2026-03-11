@@ -16,7 +16,9 @@ export function DockerForm({
   const certs = certData?.certificates ?? [];
   const certOptions = [
     { value: "", label: "(none)" },
-    ...certs.map((c) => ({ value: c.id, label: c.name || c.id })),
+    ...certs
+      .map((c) => ({ value: c.id, label: c.name || c.id }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
   const set = (key: string, value: string) =>
     onChange({ ...params, [key]: value });
