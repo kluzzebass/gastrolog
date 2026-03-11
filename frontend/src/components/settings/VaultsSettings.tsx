@@ -228,14 +228,16 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             />
           </FormField>
           <NodeSelect value={newNodeId} onChange={setNewNodeId} dark={dark} />
-          <FormField label="Rotation Policy" dark={dark}>
-            <SelectInput
-              value={newPolicy}
-              onChange={setNewPolicy}
-              options={policyOptions}
-              dark={dark}
-            />
-          </FormField>
+          {newType !== "cloud" && (
+            <FormField label="Rotation Policy" dark={dark}>
+              <SelectInput
+                value={newPolicy}
+                onChange={setNewPolicy}
+                options={policyOptions}
+                dark={dark}
+              />
+            </FormField>
+          )}
           <RetentionRulesEditor
             rules={newRetentionRules}
             onChange={setNewRetentionRules}
@@ -259,7 +261,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
         const hasPolicy = vault.policy && policies.some((p) => p.id === vault.policy);
         const hasRetention = vault.retentionRules.length > 0;
         const warnings = [
-          ...(!hasPolicy ? ["no rotation policy"] : []),
+          ...(vault.type !== "cloud" && !hasPolicy ? ["no rotation policy"] : []),
           ...(!hasRetention ? ["no retention policy"] : []),
         ];
         const activeJob = activeJobs[vault.id];
@@ -430,14 +432,16 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                 onChange={(v) => setEdit(vault.id, { nodeId: v })}
                 dark={dark}
               />
-              <FormField label="Rotation Policy" dark={dark}>
-                <SelectInput
-                  value={edit.policy}
-                  onChange={(v) => setEdit(vault.id, { policy: v })}
-                  options={policyOptions}
-                  dark={dark}
-                />
-              </FormField>
+              {vault.type !== "cloud" && (
+                <FormField label="Rotation Policy" dark={dark}>
+                  <SelectInput
+                    value={edit.policy}
+                    onChange={(v) => setEdit(vault.id, { policy: v })}
+                    options={policyOptions}
+                    dark={dark}
+                  />
+                </FormField>
+              )}
               <RetentionRulesEditor
                 rules={edit.retentionRules}
                 onChange={(rules) =>
