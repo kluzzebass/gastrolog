@@ -133,7 +133,11 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       name: edit.name,
       type: edit.type,
       policy: edit.policy,
-      retentionRules: edit.retentionRules,
+      retentionRules: edit.retentionRules.filter(
+        (r) =>
+          r.retentionPolicyId !== "" &&
+          (r.action !== "migrate" || r.destinationId !== ""),
+      ),
       params: edit.params,
       enabled: edit.enabled,
       nodeId: edit.nodeId,

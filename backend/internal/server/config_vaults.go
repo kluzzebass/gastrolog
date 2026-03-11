@@ -317,6 +317,9 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 		cfg.Policy = new(pid)
 	}
 	for _, pb := range p.RetentionRules {
+		if pb.RetentionPolicyId == "" {
+			return config.VaultConfig{}, errors.New("retention rule missing policy ID")
+		}
 		b := config.RetentionRule{
 			Action: config.RetentionAction(pb.Action),
 		}
@@ -325,6 +328,11 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 			return config.VaultConfig{}, fmt.Errorf("invalid retention policy ID: %w", err)
 		}
 		b.RetentionPolicyID = rpID
+		if config.RetentionAction(pb.Action) == config.RetentionActionMigrate {
+			if pb.DestinationId == "" {
+				return config.VaultConfig{}, errors.New("migrate rule missing destination ID")
+			}
+		}
 		if pb.DestinationId != "" {
 			dstID, err := uuid.Parse(pb.DestinationId)
 			if err != nil {
