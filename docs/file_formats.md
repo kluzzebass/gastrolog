@@ -10,6 +10,7 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
     raw.log             Raw log bytes (append-only)
     idx.log             Record metadata entries (append-only)
     attr.log            Record attributes (append-only)
+    attr_dict.log       Attribute string dictionary (append-only)
     _time.idx           Sparse time index
     _token.idx          Token index (inverted posting list)
 ```
@@ -122,9 +123,9 @@ The pairs are repeated `count` times. An empty attribute set (count=0) uses 2 by
 
 ---
 
-## idx.log -- Record Metadata Index
+## attr_dict.log -- Attribute String Dictionary
 
-Append-only file containing fixed-size metadata entries for each record. The chunk ID is derived from the directory name (authoritative).
+Per-chunk dictionary mapping strings to sequential uint32 IDs. Used by `attr.log` to deduplicate attribute keys and values. When the dictionary is present, `attr.log` records use the dict-encoded format (keyID/valID pairs) instead of inline key/value strings.
 
 ### Layout
 
@@ -132,13 +133,13 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 +---------------------------+
 |     Header (4 bytes)      |
 +---------------------------+
-|     Entry 0 (38 bytes)    |
+|     Entry 0               |
 +---------------------------+
-|     Entry 1 (38 bytes)    |
+|     Entry 1               |
 +---------------------------+
 |     ...                   |
 +---------------------------+
-|     Entry N-1 (38 bytes)  |
+|     Entry N-1             |
 +---------------------------+
 ```
 
@@ -147,11 +148,63 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 | Offset | Size | Field     | Description                              |
 |--------|------|-----------|------------------------------------------|
 | 0      | 1    | signature | `0x69` (`'i'`)                           |
-| 1      | 1    | type      | `0x69` (`'i'`)                           |
+| 1      | 1    | type      | `0x64` (`'d'`)                           |
 | 2      | 1    | version   | `0x01`                                   |
 | 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
 
-### Entry (38 bytes each)
+### Entry (variable size)
+
+| Offset | Size      | Field    | Description                    |
+|--------|-----------|----------|--------------------------------|
+| 0      | 2         | strLen   | Length of string (uint16)      |
+| 2      | strLen    | string   | UTF-8 string bytes             |
+
+Entries are appended sequentially. The entry's array index (0, 1, 2, ...) is its dictionary ID. A partial trailing entry is tolerated on crash recovery.
+
+### Dict-Encoded Attribute Record
+
+When `attr_dict.log` is present, each `attr.log` record uses this format instead of inline strings:
+
+| Offset | Size        | Field     | Description                          |
+|--------|-------------|-----------|--------------------------------------|
+| 0      | 2           | count     | Number of key-value pairs (uint16)   |
+| 2      | count × 8   | pairs     | [keyID:u32][valID:u32] repeated      |
+
+Keys are sorted lexicographically for deterministic output.
+
+---
+
+## idx.log -- Record Metadata Index
+
+Append-only file containing fixed-size metadata entries for each record. The chunk ID is derived from the directory name (authoritative).
+
+### Layout
+
+```
++---------------------------+
+|     Header (12 bytes)     |
++---------------------------+
+|     Entry 0 (58 bytes)    |
++---------------------------+
+|     Entry 1 (58 bytes)    |
++---------------------------+
+|     ...                   |
++---------------------------+
+|     Entry N-1 (58 bytes)  |
++---------------------------+
+```
+
+### Header (12 bytes)
+
+| Offset | Size | Field     | Description                              |
+|--------|------|-----------|------------------------------------------|
+| 0      | 1    | signature | `0x69` (`'i'`)                           |
+| 1      | 1    | type      | `0x69` (`'i'`)                           |
+| 2      | 1    | version   | `0x02`                                   |
+| 3      | 1    | flags     | Bit 0: sealed (`0x01` = sealed)          |
+| 4      | 8    | createdAt | Chunk creation timestamp (int64 Unix nanos) |
+
+### Entry (58 bytes each)
 
 | Offset | Size | Field         | Description                                   |
 |--------|------|---------------|-----------------------------------------------|
@@ -162,13 +215,15 @@ Append-only file containing fixed-size metadata entries for each record. The chu
 | 28     | 4    | rawSize       | Length of raw data in bytes (uint32)          |
 | 32     | 4    | attrOffset    | Byte offset into attr.log data section (uint32)|
 | 36     | 2    | attrSize      | Length of encoded attributes in bytes (uint16)|
+| 38     | 4    | ingestSeq     | Per-ingester rolling sequence counter (uint32)|
+| 42     | 16   | ingesterID    | Ingester UUID (raw bytes)                     |
 
 ### Position Semantics
 
 Record positions throughout the system are **record indices** (0, 1, 2, ...), not byte offsets. To compute the file offset for record N:
 
 ```
-idx_file_offset = 4 + (N * 38)
+idx_file_offset = 12 + (N * 58)
 ```
 
 This enables O(1) seeking by record number and trivial bidirectional traversal.
@@ -289,14 +344,104 @@ Flat array of `uint32` record indices (4 bytes each). Each key entry references 
 
 ---
 
+## Cloud Blob -- Archived Chunk
+
+Single-object format for cloud-archived (sealed) chunks. Each chunk becomes one zstd-compressed blob in S3/Azure/GCS. Designed for streaming reads — no random access.
+
+### Layout
+
+```
+[Zstd-compressed envelope]
++---------------------------+
+|     Header (94 bytes)     |
++---------------------------+
+|     Dictionary            |
+|   (dictEntries entries)   |
++---------------------------+
+|     Record Frame 0        |
++---------------------------+
+|     Record Frame 1        |
++---------------------------+
+|     ...                   |
++---------------------------+
+|     Record Frame N-1      |
++---------------------------+
+```
+
+### Header (94 bytes)
+
+| Offset | Size | Field        | Description                                  |
+|--------|------|--------------|----------------------------------------------|
+| 0      | 4    | magic        | `GLCB` (GastroLog Cloud Blob)                |
+| 4      | 1    | version      | `0x01`                                       |
+| 5      | 1    | flags        | Reserved (`0x00`)                            |
+| 6      | 16   | chunkID      | Chunk UUID (raw bytes)                       |
+| 22     | 16   | vaultID      | Vault UUID (raw bytes)                       |
+| 38     | 4    | recordCount  | Total records (uint32)                       |
+| 42     | 8    | startTS      | Min WriteTS (int64 Unix nanos)               |
+| 50     | 8    | endTS        | Max WriteTS (int64 Unix nanos)               |
+| 58     | 8    | ingestStart  | Min IngestTS (int64 Unix nanos)              |
+| 66     | 8    | ingestEnd    | Max IngestTS (int64 Unix nanos)              |
+| 74     | 8    | sourceStart  | Min SourceTS (int64 Unix nanos, 0 = none)    |
+| 82     | 8    | sourceEnd    | Max SourceTS (int64 Unix nanos, 0 = none)    |
+| 90     | 4    | dictEntries  | Number of dictionary entries (uint32)        |
+
+### Dictionary (variable size)
+
+Shared string table for attribute keys and values, identical to `attr_dict.log` encoding:
+
+| Offset | Size      | Field    | Description                    |
+|--------|-----------|----------|--------------------------------|
+| 0      | 2         | strLen   | Length of string (uint16)      |
+| 2      | strLen    | string   | UTF-8 string bytes             |
+
+Repeated `dictEntries` times. Entry index (0, 1, 2, ...) is the dictionary ID.
+
+### Record Frame (variable size)
+
+Each record is self-framing:
+
+| Offset | Size        | Field       | Description                              |
+|--------|-------------|-------------|------------------------------------------|
+| 0      | 4           | frameLen    | Frame size excluding this field (uint32) |
+| 4      | 8           | sourceTS    | Source timestamp (int64 nanos, 0 = none) |
+| 12     | 8           | ingestTS    | Ingest timestamp (int64 nanos)           |
+| 20     | 8           | writeTS     | Write timestamp (int64 nanos)            |
+| 28     | 16          | ingesterID  | Ingester UUID (raw bytes)                |
+| 44     | 4           | ingestSeq   | Per-ingester sequence counter (uint32)   |
+| 48     | 2           | attrCount   | Number of attribute pairs (uint16)       |
+| 50     | attrCount×8 | attrs       | [keyID:u32][valID:u32] pairs             |
+| varies | 4           | rawLen      | Length of raw log body (uint32)          |
+| varies | rawLen      | raw         | Raw log message bytes                    |
+
+### Compression
+
+The entire blob is wrapped in a single zstd stream (not seekable zstd). Since cloud queries scan the full blob, frame-level random access is unnecessary.
+
+### Blob Object Metadata
+
+When uploaded, the following user-defined metadata is set on the cloud object for filtering without download:
+
+| Key            | Value                              |
+|----------------|------------------------------------|
+| `chunk_id`     | 26-char base32hex chunk ID         |
+| `vault_id`     | UUID string                        |
+| `record_count` | Decimal string                     |
+| `start_ts`     | RFC 3339 timestamp                 |
+| `end_ts`       | RFC 3339 timestamp                 |
+
+---
+
 ## Validation Summary
 
 All file formats include validation checks on decode:
 
-| File         | Checks                                                         |
-|--------------|----------------------------------------------------------------|
-| raw.log      | Min size (4 bytes), signature, type, version                   |
-| idx.log      | Min size (4 bytes), signature, type, version, entry alignment  |
-| attr.log     | Min size (4 bytes), signature, type, version                   |
-| _time.idx    | Min size, signature+type, version, chunkID, entry size match   |
-| _token.idx   | Min size, signature+type, version, chunkID, key size, posting size |
+| File           | Checks                                                         |
+|----------------|----------------------------------------------------------------|
+| raw.log        | Min size (4 bytes), signature, type, version                   |
+| idx.log        | Min size (12 bytes), signature, type, version, entry alignment |
+| attr.log       | Min size (4 bytes), signature, type, version                   |
+| attr_dict.log  | Min size (4 bytes), signature, type, version                   |
+| _time.idx      | Min size, signature+type, version, chunkID, entry size match   |
+| _token.idx     | Min size, signature+type, version, chunkID, key size, posting size |
+| cloud blob     | Magic (`GLCB`), version, zstd decompression, frame sizes      |
