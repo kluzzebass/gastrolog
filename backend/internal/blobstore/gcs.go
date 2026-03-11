@@ -13,8 +13,9 @@ import (
 
 // GCSConfig holds configuration for a Google Cloud Storage store.
 type GCSConfig struct {
-	Bucket   string
-	Endpoint string // Optional: for fake-gcs-server or other emulators.
+	Bucket          string
+	Endpoint        string // Optional: for fake-gcs-server or other emulators.
+	CredentialsJSON string // Optional: inline service account JSON key.
 }
 
 // GCSStore implements Store using Google Cloud Storage.
@@ -35,6 +36,8 @@ func NewGCS(ctx context.Context, cfg GCSConfig) (*GCSStore, error) {
 			option.WithEndpoint(cfg.Endpoint+"/storage/v1/"),
 			option.WithoutAuthentication(),
 		)
+	} else if cfg.CredentialsJSON != "" {
+		opts = append(opts, option.WithAuthCredentialsJSON(option.ServiceAccount, []byte(cfg.CredentialsJSON)))
 	}
 	client, err := storage.NewClient(ctx, opts...)
 	if err != nil {

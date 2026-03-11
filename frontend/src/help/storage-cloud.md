@@ -36,6 +36,7 @@ Supported providers:
 | Setting | Description | Required |
 |---------|-------------|----------|
 | Bucket | GCS bucket name | Yes |
+| Credentials JSON | Service account key (JSON) | No (falls back to Application Default Credentials) |
 | Endpoint | Custom endpoint URL | No |
 
 ## What You Should Know

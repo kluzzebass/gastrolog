@@ -131,6 +131,21 @@ export function VaultParamsForm({
             />
           </FormField>
         )}
+        {provider === "gcs" && (
+          <FormField
+            label="Credentials JSON"
+            description="Service account key (JSON). Falls back to Application Default Credentials if empty."
+            dark={dark}
+          >
+            <TextArea
+              value={get("credentials_json")}
+              onChange={(v) => set("credentials_json", v)}
+              placeholder=""
+              dark={dark}
+              rows={3}
+            />
+          </FormField>
+        )}
         {(provider === "s3" || provider === "gcs") && (
           <FormField
             label="Endpoint"

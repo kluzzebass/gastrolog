@@ -21,8 +21,9 @@ const (
 	ParamAccessKey        = "access_key"        // S3 access key
 	ParamSecretKey        = "secret_key"        // S3 secret key
 	ParamContainer        = "container"         // Azure container name
-	ParamConnectionString = "connection_string" // Azure connection string
-	ParamVaultID          = "_vault_id"         // Injected by orchestrator
+	ParamConnectionString = "connection_string"  // Azure connection string
+	ParamCredentialsJSON  = "credentials_json"   // GCS service account JSON
+	ParamVaultID          = "_vault_id"          // Injected by orchestrator
 )
 
 var (
@@ -102,8 +103,9 @@ func createStore(provider string, params map[string]string) (blobstore.Store, er
 
 	case "gcs":
 		cfg := blobstore.GCSConfig{
-			Bucket:   params[ParamBucket],
-			Endpoint: params[ParamEndpoint],
+			Bucket:          params[ParamBucket],
+			Endpoint:        params[ParamEndpoint],
+			CredentialsJSON: params[ParamCredentialsJSON],
 		}
 		if cfg.Bucket == "" {
 			return nil, errors.New("missing required parameter: bucket")
