@@ -260,7 +260,9 @@ func mapSearchError(err error) error {
 }
 
 // remoteVaultsByNode groups remote vault IDs by their owning node.
-func (s *QueryServer) remoteVaultsByNode(ctx context.Context) map[string][]uuid.UUID {
+// When selectedVaults is non-nil, only vaults in that set are included
+// (used when the query contains a vault_id=X filter).
+func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []uuid.UUID) map[string][]uuid.UUID {
 	allCfg, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil
@@ -271,6 +273,15 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context) map[string][]uuid.
 		localVaults[id] = struct{}{}
 	}
 
+	// Build selected set for O(1) lookup.
+	var selected map[uuid.UUID]struct{}
+	if selectedVaults != nil {
+		selected = make(map[uuid.UUID]struct{}, len(selectedVaults))
+		for _, id := range selectedVaults {
+			selected[id] = struct{}{}
+		}
+	}
+
 	byNode := make(map[string][]uuid.UUID)
 	for _, vc := range allCfg {
 		if _, local := localVaults[vc.ID]; local {
@@ -278,6 +289,11 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context) map[string][]uuid.
 		}
 		if vc.NodeID == "" || vc.NodeID == s.localNodeID {
 			continue
+		}
+		if selected != nil {
+			if _, ok := selected[vc.ID]; !ok {
+				continue
+			}
 		}
 		byNode[vc.NodeID] = append(byNode[vc.NodeID], vc.ID)
 	}
@@ -486,7 +502,8 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, prevRemo
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return remoteResult{}
 	}
-	byNode := s.remoteVaultsByNode(ctx)
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
 		return remoteResult{}
 	}
@@ -634,7 +651,8 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil
 	}
-	byNode := s.remoteVaultsByNode(ctx)
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
 		return nil
 	}
@@ -749,7 +767,8 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 		return nil
 	}
 
-	byNode := s.remoteVaultsByNode(ctx)
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
 		return nil
 	}
@@ -1021,7 +1040,8 @@ func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, r
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return
 	}
-	byNode := s.remoteVaultsByNode(ctx)
+	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	queryExpr := q.String()
 	for nodeID, vaultIDs := range byNode {
 		vaultStrs := make([]string, len(vaultIDs))
