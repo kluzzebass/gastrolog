@@ -119,7 +119,7 @@ export function SearchSidebar({
             {vaultsLoading ? (
               <LoadingPlaceholder dark={dark} className="px-2.5 py-1.5" />
             ) : (
-              vaults?.map((vault) => (
+              vaults?.toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((vault) => (
                 <VaultButton
                   key={vault.id}
                   label={vault.name || vault.id}

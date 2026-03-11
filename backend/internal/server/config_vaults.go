@@ -316,6 +316,9 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 		}
 		cfg.Policy = new(pid)
 	}
+	if len(p.RetentionRules) > 1 {
+		return config.VaultConfig{}, errors.New("at most one retention rule per vault")
+	}
 	for _, pb := range p.RetentionRules {
 		if pb.RetentionPolicyId == "" {
 			return config.VaultConfig{}, errors.New("retention rule missing policy ID")

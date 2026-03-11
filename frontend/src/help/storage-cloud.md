@@ -2,7 +2,7 @@
 
 Type: `cloud`
 
-Archives logs to cloud object storage. Cloud vaults are **sealed-only** — they do not accept live ingestion. Data arrives via [retention](help:policy-retention) rules with the **migrate** action, which moves sealed chunks from a file or memory vault into cloud storage.
+Archives logs to cloud object storage. Cloud vaults are **sealed-only** — they do not accept live ingestion. Data arrives via a [retention](help:policy-retention) rule with the **migrate** action, which moves sealed chunks from a file or memory vault into cloud storage.
 
 Supported providers:
 

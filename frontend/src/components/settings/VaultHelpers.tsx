@@ -13,7 +13,7 @@ export interface RetentionRuleEdit {
   destinationId: string;
 }
 
-/** Returns true when every retention rule has required fields filled in. */
+/** Returns true when the retention rule (if present) has required fields filled in. */
 export function retentionRulesValid(rules: RetentionRuleEdit[]): boolean {
   return rules.every(
     (r) =>
@@ -82,7 +82,7 @@ export function JobProgress({
   );
 }
 
-export function RetentionRulesEditor({
+export function RetentionRuleEditor({
   rules,
   onChange,
   retentionPolicies,
@@ -98,9 +98,14 @@ export function RetentionRulesEditor({
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
+  const rule = rules[0] as RetentionRuleEdit | undefined;
+  const enabled = !!rule;
+
   const policyOptions = [
     { value: "", label: "(select policy)" },
-    ...retentionPolicies.map((r) => ({ value: r.id, label: r.name || r.id })),
+    ...retentionPolicies
+      .map((r) => ({ value: r.id, label: r.name || r.id }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
   const actionOptions = [
     { value: "expire", label: "expire" },
@@ -110,8 +115,14 @@ export function RetentionRulesEditor({
     { value: "", label: "(select vault)" },
     ...vaults
       .filter((s) => s.id !== currentVaultId)
-      .map((s) => ({ value: s.id, label: s.name || s.id })),
+      .map((s) => ({ value: s.id, label: s.name || s.id }))
+      .sort((a, b) => a.label.localeCompare(b.label)),
   ];
+
+  const setRule = (patch: Partial<RetentionRuleEdit>) => {
+    if (!rule) return;
+    onChange([{ ...rule, ...patch }]);
+  };
 
   return (
     <div className="flex flex-col gap-2">
@@ -119,46 +130,34 @@ export function RetentionRulesEditor({
         <span
           className={`text-[0.8em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          Retention Rules
+          Retention Rule
         </span>
         <Button
           variant="ghost"
           dark={dark}
           onClick={() =>
-            onChange([
-              ...rules,
-              { retentionPolicyId: "", action: "expire", destinationId: "" },
-            ])
+            enabled
+              ? onChange([])
+              : onChange([{ retentionPolicyId: "", action: "expire", destinationId: "" }])
           }
         >
-          + Add
+          {enabled ? "Remove" : "+ Add"}
         </Button>
       </div>
-      {rules.length === 0 && (
+      {!enabled && (
         <span
           className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
-          No retention rules
+          No retention rule
         </span>
       )}
-      {rules.map((rule, idx) => {
-        const ruleKey = `${rule.retentionPolicyId}-${rule.action}-${rule.destinationId}`;
-        // Count prior rules with identical content to disambiguate duplicates
-        const dupCount = rules.slice(0, idx).filter(
-          (r) => r.retentionPolicyId === rule.retentionPolicyId && r.action === rule.action && r.destinationId === rule.destinationId,
-        ).length;
-        return (
-        <div key={`${ruleKey}-${dupCount}`} className="flex items-end gap-2">
+      {enabled && (
+        <div className="flex items-end gap-2">
           <div className="flex-1">
             <FormField label="Policy" dark={dark}>
               <SelectInput
                 value={rule.retentionPolicyId}
-                onChange={(v) => {
-                  const next = rules.map((r, i) =>
-                    i === idx ? { ...r, retentionPolicyId: v } : r,
-                  );
-                  onChange(next);
-                }}
+                onChange={(v) => setRule({ retentionPolicyId: v })}
                 options={policyOptions}
                 dark={dark}
               />
@@ -168,14 +167,9 @@ export function RetentionRulesEditor({
             <FormField label="Action" dark={dark}>
               <SelectInput
                 value={rule.action}
-                onChange={(v) => {
-                  const next = rules.map((r, i) =>
-                    i === idx
-                      ? { ...r, action: v, destinationId: v === "expire" ? "" : r.destinationId }
-                      : r,
-                  );
-                  onChange(next);
-                }}
+                onChange={(v) =>
+                  setRule({ action: v, destinationId: v === "expire" ? "" : rule.destinationId })
+                }
                 options={actionOptions}
                 dark={dark}
               />
@@ -186,27 +180,15 @@ export function RetentionRulesEditor({
               <FormField label="Destination" dark={dark}>
                 <SelectInput
                   value={rule.destinationId}
-                  onChange={(v) => {
-                    const next = rules.map((r, i) =>
-                      i === idx ? { ...r, destinationId: v } : r,
-                    );
-                    onChange(next);
-                  }}
+                  onChange={(v) => setRule({ destinationId: v })}
                   options={vaultOptions}
                   dark={dark}
                 />
               </FormField>
             </div>
           )}
-          <Button variant="ghost"
-            onClick={() => onChange(rules.filter((_, i) => i !== idx))}
-            dark={dark}
-          >
-            Remove
-          </Button>
         </div>
-        );
-      })}
+      )}
     </div>
   );
 }

@@ -24,7 +24,7 @@ import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
 import { sortByName } from "../../lib/sort";
-import { JobProgress, RetentionRulesEditor, retentionRulesValid } from "./VaultHelpers";
+import { JobProgress, RetentionRuleEditor, retentionRulesValid } from "./VaultHelpers";
 import type { RetentionRuleEdit } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 
@@ -238,7 +238,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
               />
             </FormField>
           )}
-          <RetentionRulesEditor
+          <RetentionRuleEditor
             rules={newRetentionRules}
             onChange={setNewRetentionRules}
             retentionPolicies={retentionPolicies}
@@ -442,7 +442,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                   />
                 </FormField>
               )}
-              <RetentionRulesEditor
+              <RetentionRuleEditor
                 rules={edit.retentionRules}
                 onChange={(rules) =>
                   setEdit(vault.id, { retentionRules: rules })
