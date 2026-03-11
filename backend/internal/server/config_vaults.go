@@ -344,3 +344,32 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 	}
 	return cfg, nil
 }
+
+// VaultConnectionTester validates connectivity for a vault configuration.
+type VaultConnectionTester func(ctx context.Context, params map[string]string) (string, error)
+
+// TestVault tests connectivity for a vault configuration without saving it.
+func (s *ConfigServer) TestVault(
+	ctx context.Context,
+	req *connect.Request[apiv1.TestVaultRequest],
+) (*connect.Response[apiv1.TestVaultResponse], error) {
+	tester := s.vaultTesters[req.Msg.Type]
+	if tester == nil {
+		return connect.NewResponse(&apiv1.TestVaultResponse{
+			Success: false,
+			Message: fmt.Sprintf("connection test not supported for vault type %q", req.Msg.Type),
+		}), nil
+	}
+
+	msg, err := tester(ctx, req.Msg.Params)
+	if err != nil {
+		return connect.NewResponse(&apiv1.TestVaultResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
+			Success: false,
+			Message: err.Error(),
+		}), nil
+	}
+	return connect.NewResponse(&apiv1.TestVaultResponse{
+		Success: true,
+		Message: msg,
+	}), nil
+}

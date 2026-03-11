@@ -729,6 +729,9 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			RemoteVaultForwarder: deps.SearchForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
+			VaultTesters: map[string]server.VaultConnectionTester{
+				"cloud": chunkcloud.NewConnectionTester(),
+			},
 		})
 		// Wire managed file transfer handlers on the cluster server. The HTTP
 		// server owns the managed files on disk; the cluster server streams them

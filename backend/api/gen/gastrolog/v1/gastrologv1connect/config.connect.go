@@ -137,6 +137,8 @@ const (
 	// ConfigServiceDeleteManagedFileProcedure is the fully-qualified name of the ConfigService's
 	// DeleteManagedFile RPC.
 	ConfigServiceDeleteManagedFileProcedure = "/gastrolog.v1.ConfigService/DeleteManagedFile"
+	// ConfigServiceTestVaultProcedure is the fully-qualified name of the ConfigService's TestVault RPC.
+	ConfigServiceTestVaultProcedure = "/gastrolog.v1.ConfigService/TestVault"
 	// ConfigServiceTestHTTPLookupProcedure is the fully-qualified name of the ConfigService's
 	// TestHTTPLookup RPC.
 	ConfigServiceTestHTTPLookupProcedure = "/gastrolog.v1.ConfigService/TestHTTPLookup"
@@ -219,6 +221,8 @@ type ConfigServiceClient interface {
 	ListManagedFiles(context.Context, *connect.Request[v1.ListManagedFilesRequest]) (*connect.Response[v1.ListManagedFilesResponse], error)
 	// DeleteManagedFile removes an managed file.
 	DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error)
+	// TestVault tests connectivity for a vault configuration without saving it.
+	TestVault(context.Context, *connect.Request[v1.TestVaultRequest]) (*connect.Response[v1.TestVaultResponse], error)
 	// TestHTTPLookup tests an HTTP lookup configuration with a sample value.
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
@@ -452,6 +456,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("DeleteManagedFile")),
 			connect.WithClientOptions(opts...),
 		),
+		testVault: connect.NewClient[v1.TestVaultRequest, v1.TestVaultResponse](
+			httpClient,
+			baseURL+ConfigServiceTestVaultProcedure,
+			connect.WithSchema(configServiceMethods.ByName("TestVault")),
+			connect.WithClientOptions(opts...),
+		),
 		testHTTPLookup: connect.NewClient[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse](
 			httpClient,
 			baseURL+ConfigServiceTestHTTPLookupProcedure,
@@ -505,6 +515,7 @@ type configServiceClient struct {
 	getRouteStats         *connect.Client[v1.GetRouteStatsRequest, v1.GetRouteStatsResponse]
 	listManagedFiles      *connect.Client[v1.ListManagedFilesRequest, v1.ListManagedFilesResponse]
 	deleteManagedFile     *connect.Client[v1.DeleteManagedFileRequest, v1.DeleteManagedFileResponse]
+	testVault             *connect.Client[v1.TestVaultRequest, v1.TestVaultResponse]
 	testHTTPLookup        *connect.Client[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse]
 	previewCSVLookup      *connect.Client[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse]
 }
@@ -689,6 +700,11 @@ func (c *configServiceClient) DeleteManagedFile(ctx context.Context, req *connec
 	return c.deleteManagedFile.CallUnary(ctx, req)
 }
 
+// TestVault calls gastrolog.v1.ConfigService.TestVault.
+func (c *configServiceClient) TestVault(ctx context.Context, req *connect.Request[v1.TestVaultRequest]) (*connect.Response[v1.TestVaultResponse], error) {
+	return c.testVault.CallUnary(ctx, req)
+}
+
 // TestHTTPLookup calls gastrolog.v1.ConfigService.TestHTTPLookup.
 func (c *configServiceClient) TestHTTPLookup(ctx context.Context, req *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error) {
 	return c.testHTTPLookup.CallUnary(ctx, req)
@@ -773,6 +789,8 @@ type ConfigServiceHandler interface {
 	ListManagedFiles(context.Context, *connect.Request[v1.ListManagedFilesRequest]) (*connect.Response[v1.ListManagedFilesResponse], error)
 	// DeleteManagedFile removes an managed file.
 	DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error)
+	// TestVault tests connectivity for a vault configuration without saving it.
+	TestVault(context.Context, *connect.Request[v1.TestVaultRequest]) (*connect.Response[v1.TestVaultResponse], error)
 	// TestHTTPLookup tests an HTTP lookup configuration with a sample value.
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
@@ -1002,6 +1020,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("DeleteManagedFile")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceTestVaultHandler := connect.NewUnaryHandler(
+		ConfigServiceTestVaultProcedure,
+		svc.TestVault,
+		connect.WithSchema(configServiceMethods.ByName("TestVault")),
+		connect.WithHandlerOptions(opts...),
+	)
 	configServiceTestHTTPLookupHandler := connect.NewUnaryHandler(
 		ConfigServiceTestHTTPLookupProcedure,
 		svc.TestHTTPLookup,
@@ -1088,6 +1112,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceListManagedFilesHandler.ServeHTTP(w, r)
 		case ConfigServiceDeleteManagedFileProcedure:
 			configServiceDeleteManagedFileHandler.ServeHTTP(w, r)
+		case ConfigServiceTestVaultProcedure:
+			configServiceTestVaultHandler.ServeHTTP(w, r)
 		case ConfigServiceTestHTTPLookupProcedure:
 			configServiceTestHTTPLookupHandler.ServeHTTP(w, r)
 		case ConfigServicePreviewCSVLookupProcedure:
@@ -1243,6 +1269,10 @@ func (UnimplementedConfigServiceHandler) ListManagedFiles(context.Context, *conn
 
 func (UnimplementedConfigServiceHandler) DeleteManagedFile(context.Context, *connect.Request[v1.DeleteManagedFileRequest]) (*connect.Response[v1.DeleteManagedFileResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteManagedFile is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) TestVault(context.Context, *connect.Request[v1.TestVaultRequest]) (*connect.Response[v1.TestVaultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.TestVault is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error) {

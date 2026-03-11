@@ -49,6 +49,7 @@ type ConfigServer struct {
 	afterConfigApply      func(raftfsm.Notification)
 	configSignal          *notify.Signal
 	resolveManagedFile    func(ctx context.Context, fileID string) string
+	vaultTesters          map[string]VaultConnectionTester
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
@@ -79,6 +80,11 @@ func (s *ConfigServer) notify(n raftfsm.Notification) {
 // SetOnTLSConfigChange sets a callback invoked when TLS config changes (for dynamic listener reconfig).
 func (s *ConfigServer) SetOnTLSConfigChange(fn func()) {
 	s.onTLSConfigChange = fn
+}
+
+// SetVaultTesters registers connection testers for vault types (e.g. "cloud").
+func (s *ConfigServer) SetVaultTesters(testers map[string]VaultConnectionTester) {
+	s.vaultTesters = testers
 }
 
 // SetOnLookupConfigChange sets a callback invoked when lookup or MaxMind config changes.

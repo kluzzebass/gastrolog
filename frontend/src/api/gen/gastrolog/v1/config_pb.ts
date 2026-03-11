@@ -314,7 +314,7 @@ export class RouteConfig extends Message<RouteConfig> {
   destinations: RouteDestination[] = [];
 
   /**
-   * "fanout" (default) or "round-robin"
+   * "fanout" (default), "round-robin", or "failover"
    *
    * @generated from field: string distribution = 5;
    */
@@ -4202,6 +4202,92 @@ export class TestIngesterResponse extends Message<TestIngesterResponse> {
 
   static equals(a: TestIngesterResponse | PlainMessage<TestIngesterResponse> | undefined, b: TestIngesterResponse | PlainMessage<TestIngesterResponse> | undefined): boolean {
     return proto3.util.equals(TestIngesterResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TestVaultRequest
+ */
+export class TestVaultRequest extends Message<TestVaultRequest> {
+  /**
+   * @generated from field: string type = 1;
+   */
+  type = "";
+
+  /**
+   * @generated from field: map<string, string> params = 2;
+   */
+  params: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<TestVaultRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestVaultRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestVaultRequest {
+    return new TestVaultRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestVaultRequest {
+    return new TestVaultRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestVaultRequest {
+    return new TestVaultRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestVaultRequest | PlainMessage<TestVaultRequest> | undefined, b: TestVaultRequest | PlainMessage<TestVaultRequest> | undefined): boolean {
+    return proto3.util.equals(TestVaultRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TestVaultResponse
+ */
+export class TestVaultResponse extends Message<TestVaultResponse> {
+  /**
+   * @generated from field: bool success = 1;
+   */
+  success = false;
+
+  /**
+   * @generated from field: string message = 2;
+   */
+  message = "";
+
+  constructor(data?: PartialMessage<TestVaultResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TestVaultResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "success", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestVaultResponse {
+    return new TestVaultResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TestVaultResponse {
+    return new TestVaultResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TestVaultResponse {
+    return new TestVaultResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TestVaultResponse | PlainMessage<TestVaultResponse> | undefined, b: TestVaultResponse | PlainMessage<TestVaultResponse> | undefined): boolean {
+    return proto3.util.equals(TestVaultResponse, a, b);
   }
 }
 

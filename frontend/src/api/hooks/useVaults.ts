@@ -186,6 +186,27 @@ export function usePutVault() {
   });
 }
 
+/** Strip empty-string values from params so the backend treats them as unset. */
+function stripEmptyParams(params: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== "") out[k] = v;
+  }
+  return out;
+}
+
+export function useTestVault() {
+  return useMutation({
+    mutationFn: async (args: { type: string; params: Record<string, string> }) => {
+      const response = await configClient.testVault({
+        type: args.type,
+        params: stripEmptyParams(args.params),
+      });
+      return response;
+    },
+  });
+}
+
 export function useDeleteVault() {
   const qc = useQueryClient();
   return useMutation({

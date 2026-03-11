@@ -52,6 +52,26 @@ func NewFactory() chunk.ManagerFactory {
 	}
 }
 
+// NewConnectionTester returns a function that validates cloud storage connectivity
+// by creating a temporary store and listing objects.
+func NewConnectionTester() func(ctx context.Context, params map[string]string) (string, error) {
+	return func(ctx context.Context, params map[string]string) (string, error) {
+		provider := params[ParamProvider]
+		if provider == "" {
+			return "", ErrMissingProvider
+		}
+		store, err := createStore(provider, params)
+		if err != nil {
+			return "", err
+		}
+		// List with a non-existent prefix to verify credentials without returning data.
+		if _, err := store.List(ctx, "gastrolog-test-connection/"); err != nil {
+			return "", fmt.Errorf("failed to list objects: %w", err)
+		}
+		return fmt.Sprintf("Connected to %s successfully", provider), nil
+	}
+}
+
 func createStore(provider string, params map[string]string) (blobstore.Store, error) {
 	switch provider {
 	case "s3":

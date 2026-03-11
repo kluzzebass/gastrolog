@@ -192,6 +192,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       addOptions={[
         { value: "memory", label: "memory" },
         { value: "file", label: "file" },
+        { value: "cloud", label: "cloud" },
       ]}
       onAddSelect={(type) => {
         generateName.mutateAsync().then(setNamePlaceholder);

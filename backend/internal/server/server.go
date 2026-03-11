@@ -124,6 +124,10 @@ type Config struct {
 	// SetNodeSuffrageFunc is called by the SetNodeSuffrage RPC to promote or
 	// demote a node. Handles leader-forwarding internally. Nil disables.
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
+
+	// VaultTesters maps vault types to connection test functions.
+	// Used by the TestVault RPC for cloud vaults.
+	VaultTesters map[string]VaultConnectionTester
 }
 
 // CertManager interface for TLS certificate management.
@@ -162,6 +166,7 @@ type Server struct {
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
+	vaultTesters      map[string]VaultConnectionTester
 	repairManagedFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
 
 	mu       sync.Mutex
@@ -216,6 +221,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
 		unixSocketConfig: cfg.UnixSocket,
+		vaultTesters:     cfg.VaultTesters,
 		afterConfigApply: cfg.AfterConfigApply,
 		configSignal:     cfg.ConfigSignal,
 		shutdown:         make(chan struct{}),
@@ -333,6 +339,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
 	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal, s.ResolveManagedFileByID)
+	configServer.SetVaultTesters(s.vaultTesters)
 	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
 	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig, mm config.MaxMindConfig) {
 		s.applyLookupConfig(cfg, mm, lookupRegistry)
