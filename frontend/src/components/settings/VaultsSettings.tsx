@@ -24,7 +24,7 @@ import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
 import { sortByName } from "../../lib/sort";
-import { JobProgress, RetentionRulesEditor } from "./VaultHelpers";
+import { JobProgress, RetentionRulesEditor, retentionRulesValid } from "./VaultHelpers";
 import type { RetentionRuleEdit } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 
@@ -133,11 +133,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
       name: edit.name,
       type: edit.type,
       policy: edit.policy,
-      retentionRules: edit.retentionRules.filter(
-        (r) =>
-          r.retentionPolicyId !== "" &&
-          (r.action !== "migrate" || r.destinationId !== ""),
-      ),
+      retentionRules: edit.retentionRules,
       params: edit.params,
       enabled: edit.enabled,
       nodeId: edit.nodeId,
@@ -219,7 +215,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
           onCancel={() => setAdding(false)}
           onCreate={handleCreate}
           isPending={putVault.isPending}
-          createDisabled={nameConflict}
+          createDisabled={nameConflict || !retentionRulesValid(newRetentionRules)}
           typeBadge={newType}
         >
           <FormField label="Name" dark={dark}>
@@ -394,7 +390,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
                       type: vault.type,
                     })
                   }
-                  disabled={putVault.isPending || !isDirty(vault.id)}
+                  disabled={putVault.isPending || !isDirty(vault.id) || !retentionRulesValid(getEdit(vault.id).retentionRules)}
                 >
                   {putVault.isPending ? "Saving..." : "Save"}
                 </Button>

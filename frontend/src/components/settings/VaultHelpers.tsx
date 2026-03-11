@@ -13,6 +13,15 @@ export interface RetentionRuleEdit {
   destinationId: string;
 }
 
+/** Returns true when every retention rule has required fields filled in. */
+export function retentionRulesValid(rules: RetentionRuleEdit[]): boolean {
+  return rules.every(
+    (r) =>
+      r.retentionPolicyId !== "" &&
+      (r.action !== "migrate" || r.destinationId !== ""),
+  );
+}
+
 export function JobProgress({
   jobId,
   label,
