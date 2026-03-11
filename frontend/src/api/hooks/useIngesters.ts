@@ -28,11 +28,12 @@ export function useIngesterStatus(id: string) {
   });
 }
 
-/** Strip empty-string values from params so the backend treats them as unset. */
+/** Trim whitespace and strip empty values so the backend treats them as unset. */
 function stripEmptyParams(params: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(params)) {
-    if (v !== "") out[k] = v;
+    const trimmed = v.trim();
+    if (trimmed !== "") out[k] = trimmed;
   }
   return out;
 }
