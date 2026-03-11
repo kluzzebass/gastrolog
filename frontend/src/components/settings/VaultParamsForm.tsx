@@ -134,7 +134,9 @@ export function VaultParamsForm({
         {(provider === "s3" || provider === "gcs") && (
           <FormField
             label="Endpoint"
-            description="Custom endpoint for S3-compatible services (MinIO, R2, B2, etc.)"
+            description={provider === "s3"
+              ? "Custom endpoint for S3-compatible services (MinIO, R2, B2, etc.)"
+              : "Custom endpoint for GCS-compatible services"}
             dark={dark}
           >
             <TextInput
