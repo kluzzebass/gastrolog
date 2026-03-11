@@ -135,6 +135,7 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		// so file vaults can warn about missing directories.
 		cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
 		cmParams["_expect_existing"] = "true"
+		cmParams["_vault_id"] = vaultCfg.ID.String()
 		cm, err := cmFactory(cmParams, cmLogger)
 		if err != nil {
 			return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
