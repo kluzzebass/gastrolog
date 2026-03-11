@@ -11,7 +11,7 @@ export function usePutRotationPolicy() {
       maxAgeSeconds: bigint;
       cron: string;
     }) => {
-      await configClient.putRotationPolicy({
+      return configClient.putRotationPolicy({
         config: {
           id: args.id,
           name: args.name,
@@ -27,6 +27,6 @@ export function usePutRotationPolicy() {
 
 export function useDeleteRotationPolicy() {
   return useConfigMutation(async (id: string) => {
-    await configClient.deleteRotationPolicy({ id });
+    return configClient.deleteRotationPolicy({ id });
   });
 }

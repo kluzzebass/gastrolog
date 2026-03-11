@@ -49,7 +49,7 @@ export function usePutIngester() {
       params: Record<string, string>;
       nodeId?: string;
     }) => {
-      await configClient.putIngester({
+      return configClient.putIngester({
         config: {
           id: args.id,
           name: args.name,
@@ -60,7 +60,14 @@ export function usePutIngester() {
         },
       });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+    onSuccess: (result) => {
+      if (result?.config) {
+        qc.cancelQueries({ queryKey: ["config"] });
+        qc.setQueryData(["config"], result.config);
+      } else {
+        qc.invalidateQueries({ queryKey: ["config"] });
+      }
+    },
   });
 }
 
@@ -68,9 +75,16 @@ export function useDeleteIngester() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      await configClient.deleteIngester({ id });
+      return configClient.deleteIngester({ id });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["config"] }),
+    onSuccess: (result) => {
+      if (result?.config) {
+        qc.cancelQueries({ queryKey: ["config"] });
+        qc.setQueryData(["config"], result.config);
+      } else {
+        qc.invalidateQueries({ queryKey: ["config"] });
+      }
+    },
   });
 }
 

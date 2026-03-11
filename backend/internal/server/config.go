@@ -97,6 +97,12 @@ func (s *ConfigServer) GetConfig(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetConfigRequest],
 ) (*connect.Response[apiv1.GetConfigResponse], error) {
+	return connect.NewResponse(s.buildFullConfig(ctx)), nil
+}
+
+// buildFullConfig assembles a complete GetConfigResponse from the config store.
+// Used by GetConfig and by mutation handlers to return the updated config inline.
+func (s *ConfigServer) buildFullConfig(ctx context.Context) *apiv1.GetConfigResponse {
 	resp := &apiv1.GetConfigResponse{}
 	if s.cfgStore != nil {
 		s.loadConfigVaults(ctx, resp)
@@ -108,7 +114,7 @@ func (s *ConfigServer) GetConfig(
 		s.loadConfigNodeConfigs(ctx, resp)
 		s.loadConfigManagedFiles(ctx, resp)
 	}
-	return connect.NewResponse(resp), nil
+	return resp
 }
 
 func (s *ConfigServer) loadConfigVaults(ctx context.Context, resp *apiv1.GetConfigResponse) {
@@ -405,7 +411,7 @@ func (s *ConfigServer) PutNodeConfig(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node config: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.PutNodeConfigResponse{}), nil
+	return connect.NewResponse(&apiv1.PutNodeConfigResponse{Config: s.buildFullConfig(ctx)}), nil
 }
 
 // GenerateName returns a random petname for use as a default entity name.

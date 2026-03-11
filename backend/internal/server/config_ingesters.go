@@ -159,7 +159,7 @@ func (s *ConfigServer) PutIngester(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-	return connect.NewResponse(&apiv1.PutIngesterResponse{}), nil
+	return connect.NewResponse(&apiv1.PutIngesterResponse{Config: s.buildFullConfig(ctx)}), nil
 }
 
 func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
@@ -217,7 +217,7 @@ func (s *ConfigServer) DeleteIngester(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteIngesterResponse{}), nil
+	return connect.NewResponse(&apiv1.DeleteIngesterResponse{Config: s.buildFullConfig(ctx)}), nil
 }
 
 // GetIngesterDefaults returns default parameter values for each ingester type.

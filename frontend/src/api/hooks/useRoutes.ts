@@ -11,7 +11,7 @@ export function usePutRoute() {
       distribution: string;
       enabled: boolean;
     }) => {
-      await configClient.putRoute({
+      return configClient.putRoute({
         config: {
           id: args.id,
           name: args.name,
@@ -27,6 +27,6 @@ export function usePutRoute() {
 
 export function useDeleteRoute() {
   return useConfigMutation(async (id: string) => {
-    await configClient.deleteRoute({ id });
+    return configClient.deleteRoute({ id });
   });
 }

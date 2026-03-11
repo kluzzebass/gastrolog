@@ -165,7 +165,7 @@ export function usePutVault() {
       enabled?: boolean;
       nodeId?: string;
     }) => {
-      await configClient.putVault({
+      return configClient.putVault({
         config: {
           id: args.id,
           name: args.name,
@@ -178,8 +178,13 @@ export function usePutVault() {
         },
       });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
+    onSuccess: (result) => {
+      if (result?.config) {
+        qc.cancelQueries({ queryKey: ["config"] });
+        qc.setQueryData(["config"], result.config);
+      } else {
+        qc.invalidateQueries({ queryKey: ["config"] });
+      }
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },
@@ -212,10 +217,15 @@ export function useDeleteVault() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { id: string; force?: boolean; deleteData?: boolean }) => {
-      await configClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
+      return configClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["config"] });
+    onSuccess: (result) => {
+      if (result?.config) {
+        qc.cancelQueries({ queryKey: ["config"] });
+        qc.setQueryData(["config"], result.config);
+      } else {
+        qc.invalidateQueries({ queryKey: ["config"] });
+      }
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
     },

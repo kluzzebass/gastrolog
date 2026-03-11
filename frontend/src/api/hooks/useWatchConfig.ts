@@ -18,7 +18,13 @@ export function useWatchConfig() {
           { signal: abort.signal },
         )) {
           // Each message = "config changed". Invalidate the query cache.
-          qc.invalidateQueries({ queryKey: ["config"] });
+          // Skip config invalidation if a mutation recently set the data
+          // directly — refetching now would hit a stale follower and
+          // briefly overwrite the correct data with old values.
+          const state = qc.getQueryState(["config"]);
+          if (!state || Date.now() - state.dataUpdatedAt > 2000) {
+            qc.invalidateQueries({ queryKey: ["config"] });
+          }
           qc.invalidateQueries({ queryKey: ["settings"] });
           nextBackoff = 0; // reset backoff on successful message
         }

@@ -876,6 +876,11 @@ export class PutFilterRequest extends Message<PutFilterRequest> {
  * @generated from message gastrolog.v1.PutFilterResponse
  */
 export class PutFilterResponse extends Message<PutFilterResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutFilterResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -884,6 +889,7 @@ export class PutFilterResponse extends Message<PutFilterResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutFilterResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutFilterResponse {
@@ -944,6 +950,11 @@ export class DeleteFilterRequest extends Message<DeleteFilterRequest> {
  * @generated from message gastrolog.v1.DeleteFilterResponse
  */
 export class DeleteFilterResponse extends Message<DeleteFilterResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteFilterResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -952,6 +963,7 @@ export class DeleteFilterResponse extends Message<DeleteFilterResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteFilterResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteFilterResponse {
@@ -1012,6 +1024,11 @@ export class PutRotationPolicyRequest extends Message<PutRotationPolicyRequest> 
  * @generated from message gastrolog.v1.PutRotationPolicyResponse
  */
 export class PutRotationPolicyResponse extends Message<PutRotationPolicyResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutRotationPolicyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1020,6 +1037,7 @@ export class PutRotationPolicyResponse extends Message<PutRotationPolicyResponse
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutRotationPolicyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRotationPolicyResponse {
@@ -1080,6 +1098,11 @@ export class DeleteRotationPolicyRequest extends Message<DeleteRotationPolicyReq
  * @generated from message gastrolog.v1.DeleteRotationPolicyResponse
  */
 export class DeleteRotationPolicyResponse extends Message<DeleteRotationPolicyResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteRotationPolicyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1088,6 +1111,7 @@ export class DeleteRotationPolicyResponse extends Message<DeleteRotationPolicyRe
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRotationPolicyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRotationPolicyResponse {
@@ -1148,6 +1172,11 @@ export class PutRetentionPolicyRequest extends Message<PutRetentionPolicyRequest
  * @generated from message gastrolog.v1.PutRetentionPolicyResponse
  */
 export class PutRetentionPolicyResponse extends Message<PutRetentionPolicyResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutRetentionPolicyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1156,6 +1185,7 @@ export class PutRetentionPolicyResponse extends Message<PutRetentionPolicyRespon
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutRetentionPolicyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRetentionPolicyResponse {
@@ -1216,6 +1246,11 @@ export class DeleteRetentionPolicyRequest extends Message<DeleteRetentionPolicyR
  * @generated from message gastrolog.v1.DeleteRetentionPolicyResponse
  */
 export class DeleteRetentionPolicyResponse extends Message<DeleteRetentionPolicyResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteRetentionPolicyResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1224,6 +1259,7 @@ export class DeleteRetentionPolicyResponse extends Message<DeleteRetentionPolicy
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRetentionPolicyResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRetentionPolicyResponse {
@@ -1284,6 +1320,11 @@ export class PutVaultRequest extends Message<PutVaultRequest> {
  * @generated from message gastrolog.v1.PutVaultResponse
  */
 export class PutVaultResponse extends Message<PutVaultResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1292,6 +1333,7 @@ export class PutVaultResponse extends Message<PutVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutVaultResponse {
@@ -1367,6 +1409,11 @@ export class DeleteVaultRequest extends Message<DeleteVaultRequest> {
  * @generated from message gastrolog.v1.DeleteVaultResponse
  */
 export class DeleteVaultResponse extends Message<DeleteVaultResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1375,6 +1422,7 @@ export class DeleteVaultResponse extends Message<DeleteVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteVaultResponse {
@@ -1435,6 +1483,11 @@ export class PutRouteRequest extends Message<PutRouteRequest> {
  * @generated from message gastrolog.v1.PutRouteResponse
  */
 export class PutRouteResponse extends Message<PutRouteResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutRouteResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1443,6 +1496,7 @@ export class PutRouteResponse extends Message<PutRouteResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutRouteResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutRouteResponse {
@@ -1503,6 +1557,11 @@ export class DeleteRouteRequest extends Message<DeleteRouteRequest> {
  * @generated from message gastrolog.v1.DeleteRouteResponse
  */
 export class DeleteRouteResponse extends Message<DeleteRouteResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteRouteResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1511,6 +1570,7 @@ export class DeleteRouteResponse extends Message<DeleteRouteResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRouteResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRouteResponse {
@@ -1571,6 +1631,11 @@ export class PutIngesterRequest extends Message<PutIngesterRequest> {
  * @generated from message gastrolog.v1.PutIngesterResponse
  */
 export class PutIngesterResponse extends Message<PutIngesterResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutIngesterResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1579,6 +1644,7 @@ export class PutIngesterResponse extends Message<PutIngesterResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutIngesterResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutIngesterResponse {
@@ -1639,6 +1705,11 @@ export class DeleteIngesterRequest extends Message<DeleteIngesterRequest> {
  * @generated from message gastrolog.v1.DeleteIngesterResponse
  */
 export class DeleteIngesterResponse extends Message<DeleteIngesterResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteIngesterResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1647,6 +1718,7 @@ export class DeleteIngesterResponse extends Message<DeleteIngesterResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteIngesterResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteIngesterResponse {
@@ -3888,6 +3960,11 @@ export class PutCertificateRequest extends Message<PutCertificateRequest> {
  * @generated from message gastrolog.v1.PutCertificateResponse
  */
 export class PutCertificateResponse extends Message<PutCertificateResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutCertificateResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3896,6 +3973,7 @@ export class PutCertificateResponse extends Message<PutCertificateResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutCertificateResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCertificateResponse {
@@ -3956,6 +4034,11 @@ export class DeleteCertificateRequest extends Message<DeleteCertificateRequest> 
  * @generated from message gastrolog.v1.DeleteCertificateResponse
  */
 export class DeleteCertificateResponse extends Message<DeleteCertificateResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<DeleteCertificateResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3964,6 +4047,7 @@ export class DeleteCertificateResponse extends Message<DeleteCertificateResponse
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteCertificateResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCertificateResponse {
@@ -4024,6 +4108,11 @@ export class PauseVaultRequest extends Message<PauseVaultRequest> {
  * @generated from message gastrolog.v1.PauseVaultResponse
  */
 export class PauseVaultResponse extends Message<PauseVaultResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PauseVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4032,6 +4121,7 @@ export class PauseVaultResponse extends Message<PauseVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PauseVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PauseVaultResponse {
@@ -4092,6 +4182,11 @@ export class ResumeVaultRequest extends Message<ResumeVaultRequest> {
  * @generated from message gastrolog.v1.ResumeVaultResponse
  */
 export class ResumeVaultResponse extends Message<ResumeVaultResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<ResumeVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4100,6 +4195,7 @@ export class ResumeVaultResponse extends Message<ResumeVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ResumeVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeVaultResponse {
@@ -4480,6 +4576,11 @@ export class PutNodeConfigRequest extends Message<PutNodeConfigRequest> {
  * @generated from message gastrolog.v1.PutNodeConfigResponse
  */
 export class PutNodeConfigResponse extends Message<PutNodeConfigResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetConfigResponse config = 1;
+   */
+  config?: GetConfigResponse;
+
   constructor(data?: PartialMessage<PutNodeConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4488,6 +4589,7 @@ export class PutNodeConfigResponse extends Message<PutNodeConfigResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutNodeConfigResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config", kind: "message", T: GetConfigResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutNodeConfigResponse {

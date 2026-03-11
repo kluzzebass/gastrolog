@@ -10,7 +10,7 @@ export function usePutRetentionPolicy() {
       maxBytes: bigint;
       maxChunks: bigint;
     }) => {
-      await configClient.putRetentionPolicy({
+      return configClient.putRetentionPolicy({
         config: {
           id: args.id,
           name: args.name,
@@ -25,6 +25,6 @@ export function usePutRetentionPolicy() {
 
 export function useDeleteRetentionPolicy() {
   return useConfigMutation(async (id: string) => {
-    await configClient.deleteRetentionPolicy({ id });
+    return configClient.deleteRetentionPolicy({ id });
   });
 }

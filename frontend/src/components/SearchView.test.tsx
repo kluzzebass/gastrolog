@@ -351,12 +351,26 @@ describe("SearchView", () => {
   });
 
   test("header shows system stats", () => {
-    const { getByText } = renderSV({
+    const qc = createTestQueryClient();
+    qc.setQueryData(["clusterStatus"], {
+      clusterEnabled: false,
+      nodes: [{
+        id: "node-1",
+        name: "node-1",
+        stats: {
+          cpuPercent: 42.5,
+          memoryRss: BigInt(1024 * 1024 * 256),
+          vaults: [],
+        },
+      }],
+    });
+    Object.assign(currentSv, {
       cpuPercent: 42.5,
       memoryBytes: BigInt(1024 * 1024 * 256),
     });
+    const { getByText } = render(<SearchView />, { wrapper: settingsWrapper(qc) });
     expect(getByText("42.5%")).toBeTruthy();
-    expect(getByText("256 MB")).toBeTruthy();
+    expect(getByText("256.0 MB")).toBeTruthy();
   });
 
   test("sort button toggles reverse order", () => {

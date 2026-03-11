@@ -35,7 +35,7 @@ export function usePutCertificate() {
       keyFile?: string;
       setAsDefault?: boolean;
     }) => {
-      await configClient.putCertificate({
+      return configClient.putCertificate({
         id: args.id,
         name: args.name,
         certPem: args.certPem ?? "",
@@ -52,7 +52,7 @@ export function usePutCertificate() {
 export function useDeleteCertificate() {
   return useConfigMutation(
     async (id: string) => {
-      await configClient.deleteCertificate({ id });
+      return configClient.deleteCertificate({ id });
     },
     [["certificates"], ["settings"]],
   );

@@ -3,7 +3,7 @@ import { useConfigMutation } from "./useConfig";
 
 export function usePutFilter() {
   return useConfigMutation(async (args: { id: string; name: string; expression: string }) => {
-    await configClient.putFilter({
+    return configClient.putFilter({
       config: { id: args.id, name: args.name, expression: args.expression },
     });
   });
@@ -11,6 +11,6 @@ export function usePutFilter() {
 
 export function useDeleteFilter() {
   return useConfigMutation(async (id: string) => {
-    await configClient.deleteFilter({ id });
+    return configClient.deleteFilter({ id });
   });
 }

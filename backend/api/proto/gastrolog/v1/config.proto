@@ -233,43 +233,57 @@ message PutFilterRequest {
   FilterConfig config = 2;
 }
 
-message PutFilterResponse {}
+message PutFilterResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteFilterRequest {
   string id = 1;
 }
 
-message DeleteFilterResponse {}
+message DeleteFilterResponse {
+  GetConfigResponse config = 1;
+}
 
 message PutRotationPolicyRequest {
   RotationPolicyConfig config = 2;
 }
 
-message PutRotationPolicyResponse {}
+message PutRotationPolicyResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteRotationPolicyRequest {
   string id = 1;
 }
 
-message DeleteRotationPolicyResponse {}
+message DeleteRotationPolicyResponse {
+  GetConfigResponse config = 1;
+}
 
 message PutRetentionPolicyRequest {
   RetentionPolicyConfig config = 2;
 }
 
-message PutRetentionPolicyResponse {}
+message PutRetentionPolicyResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteRetentionPolicyRequest {
   string id = 1;
 }
 
-message DeleteRetentionPolicyResponse {}
+message DeleteRetentionPolicyResponse {
+  GetConfigResponse config = 1;
+}
 
 message PutVaultRequest {
   VaultConfig config = 1;
 }
 
-message PutVaultResponse {}
+message PutVaultResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteVaultRequest {
   string id = 1;
@@ -279,31 +293,41 @@ message DeleteVaultRequest {
   bool delete_data = 3;
 }
 
-message DeleteVaultResponse {}
+message DeleteVaultResponse {
+  GetConfigResponse config = 1;
+}
 
 message PutRouteRequest {
   RouteConfig config = 1;
 }
 
-message PutRouteResponse {}
+message PutRouteResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteRouteRequest {
   string id = 1;
 }
 
-message DeleteRouteResponse {}
+message DeleteRouteResponse {
+  GetConfigResponse config = 1;
+}
 
 message PutIngesterRequest {
   IngesterConfig config = 1;
 }
 
-message PutIngesterResponse {}
+message PutIngesterResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteIngesterRequest {
   string id = 1;
 }
 
-message DeleteIngesterResponse {}
+message DeleteIngesterResponse {
+  GetConfigResponse config = 1;
+}
 
 message GetSettingsRequest {
   bool include_secrets = 1; // When true, return actual secret values (for export/backup).
@@ -575,25 +599,33 @@ message PutCertificateRequest {
   bool set_as_default = 6;
 }
 
-message PutCertificateResponse {}
+message PutCertificateResponse {
+  GetConfigResponse config = 1;
+}
 
 message DeleteCertificateRequest {
   string id = 1;
 }
 
-message DeleteCertificateResponse {}
+message DeleteCertificateResponse {
+  GetConfigResponse config = 1;
+}
 
 message PauseVaultRequest {
   string id = 1;
 }
 
-message PauseVaultResponse {}
+message PauseVaultResponse {
+  GetConfigResponse config = 1;
+}
 
 message ResumeVaultRequest {
   string id = 1;
 }
 
-message ResumeVaultResponse {}
+message ResumeVaultResponse {
+  GetConfigResponse config = 1;
+}
 
 message TestIngesterRequest {
   string type = 1;
@@ -634,7 +666,9 @@ message PutNodeConfigRequest {
   NodeConfig config = 1;
 }
 
-message PutNodeConfigResponse {}
+message PutNodeConfigResponse {
+  GetConfigResponse config = 1;
+}
 
 message GenerateNameRequest {}
 
