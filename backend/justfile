@@ -88,7 +88,7 @@ cluster-node1:
   # Logs go to stderr; merge into stdout so we can tee and extract the token.
   go run ./cmd/gastrolog server \
     --home data/node1 \
-    --addr :4564 \
+    --listen :4564 \
     --cluster-addr :4566 2>&1 | while IFS= read -r line; do
       echo "$line" >&2
       if [[ "$line" == *"cluster join token"*"token="* ]]; then
@@ -112,7 +112,7 @@ cluster-node2:
   TOKEN=$(cat data/cluster-token)
   exec go run ./cmd/gastrolog server \
     --home data/node2 \
-    --addr :4574 \
+    --listen :4574 \
     --cluster-addr :4576 \
     --join-addr localhost:4566 \
     --join-token "$TOKEN"
@@ -128,7 +128,7 @@ cluster-node3:
   TOKEN=$(cat data/cluster-token)
   exec go run ./cmd/gastrolog server \
     --home data/node3 \
-    --addr :4584 \
+    --listen :4584 \
     --cluster-addr :4586 \
     --join-addr localhost:4566 \
     --join-token "$TOKEN"
@@ -144,7 +144,7 @@ cluster-node4:
   TOKEN=$(cat data/cluster-token)
   exec go run ./cmd/gastrolog server \
     --home data/node4 \
-    --addr :4594 \
+    --listen :4594 \
     --cluster-addr :4596 \
     --join-addr localhost:4566 \
     --join-token "$TOKEN" \
@@ -152,28 +152,28 @@ cluster-node4:
 
 # Runs an existing cluster node 1 (no init, no enrollment).
 run-node1:
-  go run ./cmd/gastrolog server --home data/node1 --addr :4564 --cluster-addr :4566
+  go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566
 
 # Runs an existing cluster node 2 (no init, no enrollment).
 run-node2:
-  go run ./cmd/gastrolog server --home data/node2 --addr :4574 --cluster-addr :4576
+  go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576
 
 # Runs an existing cluster node 3 (no init, no enrollment).
 run-node3:
-  go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4586
+  go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586
 
 # Runs an existing cluster node 4 (nonvoter, no init, no enrollment).
 run-node4:
-  go run ./cmd/gastrolog server --home data/node4 --addr :4594 --cluster-addr :4596
+  go run ./cmd/gastrolog server --home data/node4 --listen :4594 --cluster-addr :4596
 
 # Runs all 4 cluster nodes in one terminal with colored output.
 cluster-run:
   go run ./cmd/multirun \
     --name node1,node2,node3,node4 \
-    "go run ./cmd/gastrolog server --home data/node1 --addr :4564 --cluster-addr :4566" \
-    "go run ./cmd/gastrolog server --home data/node2 --addr :4574 --cluster-addr :4576" \
-    "go run ./cmd/gastrolog server --home data/node3 --addr :4584 --cluster-addr :4586" \
-    "go run ./cmd/gastrolog server --home data/node4 --addr :4594 --cluster-addr :4596"
+    "go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566" \
+    "go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576" \
+    "go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586" \
+    "go run ./cmd/gastrolog server --home data/node4 --listen :4594 --cluster-addr :4596"
 
 # --- End cluster recipes ---
 
