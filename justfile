@@ -47,7 +47,15 @@ audit:
 cloc:
     cloc . --exclude-dir=node_modules,dist,.claude,.dogcats,.github,.zed,deploy,data,stores,gen,vendor --exclude-ext=lock,sum --not-match-f='\.test$'
 
-# Tag and push to kick off draft release creation via GitHub Actions. Usage: just draft patch
+# Start cloud storage emulators (MinIO, Azurite, fake-gcs-server)
+cloud-storage-up:
+    docker compose -f test/cloud-storage/compose.yml up -d
+
+# Tear down cloud storage emulators
+cloud-storage-down:
+    docker compose -f test/cloud-storage/compose.yml down -v
+
+# Tag and push to kick off draft release creation via GitHub Actions.
 draft bump:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -60,10 +68,12 @@ draft bump:
     echo "Monitor: https://github.com/kluzzebass/gastrolog/actions"
     echo ""
     echo "Once the draft is ready:"
-    echo "  just release-notes       # generate release notes"
-    echo "  just publish $version    # publish after reviewing notes"
+    echo "  just release-notes         # generate release notes"
+    echo "  just publish $version      # publish after reviewing notes"
+    echo ""
+    echo "Tip: run 'just changelog <bump>' BEFORE drafting to update CHANGELOG.md"
 
-# Publish a draft release after verifying release notes exist. Usage: just publish [vVersion]
+# Publish a draft release after verifying release notes exist.
 publish version="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -95,6 +105,58 @@ publish version="":
     echo "Publishing $version..."
     gh release edit "$version" --draft=false
     echo "Released $version"
+
+# Generate a changelog entry for the next release using Claude Code.
+changelog bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    version=$(svu {{bump}})
+
+    # Find the latest release tag
+    prev=$(gh release list --json tagName,isDraft -q '[.[] | select(.isDraft | not)] | .[0].tagName' 2>/dev/null || true)
+    if [ -z "$prev" ]; then
+        prev=$(git tag --sort=-v:refname | head -1)
+    fi
+    if [ -z "$prev" ]; then
+        echo "Error: no previous release tag found."
+        exit 1
+    fi
+
+    echo "Generating changelog for $version (since $prev)..."
+
+    log=$(git log --format="- %s%n%b" "$prev"..HEAD | sed '/^$/d; /^Co-Authored-By:/d')
+    changelog=$(cat CHANGELOG.md)
+
+    entry=$(claude -p --output-format text --append-system-prompt "Output ONLY raw markdown. No insights, no commentary, no preamble, no sign-off." "$(cat <<PROMPT
+    You are writing a CHANGELOG.md entry for GastroLog $version.
+
+    RULES:
+    - Output ONLY the changelog section. No preamble, no commentary. Just the entry.
+    - Start with: ## $version — $(date +%Y-%m-%d)
+    - Group changes under ### headings: Breaking Changes, Features, Performance, Fixes (omit empty groups).
+    - Document what is DIFFERENT from the previous release ($prev). That is ALL the user cares about.
+    - Do NOT expose internal development churn. If a feature was added then tweaked — that is ONE entry.
+    - Same-cycle bug fixes (bugs introduced and fixed within this release cycle) should NOT appear.
+    - Internal-only changes (CI workflows, build scripts, code cleanup, dead code removal) should NOT appear unless they affect users.
+    - Use concise bullet points with **bold lead** — description format, matching the existing changelog style.
+    - Keep it short and scannable. No prose paragraphs.
+    - Look at the existing CHANGELOG.md for tone and formatting conventions.
+
+    Existing CHANGELOG.md (for style reference):
+    $changelog
+
+    Git log ($prev..HEAD):
+    $log
+    PROMPT
+    )")
+
+    # Insert the new entry before the previous release heading
+    awk -v entry="$entry" '/^## v[0-9]/ && !inserted { print entry; print ""; inserted=1 } { print }' CHANGELOG.md > CHANGELOG.md.tmp
+    mv CHANGELOG.md.tmp CHANGELOG.md
+
+    echo "Changelog updated with $version entry."
+    echo "Review the changes in CHANGELOG.md before committing."
 
 # Generate release notes for the latest draft using Claude Code. Usage: just release-notes
 release-notes:

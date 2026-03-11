@@ -1,0 +1,66 @@
+# Cloud storage emulators for integration testing vault backends.
+#
+# Usage:
+#   just cloud-storage-up     # start all emulators
+#   just cloud-storage-down   # tear down
+#
+# Endpoints:
+#   MinIO (S3):    http://localhost:9000  (console: http://localhost:9001)
+#   Azurite:       http://localhost:10000 (blob), :10001 (queue), :10002 (table)
+#   fake-gcs:      http://localhost:4443
+#
+# Credentials:
+#   MinIO:    gastrolog / gastrolog
+#   Azurite:  connection string "UseDevelopmentStorage=true" (well-known dev account)
+#   fake-gcs: no auth (use option.WithoutAuthentication() in Go client)
+
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: gastrolog-minio
+    command:
+      - server
+      - /data
+      - --console-address=:9001
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: gastrolog
+      MINIO_ROOT_PASSWORD: gastrolog
+    volumes:
+      - minio-data:/data
+
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    container_name: gastrolog-azurite
+    command:
+      - azurite
+      - --blobHost=0.0.0.0
+      - --queueHost=0.0.0.0
+      - --tableHost=0.0.0.0
+      - --skipApiVersionCheck
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+    volumes:
+      - azurite-data:/data
+
+  fake-gcs:
+    image: fsouza/fake-gcs-server:latest
+    container_name: gastrolog-fake-gcs
+    command:
+      - -scheme=http
+      - -port=4443
+      - -backend=filesystem
+      - -filesystem-root=/data
+    ports:
+      - "4443:4443"
+    volumes:
+      - fake-gcs-data:/data
+
+volumes:
+  minio-data:
+  azurite-data:
+  fake-gcs-data:
