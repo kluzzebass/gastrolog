@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FormField, TextInput, SelectInput } from "./FormField";
+import { FormField, TextInput, TextArea, SelectInput } from "./FormField";
 import { Checkbox } from "./Checkbox";
 import { useTestVault } from "../../api/hooks/useVaults";
 import { useThemeClass } from "../../hooks/useThemeClass";
@@ -122,12 +122,12 @@ export function VaultParamsForm({
         )}
         {provider === "azure" && (
           <FormField label="Connection String" dark={dark}>
-            <TextInput
+            <TextArea
               value={get("connection_string")}
               onChange={(v) => set("connection_string", v)}
               placeholder=""
               dark={dark}
-              mono
+              rows={2}
             />
           </FormField>
         )}
