@@ -1,5 +1,4 @@
 import { FormField, TextInput } from "../FormField";
-import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function HttpForm({
@@ -24,7 +23,6 @@ export function HttpForm({
           examples={[":3100"]}
         />
       </FormField>
-      <TestConnectionButton type="http" params={params} dark={dark} />
     </div>
   );
 }

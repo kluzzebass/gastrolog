@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
+	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -161,7 +163,7 @@ func (s *ConfigServer) PutIngester(
 	// node — remote ingesters may depend on resources (files, sockets) that
 	// only exist on the owning node.
 	if ingCfg.Enabled {
-		if err := s.validateIngester(ingCfg); err != nil {
+		if err := s.validateIngester(ingCfg, ingesters); err != nil {
 			return nil, err
 		}
 	}
@@ -174,7 +176,7 @@ func (s *ConfigServer) PutIngester(
 	return connect.NewResponse(&apiv1.PutIngesterResponse{Config: s.buildFullConfig(ctx)}), nil
 }
 
-func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
+func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig, existing []config.IngesterConfig) error {
 	reg, ok := s.factories.IngesterTypes[ingCfg.Type]
 	if !ok {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
@@ -190,6 +192,101 @@ func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig) error {
 	}
 	if _, err := reg.Factory(ingCfg.ID, params, s.factories.Logger); err != nil {
 		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+
+	// For listener ingesters: (1) reject config-level address collisions
+	// with other gastrolog ingesters, then (2) trial-bind to catch ports
+	// held by external processes. Skip the trial bind when this ingester
+	// is already running — it legitimately holds its own ports.
+	if reg.ListenAddrs != nil {
+		if err := s.checkListenAddrConflicts(ingCfg, existing); err != nil {
+			return err
+		}
+		if s.orch.GetIngesterStats(ingCfg.ID) == nil {
+			if err := checkListenAddrs(reg.ListenAddrs(ingCfg.Params)); err != nil {
+				return connect.NewError(connect.CodeInvalidArgument, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// checkListenAddrs verifies that all addresses are available to bind.
+func checkListenAddrs(addrs []orchestrator.ListenAddr) error {
+	for _, a := range addrs {
+		if err := tryBind(a.Network, a.Address); err != nil {
+			return fmt.Errorf("%s %s: %w", a.Network, a.Address, err)
+		}
+	}
+	return nil
+}
+
+// normalizeAddr ensures the address has a host:port format.
+// Bare port numbers like "514" become ":514".
+func normalizeAddr(address string) string {
+	if address == "" {
+		return address
+	}
+	// Already has a colon → assume host:port or :port.
+	if strings.Contains(address, ":") {
+		return address
+	}
+	// Bare number → treat as port.
+	return ":" + address
+}
+
+// tryBind attempts a trial bind on the given network/address and immediately
+// closes the listener. Returns nil if the address is available.
+func tryBind(network, address string) error {
+	address = normalizeAddr(address)
+	switch network {
+	case "udp":
+		pc, err := net.ListenPacket("udp", address)
+		if err != nil {
+			return err
+		}
+		return pc.Close()
+	default:
+		ln, err := net.Listen(network, address)
+		if err != nil {
+			return err
+		}
+		return ln.Close()
+	}
+}
+
+// checkListenAddrConflicts detects address collisions between listener
+// ingesters. Two ingesters on the same node cannot bind the same
+// network+address pair.
+func (s *ConfigServer) checkListenAddrConflicts(ingCfg config.IngesterConfig, existing []config.IngesterConfig) error {
+	reg := s.factories.IngesterTypes[ingCfg.Type]
+	wanted := reg.ListenAddrs(ingCfg.Params)
+
+	for _, other := range existing {
+		if other.ID == ingCfg.ID {
+			continue // same ingester — updating self
+		}
+		otherReg, ok := s.factories.IngesterTypes[other.Type]
+		if !ok || otherReg.ListenAddrs == nil {
+			continue
+		}
+		// Only compare ingesters on the same node.
+		otherNode := other.NodeID
+		if otherNode == "" {
+			otherNode = s.localNodeID
+		}
+		if otherNode != ingCfg.NodeID {
+			continue
+		}
+		for _, w := range wanted {
+			for _, o := range otherReg.ListenAddrs(other.Params) {
+				if w.Network == o.Network && w.Address == o.Address {
+					return connect.NewError(connect.CodeInvalidArgument,
+						fmt.Errorf("listen address %s %s is already used by ingester %q", w.Network, w.Address, other.Name))
+				}
+			}
+		}
 	}
 	return nil
 }
@@ -246,30 +343,63 @@ func (s *ConfigServer) GetIngesterDefaults(
 	return connect.NewResponse(&apiv1.GetIngesterDefaultsResponse{Types: types}), nil
 }
 
-// TestIngester tests connectivity for an ingester configuration without saving it.
+// TestIngester tests an ingester configuration without saving it.
+// For connection-based ingesters (kafka, mqtt, …) it tests connectivity.
+// For listener ingesters (syslog, otlp, …) it checks port availability.
 func (s *ConfigServer) TestIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.TestIngesterRequest],
 ) (*connect.Response[apiv1.TestIngesterResponse], error) {
 	reg, ok := s.factories.IngesterTypes[req.Msg.Type]
-	if !ok || reg.Tester == nil {
+	if !ok {
 		return connect.NewResponse(&apiv1.TestIngesterResponse{
 			Success: false,
-			Message: fmt.Sprintf("connection test not supported for ingester type %q", req.Msg.Type),
+			Message: fmt.Sprintf("unknown ingester type %q", req.Msg.Type),
 		}), nil
 	}
 
-	msg, err := reg.Tester(ctx, req.Msg.Params)
-
-	if err != nil {
-		return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
-			Success: false,
-			Message: err.Error(),
+	// Connection-based ingesters: delegate to the registered tester.
+	if reg.Tester != nil {
+		msg, err := reg.Tester(ctx, req.Msg.Params)
+		if err != nil {
+			return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
+				Success: false,
+				Message: err.Error(),
+			}), nil
+		}
+		return connect.NewResponse(&apiv1.TestIngesterResponse{
+			Success: true,
+			Message: msg,
 		}), nil
 	}
+
+	// Listener ingesters: check port availability.
+	if reg.ListenAddrs != nil {
+		addrs := reg.ListenAddrs(req.Msg.Params)
+		// Skip trial bind if this ingester is already running (it holds its ports).
+		if req.Msg.Id != "" {
+			if id, err := uuid.Parse(req.Msg.Id); err == nil && s.orch.GetIngesterStats(id) != nil {
+				return connect.NewResponse(&apiv1.TestIngesterResponse{
+					Success: true,
+					Message: "ports held by running ingester",
+				}), nil
+			}
+		}
+		if err := checkListenAddrs(addrs); err != nil {
+			return connect.NewResponse(&apiv1.TestIngesterResponse{ //nolint:nilerr // port conflict is reported in the response body
+				Success: false,
+				Message: err.Error(),
+			}), nil
+		}
+		return connect.NewResponse(&apiv1.TestIngesterResponse{
+			Success: true,
+			Message: "listen addresses available",
+		}), nil
+	}
+
 	return connect.NewResponse(&apiv1.TestIngesterResponse{
 		Success: true,
-		Message: msg,
+		Message: "no checks available",
 	}), nil
 }
 

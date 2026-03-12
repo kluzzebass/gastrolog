@@ -1,5 +1,4 @@
 import { FormField, TextInput } from "../FormField";
-import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function OtlpForm({
@@ -40,7 +39,6 @@ export function OtlpForm({
           />
         </FormField>
       </div>
-      <TestConnectionButton type="otlp" params={params} dark={dark} />
     </div>
   );
 }

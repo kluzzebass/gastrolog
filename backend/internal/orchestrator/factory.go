@@ -32,14 +32,21 @@ import (
 // or an error describing the failure.
 type ConnectionTester func(ctx context.Context, params map[string]string) (string, error)
 
+// ListenAddr describes a network address that a listener ingester will bind to.
+type ListenAddr struct {
+	Network string // "tcp", "udp"
+	Address string
+}
+
 // IngesterRegistration bundles an ingester's factory, default parameters,
 // and optional connection tester into a single registration unit.
 // This prevents the factory, defaults, and tester maps from diverging
 // when new ingester types are added.
 type IngesterRegistration struct {
-	Factory  IngesterFactory
-	Defaults func() map[string]string
-	Tester   ConnectionTester // nil if not supported
+	Factory     IngesterFactory
+	Defaults    func() map[string]string
+	Tester      ConnectionTester                      // nil if not supported
+	ListenAddrs func(params map[string]string) []ListenAddr // nil for non-listeners
 }
 
 type Factories struct {

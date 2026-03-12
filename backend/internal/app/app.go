@@ -791,8 +791,8 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
-	noCtx := func(fn func(map[string]string) (string, error)) orchestrator.ConnectionTester {
-		return func(_ context.Context, params map[string]string) (string, error) { return fn(params) }
+	listen := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, addrs func(map[string]string) []orchestrator.ListenAddr) orchestrator.IngesterRegistration {
+		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, ListenAddrs: addrs}
 	}
 	ingesterTypes := map[string]orchestrator.IngesterRegistration{
 		"chatterbox": reg(chatterbox.NewIngester, chatterbox.ParamDefaults, nil),
@@ -800,14 +800,14 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 			func(ctx context.Context, params map[string]string) (string, error) {
 				return ingestdocker.TestConnection(ctx, params, cfgStore)
 			}),
-		"fluentfwd": reg(ingestfluentfwd.NewFactory(), ingestfluentfwd.ParamDefaults, noCtx(ingestfluentfwd.TestConnection)),
-		"http":      reg(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, noCtx(ingesthttp.TestConnection)),
+		"fluentfwd": listen(ingestfluentfwd.NewFactory(), ingestfluentfwd.ParamDefaults, ingestfluentfwd.ListenAddrs),
+		"http":      listen(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
 		"kafka":     reg(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
 		"mqtt":      reg(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
 		"metrics":   reg(ingestmetrics.NewFactory(orch), ingestmetrics.ParamDefaults, nil),
-		"otlp":      reg(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, noCtx(ingestotlp.TestConnection)),
-		"relp":      reg(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, noCtx(ingestrelp.TestConnection)),
-		"syslog":    reg(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, noCtx(ingestsyslog.TestConnection)),
+		"otlp":      listen(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
+		"relp":      listen(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, ingestrelp.ListenAddrs),
+		"syslog":    listen(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, ingestsyslog.ListenAddrs),
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {

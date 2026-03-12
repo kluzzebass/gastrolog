@@ -37,6 +37,7 @@ export {
   usePutIngester,
   useDeleteIngester,
   useTestIngester,
+  useCheckListenAddrs,
 } from "./useIngesters";
 export { useJob, useWatchJobs } from "./useJobs";
 export { useWatchConfig } from "./useWatchConfig";

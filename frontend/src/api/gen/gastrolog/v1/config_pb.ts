@@ -4238,6 +4238,14 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
    */
   params: { [key: string]: string } = {};
 
+  /**
+   * Optional ingester ID — when set, the trial-bind port check skips
+   * addresses held by this ingester (it's already running on them).
+   *
+   * @generated from field: string id = 3;
+   */
+  id = "";
+
   constructor(data?: PartialMessage<TestIngesterRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4248,6 +4256,7 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 3, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestIngesterRequest {

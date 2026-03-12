@@ -1,5 +1,4 @@
 import { FormField, TextInput } from "../FormField";
-import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function FluentfwdForm({
@@ -24,7 +23,6 @@ export function FluentfwdForm({
           examples={[":24224"]}
         />
       </FormField>
-      <TestConnectionButton type="fluentfwd" params={params} dark={dark} />
     </div>
   );
 }

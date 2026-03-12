@@ -633,6 +633,9 @@ message ResumeVaultResponse {
 message TestIngesterRequest {
   string type = 1;
   map<string, string> params = 2;
+  // Optional ingester ID — when set, the trial-bind port check skips
+  // addresses held by this ingester (it's already running on them).
+  string id = 3;
 }
 
 message TestIngesterResponse {

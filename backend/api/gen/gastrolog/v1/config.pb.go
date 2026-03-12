@@ -5033,9 +5033,12 @@ func (x *ResumeVaultResponse) GetConfig() *GetConfigResponse {
 }
 
 type TestIngesterRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
-	Params        map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Type   string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Params map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Optional ingester ID — when set, the trial-bind port check skips
+	// addresses held by this ingester (it's already running on them).
+	Id            string `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5082,6 +5085,13 @@ func (x *TestIngesterRequest) GetParams() map[string]string {
 		return x.Params
 	}
 	return nil
+}
+
+func (x *TestIngesterRequest) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
 }
 
 type TestIngesterResponse struct {
@@ -6885,10 +6895,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x12ResumeVaultRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"N\n" +
 	"\x13ResumeVaultResponse\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config\"\xab\x01\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config\"\xbb\x01\n" +
 	"\x13TestIngesterRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12E\n" +
-	"\x06params\x18\x02 \x03(\v2-.gastrolog.v1.TestIngesterRequest.ParamsEntryR\x06params\x1a9\n" +
+	"\x06params\x18\x02 \x03(\v2-.gastrolog.v1.TestIngesterRequest.ParamsEntryR\x06params\x12\x0e\n" +
+	"\x02id\x18\x03 \x01(\tR\x02id\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"J\n" +

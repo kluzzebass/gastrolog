@@ -14,7 +14,7 @@ import { SyslogForm } from "./SyslogForm";
 import type { IngesterParamsFormProps } from "./types";
 
 export type { IngesterParamsFormProps } from "./types";
-export { isIngesterParamsValid } from "./validation";
+export { isIngesterParamsValid, listenAddrConflict } from "./validation";
 
 const FORM_MAP: Record<
   string,

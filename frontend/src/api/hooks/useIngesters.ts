@@ -73,12 +73,41 @@ export function useDeleteIngester() {
 
 export function useTestIngester() {
   return useMutation({
-    mutationFn: async (args: { type: string; params: Record<string, string> }) => {
+    mutationFn: async (args: { type: string; params: Record<string, string>; id?: string }) => {
       const response = await configClient.testIngester({
         type: args.type,
         params: stripEmptyParams(args.params),
+        id: args.id ?? "",
       });
       return response;
     },
+  });
+}
+
+/**
+ * Auto-checks listen address availability for listener ingesters.
+ * Calls TestIngester on the server with debounce whenever params change.
+ */
+export function useCheckListenAddrs(type: string, params: Record<string, string>, id: string) {
+  const LISTENER_TYPES = new Set(["syslog", "http", "fluentfwd", "otlp", "relp"]);
+  const isListener = LISTENER_TYPES.has(type);
+
+  // Build a stable key from the address-relevant params.
+  const stripped = stripEmptyParams(params);
+  const paramKey = isListener ? JSON.stringify(stripped) : "";
+
+  return useQuery({
+    queryKey: ["checkListenAddrs", type, paramKey, id],
+    queryFn: async () => {
+      const response = await configClient.testIngester({
+        type,
+        params: stripped,
+        id,
+      });
+      return response;
+    },
+    enabled: isListener && paramKey !== "{}",
+    staleTime: 5_000,
+    gcTime: 10_000,
   });
 }

@@ -1,5 +1,4 @@
 import { FormField, TextInput } from "../FormField";
-import { TestConnectionButton } from "./TestConnectionButton";
 import type { SubFormProps } from "./types";
 
 export function SyslogForm({
@@ -40,7 +39,6 @@ export function SyslogForm({
           />
         </FormField>
       </div>
-      <TestConnectionButton type="syslog" params={params} dark={dark} />
     </div>
   );
 }

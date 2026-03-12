@@ -1,6 +1,5 @@
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
-import { TestConnectionButton } from "./TestConnectionButton";
 import { useCertificates } from "../../../api/hooks/useCertificates";
 import type { SubFormProps } from "./types";
 
@@ -86,7 +85,6 @@ export function RelpForm({
           </FormField>
         </div>
       )}
-      <TestConnectionButton type="relp" params={params} dark={dark} />
     </div>
   );
 }

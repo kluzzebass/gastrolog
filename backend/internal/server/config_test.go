@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"net"
 	"net/http"
 	"slices"
 	"testing"
@@ -526,7 +527,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.ConfigSer
 			"file":   indexfile.NewFactory(),
 		},
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults},
+			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
 		},
 	}
 
@@ -1010,6 +1011,116 @@ func TestPutIngesterMissingRequiredParam(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected error for syslog without addr params")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestPutIngesterListenAddrConflict(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	// Create a syslog ingester on :15140.
+	_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Name:    "syslog-a",
+			Type:    "syslog",
+			Enabled: true,
+			Params:  map[string]string{"udp_addr": ":15140"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("first ingester: %v", err)
+	}
+
+	// Second ingester on same address should fail.
+	_, err = client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Name:    "syslog-b",
+			Type:    "syslog",
+			Enabled: true,
+			Params:  map[string]string{"udp_addr": ":15140"},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for conflicting listen address")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestPutIngesterListenAddrUpdateSelf(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	// Create a syslog ingester.
+	resp, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Name:    "syslog-self",
+			Type:    "syslog",
+			Enabled: true,
+			Params:  map[string]string{"udp_addr": ":15141"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Find the created ingester's ID.
+	var ingID string
+	for _, ing := range resp.Msg.Config.Ingesters {
+		if ing.Name == "syslog-self" {
+			ingID = ing.Id
+			break
+		}
+	}
+	if ingID == "" {
+		t.Fatal("ingester not found in config response")
+	}
+
+	// Re-save the same ingester with the same address — should succeed.
+	_, err = client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Id:      ingID,
+			Name:    "syslog-self",
+			Type:    "syslog",
+			Enabled: true,
+			Params:  map[string]string{"udp_addr": ":15141"},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("re-save same address should succeed: %v", err)
+	}
+}
+
+func TestPutIngesterExternalPortConflict(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetupWithIngesters(t)
+	ctx := context.Background()
+
+	// Occupy a UDP port to simulate an external process.
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pc.Close()
+	occupiedAddr := pc.LocalAddr().String()
+
+	// Creating an ingester on that address should fail at trial bind.
+	_, err = client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+		Config: &gastrologv1.IngesterConfig{
+			Name:    "syslog-external-conflict",
+			Type:    "syslog",
+			Enabled: true,
+			Params:  map[string]string{"udp_addr": occupiedAddr},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error when external process holds the port")
 	}
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
