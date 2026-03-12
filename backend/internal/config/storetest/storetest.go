@@ -29,7 +29,18 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	// Filters
+	testFilters(t, newStore)
+	testRotationPolicies(t, newStore)
+	testRetentionPolicies(t, newStore)
+	testVaults(t, newStore)
+	testIngesters(t, newStore)
+	testIntegration(t, newStore)
+	testServerSettings(t, newStore)
+	testUsers(t, newStore)
+	testAuth(t, newStore)
+}
+
+func testFilters(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("PutGetFilter", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -54,8 +65,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("Expression: expected %q, got %q", "*", got.Expression)
 		}
 	})
+}
 
-	// Rotation policies
+func testRotationPolicies(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("PutGetRotationPolicy", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -215,8 +227,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil MaxRecords, got %v", *got.MaxRecords)
 		}
 	})
+}
 
-	// Retention policies
+func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("PutGetRetentionPolicy", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -367,7 +380,6 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	// Vault retention rules
 	t.Run("VaultRetentionRules", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -408,8 +420,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("rule[1] destination: got %v, want %s", got.RetentionRules[1].Destination, dstID)
 		}
 	})
+}
 
-	// Vaults
+func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("PutGetVault", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -565,8 +578,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil Params, got %v", got.Params)
 		}
 	})
+}
 
-	// Ingesters
+func testIngesters(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("PutGetIngester", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -723,8 +737,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil Params, got %v", got.Params)
 		}
 	})
+}
 
-	// Integration
+func testIntegration(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("LoadAfterCRUD", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -808,8 +823,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected nil, got %+v", ing)
 		}
 	})
+}
 
-	// Server Settings
+func testServerSettings(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("LoadSaveServerSettings", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -852,9 +868,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Errorf("expected %q, got %q", "new-secret", ss.Auth.JWTSecret)
 		}
 	})
+}
 
-	// Users
-
+func testUsers(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("CreateGetUser", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -1235,7 +1251,9 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("expected nil after user delete, got %q", *got)
 		}
 	})
+}
 
+func testAuth(t *testing.T, newStore func(t *testing.T) config.Store) {
 	t.Run("InvalidateTokens", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
@@ -1278,8 +1296,6 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatal("expected error invalidating non-existent user")
 		}
 	})
-
-	// Refresh tokens
 
 	t.Run("CreateGetRefreshToken", func(t *testing.T) {
 		s := newStore(t)
