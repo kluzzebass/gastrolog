@@ -18,6 +18,7 @@ service:
   telemetry:
     logs:
       level: debug
+      encoding: json
       output_paths: ["/var/log/otel/collector.log"]
   pipelines:
     logs:
