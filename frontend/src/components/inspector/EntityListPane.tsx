@@ -14,7 +14,8 @@ import { ExpandableCard } from "../settings/ExpandableCard";
 import { HelpButton } from "../HelpButton";
 import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
-import { formatTimestamp, elapsed, countdown, useTick } from "./JobCard";
+import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
+import { useTick } from "./JobCard";
 import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
@@ -305,7 +306,7 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       )}
       {job.startedAt && (
         <span className={`ml-auto font-mono text-[0.9em] shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}>
-          {elapsed(job.startedAt.toDate(), now)}
+          {elapsed(protoToInstant(job.startedAt), now)}
         </span>
       )}
     </div>
@@ -344,15 +345,15 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       </span>
       <span
         className={`font-mono text-[0.9em] text-right ${c("text-text-muted", "text-light-text-muted")}`}
-        title={job.lastRun ? formatTimestamp(job.lastRun.toDate()) : ""}
+        title={job.lastRun ? formatTimestamp(protoToInstant(job.lastRun)) : ""}
       >
-        {job.lastRun ? elapsed(job.lastRun.toDate(), now) : "\u2014"}
+        {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "\u2014"}
       </span>
       <span
         className={`font-mono text-[0.9em] text-right ${c("text-text-muted", "text-light-text-muted")}`}
-        title={job.nextRun ? formatTimestamp(job.nextRun.toDate()) : ""}
+        title={job.nextRun ? formatTimestamp(protoToInstant(job.nextRun)) : ""}
       >
-        {job.nextRun ? countdown(job.nextRun.toDate(), now) : "\u2014"}
+        {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "\u2014"}
       </span>
     </div>
   );

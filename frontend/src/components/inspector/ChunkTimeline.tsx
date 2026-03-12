@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import { protoToInstant, instantToMs } from "../../utils/temporal";
 import { formatBytes, formatDurationMs } from "../../utils/units";
 import { Badge } from "../Badge";
 
@@ -28,8 +29,8 @@ export function ChunkTimeline({
 
     const parsed = chunks
       .map((chunk) => {
-        const start = chunk.startTs?.toDate().getTime() ?? 0;
-        const end = chunk.endTs?.toDate().getTime() ?? start;
+        const start = chunk.startTs ? instantToMs(protoToInstant(chunk.startTs)) : 0;
+        const end = chunk.endTs ? instantToMs(protoToInstant(chunk.endTs)) : start;
         if (start === 0 && end === 0) return null;
         return {
           id: chunk.id,

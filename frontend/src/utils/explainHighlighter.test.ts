@@ -203,7 +203,8 @@ describe("formatTs", () => {
 
   test("formats a timestamp", () => {
     const ts = {
-      toDate: () => new Date("2024-03-15T14:30:45Z"),
+      seconds: 1710513045n,
+      nanos: 0,
     };
     const result = formatTs(ts);
     // Should be in HH:MM:SS 24-hour format

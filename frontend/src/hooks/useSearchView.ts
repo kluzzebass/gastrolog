@@ -18,6 +18,7 @@ import { Record as ProtoRecord } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
 import { timeRangeMs, sameRecord } from "../utils";
+import { protoToInstant, instantToISO, instantToMs } from "../utils/temporal";
 import {
   stripTimeRange,
   stripChunk,
@@ -96,9 +97,9 @@ function recordsToRawTable(records: ProtoRecord[]): TableResult {
   const decoder = new TextDecoder();
   const rows = records.map((rec) => {
     const values: string[] = Array.from({ length: columns.length }, () => "");
-    values[0] = rec.writeTs?.toDate().toISOString() ?? "";
-    values[1] = rec.ingestTs?.toDate().toISOString() ?? "";
-    values[2] = rec.sourceTs?.toDate().toISOString() ?? "";
+    values[0] = rec.writeTs ? instantToISO(protoToInstant(rec.writeTs)) : "";
+    values[1] = rec.ingestTs ? instantToISO(protoToInstant(rec.ingestTs)) : "";
+    values[2] = rec.sourceTs ? instantToISO(protoToInstant(rec.sourceTs)) : "";
     for (let j = 0; j < attrKeys.length; j++) {
       values[3 + j] = rec.attrs[attrKeys[j]!] ?? "";
     }
@@ -618,10 +619,10 @@ export function useSearchView() {
   };
 
   const handleContextRecordSelect = (rec: ProtoRecord) => {
-    const ts = rec.writeTs?.toDate();
-    if (ts) {
-      const start = new Date(ts.getTime() - 30_000);
-      const end = new Date(ts.getTime() + 30_000);
+    const tsMs = rec.writeTs ? instantToMs(protoToInstant(rec.writeTs)) : 0;
+    if (tsMs) {
+      const start = new Date(tsMs - 30_000);
+      const end = new Date(tsMs + 30_000);
       const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
       setTimeRange("custom");
       setRangeStart(start);
@@ -784,12 +785,12 @@ export function useSearchView() {
 
   // Zoom out from selected record: doubles the visible time span.
   const handleZoomOut = () => {
-    const anchor = selectedRecord?.writeTs?.toDate();
-    if (!anchor) return;
-    const curStart = rangeStart?.getTime() ?? anchor.getTime() - 30_000;
-    const curEnd = rangeEnd?.getTime() ?? anchor.getTime() + 30_000;
+    const anchorMs = selectedRecord?.writeTs ? instantToMs(protoToInstant(selectedRecord.writeTs)) : 0;
+    if (!anchorMs) return;
+    const curStart = rangeStart?.getTime() ?? anchorMs - 30_000;
+    const curEnd = rangeEnd?.getTime() ?? anchorMs + 30_000;
     const span = curEnd - curStart;
-    const mid = anchor.getTime();
+    const mid = anchorMs;
     const newStart = new Date(mid - span);
     const newEnd = new Date(mid + span);
     setTimeRange("custom");

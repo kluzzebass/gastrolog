@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { Temporal } from "temporal-polyfill";
 import {
   extractKVPairs,
   relativeTime,
@@ -82,34 +83,31 @@ describe("extractKVPairs", () => {
 });
 
 describe("relativeTime", () => {
+  const msToInstant = (ms: number) =>
+    Temporal.Instant.fromEpochMilliseconds(ms);
+
   test("seconds ago", () => {
-    const date = new Date(Date.now() - 30 * 1000);
-    expect(relativeTime(date)).toBe("30s ago");
+    expect(relativeTime(msToInstant(Date.now() - 30 * 1000))).toBe("30s ago");
   });
 
   test("minutes ago", () => {
-    const date = new Date(Date.now() - 5 * 60 * 1000);
-    expect(relativeTime(date)).toBe("5m ago");
+    expect(relativeTime(msToInstant(Date.now() - 5 * 60 * 1000))).toBe("5m ago");
   });
 
   test("hours ago", () => {
-    const date = new Date(Date.now() - 3 * 60 * 60 * 1000);
-    expect(relativeTime(date)).toBe("3h ago");
+    expect(relativeTime(msToInstant(Date.now() - 3 * 60 * 60 * 1000))).toBe("3h ago");
   });
 
   test("days ago", () => {
-    const date = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
-    expect(relativeTime(date)).toBe("2d ago");
+    expect(relativeTime(msToInstant(Date.now() - 2 * 24 * 60 * 60 * 1000))).toBe("2d ago");
   });
 
   test("in the future", () => {
-    const date = new Date(Date.now() + 60 * 1000);
-    expect(relativeTime(date)).toBe("in the future");
+    expect(relativeTime(msToInstant(Date.now() + 60 * 1000))).toBe("in the future");
   });
 
   test("just now (0s ago)", () => {
-    const date = new Date(Date.now());
-    expect(relativeTime(date)).toBe("0s ago");
+    expect(relativeTime(msToInstant(Date.now()))).toBe("0s ago");
   });
 });
 

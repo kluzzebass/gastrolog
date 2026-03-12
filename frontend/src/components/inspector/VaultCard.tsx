@@ -4,6 +4,7 @@ import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault } from "../../api/hooks";
 import { useToast } from "../Toast";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
+import { protoToInstant, instantToMs, instantToDate } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
@@ -142,8 +143,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
   // Sort by start time, newest first.
   const sorted = [...chunks].sort((a, b) => {
-    const aTime = a.startTs?.toDate().getTime() ?? 0;
-    const bTime = b.startTs?.toDate().getTime() ?? 0;
+    const aTime = a.startTs ? instantToMs(protoToInstant(a.startTs)) : 0;
+    const bTime = b.startTs ? instantToMs(protoToInstant(b.startTs)) : 0;
     return bTime - aTime;
   });
 
@@ -177,8 +178,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
       {/* Rows */}
       {sorted.map((chunk) => {
-        const start = chunk.startTs?.toDate();
-        const end = chunk.endTs?.toDate();
+        const start = chunk.startTs ? instantToDate(protoToInstant(chunk.startTs)) : undefined;
+        const end = chunk.endTs ? instantToDate(protoToInstant(chunk.endTs)) : undefined;
         const isExpanded = expandedChunk === chunk.id;
 
         return (

@@ -3,10 +3,10 @@ import type { ProtoRecord } from "../utils";
 import { useThemeClass } from "../hooks/useThemeClass";
 import {
   extractKVPairs,
-  relativeTime,
   formatBytes,
   formatChunkId,
 } from "../utils";
+import { protoToInstant, instantToISO, relativeTime } from "../utils/temporal";
 import { syntaxHighlight, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
 import { ContextRecord } from "./ContextRecord";
@@ -14,19 +14,6 @@ import { useDetailPanel } from "../hooks/useDetailPanel";
 
 const MAX_DISPLAY_LINES = 100;
 
-/**
- * Format a protobuf Timestamp to RFC 3339 with nanosecond precision.
- * JavaScript's Date.toISOString() truncates to milliseconds, losing the
- * sub-ms nanos that Go stores — breaking exact equality filters.
- */
-function formatTimestampNano(ts: { seconds: bigint; nanos: number }): string {
-  const date = new Date(Number(ts.seconds) * 1000);
-  const iso = date.toISOString(); // "2026-03-12T01:38:25.397Z" (ms precision)
-  if (ts.nanos % 1_000_000 === 0) return iso; // no sub-ms precision needed
-  const nanoStr = ts.nanos.toString().padStart(9, "0");
-  // Replace ".MMMZ" with ".NNNNNNNNNZ"
-  return iso.replace(/\.\d{3}Z$/, `.${nanoStr}Z`);
-}
 
 /** Format a 16-byte Uint8Array as a UUID string. */
 function formatUUID(bytes: Uint8Array): string {
@@ -285,10 +272,10 @@ export function DetailPanelContent({
 
   const kvPairs = extractKVPairs(rawText);
 
-  const tsRows: { label: string; date: Date | null }[] = [
-    { label: "Write", date: record.writeTs ? record.writeTs.toDate() : null },
-    { label: "Ingest", date: record.ingestTs ? record.ingestTs.toDate() : null },
-    { label: "Source", date: record.sourceTs ? record.sourceTs.toDate() : null },
+  const tsRows = [
+    { label: "Write", ts: record.writeTs },
+    { label: "Ingest", ts: record.ingestTs },
+    { label: "Source", ts: record.sourceTs },
   ];
 
   const styles = buildStyles(c);
@@ -302,27 +289,30 @@ export function DetailPanelContent({
           <tr>
             <th colSpan={2} className={headerCls}>Timestamps</th>
           </tr>
-          {tsRows.map(({ label, date }) => (
-            <tr key={label}>
-              <td className={`${keyCls} ${borderCls}`}>{label}</td>
-              <td className={styles.valCls}>
-                {date ? (
-                  <>
-                    <div className={`break-all ${c("text-text-normal", "text-light-text-normal")}`}>
-                      {date.toISOString()}
+          {tsRows.map(({ label, ts }) => {
+            const instant = ts ? protoToInstant(ts) : null;
+            return (
+              <tr key={label}>
+                <td className={`${keyCls} ${borderCls}`}>{label}</td>
+                <td className={styles.valCls}>
+                  {instant ? (
+                    <>
+                      <div className={`break-all ${c("text-text-normal", "text-light-text-normal")}`}>
+                        {instantToISO(instant)}
+                      </div>
+                      <div className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                        {relativeTime(instant)}
+                      </div>
+                    </>
+                  ) : (
+                    <div className={c("text-text-ghost", "text-light-text-ghost")}>
+                      {"\u2014"}
                     </div>
-                    <div className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                      {relativeTime(date)}
-                    </div>
-                  </>
-                ) : (
-                  <div className={c("text-text-ghost", "text-light-text-ghost")}>
-                    {"\u2014"}
-                  </div>
-                )}
-              </td>
-            </tr>
-          ))}
+                  )}
+                </td>
+              </tr>
+            );
+          })}
 
           <MessageSection
             rawText={rawText}
@@ -388,7 +378,7 @@ export function DetailPanelContent({
                     onMultiFieldSelect([
                       ["ingester_id", formatUUID(record.ingesterId)],
                       ["ingest_seq", record.ingestSeq.toString()],
-                      ["ingest_ts", formatTimestampNano(record.ingestTs!)],
+                      ["ingest_ts", instantToISO(protoToInstant(record.ingestTs!))],
                     ]);
                   }}
                 >

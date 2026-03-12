@@ -1,5 +1,6 @@
 import type { ProtoRecord } from "../utils";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { protoToInstant, formatLocalTime } from "../utils/temporal";
 import { syntaxHighlight, type HighlightMode } from "../syntax";
 import { detectSeverity } from "./LogEntry";
 
@@ -20,15 +21,8 @@ export function ContextRecord({
   const rawText = new TextDecoder().decode(record.raw);
   const parts = syntaxHighlight(rawText, highlightMode);
   const severity = detectSeverity(record.attrs);
-  const writeTime = record.writeTs ? record.writeTs.toDate() : new Date();
-
-  const ts = writeTime.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-    hour12: false,
-  });
+  const writeInstant = record.writeTs ? protoToInstant(record.writeTs) : null;
+  const ts = writeInstant ? formatLocalTime(writeInstant) : "--:--:--";
 
   const borderClass = isAnchor
     ? c("border-l-copper bg-copper/10 text-text-normal", "border-l-copper bg-copper/8 text-light-text-normal")

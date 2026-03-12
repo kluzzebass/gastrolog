@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { protoToInstant, instantToISO } from "../utils/temporal";
 import { DownloadIcon } from "./icons";
 import type { ProtoRecord } from "../utils";
 
@@ -9,9 +10,9 @@ type Format = "json" | "csv";
 function recordToPlain(record: ProtoRecord) {
   const raw = new TextDecoder().decode(record.raw);
   return {
-    timestamp: record.ingestTs ? record.ingestTs.toDate().toISOString() : "",
+    timestamp: record.ingestTs ? instantToISO(protoToInstant(record.ingestTs)) : "",
     sourceTimestamp: record.sourceTs
-      ? record.sourceTs.toDate().toISOString()
+      ? instantToISO(protoToInstant(record.sourceTs))
       : "",
     message: raw,
     ...record.attrs,

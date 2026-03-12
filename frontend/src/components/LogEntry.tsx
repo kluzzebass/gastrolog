@@ -1,6 +1,7 @@
 import { forwardRef } from "react";
 import type { ProtoRecord } from "../utils";
 import { clickableProps } from "../utils";
+import { protoToInstant, formatLocalTime } from "../utils/temporal";
 import { syntaxHighlight, composeWithSearch, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
 import { SEVERITIES, classifySeverity } from "../lib/severity";
@@ -60,15 +61,8 @@ export const LogEntry = forwardRef<
   const rawText = new TextDecoder().decode(record.raw);
   const parts = composeWithSearch(syntaxHighlight(rawText, highlightMode), tokens);
   const severity = detectSeverity(record.attrs);
-  const ingestTime = record.ingestTs ? record.ingestTs.toDate() : new Date();
-
-  const ts = ingestTime.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    fractionalSecondDigits: 3,
-    hour12: false,
-  });
+  const ingestInstant = record.ingestTs ? protoToInstant(record.ingestTs) : null;
+  const ts = ingestInstant ? formatLocalTime(ingestInstant) : "--:--:--";
 
   return (
     <article

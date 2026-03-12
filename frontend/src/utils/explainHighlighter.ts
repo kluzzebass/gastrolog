@@ -1,4 +1,5 @@
 import type { PipelineStep } from "../api/client";
+import { protoToInstant, formatLocalTimeShort } from "./temporal";
 
 // ── Highlight helpers for ExplainPanel ──
 
@@ -90,14 +91,9 @@ export function buildSegments(
 }
 
 /** Format a proto Timestamp for display. */
-export function formatTs(ts?: { toDate(): Date }): string {
+export function formatTs(ts?: { seconds: bigint; nanos: number }): string {
   if (!ts) return "";
-  return ts.toDate().toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
-  });
+  return formatLocalTimeShort(protoToInstant(ts));
 }
 
 /** Return Tailwind classes for a pipeline step action badge. */

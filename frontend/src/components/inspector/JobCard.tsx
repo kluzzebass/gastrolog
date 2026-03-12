@@ -2,56 +2,12 @@ import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";
+import { protoToInstant, formatTimestamp, elapsed, countdown } from "../../utils/temporal";
 import { Badge } from "../Badge";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 
-// ---- Time utilities ----
-
-/** Format a Date as `YYYY-MM-DD HH:MM:SS` (24-hour, local time). */
-export function formatTimestamp(date: Date): string {
-  const y = date.getFullYear();
-  const mo = String(date.getMonth() + 1).padStart(2, "0");
-  const d = String(date.getDate()).padStart(2, "0");
-  const h = String(date.getHours()).padStart(2, "0");
-  const mi = String(date.getMinutes()).padStart(2, "0");
-  const s = String(date.getSeconds()).padStart(2, "0");
-  return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
-}
-
-/** Format elapsed time since a past date, e.g. "3m 12s ago", "1h 4m ago". */
-export function elapsed(date: Date, now = Date.now()): string {
-  const diff = now - date.getTime();
-  if (diff < 0) return "just now";
-
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  if (mins < 60) return `${mins}m ${remSecs}s ago`;
-  const hours = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  if (hours < 24) return `${hours}h ${remMins}m ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ${hours % 24}h ago`;
-}
-
-/** Format a countdown to a future date, e.g. "in 42s", "in 3m 12s". */
-export function countdown(date: Date, now = Date.now()): string {
-  const diff = date.getTime() - now;
-  if (diff <= 0) return "now";
-
-  const secs = Math.floor(diff / 1000);
-  if (secs < 60) return `in ${secs}s`;
-  const mins = Math.floor(secs / 60);
-  const remSecs = secs % 60;
-  if (mins < 60) return `in ${mins}m ${remSecs}s`;
-  const hours = Math.floor(mins / 60);
-  const remMins = mins % 60;
-  if (hours < 24) return `in ${hours}h ${remMins}m`;
-  const days = Math.floor(hours / 24);
-  return `in ${days}d ${hours % 24}h`;
-}
+export { formatTimestamp, elapsed, countdown } from "../../utils/temporal";
 
 /** Ticks every second, returning Date.now() so time-dependent expressions
  *  have a compiler-visible dependency that changes each tick. */
@@ -159,15 +115,15 @@ export function ScheduledJobsTable({
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
-            title={job.lastRun ? formatTimestamp(job.lastRun.toDate()) : ""}
+            title={job.lastRun ? formatTimestamp(protoToInstant(job.lastRun)) : ""}
           >
-            {job.lastRun ? elapsed(job.lastRun.toDate(), now) : "\u2014"}
+            {job.lastRun ? elapsed(protoToInstant(job.lastRun), now) : "\u2014"}
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
-            title={job.nextRun ? formatTimestamp(job.nextRun.toDate()) : ""}
+            title={job.nextRun ? formatTimestamp(protoToInstant(job.nextRun)) : ""}
           >
-            {job.nextRun ? countdown(job.nextRun.toDate(), now) : "\u2014"}
+            {job.nextRun ? countdown(protoToInstant(job.nextRun), now) : "\u2014"}
           </span>
         </div>
       ))}
@@ -240,13 +196,13 @@ function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   if (job.startedAt) {
     stats.push({
       label: "Started",
-      value: formatTimestamp(job.startedAt.toDate()),
+      value: formatTimestamp(protoToInstant(job.startedAt)),
     });
   }
   if (job.completedAt) {
     stats.push({
       label: "Completed",
-      value: formatTimestamp(job.completedAt.toDate()),
+      value: formatTimestamp(protoToInstant(job.completedAt)),
     });
   }
   if (job.error) {

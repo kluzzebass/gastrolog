@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Record as ProtoRecord } from "../client";
 import type { HistogramData } from "../../utils/histogramData";
+import { protoToInstant, instantToMs } from "../../utils/temporal";
 
 const NUM_BUCKETS = 50;
 
@@ -17,10 +18,9 @@ export function useLiveHistogram(records: ProtoRecord[]): HistogramData | null {
     // We need oldest-first for bucketing.
     const timestamps: { ms: number; level: string }[] = [];
     for (const r of records) {
-      const ts = r.ingestTs?.toDate();
-      if (!ts) continue;
+      if (!r.ingestTs) continue;
       timestamps.push({
-        ms: ts.getTime(),
+        ms: instantToMs(protoToInstant(r.ingestTs)),
         level: r.attrs["level"] ?? "",
       });
     }
