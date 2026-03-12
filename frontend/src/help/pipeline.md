@@ -14,7 +14,7 @@ Pipeline operators fall into different categories based on how they process data
 |----------|-----------|:-----------:|----------|
 | **Streaming** | `where`, `eval`, `fields`, `rename`, `dedup`, `lookup` | Yes | Process records one at a time as they arrive, without buffering. |
 | **Short-circuit** | `head` | Yes | Stops iteration early after collecting N records. Can avoid scanning the entire result set. |
-| **Bounded streaming** | `tail`, `slice` | No | Stream through all records with a fixed-size buffer (N records for `tail`, range-based for `slice`). Memory usage is proportional to the output size, not the input. However, if preceded by `sort`, they fall back to full materialization. In a cluster, records are gathered from all nodes before applying the operator on the coordinator. |
+| **Bounded streaming** | `tail`, `slice` | No | Stream through all records with a fixed-size buffer (N records for `tail`, range-based for `slice`). Memory usage is proportional to the output size, not the input. However, if preceded by a materializing operator such as `sort`, they fall back to full materialization. In a cluster, records are gathered from all nodes before applying the operator on the coordinator. |
 | **Materializing** | `stats`, `timechart`, `sort` | No | Collect all matching records before producing output. `sort` buffers everything on the coordinator. `stats` and `timechart` aggregate per-node in a cluster and merge results. `stats` and `timechart` occupy the same slot — you can use one or the other, never both. |
 | **Visualization** | `linechart`, `barchart`, `donut`, `heatmap`, `scatter`, `map`, `raw` | No | Control how results are displayed but do not transform data. Must appear at the end of a pipeline, after `stats` or `timechart`. See [Visualizations](help:visualizations). |
 
@@ -175,7 +175,7 @@ Combine `head` and `tail` to select a specific row range. For example, to get ro
 
 Tail is not supported in follow mode (it requires all records before producing output).
 
-**Memory optimization:** When `tail` appears without a preceding `sort`, it streams through results using a fixed-size buffer of N records instead of loading all matching records into memory. For best performance on large result sets, avoid placing `sort` before `tail`.
+**Memory optimization:** When `tail` appears without a preceding materializing operator, it streams through results using a fixed-size buffer of N records instead of loading all matching records into memory. For best performance on large result sets, avoid placing materializing operators before `tail`.
 
 ## Slice Operator
 
@@ -189,7 +189,7 @@ This returns rows 12 through 54. Equivalent to `| head 54 | tail 43`, but withou
 
 Slice is not supported in follow mode.
 
-**Memory optimization:** Like `tail`, `slice` streams through results without materializing all records, and stops reading as soon as the end position is reached. Placing `sort` before `slice` forces full materialization.
+**Memory optimization:** Like `tail`, `slice` streams through results without materializing all records, and stops reading as soon as the end position is reached. Placing a materializing operator before `slice` forces full materialization.
 
 ## Rename Operator
 
