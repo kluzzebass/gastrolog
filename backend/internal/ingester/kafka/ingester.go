@@ -84,6 +84,12 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 		"group", ing.cfg.Group,
 	)
 
+	const (
+		backoffMin = 100 * time.Millisecond
+		backoffMax = 5 * time.Second
+	)
+	backoff := backoffMin
+
 	for {
 		fetches := client.PollFetches(ctx)
 		if ctx.Err() != nil {
@@ -92,8 +98,9 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 			return nil
 		}
 
-		if errs := fetches.Errors(); len(errs) > 0 {
-			for _, e := range errs {
+		fetchErrs := fetches.Errors()
+		if len(fetchErrs) > 0 {
+			for _, e := range fetchErrs {
 				ing.logger.Warn("kafka fetch error",
 					"topic", e.Topic,
 					"partition", e.Partition,
@@ -101,6 +108,19 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 				)
 			}
 		}
+
+		hasRecords := fetches.NumRecords() > 0
+		if !hasRecords && len(fetchErrs) > 0 {
+			// Errors with no records — back off to avoid tight-looping.
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil
+			}
+			backoff = min(backoff*2, backoffMax)
+			continue
+		}
+		backoff = backoffMin // reset on successful fetch
 
 		now := time.Now()
 
