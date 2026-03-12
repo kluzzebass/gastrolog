@@ -121,12 +121,24 @@ func (s *ConfigServer) PutIngester(
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
+	if req.Msg.Config.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	}
 	if req.Msg.Config.Type == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ingester type required"))
 	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
 	if connErr != nil {
+		return nil, connErr
+	}
+
+	// Reject duplicate names.
+	ingesters, err := s.cfgStore.ListIngesters(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("ingester", id, req.Msg.Config.Name, ingesters, func(i config.IngesterConfig) (uuid.UUID, string) { return i.ID, i.Name }); connErr != nil {
 		return nil, connErr
 	}
 

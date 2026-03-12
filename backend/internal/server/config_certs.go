@@ -125,6 +125,15 @@ func (s *ConfigServer) PutCertificate(
 
 	certID := resolveCertID(existing.ID, req.Msg.Id)
 
+	// Reject duplicate names.
+	certs, err := s.cfgStore.ListCertificates(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("certificate", certID, req.Msg.Name, certs, func(c config.CertPEM) (uuid.UUID, string) { return c.ID, c.Name }); connErr != nil {
+		return nil, connErr
+	}
+
 	newCert := config.CertPEM{
 		ID:       certID,
 		Name:     req.Msg.Name,

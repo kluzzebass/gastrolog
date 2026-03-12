@@ -25,9 +25,21 @@ func (s *ConfigServer) PutRotationPolicy(
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
+	if req.Msg.Config.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
 	if connErr != nil {
+		return nil, connErr
+	}
+
+	// Reject duplicate names.
+	rotPolicies, err := s.cfgStore.ListRotationPolicies(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("rotation policy", id, req.Msg.Config.Name, rotPolicies, func(p config.RotationPolicyConfig) (uuid.UUID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -97,9 +109,21 @@ func (s *ConfigServer) PutRetentionPolicy(
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
+	if req.Msg.Config.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
 	if connErr != nil {
+		return nil, connErr
+	}
+
+	// Reject duplicate names.
+	retPolicies, err := s.cfgStore.ListRetentionPolicies(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("retention policy", id, req.Msg.Config.Name, retPolicies, func(p config.RetentionPolicyConfig) (uuid.UUID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
 	}
 

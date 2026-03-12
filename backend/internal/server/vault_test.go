@@ -655,21 +655,25 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	ctx := context.Background()
 
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "merge-catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	for _, id := range []uuid.UUID{srcID, dstID} {
+	for _, v := range []struct {
+		id   uuid.UUID
+		name string
+	}{{srcID, "merge-src"}, {dstID, "merge-dst"}} {
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:   id.String(),
+				Id:   v.id.String(),
+				Name: v.name,
 				Type: "memory",
 			},
 		}))
 		if err != nil {
-			t.Fatalf("PutVault(%s): %v", id, err)
+			t.Fatalf("PutVault(%s): %v", v.id, err)
 		}
 	}
 
@@ -677,6 +681,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	_, err = cfgClient.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
 			Id:       uuid.Must(uuid.NewV7()).String(),
+			Name:     "merge-route",
 			FilterId: filterID.String(),
 			Destinations: []*gastrologv1.RouteDestination{
 				{VaultId: srcID.String()},
@@ -781,23 +786,27 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 	dstID := uuid.Must(uuid.NewV7())
 
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "file-merge-filter", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
 	}
 
-	for _, id := range []uuid.UUID{srcID, dstID} {
-		vaultDir := filepath.Join(homeDir, "vaults", id.String())
+	for _, v := range []struct {
+		id   uuid.UUID
+		name string
+	}{{srcID, "file-merge-src"}, {dstID, "file-merge-dst"}} {
+		vaultDir := filepath.Join(homeDir, "vaults", v.id.String())
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:     id.String(),
+				Id:     v.id.String(),
+				Name:   v.name,
 				Type:   "file",
 				Params: map[string]string{"dir": vaultDir},
 			},
 		}))
 		if err != nil {
-			t.Fatalf("PutVault(%s): %v", id, err)
+			t.Fatalf("PutVault(%s): %v", v.id, err)
 		}
 	}
 

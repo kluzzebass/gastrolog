@@ -376,6 +376,10 @@ func (s *ConfigServer) PutSettings(
 		return nil, connErr
 	}
 
+	if connErr := validateLookupNames(ss.Lookup); connErr != nil {
+		return nil, connErr
+	}
+
 	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
@@ -415,6 +419,15 @@ func (s *ConfigServer) PutNodeConfig(
 	nodeUUID, err := uuid.Parse(idStr)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("parse node ID: %w", err))
+	}
+
+	// Reject duplicate names.
+	nodes, err := s.cfgStore.ListNodes(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("node", nodeUUID, name, nodes, func(n config.NodeConfig) (uuid.UUID, string) { return n.ID, n.Name }); connErr != nil {
+		return nil, connErr
 	}
 
 	if err := s.cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
@@ -811,6 +824,42 @@ func validateTokenDurations(auth config.AuthConfig) *connect.Error {
 	return nil
 }
 
+// validateLookupNames checks that no two lookup tables (across all types)
+// share the same name. Duplicate names would shadow each other in the
+// pipeline registry.
+func validateLookupNames(lc config.LookupConfig) *connect.Error {
+	seen := make(map[string]string) // name → type
+	for _, l := range lc.HTTPLookups {
+		if prev, ok := seen[l.Name]; ok {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("lookup name %q is used by both %s and http lookup", l.Name, prev))
+		}
+		seen[l.Name] = "http"
+	}
+	for _, l := range lc.JSONFileLookups {
+		if prev, ok := seen[l.Name]; ok {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("lookup name %q is used by both %s and json file lookup", l.Name, prev))
+		}
+		seen[l.Name] = "json file"
+	}
+	for _, l := range lc.MMDBLookups {
+		if prev, ok := seen[l.Name]; ok {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("lookup name %q is used by both %s and mmdb lookup", l.Name, prev))
+		}
+		seen[l.Name] = "mmdb"
+	}
+	for _, l := range lc.CSVLookups {
+		if prev, ok := seen[l.Name]; ok {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("lookup name %q is used by both %s and csv lookup", l.Name, prev))
+		}
+		seen[l.Name] = "csv"
+	}
+	return nil
+}
+
 // TestHTTPLookup tests an HTTP lookup configuration.
 // Test values are URL template variables: each key corresponds to a {key} placeholder
 // in the URL template. All variables are substituted, then a single request is made.
@@ -924,6 +973,19 @@ func (s *ConfigServer) PreviewCSVLookup(
 		Rows:      rows,
 		TotalRows: int32(totalRows),
 	}), nil
+}
+
+// checkNameConflict returns an AlreadyExists error if another entity of the
+// same type already has the given name. Empty names are allowed to coexist.
+func checkNameConflict[S ~[]E, E any](entityType string, id uuid.UUID, name string, existing S, identify func(E) (uuid.UUID, string)) *connect.Error {
+	for _, e := range existing {
+		eid, ename := identify(e)
+		if eid != id && ename == name {
+			return connect.NewError(connect.CodeAlreadyExists,
+				fmt.Errorf("%s name %q is already in use", entityType, name))
+		}
+	}
+	return nil
 }
 
 // formatBytes formats a byte count as a human-readable string.

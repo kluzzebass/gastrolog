@@ -25,6 +25,9 @@ func (s *ConfigServer) PutFilter(
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
+	if req.Msg.Config.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	}
 
 	// Validate expression by trying to compile it.
 	if _, err := orchestrator.CompileFilter(uuid.Nil, req.Msg.Config.Expression); err != nil {
@@ -35,6 +38,16 @@ func (s *ConfigServer) PutFilter(
 	if connErr != nil {
 		return nil, connErr
 	}
+
+	// Reject duplicate names.
+	filters, err := s.cfgStore.ListFilters(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("filter", id, req.Msg.Config.Name, filters, func(f config.FilterConfig) (uuid.UUID, string) { return f.ID, f.Name }); connErr != nil {
+		return nil, connErr
+	}
+
 	cfg := config.FilterConfig{ID: id, Name: req.Msg.Config.Name, Expression: req.Msg.Config.Expression}
 	if err := s.cfgStore.PutFilter(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)

@@ -26,8 +26,21 @@ func (s *ConfigServer) PutRoute(
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
+	if req.Msg.Config.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	}
+
 	id, connErr := parseUUID(req.Msg.Config.Id)
 	if connErr != nil {
+		return nil, connErr
+	}
+
+	// Reject duplicate names.
+	routes, err := s.cfgStore.ListRoutes(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("route", id, req.Msg.Config.Name, routes, func(r config.RouteConfig) (uuid.UUID, string) { return r.ID, r.Name }); connErr != nil {
 		return nil, connErr
 	}
 

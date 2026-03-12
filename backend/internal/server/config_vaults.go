@@ -112,6 +112,9 @@ func (s *ConfigServer) PutVault(
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
+	if req.Msg.Config.Name == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+	}
 	if req.Msg.Config.Type == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault type required"))
 	}
@@ -124,6 +127,15 @@ func (s *ConfigServer) PutVault(
 	// Auto-assign local node ID when not specified.
 	if vaultCfg.NodeID == "" {
 		vaultCfg.NodeID = s.localNodeID
+	}
+
+	// Reject duplicate names.
+	vaults, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v config.VaultConfig) (uuid.UUID, string) { return v.ID, v.Name }); connErr != nil {
+		return nil, connErr
 	}
 
 	// Validate file vault directory against nesting.

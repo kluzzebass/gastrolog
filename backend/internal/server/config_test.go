@@ -139,7 +139,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	// Create a filter first, then a vault that uses it.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -148,6 +148,7 @@ func TestDeleteVaultForce(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:   vaultID.String(),
+			Name: "test-vault",
 			Type: "memory",
 		},
 	}))
@@ -245,6 +246,7 @@ func TestPutVaultNestedDirPrevention(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:     nestedChildID.String(),
+			Name:   "nested-child",
 			Type:   "file",
 			Params: map[string]string{"dir": baseDir + "/vault1/archive"},
 		},
@@ -260,6 +262,7 @@ func TestPutVaultNestedDirPrevention(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:     nestedParentID.String(),
+			Name:   "nested-parent",
 			Type:   "file",
 			Params: map[string]string{"dir": baseDir},
 		},
@@ -275,6 +278,7 @@ func TestPutVaultNestedDirPrevention(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:     siblingID.String(),
+			Name:   "sibling",
 			Type:   "file",
 			Params: map[string]string{"dir": baseDir + "/vault2"},
 		},
@@ -287,6 +291,7 @@ func TestPutVaultNestedDirPrevention(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:   memVaultID.String(),
+			Name: "mem-vault",
 			Type: "memory",
 		},
 	}))
@@ -299,6 +304,7 @@ func TestPutVaultNestedDirPrevention(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:     vault1ID.String(),
+			Name:   "vault1-self-update",
 			Type:   "file",
 			Params: map[string]string{"dir": baseDir + "/vault1"},
 		},
@@ -311,6 +317,7 @@ func TestPutVaultNestedDirPrevention(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:     duplicateDirID.String(),
+			Name:   "duplicate-dir",
 			Type:   "file",
 			Params: map[string]string{"dir": baseDir + "/vault1"},
 		},
@@ -329,7 +336,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	// Create a filter and a vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "catch-all-2", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -338,6 +345,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:   vaultID.String(),
+			Name: "pause-vault",
 			Type: "memory",
 		},
 	}))
@@ -349,6 +357,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
 			Id:       uuid.Must(uuid.NewV7()).String(),
+			Name:     "test-route",
 			FilterId: filterID.String(),
 			Destinations: []*gastrologv1.RouteDestination{
 				{VaultId: vaultID.String()},
@@ -446,7 +455,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	// Create a filter and vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "catch-all-3", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -455,6 +464,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
 			Id:   vaultID.String(),
+			Name: "persist-vault",
 			Type: "memory",
 		},
 	}))
@@ -533,12 +543,214 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.ConfigSer
 	return client, cfgStore, orch
 }
 
+func TestDuplicateEntityNames(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	t.Run("filter", func(t *testing.T) {
+		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+			Config: &gastrologv1.FilterConfig{Name: "my-filter", Expression: "*"},
+		}))
+		if err != nil {
+			t.Fatalf("first PutFilter: %v", err)
+		}
+		_, err = client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+			Config: &gastrologv1.FilterConfig{Name: "my-filter", Expression: "level=error"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate filter name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("vault", func(t *testing.T) {
+		_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: "memory"},
+		}))
+		if err != nil {
+			t.Fatalf("first PutVault: %v", err)
+		}
+		_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: "memory"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate vault name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("route", func(t *testing.T) {
+		_, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+			Config: &gastrologv1.RouteConfig{Name: "my-route"},
+		}))
+		if err != nil {
+			t.Fatalf("first PutRoute: %v", err)
+		}
+		_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+			Config: &gastrologv1.RouteConfig{Name: "my-route"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate route name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("rotation_policy", func(t *testing.T) {
+		_, err := client.PutRotationPolicy(ctx, connect.NewRequest(&gastrologv1.PutRotationPolicyRequest{
+			Config: &gastrologv1.RotationPolicyConfig{Name: "my-rotation", MaxRecords: 1000},
+		}))
+		if err != nil {
+			t.Fatalf("first PutRotationPolicy: %v", err)
+		}
+		_, err = client.PutRotationPolicy(ctx, connect.NewRequest(&gastrologv1.PutRotationPolicyRequest{
+			Config: &gastrologv1.RotationPolicyConfig{Name: "my-rotation", MaxRecords: 2000},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate rotation policy name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("retention_policy", func(t *testing.T) {
+		_, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+			Config: &gastrologv1.RetentionPolicyConfig{Name: "my-retention", MaxChunks: 10},
+		}))
+		if err != nil {
+			t.Fatalf("first PutRetentionPolicy: %v", err)
+		}
+		_, err = client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+			Config: &gastrologv1.RetentionPolicyConfig{Name: "my-retention", MaxChunks: 20},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate retention policy name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("ingester", func(t *testing.T) {
+		// Ingesters use disabled=true to skip factory validation.
+		_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+			Config: &gastrologv1.IngesterConfig{Name: "my-ingester", Type: "syslog"},
+		}))
+		if err != nil {
+			t.Fatalf("first PutIngester: %v", err)
+		}
+		_, err = client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
+			Config: &gastrologv1.IngesterConfig{Name: "my-ingester", Type: "syslog"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate ingester name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("node", func(t *testing.T) {
+		nodeA := uuid.Must(uuid.NewV7())
+		nodeB := uuid.Must(uuid.NewV7())
+		_, err := client.PutNodeConfig(ctx, connect.NewRequest(&gastrologv1.PutNodeConfigRequest{
+			Config: &gastrologv1.NodeConfig{Id: nodeA.String(), Name: "alpha"},
+		}))
+		if err != nil {
+			t.Fatalf("first PutNodeConfig: %v", err)
+		}
+		_, err = client.PutNodeConfig(ctx, connect.NewRequest(&gastrologv1.PutNodeConfigRequest{
+			Config: &gastrologv1.NodeConfig{Id: nodeB.String(), Name: "alpha"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate node name")
+		}
+		if connect.CodeOf(err) != connect.CodeAlreadyExists {
+			t.Fatalf("expected AlreadyExists, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("update_self_allowed", func(t *testing.T) {
+		// Creating with an explicit ID, then updating with the same ID and name should work.
+		id := uuid.Must(uuid.NewV7())
+		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+			Config: &gastrologv1.FilterConfig{Id: id.String(), Name: "self-update", Expression: "*"},
+		}))
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		_, err = client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+			Config: &gastrologv1.FilterConfig{Id: id.String(), Name: "self-update", Expression: "level=error"},
+		}))
+		if err != nil {
+			t.Fatalf("update self should be allowed: %v", err)
+		}
+	})
+
+	t.Run("lookup_names_across_types", func(t *testing.T) {
+		// Two lookups with the same name across different types should conflict.
+		_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+			Lookup: &gastrologv1.PutLookupSettings{
+				HttpLookups: []*gastrologv1.HTTPLookupEntry{
+					{Name: "duped", UrlTemplate: "http://example.com/{ip}"},
+				},
+				CsvLookups: []*gastrologv1.CSVLookupEntry{
+					{Name: "duped", FileId: uuid.Must(uuid.NewV7()).String()},
+				},
+			},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate lookup name across types")
+		}
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("lookup_names_within_type", func(t *testing.T) {
+		// Two lookups with the same name within the same type should also conflict.
+		_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+			Lookup: &gastrologv1.PutLookupSettings{
+				HttpLookups: []*gastrologv1.HTTPLookupEntry{
+					{Name: "api-a", UrlTemplate: "http://a.example.com/{ip}"},
+					{Name: "api-a", UrlTemplate: "http://b.example.com/{ip}"},
+				},
+			},
+		}))
+		if err == nil {
+			t.Fatal("expected error for duplicate lookup name within type")
+		}
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+		}
+	})
+
+	t.Run("empty_name_rejected", func(t *testing.T) {
+		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
+			Config: &gastrologv1.FilterConfig{Name: "", Expression: "*"},
+		}))
+		if err == nil {
+			t.Fatal("expected error for empty name")
+		}
+		if connect.CodeOf(err) != connect.CodeInvalidArgument {
+			t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+		}
+	})
+}
+
 func TestPutIngesterUnknownType(t *testing.T) {
 	client, _, _ := newConfigTestSetupWithIngesters(t)
 	ctx := context.Background()
 
 	_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
 		Config: &gastrologv1.IngesterConfig{
+			Name:    "bad-ingester",
 			Type:    "nonexistent",
 			Enabled: true,
 		},
@@ -790,6 +1002,7 @@ func TestPutIngesterMissingRequiredParam(t *testing.T) {
 	// Syslog requires at least one of udp_addr or tcp_addr.
 	_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
 		Config: &gastrologv1.IngesterConfig{
+			Name:    "syslog-test",
 			Type:    "syslog",
 			Enabled: true,
 			Params:  map[string]string{},
