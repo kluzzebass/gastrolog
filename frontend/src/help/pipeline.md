@@ -147,7 +147,7 @@ Combine with `head` for top-N queries:
 level=error | stats count by host | sort -count | head 10
 ```
 
-Sort is not supported in follow mode (it requires all records before producing output).
+Sort is not supported in follow mode (it requires all records before producing output). Because sort must load all matching records into memory before ordering them, it can be expensive on large result sets. Narrow your filter or time range when sorting across many records.
 
 ## Head Operator
 
@@ -157,7 +157,7 @@ The `head` operator keeps only the first N records or rows, discarding the rest.
 * | head 100
 ```
 
-When used without `sort`, `head` can optimize the underlying scan to stop early.
+When used without `sort`, `head` can optimize the underlying scan to stop early — no more records are read after the first N.
 
 ## Tail Operator
 
@@ -175,6 +175,8 @@ Combine `head` and `tail` to select a specific row range. For example, to get ro
 
 Tail is not supported in follow mode (it requires all records before producing output).
 
+**Memory optimization:** When `tail` appears without a preceding `sort`, it streams through results using a fixed-size buffer of N records instead of loading all matching records into memory. For best performance on large result sets, avoid placing `sort` before `tail`.
+
 ## Slice Operator
 
 The `slice` operator selects a range of rows by position. Both arguments are 1-indexed and inclusive.
@@ -186,6 +188,8 @@ The `slice` operator selects a range of rows by position. Both arguments are 1-i
 This returns rows 12 through 54. Equivalent to `| head 54 | tail 43`, but without the mental math.
 
 Slice is not supported in follow mode.
+
+**Memory optimization:** Like `tail`, `slice` streams through results without materializing all records, and stops reading as soon as the end position is reached. Placing `sort` before `slice` forces full materialization.
 
 ## Rename Operator
 
