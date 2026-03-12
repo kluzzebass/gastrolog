@@ -156,7 +156,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		vaultsDir = homeDir // default: vaults resolve relative to home
 	}
 
-	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, cfg.SlogCapture, cfg.SlogCaptureHandler)
+	certMgr, err := loadCertManager(ctx, logger, cfgStore)
+	if err != nil {
+		return err
+	}
+
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler)
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	// orchReady is closed after startOrchestrator completes so that forwarded
@@ -195,11 +200,6 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	tokens, err := buildAuthTokens(ctx, logger, cfgStore, cfg.NoAuth)
-	if err != nil {
-		return err
-	}
-
-	certMgr, err := loadCertManager(ctx, logger, cfgStore)
 	if err != nil {
 		return err
 	}
@@ -787,7 +787,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	return nil
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -806,7 +806,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 		"mqtt":      reg(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
 		"metrics":   reg(ingestmetrics.NewFactory(orch), ingestmetrics.ParamDefaults, nil),
 		"otlp":      reg(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, noCtx(ingestotlp.TestConnection)),
-		"relp":      reg(ingestrelp.NewFactory(), ingestrelp.ParamDefaults, noCtx(ingestrelp.TestConnection)),
+		"relp":      reg(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, noCtx(ingestrelp.TestConnection)),
 		"syslog":    reg(ingestsyslog.NewFactory(), ingestsyslog.ParamDefaults, noCtx(ingestsyslog.TestConnection)),
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}

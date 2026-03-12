@@ -5,14 +5,19 @@ package relp
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
-	gorelp "github.com/thierry-f-78/go-relp"
-
+	"gastrolog/internal/cert"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -29,6 +34,8 @@ type Ingester struct {
 	addr   string
 	logger *slog.Logger
 
+	tlsConfig *tls.Config
+
 	mu       sync.Mutex
 	listener net.Listener
 }
@@ -41,6 +48,10 @@ type Config struct {
 	// Addr is the TCP address to listen on (e.g., ":2514").
 	Addr string
 
+	// TLSConfig, if non-nil, wraps accepted connections with TLS.
+	// For mutual TLS, set ClientAuth and ClientCAs on the config.
+	TLSConfig *tls.Config
+
 	// Logger for structured logging.
 	Logger *slog.Logger
 }
@@ -48,9 +59,10 @@ type Config struct {
 // New creates a new RELP ingester.
 func New(cfg Config) *Ingester {
 	return &Ingester{
-		id:     cfg.ID,
-		addr:   cfg.Addr,
-		logger: logging.Default(cfg.Logger).With("component", "ingester", "type", "relp"),
+		id:        cfg.ID,
+		addr:      cfg.Addr,
+		tlsConfig: cfg.TLSConfig,
+		logger:    logging.Default(cfg.Logger).With("component", "ingester", "type", "relp"),
 	}
 }
 
@@ -65,7 +77,11 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 	r.listener = listener
 	r.mu.Unlock()
 
-	r.logger.Info("RELP listener starting", "addr", listener.Addr().String())
+	proto := "TCP"
+	if r.tlsConfig != nil {
+		proto = "TLS"
+	}
+	r.logger.Info("RELP ingester starting", "addr", listener.Addr().String(), "proto", proto)
 
 	var wg sync.WaitGroup
 	defer func() {
@@ -122,20 +138,18 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 		remoteIP = tcpAddr.IP.String()
 	}
 
-	opts, err := gorelp.ValidateOptions(&gorelp.Options{
-		Tls: gorelp.Opt_tls_disabled,
-	})
-	if err != nil {
-		r.logger.Error("RELP options validation failed", "error", err)
-		return
+	// Wrap with TLS if configured.
+	var fd io.ReadWriter = conn
+	if r.tlsConfig != nil {
+		tlsConn := tls.Server(conn, r.tlsConfig)
+		if err := tlsConn.HandshakeContext(ctx); err != nil {
+			r.logger.Debug("RELP TLS handshake failed", "error", err, "remote", remoteIP)
+			return
+		}
+		fd = tlsConn
 	}
 
-	session, err := gorelp.NewTcp(conn, opts)
-	if err != nil {
-		r.logger.Debug("RELP session setup failed", "error", err, "remote", remoteIP)
-		return
-	}
-	defer func() { _ = session.Close() }()
+	session := NewSession(fd, fd)
 
 	r.logger.Debug("RELP session established", "remote", remoteIP)
 
@@ -148,8 +162,7 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 
 		msg, err := session.ReceiveLog()
 		if err != nil {
-			// ReceiveLog returns error on close or protocol error.
-			if !errors.Is(err, net.ErrClosed) {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
 				r.logger.Debug("RELP receive ended", "error", err, "remote", remoteIP)
 			}
 			return
@@ -194,5 +207,85 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 		case <-ctx.Done():
 			return
 		}
+	}
+}
+
+// BuildTLSConfig builds a *tls.Config from ingester parameters.
+// Returns nil if TLS is not configured (tls param is empty or "false").
+//
+// The server certificate is resolved from the cert manager by name
+// (tls_cert param). For mutual TLS, tls_ca specifies the CA file path
+// and tls_allowed_cn optionally restricts client certificate CNs.
+func BuildTLSConfig(params map[string]string, certMgr *cert.Manager) (*tls.Config, error) {
+	if params["tls"] != "true" {
+		return nil, nil
+	}
+
+	cfg := &tls.Config{
+		MinVersion: tls.VersionTLS12,
+	}
+
+	// Resolve server certificate from the cert manager by name.
+	// Uses GetCertificate callback so cert rotations are picked up automatically.
+	certName := params["tls_cert"]
+	if certName != "" {
+		if certMgr == nil {
+			return nil, errors.New("RELP TLS: cert manager not available")
+		}
+		// Verify the cert exists at config time.
+		if certMgr.Certificate(certName) == nil {
+			return nil, fmt.Errorf("RELP TLS: certificate %q not found in cert manager", certName)
+		}
+		cfg.GetCertificate = func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			c := certMgr.Certificate(certName)
+			if c == nil {
+				return nil, fmt.Errorf("RELP TLS: certificate %q no longer available", certName)
+			}
+			return c, nil
+		}
+	}
+
+	// Load CA for client certificate verification (mutual TLS).
+	caFile := params["tls_ca"]
+	if caFile != "" {
+		caPEM, err := os.ReadFile(caFile) //nolint:gosec // G304: CA file path from user config
+		if err != nil {
+			return nil, fmt.Errorf("read RELP CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, errors.New("RELP CA file contains no valid certificates")
+		}
+		cfg.ClientCAs = pool
+		cfg.ClientAuth = tls.RequireAndVerifyClientCert
+
+		// Optional CN-based ACL.
+		if pattern := params["tls_allowed_cn"]; pattern != "" {
+			cfg.VerifyPeerCertificate = buildCNVerifier(pattern)
+		}
+	}
+
+	return cfg, nil
+}
+
+// buildCNVerifier returns a VerifyPeerCertificate function that checks
+// the client certificate's Common Name against a wildcard pattern.
+func buildCNVerifier(pattern string) func([][]byte, [][]*x509.Certificate) error {
+	return func(rawCerts [][]byte, _ [][]*x509.Certificate) error {
+		if len(rawCerts) == 0 {
+			return errors.New("relp: no client certificate provided")
+		}
+		cert, err := x509.ParseCertificate(rawCerts[0])
+		if err != nil {
+			return fmt.Errorf("relp: parse client certificate: %w", err)
+		}
+		matched, err := filepath.Match(pattern, cert.Subject.CommonName)
+		if err != nil {
+			return fmt.Errorf("relp: invalid CN pattern %q: %w", pattern, err)
+		}
+		if !matched {
+			return fmt.Errorf("relp: client CN %q does not match allowed pattern %q", cert.Subject.CommonName, pattern)
+		}
+		return nil
 	}
 }

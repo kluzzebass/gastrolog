@@ -11,6 +11,7 @@ interface SearchState {
   resumeToken: Uint8Array | null;
   tableResult: TableResult | null;
   histogram: HistogramBucket[] | null;
+  version: number;
 }
 
 const OPERATORS = new Set(["AND", "OR", "NOT"]);
@@ -77,6 +78,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
     resumeToken: null,
     tableResult: null,
     histogram: null,
+    version: 0,
   });
 
   const abortRef = useRef<AbortController | null>(null);
@@ -153,6 +155,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
               isSearching: false,
               hasMore: false,
               resumeToken: null,
+              version: prev.version + 1,
             }));
             abortRef.current = null;
             return;
@@ -185,6 +188,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           hasMore,
           resumeToken: lastResumeToken,
           histogram,
+          version: prev.version + 1,
         }));
       } catch (err) {
         if (
@@ -243,6 +247,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       resumeToken: null,
       tableResult: null,
       histogram: null,
+      version: 0,
     });
   };
 
@@ -253,7 +258,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       abortRef.current.abort();
       abortRef.current = null;
     }
-    setState({
+    setState((prev) => ({
       records,
       isSearching: false,
       error: null,
@@ -261,7 +266,8 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       resumeToken: null,
       tableResult: null,
       histogram: null,
-    });
+      version: prev.version + 1,
+    }));
   };
 
   const cancel = () => {

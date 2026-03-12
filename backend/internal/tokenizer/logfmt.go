@@ -35,7 +35,10 @@ func ExtractLogfmt(msg []byte) []KeyValue {
 
 		keyLen := keyEnd - keyStart
 		if keyLen == 0 {
-			i++
+			// Invalid key — skip past any =value that follows.
+			for i < len(msg) && !IsWhitespace(msg[i]) {
+				i++
+			}
 			continue
 		}
 		if keyLen > MaxKeyLength {
@@ -95,7 +98,34 @@ func parseLogfmtKey(msg []byte, i int) (keyStart, keyEnd, next int) {
 	for i < len(msg) && msg[i] > ' ' && msg[i] != '=' && msg[i] != '"' {
 		i++
 	}
+	// Validate: key must match [A-Za-z_][A-Za-z0-9_\-.]* to filter out
+	// punctuation and structured-data fragments that the permissive logfmt
+	// spec would otherwise accept.
+	if !isValidLogfmtKey(msg[keyStart:i]) {
+		return keyStart, keyStart, i // zero-length key → skipped by caller
+	}
 	return keyStart, i, i
+}
+
+// isValidLogfmtKey checks that a logfmt key looks like a real field name:
+// starts with letter or underscore, rest may contain letters, digits,
+// underscores, hyphens, dots, colons, and slashes (for k8s annotations,
+// Prometheus labels, etc.).
+func isValidLogfmtKey(key []byte) bool {
+	if len(key) == 0 {
+		return false
+	}
+	c := key[0]
+	if !IsLetter(c) && c != '_' {
+		return false
+	}
+	for i := 1; i < len(key); i++ {
+		c := key[i]
+		if !IsLetter(c) && !IsDigit(c) && c != '_' && c != '-' && c != '.' && c != ':' && c != '/' {
+			return false
+		}
+	}
+	return true
 }
 
 func parseLogfmtValue(msg []byte, i int) (string, int) {

@@ -278,6 +278,7 @@ export function useSearchView() {
     setRecords,
     cancel: cancelSearch,
     reset: resetSearch,
+    version: searchVersion,
   } = useSearch({ onError: toastError });
   const {
     records: followRecords,
@@ -674,7 +675,7 @@ export function useSearchView() {
 
   const displayRecords = isFollowMode ? followRecords : records;
   const hasResults = displayRecords.length > 0;
-  const { attrFields, kvFields } = useFields(q, hasResults, isPipelineResult);
+  const { attrFields, kvFields } = useFields(q, hasResults, isPipelineResult, searchVersion);
   const allFields = (() => {
     const seen = new Set<string>();
     const merged = [];

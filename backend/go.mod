@@ -33,7 +33,6 @@ require (
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/spf13/cobra v1.10.2
 	github.com/theory/jsonpath v0.11.0
-	github.com/thierry-f-78/go-relp v1.0.0
 	github.com/twmb/franz-go v1.20.7
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	go.opentelemetry.io/proto/otlp v1.9.0

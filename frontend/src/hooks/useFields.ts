@@ -11,11 +11,15 @@ interface FieldsResult {
 const EMPTY: FieldsResult = { attrFields: [], kvFields: [] };
 
 function protoToSummary(fields: FieldInfo[]): FieldSummary[] {
-  return fields.map((f) => ({
-    key: f.key,
-    count: f.count,
-    values: f.topValues.map((v) => ({ value: v.value, count: v.count })),
-  }));
+  return fields
+    .map((f) => ({
+      key: f.key,
+      count: f.count,
+      values: f.topValues
+        .map((v) => ({ value: v.value, count: v.count }))
+        .sort((a, b) => a.value.localeCompare(b.value)),
+    }))
+    .sort((a, b) => a.key.localeCompare(b.key));
 }
 
 /**
@@ -30,6 +34,7 @@ export function useFields(
   expression: string,
   hasResults: boolean,
   isPipeline: boolean,
+  version: number,
 ): FieldsResult {
   const [result, setResult] = useState<FieldsResult>(EMPTY);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -71,7 +76,7 @@ export function useFields(
     return () => {
       clearTimeout(debounceRef.current);
     };
-  }, [expression, hasResults, isPipeline]);
+  }, [expression, hasResults, isPipeline, version]);
 
   return result;
 }

@@ -62,7 +62,7 @@ services:
       - -c
       - |
         /opt/kafka/bin/kafka-topics.sh \
-          --bootstrap-server kafka:9092 \
+          --bootstrap-server kafka:9094 \
           --create --if-not-exists \
           --topic gastrolog-logs \
           --partitions 1 \
@@ -86,7 +86,7 @@ services:
           i=$((i + 1))
           echo "{\"message\": \"kafka integration test log line\", \"seq\": $i}" | \
             /opt/kafka/bin/kafka-console-producer.sh \
-              --bootstrap-server kafka:9092 \
+              --bootstrap-server kafka:9094 \
               --topic gastrolog-logs
           sleep 2
         done
@@ -109,6 +109,7 @@ services:
   otel-collector:
     image: otel/opentelemetry-collector-contrib:latest
     container_name: gastrolog-otel
+    user: "0"
     extra_hosts: [host.docker.internal:host-gateway]
     volumes:
       - ./otel/config.yaml:/etc/otelcol-contrib/config.yaml:ro

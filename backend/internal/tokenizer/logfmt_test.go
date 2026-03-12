@@ -91,6 +91,21 @@ func TestExtractLogfmt(t *testing.T) {
 			msg:      "",
 			expected: nil,
 		},
+		{
+			name:     "punctuation keys rejected",
+			msg:      `#3] }, action=pick 0.147=foo {addr:=bar`,
+			expected: []KeyValue{{Key: "action", Value: "pick"}},
+		},
+		{
+			name:     "ipv6 and brackets rejected as keys",
+			msg:      `[fdc4:f303:9324::1]:443 target=host`,
+			expected: nil, // starts with [
+		},
+		{
+			name:     "go format verbs rejected",
+			msg:      `\u003c%!p(bool=true) level=info`,
+			expected: []KeyValue{{Key: "level", Value: "info"}},
+		},
 	}
 
 	for _, tt := range tests {

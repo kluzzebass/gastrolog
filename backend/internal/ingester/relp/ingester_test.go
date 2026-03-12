@@ -3,7 +3,15 @@ package relp
 import (
 	"bufio"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"runtime"
 	"strconv"
@@ -95,7 +103,7 @@ func readToken(reader *bufio.Reader) (string, error) {
 
 func TestRELPFactory(t *testing.T) {
 	t.Parallel()
-	factory := NewFactory()
+	factory := NewFactory(nil)
 
 	// Default addr.
 	ing, err := factory(uuid.New(), nil, nil)
@@ -332,4 +340,227 @@ func TestRELPConnectionClose(t *testing.T) {
 	conn2.Close()
 
 	cancel()
+}
+
+// generateTestCert creates a self-signed CA + server cert for TLS tests.
+func generateTestCert(t *testing.T) (tls.Certificate, *x509.CertPool) {
+	t.Helper()
+
+	// Generate CA key and certificate.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate CA key: %v", err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Test CA"},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create CA cert: %v", err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+
+	// Generate server key and certificate signed by CA.
+	srvKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate server key: %v", err)
+	}
+	srvTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+	}
+	srvDER, err := x509.CreateCertificate(rand.Reader, srvTemplate, caCert, &srvKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create server cert: %v", err)
+	}
+
+	srvCertPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srvDER})
+	srvKeyDER, _ := x509.MarshalECPrivateKey(srvKey)
+	srvKeyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: srvKeyDER})
+
+	cert, err := tls.X509KeyPair(srvCertPEM, srvKeyPEM)
+	if err != nil {
+		t.Fatalf("load keypair: %v", err)
+	}
+
+	pool := x509.NewCertPool()
+	pool.AddCert(caCert)
+	return cert, pool
+}
+
+func TestRELPTLS(t *testing.T) {
+	t.Parallel()
+	out := make(chan orchestrator.IngestMessage, 10)
+
+	srvCert, caPool := generateTestCert(t)
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{srvCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	ing := New(Config{
+		ID:        "test-relp-tls",
+		Addr:      "127.0.0.1:0",
+		TLSConfig: tlsCfg,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go ing.Run(ctx, out)
+
+	// Wait for listener.
+	deadline := time.Now().Add(2 * time.Second)
+	var addr net.Addr
+	for {
+		addr = ing.Addr()
+		if addr != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("listener did not start")
+		}
+		runtime.Gosched()
+	}
+
+	// Connect with TLS.
+	conn, err := tls.Dial("tcp", addr.String(), &tls.Config{
+		RootCAs:    caPool,
+		MinVersion: tls.VersionTLS12,
+	})
+	if err != nil {
+		t.Fatalf("TLS dial failed: %v", err)
+	}
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+
+	// Open session.
+	writeRELPFrame(conn, 1, "open", "relp_version=1\nrelp_software=test\ncommands=syslog")
+	txnr, cmd, _, err := readRELPResponse(reader)
+	if err != nil {
+		t.Fatalf("read open response: %v", err)
+	}
+	if txnr != 1 || cmd != "rsp" {
+		t.Fatalf("unexpected open response: txnr=%d cmd=%s", txnr, cmd)
+	}
+
+	// Send syslog message over TLS.
+	syslogMsg := "<34>Jan 15 10:22:15 router01 kernel: TLS test message"
+	writeRELPFrame(conn, 2, "syslog", syslogMsg)
+
+	select {
+	case m := <-out:
+		if string(m.Raw) != syslogMsg {
+			t.Errorf("expected raw %q, got %q", syslogMsg, m.Raw)
+		}
+		m.Ack <- nil
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for message")
+	}
+
+	// Read ack.
+	txnr, cmd, rspData, err := readRELPResponse(reader)
+	if err != nil {
+		t.Fatalf("read syslog ack: %v", err)
+	}
+	if txnr != 2 || cmd != "rsp" {
+		t.Fatalf("unexpected ack: txnr=%d cmd=%s", txnr, cmd)
+	}
+	if !strings.Contains(rspData, "200 Ok") {
+		t.Errorf("expected 200 Ok, got %q", rspData)
+	}
+
+	cancel()
+}
+
+func TestRELPProtocol(t *testing.T) {
+	t.Parallel()
+
+	t.Run("frame_round_trip", func(t *testing.T) {
+		t.Parallel()
+		// net.Pipe gives a synchronous bidirectional connection.
+		client, server := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		session := NewSession(server, server)
+		reader := bufio.NewReader(client)
+
+		type ackResult struct {
+			txnr int
+			cmd  string
+			data string
+			err  error
+		}
+		ackCh := make(chan ackResult, 1)
+
+		// Client goroutine: open → drain open rsp → syslog → read syslog ack.
+		go func() {
+			writeRELPFrame(client, 1, "open", "relp_version=1\ncommands=syslog")
+			readRELPResponse(reader) // drain open response
+			writeRELPFrame(client, 2, "syslog", "test message")
+			txnr, cmd, data, err := readRELPResponse(reader)
+			ackCh <- ackResult{txnr, cmd, data, err}
+		}()
+
+		msg, err := session.ReceiveLog()
+		if err != nil {
+			t.Fatalf("ReceiveLog: %v", err)
+		}
+
+		if string(msg.Data) != "test message" {
+			t.Errorf("expected 'test message', got %q", msg.Data)
+		}
+		if msg.Txnr != 2 {
+			t.Errorf("expected txnr 2, got %d", msg.Txnr)
+		}
+
+		if err := session.AnswerOk(msg); err != nil {
+			t.Fatalf("AnswerOk: %v", err)
+		}
+
+		ack := <-ackCh
+		if ack.err != nil {
+			t.Fatalf("read ack: %v", ack.err)
+		}
+		if ack.txnr != 2 || ack.cmd != "rsp" || !strings.Contains(ack.data, "200 Ok") {
+			t.Errorf("unexpected ack: txnr=%d cmd=%s data=%q", ack.txnr, ack.cmd, ack.data)
+		}
+	})
+
+	t.Run("zero_datalen_close", func(t *testing.T) {
+		t.Parallel()
+		client, server := net.Pipe()
+		defer client.Close()
+		defer server.Close()
+
+		session := NewSession(server, server)
+		reader := bufio.NewReader(client)
+
+		go func() {
+			writeRELPFrame(client, 1, "open", "relp_version=0\ncommands=syslog")
+			readRELPResponse(reader) // drain open response
+			// Send close with 0 datalen — "2 close 0\n"
+			client.Write([]byte("2 close 0\n"))
+			readRELPResponse(reader) // drain close response
+		}()
+
+		_, err := session.ReceiveLog()
+		if err == nil {
+			t.Fatal("expected EOF on close")
+		}
+	})
 }

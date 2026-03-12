@@ -78,7 +78,7 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	}
 	defer client.Close()
 
-	ing.logger.Info("kafka consumer started",
+	ing.logger.Info("kafka ingester starting",
 		"brokers", ing.cfg.Brokers,
 		"topic", ing.cfg.Topic,
 		"group", ing.cfg.Group,
@@ -87,7 +87,7 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	for {
 		fetches := client.PollFetches(ctx)
 		if ctx.Err() != nil {
-			ing.logger.Info("kafka consumer stopping")
+			ing.logger.Info("kafka ingester stopping")
 			_ = client.CommitUncommittedOffsets(context.Background())
 			return nil
 		}
