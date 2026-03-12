@@ -45,9 +45,11 @@ export type SettingsTab =
 
 interface SettingsDialogProps {
   dark: boolean;
-  tab: SettingsTab;
+  /** Tab name, optionally suffixed with `:entityName` for deep-linking (e.g. "vaults:myVault"). */
+  tab: string;
   onTabChange: (tab: SettingsTab) => void;
   onClose: () => void;
+  onOpenInspector?: (inspectorParam: string) => void;
   isAdmin?: boolean;
   noAuth?: boolean;
 }
@@ -75,17 +77,39 @@ const allTabs: TabDef[] = [
   { id: "routes", label: "Routes", icon: RouteIcon, helpTopicId: "routing" },
 ];
 
+/** Parse tab param — may include `:entityName` for deep-linking (e.g. "vaults:myVault"). */
+function parseTabParam(raw: string): { tab: SettingsTab; expandEntity: string | null } {
+  const idx = raw.indexOf(":");
+  if (idx >= 0) {
+    const t = raw.slice(0, idx) as SettingsTab;
+    return { tab: allTabs.some((d) => d.id === t) ? t : "service", expandEntity: raw.slice(idx + 1) };
+  }
+  const t = raw as SettingsTab;
+  return { tab: allTabs.some((d) => d.id === t) ? t : "service", expandEntity: null };
+}
+
 export function SettingsDialog({
   dark,
-  tab,
+  tab: rawTab,
   onTabChange,
   onClose,
+  onOpenInspector,
   isAdmin,
   noAuth,
 }: Readonly<SettingsDialogProps>) {
   const c = useThemeClass(dark);
   const tabs = allTabs.filter((t) => !t.adminOnly || isAdmin);
-  const [expandTarget, setExpandTarget] = useState<string | null>(null);
+
+  // Parse optional ":entityName" suffix from the tab param.
+  const { tab, expandEntity } = parseTabParam(rawTab);
+  const [expandTarget, setExpandTarget] = useState<string | null>(expandEntity);
+
+  // If the URL-provided expand entity changes (e.g. navigating from inspector), update.
+  const [prevExpandEntity, setPrevExpandEntity] = useState(expandEntity);
+  if (expandEntity !== prevExpandEntity) {
+    setPrevExpandEntity(expandEntity);
+    if (expandEntity) setExpandTarget(expandEntity);
+  }
 
   const navigateTo = (targetTab: SettingsTab, entityName?: string) => {
     onTabChange(targetTab);
@@ -143,12 +167,12 @@ export function SettingsDialog({
           {tab === "files" && <FilesSettings dark={dark} />}
           {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
-          {tab === "ingesters" && <IngestersSettings dark={dark} />}
+          {tab === "ingesters" && <IngestersSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
           {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "routes" && <RoutesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "policies" && <PoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "retention" && <RetentionPoliciesSettings dark={dark} onNavigateTo={navigateTo} />}
-          {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} />}
+          {tab === "vaults" && <VaultsSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
         </div>
       </div>
     </Dialog>

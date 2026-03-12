@@ -21,13 +21,14 @@ interface InspectorDialogProps {
   inspectorParam: string;
   onNavigate: (param: string) => void;
   onClose: () => void;
+  onOpenSettings?: (tab: string, entityName?: string) => void;
 }
 
 // ---- URL state parsing ----
 
 type ParsedState =
   | { mode: "nodes"; nodeId: string }
-  | { mode: "entities"; entityType: EntityType };
+  | { mode: "entities"; entityType: EntityType; expandTarget: string | null };
 
 const entityTypes = new Set<EntityType>(["vaults", "ingesters", "routes", "jobs", "system"]);
 
@@ -36,28 +37,33 @@ function parseParam(param: string): ParsedState {
     return { mode: "nodes", nodeId: param.slice(6) };
   }
   if (param.startsWith("entities:")) {
-    const et = param.slice(9) as EntityType;
+    const rest = param.slice(9);
+    // Format: "entities:<type>" or "entities:<type>:<entityName>"
+    const colonIdx = rest.indexOf(":");
+    const etRaw = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
+    const entityName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : null;
+    const et = etRaw as EntityType;
     if (entityTypes.has(et)) {
-      return { mode: "entities", entityType: et };
+      return { mode: "entities", entityType: et, expandTarget: entityName };
     }
-    return { mode: "entities", entityType: "vaults" };
+    return { mode: "entities", entityType: "vaults", expandTarget: null };
   }
   // Legacy tab names.
   switch (param) {
     case "cluster":
       return { mode: "nodes", nodeId: "" };
     case "metrics":
-      return { mode: "entities", entityType: "system" };
+      return { mode: "entities", entityType: "system", expandTarget: null };
     case "vaults":
     case "ingesters":
     case "jobs":
-      return { mode: "entities", entityType: param };
+      return { mode: "entities", entityType: param, expandTarget: null };
     default:
-      return { mode: "entities", entityType: "vaults" };
+      return { mode: "entities", entityType: "vaults", expandTarget: null };
   }
 }
 
-function encodeParam(state: ParsedState): string {
+function encodeParam(state: { mode: "nodes"; nodeId: string } | { mode: "entities"; entityType: EntityType }): string {
   if (state.mode === "nodes") {
     return `nodes:${state.nodeId}`;
   }
@@ -87,6 +93,7 @@ export function InspectorDialog({
   inspectorParam,
   onNavigate,
   onClose,
+  onOpenSettings,
 }: Readonly<InspectorDialogProps>) {
   const c = useThemeClass(dark);
 
@@ -115,7 +122,7 @@ export function InspectorDialog({
   // Parse URL state, forcing entities mode in single-node.
   let parsed = parseParam(inspectorParam);
   if (!multiNode && parsed.mode === "nodes") {
-    parsed = { mode: "entities", entityType: "vaults" };
+    parsed = { mode: "entities", entityType: "vaults", expandTarget: null };
   }
 
   const mode: InspectorMode = parsed.mode;
@@ -246,9 +253,9 @@ export function InspectorDialog({
         {/* ---- Right content pane ---- */}
         <div className="flex-1 overflow-y-auto app-scroll p-5">
           {parsed.mode === "nodes" ? (
-            <NodeDetailPane nodeId={selectedNodeId} dark={dark} />
+            <NodeDetailPane nodeId={selectedNodeId} dark={dark} onOpenSettings={onOpenSettings} />
           ) : (
-            <EntityListPane entityType={parsed.entityType} dark={dark} />
+            <EntityListPane entityType={parsed.entityType} dark={dark} onOpenSettings={onOpenSettings} expandTarget={parsed.expandTarget} />
           )}
         </div>
       </div>

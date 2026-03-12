@@ -6,9 +6,11 @@ import { useToast } from "../Toast";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
+import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 import { ChunkTimeline } from "./ChunkTimeline";
+import { CrossLinkBadge } from "./CrossLinkBadge";
 
 interface VaultCardProps {
   vault: VaultInfo;
@@ -16,6 +18,7 @@ interface VaultCardProps {
   expanded: boolean;
   onToggle: () => void;
   showNodeBadge?: boolean;
+  onOpenSettings?: () => void;
 }
 
 export function VaultCard({
@@ -24,6 +27,7 @@ export function VaultCard({
   expanded,
   onToggle,
   showNodeBadge = true,
+  onOpenSettings,
 }: Readonly<VaultCardProps>) {
   return (
     <ExpandableCard
@@ -36,6 +40,11 @@ export function VaultCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
+          {onOpenSettings && (
+            <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
+              <CogIcon className="w-3 h-3" />
+            </CrossLinkBadge>
+          )}
           {showNodeBadge && <NodeBadge nodeId={vault.nodeId} dark={dark} />}
           {!vault.enabled && (
             <Badge variant="warn" dark={dark}>disabled</Badge>

@@ -15,9 +15,10 @@ import { Badge } from "../Badge";
 interface NodeDetailPaneProps {
   nodeId: string;
   dark: boolean;
+  onOpenSettings?: (tab: string, entityName?: string) => void;
 }
 
-export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) {
+export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDetailPaneProps>) {
   const { data: settingsData } = useSettings();
   const localNodeId = settingsData?.nodeId ?? "";
 
@@ -66,6 +67,7 @@ export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) 
                   expanded={expandedVault === vault.id}
                   onToggle={() => setExpandedVault(expandedVault === vault.id ? null : vault.id)}
                   showNodeBadge={false}
+                  onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vault.id) : undefined}
                 />
               ))}
           </div>
@@ -86,6 +88,7 @@ export function NodeDetailPane({ nodeId, dark }: Readonly<NodeDetailPaneProps>) 
                 expanded={expandedIngester === ing.id}
                 onToggle={() => setExpandedIngester(expandedIngester === ing.id ? null : ing.id)}
                 showNodeBadge={false}
+                onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || ing.id) : undefined}
               />
             ))}
           </div>

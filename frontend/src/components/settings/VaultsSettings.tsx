@@ -23,12 +23,14 @@ import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
+import { PulseIcon } from "../icons";
+import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { sortByName } from "../../lib/sort";
 import { JobProgress, RetentionRuleEditor, retentionRulesValid } from "./VaultHelpers";
 import type { RetentionRuleEdit } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 
-export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void }>) {
+export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void; onOpenInspector?: (inspectorParam: string) => void }>) {
   const { data: config, isLoading } = useConfig();
   const putVault = usePutVault();
   const deleteVault = useDeleteVault();
@@ -69,11 +71,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
 
-  // Auto-expand a vault when navigated to from another settings tab.
-  // React-recommended "adjusting state when a prop changes" pattern.
-  const [prevExpandTarget, setPrevExpandTarget] = useState(expandTarget);
-  if (expandTarget && expandTarget !== prevExpandTarget && configVaults && configVaults.length > 0) {
-    setPrevExpandTarget(expandTarget);
+  // Auto-expand a vault when navigated to from another view.
+  const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
+  if (expandTarget && expandTarget !== consumedExpandTarget && configVaults && configVaults.length > 0) {
+    setConsumedExpandTarget(expandTarget);
     const match = configVaults.find((s) => (s.name || s.id) === expandTarget);
     if (match) {
       setExpanded(match.id);
@@ -403,6 +404,11 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             }
             headerRight={
               <span className="flex items-center gap-2">
+                {onOpenInspector && (
+                  <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:vaults:${vault.name || vault.id}`)}>
+                    <PulseIcon className="w-3 h-3" />
+                  </CrossLinkBadge>
+                )}
                 <NodeBadge nodeId={edit.nodeId} dark={dark} />
                 {!vault.enabled && (
                   <Badge variant="ghost" dark={dark}>disabled</Badge>

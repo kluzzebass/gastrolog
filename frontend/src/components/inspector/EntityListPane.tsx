@@ -23,14 +23,16 @@ import type { EntityType } from "./InspectorDialog";
 interface EntityListPaneProps {
   entityType: EntityType;
   dark: boolean;
+  onOpenSettings?: (tab: string, entityName?: string) => void;
+  expandTarget?: string | null;
 }
 
-export function EntityListPane({ entityType, dark }: Readonly<EntityListPaneProps>) {
+export function EntityListPane({ entityType, dark, onOpenSettings, expandTarget }: Readonly<EntityListPaneProps>) {
   switch (entityType) {
     case "vaults":
-      return <VaultsList dark={dark} />;
+      return <VaultsList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} />;
     case "ingesters":
-      return <IngestersList dark={dark} />;
+      return <IngestersList dark={dark} onOpenSettings={onOpenSettings} expandTarget={expandTarget} />;
     case "routes":
       return <RouteStatsList dark={dark} />;
     case "jobs":
@@ -49,7 +51,14 @@ function useToggleSet() {
       else next.add(id);
       return next;
     });
-  return { expanded, toggle };
+  const add = (id: string) =>
+    setExpanded((prev) => {
+      if (prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  return { expanded, toggle, add };
 }
 
 // ---- Node context helper ----
@@ -79,9 +88,17 @@ function useNodeContext() {
 
 // ---- Vaults ----
 
-function VaultsList({ dark }: Readonly<{ dark: boolean }>) {
+function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
   const { data: vaults, isLoading } = useVaults();
-  const { expanded, toggle } = useToggleSet();
+  const { expanded, toggle, add } = useToggleSet();
+
+  // Auto-expand a vault when deep-linked from settings.
+  const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
+  if (expandTarget && expandTarget !== consumedTarget && vaults && vaults.length > 0) {
+    setConsumedTarget(expandTarget);
+    const match = vaults.find((v) => (v.name || v.id) === expandTarget);
+    if (match) add(match.id);
+  }
 
   if (isLoading) return <Loading dark={dark} />;
   if (!vaults || vaults.length === 0) return <Empty dark={dark}>No vaults configured.</Empty>;
@@ -98,6 +115,7 @@ function VaultsList({ dark }: Readonly<{ dark: boolean }>) {
           dark={dark}
           expanded={expanded.has(vault.id)}
           onToggle={() => toggle(vault.id)}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vault.id) : undefined}
         />
       ))}
     </div>
@@ -106,9 +124,17 @@ function VaultsList({ dark }: Readonly<{ dark: boolean }>) {
 
 // ---- Ingesters ----
 
-function IngestersList({ dark }: Readonly<{ dark: boolean }>) {
+function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
   const { data: ingesters, isLoading } = useIngesters();
-  const { expanded, toggle } = useToggleSet();
+  const { expanded, toggle, add } = useToggleSet();
+
+  // Auto-expand an ingester when deep-linked from settings.
+  const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
+  if (expandTarget && expandTarget !== consumedTarget && ingesters && ingesters.length > 0) {
+    setConsumedTarget(expandTarget);
+    const match = ingesters.find((i) => (i.name || i.id) === expandTarget);
+    if (match) add(match.id);
+  }
 
   if (isLoading) return <Loading dark={dark} />;
   if (!ingesters || ingesters.length === 0) return <Empty dark={dark}>No ingesters configured.</Empty>;
@@ -125,6 +151,7 @@ function IngestersList({ dark }: Readonly<{ dark: boolean }>) {
           dark={dark}
           expanded={expanded.has(ing.id)}
           onToggle={() => toggle(ing.id)}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || ing.id) : undefined}
         />
       ))}
     </div>

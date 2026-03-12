@@ -15,6 +15,8 @@ import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
 import { NodeSelect } from "./NodeSelect";
 import { sortByName } from "../../lib/sort";
+import { PulseIcon } from "../icons";
+import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 
 const ingesterTypes = [
   { value: "chatterbox", label: "chatterbox" },
@@ -73,20 +75,32 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
   }
 }
 
-export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
+export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, onOpenInspector }: Readonly<{ dark: boolean; expandTarget?: string | null; onExpandTargetConsumed?: () => void; onOpenInspector?: (inspectorParam: string) => void }>) {
   const { data: config, isLoading } = useConfig();
   const putIngester = usePutIngester();
   const deleteIngester = useDeleteIngester();
   const generateName = useGenerateName();
   const { addToast } = useToast();
 
-  const { isExpanded, toggle: toggleCard } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard, setExpanded } = useExpandedCard();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
   const { adding, newName, newType, newParams, newNodeId } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
-  const ingesters = config?.ingesters ?? [];
+  const configIngesters = config?.ingesters;
+  const ingesters = configIngesters ?? [];
+
+  // Auto-expand an ingester when navigated to from another view.
+  const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
+  if (expandTarget && expandTarget !== consumedExpandTarget && configIngesters && configIngesters.length > 0) {
+    setConsumedExpandTarget(expandTarget);
+    const match = configIngesters.find((i) => (i.name || i.id) === expandTarget);
+    if (match) {
+      setExpanded(match.id);
+    }
+    onExpandTargetConsumed?.();
+  }
   const existingNames = new Set(ingesters.map((i) => i.name));
   const effectiveName = newName.trim() || namePlaceholder || newType;
   const nameConflict = existingNames.has(effectiveName);
@@ -197,6 +211,11 @@ export function IngestersSettings({ dark }: Readonly<{ dark: boolean }>) {
             onDelete={() => handleDelete(ing.id)}
             headerRight={
               <span className="flex items-center gap-2">
+                {onOpenInspector && (
+                  <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:ingesters:${ing.name || ing.id}`)}>
+                    <PulseIcon className="w-3 h-3" />
+                  </CrossLinkBadge>
+                )}
                 <NodeBadge nodeId={ing.nodeId} dark={dark} />
                 {!ing.enabled && (
                   <Badge variant="ghost" dark={dark}>disabled</Badge>

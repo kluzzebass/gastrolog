@@ -7,7 +7,7 @@ import { HistogramChart } from "./HistogramChart";
 import { SearchSidebar } from "./SearchSidebar";
 import { DetailSidebar } from "./DetailSidebar";
 import { SearchResults } from "./SearchResults";
-import { SettingsDialog, type SettingsTab } from "./settings/SettingsDialog";
+import { SettingsDialog } from "./settings/SettingsDialog";
 import { InspectorDialog } from "./inspector/InspectorDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PreferencesDialog } from "./PreferencesDialog";
@@ -165,9 +165,10 @@ export function SearchView() {
           {sv.settingsParam && (
             <SettingsDialog
               dark={sv.dark}
-              tab={sv.settingsParam as SettingsTab}
+              tab={sv.settingsParam}
               onTabChange={(tab) => sv.navigate({ search: (prev) => ({ ...prev, settings: tab }) })}
               onClose={() => sv.navigate({ search: (prev) => ({ ...prev, settings: undefined }) })}
+              onOpenInspector={(param) => sv.navigate({ search: (prev) => ({ ...prev, settings: undefined, inspector: param }) })}
               isAdmin={sv.currentUser?.role === "admin" || getToken() === "no-auth"}
               noAuth={getToken() === "no-auth"}
             />
@@ -179,6 +180,7 @@ export function SearchView() {
               inspectorParam={sv.inspectorParam}
               onNavigate={(p) => { sessionStorage.setItem("inspector-last", p); sv.navigate({ search: (prev) => ({ ...prev, inspector: p }) }); }}
               onClose={() => sv.navigate({ search: (prev) => ({ ...prev, inspector: undefined }) })}
+              onOpenSettings={(tab, entityName) => sv.navigate({ search: (prev) => ({ ...prev, inspector: undefined, settings: entityName ? `${tab}:${entityName}` : tab }) })}
             />
           )}
 

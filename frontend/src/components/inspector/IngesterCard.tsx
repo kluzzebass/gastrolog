@@ -3,8 +3,10 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useIngesterStatus } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
+import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
+import { CrossLinkBadge } from "./CrossLinkBadge";
 
 interface IngesterCardProps {
   ingester: { id: string; name: string; type: string; running: boolean; nodeId: string };
@@ -12,6 +14,7 @@ interface IngesterCardProps {
   expanded: boolean;
   onToggle: () => void;
   showNodeBadge?: boolean;
+  onOpenSettings?: () => void;
 }
 
 export function IngesterCard({
@@ -20,6 +23,7 @@ export function IngesterCard({
   expanded,
   onToggle,
   showNodeBadge = true,
+  onOpenSettings,
 }: Readonly<IngesterCardProps>) {
   return (
     <ExpandableCard
@@ -31,6 +35,11 @@ export function IngesterCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
+          {onOpenSettings && (
+            <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
+              <CogIcon className="w-3 h-3" />
+            </CrossLinkBadge>
+          )}
           {showNodeBadge && <NodeBadge nodeId={ingester.nodeId} dark={dark} />}
           {ingester.running ? (
             <Badge variant="info" dark={dark}>running</Badge>
