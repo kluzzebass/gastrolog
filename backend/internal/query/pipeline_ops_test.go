@@ -2,6 +2,7 @@ package query
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -597,5 +598,187 @@ func TestCompareSortValues(t *testing.T) {
 	// String comparison.
 	if compareSortValues("abc", "xyz") >= 0 {
 		t.Error("abc should be less than xyz")
+	}
+}
+
+// recordIter creates an iter.Seq2 from a slice of records (for testing applyRecordOps).
+func recordIter(records []chunk.Record) func(func(chunk.Record, error) bool) {
+	return func(yield func(chunk.Record, error) bool) {
+		for _, r := range records {
+			if !yield(r, nil) {
+				return
+			}
+		}
+	}
+}
+
+// makeTestRecords creates N records with "msg-0", "msg-1", etc. and optional attrs.
+func makeTestRecords(n int, attrs map[string]string) []chunk.Record {
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	records := make([]chunk.Record, n)
+	for i := range n {
+		a := make(chunk.Attributes, len(attrs))
+		for k, v := range attrs {
+			a[k] = v
+		}
+		records[i] = chunk.Record{
+			IngestTS: t0.Add(time.Duration(i) * time.Second),
+			WriteTS:  t0.Add(time.Duration(i) * time.Second),
+			Raw:      fmt.Appendf(nil, "msg-%d", i),
+			Attrs:    a,
+		}
+	}
+	return records
+}
+
+func TestStreamingTailBasic(t *testing.T) {
+	records := makeTestRecords(1000, nil)
+	ops := []querylang.PipeOp{&querylang.TailOp{N: 10}}
+
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	if len(result) != 10 {
+		t.Fatalf("expected 10 records, got %d", len(result))
+	}
+	// Should be the last 10 records.
+	for i, r := range result {
+		expected := string(records[990+i].Raw)
+		if string(r.Raw) != expected {
+			t.Errorf("record %d: got %q, want %q", i, string(r.Raw), expected)
+		}
+	}
+}
+
+func TestStreamingTailFewerRecordsThanN(t *testing.T) {
+	records := makeTestRecords(5, nil)
+	ops := []querylang.PipeOp{&querylang.TailOp{N: 100}}
+
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	if len(result) != 5 {
+		t.Errorf("expected 5 records, got %d", len(result))
+	}
+}
+
+func TestStreamingTailWithWhere(t *testing.T) {
+	records := makeTestRecords(100, nil)
+	// Set level=error on every 10th record.
+	for i := range records {
+		if i%10 == 0 {
+			records[i].Attrs["level"] = "error"
+		} else {
+			records[i].Attrs["level"] = "info"
+		}
+	}
+	ops := []querylang.PipeOp{
+		&querylang.WhereOp{Expr: &querylang.PredicateExpr{Kind: querylang.PredKV, Key: "level", Value: "error"}},
+		&querylang.TailOp{N: 3},
+	}
+
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	// 10 records match (0,10,20,...,90), tail 3 gives last 3: indices 70,80,90.
+	if len(result) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(result))
+	}
+	if string(result[0].Raw) != string(records[70].Raw) {
+		t.Errorf("first record: got %q, want %q", string(result[0].Raw), string(records[70].Raw))
+	}
+}
+
+func TestStreamingSliceBasic(t *testing.T) {
+	records := makeTestRecords(100, nil)
+	ops := []querylang.PipeOp{&querylang.SliceOp{Start: 5, End: 10}}
+
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	if len(result) != 6 { // positions 5-10 inclusive
+		t.Fatalf("expected 6 records, got %d", len(result))
+	}
+	// Record at position 5 (1-indexed) = index 4.
+	if string(result[0].Raw) != string(records[4].Raw) {
+		t.Errorf("first record: got %q, want %q", string(result[0].Raw), string(records[4].Raw))
+	}
+}
+
+func TestStreamingSliceWithWhere(t *testing.T) {
+	records := makeTestRecords(100, nil)
+	for i := range records {
+		if i%2 == 0 {
+			records[i].Attrs["parity"] = "even"
+		} else {
+			records[i].Attrs["parity"] = "odd"
+		}
+	}
+	ops := []querylang.PipeOp{
+		&querylang.WhereOp{Expr: &querylang.PredicateExpr{Kind: querylang.PredKV, Key: "parity", Value: "even"}},
+		&querylang.SliceOp{Start: 2, End: 4},
+	}
+
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	// 50 even records (0,2,4,...,98). Slice 2-4: indices 2,4,6 (survivors 2nd,3rd,4th).
+	if len(result) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(result))
+	}
+	if string(result[0].Raw) != string(records[2].Raw) {
+		t.Errorf("first record: got %q, want %q", string(result[0].Raw), string(records[2].Raw))
+	}
+}
+
+func TestStreamingSliceEarlyExit(t *testing.T) {
+	// Verify that slice stops iterating after collecting enough records.
+	// Use a large dataset but slice only the first 3.
+	records := makeTestRecords(10000, nil)
+	iterCount := 0
+	countingIter := func(yield func(chunk.Record, error) bool) {
+		for _, r := range records {
+			iterCount++
+			if !yield(r, nil) {
+				return
+			}
+		}
+	}
+	ops := []querylang.PipeOp{&querylang.SliceOp{Start: 1, End: 3}}
+
+	result, err := applyRecordOps(context.Background(), countingIter, ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	if len(result) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(result))
+	}
+	// The iterator should have stopped well before 10000.
+	// It will iterate exactly 3 (sliceEnd) + 1 (the break check happens after incrementing).
+	// Actually with range-over-func, break stops at the current iteration.
+	if iterCount > 10 {
+		t.Errorf("expected early exit, but iterated %d times", iterCount)
+	}
+}
+
+func TestSortBeforeTailFallsBackToMaterialization(t *testing.T) {
+	records := makeTestRecords(100, nil)
+	ops := []querylang.PipeOp{
+		&querylang.SortOp{Fields: []querylang.SortField{{Name: "raw"}}},
+		&querylang.TailOp{N: 5},
+	}
+
+	// Should not panic or error — falls back to batch path.
+	result, err := applyRecordOps(context.Background(), recordIter(records), ops, nil)
+	if err != nil {
+		t.Fatalf("applyRecordOps: %v", err)
+	}
+	if len(result) != 5 {
+		t.Errorf("expected 5 records, got %d", len(result))
 	}
 }

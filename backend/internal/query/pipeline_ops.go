@@ -16,7 +16,17 @@ import (
 
 // applyRecordOps collects all records from the iterator and applies the given
 // pipeline operators in order. Each operator transforms the record slice.
+//
+// When the pipeline ends with a tail or slice (and no sort precedes it),
+// a streaming path avoids materializing all records into memory: inline
+// filters/transforms run per-record and a ring buffer (tail) or positional
+// collector (slice) bounds the working set.
 func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, resolve lookup.Resolver) ([]chunk.Record, error) {
+	// Fast path: streaming tail/slice when no sort precedes the cap.
+	if capIdx, ok := findStreamableCap(ops); ok {
+		return applyStreamingCap(ctx, it, ops, capIdx, resolve)
+	}
+
 	var records []chunk.Record
 	for rec, err := range it {
 		if err != nil {
@@ -62,6 +72,288 @@ func applyRecordOps(ctx context.Context, it iter.Seq2[chunk.Record, error], ops 
 		}
 	}
 	return records, nil
+}
+
+// findStreamableCap returns the index of the last TailOp or SliceOp in ops,
+// provided no SortOp precedes it (sort requires full materialization).
+// Returns (index, true) if the streaming optimization can be applied.
+func findStreamableCap(ops []querylang.PipeOp) (int, bool) {
+	capIdx := -1
+	for i, op := range ops {
+		switch op.(type) {
+		case *querylang.SortOp:
+			return 0, false // sort before any cap — cannot stream
+		case *querylang.TailOp, *querylang.SliceOp:
+			capIdx = i
+		}
+	}
+	return capIdx, capIdx >= 0
+}
+
+// applyStreamingCap processes the iterator with bounded memory by applying
+// pre-cap operators inline per-record and using a ring buffer (tail) or
+// positional collector (slice) instead of materializing all records.
+func applyStreamingCap(ctx context.Context, it iter.Seq2[chunk.Record, error], ops []querylang.PipeOp, capIdx int, resolve lookup.Resolver) ([]chunk.Record, error) {
+	preOps := ops[:capIdx]
+	capOp := ops[capIdx]
+	postOps := ops[capIdx+1:]
+
+	sf := newStreamFilter(ctx, preOps, resolve)
+
+	// Initialize collector based on cap type.
+	var ring []chunk.Record
+	var ringPos, ringN int
+	var sliceStart, sliceEnd int // 1-indexed inclusive
+	var sliceCount int           // 0-indexed count of survivors seen so far
+	var collected []chunk.Record
+
+	switch op := capOp.(type) {
+	case *querylang.TailOp:
+		ringN = op.N
+		ring = make([]chunk.Record, ringN)
+	case *querylang.SliceOp:
+		sliceStart = op.Start // 1-indexed
+		sliceEnd = op.End     // 1-indexed inclusive
+		collected = make([]chunk.Record, 0, sliceEnd-sliceStart+1)
+	}
+
+	done := false
+	for rec, err := range it {
+		if err != nil {
+			return nil, err
+		}
+		rec = rec.Copy()
+		materializeRecord(&rec)
+
+		keep, evalErr := sf.apply(&rec)
+		if evalErr != nil {
+			return nil, evalErr
+		}
+		if !keep {
+			continue
+		}
+
+		// Feed to collector.
+		switch capOp.(type) {
+		case *querylang.TailOp:
+			ring[ringPos%ringN] = rec
+			ringPos++
+		case *querylang.SliceOp:
+			sliceCount++
+			if sliceCount >= sliceStart && sliceCount <= sliceEnd {
+				collected = append(collected, rec)
+			}
+			if sliceCount >= sliceEnd {
+				done = true
+			}
+		}
+		if done {
+			break
+		}
+	}
+
+	records := linearizeCollector(capOp, ring, ringPos, ringN, collected)
+
+	// Apply post-cap ops on the small result set.
+	if len(postOps) > 0 {
+		return applyBatchOps(ctx, records, postOps, resolve)
+	}
+	return records, nil
+}
+
+// streamFilter applies pre-cap pipeline operators inline per-record.
+type streamFilter struct {
+	ctx       context.Context
+	ops       []querylang.PipeOp
+	filters   map[int]func(chunk.Record) bool // compiled where filters by op index
+	dedups    map[int]*dedupTracker           // dedup state by op index
+	eval      *querylang.Evaluator
+	headLimit int // 0 = no limit
+	survivors int
+	resolve   lookup.Resolver
+}
+
+type dedupTracker struct {
+	seen   map[chunk.EventID]time.Time
+	window time.Duration
+}
+
+func newStreamFilter(ctx context.Context, ops []querylang.PipeOp, resolve lookup.Resolver) *streamFilter {
+	sf := &streamFilter{
+		ctx:     ctx,
+		ops:     ops,
+		filters: make(map[int]func(chunk.Record) bool),
+		dedups:  make(map[int]*dedupTracker),
+		eval:    querylang.NewEvaluator(),
+		resolve: resolve,
+	}
+	for i, op := range ops {
+		switch o := op.(type) {
+		case *querylang.WhereOp:
+			sf.filters[i] = CompileFilter(o.Expr)
+		case *querylang.DedupOp:
+			sf.dedups[i] = &dedupTracker{seen: make(map[chunk.EventID]time.Time), window: parseDedupWindow(o.Window)}
+		case *querylang.HeadOp:
+			sf.headLimit = o.N
+		}
+	}
+	return sf
+}
+
+// apply runs all pre-cap operators on a single record. Returns (keep, error).
+// When keep is false, the record should be skipped.
+func (sf *streamFilter) apply(rec *chunk.Record) (bool, error) {
+	for i, op := range sf.ops {
+		switch o := op.(type) {
+		case *querylang.WhereOp:
+			if !sf.filters[i](*rec) {
+				return false, nil
+			}
+		case *querylang.DedupOp:
+			dt := sf.dedups[i]
+			if firstTS, exists := dt.seen[rec.EventID]; exists && rec.WriteTS.Sub(firstTS) <= dt.window {
+				return false, nil
+			}
+			dt.seen[rec.EventID] = rec.WriteTS
+		case *querylang.EvalOp:
+			if err := applyInlineEval(rec, o, sf.eval); err != nil {
+				return false, err
+			}
+		case *querylang.RenameOp:
+			applyInlineRename(rec, o)
+		case *querylang.FieldsOp:
+			applyInlineFields(rec, o)
+		case *querylang.LookupOp:
+			applyRecordLookup(sf.ctx, []chunk.Record{*rec}, o, sf.resolve)
+		case *querylang.HeadOp:
+			// handled via survivors counter
+		}
+	}
+	sf.survivors++
+	if sf.headLimit > 0 && sf.survivors > sf.headLimit {
+		return false, nil
+	}
+	return true, nil
+}
+
+func applyInlineEval(rec *chunk.Record, op *querylang.EvalOp, eval *querylang.Evaluator) error {
+	row := RecordToRow(*rec)
+	for _, a := range op.Assignments {
+		val, err := eval.Eval(a.Expr, row)
+		if err != nil {
+			return fmt.Errorf("eval %s: %w", a.Field, err)
+		}
+		if !val.Missing {
+			if rec.Attrs == nil {
+				rec.Attrs = make(chunk.Attributes)
+			}
+			rec.Attrs[a.Field] = val.Str
+			row[a.Field] = val.Str
+		}
+	}
+	return nil
+}
+
+func applyInlineRename(rec *chunk.Record, op *querylang.RenameOp) {
+	for _, m := range op.Renames {
+		if v, ok := rec.Attrs[m.Old]; ok {
+			if rec.Attrs == nil {
+				rec.Attrs = make(chunk.Attributes)
+			}
+			rec.Attrs[m.New] = v
+			delete(rec.Attrs, m.Old)
+		}
+	}
+}
+
+func applyInlineFields(rec *chunk.Record, op *querylang.FieldsOp) {
+	if rec.Attrs == nil {
+		return
+	}
+	nameSet := make(map[string]bool, len(op.Names))
+	for _, n := range op.Names {
+		nameSet[n] = true
+	}
+	for k := range rec.Attrs {
+		drop := op.Drop && nameSet[k] || !op.Drop && !nameSet[k]
+		if drop {
+			delete(rec.Attrs, k)
+		}
+	}
+}
+
+// linearizeCollector extracts the final record slice from the ring buffer or slice collector.
+func linearizeCollector(capOp querylang.PipeOp, ring []chunk.Record, ringPos, ringN int, collected []chunk.Record) []chunk.Record {
+	switch capOp.(type) {
+	case *querylang.TailOp:
+		total := ringPos
+		if total < ringN {
+			out := make([]chunk.Record, total)
+			copy(out, ring[:total])
+			return out
+		}
+		out := make([]chunk.Record, ringN)
+		start := ringPos % ringN
+		copy(out, ring[start:])
+		copy(out[ringN-start:], ring[:start])
+		return out
+	case *querylang.SliceOp:
+		return collected
+	}
+	return nil
+}
+
+// applyBatchOps applies operators to an already-materialized record slice.
+func applyBatchOps(ctx context.Context, records []chunk.Record, ops []querylang.PipeOp, resolve lookup.Resolver) ([]chunk.Record, error) {
+	materializeFields(records)
+	eval := querylang.NewEvaluator()
+	for _, op := range ops {
+		var err error
+		switch o := op.(type) {
+		case *querylang.WhereOp:
+			records = applyRecordWhere(records, o)
+		case *querylang.DedupOp:
+			records = applyRecordDedup(records, parseDedupWindow(o.Window))
+		case *querylang.EvalOp:
+			records, err = applyRecordEval(records, o, eval)
+		case *querylang.SortOp:
+			applyRecordSort(records, o)
+		case *querylang.HeadOp:
+			records = applyRecordHead(records, o)
+		case *querylang.TailOp:
+			records = applyRecordTail(records, o)
+		case *querylang.SliceOp:
+			records = applyRecordSlice(records, o)
+		case *querylang.RenameOp:
+			applyRecordRename(records, o)
+		case *querylang.FieldsOp:
+			applyRecordFields(records, o)
+		case *querylang.LookupOp:
+			applyRecordLookup(ctx, records, o, resolve)
+		default:
+			return nil, fmt.Errorf("unsupported post-cap operator: %T", op)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	return records, nil
+}
+
+// materializeRecord extracts KV/JSON/logfmt fields from a single record into Attrs.
+func materializeRecord(rec *chunk.Record) {
+	row := RecordToRow(*rec)
+	if rec.Attrs == nil {
+		rec.Attrs = make(chunk.Attributes, len(row))
+	}
+	for k, v := range row {
+		if k == "raw" {
+			continue
+		}
+		if _, exists := rec.Attrs[k]; !exists {
+			rec.Attrs[k] = v
+		}
+	}
 }
 
 const defaultDedupWindow = time.Second
