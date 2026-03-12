@@ -594,6 +594,43 @@ func TestConjunctionToFiltersExprPredicate(t *testing.T) {
 	}
 }
 
+func TestMatchTimestampFieldPrecision(t *testing.T) {
+	// Go stores nanoseconds; JavaScript toISOString() sends milliseconds.
+	// Equality must match despite differing precision.
+	nanoVal := "2026-03-12T10:30:00.123456789Z" // from record (RFC3339Nano)
+	milliFilter := "2026-03-12T10:30:00.123Z"   // from JS toISOString()
+
+	f := KeyValueFilter{Key: "ingest_ts", Value: milliFilter, Op: querylang.OpEq}
+	if !matchTimestampField(nanoVal, f) {
+		t.Error("expected millisecond-precision filter to match nanosecond-precision record")
+	}
+
+	// Exact nano match should also work.
+	f2 := KeyValueFilter{Key: "ingest_ts", Value: nanoVal, Op: querylang.OpEq}
+	if !matchTimestampField(nanoVal, f2) {
+		t.Error("expected nano-precision filter to match nano-precision record")
+	}
+
+	// Different millisecond should not match.
+	f3 := KeyValueFilter{Key: "ingest_ts", Value: "2026-03-12T10:30:00.124Z", Op: querylang.OpEq}
+	if matchTimestampField(nanoVal, f3) {
+		t.Error("expected different millisecond to not match")
+	}
+
+	// Second-precision filter should match if same second.
+	secVal := "2026-03-12T10:30:00Z"
+	f4 := KeyValueFilter{Key: "ingest_ts", Value: secVal, Op: querylang.OpEq}
+	if !matchTimestampField(nanoVal, f4) {
+		t.Error("expected second-precision filter to match (same second)")
+	}
+
+	// Comparison operators use full precision.
+	f5 := KeyValueFilter{Key: "ingest_ts", Value: milliFilter, Op: querylang.OpGt}
+	if !matchTimestampField(nanoVal, f5) {
+		t.Error("expected nano > milli (nano has sub-ms digits)")
+	}
+}
+
 func TestScannerBuilderFilters(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 	b := newScannerBuilder(chunkID)

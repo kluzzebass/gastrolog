@@ -548,10 +548,81 @@ func matchFirstClassFilter(v string, f KeyValueFilter) bool {
 	if f.Value == "" || f.Value == "*" {
 		return true // key-exists check
 	}
+	// Timestamp fields need parse-based comparison because different
+	// formatters produce different precision (Go: nanoseconds via
+	// RFC3339Nano, JavaScript: milliseconds via toISOString).
+	if isTimestampField(f.Key) {
+		return matchTimestampField(v, f)
+	}
 	if f.Op != querylang.OpEq {
 		return compareValues(v, f.Value, f.Op)
 	}
 	return matchStringOrPat(v, f.Value, f.ValuePat)
+}
+
+var timestampFields = map[string]bool{
+	"ingest_ts": true, "write_ts": true, "source_ts": true,
+}
+
+func isTimestampField(key string) bool {
+	return timestampFields[strings.ToLower(key)]
+}
+
+func matchTimestampField(recordVal string, f KeyValueFilter) bool {
+	rt, err := time.Parse(time.RFC3339Nano, recordVal)
+	if err != nil {
+		return false
+	}
+	ft, err := time.Parse(time.RFC3339Nano, f.Value)
+	if err != nil {
+		return false
+	}
+	// For equality, truncate both sides to the precision of the filter
+	// value. JavaScript's toISOString() sends milliseconds; Go stores
+	// nanoseconds. Truncating to the filter's precision makes the
+	// comparison work regardless of the source's precision.
+	switch f.Op { //nolint:exhaustive // Ne not used for timestamps
+	case querylang.OpEq:
+		prec := timestampPrecision(f.Value)
+		return rt.Truncate(prec).Equal(ft.Truncate(prec))
+	case querylang.OpLt:
+		return rt.Before(ft)
+	case querylang.OpLte:
+		return !rt.After(ft)
+	case querylang.OpGt:
+		return rt.After(ft)
+	case querylang.OpGte:
+		return !rt.Before(ft)
+	default:
+		return false
+	}
+}
+
+// timestampPrecision returns the truncation unit implied by the fractional
+// seconds in an RFC 3339 timestamp. No fraction → second, 3 digits →
+// millisecond, 6 → microsecond, 9+ → nanosecond.
+func timestampPrecision(s string) time.Duration {
+	dotIdx := strings.LastIndexByte(s, '.')
+	if dotIdx < 0 {
+		return time.Second
+	}
+	// Count digits between '.' and the trailing 'Z' or '+'/'-'.
+	frac := 0
+	for i := dotIdx + 1; i < len(s); i++ {
+		if s[i] >= '0' && s[i] <= '9' {
+			frac++
+		} else {
+			break
+		}
+	}
+	switch {
+	case frac <= 3:
+		return time.Millisecond
+	case frac <= 6:
+		return time.Microsecond
+	default:
+		return time.Nanosecond
+	}
 }
 
 // firstClassFieldValue returns the string value and true for first-class
@@ -1334,10 +1405,7 @@ func matchesSingleKV(rec chunk.Record, pred *querylang.PredicateExpr) bool {
 
 	// First-class fields (ingester_id, ingest_seq, timestamps).
 	if v, ok := firstClassFieldValue(keyLower, rec); ok {
-		if pred.Op != querylang.OpEq {
-			return compareValues(v, pred.Value, pred.Op)
-		}
-		return matchStringOrPat(v, pred.Value, pred.ValuePat)
+		return matchFirstClassFilter(v, KeyValueFilter{Key: keyLower, Value: pred.Value, Op: pred.Op, ValuePat: pred.ValuePat})
 	}
 
 	// For comparison operators other than eq, use compareValues.

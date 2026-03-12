@@ -14,6 +14,20 @@ import { useDetailPanel } from "../hooks/useDetailPanel";
 
 const MAX_DISPLAY_LINES = 100;
 
+/**
+ * Format a protobuf Timestamp to RFC 3339 with nanosecond precision.
+ * JavaScript's Date.toISOString() truncates to milliseconds, losing the
+ * sub-ms nanos that Go stores — breaking exact equality filters.
+ */
+function formatTimestampNano(ts: { seconds: bigint; nanos: number }): string {
+  const date = new Date(Number(ts.seconds) * 1000);
+  const iso = date.toISOString(); // "2026-03-12T01:38:25.397Z" (ms precision)
+  if (ts.nanos % 1_000_000 === 0) return iso; // no sub-ms precision needed
+  const nanoStr = ts.nanos.toString().padStart(9, "0");
+  // Replace ".MMMZ" with ".NNNNNNNNNZ"
+  return iso.replace(/\.\d{3}Z$/, `.${nanoStr}Z`);
+}
+
 /** Format a 16-byte Uint8Array as a UUID string. */
 function formatUUID(bytes: Uint8Array): string {
   if (bytes.length !== 16) return "";
@@ -374,7 +388,7 @@ export function DetailPanelContent({
                     onMultiFieldSelect([
                       ["ingester_id", formatUUID(record.ingesterId)],
                       ["ingest_seq", record.ingestSeq.toString()],
-                      ["ingest_ts", record.ingestTs!.toDate().toISOString()],
+                      ["ingest_ts", formatTimestampNano(record.ingestTs!)],
                     ]);
                   }}
                 >
