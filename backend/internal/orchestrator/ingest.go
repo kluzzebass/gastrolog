@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"time"
+
 	"gastrolog/internal/chunk"
 
 	"github.com/google/uuid"
@@ -111,8 +113,12 @@ func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) error {
 }
 
 // forwardRemote ships a record to the node that owns the target vault.
+// Uses a tight timeout to prevent a slow peer from blocking the orchestrator
+// lock (held by the caller during ingestion).
 func (o *Orchestrator) forwardRemote(t MatchResult, rec chunk.Record) {
-	if err := o.forwarder.Forward(context.Background(), t.NodeID, t.VaultID, []chunk.Record{rec}); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := o.forwarder.Forward(ctx, t.NodeID, t.VaultID, []chunk.Record{rec}); err != nil {
 		o.logger.Warn("forward record failed", "node", t.NodeID, "vault", t.VaultID, "error", err)
 	}
 }
