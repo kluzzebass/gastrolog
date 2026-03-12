@@ -1,6 +1,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -597,7 +598,7 @@ func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBuck
 		}
 	}
 	slices.SortFunc(a, func(x, y *apiv1.HistogramBucket) int {
-		return int(x.TimestampMs - y.TimestampMs)
+		return cmp.Compare(x.TimestampMs, y.TimestampMs)
 	})
 	return a
 }
