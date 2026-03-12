@@ -14,8 +14,8 @@ Pipeline operators fall into different categories based on how they process data
 |----------|-----------|:-----------:|----------|
 | **Streaming** | `where`, `eval`, `fields`, `rename`, `dedup`, `lookup` | Yes | Process records one at a time as they arrive, without buffering. |
 | **Short-circuit** | `head` | Yes | Stops iteration early after collecting N records. Can avoid scanning the entire result set. |
-| **Materializing** | `stats`, `timechart` | No | Collect all matching records before producing output. In a cluster, each node aggregates independently and results are merged on the coordinator. `stats` and `timechart` occupy the same slot — you can use one or the other, never both. |
-| **Coordinator-only** | `sort`, `tail`, `slice` | No | Buffer all records on the coordinating node. Cannot be distributed across the cluster. |
+| **Bounded streaming** | `tail`, `slice` | No | Stream through all records with a fixed-size buffer (N records for `tail`, range-based for `slice`). Memory usage is proportional to the output size, not the input. However, if preceded by `sort`, they fall back to full materialization. In a cluster, records are gathered from all nodes before applying the operator on the coordinator. |
+| **Materializing** | `stats`, `timechart`, `sort` | No | Collect all matching records before producing output. `sort` buffers everything on the coordinator. `stats` and `timechart` aggregate per-node in a cluster and merge results. `stats` and `timechart` occupy the same slot — you can use one or the other, never both. |
 | **Visualization** | `linechart`, `barchart`, `donut`, `heatmap`, `scatter`, `map`, `raw` | No | Control how results are displayed but do not transform data. Must appear at the end of a pipeline, after `stats` or `timechart`. See [Visualizations](help:visualizations). |
 
 ## Stats Operator
