@@ -199,8 +199,9 @@ func headOnlyLimit(ops []querylang.PipeOp) int {
 // PipelineNeedsGlobalRecords reports whether a pipeline query must gather raw
 // records from all cluster nodes before running the pipeline on the coordinator.
 // This is true when:
-//   - A non-distributive cap operator (head, tail, slice) appears in the
-//     pre-aggregation phase AND the pipeline includes an aggregation, OR
+//   - The pipeline contains a non-distributive ordering operator (tail, sort,
+//     slice) that requires all records to produce a correct result, OR
+//   - A cap operator (head, tail, slice) appears before an aggregation, OR
 //   - The pipeline contains a non-distributive aggregation function (avg,
 //     dcount, median, first, last, values) that cannot be correctly merged
 //     from per-node results.
@@ -209,6 +210,11 @@ func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
 	if err != nil {
 		return false
 	}
+	// Bare tail/sort/slice (no aggregation) still needs all records from all
+	// nodes — running them on a single node's data is incorrect.
+	if needsAllRecords(ph.preOps) {
+		return true
+	}
 	if ph.statsOp == nil && ph.timechartOp == nil {
 		return false
 	}
@@ -216,6 +222,19 @@ func PipelineNeedsGlobalRecords(pipeline *querylang.Pipeline) bool {
 		return true
 	}
 	return hasNonDistributiveAgg(ph.statsOp)
+}
+
+// needsAllRecords returns true if the pipeline contains operators that require
+// the full record set to produce correct results (tail, sort, slice).
+// Head is excluded because it can short-circuit after N records.
+func needsAllRecords(ops []querylang.PipeOp) bool {
+	for _, op := range ops {
+		switch op.(type) {
+		case *querylang.TailOp, *querylang.SortOp, *querylang.SliceOp:
+			return true
+		}
+	}
+	return false
 }
 
 // hasNonDistributiveAgg returns true if the StatsOp contains aggregate functions

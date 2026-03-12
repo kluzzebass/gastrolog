@@ -924,6 +924,41 @@ func TestMultiNode_NonDistributiveAvgGlobal(t *testing.T) {
 	}
 }
 
+func TestMultiNode_PipelineGlobalHistogram(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"node-A", "node-B"})
+
+	addMNRecords(t, h.Node(t, "node-A"), "A", 3, nil)
+	addMNRecords(t, h.Node(t, "node-B"), "B", 4, nil)
+
+	// Pipeline with tail (non-table, goes through searchPipelineGlobal).
+	stream, err := h.client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: "| tail 10"},
+	}))
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	var histogram []*gastrologv1.HistogramBucket
+	var recordCount int
+	for stream.Receive() {
+		recordCount += len(stream.Msg().Records)
+		if len(stream.Msg().Histogram) > 0 {
+			histogram = stream.Msg().Histogram
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		t.Fatalf("stream error: %v", err)
+	}
+
+	if recordCount != 7 {
+		t.Errorf("expected 7 records, got %d", recordCount)
+	}
+	if len(histogram) == 0 {
+		t.Error("expected histogram in pipeline global response, got none")
+	}
+}
+
 func TestMultiNode_GetJobCrossNode(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})

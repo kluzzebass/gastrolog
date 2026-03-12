@@ -196,7 +196,7 @@ func (s *QueryServer) searchPipelineGlobal(
 			batch = batch[:0]
 		}
 	}
-	return stream.Send(&apiv1.SearchResponse{Records: batch})
+	return stream.Send(&apiv1.SearchResponse{Records: batch, Histogram: histogram})
 }
 
 // searchDirect streams search results, merging local and remote vault results
