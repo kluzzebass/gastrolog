@@ -69,14 +69,27 @@ func detectAggColumns(cols []string) []aggColumn {
 			aggs = append(aggs, aggColumn{index: i, typ: aggMin})
 		case strings.HasPrefix(lower, "max("):
 			aggs = append(aggs, aggColumn{index: i, typ: aggMax})
-		case strings.HasPrefix(lower, "avg("):
-			// Non-distributive: pipelines with avg() are now routed through
-			// searchPipelineGlobal (raw record gathering) so this path should
-			// not be reached. Keep as fallback for safety.
-			aggs = append(aggs, aggColumn{index: i, typ: aggSum})
+		case isNonDistributiveAgg(lower):
+			// Non-distributive: these are routed through searchPipelineGlobal
+			// (raw record gathering) so this merge path should not be reached.
+			// Do NOT treat as sum — that would produce silently wrong results.
+			// Skip: the column becomes a group key, producing obviously broken
+			// output if the routing invariant is ever violated.
+			continue
 		}
 	}
 	return aggs
+}
+
+// isNonDistributiveAgg returns true if the column name is a non-distributive
+// aggregate function that cannot be correctly merged by summing per-node results.
+func isNonDistributiveAgg(lower string) bool {
+	for _, prefix := range []string{"avg(", "dcount(", "median(", "first(", "last(", "values("} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // isGroupColumn returns true if column at index i is a group-by key (not an aggregate).
