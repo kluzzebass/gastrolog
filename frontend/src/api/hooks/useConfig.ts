@@ -4,27 +4,25 @@ import { GetConfigResponse } from "../gen/gastrolog/v1/config_pb";
 import { protoSharing } from "./protoSharing";
 
 /**
- * Mutation-based config writes set data directly into the query cache via
- * setQueryData. The WatchConfig stream must NOT invalidate the config query
- * while a mutation's authoritative data is still fresh — otherwise a refetch
- * can hit a stale Raft follower and overwrite the correct value.
+ * Config version tracking for cache coherence.
  *
- * suppressConfigInvalidation is a simple counter: incremented before
- * setQueryData, decremented after a delay. WatchConfig skips config
- * invalidation while the counter is >0.
+ * Every config response (GetConfig, mutations, WatchConfig) carries a
+ * monotonically increasing config_version (Raft log index). The frontend
+ * tracks the highest version it has seen from authoritative sources
+ * (mutation responses and setQueryData). WatchConfig only invalidates
+ * the config cache when its version exceeds the cached version — no
+ * timers, no races.
  */
-let suppressConfigInvalidation = 0;
+let cachedConfigVersion = 0n;
 
-/** Called by useConfigMutation before setting query data. */
-export function beginConfigSuppression() {
-  suppressConfigInvalidation++;
-  // Clear after a generous window — follower lag should be well under 10s.
-  setTimeout(() => { suppressConfigInvalidation--; }, 10_000);
+/** Update the cached version. Only advances forward (max wins). */
+export function setConfigVersion(v: bigint) {
+  if (v > cachedConfigVersion) cachedConfigVersion = v;
 }
 
-/** Called by useWatchConfig to check whether to skip config invalidation. */
-export function isConfigSuppressed(): boolean {
-  return suppressConfigInvalidation > 0;
+/** Read the current cached version for comparison by WatchConfig. */
+export function getConfigVersion(): bigint {
+  return cachedConfigVersion;
 }
 
 /**
@@ -44,17 +42,12 @@ export function useConfigMutation<TArgs, TResult>(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
-    onMutate: () => {
-      // Suppress BEFORE the request fires — WatchConfig can deliver the
-      // Raft-committed notification before the HTTP response arrives, and
-      // its refetch would hit a stale follower, overwriting setQueryData.
-      beginConfigSuppression();
-    },
     onSuccess: (result: TResult) => {
       const cfg = result != null && typeof result === "object" && "config" in result
         ? (result as { config?: GetConfigResponse }).config
         : undefined;
       if (cfg) {
+        setConfigVersion(cfg.configVersion);
         qc.cancelQueries({ queryKey: ["config"] });
         qc.setQueryData(["config"], cfg);
       } else {
@@ -72,10 +65,11 @@ export function useConfig() {
     queryKey: ["config"],
     queryFn: async () => {
       const response = await configClient.getConfig({});
+      setConfigVersion(response.configVersion);
       return response;
     },
     structuralSharing: protoSharing(GetConfigResponse.equals),
-    staleTime: 5_000, // short safety net; mutations now set data directly
+    staleTime: 60_000, // safety net only; mutations set data directly, WatchConfig handles push
   });
 }
 

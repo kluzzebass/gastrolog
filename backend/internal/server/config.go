@@ -102,6 +102,8 @@ func (s *ConfigServer) GetConfig(
 
 // buildFullConfig assembles a complete GetConfigResponse from the config store.
 // Used by GetConfig and by mutation handlers to return the updated config inline.
+// Includes the current config version from the signal so the frontend can track
+// cache freshness without timers.
 func (s *ConfigServer) buildFullConfig(ctx context.Context) *apiv1.GetConfigResponse {
 	resp := &apiv1.GetConfigResponse{}
 	if s.cfgStore != nil {
@@ -113,6 +115,9 @@ func (s *ConfigServer) buildFullConfig(ctx context.Context) *apiv1.GetConfigResp
 		s.loadConfigRoutes(ctx, resp)
 		s.loadConfigNodeConfigs(ctx, resp)
 		s.loadConfigManagedFiles(ctx, resp)
+	}
+	if s.configSignal != nil {
+		resp.ConfigVersion = s.configSignal.Version()
 	}
 	return resp
 }
@@ -431,7 +436,12 @@ func (s *ConfigServer) WatchConfig(
 	stream *connect.ServerStream[apiv1.WatchConfigResponse],
 ) error {
 	// Send one initial message so the client knows the stream is alive.
-	if err := stream.Send(&apiv1.WatchConfigResponse{}); err != nil {
+	// Include the current config version so the client can seed its cache.
+	initialVersion := uint64(0)
+	if s.configSignal != nil {
+		initialVersion = s.configSignal.Version()
+	}
+	if err := stream.Send(&apiv1.WatchConfigResponse{ConfigVersion: initialVersion}); err != nil {
 		return err
 	}
 	if s.configSignal == nil {
@@ -445,7 +455,9 @@ func (s *ConfigServer) WatchConfig(
 		case <-ctx.Done():
 			return nil
 		case <-ch:
-			if err := stream.Send(&apiv1.WatchConfigResponse{}); err != nil {
+			if err := stream.Send(&apiv1.WatchConfigResponse{
+				ConfigVersion: s.configSignal.Version(),
+			}); err != nil {
 				return err
 			}
 		}

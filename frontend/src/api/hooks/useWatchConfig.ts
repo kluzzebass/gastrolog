@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { configClient, refreshAuth } from "../client";
-import { isConfigSuppressed } from "./useConfig";
+import { getConfigVersion, setConfigVersion } from "./useConfig";
 
 export function useWatchConfig() {
   const qc = useQueryClient();
@@ -14,17 +14,22 @@ export function useWatchConfig() {
     async function connect(backoff = 0) {
       let nextBackoff = backoff;
       try {
-        for await (const _ of configClient.watchConfig(
+        for await (const msg of configClient.watchConfig(
           {},
           { signal: abort.signal },
         )) {
-          // Each message = "config changed". Invalidate the query cache.
-          // Skip config invalidation while a mutation's authoritative data
-          // is still fresh — a refetch would hit a stale Raft follower and
-          // overwrite the correct value set by setQueryData.
-          if (!isConfigSuppressed()) {
+          const streamVersion = msg.configVersion;
+
+          // Only invalidate config if the stream's version is newer than
+          // what we already hold from a mutation response or prior fetch.
+          // This replaces the old timer-based suppression — zero races.
+          if (streamVersion > getConfigVersion()) {
+            setConfigVersion(streamVersion);
             qc.invalidateQueries({ queryKey: ["config"] });
           }
+
+          // Non-config caches are always invalidated — they don't carry
+          // version info and are cheap to refetch.
           qc.invalidateQueries({ queryKey: ["settings"] });
           qc.invalidateQueries({ queryKey: ["vaults"] });
           qc.invalidateQueries({ queryKey: ["stats"] });

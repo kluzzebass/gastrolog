@@ -77,6 +77,14 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
   routes: RouteConfig[] = [];
 
   /**
+   * Monotonically increasing version derived from the Raft log index.
+   * Used by the frontend to avoid regressing the cache with stale reads.
+   *
+   * @generated from field: uint64 config_version = 9;
+   */
+  configVersion = protoInt64.zero;
+
+  /**
    * @generated from field: repeated gastrolog.v1.ManagedFileInfo managed_files = 8;
    */
   managedFiles: ManagedFileInfo[] = [];
@@ -96,6 +104,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 5, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
     { no: 6, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
     { no: 7, name: "routes", kind: "message", T: RouteConfig, repeated: true },
+    { no: 9, name: "config_version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 8, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
   ]);
 
@@ -4712,6 +4721,15 @@ export class WatchConfigRequest extends Message<WatchConfigRequest> {
  * @generated from message gastrolog.v1.WatchConfigResponse
  */
 export class WatchConfigResponse extends Message<WatchConfigResponse> {
+  /**
+   * The config version (Raft log index) that triggered this notification.
+   * Clients should only invalidate their config cache when this version
+   * exceeds the version they already hold from a mutation response.
+   *
+   * @generated from field: uint64 config_version = 1;
+   */
+  configVersion = protoInt64.zero;
+
   constructor(data?: PartialMessage<WatchConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4720,6 +4738,7 @@ export class WatchConfigResponse extends Message<WatchConfigResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.WatchConfigResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "config_version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchConfigResponse {

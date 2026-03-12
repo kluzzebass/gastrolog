@@ -109,8 +109,10 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.
+	// Thread the Raft log index as the config version so the frontend can
+	// skip stale refetches when it already holds a newer mutation response.
 	if d.configSignal != nil && n.Kind != raftfsm.NotifyClusterTLSPut {
-		d.configSignal.Notify()
+		d.configSignal.NotifyWithVersion(n.Index)
 	}
 }
 

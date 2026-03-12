@@ -66,9 +66,12 @@ type GetConfigResponse struct {
 	RetentionPolicies []*RetentionPolicyConfig `protobuf:"bytes,5,rep,name=retention_policies,json=retentionPolicies,proto3" json:"retention_policies,omitempty"`
 	NodeConfigs       []*NodeConfig            `protobuf:"bytes,6,rep,name=node_configs,json=nodeConfigs,proto3" json:"node_configs,omitempty"`
 	Routes            []*RouteConfig           `protobuf:"bytes,7,rep,name=routes,proto3" json:"routes,omitempty"`
-	ManagedFiles      []*ManagedFileInfo       `protobuf:"bytes,8,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Monotonically increasing version derived from the Raft log index.
+	// Used by the frontend to avoid regressing the cache with stale reads.
+	ConfigVersion uint64             `protobuf:"varint,9,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
+	ManagedFiles  []*ManagedFileInfo `protobuf:"bytes,8,rep,name=managed_files,json=managedFiles,proto3" json:"managed_files,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *GetConfigResponse) Reset() {
@@ -148,6 +151,13 @@ func (x *GetConfigResponse) GetRoutes() []*RouteConfig {
 		return x.Routes
 	}
 	return nil
+}
+
+func (x *GetConfigResponse) GetConfigVersion() uint64 {
+	if x != nil {
+		return x.ConfigVersion
+	}
+	return 0
 }
 
 func (x *GetConfigResponse) GetManagedFiles() []*ManagedFileInfo {
@@ -5611,7 +5621,11 @@ func (*WatchConfigRequest) Descriptor() ([]byte, []int) {
 }
 
 type WatchConfigResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The config version (Raft log index) that triggered this notification.
+	// Clients should only invalidate their config cache when this version
+	// exceeds the version they already hold from a mutation response.
+	ConfigVersion uint64 `protobuf:"varint,1,opt,name=config_version,json=configVersion,proto3" json:"config_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5644,6 +5658,13 @@ func (x *WatchConfigResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use WatchConfigResponse.ProtoReflect.Descriptor instead.
 func (*WatchConfigResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{102}
+}
+
+func (x *WatchConfigResponse) GetConfigVersion() uint64 {
+	if x != nil {
+		return x.ConfigVersion
+	}
+	return 0
 }
 
 type GetRouteStatsRequest struct {
@@ -6490,7 +6511,7 @@ var File_gastrolog_v1_config_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"\x19gastrolog/v1/config.proto\x12\fgastrolog.v1\"\x12\n" +
-	"\x10GetConfigRequest\"\x91\x04\n" +
+	"\x10GetConfigRequest\"\xb8\x04\n" +
 	"\x11GetConfigResponse\x121\n" +
 	"\x06vaults\x18\x01 \x03(\v2\x19.gastrolog.v1.VaultConfigR\x06vaults\x12:\n" +
 	"\tingesters\x18\x02 \x03(\v2\x1c.gastrolog.v1.IngesterConfigR\tingesters\x12O\n" +
@@ -6498,7 +6519,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\afilters\x18\x04 \x03(\v2\x1a.gastrolog.v1.FilterConfigR\afilters\x12R\n" +
 	"\x12retention_policies\x18\x05 \x03(\v2#.gastrolog.v1.RetentionPolicyConfigR\x11retentionPolicies\x12;\n" +
 	"\fnode_configs\x18\x06 \x03(\v2\x18.gastrolog.v1.NodeConfigR\vnodeConfigs\x121\n" +
-	"\x06routes\x18\a \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12B\n" +
+	"\x06routes\x18\a \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12%\n" +
+	"\x0econfig_version\x18\t \x01(\x04R\rconfigVersion\x12B\n" +
 	"\rmanaged_files\x18\b \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\"~\n" +
 	"\rRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
@@ -6905,8 +6927,9 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x13GenerateNameRequest\"*\n" +
 	"\x14GenerateNameResponse\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\"\x14\n" +
-	"\x12WatchConfigRequest\"\x15\n" +
-	"\x13WatchConfigResponse\"\x16\n" +
+	"\x12WatchConfigRequest\"<\n" +
+	"\x13WatchConfigResponse\x12%\n" +
+	"\x0econfig_version\x18\x01 \x01(\x04R\rconfigVersion\"\x16\n" +
 	"\x14GetRouteStatsRequest\"\xb0\x02\n" +
 	"\x15GetRouteStatsResponse\x12%\n" +
 	"\x0etotal_ingested\x18\x01 \x01(\x03R\rtotalIngested\x12#\n" +

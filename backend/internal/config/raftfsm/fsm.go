@@ -51,6 +51,7 @@ type Notification struct {
 	NodeID     string    // owning node (populated on vault/ingester deletes)
 	Dir        string    // file vault directory (populated on file vault deletes)
 	DeleteData bool      // when true, vault data directory should be removed from disk
+	Index      uint64    // Raft log index of this mutation (monotonically increasing config version)
 }
 
 // Option configures the FSM at construction time.
@@ -120,7 +121,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_DeleteRoute,
 		*gastrologv1.ConfigCommand_PutManagedFile,
 		*gastrologv1.ConfigCommand_DeleteManagedFile:
-		return f.applyConfig(ctx, cmd)
+		return f.applyConfig(ctx, cmd, l.Index)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
 		*gastrologv1.ConfigCommand_UpdatePassword,
@@ -143,12 +144,15 @@ func (f *FSM) Apply(l *raft.Log) any {
 
 // applyConfig dispatches config-entity commands (filters, policies, vaults,
 // ingesters, settings, certificates) and fires a notification on success.
-func (f *FSM) applyConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand) error {
+// The raftIndex is the Raft log index for this entry, threaded through
+// to the notification so the dispatcher can broadcast it as a config version.
+func (f *FSM) applyConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand, raftIndex uint64) error {
 	note, err := f.dispatchConfig(ctx, cmd)
 	if err != nil {
 		return err
 	}
 	if note != nil && f.onApply != nil {
+		note.Index = raftIndex
 		f.onApply(*note)
 	}
 	return nil

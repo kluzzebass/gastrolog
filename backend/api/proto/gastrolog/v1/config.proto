@@ -134,6 +134,9 @@ message GetConfigResponse {
   repeated RetentionPolicyConfig retention_policies = 5;
   repeated NodeConfig node_configs = 6;
   repeated RouteConfig routes = 7;
+  // Monotonically increasing version derived from the Raft log index.
+  // Used by the frontend to avoid regressing the cache with stale reads.
+  uint64 config_version = 9;
   repeated ManagedFileInfo managed_files = 8;
 }
 
@@ -678,7 +681,12 @@ message GenerateNameResponse {
 
 message WatchConfigRequest {}
 
-message WatchConfigResponse {}
+message WatchConfigResponse {
+  // The config version (Raft log index) that triggered this notification.
+  // Clients should only invalidate their config cache when this version
+  // exceeds the version they already hold from a mutation response.
+  uint64 config_version = 1;
+}
 
 message GetRouteStatsRequest {}
 
