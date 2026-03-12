@@ -517,22 +517,39 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, prevRemo
 		prevTokens[rp.VaultID] = rp.ResumeToken
 	}
 
+	// Fan out RPCs concurrently — one goroutine per remote vault.
+	type vaultFetch struct {
+		nodeID string
+		vid    uuid.UUID
+	}
+	var fetches []vaultFetch
+	for nodeID, vaultIDs := range byNode {
+		for _, vid := range vaultIDs {
+			fetches = append(fetches, vaultFetch{nodeID, vid})
+		}
+	}
+	results := make([]remoteVaultResult, len(fetches))
+	var wg sync.WaitGroup
+	for i, f := range fetches {
+		wg.Go(func() {
+			results[i] = s.fetchRemoteVault(ctx, f.nodeID, f.vid, queryExpr, prevTokens[f.vid])
+		})
+	}
+	wg.Wait()
+
 	var all []*apiv1.Record
 	var allHist []*apiv1.HistogramBucket
 	var remotePositions []query.RemoteVaultPosition
 	hasMore := false
-	for nodeID, vaultIDs := range byNode {
-		for _, vid := range vaultIDs {
-			result := s.fetchRemoteVault(ctx, nodeID, vid, queryExpr, prevTokens[vid])
-			all = append(all, result.records...)
-			allHist = mergeHistogramBuckets(allHist, result.histogram)
-			if result.hasMore {
-				hasMore = true
-				remotePositions = append(remotePositions, query.RemoteVaultPosition{
-					VaultID:     vid,
-					ResumeToken: result.resumeToken,
-				})
-			}
+	for i, result := range results {
+		all = append(all, result.records...)
+		allHist = mergeHistogramBuckets(allHist, result.histogram)
+		if result.hasMore {
+			hasMore = true
+			remotePositions = append(remotePositions, query.RemoteVaultPosition{
+				VaultID:     fetches[i].vid,
+				ResumeToken: result.resumeToken,
+			})
 		}
 	}
 
@@ -668,21 +685,39 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	}
 	remoteExpr := q.String() + " " + pipelineStr
 
-	var results []*query.TableResult
+	// Fan out RPCs concurrently — one goroutine per remote vault.
+	type pipelineFetch struct {
+		nodeID string
+		vid    uuid.UUID
+	}
+	var fetches []pipelineFetch
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
-			resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
-				VaultId: vid.String(),
+			fetches = append(fetches, pipelineFetch{nodeID, vid})
+		}
+	}
+	responses := make([]*apiv1.ForwardSearchResponse, len(fetches))
+	fetchErrors := make([]error, len(fetches))
+	var wg sync.WaitGroup
+	for i, f := range fetches {
+		wg.Go(func() {
+			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
+				VaultId: f.vid.String(),
 				Query:   remoteExpr,
 			})
-			if err != nil {
-				s.logger.Warn("pipeline: remote vault failed", "node", nodeID, "vault", vid, "err", err)
-				continue
-			}
-			if resp.GetTableResult() != nil {
-				if tr := protoToTableResult(resp.GetTableResult()); tr != nil {
-					results = append(results, tr)
-				}
+		})
+	}
+	wg.Wait()
+
+	var results []*query.TableResult
+	for i, resp := range responses {
+		if fetchErrors[i] != nil {
+			s.logger.Warn("pipeline: remote vault failed", "node", fetches[i].nodeID, "vault", fetches[i].vid, "err", fetchErrors[i])
+			continue
+		}
+		if resp.GetTableResult() != nil {
+			if tr := protoToTableResult(resp.GetTableResult()); tr != nil {
+				results = append(results, tr)
 			}
 		}
 	}

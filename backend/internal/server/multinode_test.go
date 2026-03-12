@@ -361,12 +361,10 @@ func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStat
 // directRemoteSearcher calls directly into the target node's orchestrator,
 // simulating ForwardSearch/ForwardFollow/ForwardExplain RPCs without gRPC.
 type directRemoteSearcher struct {
-	nodes  map[string]*orchestrator.Orchestrator
-	called bool
+	nodes map[string]*orchestrator.Orchestrator
 }
 
 func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
-	d.called = true
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
