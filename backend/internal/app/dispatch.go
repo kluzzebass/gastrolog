@@ -21,6 +21,7 @@ import (
 // dispatcher. Defined at the consumer site so tests can supply a mock.
 type orchActions interface {
 	ListVaults() []uuid.UUID
+	VaultType(id uuid.UUID) string
 	AddVault(ctx context.Context, cfg config.VaultConfig, f orchestrator.Factories) error
 	ReloadFilters(ctx context.Context) error
 	ReloadRotationPolicies(ctx context.Context) error
@@ -29,6 +30,7 @@ type orchActions interface {
 	EnableVault(id uuid.UUID) error
 	SetVaultCompression(vaultID uuid.UUID, enabled bool) error
 	ForceRemoveVault(id uuid.UUID) error
+	UnregisterVault(id uuid.UUID) error
 	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
 	IsDraining(vaultID uuid.UUID) bool
 	CancelDrain(ctx context.Context, vaultID uuid.UUID) error
@@ -121,6 +123,10 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 
 	if vaultCfg.NodeID != "" && vaultCfg.NodeID != d.localNodeID {
 		d.maybeStartDrain(ctx, id, vaultCfg.NodeID)
+		// Always reload filters so forwarding targets point to the new node.
+		// maybeStartDrain handles the source node (drain updates filters),
+		// but on every OTHER node the filter set still has the old target.
+		d.reloadFilters(ctx)
 		return
 	}
 
@@ -144,10 +150,26 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 
 // maybeStartDrain starts draining a vault to a remote node if the vault is
 // locally registered and not already draining.
+//
+// Cloud vaults are exempt from drain — their data lives in shared object
+// storage (S3/Azure/GCS) accessible from any node. Draining would wastefully
+// download each chunk, send it over the internal network, and re-upload it.
+// Instead, the vault is simply unregistered locally; the new node's
+// AddVault creates a Manager pointing to the same bucket.
 func (d *configDispatcher) maybeStartDrain(ctx context.Context, id uuid.UUID, targetNodeID string) {
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		return
 	}
+
+	if d.orch.VaultType(id) == "cloud" {
+		if err := d.orch.UnregisterVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+			d.logger.Error("dispatch: unregister cloud vault for reassignment", "id", id, "error", err)
+		} else {
+			d.logger.Info("dispatch: cloud vault reassigned, unregistered locally (no drain needed)", "id", id, "target_node", targetNodeID)
+		}
+		return
+	}
+
 	if d.orch.IsDraining(id) {
 		return // drain already in progress
 	}
@@ -213,6 +235,14 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) 
 	}
 
 	if ingCfg.NodeID != "" && ingCfg.NodeID != d.localNodeID {
+		// Ingester assigned to another node — stop it locally if running.
+		if slices.Contains(d.orch.ListIngesters(), id) {
+			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
+				d.logger.Error("dispatch: remove ingester reassigned to remote node", "id", id, "name", ingCfg.Name, "node", ingCfg.NodeID, "error", err)
+			} else {
+				d.logger.Info("dispatch: ingester reassigned, stopped locally", "id", id, "name", ingCfg.Name, "target_node", ingCfg.NodeID)
+			}
+		}
 		return
 	}
 

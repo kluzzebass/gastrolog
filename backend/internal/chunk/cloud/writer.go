@@ -9,12 +9,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 
+	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
+
 	"gastrolog/internal/chunk"
 )
 
 // Writer encodes records into the cloud blob format.
-// Records are buffered in memory, then flushed as a single
-// zstd-compressed stream on WriteTo.
+// Records are buffered in memory, then flushed with an uncompressed
+// header/dict/index prefix followed by seekable zstd record data.
 type Writer struct {
 	chunkID chunk.ChunkID
 	vaultID uuid.UUID
@@ -77,17 +79,33 @@ func (w *Writer) Add(rec chunk.Record) error {
 	return nil
 }
 
-// WriteTo compresses and writes the complete blob to dst.
-// After WriteTo, the Writer should not be reused.
+// WriteTo writes the cloud blob to dst:
+//   - Uncompressed header (98 bytes)
+//   - Uncompressed dictionary
+//   - Uncompressed record index (12 bytes per record)
+//   - Seekable zstd compressed record data (256KB frames)
 func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
-	enc, err := zstd.NewWriter(dst, zstd.WithEncoderLevel(zstd.SpeedDefault))
-	if err != nil {
-		return 0, fmt.Errorf("create zstd writer: %w", err)
-	}
-
 	var written int64
 
-	// --- Header (94 bytes) ---
+	// --- Encode dictionary to compute dictSize ---
+	var dictBuf []byte
+	for i := range w.dict.Len() {
+		s, _ := w.dict.Get(uint32(i))
+		dictBuf = append(dictBuf, chunk.EncodeDictEntry(s)...)
+	}
+
+	// --- Build record index and compute decompressed offsets ---
+	index := make([]recordIndex, w.count)
+	var decompressedOff uint64
+	for i, frame := range w.frames {
+		index[i] = recordIndex{
+			Offset: decompressedOff + 4, // past the u32 frameLen prefix
+			Size:   uint32(len(frame)),  //nolint:gosec // G115: frame size bounded by record limits
+		}
+		decompressedOff += 4 + uint64(len(frame))
+	}
+
+	// --- Header (98 bytes) ---
 	var hdr [headerSize]byte
 	copy(hdr[0:4], magic[:])
 	hdr[4] = formatVersion
@@ -102,46 +120,76 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	binary.LittleEndian.PutUint64(hdr[74:82], tsNanos(w.sourceStart))
 	binary.LittleEndian.PutUint64(hdr[82:90], tsNanos(w.sourceEnd))
 	binary.LittleEndian.PutUint32(hdr[90:94], uint32(w.dict.Len())) //nolint:gosec // G115: dict size bounded by StringDict capacity
+	binary.LittleEndian.PutUint32(hdr[94:98], uint32(len(dictBuf))) //nolint:gosec // G115: dict bytes bounded
 
-	n, err := enc.Write(hdr[:])
+	n, err := dst.Write(hdr[:])
 	written += int64(n)
 	if err != nil {
-		_ = enc.Close()
 		return written, err
 	}
 
 	// --- Dictionary ---
-	for i := range w.dict.Len() {
-		s, _ := w.dict.Get(uint32(i))
-		entry := chunk.EncodeDictEntry(s)
-		n, err := enc.Write(entry)
-		written += int64(n)
-		if err != nil {
-			_ = enc.Close()
-			return written, err
-		}
+	n, err = dst.Write(dictBuf)
+	written += int64(n)
+	if err != nil {
+		return written, err
 	}
 
-	// --- Record frames ---
+	// --- Record Index ---
+	idxBuf := make([]byte, int(w.count)*indexEntrySize)
+	for i, idx := range index {
+		off := i * indexEntrySize
+		binary.LittleEndian.PutUint64(idxBuf[off:], idx.Offset)
+		binary.LittleEndian.PutUint32(idxBuf[off+8:], idx.Size)
+	}
+	n, err = dst.Write(idxBuf)
+	written += int64(n)
+	if err != nil {
+		return written, err
+	}
+
+	// --- Seekable Zstd Record Data ---
+	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	if err != nil {
+		return written, fmt.Errorf("create zstd encoder: %w", err)
+	}
+	defer func() { _ = enc.Close() }()
+
+	sw, err := seekable.NewWriter(dst, enc)
+	if err != nil {
+		return written, fmt.Errorf("create seekable writer: %w", err)
+	}
+
+	// Write record frames in ~256KB batches. Each batch becomes one
+	// independently-decompressible zstd frame in the seekable stream.
+	var batch []byte
 	var frameLenBuf [4]byte
 	for _, frame := range w.frames {
-		binary.LittleEndian.PutUint32(frameLenBuf[:], uint32(len(frame))) //nolint:gosec // G115: frame size bounded by record limits
-		n, err := enc.Write(frameLenBuf[:])
-		written += int64(n)
-		if err != nil {
-			_ = enc.Close()
-			return written, err
+		binary.LittleEndian.PutUint32(frameLenBuf[:], uint32(len(frame))) //nolint:gosec // G115: frame size bounded
+		batch = append(batch, frameLenBuf[:]...)
+		batch = append(batch, frame...)
+
+		if len(batch) >= seekableFrameSize {
+			nn, werr := sw.Write(batch)
+			written += int64(nn)
+			if werr != nil {
+				_ = sw.Close()
+				return written, werr
+			}
+			batch = batch[:0]
 		}
-		n, err = enc.Write(frame)
-		written += int64(n)
-		if err != nil {
-			_ = enc.Close()
-			return written, err
+	}
+	if len(batch) > 0 {
+		nn, werr := sw.Write(batch)
+		written += int64(nn)
+		if werr != nil {
+			_ = sw.Close()
+			return written, werr
 		}
 	}
 
-	if err := enc.Close(); err != nil {
-		return written, fmt.Errorf("close zstd: %w", err)
+	if err := sw.Close(); err != nil {
+		return written, fmt.Errorf("close seekable writer: %w", err)
 	}
 	return written, nil
 }

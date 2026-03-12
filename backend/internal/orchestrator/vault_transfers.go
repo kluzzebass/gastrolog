@@ -252,35 +252,59 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID uuid.UUID, targe
 		return
 	}
 
-	metas, err := cm.List()
-	if err != nil {
-		job.Fail(o.now(), fmt.Sprintf("list chunks: %v", err))
+	// Wait for the target node to create the vault before transferring.
+	// Both nodes process the same Raft notification independently —
+	// without this, the transfer RPCs can hit ErrVaultNotFound.
+	if o.transferrer != nil {
+		if err := o.transferrer.WaitVaultReady(ctx, targetNodeID, vaultID); err != nil {
+			job.Fail(o.now(), fmt.Sprintf("target vault not ready: %v", err))
+			return
+		}
+	}
+
+	// Transfer all currently sealed chunks.
+	if !o.drainSealed(ctx, vaultID, cm, targetNodeID, job) {
+		return // drainSealed already called job.Fail
+	}
+
+	// Final seal: catch any records that were appended between
+	// DrainVault's SealActive and the worker starting (e.g. from
+	// ForwardRecords RPCs from nodes with stale filter sets).
+	if err := o.SealActive(vaultID); err != nil {
+		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)
+	}
+	if !o.drainSealed(ctx, vaultID, cm, targetNodeID, job) {
 		return
 	}
 
-	var sealed []chunk.ChunkMeta
-	for _, m := range metas {
-		if m.Sealed {
-			sealed = append(sealed, m)
-		}
-	}
-	job.SetRunning(int64(len(sealed)))
+	o.finishDrain(vaultID)
+}
 
-	for _, meta := range sealed {
+// drainSealed lists sealed chunks and transfers each to the target node.
+// Returns false if the transfer failed (job.Fail was called).
+func (o *Orchestrator) drainSealed(ctx context.Context, vaultID uuid.UUID, cm chunk.ChunkManager, targetNodeID string, job *JobProgress) bool {
+	metas, err := cm.List()
+	if err != nil {
+		job.Fail(o.now(), fmt.Sprintf("list chunks: %v", err))
+		return false
+	}
+
+	for _, meta := range metas {
+		if !meta.Sealed {
+			continue
+		}
 		if ctx.Err() != nil {
 			job.Fail(o.now(), "drain cancelled")
-			return
+			return false
 		}
-		// Use moveChunkRemote directly — vault is still in o.vaults during drain.
 		if err := o.moveChunkRemote(ctx, meta.ID, vaultID, cm, vaultID, targetNodeID); err != nil {
 			job.Fail(o.now(), fmt.Sprintf("transfer chunk %s: %v", meta.ID, err))
-			return
+			return false
 		}
 		job.AddRecords(meta.RecordCount)
 		job.IncrChunks()
 	}
-
-	o.finishDrain(vaultID)
+	return true
 }
 
 // finishDrain cleans up after all chunks have been transferred.

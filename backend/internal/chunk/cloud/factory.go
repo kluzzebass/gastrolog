@@ -49,7 +49,19 @@ func NewFactory() chunk.ManagerFactory {
 			return nil, fmt.Errorf("create %s store: %w", provider, err)
 		}
 
-		return NewManager(store, vaultID, logger), nil
+		if err := store.EnsureBucket(context.Background()); err != nil {
+			return nil, fmt.Errorf("ensure %s bucket: %w", provider, err)
+		}
+
+		mgr := NewManager(store, vaultID, logger)
+
+		// Eagerly fetch and cache chunk metadata so subsequent Meta()
+		// calls don't need individual HEAD requests.
+		if _, err := mgr.List(); err != nil {
+			return nil, fmt.Errorf("list %s chunks: %w", provider, err)
+		}
+
+		return mgr, nil
 	}
 }
 

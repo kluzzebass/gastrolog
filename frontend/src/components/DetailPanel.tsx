@@ -199,7 +199,7 @@ function ReferenceSection({
         <th colSpan={2} className={headerCls}>Reference</th>
       </tr>
       <tr>
-        <td className={`${keyCls} ${borderCls}`}>vault</td>
+        <td className={`${keyCls} ${borderCls}`}>vault_id</td>
         <ValueCell
           value={record.ref?.vaultId ?? "N/A"}
           onClick={record.ref?.vaultId ? () => onVaultSelect(record.ref!.vaultId) : undefined}
@@ -207,7 +207,7 @@ function ReferenceSection({
         />
       </tr>
       <tr>
-        <td className={`${keyCls} ${borderCls}`}>chunk</td>
+        <td className={`${keyCls} ${borderCls}`}>chunk_id</td>
         <ValueCell
           value={record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A"}
           onClick={record.ref?.chunkId ? () => onChunkSelect(record.ref!.chunkId) : undefined}
@@ -363,48 +363,44 @@ export function DetailPanelContent({
           />
 
           {/* — Event Identity — */}
-          {record.ingesterId.length === 16 && !record.ingesterId.every((b) => b === 0) && (
-            <>
-              <tr>
-                <th colSpan={2} className={headerCls}>
-                  {onMultiFieldSelect ? (
-                    <button
-                      type="button"
-                      title="Filter by this event identity"
-                      className={`cursor-pointer uppercase transition-colors ${c("hover:text-copper", "hover:text-copper")}`}
-                      onClick={() => {
-                        onMultiFieldSelect([
-                          ["ingester_id", formatUUID(record.ingesterId)],
-                          ["ingest_seq", record.ingestSeq.toString()],
-                          ["ingest_ts", record.ingestTs!.toDate().toISOString()],
-                        ]);
-                      }}
-                    >
-                      Event Identity
-                    </button>
-                  ) : (
-                    "Event Identity"
-                  )}
-                </th>
-              </tr>
-              <tr>
-                <td className={`${keyCls} ${borderCls}`}>ingester_id</td>
-                <ValueCell
-                  value={formatUUID(record.ingesterId)}
-                  onClick={() => onFieldSelect("ingester_id", formatUUID(record.ingesterId))}
-                  styles={styles}
-                />
-              </tr>
-              <tr>
-                <td className={`${keyCls} ${borderCls}`}>ingest_seq</td>
-                <ValueCell
-                  value={record.ingestSeq.toString()}
-                  onClick={() => onFieldSelect("ingest_seq", record.ingestSeq.toString())}
-                  styles={styles}
-                />
-              </tr>
-            </>
-          )}
+          <tr>
+            <th colSpan={2} className={headerCls}>
+              {onMultiFieldSelect ? (
+                <button
+                  type="button"
+                  title="Filter by this event identity"
+                  className={`cursor-pointer uppercase transition-colors ${c("hover:text-copper", "hover:text-copper")}`}
+                  onClick={() => {
+                    onMultiFieldSelect([
+                      ["ingester_id", formatUUID(record.ingesterId)],
+                      ["ingest_seq", record.ingestSeq.toString()],
+                      ["ingest_ts", record.ingestTs!.toDate().toISOString()],
+                    ]);
+                  }}
+                >
+                  Event Identity
+                </button>
+              ) : (
+                "Event Identity"
+              )}
+            </th>
+          </tr>
+          <tr>
+            <td className={`${keyCls} ${borderCls}`}>ingester_id</td>
+            <ValueCell
+              value={formatUUID(record.ingesterId)}
+              onClick={() => onFieldSelect("ingester_id", formatUUID(record.ingesterId))}
+              styles={styles}
+            />
+          </tr>
+          <tr>
+            <td className={`${keyCls} ${borderCls}`}>ingest_seq</td>
+            <ValueCell
+              value={record.ingestSeq.toString()}
+              onClick={() => onFieldSelect("ingest_seq", record.ingestSeq.toString())}
+              styles={styles}
+            />
+          </tr>
 
           {/* — Context — */}
           <tr>

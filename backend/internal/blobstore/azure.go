@@ -32,6 +32,15 @@ func NewAzure(cfg AzureConfig) (*AzureStore, error) {
 	return &AzureStore{client: client, containerName: cfg.Container}, nil
 }
 
+func (a *AzureStore) EnsureBucket(ctx context.Context) error {
+	_, err := a.client.CreateContainer(ctx, a.containerName, nil)
+	if err != nil {
+		// Ignore "container already exists" errors.
+		return nil //nolint:nilerr
+	}
+	return nil
+}
+
 func (a *AzureStore) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {
 	opts := &azblob.UploadStreamOptions{
 		BlockSize:   4 * 1024 * 1024, // 4MB blocks

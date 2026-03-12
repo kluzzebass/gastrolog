@@ -1,7 +1,8 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { configClient } from "../client";
 import { IngesterConfig, GetIngesterStatusResponse } from "../gen/gastrolog/v1/config_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
+import { useConfigMutation } from "./useConfig";
 
 export function useIngesters() {
   return useQuery({
@@ -39,9 +40,8 @@ function stripEmptyParams(params: Record<string, string>): Record<string, string
 }
 
 export function usePutIngester() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
+  return useConfigMutation(
+    async (args: {
       id: string;
       name: string;
       type: string;
@@ -60,32 +60,15 @@ export function usePutIngester() {
         },
       });
     },
-    onSuccess: (result) => {
-      if (result?.config) {
-        qc.cancelQueries({ queryKey: ["config"] });
-        qc.setQueryData(["config"], result.config);
-      } else {
-        qc.invalidateQueries({ queryKey: ["config"] });
-      }
-    },
-  });
+  );
 }
 
 export function useDeleteIngester() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (id: string) => {
+  return useConfigMutation(
+    async (id: string) => {
       return configClient.deleteIngester({ id });
     },
-    onSuccess: (result) => {
-      if (result?.config) {
-        qc.cancelQueries({ queryKey: ["config"] });
-        qc.setQueryData(["config"], result.config);
-      } else {
-        qc.invalidateQueries({ queryKey: ["config"] });
-      }
-    },
-  });
+  );
 }
 
 export function useTestIngester() {

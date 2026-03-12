@@ -59,6 +59,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		cmLogger = cmLogger.With("vault", vaultCfg.ID)
 	}
 	cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
+	cmParams["_vault_id"] = vaultCfg.ID.String()
 	cm, err := cmFactory(cmParams, cmLogger)
 	if err != nil {
 		return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
@@ -285,6 +286,43 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	o.rebuildFilterSetLocked()
 
 	o.logger.Info("vault force-removed", "id", id, "name", vault.Name, "type", vault.Type)
+	return nil
+}
+
+// UnregisterVault removes a vault from the orchestrator without deleting any
+// data. The chunk manager is closed (releasing connections/locks) but chunks
+// and indexes are left intact in storage. This is the correct operation for
+// cloud vault reassignment — the data lives in shared object storage and the
+// new node will open a fresh Manager pointing to the same bucket.
+func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	vault, exists := o.vaults[id]
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
+	}
+
+	// Cancel pending compress/index jobs before closing the chunk manager.
+	vaultPrefix := id.String()
+	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
+	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+
+	if err := vault.Chunks.Close(); err != nil {
+		o.logger.Warn("failed to close chunk manager during unregister",
+			"vault", id, "error", err)
+	}
+
+	// Remove retention and rotation jobs.
+	o.scheduler.RemoveJob(retentionJobName(id))
+	delete(o.retention, id)
+	o.cronRotation.removeJob(id)
+
+	// Remove from registry.
+	delete(o.vaults, id)
+	o.rebuildFilterSetLocked()
+
+	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type)
 	return nil
 }
 

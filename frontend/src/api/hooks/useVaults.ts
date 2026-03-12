@@ -3,6 +3,7 @@ import { vaultClient, configClient } from "../client";
 import type { RetentionRule } from "../gen/gastrolog/v1/config_pb";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
+import { useConfigMutation } from "./useConfig";
 
 export function useVaults() {
   return useQuery({
@@ -153,9 +154,8 @@ export function useMergeVaults() {
 }
 
 export function usePutVault() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: {
+  return useConfigMutation(
+    async (args: {
       id: string;
       name: string;
       type: string;
@@ -178,17 +178,8 @@ export function usePutVault() {
         },
       });
     },
-    onSuccess: (result) => {
-      if (result?.config) {
-        qc.cancelQueries({ queryKey: ["config"] });
-        qc.setQueryData(["config"], result.config);
-      } else {
-        qc.invalidateQueries({ queryKey: ["config"] });
-      }
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
+    [["vaults"], ["stats"]],
+  );
 }
 
 /** Trim whitespace and strip empty values so the backend treats them as unset. */
@@ -214,21 +205,11 @@ export function useTestVault() {
 }
 
 export function useDeleteVault() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: async (args: { id: string; force?: boolean; deleteData?: boolean }) => {
+  return useConfigMutation(
+    async (args: { id: string; force?: boolean; deleteData?: boolean }) => {
       return configClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
     },
-    onSuccess: (result) => {
-      if (result?.config) {
-        qc.cancelQueries({ queryKey: ["config"] });
-        qc.setQueryData(["config"], result.config);
-      } else {
-        qc.invalidateQueries({ queryKey: ["config"] });
-      }
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-    },
-  });
+    [["vaults"], ["stats"]],
+  );
 }
 

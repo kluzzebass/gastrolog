@@ -2,6 +2,8 @@ package cloud_test
 
 import (
 	"bytes"
+	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -11,12 +13,12 @@ import (
 	"gastrolog/internal/chunk/cloud"
 )
 
-func TestRoundTrip(t *testing.T) {
+func testRecords() (chunk.ChunkID, uuid.UUID, []chunk.Record) {
 	chunkID := chunk.NewChunkID()
 	vaultID := uuid.New()
 	ingesterID := uuid.New()
-
 	now := time.Now().Truncate(time.Nanosecond)
+
 	records := []chunk.Record{
 		{
 			SourceTS: now.Add(-2 * time.Second),
@@ -43,8 +45,43 @@ func TestRoundTrip(t *testing.T) {
 			Raw:      []byte("third message without source ts"),
 		},
 	}
+	return chunkID, vaultID, records
+}
 
-	// Write.
+func assertRecord(t *testing.T, i int, got, want chunk.Record) {
+	t.Helper()
+	if !got.WriteTS.Equal(want.WriteTS) {
+		t.Errorf("[%d] WriteTS = %v, want %v", i, got.WriteTS, want.WriteTS)
+	}
+	if !got.IngestTS.Equal(want.IngestTS) {
+		t.Errorf("[%d] IngestTS = %v, want %v", i, got.IngestTS, want.IngestTS)
+	}
+	if !got.SourceTS.Equal(want.SourceTS) {
+		t.Errorf("[%d] SourceTS = %v, want %v", i, got.SourceTS, want.SourceTS)
+	}
+	if got.EventID.IngesterID != want.EventID.IngesterID {
+		t.Errorf("[%d] IngesterID mismatch", i)
+	}
+	if got.EventID.IngestSeq != want.EventID.IngestSeq {
+		t.Errorf("[%d] IngestSeq = %d, want %d", i, got.EventID.IngestSeq, want.EventID.IngestSeq)
+	}
+	if string(got.Raw) != string(want.Raw) {
+		t.Errorf("[%d] Raw = %q, want %q", i, got.Raw, want.Raw)
+	}
+	for k, v := range want.Attrs {
+		if got.Attrs[k] != v {
+			t.Errorf("[%d] Attrs[%q] = %q, want %q", i, k, got.Attrs[k], v)
+		}
+	}
+	if len(got.Attrs) != len(want.Attrs) {
+		t.Errorf("[%d] Attrs count = %d, want %d", i, len(got.Attrs), len(want.Attrs))
+	}
+}
+
+// writeBlobToTempFile writes a blob to a temp file and returns it seeked to start.
+func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID uuid.UUID, records []chunk.Record) *os.File {
+	t.Helper()
+
 	w := cloud.NewWriter(chunkID, vaultID)
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
@@ -56,7 +93,30 @@ func TestRoundTrip(t *testing.T) {
 	if _, err := w.WriteTo(&buf); err != nil {
 		t.Fatalf("WriteTo: %v", err)
 	}
-	t.Logf("blob size: %d bytes (3 records)", buf.Len())
+	t.Logf("blob size: %d bytes (%d records)", buf.Len(), len(records))
+
+	tmp, err := os.CreateTemp(t.TempDir(), "glcb-test-*")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	if _, err := io.Copy(tmp, &buf); err != nil {
+		t.Fatalf("write temp: %v", err)
+	}
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("seek: %v", err)
+	}
+	return tmp
+}
+
+func TestRoundTrip(t *testing.T) {
+	chunkID, vaultID, records := testRecords()
+
+	w := cloud.NewWriter(chunkID, vaultID)
+	for _, rec := range records {
+		if err := w.Add(rec); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+	}
 
 	// Verify writer metadata.
 	wm := w.Meta()
@@ -70,8 +130,9 @@ func TestRoundTrip(t *testing.T) {
 		t.Errorf("writer meta vaultID mismatch")
 	}
 
-	// Read.
-	rd, err := cloud.NewReader(&buf)
+	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
+
+	rd, err := cloud.NewReader(tmp)
 	if err != nil {
 		t.Fatalf("NewReader: %v", err)
 	}
@@ -92,56 +153,127 @@ func TestRoundTrip(t *testing.T) {
 		t.Error("reader meta sourceStart is zero")
 	}
 
-	// Read all records and compare.
+	// Sequential read.
 	for i, want := range records {
-		got, err := rd.Next()
+		got, err := rd.ReadRecord(uint32(i))
 		if err != nil {
-			t.Fatalf("Next[%d]: %v", i, err)
+			t.Fatalf("ReadRecord[%d]: %v", i, err)
 		}
-		if !got.WriteTS.Equal(want.WriteTS) {
-			t.Errorf("[%d] WriteTS = %v, want %v", i, got.WriteTS, want.WriteTS)
-		}
-		if !got.IngestTS.Equal(want.IngestTS) {
-			t.Errorf("[%d] IngestTS = %v, want %v", i, got.IngestTS, want.IngestTS)
-		}
-		if !got.SourceTS.Equal(want.SourceTS) {
-			t.Errorf("[%d] SourceTS = %v, want %v", i, got.SourceTS, want.SourceTS)
-		}
-		if got.EventID.IngesterID != want.EventID.IngesterID {
-			t.Errorf("[%d] IngesterID mismatch", i)
-		}
-		if got.EventID.IngestSeq != want.EventID.IngestSeq {
-			t.Errorf("[%d] IngestSeq = %d, want %d", i, got.EventID.IngestSeq, want.EventID.IngestSeq)
-		}
-		if string(got.Raw) != string(want.Raw) {
-			t.Errorf("[%d] Raw = %q, want %q", i, got.Raw, want.Raw)
-		}
-		for k, v := range want.Attrs {
-			if got.Attrs[k] != v {
-				t.Errorf("[%d] Attrs[%q] = %q, want %q", i, k, got.Attrs[k], v)
-			}
-		}
-		if len(got.Attrs) != len(want.Attrs) {
-			t.Errorf("[%d] Attrs count = %d, want %d", i, len(got.Attrs), len(want.Attrs))
-		}
+		assertRecord(t, i, got, want)
 	}
 
-	// Next should return ErrNoMoreRecords.
-	_, err = rd.Next()
+	// Past-end.
+	_, err = rd.ReadRecord(3)
 	if err != chunk.ErrNoMoreRecords {
 		t.Errorf("expected ErrNoMoreRecords, got %v", err)
 	}
+
+	// Random access: read record 2, then 0.
+	got, err := rd.ReadRecord(2)
+	if err != nil {
+		t.Fatalf("ReadRecord[2]: %v", err)
+	}
+	assertRecord(t, 2, got, records[2])
+
+	got, err = rd.ReadRecord(0)
+	if err != nil {
+		t.Fatalf("ReadRecord[0]: %v", err)
+	}
+	assertRecord(t, 0, got, records[0])
+}
+
+func TestSeekableCursor(t *testing.T) {
+	chunkID, vaultID, records := testRecords()
+	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
+
+	rd, err := cloud.NewReader(tmp)
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	cursor := cloud.NewSeekableCursor(rd, chunkID)
+	defer cursor.Close()
+
+	// Forward iteration.
+	for i, want := range records {
+		got, ref, err := cursor.Next()
+		if err != nil {
+			t.Fatalf("Next[%d]: %v", i, err)
+		}
+		if ref.Pos != uint64(i) {
+			t.Errorf("[%d] Pos = %d", i, ref.Pos)
+		}
+		assertRecord(t, i, got, want)
+	}
+
+	_, _, err = cursor.Next()
+	if err != chunk.ErrNoMoreRecords {
+		t.Errorf("expected ErrNoMoreRecords, got %v", err)
+	}
+
+	// Seek to record 2, then Prev to get records 1, 0.
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: 2}); err != nil {
+		t.Fatalf("Seek: %v", err)
+	}
+
+	got, ref, err := cursor.Prev()
+	if err != nil {
+		t.Fatalf("Prev after Seek(2): %v", err)
+	}
+	if ref.Pos != 1 {
+		t.Errorf("Prev pos = %d, want 1", ref.Pos)
+	}
+	assertRecord(t, 1, got, records[1])
+
+	got, ref, err = cursor.Prev()
+	if err != nil {
+		t.Fatalf("Prev: %v", err)
+	}
+	if ref.Pos != 0 {
+		t.Errorf("Prev pos = %d, want 0", ref.Pos)
+	}
+	assertRecord(t, 0, got, records[0])
+
+	// Prev past start.
+	_, _, err = cursor.Prev()
+	if err != chunk.ErrNoMoreRecords {
+		t.Errorf("expected ErrNoMoreRecords, got %v", err)
+	}
+
+	// Seek to end (recordCount), then Prev to get last record.
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: 3}); err != nil {
+		t.Fatalf("Seek to end: %v", err)
+	}
+	got, ref, err = cursor.Prev()
+	if err != nil {
+		t.Fatalf("Prev from end: %v", err)
+	}
+	if ref.Pos != 2 {
+		t.Errorf("Prev pos = %d, want 2", ref.Pos)
+	}
+	assertRecord(t, 2, got, records[2])
+
+	// Seek to 1, Next should give record 1.
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: 1}); err != nil {
+		t.Fatalf("Seek(1): %v", err)
+	}
+	got, ref, err = cursor.Next()
+	if err != nil {
+		t.Fatalf("Next after Seek(1): %v", err)
+	}
+	if ref.Pos != 1 {
+		t.Errorf("Next pos = %d, want 1", ref.Pos)
+	}
+	assertRecord(t, 1, got, records[1])
 }
 
 func TestEmptyBlob(t *testing.T) {
-	w := cloud.NewWriter(chunk.NewChunkID(), uuid.New())
+	chunkID := chunk.NewChunkID()
+	vaultID := uuid.New()
 
-	var buf bytes.Buffer
-	if _, err := w.WriteTo(&buf); err != nil {
-		t.Fatalf("WriteTo: %v", err)
-	}
+	tmp := writeBlobToTempFile(t, chunkID, vaultID, nil)
 
-	rd, err := cloud.NewReader(&buf)
+	rd, err := cloud.NewReader(tmp)
 	if err != nil {
 		t.Fatalf("NewReader: %v", err)
 	}
@@ -151,7 +283,7 @@ func TestEmptyBlob(t *testing.T) {
 		t.Errorf("expected 0 records, got %d", rd.Meta().RecordCount)
 	}
 
-	_, err = rd.Next()
+	_, err = rd.ReadRecord(0)
 	if err != chunk.ErrNoMoreRecords {
 		t.Errorf("expected ErrNoMoreRecords, got %v", err)
 	}

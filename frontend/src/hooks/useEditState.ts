@@ -4,15 +4,26 @@ export function useEditState<T extends Record<string, any>>(
   defaults: (id: string) => T,
 ) {
   const [edits, setEdits] = useState<Record<string, T>>({});
-  // Track IDs where we're waiting for server data to settle after save.
-  // While pending, getEdit returns the last-saved values to avoid flashing
-  // stale defaults between clearEdit and query refetch.
-  const pendingRef = useRef<Record<string, T>>({});
+
+  // Snapshot of defaults(id) at the time each edit was created.
+  // If defaults later diverge (e.g. config updated via WatchConfig or another
+  // mutation), the stale edit is discarded so getEdit returns fresh values.
+  const baselineRef = useRef<Record<string, string>>({});
 
   const getEdit = useCallback(
     (id: string): T => {
-      if (edits[id]) return edits[id];
-      if (pendingRef.current[id]) return pendingRef.current[id];
+      if (edits[id]) {
+        // Check if defaults changed since the edit was created — if so, the
+        // edit is stale (e.g. config was updated externally) and must be discarded.
+        const currentDefaults = JSON.stringify(defaults(id));
+        if (baselineRef.current[id] !== currentDefaults) {
+          // Can't call setEdits during render, but returning defaults is safe.
+          // The stale entry will be cleaned up on the next setEdit or clearEdit.
+          delete baselineRef.current[id];
+          return defaults(id);
+        }
+        return edits[id];
+      }
       return defaults(id);
     },
     [edits, defaults],
@@ -20,24 +31,25 @@ export function useEditState<T extends Record<string, any>>(
 
   const setEdit = useCallback(
     (id: string, patch: Partial<T>) => {
-      delete pendingRef.current[id];
-      setEdits((prev) => ({
-        ...prev,
-        [id]: { ...defaults(id), ...prev[id], ...patch } as T,
-      }));
+      setEdits((prev) => {
+        const base = defaults(id);
+        // Only snapshot baseline when creating a NEW edit (no previous entry).
+        if (!prev[id]) {
+          baselineRef.current[id] = JSON.stringify(base);
+        }
+        return {
+          ...prev,
+          [id]: { ...base, ...prev[id], ...patch } as T,
+        };
+      });
     },
     [defaults],
   );
 
   const clearEdit = useCallback((id: string) => {
+    delete baselineRef.current[id];
     setEdits((prev) => {
       if (!prev[id]) return prev;
-      // Stash the current edit values so getEdit doesn't flash stale defaults.
-      pendingRef.current[id] = prev[id];
-      // Clear on next frame (after query refetch settles).
-      requestAnimationFrame(() => {
-        delete pendingRef.current[id];
-      });
       const next = { ...prev };
       delete next[id];
       return next;
@@ -47,8 +59,10 @@ export function useEditState<T extends Record<string, any>>(
   const isDirty = useCallback(
     (id: string): boolean => {
       if (!edits[id]) return false;
-      const def = defaults(id);
-      return JSON.stringify(edits[id]) !== JSON.stringify(def);
+      // If baseline diverged, the edit is stale — not dirty.
+      const currentDefaults = JSON.stringify(defaults(id));
+      if (baselineRef.current[id] !== currentDefaults) return false;
+      return JSON.stringify(edits[id]) !== currentDefaults;
     },
     [edits, defaults],
   );

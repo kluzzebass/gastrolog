@@ -96,6 +96,16 @@ func (o *Orchestrator) VaultExists(vaultID uuid.UUID) bool {
 	return s != nil
 }
 
+// VaultType returns the type string for a registered vault, or "" if not found.
+func (o *Orchestrator) VaultType(vaultID uuid.UUID) string {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	if v := o.vaults[vaultID]; v != nil {
+		return v.Type
+	}
+	return ""
+}
+
 // --- Chunk write ---
 
 // Append appends a record to the vault's active chunk.

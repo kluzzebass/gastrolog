@@ -88,6 +88,12 @@ type RecordForwarder interface {
 // confirms the records have been imported as a sealed chunk.
 type RemoteTransferrer interface {
 	TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error
+
+	// WaitVaultReady blocks until the vault is registered and accepting
+	// records on the given node, or ctx expires. Used by DrainVault to
+	// synchronize with the target node's AddVault before unregistering
+	// the vault locally.
+	WaitVaultReady(ctx context.Context, nodeID string, vaultID uuid.UUID) error
 }
 
 // Orchestrator coordinates ingestion, indexing, and querying.

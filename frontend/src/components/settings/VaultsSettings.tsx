@@ -403,7 +403,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed }: R
             }
             headerRight={
               <span className="flex items-center gap-2">
-                <NodeBadge nodeId={vault.nodeId} dark={dark} />
+                <NodeBadge nodeId={edit.nodeId} dark={dark} />
                 {!vault.enabled && (
                   <Badge variant="ghost" dark={dark}>disabled</Badge>
                 )}

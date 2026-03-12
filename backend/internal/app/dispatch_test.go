@@ -64,8 +64,9 @@ func (h *captureHandler) reset() {
 
 // mockOrch implements orchActions with configurable error returns.
 type mockOrch struct {
-	vaults    []uuid.UUID
-	ingesters []uuid.UUID
+	vaults     []uuid.UUID
+	vaultTypes map[uuid.UUID]string
+	ingesters  []uuid.UUID
 
 	addVaultErr        error
 	forceRemoveErr     error
@@ -82,23 +83,44 @@ type mockOrch struct {
 	removeIngesterErr  error
 	updateMaxJobsErr   error
 
-	drainCalls      []uuid.UUID // IDs passed to DrainVault
-	cancelDrainIDs  []uuid.UUID // IDs passed to CancelDrain
+	drainCalls          []uuid.UUID // IDs passed to DrainVault
+	cancelDrainIDs      []uuid.UUID // IDs passed to CancelDrain
+	forceRemoveIDs      []uuid.UUID // IDs passed to ForceRemoveVault
+	unregisterIDs       []uuid.UUID // IDs passed to UnregisterVault
+	unregisterErr       error
+	removeIngesterIDs   []uuid.UUID // IDs passed to RemoveIngester
+	reloadFiltersCalls  int         // number of ReloadFilters calls
 }
 
-func (m *mockOrch) ListVaults() []uuid.UUID  { return m.vaults }
+func (m *mockOrch) ListVaults() []uuid.UUID    { return m.vaults }
 func (m *mockOrch) ListIngesters() []uuid.UUID { return m.ingesters }
+func (m *mockOrch) VaultType(id uuid.UUID) string {
+	if m.vaultTypes != nil {
+		return m.vaultTypes[id]
+	}
+	return ""
+}
 
 func (m *mockOrch) AddVault(context.Context, config.VaultConfig, orchestrator.Factories) error {
 	return m.addVaultErr
 }
-func (m *mockOrch) ReloadFilters(context.Context) error          { return m.reloadFiltersErr }
+func (m *mockOrch) ReloadFilters(context.Context) error {
+	m.reloadFiltersCalls++
+	return m.reloadFiltersErr
+}
 func (m *mockOrch) ReloadRotationPolicies(context.Context) error { return m.reloadRotationErr }
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
 func (m *mockOrch) DisableVault(uuid.UUID) error                 { return m.disableVaultErr }
 func (m *mockOrch) EnableVault(uuid.UUID) error                  { return m.enableVaultErr }
 func (m *mockOrch) SetVaultCompression(uuid.UUID, bool) error    { return m.setCompressionErr }
-func (m *mockOrch) ForceRemoveVault(uuid.UUID) error             { return m.forceRemoveErr }
+func (m *mockOrch) ForceRemoveVault(id uuid.UUID) error {
+	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
+	return m.forceRemoveErr
+}
+func (m *mockOrch) UnregisterVault(id uuid.UUID) error {
+	m.unregisterIDs = append(m.unregisterIDs, id)
+	return m.unregisterErr
+}
 func (m *mockOrch) DrainVault(_ context.Context, id uuid.UUID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)
 	return m.drainVaultErr
@@ -108,7 +130,10 @@ func (m *mockOrch) CancelDrain(_ context.Context, id uuid.UUID) error {
 	m.cancelDrainIDs = append(m.cancelDrainIDs, id)
 	return m.cancelDrainErr
 }
-func (m *mockOrch) RemoveIngester(uuid.UUID) error               { return m.removeIngesterErr }
+func (m *mockOrch) RemoveIngester(id uuid.UUID) error {
+	m.removeIngesterIDs = append(m.removeIngesterIDs, id)
+	return m.removeIngesterErr
+}
 func (m *mockOrch) UpdateMaxConcurrentJobs(int) error            { return m.updateMaxJobsErr }
 
 func (m *mockOrch) AddIngester(uuid.UUID, string, string, orchestrator.Ingester) error {
@@ -205,7 +230,7 @@ func TestHandle_VaultPut(t *testing.T) {
 		}
 	})
 
-	t.Run("remote_node_skipped", func(t *testing.T) {
+	t.Run("remote_node_reloads_filters", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("should not be called")}
 		d := newTestDispatcher(mo, &stubCfgStore{
@@ -214,8 +239,41 @@ func TestHandle_VaultPut(t *testing.T) {
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
+		// Vault is on another node and not locally registered — no drain/add.
+		// But filters MUST be reloaded so forwarding targets update.
+		if mo.reloadFiltersCalls != 1 {
+			t.Fatalf("expected 1 ReloadFilters call, got %d", mo.reloadFiltersCalls)
+		}
 		if h.count() != 0 {
-			t.Fatal("expected no orch calls for remote-node vault")
+			t.Fatal("unexpected error logs")
+		}
+	})
+
+	t.Run("cloud_vault_reassignment_skips_drain", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults:     []uuid.UUID{id},
+			vaultTypes: map[uuid.UUID]string{id: "cloud"},
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true, Type: "cloud"},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
+
+		// Should NOT drain — cloud data is in shared storage.
+		if len(mo.drainCalls) > 0 {
+			t.Fatal("expected no drain for cloud vault reassignment")
+		}
+		// Should unregister locally (non-destructive) instead of force-removing.
+		if len(mo.unregisterIDs) != 1 || mo.unregisterIDs[0] != id {
+			t.Fatal("expected UnregisterVault for cloud vault reassignment")
+		}
+		if len(mo.forceRemoveIDs) > 0 {
+			t.Fatal("ForceRemoveVault must not be called for cloud vaults — it deletes data")
+		}
+		if !h.hasMessage("cloud vault reassigned") {
+			t.Fatal("expected info log about cloud vault reassignment")
 		}
 	})
 
@@ -334,16 +392,36 @@ func TestHandle_IngesterPut(t *testing.T) {
 		}
 	})
 
-	t.Run("remote_node_skipped", func(t *testing.T) {
+	t.Run("remote_node_not_registered_skipped", func(t *testing.T) {
 		h := &captureHandler{}
-		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
+		mo := &mockOrch{} // ingester not locally registered
+		d := newTestDispatcher(mo, &stubCfgStore{
 			ingester: &config.IngesterConfig{ID: id, NodeID: "other-node", Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
-		if h.count() != 0 {
-			t.Fatal("expected no orch calls for remote-node ingester")
+		if len(mo.removeIngesterIDs) != 0 {
+			t.Fatal("should not call RemoveIngester when not locally registered")
+		}
+	})
+
+	t.Run("reassignment_stops_local_ingester", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			ingesters: []uuid.UUID{id}, // locally registered
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			ingester: &config.IngesterConfig{ID: id, NodeID: "other-node", Name: "chatterbox", Enabled: true},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
+
+		if len(mo.removeIngesterIDs) != 1 || mo.removeIngesterIDs[0] != id {
+			t.Fatalf("expected RemoveIngester(%s) for reassigned ingester, got %v", id, mo.removeIngesterIDs)
+		}
+		if h.hasMessage("dispatch: add ingester") {
+			t.Fatal("should not add ingester on a node it's leaving")
 		}
 	})
 

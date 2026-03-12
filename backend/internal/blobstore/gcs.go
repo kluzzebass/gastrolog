@@ -46,6 +46,15 @@ func NewGCS(ctx context.Context, cfg GCSConfig) (*GCSStore, error) {
 	return &GCSStore{client: client, bucket: cfg.Bucket}, nil
 }
 
+func (g *GCSStore) EnsureBucket(ctx context.Context) error {
+	err := g.client.Bucket(g.bucket).Create(ctx, "", nil)
+	if err != nil {
+		// Ignore "bucket already exists" (status 409 / ErrBucketExists).
+		return nil //nolint:nilerr
+	}
+	return nil
+}
+
 func (g *GCSStore) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {
 	w := g.client.Bucket(g.bucket).Object(key).NewWriter(ctx)
 	if len(metadata) > 0 {

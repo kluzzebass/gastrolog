@@ -57,7 +57,7 @@ describe("useEditState", () => {
     expect(result.current.getEdit("b").count).toBe(2);
   });
 
-  test("clearEdit resets to defaults", async () => {
+  test("clearEdit resets to defaults immediately", () => {
     const { result } = renderHook(() => useEditState(defaults));
 
     act(() => {
@@ -67,11 +67,6 @@ describe("useEditState", () => {
 
     act(() => {
       result.current.clearEdit("foo");
-    });
-    // Immediately after clear, stashed values prevent flash.
-    // After the next frame, defaults take over.
-    await act(async () => {
-      await new Promise((r) => requestAnimationFrame(r));
     });
     expect(result.current.getEdit("foo")).toEqual({
       name: "default-foo",
@@ -89,5 +84,54 @@ describe("useEditState", () => {
       name: "default-nonexistent",
       count: 0,
     });
+  });
+
+  test("stale edit is discarded when defaults change", () => {
+    // Mutable defaults that we can change externally (simulating config update).
+    let externalNodeId = "node-1";
+    const dynamicDefaults = (id: string) => ({
+      name: `vault-${id}`,
+      count: 0,
+      nodeId: externalNodeId,
+    });
+
+    const { result, rerender } = renderHook(() =>
+      useEditState(dynamicDefaults),
+    );
+
+    // User edits nodeId to "node-2".
+    act(() => {
+      result.current.setEdit("v1", { nodeId: "node-2" });
+    });
+    expect(result.current.getEdit("v1").nodeId).toBe("node-2");
+
+    // Simulate config changing externally (e.g. WatchConfig refetch).
+    externalNodeId = "node-3";
+    rerender();
+
+    // The edit's baseline no longer matches current defaults — stale edit discarded.
+    expect(result.current.getEdit("v1").nodeId).toBe("node-3");
+  });
+
+  test("isDirty returns false for stale edits", () => {
+    let externalName = "original";
+    const dynamicDefaults = (id: string) => ({
+      name: externalName,
+      count: 0,
+    });
+
+    const { result, rerender } = renderHook(() =>
+      useEditState(dynamicDefaults),
+    );
+
+    act(() => {
+      result.current.setEdit("x", { name: "edited" });
+    });
+    expect(result.current.isDirty("x")).toBe(true);
+
+    // Defaults change externally — edit becomes stale, not dirty.
+    externalName = "updated-externally";
+    rerender();
+    expect(result.current.isDirty("x")).toBe(false);
   });
 });

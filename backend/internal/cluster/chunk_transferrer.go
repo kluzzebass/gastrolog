@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -78,6 +79,34 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 		return fmt.Errorf("receive response from %s: %w", nodeID, err)
 	}
 	return nil
+}
+
+// WaitVaultReady polls the target node until the vault is registered and
+// accepting records, or ctx expires. Uses ForwardListChunks as a lightweight
+// existence probe — it returns an error if the vault doesn't exist.
+func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID uuid.UUID) error {
+	const pollInterval = 100 * time.Millisecond
+
+	vid := vaultID.String()
+	for {
+		conn, err := ct.peers.Conn(nodeID)
+		if err == nil {
+			probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			req := &gastrologv1.ForwardListChunksRequest{VaultId: vid}
+			resp := &gastrologv1.ForwardListChunksResponse{}
+			err = conn.Invoke(probeCtx, "/gastrolog.v1.ClusterService/ForwardListChunks", req, resp)
+			cancel()
+			if err == nil {
+				return nil // vault exists on target
+			}
+		}
+
+		select {
+		case <-time.After(pollInterval):
+		case <-ctx.Done():
+			return fmt.Errorf("vault %s not ready on node %s: %w", vaultID, nodeID, ctx.Err())
+		}
+	}
 }
 
 // chunkRecordToExport converts a chunk.Record to a proto ExportRecord.

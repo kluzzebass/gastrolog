@@ -13,6 +13,10 @@ import (
 
 // Store is the interface for cloud object storage operations.
 type Store interface {
+	// EnsureBucket creates the bucket/container if it doesn't already exist.
+	// Safe to call repeatedly — a no-op if the bucket exists.
+	EnsureBucket(ctx context.Context) error
+
 	// Upload writes data to the given key with optional metadata.
 	Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error
 

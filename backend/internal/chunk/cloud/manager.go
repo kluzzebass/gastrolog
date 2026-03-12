@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,9 +69,10 @@ func (m *Manager) chunkIDFromKey(key string) (chunk.ChunkID, bool) {
 // blobMetaToChunkMeta converts blob object metadata to ChunkMeta.
 func blobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMeta {
 	meta := chunk.ChunkMeta{
-		ID:     id,
-		Sealed: true,
-		Bytes:  bm.Size,
+		ID:         id,
+		Sealed:     true,
+		Compressed: true,
+		Bytes:      bm.Size,
 	}
 	if v, ok := bm.Metadata["record_count"]; ok {
 		n, _ := strconv.ParseInt(v, 10, 64)
@@ -152,7 +155,6 @@ func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	}
 	m.mu.RUnlock()
 
-	// Fetch from blob store.
 	info, err := m.store.Head(context.Background(), m.blobKey(id))
 	if err != nil {
 		return chunk.ChunkMeta{}, fmt.Errorf("head %s: %w", id, err)
@@ -200,27 +202,52 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 	return nil
 }
 
-func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+// downloadToTemp downloads a blob to a temporary file and seeks back to start.
+// The caller is responsible for closing and removing the file (Reader.Close does this).
+func (m *Manager) downloadToTemp(id chunk.ChunkID) (*os.File, error) {
 	rc, err := m.store.Download(context.Background(), m.blobKey(id))
 	if err != nil {
 		return nil, fmt.Errorf("download %s: %w", id, err)
 	}
+	defer func() { _ = rc.Close() }()
 
-	rd, err := NewReader(rc)
+	tmp, err := os.CreateTemp("", "glcb-*")
 	if err != nil {
-		_ = rc.Close()
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+
+	if _, err := io.Copy(tmp, rc); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
+		return nil, fmt.Errorf("download %s to temp: %w", id, err)
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
+		return nil, err
+	}
+
+	return tmp, nil
+}
+
+func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	tmp, err := m.downloadToTemp(id)
+	if err != nil {
+		return nil, err
+	}
+
+	rd, err := NewReader(tmp)
+	if err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
 		return nil, fmt.Errorf("open reader %s: %w", id, err)
 	}
 
-	return &cloudCursor{
-		reader: rd,
-		closer: rc,
-		id:     id,
-	}, nil
+	return NewSeekableCursor(rd, id), nil
 }
 
 func (m *Manager) FindStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
-	// No time index — query engine falls back to scanning from position 0.
 	return 0, false, nil
 }
 
@@ -276,10 +303,6 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		}
 	}
 
-	// Compress to buffer, then upload. The blob is already buffered
-	// in the Writer (record frames), so this adds minimal overhead.
-	// Using a seekable buffer avoids issues with S3 checksum computation
-	// on non-TLS connections.
 	var buf bytes.Buffer
 	if _, err := w.WriteTo(&buf); err != nil {
 		return chunk.ChunkMeta{}, fmt.Errorf("compress %s: %w", chunkID, err)
@@ -291,7 +314,6 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		return chunk.ChunkMeta{}, fmt.Errorf("upload %s: %w", chunkID, err)
 	}
 
-	// Fetch actual size from store.
 	info, err := m.store.Head(context.Background(), key)
 	if err != nil {
 		m.logger.Warn("failed to head after upload", "chunk", chunkID, "error", err)
@@ -303,6 +325,7 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		EndTS:       bm.EndTS,
 		RecordCount: int64(bm.RecordCount),
 		Sealed:      true,
+		Compressed:  true,
 		IngestStart: bm.IngestStart,
 		IngestEnd:   bm.IngestEnd,
 		SourceStart: bm.SourceStart,
@@ -350,35 +373,73 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 
 func (m *Manager) Close() error { return nil }
 
-// --- cloudCursor adapts cloud.Reader to chunk.RecordCursor ---
+// --- seekableCursor: random-access cursor backed by seekable zstd ---
 
-type cloudCursor struct {
-	reader *Reader
-	closer interface{ Close() error }
-	id     chunk.ChunkID
-	pos    uint64
+type seekableCursor struct {
+	reader      *Reader
+	id          chunk.ChunkID
+	recordCount uint64
+	fwdIndex    uint64
+	revIndex    uint64
+	fwdDone     bool
+	revDone     bool
 }
 
-func (c *cloudCursor) Next() (chunk.Record, chunk.RecordRef, error) {
-	rec, err := c.reader.Next()
-	if err != nil {
-		return rec, chunk.RecordRef{}, err
+// NewSeekableCursor creates a seekable cursor from a Reader.
+// Exported for testing; Manager.OpenCursor creates these internally.
+func NewSeekableCursor(rd *Reader, id chunk.ChunkID) chunk.RecordCursor {
+	return &seekableCursor{
+		reader:      rd,
+		id:          id,
+		recordCount: uint64(rd.Meta().RecordCount),
+		fwdIndex:    0,
+		revIndex:    uint64(rd.Meta().RecordCount),
 	}
-	ref := chunk.RecordRef{ChunkID: c.id, Pos: c.pos}
-	c.pos++
+}
+
+func (c *seekableCursor) Next() (chunk.Record, chunk.RecordRef, error) {
+	if c.fwdDone || c.fwdIndex >= c.recordCount {
+		c.fwdDone = true
+		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+	}
+
+	rec, err := c.reader.ReadRecord(uint32(c.fwdIndex)) //nolint:gosec // G115: bounded by recordCount
+	if err != nil {
+		return chunk.Record{}, chunk.RecordRef{}, err
+	}
+
+	ref := chunk.RecordRef{ChunkID: c.id, Pos: c.fwdIndex}
+	c.fwdIndex++
 	return rec, ref, nil
 }
 
-func (c *cloudCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
-	return chunk.Record{}, chunk.RecordRef{}, errors.New("cloud cursor does not support Prev")
+func (c *seekableCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
+	if c.revDone || c.revIndex == 0 {
+		c.revDone = true
+		return chunk.Record{}, chunk.RecordRef{}, chunk.ErrNoMoreRecords
+	}
+
+	c.revIndex--
+	rec, err := c.reader.ReadRecord(uint32(c.revIndex)) //nolint:gosec // G115: bounded by recordCount
+	if err != nil {
+		c.revIndex++
+		return chunk.Record{}, chunk.RecordRef{}, err
+	}
+
+	return rec, chunk.RecordRef{ChunkID: c.id, Pos: c.revIndex}, nil
 }
 
-func (c *cloudCursor) Seek(_ chunk.RecordRef) error {
-	return errors.New("cloud cursor does not support Seek")
+func (c *seekableCursor) Seek(ref chunk.RecordRef) error {
+	c.fwdIndex = ref.Pos
+	c.revIndex = ref.Pos
+	c.fwdDone = false
+	c.revDone = false
+	return nil
 }
 
-func (c *cloudCursor) Close() error {
-	_ = c.reader.Close()
-	return c.closer.Close()
+func (c *seekableCursor) Close() error {
+	if c.reader != nil {
+		return c.reader.Close()
+	}
+	return nil
 }
-

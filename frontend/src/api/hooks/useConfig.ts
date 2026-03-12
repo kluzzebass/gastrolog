@@ -4,6 +4,30 @@ import { GetConfigResponse } from "../gen/gastrolog/v1/config_pb";
 import { protoSharing } from "./protoSharing";
 
 /**
+ * Mutation-based config writes set data directly into the query cache via
+ * setQueryData. The WatchConfig stream must NOT invalidate the config query
+ * while a mutation's authoritative data is still fresh — otherwise a refetch
+ * can hit a stale Raft follower and overwrite the correct value.
+ *
+ * suppressConfigInvalidation is a simple counter: incremented before
+ * setQueryData, decremented after a delay. WatchConfig skips config
+ * invalidation while the counter is >0.
+ */
+let suppressConfigInvalidation = 0;
+
+/** Called by useConfigMutation before setting query data. */
+export function beginConfigSuppression() {
+  suppressConfigInvalidation++;
+  // Clear after a generous window — follower lag should be well under 10s.
+  setTimeout(() => { suppressConfigInvalidation--; }, 10_000);
+}
+
+/** Called by useWatchConfig to check whether to skip config invalidation. */
+export function isConfigSuppressed(): boolean {
+  return suppressConfigInvalidation > 0;
+}
+
+/**
  * Factory that eliminates the useQueryClient + onSuccess boilerplate for config mutations.
  *
  * When the mutation response carries a `config` field (all Put/Delete RPCs now do),
@@ -20,6 +44,12 @@ export function useConfigMutation<TArgs, TResult>(
   const qc = useQueryClient();
   return useMutation({
     mutationFn: fn,
+    onMutate: () => {
+      // Suppress BEFORE the request fires — WatchConfig can deliver the
+      // Raft-committed notification before the HTTP response arrives, and
+      // its refetch would hit a stale follower, overwriting setQueryData.
+      beginConfigSuppression();
+    },
     onSuccess: (result: TResult) => {
       const cfg = result != null && typeof result === "object" && "config" in result
         ? (result as { config?: GetConfigResponse }).config

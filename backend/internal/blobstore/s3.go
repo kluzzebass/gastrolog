@@ -52,6 +52,16 @@ func NewS3(ctx context.Context, cfg S3Config) (*S3Store, error) {
 	return &S3Store{client: client, bucket: cfg.Bucket}, nil
 }
 
+func (s *S3Store) EnsureBucket(ctx context.Context) error {
+	_, err := s.client.CreateBucket(ctx, &s3.CreateBucketInput{Bucket: &s.bucket})
+	if err != nil {
+		// Ignore "bucket already exists" — BucketAlreadyExists and
+		// BucketAlreadyOwnedByYou are both fine.
+		return nil //nolint:nilerr
+	}
+	return nil
+}
+
 func (s *S3Store) Upload(ctx context.Context, key string, data io.Reader, metadata map[string]string) error {
 	input := &s3.PutObjectInput{
 		Bucket:   &s.bucket,

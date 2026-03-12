@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { configClient, refreshAuth } from "../client";
+import { isConfigSuppressed } from "./useConfig";
 
 export function useWatchConfig() {
   const qc = useQueryClient();
@@ -18,14 +19,15 @@ export function useWatchConfig() {
           { signal: abort.signal },
         )) {
           // Each message = "config changed". Invalidate the query cache.
-          // Skip config invalidation if a mutation recently set the data
-          // directly — refetching now would hit a stale follower and
-          // briefly overwrite the correct data with old values.
-          const state = qc.getQueryState(["config"]);
-          if (!state || Date.now() - state.dataUpdatedAt > 2000) {
+          // Skip config invalidation while a mutation's authoritative data
+          // is still fresh — a refetch would hit a stale Raft follower and
+          // overwrite the correct value set by setQueryData.
+          if (!isConfigSuppressed()) {
             qc.invalidateQueries({ queryKey: ["config"] });
           }
           qc.invalidateQueries({ queryKey: ["settings"] });
+          qc.invalidateQueries({ queryKey: ["vaults"] });
+          qc.invalidateQueries({ queryKey: ["stats"] });
           nextBackoff = 0; // reset backoff on successful message
         }
       } catch (err) {

@@ -36,6 +36,10 @@ type mockTransferrer struct {
 	gate    chan struct{} // if non-nil, TransferRecords blocks until closed
 }
 
+func (m *mockTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+	return nil // always ready in tests
+}
+
 type transferCall struct {
 	NodeID  string
 	VaultID uuid.UUID

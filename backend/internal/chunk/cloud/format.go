@@ -1,39 +1,49 @@
 // Package cloud defines the single-blob format for cloud-archived chunks.
 //
-// Each sealed chunk becomes one zstd-compressed object in the bucket.
-// The format is designed for streaming reads (full scan, no random access).
+// Header, dictionary, and record index are stored uncompressed.
+// Record data uses seekable zstd (256KB independent frames), enabling
+// O(1) random access to any record via the offset index.
 //
-// Wire format (inside zstd envelope):
+//	Uncompressed prefix:
+//	  Header (98 bytes):
+//	    [magic:4]          "GLCB" (GastroLog Cloud Blob)
+//	    [version:1]        format version (0x01)
+//	    [flags:1]          reserved
+//	    [chunkID:16]       raw UUIDv7 bytes
+//	    [vaultID:16]       raw UUID bytes
+//	    [recordCount:u32]  total records
+//	    [startTS:i64]      min WriteTS (nanos)
+//	    [endTS:i64]        max WriteTS (nanos)
+//	    [ingestStart:i64]  min IngestTS (nanos)
+//	    [ingestEnd:i64]    max IngestTS (nanos)
+//	    [sourceStart:i64]  min SourceTS, 0 = none (nanos)
+//	    [sourceEnd:i64]    max SourceTS, 0 = none (nanos)
+//	    [dictEntries:u32]  string dictionary size
+//	    [dictSize:u32]     total bytes of dictionary section
 //
-//	Header (94 bytes):
-//	  [magic:4]          "GLCB" (GastroLog Cloud Blob)
-//	  [version:1]        format version (0x01)
-//	  [flags:1]          reserved
-//	  [chunkID:16]       raw UUIDv7 bytes
-//	  [vaultID:16]       raw UUID bytes
-//	  [recordCount:u32]  total records
-//	  [startTS:i64]      min WriteTS (nanos)
-//	  [endTS:i64]        max WriteTS (nanos)
-//	  [ingestStart:i64]  min IngestTS (nanos)
-//	  [ingestEnd:i64]    max IngestTS (nanos)
-//	  [sourceStart:i64]  min SourceTS, 0 = none (nanos)
-//	  [sourceEnd:i64]    max SourceTS, 0 = none (nanos)
-//	  [dictEntries:u32]  string dictionary size
+//	  Dictionary (dictSize bytes):
+//	    [len:u16][bytes] × dictEntries
 //
-//	Dictionary (variable):
-//	  [len:u16][bytes] × dictEntries
+//	  Record Index (recordCount × 12 bytes):
+//	    [offset:u64]       byte offset into decompressed record data
+//	    [size:u32]         frame size (excluding the u32 frameLen prefix)
 //
-//	Records (variable, × recordCount):
-//	  [frameLen:u32]     frame size excluding this field
-//	  [sourceTS:i64]
-//	  [ingestTS:i64]
-//	  [writeTS:i64]
-//	  [ingesterID:16]
-//	  [ingestSeq:u32]
-//	  [attrCount:u16]
-//	  [keyID:u32][valID:u32] × attrCount
-//	  [rawLen:u32]
-//	  [raw bytes]
+//	Seekable zstd section:
+//	  Record data compressed in ~256KB independent frames with an appended
+//	  seek table for random access via ReadAt.
+//
+// Record frame encoding:
+//
+//	[frameLen:u32]     frame size excluding this field
+//	[sourceTS:i64]
+//	[ingestTS:i64]
+//	[writeTS:i64]
+//	[ingesterID:16]
+//	[ingestSeq:u32]
+//	[attrCount:u16]
+//	[keyID:u32][valID:u32] × attrCount
+//	[rawLen:u32]
+//	[raw bytes]
 package cloud
 
 import (
@@ -48,7 +58,14 @@ var magic = [4]byte{'G', 'L', 'C', 'B'}
 
 const (
 	formatVersion = 0x01
-	headerSize    = 94 // fixed header before dictionary
+	headerSize    = 98 // fixed header before dictionary
+
+	// Record index entry: byte offset (u64) + frame size (u32).
+	indexEntrySize = 12
+
+	// Seekable zstd frame size — each frame is independently compressed,
+	// enabling random access at frame granularity. Matches the file vault.
+	seekableFrameSize = 256 << 10 // 256 KB
 
 	// Minimum record frame: timestamps (3×8) + ingesterID (16) + ingestSeq (4)
 	// + attrCount (2) + rawLen (4) = 58 bytes.
@@ -85,4 +102,10 @@ type BlobMeta struct {
 	IngestEnd   time.Time
 	SourceStart time.Time // zero = no source timestamps
 	SourceEnd   time.Time
+}
+
+// recordIndex is one entry in the record offset index.
+type recordIndex struct {
+	Offset uint64 // byte offset into decompressed record data
+	Size   uint32 // frame size (excluding the u32 frameLen prefix)
 }
