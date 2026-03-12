@@ -72,7 +72,14 @@ func blobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMet
 		ID:         id,
 		Sealed:     true,
 		Compressed: true,
-		Bytes:      bm.Size,
+		DiskBytes:  bm.Size,
+		Bytes:      bm.Size, // overwritten below if raw_bytes is known
+	}
+	if v, ok := bm.Metadata["raw_bytes"]; ok {
+		n, _ := strconv.ParseInt(v, 10, 64)
+		if n > 0 {
+			meta.Bytes = n
+		}
 	}
 	if v, ok := bm.Metadata["record_count"]; ok {
 		n, _ := strconv.ParseInt(v, 10, 64)
@@ -111,6 +118,7 @@ func objectMetadata(bm BlobMeta) map[string]string {
 		"chunk_id":     bm.ChunkID.String(),
 		"vault_id":     bm.VaultID.String(),
 		"record_count": strconv.FormatUint(uint64(bm.RecordCount), 10),
+		"raw_bytes":    strconv.FormatInt(bm.RawBytes, 10),
 	}
 	if !bm.StartTS.IsZero() {
 		md["start_ts"] = bm.StartTS.Format(time.RFC3339Nano)
@@ -330,8 +338,8 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		IngestEnd:   bm.IngestEnd,
 		SourceStart: bm.SourceStart,
 		SourceEnd:   bm.SourceEnd,
-		Bytes:       info.Size,
-		DiskBytes:   info.Size,
+		Bytes:     bm.RawBytes,
+		DiskBytes: info.Size,
 	}
 
 	m.mu.Lock()

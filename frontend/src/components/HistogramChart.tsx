@@ -3,6 +3,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { HistogramData } from "../utils/histogramData";
+import { formatDateShort, formatTimeHM, formatTimeOnly } from "../utils/temporal";
 import { SEVERITY_COLOR_MAP, GROUP_PALETTE, resolveColor } from "./charts/chartColors";
 import type { EChartsOption } from "echarts";
 
@@ -263,22 +264,9 @@ export function HistogramChart({
     : 0;
 
   const formatTime = (d: Date) => {
-    if (rangeMs > 24 * 60 * 60 * 1000) {
-      return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    }
-    if (rangeMs < 60 * 60 * 1000) {
-      return d.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
-      });
-    }
-    return d.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    if (rangeMs > 24 * 60 * 60 * 1000) return formatDateShort(d);
+    if (rangeMs < 60 * 60 * 1000) return formatTimeOnly(d);
+    return formatTimeHM(d);
   };
 
   // Build a single tooltip line with a colored dot, label, and count.

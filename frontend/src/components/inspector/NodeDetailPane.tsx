@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
+import { useConfig } from "../../api/hooks/useConfig";
 import { useSettings } from "../../api/hooks/useSettings";
 import { JobKind } from "../../api/gen/gastrolog/v1/job_pb";
 import { toastError } from "../Toast";
@@ -23,7 +24,18 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const localNodeId = settingsData?.nodeId ?? "";
 
   const { data: cluster } = useClusterStatus();
+  const { data: config } = useConfig();
   const nodeInfo = cluster?.nodes.find((n) => n.id === nodeId);
+
+  // Build vault ID → cloud provider map from config.
+  const cloudProviders = new Map<string, string>();
+  if (config?.vaults) {
+    for (const vc of config.vaults) {
+      if (vc.type === "cloud" && vc.params["provider"]) {
+        cloudProviders.set(vc.id, vc.params["provider"]);
+      }
+    }
+  }
 
   // Data for all entity types, filtered by this node.
   const { data: allVaults } = useVaults();
@@ -63,6 +75,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
                 <VaultCard
                   key={vault.id}
                   vault={vault}
+                  cloudProvider={cloudProviders.get(vault.id)}
                   dark={dark}
                   expanded={expandedVault === vault.id}
                   onToggle={() => setExpandedVault(expandedVault === vault.id ? null : vault.id)}

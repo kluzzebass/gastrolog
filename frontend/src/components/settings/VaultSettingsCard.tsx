@@ -124,6 +124,7 @@ export function VaultSettingsCard({
       key={vault.id}
       id={vault.name || vault.id}
       typeBadge={vault.type}
+      secondaryBadge={vault.type === "cloud" ? vault.params["provider"] : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
@@ -224,11 +225,6 @@ export function VaultSettingsCard({
       }
       headerRight={
         <span className="flex items-center gap-2">
-          {onOpenInspector && (
-            <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:vaults:${vault.name || vault.id}`)}>
-              <PulseIcon className="w-3 h-3" />
-            </CrossLinkBadge>
-          )}
           <NodeBadge nodeId={edit.nodeId} dark={dark} />
           {!vault.enabled && (
             <Badge variant="ghost" dark={dark}>disabled</Badge>
@@ -237,6 +233,11 @@ export function VaultSettingsCard({
             <span className="text-[0.85em] text-severity-warn">
               {warnings.join(", ")}
             </span>
+          )}
+          {onOpenInspector && (
+            <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:vaults:${vault.name || vault.id}`)}>
+              <PulseIcon className="w-3 h-3" />
+            </CrossLinkBadge>
           )}
         </span>
       }

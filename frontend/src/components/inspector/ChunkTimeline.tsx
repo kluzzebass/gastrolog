@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
-import { protoToInstant, instantToMs } from "../../utils/temporal";
+import { protoToInstant, instantToMs, formatDateShort, formatTimeHM, formatTimeOnly, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes, formatDurationMs } from "../../utils/units";
 import { Badge } from "../Badge";
 
@@ -316,7 +316,7 @@ function ChunkTooltip({
         className={`flex gap-4 flex-wrap ${c("text-text-muted", "text-light-text-muted")}`}
       >
         <span>
-          {formatTimeShort(start)} &rarr; {formatTimeShort(end)}
+          {formatDateTimeShort(start)} &rarr; {formatDateTimeShort(end)}
         </span>
         <span>{formatDurationMs(duration)}</span>
         <span className="font-mono">
@@ -394,29 +394,8 @@ function generateTicks(
 
 function formatTickLabel(ms: number, interval: number): string {
   const d = new Date(ms);
-  if (interval >= 86400_000) {
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-  }
-  if (interval >= 3600_000) {
-    return d.toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-  return d.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function formatTimeShort(d: Date): string {
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  if (interval >= 86400_000) return formatDateShort(d);
+  if (interval >= 3600_000) return formatTimeHM(d);
+  return formatTimeOnly(d);
 }
 

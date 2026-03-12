@@ -29,22 +29,21 @@ export function IngesterCard({
     <ExpandableCard
       id={ingester.name || ingester.id}
       typeBadge={ingester.type}
-      typeBadgeAccent
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          {onOpenSettings && (
-            <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
-              <CogIcon className="w-3 h-3" />
-            </CrossLinkBadge>
-          )}
           {showNodeBadge && <NodeBadge nodeId={ingester.nodeId} dark={dark} />}
           {ingester.running ? (
             <Badge variant="info" dark={dark}>running</Badge>
           ) : (
             <Badge variant="ghost" dark={dark}>stopped</Badge>
+          )}
+          {onOpenSettings && (
+            <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
+              <CogIcon className="w-3 h-3" />
+            </CrossLinkBadge>
           )}
         </span>
       }

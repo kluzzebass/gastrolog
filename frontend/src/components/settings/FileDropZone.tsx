@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { formatDateOnly } from "../../utils/temporal";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/config_pb";
 import type { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
@@ -77,7 +78,7 @@ export function FileDropZone({
           </span>
           {"uploadedAt" in displayFile && displayFile.uploadedAt && (
             <span className={c("text-text-ghost", "text-light-text-ghost")}>
-              &middot; {new Date(displayFile.uploadedAt).toLocaleDateString()}
+              &middot; {formatDateOnly(new Date(displayFile.uploadedAt))}
             </span>
           )}
         </div>

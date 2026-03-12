@@ -1,0 +1,129 @@
+# Integration test environment for all ingesters.
+#
+# Brings up real-world services that produce genuine log traffic as a
+# byproduct of normal operation — no synthetic generators. GastroLog
+# runs on the host; these containers connect to it.
+#
+# Usage:
+#   just ingester-integration-up                              # start services
+#   ./test/ingester-integration/init/setup.sh <sock-path>     # add ingesters to gastrolog
+#   just ingester-integration-down                            # tear down + remove volumes
+#
+# The setup script only creates ingesters — configure filters, routes,
+# and vaults via the UI before running it.
+#
+# Ingesters exercised:
+#   kafka      ← kafka-producer writing test messages to topic gastrolog-logs
+#   syslog     ← rsyslog forwarding via TCP
+#   relp       ← rsyslog forwarding via RELP
+#   otlp       ← OTel Collector self-telemetry
+#   fluentfwd  ← Fluent Bit forwarding container logs
+#   http       ← Fluent Bit pushing to Loki-compatible endpoint
+#   docker     ← gastrolog reading directly from Docker API (host socket)
+#
+# After starting, open http://localhost:4564 to search logs.
+
+services:
+  # ── Kafka (KRaft) ───────────────────────────────────────────────
+  # Single-node KRaft broker. A dedicated producer writes test
+  # messages to the gastrolog-logs topic, then gastrolog's kafka
+  # ingester consumes them.
+  kafka:
+    image: apache/kafka:latest
+    container_name: gastrolog-kafka
+    extra_hosts: [host.docker.internal:host-gateway]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: HOST://:9092,DOCKER://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: HOST://localhost:9092,DOCKER://kafka:9094
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: HOST:PLAINTEXT,DOCKER:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: DOCKER
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    ports:
+      - "9092:9092"
+    healthcheck:
+      test: ["CMD", "/opt/kafka/bin/kafka-topics.sh", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+
+  # Topic creation after broker is healthy.
+  kafka-init:
+    image: apache/kafka:latest
+    container_name: gastrolog-kafka-init
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create --if-not-exists \
+          --topic gastrolog-logs \
+          --partitions 1 \
+          --replication-factor 1
+    restart: "no"
+
+  # Produce a test message every 2 seconds to the gastrolog-logs topic.
+  # Runs in a loop so the kafka ingester always has fresh data.
+  kafka-producer:
+    image: apache/kafka:latest
+    container_name: gastrolog-kafka-producer
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        i=0
+        while true; do
+          i=$((i + 1))
+          echo "{\"message\": \"kafka integration test log line\", \"seq\": $i}" | \
+            /opt/kafka/bin/kafka-console-producer.sh \
+              --bootstrap-server kafka:9092 \
+              --topic gastrolog-logs
+          sleep 2
+        done
+    restart: unless-stopped
+
+  # ── rsyslog ─────────────────────────────────────────────────────
+  # Forwards its own internal messages to gastrolog on the host via
+  # both syslog (TCP) and RELP, exercising two ingesters from one
+  # container.
+  rsyslog:
+    image: rsyslog/syslog_appliance_alpine:latest
+    container_name: gastrolog-rsyslog
+    extra_hosts: [host.docker.internal:host-gateway]
+    volumes:
+      - ./rsyslog/rsyslog.conf:/etc/rsyslog.conf:ro
+
+  # ── OTel Collector ──────────────────────────────────────────────
+  # Configured for self-monitoring: exports its own internal
+  # telemetry as OTLP logs to gastrolog on the host.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:latest
+    container_name: gastrolog-otel
+    extra_hosts: [host.docker.internal:host-gateway]
+    volumes:
+      - ./otel/config.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - otel-logs:/var/log/otel
+
+  # ── Fluent Bit ──────────────────────────────────────────────────
+  # Generates dummy log lines and forwards via two outputs:
+  # Fluent Forward and Loki HTTP push — exercising two ingesters.
+  # Kafka is fed by a separate producer to avoid feedback loops.
+  fluent-bit:
+    image: fluent/fluent-bit:latest
+    container_name: gastrolog-fluent-bit
+    extra_hosts: [host.docker.internal:host-gateway]
+    volumes:
+      - ./fluent-bit/fluent-bit.conf:/fluent-bit/etc/fluent-bit.conf:ro
+
+volumes:
+  otel-logs:

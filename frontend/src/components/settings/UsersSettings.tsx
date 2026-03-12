@@ -1,4 +1,5 @@
 import { useReducer } from "react";
+import { formatDateOnly } from "../../utils/temporal";
 import { useExpandedCard } from "../../hooks/useExpandedCards";
 import {
   useListUsers,
@@ -275,7 +276,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                 className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}
               >
                 Created{" "}
-                {new Date(Number(user.createdAt) * 1000).toLocaleDateString()}
+                {formatDateOnly(new Date(Number(user.createdAt) * 1000))}
                 {isSelf && " (you)"}
               </div>
             </div>

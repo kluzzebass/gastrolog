@@ -6,6 +6,7 @@ interface ExpandableCardProps {
   id: string;
   typeBadge?: string;
   typeBadgeAccent?: boolean;
+  secondaryBadge?: string;
   dark: boolean;
   expanded?: boolean;
   onToggle?: () => void;
@@ -19,6 +20,7 @@ export function ExpandableCard({
   id,
   typeBadge,
   typeBadgeAccent,
+  secondaryBadge,
   dark,
   expanded,
   onToggle,
@@ -61,6 +63,11 @@ export function ExpandableCard({
           {typeBadge && (
             <Badge variant={typeBadgeAccent ? "copper" : "muted"} dark={dark}>
               {typeBadge}
+            </Badge>
+          )}
+          {secondaryBadge && (
+            <Badge variant="muted" dark={dark}>
+              {secondaryBadge}
             </Badge>
           )}
           {status}

@@ -2,6 +2,7 @@ import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { buildThemeOption } from "./charts/echartsTheme";
 import { SERIES_COLORS, resolveColor, formatChartValue } from "./charts/chartColors";
+import { formatTimeOnly } from "../utils/temporal";
 import type { EChartsOption } from "echarts";
 
 interface TimeSeriesChartProps {
@@ -126,12 +127,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
         const items = Array.isArray(params) ? params : [params];
         if (items.length === 0) return "";
         const ts = new Date(items[0].value[0]);
-        const timeStr = ts.toLocaleTimeString("en-US", {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: false,
-        });
+        const timeStr = formatTimeOnly(ts);
         const lines = items.map((p: any) => {
           const dot = `<span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:${p.color};margin-right:6px;"></span>`;
           return `${dot}${p.seriesName} <b>${formatChartValue(p.value[1] as number)}</b>`;

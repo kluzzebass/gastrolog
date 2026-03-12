@@ -96,6 +96,7 @@ type BlobMeta struct {
 	ChunkID     chunk.ChunkID
 	VaultID     uuid.UUID
 	RecordCount uint32
+	RawBytes    int64     // uncompressed record data size (0 if unknown)
 	StartTS     time.Time
 	EndTS       time.Time
 	IngestStart time.Time

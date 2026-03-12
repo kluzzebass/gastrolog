@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
+import { formatDateTimestamp } from "../../../utils/temporal";
 import { usePutSettings, MAXMIND_KEEP } from "../../../api/hooks/useSettings";
 import { useExpandedCard } from "../../../hooks/useExpandedCards";
 import { FormField, TextInput } from "../FormField";
@@ -136,7 +137,7 @@ export function MaxMindCard({
 
         {savedMaxmind?.lastUpdate && (
           <div className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            Last updated: {new Date(savedMaxmind.lastUpdate).toLocaleString()}
+            Last updated: {formatDateTimestamp(new Date(savedMaxmind.lastUpdate))}
           </div>
         )}
       </div>

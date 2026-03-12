@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { formatDateTimestamp } from "../../utils/temporal";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig } from "../../api/hooks/useConfig";
 import { useSettings } from "../../api/hooks/useSettings";
@@ -239,7 +240,7 @@ function VersionRow({
           </span>
           {file.uploadedAt && (
             <span className={c("text-text-ghost", "text-light-text-ghost")}>
-              {new Date(file.uploadedAt).toLocaleString()}
+              {formatDateTimestamp(new Date(file.uploadedAt))}
             </span>
           )}
           {label && (

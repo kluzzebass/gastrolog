@@ -55,6 +55,14 @@ cloud-storage-up:
 cloud-storage-down:
     docker compose -f test/cloud-storage/compose.yml down -v
 
+# Start ingester integration test environment (all ingesters + real services)
+ingester-integration-up:
+    docker compose -f test/ingester-integration/compose.yml up --build -d
+
+# Tear down ingester integration test environment
+ingester-integration-down:
+    docker compose -f test/ingester-integration/compose.yml down -v
+
 # Tag and push to kick off draft release creation via GitHub Actions.
 draft bump:
     #!/usr/bin/env bash

@@ -1,0 +1,25 @@
+# OTel Collector config for integration testing.
+# Reads its own log output via filelog receiver and exports it as
+# OTLP logs to gastrolog on the host.
+
+receivers:
+  filelog:
+    include:
+      - /var/log/otel/collector.log
+    start_at: beginning
+
+exporters:
+  otlp/gastrolog:
+    endpoint: host.docker.internal:4317
+    tls:
+      insecure: true
+
+service:
+  telemetry:
+    logs:
+      level: debug
+      output_paths: ["/var/log/otel/collector.log"]
+  pipelines:
+    logs:
+      receivers: [filelog]
+      exporters: [otlp/gastrolog]

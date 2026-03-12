@@ -91,7 +91,18 @@ function useNodeContext() {
 
 function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
   const { data: vaults, isLoading } = useVaults();
+  const { data: config } = useConfig();
   const { expanded, toggle, add } = useToggleSet();
+
+  // Build a vault ID → cloud provider map from config (VaultInfo lacks params).
+  const cloudProviders = new Map<string, string>();
+  if (config?.vaults) {
+    for (const vc of config.vaults) {
+      if (vc.type === "cloud" && vc.params["provider"]) {
+        cloudProviders.set(vc.id, vc.params["provider"]);
+      }
+    }
+  }
 
   // Auto-expand a vault when deep-linked from settings.
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
@@ -113,6 +124,7 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
         <VaultCard
           key={vault.id}
           vault={vault}
+          cloudProvider={cloudProviders.get(vault.id)}
           dark={dark}
           expanded={expanded.has(vault.id)}
           onToggle={() => toggle(vault.id)}

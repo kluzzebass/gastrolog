@@ -211,14 +211,14 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
             onDelete={() => handleDelete(ing.id)}
             headerRight={
               <span className="flex items-center gap-2">
+                <NodeBadge nodeId={ing.nodeId} dark={dark} />
+                {!ing.enabled && (
+                  <Badge variant="ghost" dark={dark}>disabled</Badge>
+                )}
                 {onOpenInspector && (
                   <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:ingesters:${ing.name || ing.id}`)}>
                     <PulseIcon className="w-3 h-3" />
                   </CrossLinkBadge>
-                )}
-                <NodeBadge nodeId={ing.nodeId} dark={dark} />
-                {!ing.enabled && (
-                  <Badge variant="ghost" dark={dark}>disabled</Badge>
                 )}
               </span>
             }

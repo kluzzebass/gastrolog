@@ -110,3 +110,56 @@ export function formatLocalTimeShort(instant: Temporal.Instant): string {
     hour12: false,
   });
 }
+
+// ── Date-based formatters (for components that work with Date) ─────
+
+/** Format Date as `YYYY-MM-DD HH:MM:SS` (24-hour, local time). */
+export function formatDateTimestamp(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${y}-${mo}-${day} ${h}:${mi}:${s}`;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Format Date as `Mon DD HH:MM:SS` (24-hour, local time, no year). */
+export function formatDateTimeShort(d: Date): string {
+  const mon = MONTHS[d.getMonth()];
+  const day = d.getDate();
+  const h = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${mon} ${day} ${h}:${mi}:${s}`;
+}
+
+/** Format Date as `HH:MM:SS` (24-hour). */
+export function formatTimeOnly(d: Date): string {
+  const h = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  const s = String(d.getSeconds()).padStart(2, "0");
+  return `${h}:${mi}:${s}`;
+}
+
+/** Format Date as `HH:MM` (24-hour). */
+export function formatTimeHM(d: Date): string {
+  const h = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${h}:${mi}`;
+}
+
+/** Format Date as `Mon DD` (no year, no time). */
+export function formatDateShort(d: Date): string {
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** Format Date as `YYYY-MM-DD`. */
+export function formatDateOnly(d: Date): string {
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${day}`;
+}

@@ -5,6 +5,7 @@ import { ExpandableCard } from "./ExpandableCard";
 interface SettingsCardProps {
   id: string;
   typeBadge?: string;
+  secondaryBadge?: string;
   dark: boolean;
   expanded?: boolean;
   onToggle?: () => void;
@@ -20,6 +21,7 @@ interface SettingsCardProps {
 export function SettingsCard({
   id,
   typeBadge,
+  secondaryBadge,
   dark,
   expanded,
   onToggle,
@@ -38,6 +40,7 @@ export function SettingsCard({
     <ExpandableCard
       id={id}
       typeBadge={typeBadge}
+      secondaryBadge={secondaryBadge}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}

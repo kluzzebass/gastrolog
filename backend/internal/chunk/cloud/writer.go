@@ -230,10 +230,15 @@ func (w *Writer) updateBounds(rec chunk.Record) {
 
 // Meta returns the blob metadata computed from added records.
 func (w *Writer) Meta() BlobMeta {
+	var rawBytes int64
+	for _, frame := range w.frames {
+		rawBytes += 4 + int64(len(frame)) // u32 frameLen prefix + frame
+	}
 	return BlobMeta{
 		ChunkID:     w.chunkID,
 		VaultID:     w.vaultID,
 		RecordCount: w.count,
+		RawBytes:    rawBytes,
 		StartTS:     w.startTS,
 		EndTS:       w.endTS,
 		IngestStart: w.ingestStart,
