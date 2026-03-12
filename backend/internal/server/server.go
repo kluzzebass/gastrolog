@@ -338,11 +338,22 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
-	configServer := NewConfigServer(s.orch, s.cfgStore, s.factories, s.certManager, s.peerIngesterStats, s.peerRouteStats, s.localNodeID, s.afterConfigApply, s.configSignal, s.ResolveManagedFileByID)
-	configServer.SetVaultTesters(s.vaultTesters)
-	configServer.SetOnTLSConfigChange(s.reconfigureTLS)
-	configServer.SetOnLookupConfigChange(func(cfg config.LookupConfig, mm config.MaxMindConfig) {
-		s.applyLookupConfig(cfg, mm, lookupRegistry)
+	configServer := NewConfigServer(ConfigServerConfig{
+		Orch:               s.orch,
+		CfgStore:           s.cfgStore,
+		Factories:          s.factories,
+		CertManager:        s.certManager,
+		PeerStats:          s.peerIngesterStats,
+		PeerRouteStats:     s.peerRouteStats,
+		LocalNodeID:        s.localNodeID,
+		AfterConfigApply:   s.afterConfigApply,
+		ConfigSignal:       s.configSignal,
+		ResolveManagedFile: s.ResolveManagedFileByID,
+		VaultTesters:       s.vaultTesters,
+		OnTLSConfigChange:  s.reconfigureTLS,
+		OnLookupConfigChange: func(cfg config.LookupConfig, mm config.MaxMindConfig) {
+			s.applyLookupConfig(cfg, mm, lookupRegistry)
+		},
 	})
 	lifecycleServer := NewLifecycleServer(s.orch, s.initiateShutdown, s.cluster, s.cfgStore, s.localNodeID, s.clusterAddress, s.peerStats, s.localStatsFn, s.logger)
 	if s.joinClusterFn != nil {

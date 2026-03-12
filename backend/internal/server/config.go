@@ -35,6 +35,23 @@ type PeerRouteStatsProvider interface {
 	AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*apiv1.VaultRouteStats, routeStats []*apiv1.PerRouteStats)
 }
 
+// ConfigServerConfig holds all dependencies for ConfigServer construction.
+type ConfigServerConfig struct {
+	Orch               *orchestrator.Orchestrator
+	CfgStore           config.Store
+	Factories          orchestrator.Factories
+	CertManager        CertManager
+	PeerStats          PeerIngesterStatsProvider
+	PeerRouteStats     PeerRouteStatsProvider
+	LocalNodeID        string
+	AfterConfigApply   func(raftfsm.Notification)
+	ConfigSignal       *notify.Signal
+	ResolveManagedFile func(ctx context.Context, fileID string) string
+	OnTLSConfigChange  func()
+	OnLookupConfigChange func(config.LookupConfig, config.MaxMindConfig)
+	VaultTesters       map[string]VaultConnectionTester
+}
+
 // ConfigServer implements the ConfigService.
 type ConfigServer struct {
 	orch                  *orchestrator.Orchestrator
@@ -55,18 +72,21 @@ type ConfigServer struct {
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
 
 // NewConfigServer creates a new ConfigServer.
-func NewConfigServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, certManager CertManager, peerStats PeerIngesterStatsProvider, peerRouteStats PeerRouteStatsProvider, localNodeID string, afterConfigApply func(raftfsm.Notification), configSignal *notify.Signal, resolveManagedFile func(ctx context.Context, fileID string) string) *ConfigServer {
+func NewConfigServer(cfg ConfigServerConfig) *ConfigServer {
 	return &ConfigServer{
-		orch:               orch,
-		cfgStore:           cfgStore,
-		factories:          factories,
-		certManager:        certManager,
-		peerStats:          peerStats,
-		peerRouteStats:     peerRouteStats,
-		localNodeID:        localNodeID,
-		afterConfigApply:   afterConfigApply,
-		configSignal:       configSignal,
-		resolveManagedFile: resolveManagedFile,
+		orch:                 cfg.Orch,
+		cfgStore:             cfg.CfgStore,
+		factories:            cfg.Factories,
+		certManager:          cfg.CertManager,
+		peerStats:            cfg.PeerStats,
+		peerRouteStats:       cfg.PeerRouteStats,
+		localNodeID:          cfg.LocalNodeID,
+		afterConfigApply:     cfg.AfterConfigApply,
+		configSignal:         cfg.ConfigSignal,
+		resolveManagedFile:   cfg.ResolveManagedFile,
+		onTLSConfigChange:    cfg.OnTLSConfigChange,
+		onLookupConfigChange: cfg.OnLookupConfigChange,
+		vaultTesters:         cfg.VaultTesters,
 	}
 }
 
@@ -75,21 +95,6 @@ func (s *ConfigServer) notify(n raftfsm.Notification) {
 	if s.afterConfigApply != nil {
 		s.afterConfigApply(n)
 	}
-}
-
-// SetOnTLSConfigChange sets a callback invoked when TLS config changes (for dynamic listener reconfig).
-func (s *ConfigServer) SetOnTLSConfigChange(fn func()) {
-	s.onTLSConfigChange = fn
-}
-
-// SetVaultTesters registers connection testers for vault types (e.g. "cloud").
-func (s *ConfigServer) SetVaultTesters(testers map[string]VaultConnectionTester) {
-	s.vaultTesters = testers
-}
-
-// SetOnLookupConfigChange sets a callback invoked when lookup or MaxMind config changes.
-func (s *ConfigServer) SetOnLookupConfigChange(fn func(config.LookupConfig, config.MaxMindConfig)) {
-	s.onLookupConfigChange = fn
 }
 
 // GetConfig returns the current configuration.
