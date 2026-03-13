@@ -205,13 +205,23 @@ function ReferenceSection({
         <th colSpan={2} className={headerCls}>Reference</th>
       </tr>
       <tr>
-        <td className={`${keyCls} ${borderCls}`}>vault</td>
+        <td className={`${keyCls} ${borderCls}`}>vault_id</td>
         <ValueCell
-          value={(vaultName ?? vaultId) || "N/A"}
+          value={vaultId || "N/A"}
           onClick={vaultId ? () => onVaultSelect(vaultId) : undefined}
           styles={styles}
         />
       </tr>
+      {vaultName && (
+        <tr>
+          <td className={`${keyCls} ${borderCls}`}>vault</td>
+          <ValueCell
+            value={vaultName}
+            onClick={() => onVaultSelect(vaultId)}
+            styles={styles}
+          />
+        </tr>
+      )}
       <tr>
         <td className={`${keyCls} ${borderCls}`}>chunk_id</td>
         <ValueCell
