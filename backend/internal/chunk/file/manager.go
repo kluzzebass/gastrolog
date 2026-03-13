@@ -95,6 +95,8 @@ type Manager struct {
 	closed   bool
 	zstdEnc  *zstd.Encoder
 
+	compressWg sync.WaitGroup // tracks in-flight CompressChunk calls
+
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
 	logger *slog.Logger
@@ -1495,10 +1497,10 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 // Close closes the active chunk files without sealing.
 // The manager should not be used after Close is called.
 func (m *Manager) Close() error {
+	// Mark as closed under the lock so new CompressChunk calls bail out.
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.closed {
+		m.mu.Unlock()
 		return nil
 	}
 	m.closed = true
@@ -1510,6 +1512,15 @@ func (m *Manager) Close() error {
 		errs = append(errs, m.closeActiveFiles()...)
 		m.active = nil
 	}
+	m.mu.Unlock()
+
+	// Wait for in-flight compression to finish before closing the encoder.
+	// CompressChunk re-acquires the lock for its metadata update, so we must
+	// release first.
+	m.compressWg.Wait()
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	// Close zstd encoder.
 	if m.zstdEnc != nil {
@@ -1549,6 +1560,14 @@ func (m *Manager) closeActiveFiles() []error {
 			errs = append(errs, err)
 		}
 	}
+
+	// Remove B+ tree files — they are transient and only needed while the
+	// chunk is active. sealLocked removes them too, but Close() can be
+	// called without sealing (e.g. shutdown), leaving orphaned files.
+	id := m.active.meta.id
+	_ = os.Remove(m.ingestBTPath(id))
+	_ = os.Remove(m.sourceBTPath(id))
+
 	return errs
 }
 
@@ -1837,7 +1856,13 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
 		}
 	} else {
-		if err := os.RemoveAll(m.chunkDir(id)); err != nil {
+		dir := m.chunkDir(id)
+		// Wait for in-flight compression to finish — it may be writing
+		// temporary files into this chunk's directory.
+		m.mu.Unlock()
+		m.compressWg.Wait()
+		m.mu.Lock()
+		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("remove chunk dir %s: %w", id, err)
 		}
 	}
@@ -1852,6 +1877,10 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 // Intended to be called by the orchestrator via the scheduler after sealing.
 func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return nil
+	}
 	meta, ok := m.metas[id]
 	if !ok {
 		m.mu.Unlock()
@@ -1864,12 +1893,15 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	rawPath := m.rawLogPath(id)
 	attrPath := m.attrLogPath(id)
 	mode := m.cfg.FileMode
+	enc := m.zstdEnc
+	m.compressWg.Add(1)
 	m.mu.Unlock()
+	defer m.compressWg.Done()
 
-	if err := compressFile(rawPath, m.zstdEnc, mode); err != nil {
+	if err := compressFile(rawPath, enc, mode); err != nil {
 		return fmt.Errorf("compress raw.log: %w", err)
 	}
-	if err := compressFile(attrPath, m.zstdEnc, mode); err != nil {
+	if err := compressFile(attrPath, enc, mode); err != nil {
 		return fmt.Errorf("compress attr.log: %w", err)
 	}
 
