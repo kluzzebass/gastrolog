@@ -730,8 +730,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			VaultTesters: map[string]server.VaultConnectionTester{
-				"cloud": chunkcloud.NewConnectionTester(),
-				"file":  chunkcloud.NewConnectionTester(),
+				"file": chunkcloud.NewConnectionTester(),
 			},
 		})
 		// Wire managed file transfer handlers on the cluster server. The HTTP
