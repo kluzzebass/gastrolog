@@ -30,6 +30,13 @@
   --color-severity-debug: #5b8ab5;
   --color-severity-trace: #6a6080;
 
+  /* Severity text — WCAG AA contrast-safe text on severity backgrounds */
+  --color-severity-error-text: #ffffff;
+  --color-severity-warn-text: #0d0f12;
+  --color-severity-info-text: #0d0f12;
+  --color-severity-debug-text: #0d0f12;
+  --color-severity-trace-text: #ffffff;
+
   /* Highlight (dark) */
   --color-highlight-bg: #c8875c30;
   --color-highlight-border: #c8875c60;
@@ -86,6 +93,12 @@
   --color-severity-debug: #5e81ac;
   --color-severity-trace: #b48ead;
 
+  --color-severity-error-text: #ffffff;
+  --color-severity-warn-text: #2e3440;
+  --color-severity-info-text: #2e3440;
+  --color-severity-debug-text: #ffffff;
+  --color-severity-trace-text: #2e3440;
+
   --color-highlight-bg: #88c0d030;
   --color-highlight-border: #88c0d060;
   --color-highlight-text: #d8dee9;
@@ -131,6 +144,12 @@
   --color-severity-info: #859900;
   --color-severity-debug: #6c71c4;
   --color-severity-trace: #d33682;
+
+  --color-severity-error-text: #ffffff;
+  --color-severity-warn-text: #002b36;
+  --color-severity-info-text: #002b36;
+  --color-severity-debug-text: #ffffff;
+  --color-severity-trace-text: #ffffff;
 
   --color-highlight-bg: #268bd230;
   --color-highlight-border: #268bd260;
@@ -178,6 +197,12 @@
   --color-severity-debug: #8be9fd;
   --color-severity-trace: #ff79c6;
 
+  --color-severity-error-text: #282a36;
+  --color-severity-warn-text: #282a36;
+  --color-severity-info-text: #282a36;
+  --color-severity-debug-text: #282a36;
+  --color-severity-trace-text: #282a36;
+
   --color-highlight-bg: #bd93f930;
   --color-highlight-border: #bd93f960;
   --color-highlight-text: #f8f8f2;
@@ -223,6 +248,12 @@
   --color-severity-info: #a6e3a1;
   --color-severity-debug: #89b4fa;
   --color-severity-trace: #f5c2e7;
+
+  --color-severity-error-text: #1e1e2e;
+  --color-severity-warn-text: #1e1e2e;
+  --color-severity-info-text: #1e1e2e;
+  --color-severity-debug-text: #1e1e2e;
+  --color-severity-trace-text: #1e1e2e;
 
   --color-highlight-bg: #cba6f730;
   --color-highlight-border: #cba6f760;
@@ -270,6 +301,12 @@
   --color-severity-debug: #83a598;
   --color-severity-trace: #d3869b;
 
+  --color-severity-error-text: #282828;
+  --color-severity-warn-text: #282828;
+  --color-severity-info-text: #282828;
+  --color-severity-debug-text: #282828;
+  --color-severity-trace-text: #282828;
+
   --color-highlight-bg: #fe801930;
   --color-highlight-border: #fe801960;
   --color-highlight-text: #ebdbb2;
@@ -315,6 +352,12 @@
   --color-severity-info: #9ece6a;
   --color-severity-debug: #7dcfff;
   --color-severity-trace: #bb9af7;
+
+  --color-severity-error-text: #1a1b26;
+  --color-severity-warn-text: #1a1b26;
+  --color-severity-info-text: #1a1b26;
+  --color-severity-debug-text: #1a1b26;
+  --color-severity-trace-text: #1a1b26;
 
   --color-highlight-bg: #7aa2f730;
   --color-highlight-border: #7aa2f760;
@@ -362,6 +405,12 @@
   --color-severity-debug: #c4a7e7;
   --color-severity-trace: #ea9a97;
 
+  --color-severity-error-text: #191724;
+  --color-severity-warn-text: #191724;
+  --color-severity-info-text: #191724;
+  --color-severity-debug-text: #191724;
+  --color-severity-trace-text: #191724;
+
   --color-highlight-bg: #ebbcba30;
   --color-highlight-border: #ebbcba60;
   --color-highlight-text: #e0def4;
@@ -408,6 +457,12 @@
   --color-severity-debug: #7fbbb3;
   --color-severity-trace: #d699b6;
 
+  --color-severity-error-text: #2d353b;
+  --color-severity-warn-text: #2d353b;
+  --color-severity-info-text: #2d353b;
+  --color-severity-debug-text: #2d353b;
+  --color-severity-trace-text: #2d353b;
+
   --color-highlight-bg: #a7c08030;
   --color-highlight-border: #a7c08060;
   --color-highlight-text: #d3c6aa;
@@ -453,6 +508,12 @@
   --color-severity-info: #00f5d4;
   --color-severity-debug: #7b2fff;
   --color-severity-trace: #ff6eff;
+
+  --color-severity-error-text: #1a1028;
+  --color-severity-warn-text: #1a1028;
+  --color-severity-info-text: #1a1028;
+  --color-severity-debug-text: #1a1028;
+  --color-severity-trace-text: #ffffff;
 
   --color-highlight-bg: #f7258530;
   --color-highlight-border: #f7258560;

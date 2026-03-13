@@ -250,7 +250,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 {(() => {
                   const secs = parseDurationSeconds(s.tokenDuration);
                   if (secs !== null && secs < 60)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 minute</p>;
+                    return <p className="text-[0.75em] text-severity-warn mt-1">Must be at least 1 minute</p>;
                   return null;
                 })()}
               </FormField>
@@ -272,9 +272,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                   const secs = parseDurationSeconds(s.refreshTokenDuration);
                   const tokenSecs = parseDurationSeconds(s.tokenDuration);
                   if (secs !== null && secs < 3600)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 hour</p>;
+                    return <p className="text-[0.75em] text-severity-warn mt-1">Must be at least 1 hour</p>;
                   if (secs !== null && tokenSecs !== null && secs <= tokenSecs)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Must be longer than the token duration</p>;
+                    return <p className="text-[0.75em] text-severity-warn mt-1">Must be longer than the token duration</p>;
                   return null;
                 })()}
               </FormField>
@@ -547,9 +547,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 {(() => {
                   const secs = parseDurationSeconds(s.broadcastInterval);
                   if (s.broadcastInterval && secs === null)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Invalid duration format</p>;
+                    return <p className="text-[0.75em] text-severity-warn mt-1">Invalid duration format</p>;
                   if (secs !== null && secs < 1)
-                    return <p className="text-[0.75em] text-amber-500 mt-1">Must be at least 1 second</p>;
+                    return <p className="text-[0.75em] text-severity-warn mt-1">Must be at least 1 second</p>;
                   return null;
                 })()}
               </FormField>

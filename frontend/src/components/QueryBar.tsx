@@ -219,7 +219,7 @@ export function QueryBar({
         {collapsed ? (
           /* ── Collapsed: single-line preview ── */
           <div
-            className={`flex-1 flex items-center gap-2 min-w-0 cursor-pointer rounded border px-2.5 py-[9px] font-mono text-sm ${c(
+            className={`flex-1 flex items-center gap-2 min-w-0 cursor-pointer rounded border px-2.5 py-2 font-mono text-sm ${c(
               "bg-ink-well border-ink-border text-text-secondary hover:border-copper-dim",
               "bg-light-input border-light-border text-light-text-secondary hover:border-copper",
             )}`}
@@ -494,7 +494,7 @@ function QueryActionButtons({
           onClick={cancelSearch}
           aria-label="Cancel search"
           title="Cancel search"
-          className="px-2 py-2.5 rounded border border-transparent bg-severity-error text-white hover:bg-severity-error/80 transition-all duration-200"
+          className="px-2 py-2.5 rounded border border-transparent bg-severity-error text-severity-error-text hover:bg-severity-error/80 transition-all duration-200"
         >
           <XIcon className="w-4.5 h-4.5" />
         </button>
