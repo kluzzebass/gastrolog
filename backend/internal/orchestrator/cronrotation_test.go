@@ -40,6 +40,12 @@ func (f *cronFakeChunkManager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor,
 func (f *cronFakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *cronFakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (f *cronFakeChunkManager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 func (f *cronFakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
 	return nil, nil
 }

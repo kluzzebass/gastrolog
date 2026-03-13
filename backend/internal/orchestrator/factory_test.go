@@ -33,6 +33,12 @@ func (f *fakeChunkManager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, err
 func (f *fakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *fakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (f *fakeChunkManager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 func (f *fakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
 	return nil, nil
 }

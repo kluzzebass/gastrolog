@@ -125,10 +125,13 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 		RuntimeFilter: "none",
 	}
 
-	// Unsealed chunks always use sequential scan with runtime filters.
+	// Unsealed chunks use sequential scan but may benefit from B+ tree time seeks.
 	if !meta.Sealed {
+		currentPositions := cp.RecordCount
+		currentPositions = e.buildTimeSeekStep(&cp, q, meta, cm, currentPositions)
+		currentPositions = e.buildActiveChunkTSSeekSteps(&cp, q, meta, cm, currentPositions)
 		cp.ScanMode = "sequential"
-		cp.EstimatedScan = cp.RecordCount
+		cp.EstimatedScan = currentPositions
 		cp.RuntimeFilter = e.buildRuntimeFilterDesc(q)
 		return cp
 	}
@@ -187,6 +190,57 @@ func (e *Engine) buildTimeSeekStep(cp *ChunkPlan, q Query, meta chunk.ChunkMeta,
 		step.Details = "start before chunk"
 	}
 	cp.Pipeline = append(cp.Pipeline, step)
+	return currentPositions
+}
+
+// buildActiveChunkTSSeekSteps adds pipeline steps for B+ tree IngestTS/SourceTS seeks on active chunks.
+func (e *Engine) buildActiveChunkTSSeekSteps(cp *ChunkPlan, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, currentPositions int) int {
+	if !q.IngestStart.IsZero() {
+		step := PipelineStep{
+			Index:           "ingest_ts",
+			Predicate:       "ingest >= " + q.IngestStart.Format("15:04:05"),
+			PositionsBefore: currentPositions,
+			Action:          "seek",
+			Reason:          "btree",
+		}
+		if pos, found, err := cm.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
+			skipped := int(pos) //nolint:gosec // G115: pos is a record position
+			remaining := cp.RecordCount - skipped
+			if remaining < currentPositions {
+				currentPositions = remaining
+			}
+			step.PositionsAfter = currentPositions
+			step.Details = fmt.Sprintf("skip %d via btree", skipped)
+		} else {
+			step.PositionsAfter = currentPositions
+			step.Details = "start before chunk"
+		}
+		cp.Pipeline = append(cp.Pipeline, step)
+	}
+
+	if !q.SourceStart.IsZero() {
+		step := PipelineStep{
+			Index:           "source_ts",
+			Predicate:       "source >= " + q.SourceStart.Format("15:04:05"),
+			PositionsBefore: currentPositions,
+			Action:          "seek",
+			Reason:          "btree",
+		}
+		if pos, found, err := cm.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
+			skipped := int(pos) //nolint:gosec // G115: pos is a record position
+			remaining := cp.RecordCount - skipped
+			if remaining < currentPositions {
+				currentPositions = remaining
+			}
+			step.PositionsAfter = currentPositions
+			step.Details = fmt.Sprintf("skip %d via btree", skipped)
+		} else {
+			step.PositionsAfter = currentPositions
+			step.Details = "start before chunk"
+		}
+		cp.Pipeline = append(cp.Pipeline, step)
+	}
+
 	return currentPositions
 }
 

@@ -259,6 +259,14 @@ func (m *Manager) FindStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool,
 	return 0, false, nil
 }
 
+func (m *Manager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+
+func (m *Manager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+
 func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
 	cursor, err := m.OpenCursor(id)
 	if err != nil {

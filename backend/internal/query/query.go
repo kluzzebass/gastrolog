@@ -567,15 +567,23 @@ func setMinPositionsFromBounds(b *scannerBuilder, q Query, meta chunk.ChunkMeta,
 			b.setMinPosition(pos)
 		}
 	}
-	// IngestTS: use ingest index when available.
+	// IngestTS: use sealed index or active chunk B+ tree.
 	if !q.IngestStart.IsZero() && meta.Sealed {
 		if pos, found, err := im.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
 			b.setMinPosition(pos)
 		}
+	} else if !q.IngestStart.IsZero() {
+		if pos, found, err := cm.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
+			b.setMinPosition(pos)
+		}
 	}
-	// SourceTS: use source index when available.
+	// SourceTS: use sealed index or active chunk B+ tree.
 	if !q.SourceStart.IsZero() && meta.Sealed {
 		if pos, found, err := im.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
+			b.setMinPosition(pos)
+		}
+	} else if !q.SourceStart.IsZero() {
+		if pos, found, err := cm.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}
 	}

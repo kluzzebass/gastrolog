@@ -44,6 +44,12 @@ func (f *retentionFakeChunkManager) OpenCursor(id chunk.ChunkID) (chunk.RecordCu
 func (f *retentionFakeChunkManager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	return 0, false, nil
 }
+func (f *retentionFakeChunkManager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+func (f *retentionFakeChunkManager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
 func (f *retentionFakeChunkManager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
 	return nil, nil
 }

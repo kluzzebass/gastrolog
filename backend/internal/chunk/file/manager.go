@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"gastrolog/internal/btree"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/logging"
@@ -28,6 +29,8 @@ const (
 	idxLogFileName      = "idx.log"
 	attrLogFileName     = "attr.log"
 	attrDictFileName    = "attr_dict.log"
+	ingestBTFileName    = "_ingest.bt"
+	sourceBTFileName    = "_source.bt"
 )
 
 // CompressionType selects the compression algorithm for sealed chunks.
@@ -141,6 +144,8 @@ type chunkState struct {
 	attrFile    *os.File
 	dictFile    *os.File
 	dict        *chunk.StringDict
+	ingestBT    *btree.Tree[int64, uint32] // IngestTS → record position
+	sourceBT    *btree.Tree[int64, uint32] // SourceTS → record position
 	rawOffset   uint64    // Current write position in raw.log (after header)
 	attrOffset  uint64    // Current write position in attr.log (after header)
 	recordCount uint64    // Number of records written
@@ -317,6 +322,17 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 	}
 	if _, err := active.idxFile.WriteAt(idxBuf[:], idxPos); err != nil {
 		return chunk.ChunkID{}, 0, fmt.Errorf("write idx at offset %d: %w", idxPos, err)
+	}
+
+	// Insert into B+ tree indexes for IngestTS/SourceTS seeking.
+	recPos := uint32(recordIndex) //nolint:gosec // G115: record index bounded by chunk rotation policy
+	if err := active.ingestBT.Insert(record.IngestTS.UnixNano(), recPos); err != nil {
+		return chunk.ChunkID{}, 0, fmt.Errorf("insert ingest btree: %w", err)
+	}
+	if !record.SourceTS.IsZero() {
+		if err := active.sourceBT.Insert(record.SourceTS.UnixNano(), recPos); err != nil {
+			return chunk.ChunkID{}, 0, fmt.Errorf("insert source btree: %w", err)
+		}
 	}
 
 	return chunkID, recordIndex, nil
@@ -795,6 +811,13 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	meta.logicalDataBytes = dataBytes
 	meta.bytes = dataBytes
 
+	// Rebuild B+ tree indexes from idx.log entries.
+	ingestBT, sourceBT, err := m.rebuildBTrees(id, idxFile, recordCount)
+	if err != nil {
+		closeAll()
+		return fmt.Errorf("rebuild btrees for chunk %s: %w", id, err)
+	}
+
 	m.active = &chunkState{
 		meta:        meta,
 		rawFile:     rawFile,
@@ -802,6 +825,8 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		attrFile:    attrFile,
 		dictFile:    dictFile,
 		dict:        dict,
+		ingestBT:    ingestBT,
+		sourceBT:    sourceBT,
 		rawOffset:   rawOffset,
 		attrOffset:  attrOffset,
 		recordCount: recordCount,
@@ -809,6 +834,64 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 	}
 
 	return nil
+}
+
+// rebuildBTrees creates fresh B+ tree indexes from idx.log entries during crash recovery.
+// Any stale B+ tree files are removed first.
+func (m *Manager) rebuildBTrees(id chunk.ChunkID, idxFile *os.File, recordCount uint64) (*btree.Tree[int64, uint32], *btree.Tree[int64, uint32], error) {
+	// Remove stale B+ tree files if they exist from a prior run.
+	ingestPath := m.ingestBTPath(id)
+	sourcePath := m.sourceBTPath(id)
+	_ = os.Remove(ingestPath) //nolint:gosec // G703: path is derived from chunk ID, not user input
+	_ = os.Remove(sourcePath) //nolint:gosec // G703: path is derived from chunk ID, not user input
+
+	ingestBT, err := btree.Create(ingestPath, btree.Int64Uint32)
+	if err != nil {
+		return nil, nil, err
+	}
+	sourceBT, err := btree.Create(sourcePath, btree.Int64Uint32)
+	if err != nil {
+		_ = ingestBT.Close()
+		return nil, nil, err
+	}
+
+	var entryBuf [IdxEntrySize]byte
+	for i := range recordCount {
+		offset := IdxFileOffset(i)
+		if _, err := idxFile.ReadAt(entryBuf[:], offset); err != nil {
+			_ = ingestBT.Close()
+			_ = sourceBT.Close()
+			return nil, nil, fmt.Errorf("read idx entry %d: %w", i, err)
+		}
+		entry := DecodeIdxEntry(entryBuf[:])
+		pos := uint32(i)
+
+		if err := ingestBT.Insert(entry.IngestTS.UnixNano(), pos); err != nil {
+			_ = ingestBT.Close()
+			_ = sourceBT.Close()
+			return nil, nil, err
+		}
+		if !entry.SourceTS.IsZero() {
+			if err := sourceBT.Insert(entry.SourceTS.UnixNano(), pos); err != nil {
+				_ = ingestBT.Close()
+				_ = sourceBT.Close()
+				return nil, nil, err
+			}
+		}
+	}
+
+	if err := ingestBT.Sync(); err != nil {
+		_ = ingestBT.Close()
+		_ = sourceBT.Close()
+		return nil, nil, err
+	}
+	if err := sourceBT.Sync(); err != nil {
+		_ = ingestBT.Close()
+		_ = sourceBT.Close()
+		return nil, nil, err
+	}
+
+	return ingestBT, sourceBT, nil
 }
 
 func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
@@ -978,6 +1061,25 @@ func (m *Manager) openLocked() error {
 		return err
 	}
 
+	// Create B+ tree indexes for IngestTS and SourceTS seeking.
+	closeDataFiles := func() {
+		_ = rawFile.Close()
+		_ = idxFile.Close()
+		_ = attrFile.Close()
+		_ = dictFile.Close()
+	}
+	ingestBT, err := btree.Create(m.ingestBTPath(id), btree.Int64Uint32)
+	if err != nil {
+		closeDataFiles()
+		return err
+	}
+	sourceBT, err := btree.Create(m.sourceBTPath(id), btree.Int64Uint32)
+	if err != nil {
+		_ = ingestBT.Close()
+		closeDataFiles()
+		return err
+	}
+
 	meta := &chunkMeta{
 		id:     id,
 		sealed: false,
@@ -990,6 +1092,8 @@ func (m *Manager) openLocked() error {
 		attrFile:    attrFile,
 		dictFile:    dictFile,
 		dict:        chunk.NewStringDict(),
+		ingestBT:    ingestBT,
+		sourceBT:    sourceBT,
 		rawOffset:   0, // Data starts after header
 		attrOffset:  0, // Data starts after header
 		recordCount: 0,
@@ -1150,6 +1254,16 @@ func (m *Manager) sealLocked() error {
 	if err := m.active.dictFile.Close(); err != nil {
 		return err
 	}
+
+	// Close and remove B+ tree files — sealed chunks use flat indexes.
+	if err := m.active.ingestBT.Close(); err != nil {
+		return err
+	}
+	_ = os.Remove(m.ingestBTPath(id))
+	if err := m.active.sourceBT.Close(); err != nil {
+		return err
+	}
+	_ = os.Remove(m.sourceBTPath(id))
 
 	// Compute directory-level sizes now that files are closed.
 	m.active.meta.bytes = m.computeTotalLogicalBytes(id, m.active.meta.logicalDataBytes)
@@ -1390,21 +1504,7 @@ func (m *Manager) Close() error {
 
 	// Close active chunk files but don't seal (chunk remains active for recovery).
 	if m.active != nil {
-		// Wait for in-flight Phase 2 writers before closing files.
-		m.active.inflight.Wait()
-
-		if err := m.active.rawFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		if err := m.active.idxFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		if err := m.active.attrFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
-		if err := m.active.dictFile.Close(); err != nil {
-			errs = append(errs, err)
-		}
+		errs = append(errs, m.closeActiveFiles()...)
 		m.active = nil
 	}
 
@@ -1428,6 +1528,25 @@ func (m *Manager) Close() error {
 		return errs[0]
 	}
 	return nil
+}
+
+// closeActiveFiles waits for inflight writers and closes all active chunk resources.
+func (m *Manager) closeActiveFiles() []error {
+	m.active.inflight.Wait()
+	var errs []error
+	for _, closer := range []io.Closer{
+		m.active.rawFile,
+		m.active.idxFile,
+		m.active.attrFile,
+		m.active.dictFile,
+		m.active.ingestBT,
+		m.active.sourceBT,
+	} {
+		if err := closer.Close(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
 }
 
 // computeDiskBytes sums the on-disk sizes of all files in the chunk directory.
@@ -1500,6 +1619,14 @@ func (m *Manager) dictLogPath(id chunk.ChunkID) string {
 	return filepath.Join(m.chunkDir(id), attrDictFileName)
 }
 
+func (m *Manager) ingestBTPath(id chunk.ChunkID) string {
+	return filepath.Join(m.chunkDir(id), ingestBTFileName)
+}
+
+func (m *Manager) sourceBTPath(id chunk.ChunkID) string {
+	return filepath.Join(m.chunkDir(id), sourceBTFileName)
+}
+
 // FindStartPosition binary searches idx.log for the record at or before the given timestamp.
 // Uses WriteTS for the search since it's monotonically increasing within a chunk.
 func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
@@ -1566,6 +1693,48 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	}
 
 	return lo - 1, true, nil
+}
+
+// FindIngestStartPosition returns the earliest record position with IngestTS >= ts
+// for the active chunk. Returns (0, false, nil) for sealed chunks (use the index manager).
+func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+
+	if active == nil || active.meta.id != id {
+		return 0, false, nil
+	}
+
+	it, err := active.ingestBT.FindGE(ts.UnixNano())
+	if err != nil {
+		return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
+	}
+	if !it.Valid() {
+		return 0, false, nil
+	}
+	return uint64(it.Value()), true, nil
+}
+
+// FindSourceStartPosition returns the earliest record position with SourceTS >= ts
+// for the active chunk. Returns (0, false, nil) for sealed chunks (use the index manager).
+func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	active := m.active
+	m.mu.Unlock()
+
+	if active == nil || active.meta.id != id {
+		return 0, false, nil
+	}
+
+	it, err := active.sourceBT.FindGE(ts.UnixNano())
+	if err != nil {
+		return 0, false, fmt.Errorf("btree source FindGE: %w", err)
+	}
+	if !it.Valid() {
+		return 0, false, nil
+	}
+	return uint64(it.Value()), true, nil
 }
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.

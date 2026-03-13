@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -1013,5 +1015,653 @@ func TestConcurrentAppend(t *testing.T) {
 			}
 		}
 		cursor.Close()
+	}
+}
+
+func TestActiveChunkBTreeSeeking(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	// Insert records with non-monotonic IngestTS and SourceTS.
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	records := []chunk.Record{
+		{IngestTS: base.Add(300 * time.Millisecond), SourceTS: base.Add(100 * time.Millisecond), Attrs: chunk.Attributes{"src": "a"}, Raw: []byte("r0")},
+		{IngestTS: base.Add(100 * time.Millisecond), SourceTS: base.Add(500 * time.Millisecond), Attrs: chunk.Attributes{"src": "b"}, Raw: []byte("r1")},
+		{IngestTS: base.Add(500 * time.Millisecond), SourceTS: base.Add(200 * time.Millisecond), Attrs: chunk.Attributes{"src": "c"}, Raw: []byte("r2")},
+		{IngestTS: base.Add(200 * time.Millisecond), SourceTS: base.Add(400 * time.Millisecond), Attrs: chunk.Attributes{"src": "d"}, Raw: []byte("r3")},
+		{IngestTS: base.Add(400 * time.Millisecond), Raw: []byte("r4"), Attrs: chunk.Attributes{"src": "e"}}, // no SourceTS
+	}
+
+	var chunkID chunk.ChunkID
+	for _, rec := range records {
+		id, _, err := mgr.Append(rec)
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+		chunkID = id
+	}
+
+	// FindIngestStartPosition should find the earliest record with IngestTS >= target.
+	tests := []struct {
+		name    string
+		method  string
+		target  time.Time
+		wantPos uint64
+		wantOK  bool
+	}{
+		// IngestTS order by value: 100ms(r1), 200ms(r3), 300ms(r0), 400ms(r4), 500ms(r2)
+		{"ingest_before_all", "ingest", base, 1, true},                              // r1 at 100ms
+		{"ingest_exact_match", "ingest", base.Add(200 * time.Millisecond), 3, true}, // r3 at 200ms
+		{"ingest_between", "ingest", base.Add(250 * time.Millisecond), 0, true},     // r0 at 300ms
+		{"ingest_after_all", "ingest", base.Add(600 * time.Millisecond), 0, false},
+
+		// SourceTS order by value: 100ms(r0), 200ms(r2), 400ms(r3), 500ms(r1) — r4 excluded (zero)
+		{"source_before_all", "source", base, 0, true},                              // r0 at 100ms
+		{"source_exact_match", "source", base.Add(200 * time.Millisecond), 2, true}, // r2 at 200ms
+		{"source_between", "source", base.Add(300 * time.Millisecond), 3, true},     // r3 at 400ms
+		{"source_after_all", "source", base.Add(600 * time.Millisecond), 0, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var pos uint64
+			var found bool
+			var err error
+			if tt.method == "ingest" {
+				pos, found, err = mgr.FindIngestStartPosition(chunkID, tt.target)
+			} else {
+				pos, found, err = mgr.FindSourceStartPosition(chunkID, tt.target)
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if found != tt.wantOK {
+				t.Fatalf("found = %v, want %v", found, tt.wantOK)
+			}
+			if found && pos != tt.wantPos {
+				t.Fatalf("pos = %d, want %d", pos, tt.wantPos)
+			}
+		})
+	}
+}
+
+func TestBTreeRecoveryAfterReopen(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	base := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	records := []chunk.Record{
+		{IngestTS: base.Add(300 * time.Millisecond), SourceTS: base.Add(100 * time.Millisecond), Attrs: chunk.Attributes{"src": "a"}, Raw: []byte("r0")},
+		{IngestTS: base.Add(100 * time.Millisecond), SourceTS: base.Add(500 * time.Millisecond), Attrs: chunk.Attributes{"src": "b"}, Raw: []byte("r1")},
+		{IngestTS: base.Add(500 * time.Millisecond), SourceTS: base.Add(200 * time.Millisecond), Attrs: chunk.Attributes{"src": "c"}, Raw: []byte("r2")},
+	}
+
+	for _, rec := range records {
+		if _, _, err := mgr.Append(rec); err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+
+	// Close without sealing — simulates crash recovery.
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Reopen — should rebuild B+ trees from idx.log.
+	mgr, err = NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer mgr.Close()
+
+	active := mgr.Active()
+	if active == nil {
+		t.Fatal("expected active chunk after reopen")
+	}
+
+	// Verify IngestTS seeking works after recovery.
+	// IngestTS order: 100ms(r1), 300ms(r0), 500ms(r2)
+	pos, found, err := mgr.FindIngestStartPosition(active.ID, base.Add(200*time.Millisecond))
+	if err != nil {
+		t.Fatalf("FindIngestStartPosition: %v", err)
+	}
+	if !found || pos != 0 {
+		t.Fatalf("FindIngestStartPosition: found=%v pos=%d, want found=true pos=0 (r0 at 300ms)", found, pos)
+	}
+
+	// Verify SourceTS seeking works after recovery.
+	// SourceTS order: 100ms(r0), 200ms(r2), 500ms(r1)
+	pos, found, err = mgr.FindSourceStartPosition(active.ID, base.Add(150*time.Millisecond))
+	if err != nil {
+		t.Fatalf("FindSourceStartPosition: %v", err)
+	}
+	if !found || pos != 2 {
+		t.Fatalf("FindSourceStartPosition: found=%v pos=%d, want found=true pos=2 (r2 at 200ms)", found, pos)
+	}
+}
+
+func TestBTreeSeekingLargeNonMonotonic(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	// Insert 2000 records with randomized IngestTS and SourceTS.
+	// This forces multiple B+ tree leaf splits.
+	rng := rand.New(rand.NewPCG(42, 0))
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := 2000
+
+	type record struct {
+		ingestTS time.Time
+		sourceTS time.Time
+		pos      uint32
+	}
+	records := make([]record, n)
+	var chunkID chunk.ChunkID
+
+	for i := range n {
+		ingestOffset := time.Duration(rng.Int64N(1_000_000)) * time.Microsecond
+		sourceOffset := time.Duration(rng.Int64N(1_000_000)) * time.Microsecond
+		rec := chunk.Record{
+			IngestTS: base.Add(ingestOffset),
+			SourceTS: base.Add(sourceOffset),
+			Attrs:    chunk.Attributes{"src": "test"},
+			Raw:      []byte(fmt.Sprintf("record-%d", i)),
+		}
+		id, _, err := mgr.Append(rec)
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+		records[i] = record{
+			ingestTS: rec.IngestTS,
+			sourceTS: rec.SourceTS,
+			pos:      uint32(i),
+		}
+	}
+
+	// Sort records by IngestTS to build expected results.
+	ingestSorted := slices.Clone(records)
+	slices.SortFunc(ingestSorted, func(a, b record) int {
+		if c := a.ingestTS.Compare(b.ingestTS); c != 0 {
+			return c
+		}
+		return int(a.pos) - int(b.pos)
+	})
+
+	sourceSorted := slices.Clone(records)
+	slices.SortFunc(sourceSorted, func(a, b record) int {
+		if c := a.sourceTS.Compare(b.sourceTS); c != 0 {
+			return c
+		}
+		return int(a.pos) - int(b.pos)
+	})
+
+	// Spot-check 200 random IngestTS seeks.
+	for range 200 {
+		target := base.Add(time.Duration(rng.Int64N(1_000_000)) * time.Microsecond)
+		pos, found, err := mgr.FindIngestStartPosition(chunkID, target)
+		if err != nil {
+			t.Fatalf("FindIngestStartPosition(%v): %v", target, err)
+		}
+
+		// Find expected: first record in ingestSorted with IngestTS >= target.
+		expectedIdx := -1
+		for i, r := range ingestSorted {
+			if !r.ingestTS.Before(target) {
+				expectedIdx = i
+				break
+			}
+		}
+
+		if expectedIdx == -1 {
+			if found {
+				t.Fatalf("FindIngestStartPosition(%v): found=%v pos=%d, want not found", target, found, pos)
+			}
+		} else {
+			if !found {
+				t.Fatalf("FindIngestStartPosition(%v): not found, want pos=%d (ts=%v)", target, ingestSorted[expectedIdx].pos, ingestSorted[expectedIdx].ingestTS)
+			}
+			if pos != uint64(ingestSorted[expectedIdx].pos) {
+				t.Fatalf("FindIngestStartPosition(%v): pos=%d, want %d (ts=%v)", target, pos, ingestSorted[expectedIdx].pos, ingestSorted[expectedIdx].ingestTS)
+			}
+		}
+	}
+
+	// Spot-check 200 random SourceTS seeks.
+	for range 200 {
+		target := base.Add(time.Duration(rng.Int64N(1_000_000)) * time.Microsecond)
+		pos, found, err := mgr.FindSourceStartPosition(chunkID, target)
+		if err != nil {
+			t.Fatalf("FindSourceStartPosition(%v): %v", target, err)
+		}
+
+		expectedIdx := -1
+		for i, r := range sourceSorted {
+			if !r.sourceTS.Before(target) {
+				expectedIdx = i
+				break
+			}
+		}
+
+		if expectedIdx == -1 {
+			if found {
+				t.Fatalf("FindSourceStartPosition(%v): found=%v pos=%d, want not found", target, found, pos)
+			}
+		} else {
+			if !found {
+				t.Fatalf("FindSourceStartPosition(%v): not found, want pos=%d (ts=%v)", target, sourceSorted[expectedIdx].pos, sourceSorted[expectedIdx].sourceTS)
+			}
+			if pos != uint64(sourceSorted[expectedIdx].pos) {
+				t.Fatalf("FindSourceStartPosition(%v): pos=%d, want %d (ts=%v)", target, pos, sourceSorted[expectedIdx].pos, sourceSorted[expectedIdx].sourceTS)
+			}
+		}
+	}
+}
+
+func TestBTreeSeekSingleRecord(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	ts := time.Date(2025, 3, 15, 12, 0, 0, 0, time.UTC)
+	chunkID, _, err := mgr.Append(chunk.Record{
+		IngestTS: ts,
+		SourceTS: ts,
+		Attrs:    chunk.Attributes{"src": "only"},
+		Raw:      []byte("single"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Exact match.
+	pos, found, err := mgr.FindIngestStartPosition(chunkID, ts)
+	if err != nil || !found || pos != 0 {
+		t.Fatalf("exact match: found=%v pos=%d err=%v", found, pos, err)
+	}
+
+	// Before the record.
+	pos, found, err = mgr.FindIngestStartPosition(chunkID, ts.Add(-time.Second))
+	if err != nil || !found || pos != 0 {
+		t.Fatalf("before: found=%v pos=%d err=%v", found, pos, err)
+	}
+
+	// After the record.
+	_, found, err = mgr.FindIngestStartPosition(chunkID, ts.Add(time.Second))
+	if err != nil || found {
+		t.Fatalf("after: found=%v err=%v, want not found", found, err)
+	}
+}
+
+func TestBTreeSeekEmptyActiveChunk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	// Force creation of an active chunk by appending then sealing, then creating new.
+	chunkID, _, err := mgr.Append(chunk.Record{
+		IngestTS: time.Now(),
+		SourceTS: time.Now(),
+		Attrs:    chunk.Attributes{"src": "t"},
+		Raw:      []byte("x"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Seeking on a chunk that IS active should work.
+	_, found, err := mgr.FindIngestStartPosition(chunkID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("seek active: %v", err)
+	}
+	if !found {
+		t.Fatal("expected to find the record")
+	}
+
+	// Seal it, then seek on the now-sealed chunk — should return not found (sealed chunks
+	// use the index manager, not the chunk manager).
+	if err := mgr.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	_, found, err = mgr.FindIngestStartPosition(chunkID, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("seek sealed: %v", err)
+	}
+	if found {
+		t.Fatal("sealed chunk should return not-found from chunk manager")
+	}
+}
+
+func TestBTreeDuplicateTimestamps(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	// Insert 100 records all with the same IngestTS.
+	ts := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	var chunkID chunk.ChunkID
+	for i := range 100 {
+		id, _, err := mgr.Append(chunk.Record{
+			IngestTS: ts,
+			SourceTS: ts.Add(time.Duration(i) * time.Millisecond), // unique SourceTS
+			Attrs:    chunk.Attributes{"src": "dup"},
+			Raw:      []byte(fmt.Sprintf("dup-%d", i)),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+
+	// FindGE for the exact timestamp should return the first record (position 0).
+	pos, found, err := mgr.FindIngestStartPosition(chunkID, ts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || pos != 0 {
+		t.Fatalf("FindIngestStartPosition: found=%v pos=%d, want found=true pos=0", found, pos)
+	}
+
+	// One nanosecond after should find nothing (all records have the same ts).
+	_, found, err = mgr.FindIngestStartPosition(chunkID, ts.Add(time.Nanosecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("expected not found for ts after all duplicates")
+	}
+
+	// SourceTS seeking should also work — each record has a unique SourceTS.
+	// Seek to the 50th millisecond.
+	target := ts.Add(50 * time.Millisecond)
+	pos, found, err = mgr.FindSourceStartPosition(chunkID, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || pos != 50 {
+		t.Fatalf("FindSourceStartPosition(%v): found=%v pos=%d, want found=true pos=50", target, found, pos)
+	}
+}
+
+func TestBTreeRecoveryPreservesCorrectness(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+
+	// Insert 500 records with random timestamps.
+	rng := rand.New(rand.NewPCG(99, 0))
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := 500
+
+	type entry struct {
+		ingestTS time.Time
+		sourceTS time.Time
+		pos      uint32
+	}
+	entries := make([]entry, n)
+
+	for i := range n {
+		ingestOffset := time.Duration(rng.Int64N(1_000_000)) * time.Microsecond
+		sourceOffset := time.Duration(rng.Int64N(1_000_000)) * time.Microsecond
+		rec := chunk.Record{
+			IngestTS: base.Add(ingestOffset),
+			SourceTS: base.Add(sourceOffset),
+			Attrs:    chunk.Attributes{"src": "test"},
+			Raw:      []byte(fmt.Sprintf("r%d", i)),
+		}
+		if _, _, err := mgr.Append(rec); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		entries[i] = entry{
+			ingestTS: rec.IngestTS,
+			sourceTS: rec.SourceTS,
+			pos:      uint32(i),
+		}
+	}
+
+	active := mgr.Active()
+	if active == nil {
+		t.Fatal("no active chunk")
+	}
+	chunkID := active.ID
+
+	// Collect pre-crash seek results for 50 random targets.
+	type seekResult struct {
+		target  time.Time
+		iPos    uint64
+		iFound  bool
+		sPos    uint64
+		sFound  bool
+	}
+	var preResults []seekResult
+	for range 50 {
+		target := base.Add(time.Duration(rng.Int64N(1_000_000)) * time.Microsecond)
+		iPos, iFound, _ := mgr.FindIngestStartPosition(chunkID, target)
+		sPos, sFound, _ := mgr.FindSourceStartPosition(chunkID, target)
+		preResults = append(preResults, seekResult{target, iPos, iFound, sPos, sFound})
+	}
+
+	// Close (simulates crash) and reopen.
+	mgr.Close()
+	mgr, err = NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer mgr.Close()
+
+	active = mgr.Active()
+	if active == nil {
+		t.Fatal("no active chunk after reopen")
+	}
+
+	// Verify all pre-crash results match post-recovery results.
+	for i, pre := range preResults {
+		iPos, iFound, err := mgr.FindIngestStartPosition(active.ID, pre.target)
+		if err != nil {
+			t.Fatalf("post-recovery ingest seek %d: %v", i, err)
+		}
+		if iFound != pre.iFound || iPos != pre.iPos {
+			t.Fatalf("post-recovery ingest seek %d (target=%v): got (pos=%d,found=%v), want (pos=%d,found=%v)",
+				i, pre.target, iPos, iFound, pre.iPos, pre.iFound)
+		}
+
+		sPos, sFound, err := mgr.FindSourceStartPosition(active.ID, pre.target)
+		if err != nil {
+			t.Fatalf("post-recovery source seek %d: %v", i, err)
+		}
+		if sFound != pre.sFound || sPos != pre.sPos {
+			t.Fatalf("post-recovery source seek %d (target=%v): got (pos=%d,found=%v), want (pos=%d,found=%v)",
+				i, pre.target, sPos, sFound, pre.sPos, pre.sFound)
+		}
+	}
+}
+
+func TestBTreeSeekZeroSourceTS(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// All records have zero SourceTS.
+	var chunkID chunk.ChunkID
+	for i := range 10 {
+		id, _, err := mgr.Append(chunk.Record{
+			IngestTS: base.Add(time.Duration(i) * time.Millisecond),
+			// SourceTS is zero
+			Attrs: chunk.Attributes{"src": "no-source"},
+			Raw:   []byte(fmt.Sprintf("r%d", i)),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkID = id
+	}
+
+	// IngestTS seeking should work normally.
+	pos, found, err := mgr.FindIngestStartPosition(chunkID, base.Add(5*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found || pos != 5 {
+		t.Fatalf("ingest seek: found=%v pos=%d, want found=true pos=5", found, pos)
+	}
+
+	// SourceTS seeking should find nothing — no records inserted into source B+ tree.
+	_, found, err = mgr.FindSourceStartPosition(chunkID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if found {
+		t.Fatal("source seek should find nothing when all SourceTS are zero")
+	}
+}
+
+func TestBTreeSeekAfterRotation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{
+		Dir: dir,
+		RotationPolicy: chunk.NewCompositePolicy(
+			chunk.NewRecordCountPolicy(10), // Rotate after 10 records
+		),
+	})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	// Insert 25 records to trigger multiple rotations.
+	var lastChunkID chunk.ChunkID
+	chunkIDs := map[chunk.ChunkID]bool{}
+	for i := range 25 {
+		id, _, err := mgr.Append(chunk.Record{
+			IngestTS: base.Add(time.Duration(i*100) * time.Millisecond),
+			SourceTS: base.Add(time.Duration(i*50) * time.Millisecond),
+			Attrs:    chunk.Attributes{"src": "rot"},
+			Raw:      []byte(fmt.Sprintf("r%d", i)),
+		})
+		if err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		chunkIDs[id] = true
+		lastChunkID = id
+	}
+
+	// Should have at least 3 chunks (25 records / 10 per chunk).
+	if len(chunkIDs) < 3 {
+		t.Fatalf("expected >= 3 chunks, got %d", len(chunkIDs))
+	}
+
+	// Only the last chunk should be active and seekable via B+ tree.
+	active := mgr.Active()
+	if active == nil {
+		t.Fatal("no active chunk")
+	}
+	if active.ID != lastChunkID {
+		t.Fatalf("active chunk %s != last chunk %s", active.ID, lastChunkID)
+	}
+
+	// B+ tree seek on the active chunk should work.
+	// The active chunk has records 20-24 (IngestTS: 2000ms-2400ms).
+	pos, found, err := mgr.FindIngestStartPosition(lastChunkID, base.Add(2100*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found {
+		t.Fatal("expected to find record in active chunk")
+	}
+	// Position within the active chunk (0-based from chunk start).
+	if pos > 4 {
+		t.Fatalf("pos=%d, expected <= 4 (5 records in active chunk)", pos)
+	}
+
+	// Sealed chunk seek should return not-found (handled by index manager, not chunk manager).
+	for id := range chunkIDs {
+		if id == lastChunkID {
+			continue
+		}
+		_, found, err := mgr.FindIngestStartPosition(id, base)
+		if err != nil {
+			t.Fatalf("sealed chunk seek: %v", err)
+		}
+		if found {
+			t.Fatalf("sealed chunk %s should return not-found from chunk manager", id)
+		}
+	}
+}
+
+func TestBTreeCleanedUpOnSeal(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer mgr.Close()
+
+	rec := chunk.Record{
+		IngestTS: time.Now(),
+		SourceTS: time.Now(),
+		Attrs:    chunk.Attributes{"src": "test"},
+		Raw:      []byte("data"),
+	}
+	chunkID, _, err := mgr.Append(rec)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	// Verify B+ tree files exist before seal.
+	chunkDir := filepath.Join(dir, chunkID.String())
+	for _, name := range []string{ingestBTFileName, sourceBTFileName} {
+		if _, err := os.Stat(filepath.Join(chunkDir, name)); err != nil {
+			t.Fatalf("btree file %s should exist before seal: %v", name, err)
+		}
+	}
+
+	if err := mgr.Seal(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+
+	// Verify B+ tree files are removed after seal.
+	for _, name := range []string{ingestBTFileName, sourceBTFileName} {
+		if _, err := os.Stat(filepath.Join(chunkDir, name)); !os.IsNotExist(err) {
+			t.Fatalf("btree file %s should be removed after seal, err=%v", name, err)
+		}
 	}
 }

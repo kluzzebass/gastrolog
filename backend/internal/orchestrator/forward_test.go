@@ -277,8 +277,10 @@ func (n *noopChunkManager) Meta(chunk.ChunkID) (chunk.ChunkMeta, error)         
 func (n *noopChunkManager) List() ([]chunk.ChunkMeta, error)                                   { return nil, nil }
 func (n *noopChunkManager) Delete(chunk.ChunkID) error                                         { return nil }
 func (n *noopChunkManager) OpenCursor(chunk.ChunkID) (chunk.RecordCursor, error)               { return nil, nil }
-func (n *noopChunkManager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error)   { return 0, false, nil }
-func (n *noopChunkManager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error)   { return nil, nil }
+func (n *noopChunkManager) FindStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error)        { return 0, false, nil }
+func (n *noopChunkManager) FindIngestStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) { return 0, false, nil }
+func (n *noopChunkManager) FindSourceStartPosition(chunk.ChunkID, time.Time) (uint64, bool, error) { return 0, false, nil }
+func (n *noopChunkManager) ReadWriteTimestamps(chunk.ChunkID, []uint64) ([]time.Time, error)       { return nil, nil }
 func (n *noopChunkManager) SetRotationPolicy(chunk.RotationPolicy)                             {}
 func (n *noopChunkManager) CheckRotation() *string                                             { return nil }
 func (n *noopChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta, error)        { return chunk.ChunkMeta{}, nil }

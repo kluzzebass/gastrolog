@@ -303,6 +303,16 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	return uint64(lo - 1), true, nil //nolint:gosec // G115: lo is always > 0 here (checked above)
 }
 
+// FindIngestStartPosition is not supported by the memory manager.
+func (m *Manager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+
+// FindSourceStartPosition is not supported by the memory manager.
+func (m *Manager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
+	return 0, false, nil
+}
+
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
 func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]time.Time, error) {
 	if len(positions) == 0 {
