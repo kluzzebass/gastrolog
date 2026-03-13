@@ -4,12 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
-
-	"github.com/google/uuid"
 
 	"gastrolog/internal/blobstore"
-	"gastrolog/internal/chunk"
 )
 
 // Factory parameter keys.
@@ -30,40 +26,6 @@ var (
 	ErrMissingProvider = errors.New("missing required parameter: provider")
 	ErrUnknownProvider = errors.New("unknown provider (must be s3, azure, or gcs)")
 )
-
-// NewFactory returns a factory function that creates cloud ChunkManagers.
-func NewFactory() chunk.ManagerFactory {
-	return func(params map[string]string, logger *slog.Logger) (chunk.ChunkManager, error) {
-		provider := params[ParamProvider]
-		if provider == "" {
-			return nil, ErrMissingProvider
-		}
-
-		vaultID, err := uuid.Parse(params[ParamVaultID])
-		if err != nil {
-			return nil, fmt.Errorf("invalid vault ID: %w", err)
-		}
-
-		store, err := createStore(provider, params)
-		if err != nil {
-			return nil, fmt.Errorf("create %s store: %w", provider, err)
-		}
-
-		if err := store.EnsureBucket(context.Background()); err != nil {
-			return nil, fmt.Errorf("ensure %s bucket: %w", provider, err)
-		}
-
-		mgr := NewManager(store, vaultID, logger)
-
-		// Eagerly fetch and cache chunk metadata so subsequent Meta()
-		// calls don't need individual HEAD requests.
-		if _, err := mgr.List(); err != nil {
-			return nil, fmt.Errorf("list %s chunks: %w", provider, err)
-		}
-
-		return mgr, nil
-	}
-}
 
 // NewConnectionTester returns a function that validates cloud storage connectivity
 // by creating a temporary store and listing objects.
