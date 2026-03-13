@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -69,6 +70,9 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 			continue
 		}
 		if err := o.appendLocal(t.VaultID, rec); err != nil {
+			if errors.Is(err, ErrVaultDisabled) {
+				continue // Skip disabled vaults during ingestion.
+			}
 			return err
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
