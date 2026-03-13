@@ -43,5 +43,8 @@ package-lock.json
 pnpm-lock.yaml
 .dogcats/.issues.lock
 
+# Claude Code worktrees
+.claude/worktrees/
+
 # test files
 testfiles/

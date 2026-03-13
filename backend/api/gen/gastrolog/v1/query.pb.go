@@ -1130,8 +1130,8 @@ type ChunkPlan struct {
 	EstimatedRecords int64                  `protobuf:"varint,6,opt,name=estimated_records,json=estimatedRecords,proto3" json:"estimated_records,omitempty"`
 	RuntimeFilters   []string               `protobuf:"bytes,7,rep,name=runtime_filters,json=runtimeFilters,proto3" json:"runtime_filters,omitempty"`
 	VaultId          string                 `protobuf:"bytes,8,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	StartTs          *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=start_ts,json=startTs,proto3" json:"start_ts,omitempty"`
-	EndTs            *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
+	WriteStart       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=write_start,json=writeStart,proto3" json:"write_start,omitempty"`
+	WriteEnd         *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=write_end,json=writeEnd,proto3" json:"write_end,omitempty"`
 	SkipReason       string                 `protobuf:"bytes,11,opt,name=skip_reason,json=skipReason,proto3" json:"skip_reason,omitempty"`
 	BranchPlans      []*BranchPlan          `protobuf:"bytes,12,rep,name=branch_plans,json=branchPlans,proto3" json:"branch_plans,omitempty"`
 	NodeId           string                 `protobuf:"bytes,13,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // Node that owns this chunk's vault
@@ -1225,16 +1225,16 @@ func (x *ChunkPlan) GetVaultId() string {
 	return ""
 }
 
-func (x *ChunkPlan) GetStartTs() *timestamppb.Timestamp {
+func (x *ChunkPlan) GetWriteStart() *timestamppb.Timestamp {
 	if x != nil {
-		return x.StartTs
+		return x.WriteStart
 	}
 	return nil
 }
 
-func (x *ChunkPlan) GetEndTs() *timestamppb.Timestamp {
+func (x *ChunkPlan) GetWriteEnd() *timestamppb.Timestamp {
 	if x != nil {
-		return x.EndTs
+		return x.WriteEnd
 	}
 	return nil
 }
@@ -2262,7 +2262,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\rVaultPosition\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x1a\n" +
-	"\bposition\x18\x03 \x01(\x04R\bposition\"\x82\x04\n" +
+	"\bposition\x18\x03 \x01(\x04R\bposition\"\x8e\x04\n" +
 	"\tChunkPlan\x12\x19\n" +
 	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
@@ -2271,10 +2271,11 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\tscan_mode\x18\x05 \x01(\tR\bscanMode\x12+\n" +
 	"\x11estimated_records\x18\x06 \x01(\x03R\x10estimatedRecords\x12'\n" +
 	"\x0fruntime_filters\x18\a \x03(\tR\x0eruntimeFilters\x12\x19\n" +
-	"\bvault_id\x18\b \x01(\tR\avaultId\x125\n" +
-	"\bstart_ts\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
-	"\x06end_ts\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x1f\n" +
+	"\bvault_id\x18\b \x01(\tR\avaultId\x12;\n" +
+	"\vwrite_start\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"writeStart\x127\n" +
+	"\twrite_end\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\bwriteEnd\x12\x1f\n" +
 	"\vskip_reason\x18\v \x01(\tR\n" +
 	"skipReason\x12;\n" +
 	"\fbranch_plans\x18\f \x03(\v2\x18.gastrolog.v1.BranchPlanR\vbranchPlans\x12\x17\n" +
@@ -2447,8 +2448,8 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	16, // 21: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.VaultPosition
 	15, // 22: gastrolog.v1.ResumeToken.remote_positions:type_name -> gastrolog.v1.RemoteVaultPosition
 	19, // 23: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	35, // 24: gastrolog.v1.ChunkPlan.start_ts:type_name -> google.protobuf.Timestamp
-	35, // 25: gastrolog.v1.ChunkPlan.end_ts:type_name -> google.protobuf.Timestamp
+	35, // 24: gastrolog.v1.ChunkPlan.write_start:type_name -> google.protobuf.Timestamp
+	35, // 25: gastrolog.v1.ChunkPlan.write_end:type_name -> google.protobuf.Timestamp
 	18, // 26: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
 	19, // 27: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
 	13, // 28: gastrolog.v1.GetContextRequest.ref:type_name -> gastrolog.v1.RecordRef

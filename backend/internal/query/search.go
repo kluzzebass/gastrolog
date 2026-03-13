@@ -996,14 +996,14 @@ func (e *Engine) SearchWithContext(ctx context.Context, q Query) (iter.Seq2[chun
 			return
 		}
 
-		// Sort all chunks by StartTS for consistent ordering.
+		// Sort all chunks by WriteStart for consistent ordering.
 		allChunks := e.selectChunks(metas, q, chunkIDs)
 
 		// Also need all chunks sorted ascending for context gathering.
 		allChunksAsc := make([]chunk.ChunkMeta, len(metas))
 		copy(allChunksAsc, metas)
 		slices.SortFunc(allChunksAsc, func(a, b chunk.ChunkMeta) int {
-			return a.StartTS.Compare(b.StartTS)
+			return a.WriteStart.Compare(b.WriteStart)
 		})
 
 		cs := &contextSearchState{

@@ -155,8 +155,8 @@ type ChunkAnalysis struct {
 	ChunkID      chunk.ChunkID `json:"chunk_id"`
 	ChunkBytes   int64         `json:"chunk_bytes"`   // Raw data size
 	ChunkRecords int64         `json:"chunk_records"` // Total records in chunk
-	ChunkStartTS time.Time     `json:"chunk_start_ts"`
-	ChunkEndTS   time.Time     `json:"chunk_end_ts"`
+	ChunkWriteStart time.Time  `json:"chunk_write_start"`
+	ChunkWriteEnd   time.Time  `json:"chunk_write_end"`
 	Sealed       bool          `json:"sealed"`
 
 	// High-level summaries

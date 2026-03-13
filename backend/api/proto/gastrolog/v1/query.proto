@@ -192,8 +192,8 @@ message ChunkPlan {
   int64 estimated_records = 6;
   repeated string runtime_filters = 7;
   string vault_id = 8;
-  google.protobuf.Timestamp start_ts = 9;
-  google.protobuf.Timestamp end_ts = 10;
+  google.protobuf.Timestamp write_start = 9;
+  google.protobuf.Timestamp write_end = 10;
   string skip_reason = 11;
   repeated BranchPlan branch_plans = 12;
   string node_id = 13; // Node that owns this chunk's vault

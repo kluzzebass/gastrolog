@@ -145,8 +145,8 @@ function ChunkList({ vaultId, vaultType, dark }: Readonly<{ vaultId: string; vau
 
   // Sort by start time, newest first.
   const sorted = [...chunks].sort((a, b) => {
-    const aTime = a.startTs ? instantToMs(protoToInstant(a.startTs)) : 0;
-    const bTime = b.startTs ? instantToMs(protoToInstant(b.startTs)) : 0;
+    const aTime = a.writeStart ? instantToMs(protoToInstant(a.writeStart)) : 0;
+    const bTime = b.writeStart ? instantToMs(protoToInstant(b.writeStart)) : 0;
     return bTime - aTime;
   });
 
@@ -181,8 +181,8 @@ function ChunkList({ vaultId, vaultType, dark }: Readonly<{ vaultId: string; vau
         </thead>
         <tbody>
           {sorted.map((chunk) => {
-            const start = chunk.startTs ? instantToDate(protoToInstant(chunk.startTs)) : undefined;
-            const end = chunk.endTs ? instantToDate(protoToInstant(chunk.endTs)) : undefined;
+            const start = chunk.writeStart ? instantToDate(protoToInstant(chunk.writeStart)) : undefined;
+            const end = chunk.writeEnd ? instantToDate(protoToInstant(chunk.writeEnd)) : undefined;
             const isExpanded = expandedChunk === chunk.id;
 
             return (

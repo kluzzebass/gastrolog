@@ -5,7 +5,7 @@ import "time"
 // VaultState is an immutable snapshot of all sealed chunks in a vault.
 // It contains all information needed to make retention decisions without IO.
 type VaultState struct {
-	// Chunks contains metadata for all sealed chunks, sorted by StartTS ascending (oldest first).
+	// Chunks contains metadata for all sealed chunks, sorted by WriteStart ascending (oldest first).
 	Chunks []ChunkMeta
 
 	// Now is the current wall-clock time.
@@ -56,7 +56,7 @@ func (c *CompositeRetentionPolicy) Apply(state VaultState) []ChunkID {
 }
 
 // TTLRetentionPolicy deletes sealed chunks older than maxAge.
-// Age is measured from the chunk's EndTS (last record written).
+// Age is measured from the chunk's WriteEnd (last record written).
 type TTLRetentionPolicy struct {
 	maxAge time.Duration
 }
@@ -75,7 +75,7 @@ func (p *TTLRetentionPolicy) Apply(state VaultState) []ChunkID {
 	cutoff := state.Now.Add(-p.maxAge)
 
 	for _, meta := range state.Chunks {
-		if meta.EndTS.Before(cutoff) {
+		if meta.WriteEnd.Before(cutoff) {
 			result = append(result, meta.ID)
 		}
 	}

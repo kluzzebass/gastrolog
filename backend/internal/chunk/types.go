@@ -134,8 +134,8 @@ type RecordRef struct {
 // ChunkMeta contains metadata about a chunk.
 type ChunkMeta struct {
 	ID          ChunkID
-	StartTS     time.Time
-	EndTS       time.Time
+	WriteStart  time.Time // min WriteTS in chunk
+	WriteEnd    time.Time // max WriteTS in chunk
 	RecordCount int64
 	Bytes       int64 // Total logical bytes (raw + attr + idx)
 	Sealed      bool

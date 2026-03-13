@@ -85,13 +85,13 @@ func blobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMet
 		n, _ := strconv.ParseInt(v, 10, 64)
 		meta.RecordCount = n
 	}
-	if v, ok := bm.Metadata["start_ts"]; ok {
+	if v, ok := bm.Metadata["write_start"]; ok {
 		t, _ := time.Parse(time.RFC3339Nano, v)
-		meta.StartTS = t
+		meta.WriteStart = t
 	}
-	if v, ok := bm.Metadata["end_ts"]; ok {
+	if v, ok := bm.Metadata["write_end"]; ok {
 		t, _ := time.Parse(time.RFC3339Nano, v)
-		meta.EndTS = t
+		meta.WriteEnd = t
 	}
 	if v, ok := bm.Metadata["ingest_start"]; ok {
 		t, _ := time.Parse(time.RFC3339Nano, v)
@@ -120,11 +120,11 @@ func objectMetadata(bm BlobMeta) map[string]string {
 		"record_count": strconv.FormatUint(uint64(bm.RecordCount), 10),
 		"raw_bytes":    strconv.FormatInt(bm.RawBytes, 10),
 	}
-	if !bm.StartTS.IsZero() {
-		md["start_ts"] = bm.StartTS.Format(time.RFC3339Nano)
+	if !bm.WriteStart.IsZero() {
+		md["write_start"] = bm.WriteStart.Format(time.RFC3339Nano)
 	}
-	if !bm.EndTS.IsZero() {
-		md["end_ts"] = bm.EndTS.Format(time.RFC3339Nano)
+	if !bm.WriteEnd.IsZero() {
+		md["write_end"] = bm.WriteEnd.Format(time.RFC3339Nano)
 	}
 	if !bm.IngestStart.IsZero() {
 		md["ingest_start"] = bm.IngestStart.Format(time.RFC3339Nano)
@@ -337,8 +337,8 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 
 	meta := chunk.ChunkMeta{
 		ID:          chunkID,
-		StartTS:     bm.StartTS,
-		EndTS:       bm.EndTS,
+		WriteStart:     bm.WriteStart,
+		WriteEnd:       bm.WriteEnd,
 		RecordCount: int64(bm.RecordCount),
 		Sealed:      true,
 		Compressed:  true,

@@ -68,7 +68,7 @@ func (r *retentionRunner) sweep() {
 		return
 	}
 
-	// Filter to sealed chunks only (sorted by StartTS from List).
+	// Filter to sealed chunks only (sorted by WriteStart from List).
 	var sealed []chunk.ChunkMeta
 	for _, meta := range metas {
 		if meta.Sealed {

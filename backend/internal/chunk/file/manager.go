@@ -104,8 +104,8 @@ type Manager struct {
 // No longer persisted to meta.bin.
 type chunkMeta struct {
 	id               chunk.ChunkID
-	startTS          time.Time // WriteTS of first record
-	endTS            time.Time // WriteTS of last record
+	writeStart          time.Time // WriteTS of first record
+	writeEnd            time.Time // WriteTS of last record
 	recordCount      int64     // Number of records in chunk
 	bytes            int64     // Total logical bytes (data + non-data files)
 	logicalDataBytes int64     // Logical data bytes only (raw + attr + idx content)
@@ -123,8 +123,8 @@ type chunkMeta struct {
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
 		ID:          m.id,
-		StartTS:     m.startTS,
-		EndTS:       m.endTS,
+		WriteStart:     m.writeStart,
+		WriteEnd:       m.writeEnd,
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
@@ -392,10 +392,10 @@ func (m *Manager) updateActiveState(record chunk.Record, rawLen, attrLen uint64)
 	m.active.meta.logicalDataBytes = dataBytes
 	m.active.meta.bytes = dataBytes
 
-	if m.active.meta.startTS.IsZero() {
-		m.active.meta.startTS = record.WriteTS
+	if m.active.meta.writeStart.IsZero() {
+		m.active.meta.writeStart = record.WriteTS
 	}
-	m.active.meta.endTS = record.WriteTS
+	m.active.meta.writeEnd = record.WriteTS
 
 	expandBounds(&m.active.meta.ingestStart, &m.active.meta.ingestEnd, record.IngestTS)
 	if !record.SourceTS.IsZero() {
@@ -425,8 +425,8 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 
 	return chunk.ActiveChunkState{
 		ChunkID:     m.active.meta.id,
-		StartTS:     m.active.meta.startTS,
-		LastWriteTS: m.active.meta.endTS,
+		WriteStart:     m.active.meta.writeStart,
+		LastWriteTS: m.active.meta.writeEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       totalBytes,
 		Records:     m.active.recordCount,
@@ -476,9 +476,9 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	for _, meta := range m.metas {
 		out = append(out, meta.toChunkMeta())
 	}
-	// Sort by StartTS to ensure consistent ordering.
+	// Sort by WriteStart to ensure consistent ordering.
 	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-		return a.StartTS.Compare(b.StartTS)
+		return a.WriteStart.Compare(b.WriteStart)
 	})
 	return out, nil
 }
@@ -935,8 +935,8 @@ func (m *Manager) loadChunkMeta(id chunk.ChunkID) (*chunkMeta, error) {
 		return nil, fmt.Errorf("read first/last entries for chunk %s: %w", id, err)
 	}
 
-	meta.startTS = firstEntry.WriteTS
-	meta.endTS = lastEntry.WriteTS
+	meta.writeStart = firstEntry.WriteTS
+	meta.writeEnd = lastEntry.WriteTS
 	computeIngestBounds(meta, firstEntry, lastEntry)
 	computeSourceBounds(meta, firstEntry, lastEntry)
 
@@ -1406,10 +1406,10 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 	s.attrOffset += uint64(len(attrBytes))
 	s.count++
 
-	if s.meta.startTS.IsZero() {
-		s.meta.startTS = rec.WriteTS
+	if s.meta.writeStart.IsZero() {
+		s.meta.writeStart = rec.WriteTS
 	}
-	s.meta.endTS = rec.WriteTS
+	s.meta.writeEnd = rec.WriteTS
 	expandBounds(&s.meta.ingestStart, &s.meta.ingestEnd, rec.IngestTS)
 	if !rec.SourceTS.IsZero() {
 		expandBounds(&s.meta.sourceStart, &s.meta.sourceEnd, rec.SourceTS)
@@ -1638,7 +1638,7 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	}
 
 	// Quick bounds check using cached time bounds.
-	if ts.Before(meta.startTS) {
+	if ts.Before(meta.writeStart) {
 		return 0, false, nil // Before all records
 	}
 

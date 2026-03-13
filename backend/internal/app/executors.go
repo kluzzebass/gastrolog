@@ -238,11 +238,11 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 					SkipReason:       cp.SkipReason,
 					NodeId:           localNodeID,
 				}
-				if !cp.StartTS.IsZero() {
-					chunkPlan.StartTs = timestamppb.New(cp.StartTS)
+				if !cp.WriteStart.IsZero() {
+					chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)
 				}
-				if !cp.EndTS.IsZero() {
-					chunkPlan.EndTs = timestamppb.New(cp.EndTS)
+				if !cp.WriteEnd.IsZero() {
+					chunkPlan.WriteEnd = timestamppb.New(cp.WriteEnd)
 				}
 				for _, bp := range cp.BranchPlans {
 					chunkPlan.BranchPlans = append(chunkPlan.BranchPlans, &gastrologv1.BranchPlan{

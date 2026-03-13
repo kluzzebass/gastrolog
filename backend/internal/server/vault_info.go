@@ -141,8 +141,8 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID uuid.UUID, me
 		}
 		stat.RecordCount += meta.RecordCount
 		s.accumulateChunkBytes(stat, vaultID, meta)
-		updateTimeBounds(&stat.OldestRecord, meta.StartTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
-		updateTimeBounds(&stat.NewestRecord, meta.EndTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
+		updateTimeBounds(&stat.OldestRecord, meta.WriteStart, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
+		updateTimeBounds(&stat.NewestRecord, meta.WriteEnd, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
 	}
 	return stat
 }
@@ -167,8 +167,8 @@ func (s *VaultServer) accumulateGlobalStats(resp *apiv1.GetStatsResponse, stat *
 	resp.SealedChunks += stat.SealedChunks
 
 	for _, meta := range metas {
-		updateTimeBounds(&resp.OldestRecord, meta.StartTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
-		updateTimeBounds(&resp.NewestRecord, meta.EndTS, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
+		updateTimeBounds(&resp.OldestRecord, meta.WriteStart, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.Before(b) })
+		updateTimeBounds(&resp.NewestRecord, meta.WriteEnd, (*timestamppb.Timestamp).AsTime, func(a, b time.Time) bool { return a.After(b) })
 	}
 }
 
@@ -398,8 +398,8 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id uuid.UUID) *api
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	return &apiv1.ChunkMeta{
 		Id:          meta.ID.String(),
-		StartTs:     timestamppb.New(meta.StartTS),
-		EndTs:       timestamppb.New(meta.EndTS),
+		WriteStart:     timestamppb.New(meta.WriteStart),
+		WriteEnd:       timestamppb.New(meta.WriteEnd),
 		Sealed:      meta.Sealed,
 		RecordCount: meta.RecordCount,
 		Bytes:       meta.Bytes,

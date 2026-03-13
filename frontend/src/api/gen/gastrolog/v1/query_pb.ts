@@ -1010,14 +1010,14 @@ export class ChunkPlan extends Message<ChunkPlan> {
   vaultId = "";
 
   /**
-   * @generated from field: google.protobuf.Timestamp start_ts = 9;
+   * @generated from field: google.protobuf.Timestamp write_start = 9;
    */
-  startTs?: Timestamp;
+  writeStart?: Timestamp;
 
   /**
-   * @generated from field: google.protobuf.Timestamp end_ts = 10;
+   * @generated from field: google.protobuf.Timestamp write_end = 10;
    */
-  endTs?: Timestamp;
+  writeEnd?: Timestamp;
 
   /**
    * @generated from field: string skip_reason = 11;
@@ -1052,8 +1052,8 @@ export class ChunkPlan extends Message<ChunkPlan> {
     { no: 6, name: "estimated_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 7, name: "runtime_filters", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 8, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 9, name: "start_ts", kind: "message", T: Timestamp },
-    { no: 10, name: "end_ts", kind: "message", T: Timestamp },
+    { no: 9, name: "write_start", kind: "message", T: Timestamp },
+    { no: 10, name: "write_end", kind: "message", T: Timestamp },
     { no: 11, name: "skip_reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "branch_plans", kind: "message", T: BranchPlan, repeated: true },
     { no: 13, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },

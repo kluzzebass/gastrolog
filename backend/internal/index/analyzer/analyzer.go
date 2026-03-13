@@ -53,8 +53,8 @@ func (a *Analyzer) AnalyzeChunk(chunkID chunk.ChunkID) (*ChunkAnalysis, error) {
 		ChunkID:      chunkID,
 		ChunkBytes:   chunkBytes,
 		ChunkRecords: chunkRecords,
-		ChunkStartTS: meta.StartTS,
-		ChunkEndTS:   meta.EndTS,
+		ChunkWriteStart: meta.WriteStart,
+		ChunkWriteEnd:   meta.WriteEnd,
 		Sealed:       meta.Sealed,
 		AnalyzedAt:   time.Now(),
 	}

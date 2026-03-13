@@ -144,11 +144,11 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []uuid.UUID) {
 			if meta.RecordCount == 0 {
 				continue
 			}
-			if q.Start.IsZero() || meta.StartTS.Before(q.Start) {
-				q.Start = meta.StartTS
+			if q.Start.IsZero() || meta.WriteStart.Before(q.Start) {
+				q.Start = meta.WriteStart
 			}
-			if q.End.IsZero() || meta.EndTS.After(q.End) {
-				q.End = meta.EndTS
+			if q.End.IsZero() || meta.WriteEnd.After(q.End) {
+				q.End = meta.WriteEnd
 			}
 		}
 	}
@@ -169,7 +169,7 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 			if meta.RecordCount == 0 {
 				continue
 			}
-			if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
+			if meta.WriteEnd.Before(start) || !meta.WriteStart.Before(end) {
 				continue
 			}
 			timechartChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
@@ -199,7 +199,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end 
 			if meta.RecordCount == 0 {
 				continue
 			}
-			if meta.EndTS.Before(start) || !meta.StartTS.Before(end) {
+			if meta.WriteEnd.Before(start) || !meta.WriteStart.Before(end) {
 				continue
 			}
 			timechartChunkGroups(cm, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
@@ -224,15 +224,15 @@ func timechartChunkGroups(
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
 	firstBucket := 0
-	if meta.StartTS.After(start) {
-		firstBucket = int(meta.StartTS.Sub(start) / bucketWidth)
+	if meta.WriteStart.After(start) {
+		firstBucket = int(meta.WriteStart.Sub(start) / bucketWidth)
 		if firstBucket >= numBuckets {
 			return
 		}
 	}
 	lastBucket := numBuckets - 1
-	if meta.EndTS.Before(end) {
-		lastBucket = int(meta.EndTS.Sub(start) / bucketWidth)
+	if meta.WriteEnd.Before(end) {
+		lastBucket = int(meta.WriteEnd.Sub(start) / bucketWidth)
 		if lastBucket >= numBuckets {
 			lastBucket = numBuckets - 1
 		}
@@ -248,7 +248,7 @@ func timechartChunkGroups(
 		}
 
 		var endPos uint64
-		if !bEnd.Before(meta.EndTS) {
+		if !bEnd.Before(meta.WriteEnd) {
 			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
 		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
 			endPos = pos
@@ -421,15 +421,15 @@ func timechartChunkFast(
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
 	firstBucket := 0
-	if meta.StartTS.After(start) {
-		firstBucket = int(meta.StartTS.Sub(start) / bucketWidth)
+	if meta.WriteStart.After(start) {
+		firstBucket = int(meta.WriteStart.Sub(start) / bucketWidth)
 		if firstBucket >= numBuckets {
 			return
 		}
 	}
 	lastBucket := numBuckets - 1
-	if meta.EndTS.Before(end) {
-		lastBucket = int(meta.EndTS.Sub(start) / bucketWidth)
+	if meta.WriteEnd.Before(end) {
+		lastBucket = int(meta.WriteEnd.Sub(start) / bucketWidth)
 		if lastBucket >= numBuckets {
 			lastBucket = numBuckets - 1
 		}
@@ -445,7 +445,7 @@ func timechartChunkFast(
 		}
 
 		var endPos uint64
-		if !bEnd.Before(meta.EndTS) {
+		if !bEnd.Before(meta.WriteEnd) {
 			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
 		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
 			endPos = pos

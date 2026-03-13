@@ -882,7 +882,7 @@ func TestAdoptAlreadyTrackedFails(t *testing.T) {
 	}
 }
 
-// TestListReturnsSortedChunks verifies that List() returns chunks sorted by StartTS.
+// TestListReturnsSortedChunks verifies that List() returns chunks sorted by WriteStart.
 func TestListReturnsSortedChunks(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -924,11 +924,11 @@ func TestListReturnsSortedChunks(t *testing.T) {
 		t.Fatalf("expected 3 chunks, got %d", len(metas))
 	}
 
-	// Verify sorted by StartTS ascending
+	// Verify sorted by WriteStart ascending
 	for i := 1; i < len(metas); i++ {
-		if !metas[i].StartTS.After(metas[i-1].StartTS) {
-			t.Errorf("not sorted: metas[%d].StartTS=%v <= metas[%d].StartTS=%v",
-				i, metas[i].StartTS, i-1, metas[i-1].StartTS)
+		if !metas[i].WriteStart.After(metas[i-1].WriteStart) {
+			t.Errorf("not sorted: metas[%d].WriteStart=%v <= metas[%d].WriteStart=%v",
+				i, metas[i].WriteStart, i-1, metas[i-1].WriteStart)
 		}
 	}
 }

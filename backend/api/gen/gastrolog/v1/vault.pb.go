@@ -389,8 +389,8 @@ func (x *ListChunksResponse) GetChunks() []*ChunkMeta {
 type ChunkMeta struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	StartTs       *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=start_ts,json=startTs,proto3" json:"start_ts,omitempty"`
-	EndTs         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=end_ts,json=endTs,proto3" json:"end_ts,omitempty"`
+	WriteStart    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=write_start,json=writeStart,proto3" json:"write_start,omitempty"`
+	WriteEnd      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=write_end,json=writeEnd,proto3" json:"write_end,omitempty"`
 	Sealed        bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount   int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Bytes         int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
@@ -437,16 +437,16 @@ func (x *ChunkMeta) GetId() string {
 	return ""
 }
 
-func (x *ChunkMeta) GetStartTs() *timestamppb.Timestamp {
+func (x *ChunkMeta) GetWriteStart() *timestamppb.Timestamp {
 	if x != nil {
-		return x.StartTs
+		return x.WriteStart
 	}
 	return nil
 }
 
-func (x *ChunkMeta) GetEndTs() *timestamppb.Timestamp {
+func (x *ChunkMeta) GetWriteEnd() *timestamppb.Timestamp {
 	if x != nil {
-		return x.EndTs
+		return x.WriteEnd
 	}
 	return nil
 }
@@ -2290,11 +2290,12 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x95\x02\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xa1\x02\n" +
 	"\tChunkMeta\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x125\n" +
-	"\bstart_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\astartTs\x121\n" +
-	"\x06end_ts\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x05endTs\x12\x16\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
+	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"writeStart\x127\n" +
+	"\twrite_end\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\bwriteEnd\x12\x16\n" +
 	"\x06sealed\x18\x04 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x05 \x01(\x03R\vrecordCount\x12\x14\n" +
 	"\x05bytes\x18\x06 \x01(\x03R\x05bytes\x12\x1e\n" +
@@ -2525,8 +2526,8 @@ var file_gastrolog_v1_vault_proto_depIdxs = []int32{
 	2,  // 0: gastrolog.v1.ListVaultsResponse.vaults:type_name -> gastrolog.v1.VaultInfo
 	2,  // 1: gastrolog.v1.GetVaultResponse.vault:type_name -> gastrolog.v1.VaultInfo
 	7,  // 2: gastrolog.v1.ListChunksResponse.chunks:type_name -> gastrolog.v1.ChunkMeta
-	40, // 3: gastrolog.v1.ChunkMeta.start_ts:type_name -> google.protobuf.Timestamp
-	40, // 4: gastrolog.v1.ChunkMeta.end_ts:type_name -> google.protobuf.Timestamp
+	40, // 3: gastrolog.v1.ChunkMeta.write_start:type_name -> google.protobuf.Timestamp
+	40, // 4: gastrolog.v1.ChunkMeta.write_end:type_name -> google.protobuf.Timestamp
 	7,  // 5: gastrolog.v1.GetChunkResponse.chunk:type_name -> gastrolog.v1.ChunkMeta
 	12, // 6: gastrolog.v1.GetIndexesResponse.indexes:type_name -> gastrolog.v1.IndexInfo
 	15, // 7: gastrolog.v1.AnalyzeChunkResponse.analyses:type_name -> gastrolog.v1.ChunkAnalysis

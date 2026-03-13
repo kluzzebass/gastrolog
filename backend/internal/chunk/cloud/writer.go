@@ -25,8 +25,8 @@ type Writer struct {
 	frames [][]byte // pre-encoded record frames
 	count  uint32
 
-	startTS     time.Time
-	endTS       time.Time
+	writeStart     time.Time
+	writeEnd       time.Time
 	ingestStart time.Time
 	ingestEnd   time.Time
 	sourceStart time.Time
@@ -113,8 +113,8 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	copy(hdr[6:22], w.chunkID[:])
 	copy(hdr[22:38], w.vaultID[:])
 	binary.LittleEndian.PutUint32(hdr[38:42], w.count)
-	binary.LittleEndian.PutUint64(hdr[42:50], tsNanos(w.startTS))
-	binary.LittleEndian.PutUint64(hdr[50:58], tsNanos(w.endTS))
+	binary.LittleEndian.PutUint64(hdr[42:50], tsNanos(w.writeStart))
+	binary.LittleEndian.PutUint64(hdr[50:58], tsNanos(w.writeEnd))
 	binary.LittleEndian.PutUint64(hdr[58:66], tsNanos(w.ingestStart))
 	binary.LittleEndian.PutUint64(hdr[66:74], tsNanos(w.ingestEnd))
 	binary.LittleEndian.PutUint64(hdr[74:82], tsNanos(w.sourceStart))
@@ -196,8 +196,8 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 
 func (w *Writer) updateBounds(rec chunk.Record) {
 	if w.count == 0 {
-		w.startTS = rec.WriteTS
-		w.endTS = rec.WriteTS
+		w.writeStart = rec.WriteTS
+		w.writeEnd = rec.WriteTS
 		w.ingestStart = rec.IngestTS
 		w.ingestEnd = rec.IngestTS
 		if !rec.SourceTS.IsZero() {
@@ -206,11 +206,11 @@ func (w *Writer) updateBounds(rec chunk.Record) {
 		}
 		return
 	}
-	if rec.WriteTS.Before(w.startTS) {
-		w.startTS = rec.WriteTS
+	if rec.WriteTS.Before(w.writeStart) {
+		w.writeStart = rec.WriteTS
 	}
-	if rec.WriteTS.After(w.endTS) {
-		w.endTS = rec.WriteTS
+	if rec.WriteTS.After(w.writeEnd) {
+		w.writeEnd = rec.WriteTS
 	}
 	if rec.IngestTS.Before(w.ingestStart) {
 		w.ingestStart = rec.IngestTS
@@ -239,8 +239,8 @@ func (w *Writer) Meta() BlobMeta {
 		VaultID:     w.vaultID,
 		RecordCount: w.count,
 		RawBytes:    rawBytes,
-		StartTS:     w.startTS,
-		EndTS:       w.endTS,
+		WriteStart:     w.writeStart,
+		WriteEnd:       w.writeEnd,
 		IngestStart: w.ingestStart,
 		IngestEnd:   w.ingestEnd,
 		SourceStart: w.sourceStart,

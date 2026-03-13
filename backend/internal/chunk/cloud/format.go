@@ -12,8 +12,8 @@
 //	    [chunkID:16]       raw UUIDv7 bytes
 //	    [vaultID:16]       raw UUID bytes
 //	    [recordCount:u32]  total records
-//	    [startTS:i64]      min WriteTS (nanos)
-//	    [endTS:i64]        max WriteTS (nanos)
+//	    [writeStart:i64]   min WriteTS (nanos)
+//	    [writeEnd:i64]     max WriteTS (nanos)
 //	    [ingestStart:i64]  min IngestTS (nanos)
 //	    [ingestEnd:i64]    max IngestTS (nanos)
 //	    [sourceStart:i64]  min SourceTS, 0 = none (nanos)
@@ -97,8 +97,8 @@ type BlobMeta struct {
 	VaultID     uuid.UUID
 	RecordCount uint32
 	RawBytes    int64     // uncompressed record data size (0 if unknown)
-	StartTS     time.Time
-	EndTS       time.Time
+	WriteStart  time.Time
+	WriteEnd    time.Time
 	IngestStart time.Time
 	IngestEnd   time.Time
 	SourceStart time.Time // zero = no source timestamps

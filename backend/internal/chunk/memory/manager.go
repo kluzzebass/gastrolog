@@ -145,8 +145,8 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 	// In practice, memory chunks don't have the same byte-level concerns as file chunks.
 	return chunk.ActiveChunkState{
 		ChunkID:     m.active.meta.ID,
-		StartTS:     m.active.meta.StartTS,
-		LastWriteTS: m.active.meta.EndTS,
+		WriteStart:     m.active.meta.WriteStart,
+		LastWriteTS: m.active.meta.WriteEnd,
 		CreatedAt:   m.active.createdAt,
 		Bytes:       uint64(m.active.size), //nolint:gosec // G115: size is always non-negative
 		Records:     uint64(len(m.active.records)),
@@ -234,10 +234,10 @@ func (m *Manager) sealLocked() error {
 }
 
 func (m *Manager) updateMetaLocked(record chunk.Record, recordCount int64) {
-	if m.active.meta.StartTS.IsZero() {
-		m.active.meta.StartTS = record.WriteTS
+	if m.active.meta.WriteStart.IsZero() {
+		m.active.meta.WriteStart = record.WriteTS
 	}
-	m.active.meta.EndTS = record.WriteTS
+	m.active.meta.WriteEnd = record.WriteTS
 	m.active.meta.RecordCount = recordCount
 
 	// Update IngestTS and SourceTS bounds.
@@ -452,11 +452,11 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		}
 		state.size += recBytes
 
-		// Track StartTS/EndTS (WriteTS is monotonically non-decreasing).
-		if state.meta.StartTS.IsZero() {
-			state.meta.StartTS = rec.WriteTS
+		// Track WriteStart/WriteEnd (WriteTS is monotonically non-decreasing).
+		if state.meta.WriteStart.IsZero() {
+			state.meta.WriteStart = rec.WriteTS
 		}
-		state.meta.EndTS = rec.WriteTS
+		state.meta.WriteEnd = rec.WriteTS
 
 		// Compute IngestTS and SourceTS bounds inline.
 		if state.meta.IngestStart.IsZero() || rec.IngestTS.Before(state.meta.IngestStart) {

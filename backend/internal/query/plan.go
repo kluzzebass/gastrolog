@@ -29,8 +29,8 @@ type ChunkPlan struct {
 	ChunkID       chunk.ChunkID
 	Sealed        bool
 	RecordCount   int
-	StartTS       time.Time
-	EndTS         time.Time
+	WriteStart    time.Time
+	WriteEnd      time.Time
 	Pipeline      []PipelineStep // index pipeline steps
 	BranchPlans   []BranchPlan   // per-branch plans for DNF queries (len > 1)
 	ScanMode      string         // "index-driven", "sequential", "skipped"
@@ -120,8 +120,8 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 		ChunkID:       meta.ID,
 		Sealed:        meta.Sealed,
 		RecordCount:   int(meta.RecordCount),
-		StartTS:       meta.StartTS,
-		EndTS:         meta.EndTS,
+		WriteStart:       meta.WriteStart,
+		WriteEnd:         meta.WriteEnd,
 		RuntimeFilter: "none",
 	}
 

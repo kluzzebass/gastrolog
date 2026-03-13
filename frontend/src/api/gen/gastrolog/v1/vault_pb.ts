@@ -319,14 +319,14 @@ export class ChunkMeta extends Message<ChunkMeta> {
   id = "";
 
   /**
-   * @generated from field: google.protobuf.Timestamp start_ts = 2;
+   * @generated from field: google.protobuf.Timestamp write_start = 2;
    */
-  startTs?: Timestamp;
+  writeStart?: Timestamp;
 
   /**
-   * @generated from field: google.protobuf.Timestamp end_ts = 3;
+   * @generated from field: google.protobuf.Timestamp write_end = 3;
    */
-  endTs?: Timestamp;
+  writeEnd?: Timestamp;
 
   /**
    * @generated from field: bool sealed = 4;
@@ -366,8 +366,8 @@ export class ChunkMeta extends Message<ChunkMeta> {
   static readonly typeName = "gastrolog.v1.ChunkMeta";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "start_ts", kind: "message", T: Timestamp },
-    { no: 3, name: "end_ts", kind: "message", T: Timestamp },
+    { no: 2, name: "write_start", kind: "message", T: Timestamp },
+    { no: 3, name: "write_end", kind: "message", T: Timestamp },
     { no: 4, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },

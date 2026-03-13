@@ -10,8 +10,8 @@ import (
 func testMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
 		ID:          chunk.NewChunkID(),
-		StartTS:     time.UnixMicro(1000),
-		EndTS:       time.UnixMicro(2000),
+		WriteStart:     time.UnixMicro(1000),
+		WriteEnd:       time.UnixMicro(2000),
 		RecordCount: 4096,
 		Sealed:      true,
 	}
@@ -34,11 +34,11 @@ func TestMetaStoreSaveLoad(t *testing.T) {
 	if got.ID != meta.ID {
 		t.Fatalf("ID: expected %s, got %s", meta.ID, got.ID)
 	}
-	if !got.StartTS.Equal(meta.StartTS) {
-		t.Fatalf("StartTS: expected %v, got %v", meta.StartTS, got.StartTS)
+	if !got.WriteStart.Equal(meta.WriteStart) {
+		t.Fatalf("WriteStart: expected %v, got %v", meta.WriteStart, got.WriteStart)
 	}
-	if !got.EndTS.Equal(meta.EndTS) {
-		t.Fatalf("EndTS: expected %v, got %v", meta.EndTS, got.EndTS)
+	if !got.WriteEnd.Equal(meta.WriteEnd) {
+		t.Fatalf("WriteEnd: expected %v, got %v", meta.WriteEnd, got.WriteEnd)
 	}
 	if got.RecordCount != meta.RecordCount {
 		t.Fatalf("RecordCount: expected %d, got %d", meta.RecordCount, got.RecordCount)

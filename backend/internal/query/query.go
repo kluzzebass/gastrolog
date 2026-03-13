@@ -349,8 +349,8 @@ func (e *Engine) listVaults() []uuid.UUID {
 }
 
 // selectChunks filters to chunks that overlap the query time range,
-// sorted by StartTS (ascending for forward, descending for reverse).
-// Unsealed chunks are always included (their EndTS is not final).
+// sorted by WriteStart (ascending for forward, descending for reverse).
+// Unsealed chunks are always included (their WriteEnd is not final).
 // If chunkIDs is non-nil, only chunks with matching IDs are included.
 func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk.ChunkID) []chunk.ChunkMeta {
 	lower, upper := q.TimeBounds()

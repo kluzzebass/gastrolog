@@ -450,13 +450,13 @@ function ExplainChunk({
           >
             {totalRecords.toLocaleString()} rec
           </span>
-          {(plan.startTs || plan.endTs) && (
+          {(plan.writeStart || plan.writeEnd) && (
             <span
               className={`font-mono text-xs ${c("text-text-muted", "text-light-text-muted")}`}
             >
-              {formatTs(plan.startTs)}
-              {plan.startTs && plan.endTs ? " \u2013 " : ""}
-              {formatTs(plan.endTs)}
+              {formatTs(plan.writeStart)}
+              {plan.writeStart && plan.writeEnd ? " \u2013 " : ""}
+              {formatTs(plan.writeEnd)}
             </span>
           )}
           {isSkipped && plan.skipReason && (

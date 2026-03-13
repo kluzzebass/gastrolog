@@ -11,9 +11,9 @@ type ActiveChunkState struct {
 	// ChunkID is the unique identifier of the active chunk.
 	ChunkID ChunkID
 
-	// StartTS is the WriteTS of the first record in the chunk.
+	// WriteStart is the WriteTS of the first record in the chunk.
 	// Zero if no records have been written yet.
-	StartTS time.Time
+	WriteStart time.Time
 
 	// LastWriteTS is the WriteTS of the most recent record in the chunk.
 	// Zero if no records have been written yet.

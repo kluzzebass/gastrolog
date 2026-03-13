@@ -172,9 +172,9 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 
 	t.logger.Debug("token index built",
 		"chunk", chunkID.String(),
-		"chunk_start", meta.StartTS,
-		"chunk_end", meta.EndTS,
-		"chunk_duration", meta.EndTS.Sub(meta.StartTS),
+		"chunk_start", meta.WriteStart,
+		"chunk_end", meta.WriteEnd,
+		"chunk_duration", meta.WriteEnd.Sub(meta.WriteStart),
 		"records", recordCount,
 		"tokens", len(counts),
 		"positions", totalPositions,

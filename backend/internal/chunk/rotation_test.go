@@ -14,7 +14,7 @@ func TestActiveChunkStateIsValueType(t *testing.T) {
 	// Verify that ActiveChunkState can be copied by value
 	state1 := ActiveChunkState{
 		ChunkID:     NewChunkID(),
-		StartTS:     time.Now(),
+		WriteStart:     time.Now(),
 		LastWriteTS: time.Now(),
 		CreatedAt:   time.Now(),
 		Bytes:       1000,
@@ -41,8 +41,8 @@ func TestActiveChunkStateZeroValue(t *testing.T) {
 	var state ActiveChunkState
 
 	// Zero value should be valid and represent an empty/new chunk
-	if !state.StartTS.IsZero() {
-		t.Fatal("zero StartTS should be zero time")
+	if !state.WriteStart.IsZero() {
+		t.Fatal("zero WriteStart should be zero time")
 	}
 	if !state.LastWriteTS.IsZero() {
 		t.Fatal("zero LastWriteTS should be zero time")
@@ -622,7 +622,7 @@ func TestPoliciesArePure(t *testing.T) {
 	// Policies should not modify their inputs
 	state := ActiveChunkState{
 		ChunkID:     NewChunkID(),
-		StartTS:     time.Now(),
+		WriteStart:     time.Now(),
 		LastWriteTS: time.Now(),
 		CreatedAt:   time.Now(),
 		Bytes:       1000,

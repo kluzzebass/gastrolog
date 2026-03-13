@@ -1028,11 +1028,11 @@ func (s *QueryServer) Explain(
 			SkipReason:       cp.SkipReason,
 			NodeId:           vaultNodeID(cp.VaultID),
 		}
-		if !cp.StartTS.IsZero() {
-			chunkPlan.StartTs = timestamppb.New(cp.StartTS)
+		if !cp.WriteStart.IsZero() {
+			chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)
 		}
-		if !cp.EndTS.IsZero() {
-			chunkPlan.EndTs = timestamppb.New(cp.EndTS)
+		if !cp.WriteEnd.IsZero() {
+			chunkPlan.WriteEnd = timestamppb.New(cp.WriteEnd)
 		}
 
 		for _, bp := range cp.BranchPlans {

@@ -29,8 +29,8 @@ export function ChunkTimeline({
 
     const parsed = chunks
       .map((chunk) => {
-        const start = chunk.startTs ? instantToMs(protoToInstant(chunk.startTs)) : 0;
-        const end = chunk.endTs ? instantToMs(protoToInstant(chunk.endTs)) : start;
+        const start = chunk.writeStart ? instantToMs(protoToInstant(chunk.writeStart)) : 0;
+        const end = chunk.writeEnd ? instantToMs(protoToInstant(chunk.writeEnd)) : start;
         if (start === 0 && end === 0) return null;
         return {
           id: chunk.id,

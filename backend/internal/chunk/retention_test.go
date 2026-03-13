@@ -10,8 +10,8 @@ import (
 func metaAt(id ChunkID, start, end time.Time, bytes int64) ChunkMeta {
 	return ChunkMeta{
 		ID:      id,
-		StartTS: start,
-		EndTS:   end,
+		WriteStart: start,
+		WriteEnd:   end,
 		Bytes:   bytes,
 		Sealed:  true,
 	}

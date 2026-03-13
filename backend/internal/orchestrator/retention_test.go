@@ -149,10 +149,10 @@ func TestSweepDeletesExpiredChunks(t *testing.T) {
 
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: id0, StartTS: base, EndTS: base.Add(30 * time.Minute), Sealed: true},
-			{ID: id1, StartTS: base.Add(1 * time.Hour), EndTS: base.Add(90 * time.Minute), Sealed: true},
-			{ID: id2, StartTS: base.Add(2 * time.Hour), EndTS: base.Add(150 * time.Minute), Sealed: true},
-			{ID: id3, StartTS: base.Add(3 * time.Hour), EndTS: base.Add(210 * time.Minute), Sealed: true},
+			{ID: id0, WriteStart: base, WriteEnd: base.Add(30 * time.Minute), Sealed: true},
+			{ID: id1, WriteStart: base.Add(1 * time.Hour), WriteEnd: base.Add(90 * time.Minute), Sealed: true},
+			{ID: id2, WriteStart: base.Add(2 * time.Hour), WriteEnd: base.Add(150 * time.Minute), Sealed: true},
+			{ID: id3, WriteStart: base.Add(3 * time.Hour), WriteEnd: base.Add(210 * time.Minute), Sealed: true},
 		},
 	}
 	im := &retentionFakeIndexManager{}
@@ -195,10 +195,10 @@ func TestSweepSkipsActiveChunks(t *testing.T) {
 
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: idSealed0, StartTS: base, EndTS: base.Add(30 * time.Minute), Sealed: true},
-			{ID: idSealed1, StartTS: base.Add(1 * time.Hour), EndTS: base.Add(90 * time.Minute), Sealed: true},
-			{ID: idSealed2, StartTS: base.Add(2 * time.Hour), EndTS: base.Add(150 * time.Minute), Sealed: true},
-			{ID: idActive, StartTS: base.Add(3 * time.Hour), Sealed: false}, // active, unsealed
+			{ID: idSealed0, WriteStart: base, WriteEnd: base.Add(30 * time.Minute), Sealed: true},
+			{ID: idSealed1, WriteStart: base.Add(1 * time.Hour), WriteEnd: base.Add(90 * time.Minute), Sealed: true},
+			{ID: idSealed2, WriteStart: base.Add(2 * time.Hour), WriteEnd: base.Add(150 * time.Minute), Sealed: true},
+			{ID: idActive, WriteStart: base.Add(3 * time.Hour), Sealed: false}, // active, unsealed
 		},
 	}
 	im := &retentionFakeIndexManager{}
@@ -259,9 +259,9 @@ func TestSetBindingsHotSwap(t *testing.T) {
 
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: id0, StartTS: base, EndTS: base.Add(30 * time.Minute), Sealed: true},
-			{ID: id1, StartTS: base.Add(1 * time.Hour), EndTS: base.Add(90 * time.Minute), Sealed: true},
-			{ID: id2, StartTS: base.Add(2 * time.Hour), EndTS: base.Add(150 * time.Minute), Sealed: true},
+			{ID: id0, WriteStart: base, WriteEnd: base.Add(30 * time.Minute), Sealed: true},
+			{ID: id1, WriteStart: base.Add(1 * time.Hour), WriteEnd: base.Add(90 * time.Minute), Sealed: true},
+			{ID: id2, WriteStart: base.Add(2 * time.Hour), WriteEnd: base.Add(150 * time.Minute), Sealed: true},
 		},
 	}
 	im := &retentionFakeIndexManager{}
