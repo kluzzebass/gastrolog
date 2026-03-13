@@ -33,7 +33,7 @@ export function Button({
       variantClass = "bg-copper text-text-on-copper hover:bg-copper-glow";
       break;
     case "danger":
-      variantClass = "bg-severity-error text-white hover:brightness-110";
+      variantClass = "bg-severity-error text-severity-error-text hover:brightness-110";
       break;
     case "ghost":
       variantClass = bordered
