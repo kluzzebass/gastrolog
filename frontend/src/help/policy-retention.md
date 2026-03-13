@@ -42,3 +42,28 @@ Eject-only routes are excluded from live ingestion, so ejected records won't loo
 ## Example
 
 A retention policy with `maxAge: "720h"` and `maxBytes: "50GB"` will act on chunks older than 30 days **and** also act on the oldest chunks if total vault size exceeds 50 GB.
+
+## Choosing a Strategy
+
+Conditions use union semantics — a chunk is acted on if **any** condition matches. This means conditions work together to enforce the most restrictive limit.
+
+**Common patterns:**
+
+| Pattern | Configuration | Use case |
+|---------|--------------|----------|
+| **Fixed window** | `maxAge: 720h` (30 days) | Compliance or operational policy — data older than N days is gone |
+| **Budget cap** | `maxBytes: 50GB` | Fixed disk allocation — oldest chunks are evicted when space runs low |
+| **Rolling window** | `maxChunks: 100` | Keep a fixed number of chunks regardless of size or age |
+| **Belt and suspenders** | `maxAge: 720h` + `maxBytes: 100GB` | TTL for predictable expiry, size cap as a safety net for bursts |
+
+**Combining TTL with size budget:** Use TTL as the primary control and size budget as a guardrail. Under normal load, TTL governs what gets deleted. During traffic spikes, the size budget prevents the vault from consuming all available disk before chunks age out.
+
+**Tiered storage with eject:** Instead of expiring old data, eject it to a cloud-backed vault for long-term archival:
+
+1. Create a file vault with [sealed backing](help:storage-cloud) (e.g. S3) — this is your cold tier
+2. Create an eject-only route with a `*` filter pointing to the cold vault
+3. On your hot vault, set a retention rule with action **eject** targeting that route
+
+Records flow: hot vault → eject → cold vault (cloud-backed). The hot vault stays small and fast; the cold vault accumulates history in cheap cloud storage. Queries automatically search both.
+
+**No retention:** Omitting a retention policy means chunks accumulate forever. This is fine for testing but will eventually fill the disk in production. Always configure retention for production vaults.

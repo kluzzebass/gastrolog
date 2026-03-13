@@ -2,8 +2,6 @@
 
 File vaults can optionally upload sealed chunks to cloud object storage. When **Sealed Backing** is set to a cloud provider, chunks are compressed locally, converted to GLCB format, uploaded, and the local copy is deleted. The active chunk always lives on local disk — only sealed chunks move to the cloud.
 
-This replaces the old `cloud` vault type. Existing cloud vaults are automatically migrated to file vaults with sealed backing on startup.
-
 Supported providers:
 
 | Provider | Description |
@@ -20,9 +18,13 @@ Supported providers:
 |---------|-------------|----------|
 | Bucket | S3 bucket name | Yes |
 | Region | AWS region (e.g. `us-east-1`) | No |
-| Access Key | AWS access key ID | No (uses default credentials if empty) |
-| Secret Key | AWS secret access key | No |
-| Endpoint | Custom endpoint URL for S3-compatible services | No |
+| Access Key | AWS access key ID | Depends |
+| Secret Key | AWS secret access key | Depends |
+| Endpoint | Custom endpoint URL for S3-compatible services | Depends |
+
+When Access Key and Secret Key are left empty, the AWS SDK resolves credentials automatically using its default chain: environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), shared credentials file (`~/.aws/credentials`), and IAM instance roles (EC2/ECS). This is the recommended approach for AWS-hosted deployments — avoid embedding keys in the configuration.
+
+For S3-compatible services (MinIO, R2, etc.), you must set **Endpoint** to the service URL and typically provide explicit Access Key and Secret Key, since the default credential chain won't apply.
 
 ### Azure Blob Storage
 
@@ -36,8 +38,10 @@ Supported providers:
 | Setting | Description | Required |
 |---------|-------------|----------|
 | Bucket | GCS bucket name | Yes |
-| Credentials JSON | Service account key (JSON) | No (falls back to Application Default Credentials) |
+| Credentials JSON | Service account key (JSON) | Depends |
 | Endpoint | Custom endpoint URL | No |
+
+When Credentials JSON is left empty, the GCS client uses Application Default Credentials (ADC): the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, the attached service account on GCE/GKE, or credentials from `gcloud auth application-default login`. Paste a service account key JSON only when ADC is not available.
 
 ## What You Should Know
 

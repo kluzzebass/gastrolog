@@ -26,3 +26,29 @@ In a [cluster](help:clustering), rotation is managed by the [node](help:clusteri
 ## Example
 
 A policy with `maxBytes: "256MB"` and `maxAge: "1h"` will seal the chunk when it reaches 256 MB **or** when it has been open for one hour, whichever comes first.
+
+## Choosing a Strategy
+
+Rotation affects index build frequency, query performance, and retention granularity. Here are the trade-offs:
+
+**Smaller chunks** (e.g. 32–64 MB, or 5–15 minutes):
+- Index builds complete faster, so new records become indexed sooner
+- Retention deletes data in smaller increments (finer granularity)
+- More chunks means more index files on disk and more metadata in memory
+- Searches touch more chunks, though indexes make this fast
+
+**Larger chunks** (e.g. 256 MB–1 GB, or 1–6 hours):
+- Fewer index builds and less metadata overhead
+- The active (unindexed) chunk is larger, so queries scanning it take longer
+- Retention is coarser — you can't delete a fraction of a chunk
+
+**Recommended starting points:**
+
+| Scenario | Rotation | Why |
+|----------|----------|-----|
+| High-volume production | `maxBytes: 256MB`, `maxAge: 1h` | Balances index frequency with overhead |
+| Low-volume or dev | `maxAge: 24h` | Avoids many tiny chunks when ingestion is slow |
+| Compliance / time-aligned | `cron: 0 0 * * *` (daily) | Chunks align to calendar days for predictable retention |
+| Cloud-backed vaults | `maxBytes: 128MB`, `maxAge: 1h` | Keeps upload sizes reasonable; each sealed chunk becomes one cloud blob |
+
+Combine size and age for best results — size prevents unbounded growth during bursts, age ensures quiet periods still produce sealed, indexed chunks.

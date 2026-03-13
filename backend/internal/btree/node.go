@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+
+	"gastrolog/internal/format"
 )
 
 const (
@@ -18,7 +20,6 @@ const (
 	// internalHeaderSize: type (1) + count (2).
 	internalHeaderSize = 3
 
-	metaMagic   = "BT+\x00"
 	metaVersion = 1
 )
 
@@ -82,32 +83,28 @@ type meta struct {
 
 func encodeMeta(m *meta, buf []byte) {
 	clear(buf[:pageSize])
-	copy(buf[0:4], metaMagic)
-	buf[4] = metaVersion
-	binary.LittleEndian.PutUint32(buf[5:9], m.root)
-	binary.LittleEndian.PutUint64(buf[9:17], m.count)
-	binary.LittleEndian.PutUint16(buf[17:19], m.height)
-	binary.LittleEndian.PutUint32(buf[19:23], m.nextPage)
-	binary.LittleEndian.PutUint16(buf[23:25], m.keySize)
-	binary.LittleEndian.PutUint16(buf[25:27], m.valSize)
+	format.Header{Type: format.TypeBTree, Version: metaVersion}.EncodeInto(buf)
+	binary.LittleEndian.PutUint32(buf[4:8], m.root)
+	binary.LittleEndian.PutUint64(buf[8:16], m.count)
+	binary.LittleEndian.PutUint16(buf[16:18], m.height)
+	binary.LittleEndian.PutUint32(buf[18:22], m.nextPage)
+	binary.LittleEndian.PutUint16(buf[22:24], m.keySize)
+	binary.LittleEndian.PutUint16(buf[24:26], m.valSize)
 }
 
 func decodeMeta(buf []byte, m *meta) error {
-	if len(buf) < 27 {
+	if len(buf) < 26 {
 		return errors.New("btree: meta page too small")
 	}
-	if string(buf[0:4]) != metaMagic {
-		return errors.New("btree: invalid magic")
+	if _, err := format.DecodeAndValidate(buf[:format.HeaderSize], format.TypeBTree, metaVersion); err != nil {
+		return fmt.Errorf("btree: %w", err)
 	}
-	if buf[4] != metaVersion {
-		return fmt.Errorf("btree: unsupported version %d", buf[4])
-	}
-	m.root = binary.LittleEndian.Uint32(buf[5:9])
-	m.count = binary.LittleEndian.Uint64(buf[9:17])
-	m.height = binary.LittleEndian.Uint16(buf[17:19])
-	m.nextPage = binary.LittleEndian.Uint32(buf[19:23])
-	m.keySize = binary.LittleEndian.Uint16(buf[23:25])
-	m.valSize = binary.LittleEndian.Uint16(buf[25:27])
+	m.root = binary.LittleEndian.Uint32(buf[4:8])
+	m.count = binary.LittleEndian.Uint64(buf[8:16])
+	m.height = binary.LittleEndian.Uint16(buf[16:18])
+	m.nextPage = binary.LittleEndian.Uint32(buf[18:22])
+	m.keySize = binary.LittleEndian.Uint16(buf[22:24])
+	m.valSize = binary.LittleEndian.Uint16(buf[24:26])
 	return nil
 }
 

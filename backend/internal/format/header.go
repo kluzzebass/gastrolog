@@ -12,6 +12,8 @@ import "errors"
 //
 // Type codes:
 //
+//	'b' = B+ tree index
+//	'g' = cloud blob (GLCB)
 //	't' = time index
 //	's' = source index (SourceTS)
 //	'I' = ingest index (IngestTS)
@@ -43,6 +45,8 @@ const (
 	TypeAttrLog        = 'a'
 	TypeJSONIndex      = 'J' // Structural JSON index (GIN-style)
 	TypeAttrDict       = 'd' // Attribute key dictionary
+	TypeBTree          = 'b' // B+ tree index
+	TypeCloudBlob      = 'g' // GLCB cloud blob
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed     = 0x01

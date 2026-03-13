@@ -97,6 +97,9 @@ func (t *Tree[K, V]) Count() uint64 { return t.meta.count }
 // Height returns the tree height (1 = root is a leaf).
 func (t *Tree[K, V]) Height() uint16 { return t.meta.height }
 
+// DiskSize returns the current on-disk size in bytes (pages × pageSize).
+func (t *Tree[K, V]) DiskSize() uint64 { return uint64(t.meta.nextPage) * pageSize }
+
 // Insert adds a key-value pair to the tree.
 func (t *Tree[K, V]) Insert(key K, value V) error {
 	e := Entry[K, V]{Key: key, Value: value}

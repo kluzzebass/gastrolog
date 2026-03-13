@@ -12,6 +12,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 )
 
 // zstdDec is a package-level decoder, concurrent-safe, always available for reads.
@@ -43,15 +44,12 @@ func NewReader(f *os.File) (*Reader, error) {
 	if _, err := io.ReadFull(f, hdr[:]); err != nil {
 		return nil, fmt.Errorf("read header: %w", err)
 	}
-	if hdr[0] != magic[0] || hdr[1] != magic[1] || hdr[2] != magic[2] || hdr[3] != magic[3] {
-		return nil, fmt.Errorf("invalid magic: %x", hdr[0:4])
-	}
-	if hdr[4] != formatVersion {
-		return nil, fmt.Errorf("unsupported version: %d", hdr[4])
+	if _, err := format.DecodeAndValidate(hdr[:format.HeaderSize], format.TypeCloudBlob, formatVersion); err != nil {
+		return nil, fmt.Errorf("cloud blob header: %w", err)
 	}
 
 	meta, dictEntries := decodeHeaderCommon(hdr[:])
-	dictSize := binary.LittleEndian.Uint32(hdr[94:98])
+	dictSize := binary.LittleEndian.Uint32(hdr[92:96])
 
 	// --- Dictionary ---
 	dictBuf := make([]byte, dictSize)
@@ -140,19 +138,19 @@ func (rd *Reader) Close() error {
 
 // --- Shared helpers ---
 
-// decodeHeaderCommon parses the 98-byte header.
+// decodeHeaderCommon parses the 96-byte header (after common header validation).
 func decodeHeaderCommon(hdr []byte) (BlobMeta, uint32) {
 	var meta BlobMeta
-	copy(meta.ChunkID[:], hdr[6:22])
-	copy(meta.VaultID[:], hdr[22:38])
-	meta.RecordCount = binary.LittleEndian.Uint32(hdr[38:42])
-	meta.WriteStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[42:50]))
-	meta.WriteEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[50:58]))
-	meta.IngestStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[58:66]))
-	meta.IngestEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[66:74]))
-	meta.SourceStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[74:82]))
-	meta.SourceEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[82:90]))
-	dictEntries := binary.LittleEndian.Uint32(hdr[90:94])
+	copy(meta.ChunkID[:], hdr[4:20])
+	copy(meta.VaultID[:], hdr[20:36])
+	meta.RecordCount = binary.LittleEndian.Uint32(hdr[36:40])
+	meta.WriteStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[40:48]))
+	meta.WriteEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[48:56]))
+	meta.IngestStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[56:64]))
+	meta.IngestEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[64:72]))
+	meta.SourceStart = tsFromNanos(binary.LittleEndian.Uint64(hdr[72:80]))
+	meta.SourceEnd = tsFromNanos(binary.LittleEndian.Uint64(hdr[80:88]))
+	dictEntries := binary.LittleEndian.Uint32(hdr[88:92])
 	return meta, dictEntries
 }
 

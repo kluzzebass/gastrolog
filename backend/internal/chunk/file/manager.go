@@ -412,8 +412,9 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 		return chunk.ActiveChunkState{}
 	}
 
-	// Calculate total on-disk bytes: raw + attrs + idx entries
-	// (not counting headers, which are fixed overhead)
+	// Calculate total on-disk bytes: raw + attrs + idx entries.
+	// B+ tree indexes are excluded: they are transient (deleted at seal time)
+	// and their fixed page overhead would break small size policies.
 	totalBytes := m.active.rawOffset + m.active.attrOffset + (m.active.recordCount * IdxEntrySize)
 
 	return chunk.ActiveChunkState{

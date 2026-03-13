@@ -5,8 +5,9 @@
 // O(1) random access to any record via the offset index.
 //
 //	Uncompressed prefix:
-//	  Header (98 bytes):
-//	    [magic:4]          "GLCB" (GastroLog Cloud Blob)
+//	  Header (96 bytes):
+//	    [signature:1]      0x69 ('i') — common header
+//	    [type:1]           0x67 ('g') — cloud blob
 //	    [version:1]        format version (0x01)
 //	    [flags:1]          reserved
 //	    [chunkID:16]       raw UUIDv7 bytes
@@ -54,11 +55,9 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-var magic = [4]byte{'G', 'L', 'C', 'B'}
-
 const (
 	formatVersion = 0x01
-	headerSize    = 98 // fixed header before dictionary
+	headerSize    = 96 // fixed header before dictionary
 
 	// Record index entry: byte offset (u64) + frame size (u32).
 	indexEntrySize = 12

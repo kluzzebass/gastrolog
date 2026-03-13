@@ -12,6 +12,7 @@ import (
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/format"
 )
 
 // Writer encodes records into the cloud blob format.
@@ -80,7 +81,7 @@ func (w *Writer) Add(rec chunk.Record) error {
 }
 
 // WriteTo writes the cloud blob to dst:
-//   - Uncompressed header (98 bytes)
+//   - Uncompressed header (96 bytes)
 //   - Uncompressed dictionary
 //   - Uncompressed record index (12 bytes per record)
 //   - Seekable zstd compressed record data (256KB frames)
@@ -105,22 +106,20 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 		decompressedOff += 4 + uint64(len(frame))
 	}
 
-	// --- Header (98 bytes) ---
+	// --- Header (96 bytes) ---
 	var hdr [headerSize]byte
-	copy(hdr[0:4], magic[:])
-	hdr[4] = formatVersion
-	// hdr[5] = flags (reserved, 0)
-	copy(hdr[6:22], w.chunkID[:])
-	copy(hdr[22:38], w.vaultID[:])
-	binary.LittleEndian.PutUint32(hdr[38:42], w.count)
-	binary.LittleEndian.PutUint64(hdr[42:50], tsNanos(w.writeStart))
-	binary.LittleEndian.PutUint64(hdr[50:58], tsNanos(w.writeEnd))
-	binary.LittleEndian.PutUint64(hdr[58:66], tsNanos(w.ingestStart))
-	binary.LittleEndian.PutUint64(hdr[66:74], tsNanos(w.ingestEnd))
-	binary.LittleEndian.PutUint64(hdr[74:82], tsNanos(w.sourceStart))
-	binary.LittleEndian.PutUint64(hdr[82:90], tsNanos(w.sourceEnd))
-	binary.LittleEndian.PutUint32(hdr[90:94], uint32(w.dict.Len())) //nolint:gosec // G115: dict size bounded by StringDict capacity
-	binary.LittleEndian.PutUint32(hdr[94:98], uint32(len(dictBuf))) //nolint:gosec // G115: dict bytes bounded
+	format.Header{Type: format.TypeCloudBlob, Version: formatVersion}.EncodeInto(hdr[:])
+	copy(hdr[4:20], w.chunkID[:])
+	copy(hdr[20:36], w.vaultID[:])
+	binary.LittleEndian.PutUint32(hdr[36:40], w.count)
+	binary.LittleEndian.PutUint64(hdr[40:48], tsNanos(w.writeStart))
+	binary.LittleEndian.PutUint64(hdr[48:56], tsNanos(w.writeEnd))
+	binary.LittleEndian.PutUint64(hdr[56:64], tsNanos(w.ingestStart))
+	binary.LittleEndian.PutUint64(hdr[64:72], tsNanos(w.ingestEnd))
+	binary.LittleEndian.PutUint64(hdr[72:80], tsNanos(w.sourceStart))
+	binary.LittleEndian.PutUint64(hdr[80:88], tsNanos(w.sourceEnd))
+	binary.LittleEndian.PutUint32(hdr[88:92], uint32(w.dict.Len())) //nolint:gosec // G115: dict size bounded by StringDict capacity
+	binary.LittleEndian.PutUint32(hdr[92:96], uint32(len(dictBuf))) //nolint:gosec // G115: dict bytes bounded
 
 	n, err := dst.Write(hdr[:])
 	written += int64(n)
