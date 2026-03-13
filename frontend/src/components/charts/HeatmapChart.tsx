@@ -1,7 +1,7 @@
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
-import { formatChartValue } from "./chartColors";
+import { formatChartValue, cssVar } from "./chartColors";
 import type { EChartsOption } from "echarts";
 
 interface HeatmapChartProps {
@@ -51,7 +51,7 @@ export function HeatmapChart({ columns, rows, dark }: Readonly<HeatmapChartProps
   // Traditional blue → yellow → red heatmap ramp.
   const colorRange = ["#313695", "#4575b4", "#74add1", "#fee090", "#f46d43", "#d73027"];
 
-  const textGhost = dark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)";
+  const textGhost = dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost");
 
   const option: EChartsOption = {
     ...theme,
@@ -110,11 +110,11 @@ export function HeatmapChart({ columns, rows, dark }: Readonly<HeatmapChartProps
         data,
         itemStyle: {
           borderWidth: 1,
-          borderColor: dark ? "rgba(0,0,0,0.4)" : "rgba(255,255,255,0.6)",
+          borderColor: dark ? cssVar("--color-ink") : cssVar("--color-light-surface"),
         },
         emphasis: {
           itemStyle: {
-            borderColor: dark ? "#e5e5e5" : "#1a1a1a",
+            borderColor: dark ? cssVar("--color-text-bright") : cssVar("--color-light-text-bright"),
             borderWidth: 1,
           },
         },

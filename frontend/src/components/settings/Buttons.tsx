@@ -30,7 +30,7 @@ export function Button({
   let variantClass: string;
   switch (variant) {
     case "primary":
-      variantClass = "bg-copper text-white hover:bg-copper-glow";
+      variantClass = "bg-copper text-text-on-copper hover:bg-copper-glow";
       break;
     case "danger":
       variantClass = "bg-severity-error text-white hover:brightness-110";

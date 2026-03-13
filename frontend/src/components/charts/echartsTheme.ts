@@ -1,9 +1,5 @@
 import type { EChartsOption } from "echarts";
-
-/** Resolve a CSS variable to its computed value. */
-function cssVar(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
+import { cssVar } from "./chartColors";
 
 /**
  * Build common ECharts option defaults that match our design system.
@@ -11,18 +7,19 @@ function cssVar(name: string): string {
  */
 export function buildThemeOption(dark: boolean): EChartsOption {
   const textGhost = dark
-    ? cssVar("--color-text-ghost") || "rgba(255,255,255,0.35)"
-    : cssVar("--color-light-text-ghost") || "rgba(0,0,0,0.35)";
+    ? cssVar("--color-text-ghost")
+    : cssVar("--color-light-text-ghost");
+  // Grid lines use low-opacity white/black — palette-neutral on any dark/light bg.
   const gridLine = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const tooltipBg = dark
-    ? cssVar("--color-ink-surface") || "#1a1a1a"
-    : cssVar("--color-light-surface") || "#ffffff";
+    ? cssVar("--color-ink-surface")
+    : cssVar("--color-light-surface");
   const tooltipBorder = dark
-    ? cssVar("--color-ink-border-subtle") || "rgba(255,255,255,0.08)"
-    : cssVar("--color-light-border-subtle") || "rgba(0,0,0,0.08)";
+    ? cssVar("--color-ink-border-subtle")
+    : cssVar("--color-light-border-subtle");
   const textBright = dark
-    ? cssVar("--color-text-bright") || "#e5e5e5"
-    : cssVar("--color-light-text-bright") || "#1a1a1a";
+    ? cssVar("--color-text-bright")
+    : cssVar("--color-light-text-bright");
 
   return {
     animation: true,

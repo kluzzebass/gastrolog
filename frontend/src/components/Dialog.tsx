@@ -3,9 +3,9 @@ import { FocusTrap } from "focus-trap-react";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 const sizeClasses = {
-  sm: "w-full max-w-sm p-6",
-  lg: "w-[90vw] max-w-4xl h-[80vh] p-6",
-  xl: "w-[90vw] max-w-5xl h-[85vh] flex flex-col overflow-hidden",
+  sm: "w-full max-w-sm p-4 sm:p-6",
+  lg: "w-[95vw] sm:w-[90vw] max-w-4xl h-[80vh] p-4 sm:p-6",
+  xl: "w-[95vw] sm:w-[90vw] max-w-5xl h-[85vh] flex flex-col overflow-hidden",
 } as const;
 
 interface DialogProps {
@@ -51,7 +51,7 @@ export function Dialog({
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <button
           type="button"
-          className="absolute inset-0 bg-black/40 cursor-default"
+          className={`absolute inset-0 cursor-default ${c("bg-ink/60", "bg-light-text-bright/30")}`}
           onClick={onClose}
           aria-label="Close dialog"
           tabIndex={-1}

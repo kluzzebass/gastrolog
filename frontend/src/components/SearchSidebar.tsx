@@ -91,7 +91,7 @@ export function SearchSidebar({
         aria-label="Sidebar"
         style={{ width: sidebarCollapsed ? 0 : sidebarWidth }}
         className={(() => {
-          const transitionCls = resizing ? "" : "transition-[width] duration-200";
+          const transitionCls = resizing ? "" : "transition-[width,opacity] duration-200 will-change-[width,opacity]";
           const layoutCls = isTablet && !sidebarCollapsed
             ? `fixed left-0 top-0 h-full z-30 ${c("bg-ink", "bg-light-raised")}`
             : `shrink-0 ${transitionCls}`;

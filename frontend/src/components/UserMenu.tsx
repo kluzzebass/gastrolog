@@ -43,7 +43,7 @@ export function UserMenu({
 
       {open && (
         <div
-          className={`absolute right-0 top-full mt-1.5 z-50 min-w-48 rounded border shadow-lg ${c(
+          className={`absolute right-0 top-full mt-1.5 z-50 min-w-48 max-w-[calc(100vw-1rem)] rounded border shadow-lg ${c(
             "bg-ink-surface border-ink-border",
             "bg-light-surface border-light-border",
           )}`}

@@ -5,7 +5,7 @@ import type { Topology } from "topojson-specification";
 import worldTopo from "world-atlas/countries-110m.json";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
-import { resolveColor, formatChartValue } from "./chartColors";
+import { resolveColor, formatChartValue, cssVar } from "./chartColors";
 import { isoToMapName } from "./countryMapping";
 import type { EChartsOption } from "echarts";
 
@@ -353,13 +353,15 @@ export function WorldMapChart({
   const chartRef = useRef<ReactEChartsCore>(null);
   const theme = buildThemeOption(dark);
 
-  const copperBase = resolveColor("var(--color-copper)") || "#c87941";
-  const bgColor = dark ? "rgba(255,255,255,0.04)" : "rgba(0,0,0,0.05)";
+  const copperBase = resolveColor("var(--color-copper)");
+  const bgColor = dark
+    ? cssVar("--color-ink-border-subtle")
+    : cssVar("--color-light-hover");
   const colors = {
     copper: copperBase,
-    border: dark ? "rgba(255,255,255,0.20)" : "rgba(0,0,0,0.30)",
-    empty: dark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.17)",
-    textGhost: dark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)",
+    border: dark ? cssVar("--color-ink-border") : cssVar("--color-light-border"),
+    empty: dark ? cssVar("--color-ink-hover") : cssVar("--color-light-hover"),
+    textGhost: dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost"),
   };
 
   const isScatter = mode === "scatter";

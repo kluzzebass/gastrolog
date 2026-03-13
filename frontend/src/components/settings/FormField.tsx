@@ -65,18 +65,16 @@ export function ExampleValues({
       {examples.map((ex, i) => (
         <span key={ex}>
           {i > 0 && ", "}
-          <span
-            role="button"
-            tabIndex={0}
+          <button
+            type="button"
             onClick={() => onChange(ex)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onChange(ex); }}
             className={`font-mono cursor-pointer transition-colors ${c(
               "hover:text-copper",
               "hover:text-copper",
             )}`}
           >
             {ex}
-          </span>
+          </button>
         </span>
       ))}
     </div>
@@ -281,7 +279,7 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
       {entries.map(([key, val]) => (
         <div key={key} className="flex gap-1.5 items-center">
           <span
-            className={`text-[0.8em] font-mono min-w-20 shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`text-[0.8em] font-mono w-28 shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {key}
           </span>
@@ -311,7 +309,8 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
           placeholder="key"
-          className={`min-w-20 w-20 shrink-0 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
+          aria-label="Parameter key"
+          className={`w-28 shrink-0 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
             "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
             "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
           )}`}
@@ -322,6 +321,7 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
           value={newValue}
           onChange={(e) => setNewValue(e.target.value)}
           placeholder="value"
+          aria-label="Parameter value"
           className={`flex-1 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
             "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
             "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",

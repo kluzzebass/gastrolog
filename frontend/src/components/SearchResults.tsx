@@ -154,9 +154,9 @@ export function SearchResults({
               logScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
               resetFollowNewCount();
             }}
-            className={`absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full font-mono text-[0.8em] shadow-lg backdrop-blur cursor-pointer transition-all hover:brightness-110 animate-[fadeSlideDown_200ms_ease-out] ${c(
-              "bg-copper/90 text-ink",
-              "bg-copper/90 text-white",
+            className={`absolute top-3 left-1/2 -translate-x-1/2 z-10 px-3 py-1.5 rounded-full font-mono text-[0.8em] shadow-lg cursor-pointer transition-all hover:brightness-110 animate-[fadeSlideDown_200ms_ease-out] ${c(
+              "bg-copper/90 text-text-on-copper",
+              "bg-copper/90 text-text-on-copper",
             )}`}
           >
             {followNewCount} new log{followNewCount !== 1 ? "s" : ""}

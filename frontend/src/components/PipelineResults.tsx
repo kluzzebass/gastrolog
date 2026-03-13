@@ -70,9 +70,9 @@ function SingleValueDisplay({
   const formatted = !isNaN(num) ? num.toLocaleString() : value;
 
   return (
-    <div className="flex flex-col items-center justify-center py-12 px-5">
+    <div className="flex flex-col items-center justify-center py-10 px-5">
       <span
-        className={`font-mono text-[3.5em] font-semibold leading-tight ${c(
+        className={`font-mono text-[2.5em] font-semibold leading-tight ${c(
           "text-copper",
           "text-copper",
         )}`}

@@ -143,7 +143,7 @@ export function SettingsDialog({
               }`}
             >
               <Icon className="w-3.5 h-3.5 shrink-0" />
-              <span className="whitespace-nowrap">{label}</span>
+              <span className="whitespace-nowrap hidden sm:inline">{label}</span>
             </button>
           ))}
         </nav>

@@ -25,7 +25,7 @@ function asideLayoutCls(
   if (isTablet && !detailCollapsed) {
     return `fixed right-0 top-0 h-full z-30 ${c("bg-ink-surface", "bg-light-surface")}`;
   }
-  const transition = resizing ? "" : "transition-[width] duration-200";
+  const transition = resizing ? "" : "transition-[width,opacity] duration-200 will-change-[width,opacity]";
   return `shrink-0 ${transition}`;
 }
 

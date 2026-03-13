@@ -261,7 +261,7 @@ export function SetupWizard() {
           {STEPS.map((label, i) => {
             let stepClass: string;
             if (i === step) {
-              stepClass = "bg-copper text-white";
+              stepClass = "bg-copper text-text-on-copper";
             } else if (i < step) {
               stepClass = c(
                 "bg-copper/20 text-copper cursor-pointer hover:bg-copper/30",

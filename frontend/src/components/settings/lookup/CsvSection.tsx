@@ -164,7 +164,7 @@ function CsvFileFields({
                       {row.values.map((val, ci) => (
                         <td
                           key={ci}
-                          className={`px-2.5 py-1 font-mono whitespace-nowrap max-w-[200px] truncate ${c("text-text-bright", "text-light-text-bright")}`}
+                          className={`px-2.5 py-1 font-mono whitespace-nowrap max-w-xs truncate ${c("text-text-bright", "text-light-text-bright")}`}
                           title={val}
                         >
                           {val}

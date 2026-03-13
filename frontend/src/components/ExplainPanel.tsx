@@ -699,7 +699,7 @@ function PipelineFunnel({
               </span>
 
               {/* Predicate + reason */}
-              <span className="ml-auto flex items-center gap-2 min-w-0 max-w-[60%]">
+              <span className="ml-auto flex items-center gap-2 min-w-0 shrink max-w-[75%]">
                 {step.predicate && (
                   <span
                     className={`font-mono text-xs truncate ${c("text-text-normal", "text-light-text-normal")}`}

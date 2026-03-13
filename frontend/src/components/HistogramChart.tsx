@@ -316,14 +316,14 @@ export function HistogramChart({
   if (buckets.length === 0) return null;
 
   const tooltipBg = dark
-    ? resolveColor("var(--color-ink-surface)") || "#1a1a1a"
-    : resolveColor("var(--color-light-surface)") || "#ffffff";
+    ? resolveColor("var(--color-ink-surface)")
+    : resolveColor("var(--color-light-surface)");
   const tooltipBorder = dark
-    ? resolveColor("var(--color-ink-border-subtle)") || "rgba(255,255,255,0.08)"
-    : resolveColor("var(--color-light-border-subtle)") || "rgba(0,0,0,0.08)";
+    ? resolveColor("var(--color-ink-border-subtle)")
+    : resolveColor("var(--color-light-border-subtle)");
   const tooltipText = dark
-    ? resolveColor("var(--color-text-bright)") || "#e5e5e5"
-    : resolveColor("var(--color-light-text-bright)") || "#1a1a1a";
+    ? resolveColor("var(--color-text-bright)")
+    : resolveColor("var(--color-light-text-bright)");
 
   const option: EChartsOption = {
     animation: true,
@@ -417,7 +417,7 @@ export function HistogramChart({
       globalThis.removeEventListener("mousemove", onMouseMove);
       globalThis.removeEventListener("mouseup", onMouseUp);
     };
-    globalThis.addEventListener("mousemove", onMouseMove);
+    globalThis.addEventListener("mousemove", onMouseMove, { passive: true });
     globalThis.addEventListener("mouseup", onMouseUp);
   };
 
@@ -472,7 +472,7 @@ export function HistogramChart({
       const last = lastBucket!.ts.getTime();
       onPan(new Date(first + deltaMs), new Date(last + deltaMs));
     };
-    globalThis.addEventListener("mousemove", onMouseMove);
+    globalThis.addEventListener("mousemove", onMouseMove, { passive: true });
     globalThis.addEventListener("mouseup", onMouseUp);
   };
 

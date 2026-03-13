@@ -140,7 +140,7 @@ export function ChangePasswordDialog({
               isPending
                 ? "opacity-60 cursor-not-allowed"
                 : "hover:brightness-110 active:scale-[0.98]"
-            } ${c("bg-copper text-ink", "bg-copper text-white")}`}
+            } bg-copper text-text-on-copper`}
           >
             {isPending && <SpinnerIcon className="animate-spin h-4 w-4" />}
             Change Password

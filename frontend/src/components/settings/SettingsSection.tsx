@@ -64,7 +64,7 @@ export function SettingsSection({
         </div>
       )}
 
-      <div className={`flex flex-col gap-3 ${disabled ? "opacity-50 pointer-events-none" : ""}`}>
+      <div className={`flex flex-col gap-3 ${disabled ? "opacity-50" : ""}`} aria-disabled={disabled || undefined}>
         {children}
 
         {isEmpty && !adding && (

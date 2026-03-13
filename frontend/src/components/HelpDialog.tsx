@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Dialog } from "./Dialog";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { helpTopics, findTopic, resolveTopicId, allTopics } from "../help/topics";
@@ -79,14 +79,14 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
     })))).then(setSearchIndex);
   }, [search, searchIndex]);
 
-  const searchResults = useMemo(() => {
+  const searchResults = (() => {
     const q = search.trim().toLowerCase();
     if (!q || !searchIndex) return null;
     const terms = q.split(/\s+/);
     return searchIndex.filter((entry) =>
       terms.every((term) => entry.titleLower.includes(term) || entry.plainText.includes(term)),
     );
-  }, [search, searchIndex]);
+  })();
 
   // Auto-expand and reset content when navigating to a new topic.
   const [prevActiveId, setPrevActiveId] = useState(activeId);
@@ -265,7 +265,7 @@ function TopicItem({ topic: t, depth, index, activeId, expanded, onSelect, onTog
               role="button"
               tabIndex={0}
               aria-label={isExpanded ? "Collapse section" : "Expand section"}
-              className={`w-3 h-3 transition-transform cursor-pointer ${isExpanded ? "rotate-90" : ""}`}
+              className={`w-3 h-3 transition-transform cursor-pointer rounded-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-copper ${isExpanded ? "rotate-90" : ""}`}
               viewBox="0 0 12 12"
               fill="currentColor"
             >

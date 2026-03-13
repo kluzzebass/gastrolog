@@ -87,6 +87,7 @@ export function FileDropZone({
       <div
         role="button"
         tabIndex={0}
+        aria-label="Click or drag files to upload"
         onDragOver={handleDragOver}
         onDragEnter={(e) => { handleDragEnter(e); setDragging(true); }}
         onDragLeave={(e) => { handleDragLeave(e); if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false); }}
