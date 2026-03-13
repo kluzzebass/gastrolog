@@ -107,6 +107,12 @@ func (f *retentionFakeIndexManager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*i
 func (f *retentionFakeIndexManager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
 	return nil, index.JSONComplete, nil
 }
+func (f *retentionFakeIndexManager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
+	return nil, index.ErrIndexNotFound
+}
+func (f *retentionFakeIndexManager) LoadSourceEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
+	return nil, index.ErrIndexNotFound
+}
 func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }

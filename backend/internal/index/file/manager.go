@@ -298,6 +298,55 @@ func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (
 	return pos, found, nil
 }
 
+// LoadIngestEntries implements index.IndexManager.
+func (m *Manager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
+	key := chunkID.String() + ":ts_ingest"
+	var entries []filetsidx.Entry
+	if v, ok := m.cache.Load(key); ok {
+		entries = v.([]filetsidx.Entry)
+	} else {
+		var err error
+		entries, err = filetsidx.LoadIngestIndex(m.dir, chunkID)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, index.ErrIndexNotFound
+			}
+			return nil, err
+		}
+		m.cache.Store(key, entries)
+	}
+	return fileTSEntriesToIndex(entries), nil
+}
+
+// LoadSourceEntries implements index.IndexManager.
+func (m *Manager) LoadSourceEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
+	key := chunkID.String() + ":ts_source"
+	var entries []filetsidx.Entry
+	if v, ok := m.cache.Load(key); ok {
+		entries = v.([]filetsidx.Entry)
+	} else {
+		var err error
+		entries, err = filetsidx.LoadSourceIndex(m.dir, chunkID)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil, index.ErrIndexNotFound
+			}
+			return nil, err
+		}
+		m.cache.Store(key, entries)
+	}
+	return fileTSEntriesToIndex(entries), nil
+}
+
+// fileTSEntriesToIndex converts file-level tsidx entries to index.TSEntry.
+func fileTSEntriesToIndex(entries []filetsidx.Entry) []index.TSEntry {
+	out := make([]index.TSEntry, len(entries))
+	for i, e := range entries {
+		out[i] = index.TSEntry{TS: e.TS, Pos: e.Pos}
+	}
+	return out
+}
+
 // evictCache removes all cached indexes for the given chunk.
 func (m *Manager) evictCache(chunkID chunk.ChunkID) {
 	prefix := chunkID.String() + ":"

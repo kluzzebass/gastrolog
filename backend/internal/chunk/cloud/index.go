@@ -71,6 +71,14 @@ func (n *NoopIndexManager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time)
 	return 0, false, index.ErrIndexNotFound
 }
 
+func (n *NoopIndexManager) LoadIngestEntries(_ chunk.ChunkID) ([]index.TSEntry, error) {
+	return nil, index.ErrIndexNotFound
+}
+
+func (n *NoopIndexManager) LoadSourceEntries(_ chunk.ChunkID) ([]index.TSEntry, error) {
+	return nil, index.ErrIndexNotFound
+}
+
 func (n *NoopIndexManager) IndexSizes(_ chunk.ChunkID) map[string]int64 {
 	return nil
 }

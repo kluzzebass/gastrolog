@@ -90,12 +90,13 @@ type recordFilter func(chunk.Record) bool
 //   - empty (len==0): index says no matches, skip chunk entirely
 //   - non-empty: seek to these positions only
 type scannerBuilder struct {
-	vaultID   uuid.UUID // vault ID for multi-vault queries
-	chunkID   chunk.ChunkID
-	positions []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
-	filters   []recordFilter // applied in order; cheap filters should be added first
-	minPos    uint64         // prune positions below this (from time index or resume)
-	hasMinPos bool
+	vaultID        uuid.UUID // vault ID for multi-vault queries
+	chunkID        chunk.ChunkID
+	positions      []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
+	filters        []recordFilter // applied in order; cheap filters should be added first
+	minPos         uint64         // prune positions below this (from time index or resume)
+	hasMinPos      bool
+	skipTimeBounds bool // when true, position scanners skip IngestTS bounds checking (already pruned by TS index)
 }
 
 // newScannerBuilder creates a builder for the given chunk.
@@ -298,6 +299,7 @@ func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor
 	chunkID := b.chunkID
 	vaultID := b.vaultID
 	filters := b.filters
+	skipTB := b.skipTimeBounds
 
 	return func(yield func(recordWithRef, error) bool) {
 		for i := len(positions) - 1; i >= 0; i-- {
@@ -316,12 +318,14 @@ func (b *scannerBuilder) buildPositionScannerReverse(ctx context.Context, cursor
 				return
 			}
 
-			// Time bounds.
-			if !lower.IsZero() && rec.IngestTS.Before(lower) {
-				return // too old, stop
-			}
-			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-				continue // too new, skip
+			// Time bounds (skip when positions are already TS-ordered and pruned).
+			if !skipTB {
+				if !lower.IsZero() && rec.IngestTS.Before(lower) {
+					return // too old, stop
+				}
+				if !upper.IsZero() && !rec.IngestTS.Before(upper) {
+					continue // too new, skip
+				}
 			}
 
 			if !applyFilters(rec, filters) {
@@ -342,6 +346,7 @@ func (b *scannerBuilder) buildPositionScannerForward(ctx context.Context, cursor
 	chunkID := b.chunkID
 	vaultID := b.vaultID
 	filters := b.filters
+	skipTB := b.skipTimeBounds
 
 	return func(yield func(recordWithRef, error) bool) {
 		for i, pos := range positions {
@@ -359,12 +364,14 @@ func (b *scannerBuilder) buildPositionScannerForward(ctx context.Context, cursor
 				return
 			}
 
-			// Time bounds.
-			if !lower.IsZero() && rec.IngestTS.Before(lower) {
-				continue // too old, skip
-			}
-			if !upper.IsZero() && !rec.IngestTS.Before(upper) {
-				return // too new, stop
+			// Time bounds (skip when positions are already TS-ordered and pruned).
+			if !skipTB {
+				if !lower.IsZero() && rec.IngestTS.Before(lower) {
+					continue // too old, skip
+				}
+				if !upper.IsZero() && !rec.IngestTS.Before(upper) {
+					return // too new, stop
+				}
 			}
 
 			if !applyFilters(rec, filters) {
@@ -1589,4 +1596,36 @@ func matchJSONPathExists(raw []byte, key string) bool {
 		}
 	}, nil)
 	return found
+}
+
+// reorderByTS buffers all records from inner, sorts by the chosen TS field,
+// and yields in sorted order. Used for active (unsealed) chunks and fallback
+// when TS indexes are unavailable. Safe because active chunks are bounded
+// by rotation policy.
+func reorderByTS(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse bool) iter.Seq2[recordWithRef, error] {
+	return func(yield func(recordWithRef, error) bool) {
+		var buf []recordWithRef
+		for rr, err := range inner {
+			if err != nil {
+				yield(rr, err)
+				return
+			}
+			buf = append(buf, rr)
+		}
+
+		slices.SortStableFunc(buf, func(a, b recordWithRef) int {
+			at := orderBy.RecordTS(a.Record)
+			bt := orderBy.RecordTS(b.Record)
+			if reverse {
+				return bt.Compare(at)
+			}
+			return at.Compare(bt)
+		})
+
+		for _, rr := range buf {
+			if !yield(rr, nil) {
+				return
+			}
+		}
+	}
 }

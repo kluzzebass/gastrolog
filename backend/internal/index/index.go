@@ -172,6 +172,13 @@ func SplitKV(kv string) (key, value string) {
 	return kv, ""
 }
 
+// TSEntry is a (timestamp, position) pair from a timestamp index.
+// Used by LoadIngestEntries/LoadSourceEntries for TS-ordered scanning.
+type TSEntry struct {
+	TS  int64  // nanoseconds since Unix epoch
+	Pos uint32 // record position within chunk
+}
+
 type IndexManager interface {
 	BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	DeleteIndexes(chunkID chunk.ChunkID) error
@@ -222,6 +229,16 @@ type IndexManager interface {
 	// Returns (pos, true, nil) if found, (0, false, nil) if ts is after all records.
 	// Returns ErrIndexNotFound if the source index does not exist.
 	FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error)
+
+	// LoadIngestEntries returns all (IngestTS, position) entries from the ingest index,
+	// sorted by IngestTS. Used for TS-ordered scanning.
+	// Returns ErrIndexNotFound if the ingest index does not exist.
+	LoadIngestEntries(chunkID chunk.ChunkID) ([]TSEntry, error)
+
+	// LoadSourceEntries returns all (SourceTS, position) entries from the source index,
+	// sorted by SourceTS. Used for TS-ordered scanning.
+	// Returns ErrIndexNotFound if the source index does not exist.
+	LoadSourceEntries(chunkID chunk.ChunkID) ([]TSEntry, error)
 
 	// IndexSizes returns the size in bytes for each index.
 	// For file-backed indexes this is the on-disk file size.

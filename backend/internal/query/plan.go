@@ -86,6 +86,9 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 	if q.Reverse() {
 		plan.Direction = "reverse"
 	}
+	if q.OrderBy != OrderByIngestTS {
+		plan.Direction += " (order=" + q.OrderBy.String() + ")"
+	}
 
 	// Collect chunks from all selected vaults.
 	for _, vaultID := range selectedVaults {
@@ -130,6 +133,9 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 		currentPositions := cp.RecordCount
 		currentPositions = e.buildActiveChunkTSSeekSteps(&cp, q, meta, cm, currentPositions)
 		cp.ScanMode = "sequential"
+		if q.OrderBy != OrderByWriteTS {
+			cp.ScanMode = "buffer-sort (" + q.OrderBy.String() + ")"
+		}
 		cp.EstimatedScan = currentPositions
 		cp.RuntimeFilter = e.buildRuntimeFilterDesc(q)
 		return cp
@@ -155,6 +161,10 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 		cp.ScanMode = "index-driven"
 	} else {
 		cp.ScanMode = "sequential"
+	}
+	// TS-ordered scan when using non-WriteTS ordering on sealed chunks.
+	if q.OrderBy != OrderByWriteTS && meta.Sealed {
+		cp.ScanMode = "ts-ordered (" + q.OrderBy.String() + ")"
 	}
 	cp.EstimatedScan = currentPositions
 

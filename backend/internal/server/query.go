@@ -219,6 +219,11 @@ func (s *QueryServer) searchDirect(
 
 	var resume *query.ResumeToken
 	if len(resumeTokenData) > 0 {
+		// Resume tokens with non-default ordering are not yet supported.
+		if q.OrderBy != query.OrderByIngestTS {
+			return connect.NewError(connect.CodeUnimplemented,
+				fmt.Errorf("pagination with order=%s is not yet supported", q.OrderBy))
+		}
 		var err error
 		resume, err = ProtoToResumeToken(resumeTokenData)
 		if err != nil {
@@ -244,7 +249,7 @@ func (s *QueryServer) searchDirect(
 
 	iter, getToken := eng.Search(ctx, q, resume)
 
-	return s.mergeAndStream(ctx, iter, getToken, remoteRes, q.Reverse(), transform, histogram, stream)
+	return s.mergeAndStream(ctx, iter, getToken, remoteRes, q.OrderBy, q.Reverse(), transform, histogram, stream)
 }
 
 func mapSearchError(err error) error {
@@ -333,9 +338,24 @@ func emitRemoteRecord(ctx context.Context, sb *streamBatcher, r *apiv1.Record, t
 	return false, sb.add(r)
 }
 
+// remoteRecordTS returns a function that extracts the ordering timestamp
+// from a proto record based on the OrderBy value.
+func remoteRecordTS(orderBy query.OrderBy) func(*apiv1.Record) time.Time {
+	switch orderBy {
+	case query.OrderByIngestTS:
+		return func(r *apiv1.Record) time.Time { return r.GetIngestTs().AsTime() }
+	case query.OrderBySourceTS:
+		return func(r *apiv1.Record) time.Time { return r.GetSourceTs().AsTime() }
+	case query.OrderByWriteTS:
+		return func(r *apiv1.Record) time.Time { return r.GetWriteTs().AsTime() }
+	}
+	return func(r *apiv1.Record) time.Time { return r.GetIngestTs().AsTime() }
+}
+
 // drainRemoteUntil emits remote records (starting at index ri) whose timestamps
 // sort before cutoff according to isBefore. When cutoff is zero, drains all
-// remaining records. Returns the updated index and whether the transform is done.
+// remaining records. remoteTS extracts the ordering timestamp from a proto record.
+// Returns the updated index and whether the transform is done.
 func drainRemoteUntil(
 	ctx context.Context,
 	sb *streamBatcher,
@@ -343,10 +363,11 @@ func drainRemoteUntil(
 	ri int,
 	cutoff time.Time,
 	isBefore func(a, b time.Time) bool,
+	remoteTS func(*apiv1.Record) time.Time,
 	transform *query.RecordTransform,
 ) (int, bool, error) {
 	for ri < len(remote) {
-		ts := remote[ri].GetWriteTs().AsTime()
+		ts := remoteTS(remote[ri])
 		if !cutoff.IsZero() && !isBefore(ts, cutoff) {
 			break
 		}
@@ -366,11 +387,13 @@ func drainRemoteUntil(
 // results in timestamp order, applies optional per-record transforms, and
 // streams batches to the client. When remote is empty (single-node or resume
 // page), the merge is a no-op passthrough with zero overhead.
+// The orderBy parameter determines which timestamp field is used for merge ordering.
 func (s *QueryServer) mergeAndStream(
 	ctx context.Context,
 	localIter iter.Seq2[chunk.Record, error],
 	getToken func() *query.ResumeToken,
 	remoteRes remoteResult,
+	orderBy query.OrderBy,
 	reverse bool,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
@@ -385,6 +408,9 @@ func (s *QueryServer) mergeAndStream(
 		return a.Before(b)
 	}
 
+	// Select the TS field for remote proto records based on OrderBy.
+	remoteTS := remoteRecordTS(orderBy)
+
 	sb := newStreamBatcher(stream, 100)
 	ri := 0
 
@@ -393,8 +419,9 @@ func (s *QueryServer) mergeAndStream(
 			return mapSearchError(err)
 		}
 
+		localTS := orderBy.RecordTS(rec)
 		var done bool
-		ri, done, err = drainRemoteUntil(ctx, sb, remote, ri, rec.WriteTS, isBefore, transform)
+		ri, done, err = drainRemoteUntil(ctx, sb, remote, ri, localTS, isBefore, remoteTS, transform)
 		if err != nil {
 			return err
 		}
@@ -412,7 +439,7 @@ func (s *QueryServer) mergeAndStream(
 	}
 
 	// Drain remaining remote records (zero cutoff = drain all).
-	if _, _, err := drainRemoteUntil(ctx, sb, remote, ri, time.Time{}, isBefore, transform); err != nil {
+	if _, _, err := drainRemoteUntil(ctx, sb, remote, ri, time.Time{}, isBefore, remoteTS, transform); err != nil {
 		return err
 	}
 
@@ -1703,6 +1730,18 @@ func applyDirective(q *query.Query, k, v string) (bool, error) {
 			return false, fmt.Errorf("invalid pos: %w", err)
 		}
 		q.Pos = &n
+		return true, nil
+	case "order":
+		switch v {
+		case "ingest_ts":
+			q.OrderBy = query.OrderByIngestTS
+		case "source_ts":
+			q.OrderBy = query.OrderBySourceTS
+		case "write_ts":
+			q.OrderBy = query.OrderByWriteTS
+		default:
+			return false, fmt.Errorf("invalid order: %s (use ingest_ts, source_ts, or write_ts)", v)
+		}
 		return true, nil
 	default:
 		return false, nil

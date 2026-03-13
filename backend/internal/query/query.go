@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,41 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// OrderBy specifies which timestamp field to use for ordering search results.
+type OrderBy int
+
+const (
+	OrderByIngestTS OrderBy = iota // default: order by IngestTS (primary timestamp)
+	OrderBySourceTS                // order by SourceTS
+	OrderByWriteTS                 // order by WriteTS (physical write order)
+)
+
+// String returns a human-readable name for the OrderBy value.
+func (o OrderBy) String() string {
+	switch o {
+	case OrderByIngestTS:
+		return "ingest_ts"
+	case OrderBySourceTS:
+		return "source_ts"
+	case OrderByWriteTS:
+		return "write_ts"
+	}
+	return "ingest_ts"
+}
+
+// RecordTS extracts the relevant timestamp from a record based on the ordering.
+func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
+	switch o {
+	case OrderByIngestTS:
+		return rec.IngestTS
+	case OrderBySourceTS:
+		return rec.SourceTS
+	case OrderByWriteTS:
+		return rec.WriteTS
+	}
+	return rec.IngestTS
+}
 
 // KeyValueFilter represents a key=value filter that searches both
 // record attributes and key=value pairs extracted from the message body.
@@ -71,6 +107,7 @@ type Query struct {
 	RawExpression string
 
 	// Result control
+	OrderBy   OrderBy // timestamp field for ordering (default: IngestTS)
 	IsReverse bool    // return results newest-first
 	Limit     int     // max results (0 = unlimited)
 	Pos       *uint64 // exact record position within chunk (nil = no filter)
@@ -97,6 +134,9 @@ func (q Query) String() string {
 	}
 	if q.Limit > 0 {
 		parts = append(parts, fmt.Sprintf("limit=%d", q.Limit))
+	}
+	if q.OrderBy != OrderByIngestTS {
+		parts = append(parts, "order="+q.OrderBy.String())
 	}
 	return strings.Join(parts, " ")
 }
@@ -362,7 +402,7 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk
 			out = append(out, m)
 		}
 	}
-	sortChunksByIngestStart(out, q.Reverse())
+	sortChunks(out, q.OrderBy, q.Reverse())
 	return out
 }
 
@@ -407,15 +447,26 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 	return true
 }
 
-// sortChunksByIngestStart sorts chunks by IngestStart in ascending or descending order.
-func sortChunksByIngestStart(out []chunk.ChunkMeta, reverse bool) {
+// sortChunks sorts chunks by the appropriate timestamp bounds based on OrderBy.
+func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
+	startTS := func(m chunk.ChunkMeta) time.Time {
+		switch orderBy {
+		case OrderByIngestTS:
+			return m.IngestStart
+		case OrderBySourceTS:
+			return m.SourceStart
+		case OrderByWriteTS:
+			return m.WriteStart
+		}
+		return m.IngestStart
+	}
 	if reverse {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return b.IngestStart.Compare(a.IngestStart) // descending
+			return startTS(b).Compare(startTS(a)) // descending
 		})
 	} else {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return a.IngestStart.Compare(b.IngestStart) // ascending
+			return startTS(a).Compare(startTS(b)) // ascending
 		})
 	}
 }
@@ -495,6 +546,10 @@ func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, st
 // buildScannerWithManagers creates a scanner for a chunk using the composable filter pipeline.
 // It tries to use indexes when available, falling back to runtime filters when not.
 // vaultID is included in the returned recordWithRef for multi-vault queries.
+//
+// When OrderBy != OrderByWriteTS, sealed chunks use TS-index-ordered scanning:
+// the TS index is walked in timestamp order, producing positions in TS order
+// rather than physical order. For active chunks, results are buffered and sorted.
 func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
@@ -530,6 +585,11 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
 
+	// TS-ordered scanning: when OrderBy is not WriteTS, we need to reorder results.
+	if q.OrderBy != OrderByWriteTS {
+		return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, im)
+	}
+
 	// IngestTS filtering is handled by the scanner's built-in time bounds check
 	// (Start/End are IngestTS bounds), so no separate ingestTimeFilter is needed.
 
@@ -541,6 +601,113 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 	}
 
 	return b.build(ctx, cursor, q), nil
+}
+
+// buildTSOrderedScanner creates a scanner that yields records in TS-index order.
+// For sealed chunks with a TS index, it walks the index to produce positions in
+// timestamp order. For active chunks (or when the index is unavailable), it falls
+// back to buffering and sorting.
+func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+	if meta.Sealed {
+		// Try to load the TS index for this ordering.
+		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
+		if err == nil {
+			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
+		}
+		// Fall through to buffer-and-sort if index unavailable.
+	}
+
+	// Active chunk or index unavailable: build normal scanner then buffer & sort.
+	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
+		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: b.minPos}); err != nil {
+			return nil, err
+		}
+	}
+	inner := b.build(ctx, cursor, q)
+	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
+}
+
+// loadTSEntries loads the appropriate TS index entries based on OrderBy.
+func loadTSEntries(im index.IndexManager, chunkID chunk.ChunkID, orderBy OrderBy) ([]index.TSEntry, error) {
+	switch orderBy {
+	case OrderByIngestTS:
+		return im.LoadIngestEntries(chunkID)
+	case OrderBySourceTS:
+		return im.LoadSourceEntries(chunkID)
+	case OrderByWriteTS:
+		// WriteTS uses physical order, no TS index needed.
+		return nil, index.ErrIndexNotFound
+	}
+	return im.LoadIngestEntries(chunkID)
+}
+
+// buildTSIndexScanner creates a position scanner from TS-index-ordered entries.
+// It prunes entries by time bounds, intersects with any existing index positions
+// (using a set to preserve TS order), and builds a position scanner with time
+// bounds checking disabled (pruning already handled).
+func buildTSIndexScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, tsEntries []index.TSEntry) (iter.Seq2[recordWithRef, error], error) {
+	// Prune by time bounds (entries are sorted by TS, use binary search).
+	tsEntries = pruneTSEntriesByBounds(tsEntries, q)
+
+	if len(tsEntries) == 0 {
+		return emptyScanner(), nil
+	}
+
+	// If we have index-narrowed positions from token/KV lookups, intersect
+	// using a set (not sorted merge) to preserve TS order.
+	var tsPositions []uint64
+	if b.positions != nil {
+		posSet := make(map[uint64]struct{}, len(b.positions))
+		for _, p := range b.positions {
+			posSet[p] = struct{}{}
+		}
+		for _, e := range tsEntries {
+			if _, ok := posSet[uint64(e.Pos)]; ok {
+				tsPositions = append(tsPositions, uint64(e.Pos))
+			}
+		}
+	} else {
+		tsPositions = make([]uint64, len(tsEntries))
+		for i, e := range tsEntries {
+			tsPositions[i] = uint64(e.Pos)
+		}
+	}
+
+	if len(tsPositions) == 0 {
+		return emptyScanner(), nil
+	}
+
+	// Replace positions with TS-ordered ones and disable time bounds checking
+	// (already handled by pruneTSEntriesByBounds).
+	b.positions = tsPositions
+	b.skipTimeBounds = true
+	return b.build(ctx, cursor, q), nil
+}
+
+// pruneTSEntriesByBounds filters TS index entries to those within the query time bounds.
+// The entries are sorted by TS, so we use binary search for lower and upper bounds.
+func pruneTSEntriesByBounds(entries []index.TSEntry, q Query) []index.TSEntry {
+	lower, upper := q.TimeBounds()
+
+	// Binary search for lower bound.
+	if !lower.IsZero() {
+		lowerNano := lower.UnixNano()
+		lo := sort.Search(len(entries), func(i int) bool {
+			return entries[i].TS >= lowerNano
+		})
+		entries = entries[lo:]
+	}
+
+	// Binary search for upper bound (exclusive).
+	if !upper.IsZero() {
+		upperNano := upper.UnixNano()
+		hi := sort.Search(len(entries), func(i int) bool {
+			return entries[i].TS >= upperNano
+		})
+		entries = entries[:hi]
+	}
+
+	return entries
 }
 
 // setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds

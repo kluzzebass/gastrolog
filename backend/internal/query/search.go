@@ -178,14 +178,9 @@ func buildResumePositionMap(resume *ResumeToken) map[uuid.UUID]map[chunk.ChunkID
 	return m
 }
 
-// newMergeHeap creates a heap.Interface appropriate for the query direction.
-func newMergeHeap(reverse bool, capacity int) heap.Interface {
-	if reverse {
-		rh := make(mergeHeapReverse, 0, capacity)
-		return &rh
-	}
-	fh := make(mergeHeap, 0, capacity)
-	return &fh
+// newMergeHeap creates a heap.Interface appropriate for the query direction and ordering.
+func newMergeHeap(q Query, capacity int) heap.Interface {
+	return newTSHeap(q.OrderBy, q.Reverse(), capacity)
 }
 
 // lookupResumePosition returns the resume start position for a chunk, if any.
@@ -469,7 +464,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		resumePositions := buildResumePositionMap(resume)
 
 		ms := &mergeState{
-			h:              newMergeHeap(q.Reverse(), len(allChunks)),
+			h:              newMergeHeap(q, len(allChunks)),
 			chunkPositions: make(map[mergeKey]uint64),
 			lastRefs:       &lastRefs,
 		}
@@ -547,7 +542,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		followQuery.BoolExpr = nil
 
 		ms := &mergeState{
-			h:              newMergeHeap(q.Reverse(), len(allChunks)),
+			h:              newMergeHeap(q, len(allChunks)),
 			chunkPositions: make(map[mergeKey]uint64),
 			lastRefs:       &lastRefs,
 		}

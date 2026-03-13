@@ -55,6 +55,12 @@ func RecordToRow(rec chunk.Record) querylang.Row {
 		row["ingester_id"] = rec.EventID.IngesterID.String()
 	}
 	row["ingest_seq"] = strconv.FormatUint(uint64(rec.EventID.IngestSeq), 10)
+	// Expose all timestamp fields for pipeline operators (sort, project).
+	row["ingest_ts"] = rec.IngestTS.Format(time.RFC3339Nano)
+	row["write_ts"] = rec.WriteTS.Format(time.RFC3339Nano)
+	if !rec.SourceTS.IsZero() {
+		row["source_ts"] = rec.SourceTS.Format(time.RFC3339Nano)
+	}
 	return row
 }
 

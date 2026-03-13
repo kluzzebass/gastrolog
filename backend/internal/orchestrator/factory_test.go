@@ -91,6 +91,12 @@ func (f *fakeIndexManager) OpenJSONPathIndex(chunkID chunk.ChunkID) (*index.Inde
 func (f *fakeIndexManager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSONPVIndexEntry], index.JSONIndexStatus, error) {
 	return nil, index.JSONComplete, nil
 }
+func (f *fakeIndexManager) LoadIngestEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
+	return nil, index.ErrIndexNotFound
+}
+func (f *fakeIndexManager) LoadSourceEntries(chunkID chunk.ChunkID) ([]index.TSEntry, error) {
+	return nil, index.ErrIndexNotFound
+}
 func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }
