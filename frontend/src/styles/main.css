@@ -15,6 +15,7 @@
   --color-copper-dim: #a06b44;
   --color-copper-glow: #d4a070;
   --color-amber: #e8b84d;
+  --color-text-on-copper: #0d0f12;
 
   /* Text hierarchy */
   --color-text-bright: #e8e4df;
@@ -72,6 +73,7 @@
   --color-copper-dim: #81a1c1;
   --color-copper-glow: #8fbcbb;
   --color-amber: #ebcb8b;
+  --color-text-on-copper: #2e3440;
 
   --color-text-bright: #eceff4;
   --color-text-normal: #d8dee9;
@@ -117,6 +119,7 @@
   --color-copper-dim: #2176b8;
   --color-copper-glow: #2e96e6;
   --color-amber: #b58900;
+  --color-text-on-copper: #002b36;
 
   --color-text-bright: #fdf6e3;
   --color-text-normal: #eee8d5;
@@ -162,6 +165,7 @@
   --color-copper-dim: #9d79d9;
   --color-copper-glow: #caa4fa;
   --color-amber: #f1fa8c;
+  --color-text-on-copper: #282a36;
 
   --color-text-bright: #f8f8f2;
   --color-text-normal: #d4d4cc;
@@ -207,6 +211,7 @@
   --color-copper-dim: #b08be0;
   --color-copper-glow: #d4b8fa;
   --color-amber: #f9e2af;
+  --color-text-on-copper: #1e1e2e;
 
   --color-text-bright: #cdd6f4;
   --color-text-normal: #bac2de;
@@ -252,6 +257,7 @@
   --color-copper-dim: #d65d0e;
   --color-copper-glow: #fabd2f;
   --color-amber: #fabd2f;
+  --color-text-on-copper: #282828;
 
   --color-text-bright: #ebdbb2;
   --color-text-normal: #d5c4a1;
@@ -297,6 +303,7 @@
   --color-copper-dim: #6183d4;
   --color-copper-glow: #89b4fa;
   --color-amber: #e0af68;
+  --color-text-on-copper: #1a1b26;
 
   --color-text-bright: #c0caf5;
   --color-text-normal: #a9b1d6;
@@ -342,6 +349,7 @@
   --color-copper-dim: #d0a09e;
   --color-copper-glow: #f0ccc8;
   --color-amber: #f6c177;
+  --color-text-on-copper: #191724;
 
   --color-text-bright: #e0def4;
   --color-text-normal: #c4c0d8;
@@ -387,6 +395,7 @@
   --color-copper-dim: #8da76a;
   --color-copper-glow: #b5cc90;
   --color-amber: #dbbc7f;
+  --color-text-on-copper: #2d353b;
 
   --color-text-bright: #d3c6aa;
   --color-text-normal: #c0b48e;
@@ -432,6 +441,7 @@
   --color-copper-dim: #d01070;
   --color-copper-glow: #ff6eaa;
   --color-amber: #fee440;
+  --color-text-on-copper: #1a1028;
 
   --color-text-bright: #edf0ff;
   --color-text-normal: #c8cce8;
@@ -617,12 +627,12 @@ body {
   height: auto;
   padding: 8px 16px;
   background: var(--color-copper);
-  color: #fff;
+  color: var(--color-text-on-copper);
   border-radius: 4px;
   font-size: 0.875rem;
   font-weight: 500;
   text-decoration: none;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--color-ink) 30%, transparent);
 }
 
 /* Global focus indicator for keyboard navigation */

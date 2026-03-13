@@ -23,7 +23,7 @@ export function SystemStatsView({
   }
   return (
     <div className={`text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
-      Waiting for data...
+      Waiting for node stats...
     </div>
   );
 }

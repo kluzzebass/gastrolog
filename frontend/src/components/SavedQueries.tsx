@@ -67,6 +67,7 @@ export function SavedQueries({
               }
             }}
             placeholder="Query name..."
+            aria-label="Query name"
             className={`flex-1 px-2 py-1 text-[0.8em] border rounded focus:outline-none transition-colors ${c(
               "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
               "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
@@ -75,7 +76,7 @@ export function SavedQueries({
           <button
             onClick={handleSave}
             disabled={!saveName.trim()}
-            className="px-2.5 py-1 text-[0.8em] rounded bg-copper text-white hover:bg-copper-glow transition-colors disabled:opacity-40"
+            className="px-2.5 py-1 text-[0.8em] rounded bg-copper text-text-on-copper hover:bg-copper-glow transition-colors disabled:opacity-40"
           >
             Save
           </button>

@@ -2,7 +2,7 @@ import { useState, useRef } from "react";
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./echartsSetup";
 import { buildThemeOption } from "./echartsTheme";
-import { getColorForCategory, resolveColor, formatChartValue } from "./chartColors";
+import { getColorForCategory, resolveColor, formatChartValue, cssVar } from "./chartColors";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { EChartsOption } from "echarts";
 
@@ -35,8 +35,8 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
   });
 
   const total = data.reduce((sum, d) => sum + d.value, 0);
-  const textGhost = dark ? "rgba(255,255,255,0.35)" : "rgba(0,0,0,0.35)";
-  const textBright = dark ? "#e5e5e5" : "#1a1a1a";
+  const textGhost = dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost");
+  const textBright = dark ? cssVar("--color-text-bright") : cssVar("--color-light-text-bright");
 
   const option: EChartsOption = {
     ...theme,

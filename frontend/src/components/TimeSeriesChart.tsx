@@ -1,7 +1,7 @@
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { buildThemeOption } from "./charts/echartsTheme";
-import { SERIES_COLORS, resolveColor, formatChartValue } from "./charts/chartColors";
+import { SERIES_COLORS, resolveColor, formatChartValue, cssVar } from "./charts/chartColors";
 import { formatTimeOnly } from "../utils/temporal";
 import type { EChartsOption } from "echarts";
 
@@ -121,7 +121,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
       trigger: "axis",
       axisPointer: {
         type: "cross",
-        crossStyle: { color: dark ? "rgba(255,255,255,0.3)" : "rgba(0,0,0,0.2)" },
+        crossStyle: { color: dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost") },
       },
       formatter: (params: any) => {
         const items = Array.isArray(params) ? params : [params];
@@ -140,7 +140,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
       textStyle: {
         fontFamily: "'IBM Plex Mono', monospace",
         fontSize: 10,
-        color: dark ? "rgba(255,255,255,0.5)" : "rgba(0,0,0,0.5)",
+        color: dark ? cssVar("--color-text-muted") : cssVar("--color-light-text-muted"),
       },
       icon: "roundRect",
       itemWidth: 10,

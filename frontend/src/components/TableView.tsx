@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 interface TableViewProps {
@@ -24,17 +24,15 @@ export function TableView({ columns, rows, dark }: Readonly<TableViewProps>) {
   };
 
   // Detect numeric columns: all non-empty values parse as numbers.
-  const isNumeric = useMemo(() => {
-    return columns.map((_, colIdx) =>
-      rows.length > 0 &&
-      rows.every((row) => {
-        const v = row[colIdx];
-        return v === undefined || v === "" || !isNaN(Number(v));
-      }),
-    );
-  }, [columns, rows]);
+  const isNumeric = columns.map((_, colIdx) =>
+    rows.length > 0 &&
+    rows.every((row) => {
+      const v = row[colIdx];
+      return v === undefined || v === "" || !isNaN(Number(v));
+    }),
+  );
 
-  const sortedRows = useMemo(() => {
+  const sortedRows = (() => {
     if (sortCol === null) return rows;
     const col = sortCol;
     const dir = sortDir === "asc" ? 1 : -1;
@@ -47,7 +45,7 @@ export function TableView({ columns, rows, dark }: Readonly<TableViewProps>) {
       }
       return va.localeCompare(vb) * dir;
     });
-  }, [rows, sortCol, sortDir, isNumeric]);
+  })();
 
   return (
     <div className="overflow-auto app-scroll">
@@ -58,6 +56,7 @@ export function TableView({ columns, rows, dark }: Readonly<TableViewProps>) {
               <th
                 key={col}
                 onClick={() => handleSort(i)}
+                aria-sort={sortCol === i ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                 className={`text-left px-3 py-2 cursor-pointer select-none border-b whitespace-nowrap ${c(
                   "border-ink-border-subtle text-text-muted hover:text-copper",
                   "border-light-border-subtle text-light-text-muted hover:text-copper",
@@ -65,7 +64,7 @@ export function TableView({ columns, rows, dark }: Readonly<TableViewProps>) {
               >
                 {col}
                 {sortCol === i && (
-                  <span className="ml-1 text-copper">
+                  <span className="ml-1 text-copper" aria-hidden="true">
                     {sortDir === "asc" ? "\u25B4" : "\u25BE"}
                   </span>
                 )}

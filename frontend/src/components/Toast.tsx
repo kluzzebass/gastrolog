@@ -123,7 +123,7 @@ function ToastOverlay({
   if (toasts.length === 0) return null;
 
   return (
-    <div role="status" aria-live="polite" className="fixed bottom-4 right-4 z-100 flex flex-col-reverse gap-2 max-w-sm">
+    <div role="status" aria-live="polite" className="fixed bottom-4 right-4 left-4 sm:left-auto z-100 flex flex-col-reverse gap-2 max-w-sm">
       {toasts.map((toast) => (
         <ToastItem key={toast.id} toast={toast} onDismiss={onDismiss} dark={dark} />
       ))}
@@ -157,7 +157,7 @@ function ToastItem({
 
   return (
     <div
-      className={`flex items-start gap-2 px-3 py-2.5 rounded border-l-3 shadow-lg ${c(
+      className={`flex items-start gap-2 px-3 py-2.5 rounded border-l-3 shadow-md ${c(
         "bg-ink-raised text-text-bright",
         "bg-light-raised text-light-text-bright",
       )} text-[0.85em] transition-all duration-200 ${accent} ${

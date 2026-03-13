@@ -24,7 +24,7 @@ export function Checkbox({ checked, onChange, label, helpTopicId, dark }: Readon
         type="button"
         className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors ${
           checked
-            ? "bg-copper border-copper text-white"
+            ? "bg-copper border-copper text-text-on-copper"
             : c(
                 "border-ink-border bg-ink-well",
                 "border-light-border bg-light-well",

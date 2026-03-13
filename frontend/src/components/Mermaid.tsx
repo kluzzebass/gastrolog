@@ -12,55 +12,83 @@ async function getMermaid() {
   return mermaidModule;
 }
 
-const darkVars = {
-  background: "#141820",
-  primaryColor: "#1a1f2a",
-  primaryBorderColor: "#a06b44",
-  primaryTextColor: "#e8e4df",
-  secondaryColor: "#1f2536",
-  secondaryBorderColor: "#2a3040",
-  secondaryTextColor: "#b8b2aa",
-  tertiaryColor: "#222838",
-  tertiaryBorderColor: "#2a3040",
-  tertiaryTextColor: "#b8b2aa",
-  lineColor: "#a06b44",
-  textColor: "#b8b2aa",
-  mainBkg: "#1a1f2a",
-  nodeBorder: "#a06b44",
-  clusterBkg: "#141820",
-  clusterBorder: "#2a3040",
-  titleColor: "#e8e4df",
-  edgeLabelBackground: "#141820",
-  nodeTextColor: "#e8e4df",
-};
+/** Resolve a CSS variable to its computed value. */
+function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
 
-const lightVars = {
-  background: "#faf8f4",
-  primaryColor: "#ffffff",
-  primaryBorderColor: "#a06b44",
-  primaryTextColor: "#1a1610",
-  secondaryColor: "#ede8e0",
-  secondaryBorderColor: "#d8d0c4",
-  secondaryTextColor: "#3a3630",
-  tertiaryColor: "#f4f0ea",
-  tertiaryBorderColor: "#d8d0c4",
-  tertiaryTextColor: "#3a3630",
-  lineColor: "#a06b44",
-  textColor: "#3a3630",
-  mainBkg: "#ffffff",
-  nodeBorder: "#a06b44",
-  clusterBkg: "#faf8f4",
-  clusterBorder: "#d8d0c4",
-  titleColor: "#1a1610",
-  edgeLabelBackground: "#faf8f4",
-  nodeTextColor: "#1a1610",
-};
+/**
+ * Build Mermaid theme variables from CSS design tokens so diagrams adapt
+ * to whichever palette is active (Observatory, Nord, Solarized, etc.).
+ */
+function buildMermaidVars(dark: boolean) {
+  if (dark) {
+    const raised = cssVar("--color-ink-raised");
+    const surface = cssVar("--color-ink-surface");
+    const hover = cssVar("--color-ink-hover");
+    const border = cssVar("--color-ink-border");
+    const borderSubtle = cssVar("--color-ink-border-subtle");
+    const copperDim = cssVar("--color-copper-dim");
+    const textBright = cssVar("--color-text-bright");
+    const textNormal = cssVar("--color-text-normal");
+    return {
+      background: raised,
+      primaryColor: surface,
+      primaryBorderColor: copperDim,
+      primaryTextColor: textBright,
+      secondaryColor: hover,
+      secondaryBorderColor: border,
+      secondaryTextColor: textNormal,
+      tertiaryColor: borderSubtle,
+      tertiaryBorderColor: border,
+      tertiaryTextColor: textNormal,
+      lineColor: copperDim,
+      textColor: textNormal,
+      mainBkg: surface,
+      nodeBorder: copperDim,
+      clusterBkg: raised,
+      clusterBorder: border,
+      titleColor: textBright,
+      edgeLabelBackground: raised,
+      nodeTextColor: textBright,
+    };
+  }
+  const raised = cssVar("--color-light-raised");
+  const surface = cssVar("--color-light-surface");
+  const hover = cssVar("--color-light-hover");
+  const border = cssVar("--color-light-border");
+  const borderSubtle = cssVar("--color-light-border-subtle");
+  const copperDim = cssVar("--color-copper-dim");
+  const textBright = cssVar("--color-light-text-bright");
+  const textNormal = cssVar("--color-light-text-normal");
+  return {
+    background: raised,
+    primaryColor: surface,
+    primaryBorderColor: copperDim,
+    primaryTextColor: textBright,
+    secondaryColor: hover,
+    secondaryBorderColor: border,
+    secondaryTextColor: textNormal,
+    tertiaryColor: borderSubtle,
+    tertiaryBorderColor: border,
+    tertiaryTextColor: textNormal,
+    lineColor: copperDim,
+    textColor: textNormal,
+    mainBkg: surface,
+    nodeBorder: copperDim,
+    clusterBkg: raised,
+    clusterBorder: border,
+    titleColor: textBright,
+    edgeLabelBackground: raised,
+    nodeTextColor: textBright,
+  };
+}
 
 function initMermaid(m: typeof mermaidAPI, dark: boolean) {
   m.initialize({
     startOnLoad: false,
     theme: "base",
-    themeVariables: dark ? darkVars : lightVars,
+    themeVariables: buildMermaidVars(dark),
     fontFamily: '"Libre Franklin", sans-serif',
   });
 }

@@ -178,9 +178,9 @@ export function QueryBar({
       setShowHistory(false);
       setShowSavedQueries(false);
     };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("mouseup", onUp);
-    document.addEventListener("click", onClick);
+    document.addEventListener("mousedown", onDown, { passive: true });
+    document.addEventListener("mouseup", onUp, { passive: true });
+    document.addEventListener("click", onClick, { passive: true });
     return () => {
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("mouseup", onUp);
@@ -504,7 +504,7 @@ function QueryActionButtons({
           disabled={draftHasErrors}
           aria-label="Search"
           title="Search"
-          className="px-2 py-2.5 rounded border border-transparent bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-2 py-2.5 rounded border border-transparent bg-copper text-text-on-copper hover:bg-copper-glow transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <SearchIcon className="w-4.5 h-4.5" />
         </button>

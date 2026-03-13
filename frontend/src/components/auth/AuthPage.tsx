@@ -142,7 +142,7 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
 
   return (
     <div
-      className={`grain h-full flex items-center justify-center px-4 ${c("bg-ink", "bg-light-bg")}`}
+      className={`grain h-full min-h-svh flex items-center justify-center px-4 ${c("bg-ink", "bg-light-bg")}`}
     >
       <div className="w-full max-w-sm stagger-children">
         {/* Branding */}
@@ -233,7 +233,7 @@ export function AuthPage({ mode }: Readonly<AuthPageProps>) {
               isPending
                 ? "opacity-60 cursor-not-allowed"
                 : "hover:brightness-110 active:scale-[0.98]"
-            } ${c("bg-copper text-ink", "bg-copper text-white")}`}
+            } bg-copper text-text-on-copper`}
           >
             {isPending && <SpinnerIcon className="animate-spin h-4 w-4" />}
             {isRegister ? "Create Account" : "Sign In"}

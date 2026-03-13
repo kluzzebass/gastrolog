@@ -233,7 +233,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             monoTitle={false}
             typeBadge={noAuth ? "disabled" : undefined}
           >
-            <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <FormField
                 label="Token Duration"
                 description="How long access tokens remain valid. Short-lived tokens are more secure when paired with refresh tokens."
@@ -322,7 +322,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             monoTitle={false}
             typeBadge={noAuth ? "disabled" : undefined}
           >
-            <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50 pointer-events-none" : ""}`}>
+            <div className={`flex flex-col gap-4 ${noAuth ? "opacity-50" : ""}`} aria-disabled={noAuth || undefined}>
               <div className="flex items-baseline gap-4">
                 <FormField
                   label="Minimum length"

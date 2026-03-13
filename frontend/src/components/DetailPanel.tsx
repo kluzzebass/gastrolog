@@ -33,7 +33,7 @@ interface DetailStyles {
 
 function buildStyles(c: ReturnType<typeof useThemeClass>): DetailStyles {
   const headerCls = `pt-4 pb-1.5 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`;
-  const keyCls = `py-1 pr-2 w-[1%] text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-ghost", "text-light-text-ghost")}`;
+  const keyCls = `py-1 pr-2 w-0 text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-ghost", "text-light-text-ghost")}`;
   const borderCls = `border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`;
   const valCls = `py-1 text-[0.8em] font-mono align-top ${borderCls}`;
   return { headerCls, keyCls, borderCls, valCls, c };

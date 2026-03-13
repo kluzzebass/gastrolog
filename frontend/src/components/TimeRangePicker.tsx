@@ -134,7 +134,7 @@ export function TimeRangePicker({
             onClick={() => onPresetClick(range)}
             className={`px-2 py-0.5 text-[0.75em] font-mono rounded transition-all duration-150 ${
               activePreset === range
-                ? c("bg-copper text-ink", "bg-copper text-white")
+                ? "bg-copper text-text-on-copper"
                 : c(
                     "text-text-muted hover:text-text-normal hover:bg-ink-hover",
                     "text-light-text-muted hover:text-light-text-normal hover:bg-light-hover",
@@ -167,6 +167,7 @@ export function TimeRangePicker({
               if (v.length <= 5) dispatch({ type: "setStartTime", value: v });
             }}
             placeholder="HH:mm"
+            aria-label="Start time"
             className={`text-[0.75em] font-mono w-14 px-1 py-0.5 rounded border text-center ${c(
               "bg-ink-surface border-ink-border text-text-normal",
               "bg-light-surface border-light-border text-light-text-normal",
@@ -192,6 +193,7 @@ export function TimeRangePicker({
               if (v.length <= 5) dispatch({ type: "setEndTime", value: v });
             }}
             placeholder="HH:mm"
+            aria-label="End time"
             className={`text-[0.75em] font-mono w-14 px-1 py-0.5 rounded border text-center ${c(
               "bg-ink-surface border-ink-border text-text-normal",
               "bg-light-surface border-light-border text-light-text-normal",
@@ -204,6 +206,7 @@ export function TimeRangePicker({
       <div className="flex items-center justify-between">
         <button
           onClick={() => dispatch({ type: "prevMonth" })}
+          aria-label="Previous month"
           className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
         >
           {"\u25C2"}
@@ -215,6 +218,7 @@ export function TimeRangePicker({
         </span>
         <button
           onClick={() => dispatch({ type: "nextMonth" })}
+          aria-label="Next month"
           className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
         >
           {"\u25B8"}
@@ -250,7 +254,7 @@ export function TimeRangePicker({
 
             let dayCls: string;
             if (selected) {
-              dayCls = "bg-copper text-white";
+              dayCls = "bg-copper text-text-on-copper";
             } else if (inRange) {
               dayCls = c("bg-copper/10 text-text-normal", "bg-copper/10 text-light-text-normal");
             } else if (inMonth) {
@@ -277,7 +281,7 @@ export function TimeRangePicker({
       <button
         onClick={handleApply}
         disabled={!s.pendingStart || !s.pendingEnd}
-        className="w-full py-1 text-[0.8em] font-medium rounded bg-copper text-white hover:bg-copper-glow transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
+        className="w-full py-1 text-[0.8em] font-medium rounded bg-copper text-text-on-copper hover:bg-copper-glow transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed"
       >
         Apply
       </button>

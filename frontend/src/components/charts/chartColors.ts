@@ -27,6 +27,11 @@ export function getColorForCategory(name: string, index: number): string {
   return GROUP_PALETTE[index % GROUP_PALETTE.length]!;
 }
 
+/** Resolve a CSS variable to its computed value. */
+export function cssVar(name: string): string {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
 /**
  * Resolve a CSS color value for use in canvas contexts (e.g. ECharts).
  * CSS `var()` references are computed via getComputedStyle; other values pass through.
