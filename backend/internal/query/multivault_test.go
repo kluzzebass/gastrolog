@@ -174,12 +174,11 @@ func TestRunPipelineIgnoresIncomingLimit(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
-	// Insert 50 records spread over 50 minutes using AppendPreserved
-	// so WriteTS is respected by the chunk manager.
+	// Insert 50 records spread over 50 minutes.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 50 {
 		ts := t0.Add(time.Duration(i) * time.Minute)
-		s.CM.AppendPreserved(chunk.Record{
+		s.CM.Append(chunk.Record{
 			WriteTS:  ts,
 			IngestTS: ts,
 			Attrs:    chunk.Attributes{"level": "info"},
@@ -367,7 +366,7 @@ func TestRunPipelineOnRecords(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 20 {
 		ts := t0.Add(time.Duration(i) * time.Minute)
-		s.CM.AppendPreserved(chunk.Record{
+		s.CM.Append(chunk.Record{
 			WriteTS:  ts,
 			IngestTS: ts,
 			Raw:      fmt.Appendf(nil, "local-%d", i),

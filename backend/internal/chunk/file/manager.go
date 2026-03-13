@@ -229,17 +229,6 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
-	return m.doAppend(record, false)
-}
-
-func (m *Manager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, error) {
-	if record.WriteTS.IsZero() {
-		return chunk.ChunkID{}, 0, chunk.ErrMissingWriteTS
-	}
-	return m.doAppend(record, true)
-}
-
-func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.ChunkID, uint64, error) {
 	// ── Phase 1: lock → encode, reserve space ──
 	m.mu.Lock()
 
@@ -267,9 +256,7 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 		return chunk.ChunkID{}, 0, err
 	}
 
-	if !preserveWriteTS {
-		record.WriteTS = m.cfg.Now()
-	}
+	record.WriteTS = m.cfg.Now()
 
 	// Dict writes stay under lock (small, needs shared dict state).
 	if err := m.writeDictEntries(newKeys); err != nil {
@@ -1351,19 +1338,18 @@ func (m *Manager) openImportFiles(id chunk.ChunkID, createdAt time.Time) (*impor
 
 // importState tracks per-record offsets during ImportRecords.
 type importState struct {
-	files     *importFiles
-	dict      *chunk.StringDict
-	meta      *chunkMeta
-	rawOffset uint64
+	files      *importFiles
+	dict       *chunk.StringDict
+	meta       *chunkMeta
+	now        func() time.Time
+	rawOffset  uint64
 	attrOffset uint64
-	count     int64
+	count      int64
 }
 
 // writeRecord writes a single record to the import files and updates offsets/metadata.
 func (s *importState) writeRecord(rec chunk.Record) error {
-	if rec.WriteTS.IsZero() {
-		return chunk.ErrMissingWriteTS
-	}
+	rec.WriteTS = s.now()
 
 	attrBytes, newKeys, err := chunk.EncodeWithDict(rec.Attrs, s.dict)
 	if err != nil {
@@ -1439,6 +1425,7 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		files: files,
 		dict:  chunk.NewStringDict(),
 		meta:  &chunkMeta{id: id},
+		now:   m.cfg.Now,
 	}
 
 	for {

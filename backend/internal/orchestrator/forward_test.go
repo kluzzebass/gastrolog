@@ -268,9 +268,6 @@ type noopChunkManager struct{}
 func (n *noopChunkManager) Append(chunk.Record) (chunk.ChunkID, uint64, error) {
 	return chunk.ChunkID{}, 0, nil
 }
-func (n *noopChunkManager) AppendPreserved(chunk.Record) (chunk.ChunkID, uint64, error) {
-	return chunk.ChunkID{}, 0, nil
-}
 func (n *noopChunkManager) Seal() error                                                        { return nil }
 func (n *noopChunkManager) Active() *chunk.ChunkMeta                                           { return &chunk.ChunkMeta{} }
 func (n *noopChunkManager) Meta(chunk.ChunkID) (chunk.ChunkMeta, error)                        { return chunk.ChunkMeta{}, nil }

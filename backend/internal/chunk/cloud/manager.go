@@ -147,9 +147,6 @@ func (m *Manager) Append(_ chunk.Record) (chunk.ChunkID, uint64, error) {
 	return chunk.ChunkID{}, 0, ErrSealedOnly
 }
 
-func (m *Manager) AppendPreserved(_ chunk.Record) (chunk.ChunkID, uint64, error) {
-	return chunk.ChunkID{}, 0, ErrSealedOnly
-}
 
 func (m *Manager) Seal() error { return nil }
 
@@ -314,6 +311,7 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		if err != nil {
 			return chunk.ChunkMeta{}, fmt.Errorf("read record: %w", err)
 		}
+		rec.WriteTS = time.Now()
 		if err := w.Add(rec); err != nil {
 			return chunk.ChunkMeta{}, fmt.Errorf("add record: %w", err)
 		}

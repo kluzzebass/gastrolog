@@ -407,7 +407,7 @@ func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID uuid.UUID, 
 			}
 
 			rec = rec.Copy()
-			if _, _, appendErr := dstCM.AppendPreserved(rec); appendErr != nil {
+			if _, _, appendErr := dstCM.Append(rec); appendErr != nil {
 				_ = cursor.Close()
 				return fmt.Errorf("append record: %w", appendErr)
 			}

@@ -118,9 +118,7 @@ func chunkRecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 	if !rec.IngestTS.IsZero() {
 		er.IngestTs = timestamppb.New(rec.IngestTS)
 	}
-	if !rec.WriteTS.IsZero() {
-		er.WriteTs = timestamppb.New(rec.WriteTS)
-	}
+	// WriteTS is not sent — the destination re-stamps at import time.
 	if len(rec.Attrs) > 0 {
 		er.Attrs = make(map[string]string, len(rec.Attrs))
 		maps.Copy(er.Attrs, rec.Attrs)

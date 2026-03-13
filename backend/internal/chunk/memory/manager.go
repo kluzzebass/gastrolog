@@ -72,17 +72,6 @@ func NewManager(cfg Config) (*Manager, error) {
 }
 
 func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
-	return m.doAppend(record, false)
-}
-
-func (m *Manager) AppendPreserved(record chunk.Record) (chunk.ChunkID, uint64, error) {
-	if record.WriteTS.IsZero() {
-		return chunk.ChunkID{}, 0, chunk.ErrMissingWriteTS
-	}
-	return m.doAppend(record, true)
-}
-
-func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.ChunkID, uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -111,11 +100,9 @@ func (m *Manager) doAppend(record chunk.Record, preserveWriteTS bool) (chunk.Chu
 		}
 	}
 
-	if !preserveWriteTS {
-		// WriteTS is assigned by the chunk manager, not the caller.
-		// Monotonic by construction since writes are mutex-serialized.
-		record.WriteTS = m.cfg.Now()
-	}
+	// WriteTS is always assigned by the chunk manager (chunk-local).
+	// Monotonic by construction since writes are mutex-serialized.
+	record.WriteTS = m.cfg.Now()
 
 	offset := uint64(len(m.active.records))
 	m.active.records = append(m.active.records, record)
@@ -441,9 +428,7 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 			return chunk.ChunkMeta{}, iterErr
 		}
 
-		if rec.WriteTS.IsZero() {
-			return chunk.ChunkMeta{}, chunk.ErrMissingWriteTS
-		}
+		rec.WriteTS = m.cfg.Now()
 		state.records = append(state.records, rec)
 
 		recBytes := int64(len(rec.Raw))

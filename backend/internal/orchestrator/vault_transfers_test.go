@@ -319,7 +319,7 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 func TestMoveChunkLocalImportFallback(t *testing.T) {
 	t.Parallel()
 	// When both source and dest are memory vaults (no ChunkMover),
-	// MoveChunk should use ImportRecords (not AppendPreserved into active).
+	// MoveChunk should use ImportRecords.
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 
@@ -464,20 +464,6 @@ func TestImportRecordsFile(t *testing.T) {
 	}
 	if count != 5 {
 		t.Errorf("cursor returned %d records, want 5", count)
-	}
-}
-
-func TestImportRecordsZeroWriteTS(t *testing.T) {
-	t.Parallel()
-	cm := newMemVault(t)
-
-	records := []chunk.Record{
-		{Raw: []byte("test")}, // WriteTS is zero
-	}
-
-	_, err := cm.ImportRecords(sliceIterator(records))
-	if !errors.Is(err, chunk.ErrMissingWriteTS) {
-		t.Errorf("expected ErrMissingWriteTS, got: %v", err)
 	}
 }
 

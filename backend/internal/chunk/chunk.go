@@ -15,7 +15,6 @@ var (
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
-	ErrMissingWriteTS = errors.New("append preserved requires non-zero WriteTS")
 )
 
 // ManagerFactory creates a ChunkManager from configuration parameters.
@@ -30,13 +29,6 @@ type ManagerFactory func(params map[string]string, logger *slog.Logger) (ChunkMa
 // to chunk metadata and cursors.
 type ChunkManager interface {
 	Append(record Record) (ChunkID, uint64, error)
-
-	// AppendPreserved appends a record using its existing WriteTS instead of
-	// assigning a new one. The record's WriteTS must be non-zero.
-	// Used by merge/clone operations to preserve original timestamps.
-	// The caller is responsible for ensuring WriteTS monotonicity within a chunk
-	// (i.e. each call's WriteTS must be >= the previous call's WriteTS).
-	AppendPreserved(record Record) (ChunkID, uint64, error)
 
 	Seal() error
 	Active() *ChunkMeta
@@ -75,9 +67,9 @@ type ChunkManager interface {
 	CheckRotation() *string
 
 	// ImportRecords creates a new sealed chunk by consuming records from the
-	// iterator, preserving each record's WriteTS. All records must have non-zero
-	// WriteTS values with monotonically non-decreasing order. The new chunk is
-	// independent of the active chunk; concurrent Append calls are not affected.
+	// iterator, re-stamping each record's WriteTS with a fresh monotonic
+	// timestamp. The new chunk is independent of the active chunk; concurrent
+	// Append calls are not affected.
 	// Returns the metadata of the newly created sealed chunk.
 	ImportRecords(next RecordIterator) (ChunkMeta, error)
 

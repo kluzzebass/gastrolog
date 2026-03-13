@@ -208,9 +208,7 @@ func exportRecordToChunk(er *gastrologv1.ExportRecord) chunk.Record {
 	if er.GetIngestTs() != nil {
 		rec.IngestTS = er.GetIngestTs().AsTime()
 	}
-	if er.GetWriteTs() != nil {
-		rec.WriteTS = er.GetWriteTs().AsTime()
-	}
+	// WriteTS is not read — the destination re-stamps at import time.
 	if len(er.GetAttrs()) > 0 {
 		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
 		maps.Copy(rec.Attrs, er.GetAttrs())
