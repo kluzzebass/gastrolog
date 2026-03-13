@@ -1681,14 +1681,14 @@ func applyDirective(q *query.Query, k, v string) (bool, error) {
 		if err != nil {
 			return false, fmt.Errorf("invalid ingest_start time: %w", err)
 		}
-		q.IngestStart = t
+		q.Start = t
 		return true, nil
 	case "ingest_end":
 		t, err := parseTime(v)
 		if err != nil {
 			return false, fmt.Errorf("invalid ingest_end time: %w", err)
 		}
-		q.IngestEnd = t
+		q.End = t
 		return true, nil
 	case "limit":
 		var n int

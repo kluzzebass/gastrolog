@@ -510,7 +510,7 @@ func TestSearchIngestStartFiltersChunks(t *testing.T) {
 		},
 	)
 
-	results, err := collect(search(eng, context.Background(), query.Query{IngestStart: t2}))
+	results, err := collect(search(eng, context.Background(), query.Query{Start: t2}))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -47,17 +47,14 @@ type KeyValueFilter struct {
 
 // Query describes what records to search for.
 type Query struct {
-	// Time bounds on WriteTS.
-	Start time.Time // inclusive lower bound
-	End   time.Time // exclusive upper bound
+	// Primary time bounds on IngestTS.
+	// Set via start=/end=/last=/ingest_start=/ingest_end= query directives.
+	Start time.Time // inclusive lower bound on IngestTS
+	End   time.Time // exclusive upper bound on IngestTS
 
-	// Time bounds on SourceTS (optional runtime filters)
+	// Time bounds on SourceTS (optional runtime filters).
 	SourceStart time.Time // inclusive lower bound on SourceTS
 	SourceEnd   time.Time // exclusive upper bound on SourceTS
-
-	// Time bounds on IngestTS (optional runtime filters)
-	IngestStart time.Time // inclusive lower bound on IngestTS
-	IngestEnd   time.Time // exclusive upper bound on IngestTS
 
 	// Optional filters (legacy API, ignored if BoolExpr is set)
 	Tokens []string         // filter by tokens (nil = no filter, AND semantics)
@@ -165,7 +162,7 @@ func (q Query) Normalize() Query {
 	return result
 }
 
-// TimeBounds returns the effective lower and upper time bounds, accounting for reverse order.
+// TimeBounds returns the effective lower and upper IngestTS bounds, accounting for reverse order.
 // Always returns lower <= upper regardless of query direction.
 func (q Query) TimeBounds() (lower, upper time.Time) {
 	if q.IsReverse {
@@ -365,7 +362,7 @@ func (e *Engine) selectChunks(metas []chunk.ChunkMeta, q Query, chunkIDs []chunk
 			out = append(out, m)
 		}
 	}
-	sortChunksByStartTS(out, q.Reverse())
+	sortChunksByIngestStart(out, q.Reverse())
 	return out
 }
 
@@ -389,21 +386,12 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 			return false
 		}
 	}
-	if m.Sealed {
-		// Chunk must overlap [lower, upper)
-		if !lower.IsZero() && m.EndTS.Before(lower) {
-			return false
-		}
-		if !upper.IsZero() && !m.StartTS.Before(upper) {
-			return false
-		}
-	}
-
-	// Filter by IngestTS bounds if query specifies them.
-	if !q.IngestStart.IsZero() && !m.IngestEnd.IsZero() && m.IngestEnd.Before(q.IngestStart) {
+	// Primary filter: IngestTS overlap.
+	// lower/upper come from Query.Start/End which are IngestTS bounds.
+	if !lower.IsZero() && !m.IngestEnd.IsZero() && m.IngestEnd.Before(lower) {
 		return false
 	}
-	if !q.IngestEnd.IsZero() && !m.IngestStart.IsZero() && !m.IngestStart.Before(q.IngestEnd) {
+	if !upper.IsZero() && !m.IngestStart.IsZero() && !m.IngestStart.Before(upper) {
 		return false
 	}
 
@@ -419,15 +407,15 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 	return true
 }
 
-// sortChunksByStartTS sorts chunks by StartTS in ascending or descending order.
-func sortChunksByStartTS(out []chunk.ChunkMeta, reverse bool) {
+// sortChunksByIngestStart sorts chunks by IngestStart in ascending or descending order.
+func sortChunksByIngestStart(out []chunk.ChunkMeta, reverse bool) {
 	if reverse {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return b.StartTS.Compare(a.StartTS) // descending
+			return b.IngestStart.Compare(a.IngestStart) // descending
 		})
 	} else {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
-			return a.StartTS.Compare(b.StartTS) // ascending
+			return a.IngestStart.Compare(b.IngestStart) // ascending
 		})
 	}
 }
@@ -542,10 +530,8 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
 
-	// Add IngestTS filter if bounds are set.
-	if !q.IngestStart.IsZero() || !q.IngestEnd.IsZero() {
-		b.addFilter(ingestTimeFilter(q.IngestStart, q.IngestEnd))
-	}
+	// IngestTS filtering is handled by the scanner's built-in time bounds check
+	// (Start/End are IngestTS bounds), so no separate ingestTimeFilter is needed.
 
 	// Seek cursor to start position if we have one and not using positions.
 	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
@@ -558,34 +544,41 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 }
 
 // setMinPositionsFromBounds sets the scanner builder's minimum position from time bounds
-// using binary search on WriteTS, IngestTS, and SourceTS indexes.
+// using IngestTS and SourceTS indexes (sealed flat index or active chunk B+ tree).
 func setMinPositionsFromBounds(b *scannerBuilder, q Query, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
-	// WriteTS: binary search on idx.log.
+	// IngestTS: use sealed flat index or active chunk B+ tree.
 	lower, _ := q.TimeBounds()
-	if !lower.IsZero() {
-		if pos, found, err := cm.FindStartPosition(meta.ID, lower); err == nil && found {
-			b.setMinPosition(pos)
-		}
+	seekIngestTS(b, lower, meta, cm, im)
+	seekSourceTS(b, q.SourceStart, meta, cm, im)
+}
+
+func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
+	if lower.IsZero() {
+		return
 	}
-	// IngestTS: use sealed index or active chunk B+ tree.
-	if !q.IngestStart.IsZero() && meta.Sealed {
-		if pos, found, err := im.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
+	if meta.Sealed {
+		if pos, found, err := im.FindIngestStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
 		}
-	} else if !q.IngestStart.IsZero() {
-		if pos, found, err := cm.FindIngestStartPosition(meta.ID, q.IngestStart); err == nil && found {
-			b.setMinPosition(pos)
-		}
+		return
 	}
-	// SourceTS: use sealed index or active chunk B+ tree.
-	if !q.SourceStart.IsZero() && meta.Sealed {
-		if pos, found, err := im.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
+	if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
+		b.setMinPosition(pos)
+	}
+}
+
+func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta, cm chunk.ChunkManager, im index.IndexManager) {
+	if sourceStart.IsZero() {
+		return
+	}
+	if meta.Sealed {
+		if pos, found, err := im.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}
-	} else if !q.SourceStart.IsZero() {
-		if pos, found, err := cm.FindSourceStartPosition(meta.ID, q.SourceStart); err == nil && found {
-			b.setMinPosition(pos)
-		}
+		return
+	}
+	if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
+		b.setMinPosition(pos)
 	}
 }
 

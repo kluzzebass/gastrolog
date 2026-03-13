@@ -1534,19 +1534,6 @@ func sourceTimeFilter(start, end time.Time) recordFilter {
 	}
 }
 
-// ingestTimeFilter returns a filter that checks IngestTS bounds.
-func ingestTimeFilter(start, end time.Time) recordFilter {
-	return func(rec chunk.Record) bool {
-		if !start.IsZero() && rec.IngestTS.Before(start) {
-			return false
-		}
-		if !end.IsZero() && !rec.IngestTS.Before(end) {
-			return false
-		}
-		return true
-	}
-}
-
 // dotToNull converts dots in a key to null bytes for JSON path lookup.
 // e.g. "kubernetes.namespace" → "kubernetes\x00namespace"
 func dotToNull(key string) string {
