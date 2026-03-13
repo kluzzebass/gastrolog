@@ -48,9 +48,6 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store
 				} else {
 					_ = orch.EnableVault(n.ID)
 				}
-				if cfg.Type == "file" {
-					_ = orch.SetVaultCompression(n.ID, cfg.Params["compression"] == "zstd")
-				}
 			} else {
 				_ = orch.AddVault(ctx, *cfg, factories)
 			}

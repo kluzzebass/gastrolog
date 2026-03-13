@@ -23,6 +23,11 @@ type Store interface {
 	// Download returns a reader for the blob at the given key.
 	Download(ctx context.Context, key string) (io.ReadCloser, error)
 
+	// DownloadRange returns a reader for a byte range of the blob.
+	// offset is the starting byte position; length is the number of bytes.
+	// All major providers (S3, GCS, Azure) support HTTP Range requests natively.
+	DownloadRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error)
+
 	// Delete removes the blob at the given key. No error if the key doesn't exist.
 	Delete(ctx context.Context, key string) error
 

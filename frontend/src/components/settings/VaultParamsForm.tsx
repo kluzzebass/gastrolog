@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { FormField, TextInput, TextArea, SelectInput } from "./FormField";
-import { Checkbox } from "./Checkbox";
 import { useTestVault } from "../../api/hooks/useVaults";
 import { useThemeClass } from "../../hooks/useThemeClass";
 
@@ -12,8 +11,8 @@ interface VaultParamsFormProps {
   vaultName?: string;
 }
 
-const providerOptions = [
-  { value: "", label: "(select provider)" },
+const sealedBackingOptions = [
+  { value: "", label: "Local (default)" },
   { value: "s3", label: "S3 / S3-compatible" },
   { value: "azure", label: "Azure Blob Storage" },
   { value: "gcs", label: "Google Cloud Storage" },
@@ -31,6 +30,7 @@ export function VaultParamsForm({
   const get = (key: string) => params[key] ?? "";
 
   if (vaultType === "file") {
+    const backing = get("sealed_backing");
     return (
       <div className="flex flex-col gap-3">
         <FormField
@@ -46,29 +46,19 @@ export function VaultParamsForm({
             mono
           />
         </FormField>
-        <Checkbox
-          checked={get("compression") === "zstd"}
-          onChange={(v) => set("compression", v ? "zstd" : "none")}
-          label="Compress sealed chunks (zstd)"
+        <FormField
+          label="Sealed Backing"
+          description="Where sealed chunks are stored after sealing"
           dark={dark}
-        />
-      </div>
-    );
-  }
-
-  if (vaultType === "cloud") {
-    const provider = get("provider");
-    return (
-      <div className="flex flex-col gap-3">
-        <FormField label="Provider" dark={dark}>
+        >
           <SelectInput
-            value={provider}
-            onChange={(v) => set("provider", v)}
-            options={providerOptions}
+            value={backing}
+            onChange={(v) => set("sealed_backing", v)}
+            options={sealedBackingOptions}
             dark={dark}
           />
         </FormField>
-        {(provider === "s3" || provider === "gcs") && (
+        {(backing === "s3" || backing === "gcs") && (
           <FormField label="Bucket" dark={dark}>
             <TextInput
               value={get("bucket")}
@@ -79,7 +69,7 @@ export function VaultParamsForm({
             />
           </FormField>
         )}
-        {provider === "azure" && (
+        {backing === "azure" && (
           <FormField label="Container" dark={dark}>
             <TextInput
               value={get("container")}
@@ -90,7 +80,7 @@ export function VaultParamsForm({
             />
           </FormField>
         )}
-        {provider === "s3" && (
+        {backing === "s3" && (
           <>
             <FormField label="Region" dark={dark}>
               <TextInput
@@ -120,7 +110,7 @@ export function VaultParamsForm({
             </FormField>
           </>
         )}
-        {provider === "azure" && (
+        {backing === "azure" && (
           <FormField label="Connection String" dark={dark}>
             <TextArea
               value={get("connection_string")}
@@ -131,7 +121,7 @@ export function VaultParamsForm({
             />
           </FormField>
         )}
-        {provider === "gcs" && (
+        {backing === "gcs" && (
           <FormField
             label="Credentials JSON"
             description="Service account key (JSON). Falls back to Application Default Credentials if empty."
@@ -146,10 +136,10 @@ export function VaultParamsForm({
             />
           </FormField>
         )}
-        {(provider === "s3" || provider === "gcs") && (
+        {(backing === "s3" || backing === "gcs") && (
           <FormField
             label="Endpoint"
-            description={provider === "s3"
+            description={backing === "s3"
               ? "Custom endpoint for S3-compatible services (MinIO, R2, B2, etc.)"
               : "Custom endpoint for GCS-compatible services"}
             dark={dark}
@@ -163,8 +153,8 @@ export function VaultParamsForm({
             />
           </FormField>
         )}
-        {provider !== "" && (
-          <TestVaultButton type="cloud" params={params} dark={dark} />
+        {backing && backing !== "" && (
+          <TestVaultButton type="file" params={params} dark={dark} />
         )}
       </div>
     );
@@ -193,7 +183,7 @@ function TestVaultButton({
     message: string;
   } | null>(null);
 
-  const provider = params.provider ?? "";
+  const provider = params.sealed_backing ?? params.provider ?? "";
   const hasRequired =
     provider !== "" &&
     ((provider === "s3" && (params.bucket ?? "") !== "") ||

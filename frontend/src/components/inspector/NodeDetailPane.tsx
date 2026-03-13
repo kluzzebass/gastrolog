@@ -27,12 +27,13 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const { data: config } = useConfig();
   const nodeInfo = cluster?.nodes.find((n) => n.id === nodeId);
 
-  // Build vault ID → cloud provider map from config.
+  // Build vault ID → sealed backing provider map from config.
   const cloudProviders = new Map<string, string>();
   if (config?.vaults) {
     for (const vc of config.vaults) {
-      if (vc.type === "cloud" && vc.params["provider"]) {
-        cloudProviders.set(vc.id, vc.params["provider"]);
+      const backing = vc.params["sealed_backing"] ?? vc.params["provider"];
+      if (backing) {
+        cloudProviders.set(vc.id, backing);
       }
     }
   }

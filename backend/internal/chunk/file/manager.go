@@ -1,7 +1,9 @@
 package file
 
 import (
+	"bytes"
 	"cmp"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -15,11 +17,14 @@ import (
 	"syscall"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/btree"
 	"gastrolog/internal/chunk"
+	chunkcloud "gastrolog/internal/chunk/cloud"
 	"gastrolog/internal/format"
 	"gastrolog/internal/logging"
 
+	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -31,14 +36,6 @@ const (
 	attrDictFileName    = "attr_dict.log"
 	ingestBTFileName    = "_ingest.bt"
 	sourceBTFileName    = "_source.bt"
-)
-
-// CompressionType selects the compression algorithm for sealed chunks.
-type CompressionType int
-
-const (
-	CompressionNone CompressionType = iota
-	CompressionZstd
 )
 
 var (
@@ -61,15 +58,18 @@ type Config struct {
 	// The manager scopes this logger with component="chunk-manager".
 	Logger *slog.Logger
 
-	// Compression selects the compression algorithm for sealed chunks.
-	// When set, raw.log and attr.log are compressed at seal time.
-	// Defaults to CompressionNone.
-	Compression CompressionType
-
 	// ExpectExisting indicates that this vault is being loaded from config
 	// (not freshly created). If the vault directory is missing, a warning
 	// is logged about potential data loss.
 	ExpectExisting bool
+
+	// CloudStore, when non-nil, enables cloud backing for sealed chunks.
+	// After compression, sealed chunks are converted to GLCB format,
+	// uploaded to the cloud store, and local files are deleted.
+	CloudStore blobstore.Store
+
+	// VaultID is required when CloudStore is set (used for blob key prefix).
+	VaultID uuid.UUID
 }
 
 // Manager manages file-based chunk storage with split raw.log and idx.log files.
@@ -93,7 +93,7 @@ type Manager struct {
 	active   *chunkState
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
-	zstdEnc  *zstd.Encoder // non-nil when compression is enabled
+	zstdEnc  *zstd.Encoder
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
@@ -118,6 +118,8 @@ type chunkMeta struct {
 	ingestEnd   time.Time
 	sourceStart time.Time
 	sourceEnd   time.Time
+
+	cloudBacked bool // true = chunk lives in cloud, not on local disk
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -195,17 +197,13 @@ func NewManager(cfg Config) (*Manager, error) {
 	// Scope logger with component identity.
 	logger := logging.Default(cfg.Logger).With("component", "chunk-manager", "type", "file")
 
-	var zstdEnc *zstd.Encoder
-	if cfg.Compression == CompressionZstd {
-		var err error
-		zstdEnc, err = zstd.NewWriter(nil,
-			zstd.WithEncoderLevel(zstd.SpeedDefault),
-			zstd.WithEncoderConcurrency(1),
-		)
-		if err != nil {
-			_ = lockFile.Close()
-			return nil, fmt.Errorf("create zstd encoder: %w", err)
-		}
+	zstdEnc, err := zstd.NewWriter(nil,
+		zstd.WithEncoderLevel(zstd.SpeedDefault),
+		zstd.WithEncoderConcurrency(1),
+	)
+	if err != nil {
+		_ = lockFile.Close()
+		return nil, fmt.Errorf("create zstd encoder: %w", err)
 	}
 
 	manager := &Manager{
@@ -218,6 +216,14 @@ func NewManager(cfg Config) (*Manager, error) {
 	if err := manager.loadExisting(); err != nil {
 		_ = lockFile.Close()
 		return nil, fmt.Errorf("load existing chunks in %s: %w", cfg.Dir, err)
+	}
+
+	// Load cloud-backed chunks if a cloud store is configured.
+	if cfg.CloudStore != nil {
+		if err := manager.loadCloudChunks(); err != nil {
+			_ = lockFile.Close()
+			return nil, fmt.Errorf("load cloud chunks: %w", err)
+		}
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
@@ -478,6 +484,10 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 		return nil, chunk.ErrChunkNotFound
 	}
 
+	if meta.cloudBacked {
+		return m.openCloudCursor(id)
+	}
+
 	rawPath := m.rawLogPath(id)
 	idxPath := m.idxLogPath(id)
 	attrPath := m.attrLogPath(id)
@@ -502,6 +512,11 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	}
 
 	m.mu.Unlock()
+
+	// Cloud-backed chunks: download and iterate via cursor.
+	if meta.cloudBacked {
+		return m.scanAttrsCloud(id, startPos, fn)
+	}
 
 	idxPath := m.idxLogPath(id)
 	attrPath := m.attrLogPath(id)
@@ -1624,6 +1639,12 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 		return 0, false, chunk.ErrChunkNotFound
 	}
 
+	// Cloud-backed chunks have no local idx.log — return (0, false) to
+	// fall back to full scan (same behavior as the old cloud manager).
+	if meta.cloudBacked {
+		return 0, false, nil
+	}
+
 	// Quick bounds check using cached time bounds.
 	if ts.Before(meta.writeStart) {
 		return 0, false, nil // Before all records
@@ -1732,10 +1753,40 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	}
 
 	m.mu.Lock()
-	_, ok := m.metas[id]
+	meta, ok := m.metas[id]
 	m.mu.Unlock()
 	if !ok {
 		return nil, chunk.ErrChunkNotFound
+	}
+
+	// Cloud-backed chunks: iterate via cursor to collect timestamps.
+	if meta.cloudBacked {
+		cursor, err := m.openCloudCursor(id)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = cursor.Close() }()
+
+		posSet := make(map[uint64]int, len(positions))
+		for i, p := range positions {
+			posSet[p] = i
+		}
+		result := make([]time.Time, len(positions))
+		var pos uint64
+		for {
+			rec, _, recErr := cursor.Next()
+			if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if recErr != nil {
+				return nil, recErr
+			}
+			if idx, ok := posSet[pos]; ok {
+				result[idx] = rec.WriteTS
+			}
+			pos++
+		}
+		return result, nil
 	}
 
 	idxPath := m.idxLogPath(id)
@@ -1775,12 +1826,19 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		return chunk.ErrActiveChunk
 	}
 
-	if _, ok := m.metas[id]; !ok {
+	meta, ok := m.metas[id]
+	if !ok {
 		return chunk.ErrChunkNotFound
 	}
 
-	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
-		return fmt.Errorf("remove chunk dir %s: %w", id, err)
+	if meta.cloudBacked {
+		if err := m.cfg.CloudStore.Delete(context.Background(), m.blobKey(id)); err != nil {
+			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
+		}
+	} else {
+		if err := os.RemoveAll(m.chunkDir(id)); err != nil {
+			return fmt.Errorf("remove chunk dir %s: %w", id, err)
+		}
 	}
 
 	delete(m.metas, id)
@@ -1788,14 +1846,10 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 }
 
 // CompressChunk compresses raw.log and attr.log for a sealed chunk using zstd.
-// Returns nil if compression is not enabled or the chunk is not found/not sealed.
+// Returns nil if the chunk is not found or not sealed.
 // Safe to call concurrently with reads (atomic file replacement via rename).
 // Intended to be called by the orchestrator via the scheduler after sealing.
 func (m *Manager) CompressChunk(id chunk.ChunkID) error {
-	if m.zstdEnc == nil {
-		return nil
-	}
-
 	m.mu.Lock()
 	meta, ok := m.metas[id]
 	if !ok {
@@ -1826,6 +1880,15 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	}
 	m.mu.Unlock()
 
+	// If cloud backing is configured, upload the compressed chunk to
+	// cloud storage and delete the local files.
+	if m.cfg.CloudStore != nil {
+		if err := m.uploadToCloud(id); err != nil {
+			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
+			// Non-fatal: chunk stays local, next compression sweep can retry.
+		}
+	}
+
 	return nil
 }
 
@@ -1835,31 +1898,11 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	meta, ok := m.metas[id]
-	if !ok || !meta.sealed {
+	if !ok || !meta.sealed || meta.cloudBacked {
 		return
 	}
 	meta.bytes = m.computeTotalLogicalBytes(id, meta.logicalDataBytes)
 	meta.diskBytes = m.computeDiskBytes(id)
-}
-
-// SetCompressionEnabled enables or disables zstd compression for future seals.
-func (m *Manager) SetCompressionEnabled(enabled bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if enabled && m.zstdEnc == nil {
-		enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
-		if err != nil {
-			return fmt.Errorf("create zstd encoder: %w", err)
-		}
-		m.zstdEnc = enc
-		m.cfg.Compression = CompressionZstd
-	} else if !enabled && m.zstdEnc != nil {
-		_ = m.zstdEnc.Close()
-		m.zstdEnc = nil
-		m.cfg.Compression = CompressionNone
-	}
-	return nil
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.
@@ -1970,4 +2013,196 @@ func (m *Manager) Adopt(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 
 	m.metas[id] = meta
 	return meta.toChunkMeta(), nil
+}
+
+// --- Cloud-backed chunk support ---
+
+// cloudPrefix returns the blob key prefix for this vault's cloud-backed chunks.
+func (m *Manager) cloudPrefix() string {
+	return fmt.Sprintf("vault-%s/", m.cfg.VaultID)
+}
+
+// blobKey returns the object key for a cloud-backed chunk.
+func (m *Manager) blobKey(id chunk.ChunkID) string {
+	return m.cloudPrefix() + id.String() + ".glcb"
+}
+
+// chunkIDFromBlobKey extracts the ChunkID from a blob key.
+func (m *Manager) chunkIDFromBlobKey(key string) (chunk.ChunkID, bool) {
+	key = strings.TrimPrefix(key, m.cloudPrefix())
+	key = strings.TrimSuffix(key, ".glcb")
+	id, err := chunk.ParseChunkID(key)
+	if err != nil {
+		return chunk.ChunkID{}, false
+	}
+	return id, true
+}
+
+// uploadToCloud converts a sealed, compressed chunk to GLCB format, uploads it
+// to the cloud store, and deletes the local files. The chunk metadata is
+// updated to reflect cloud-backed status.
+func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
+	// Open a cursor on the local sealed chunk to read all records.
+	cursor, err := m.OpenCursor(id)
+	if err != nil {
+		return fmt.Errorf("open cursor for cloud upload: %w", err)
+	}
+
+	w := chunkcloud.NewWriter(id, m.cfg.VaultID)
+	for {
+		rec, _, recErr := cursor.Next()
+		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if recErr != nil {
+			_ = cursor.Close()
+			return fmt.Errorf("read record for cloud upload: %w", recErr)
+		}
+		if err := w.Add(rec); err != nil {
+			_ = cursor.Close()
+			return fmt.Errorf("add record to GLCB writer: %w", err)
+		}
+	}
+	_ = cursor.Close()
+
+	var buf bytes.Buffer
+	if _, err := w.WriteTo(&buf); err != nil {
+		return fmt.Errorf("compress GLCB: %w", err)
+	}
+
+	bm := w.Meta()
+	key := m.blobKey(id)
+	if err := m.cfg.CloudStore.Upload(
+		context.Background(),
+		key,
+		bytes.NewReader(buf.Bytes()),
+		chunkcloud.ObjectMetadata(bm),
+	); err != nil {
+		return fmt.Errorf("upload GLCB: %w", err)
+	}
+
+	// Get the uploaded blob size for metadata.
+	info, err := m.cfg.CloudStore.Head(context.Background(), key)
+	if err != nil {
+		m.logger.Warn("failed to head after cloud upload", "chunk", id, "error", err)
+	}
+
+	// Delete local chunk directory.
+	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
+		return fmt.Errorf("remove local chunk dir after cloud upload: %w", err)
+	}
+
+	// Update in-memory metadata.
+	m.mu.Lock()
+	if meta := m.metas[id]; meta != nil {
+		meta.cloudBacked = true
+		meta.diskBytes = info.Size
+	}
+	m.mu.Unlock()
+
+	m.logger.Info("chunk uploaded to cloud",
+		"chunk", id,
+		"bytes", info.Size,
+	)
+	return nil
+}
+
+// scanAttrsCloud iterates a cloud-backed chunk's attributes via cursor.
+func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	cursor, err := m.openCloudCursor(id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = cursor.Close() }()
+	var pos uint64
+	for {
+		rec, _, recErr := cursor.Next()
+		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if recErr != nil {
+			return recErr
+		}
+		if pos >= startPos {
+			if !fn(rec.WriteTS, rec.Attrs) {
+				return nil
+			}
+		}
+		pos++
+	}
+}
+
+// openCloudCursor downloads a cloud-backed chunk to a temp file and returns
+// a seekable cursor. This is the bulk download path — appropriate for search
+// queries, ScanAttrs, and other full-chunk scans.
+func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("download cloud chunk %s: %w", id, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	tmp, err := os.CreateTemp("", "glcb-*")
+	if err != nil {
+		return nil, fmt.Errorf("create temp file: %w", err)
+	}
+
+	if _, err := io.Copy(tmp, rc); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
+		return nil, fmt.Errorf("download cloud chunk %s to temp: %w", id, err)
+	}
+
+	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
+		return nil, err
+	}
+
+	rd, err := chunkcloud.NewReader(tmp)
+	if err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
+		return nil, fmt.Errorf("open cloud reader %s: %w", id, err)
+	}
+
+	return chunkcloud.NewSeekableCursor(rd, id), nil
+}
+
+// loadCloudChunks lists blobs from the cloud store and merges them into the
+// in-memory metadata map. Called during manager initialization when CloudStore
+// is configured.
+func (m *Manager) loadCloudChunks() error {
+	blobs, err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix())
+	if err != nil {
+		return fmt.Errorf("list cloud chunks: %w", err)
+	}
+
+	for _, blob := range blobs {
+		id, ok := m.chunkIDFromBlobKey(blob.Key)
+		if !ok {
+			continue
+		}
+		// Don't overwrite local chunks — local always wins.
+		if _, exists := m.metas[id]; exists {
+			continue
+		}
+		cm := chunkcloud.BlobMetaToChunkMeta(id, blob)
+		m.metas[id] = &chunkMeta{
+			id:          id,
+			writeStart:  cm.WriteStart,
+			writeEnd:    cm.WriteEnd,
+			recordCount: cm.RecordCount,
+			bytes:       cm.Bytes,
+			diskBytes:   cm.DiskBytes,
+			sealed:      true,
+			compressed:  true,
+			ingestStart: cm.IngestStart,
+			ingestEnd:   cm.IngestEnd,
+			sourceStart: cm.SourceStart,
+			sourceEnd:   cm.SourceEnd,
+			cloudBacked: true,
+		}
+	}
+	return nil
 }

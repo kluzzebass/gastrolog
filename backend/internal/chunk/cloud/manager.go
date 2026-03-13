@@ -66,6 +66,12 @@ func (m *Manager) chunkIDFromKey(key string) (chunk.ChunkID, bool) {
 	return id, true
 }
 
+// BlobMetaToChunkMeta converts blob object metadata to ChunkMeta.
+// Exported for use by the file vault's sealed backing integration.
+func BlobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMeta {
+	return blobMetaToChunkMeta(id, bm)
+}
+
 // blobMetaToChunkMeta converts blob object metadata to ChunkMeta.
 func blobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMeta {
 	meta := chunk.ChunkMeta{
@@ -110,6 +116,12 @@ func blobMetaToChunkMeta(id chunk.ChunkID, bm blobstore.BlobInfo) chunk.ChunkMet
 		meta.SourceEnd = t
 	}
 	return meta
+}
+
+// ObjectMetadata builds blob object metadata from BlobMeta for upload.
+// Exported for use by the file vault's sealed backing integration.
+func ObjectMetadata(bm BlobMeta) map[string]string {
+	return objectMetadata(bm)
 }
 
 // objectMetadata builds blob object metadata from BlobMeta for upload.

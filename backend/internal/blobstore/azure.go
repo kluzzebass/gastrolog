@@ -65,6 +65,16 @@ func (a *AzureStore) Download(ctx context.Context, key string) (io.ReadCloser, e
 	return resp.Body, nil
 }
 
+func (a *AzureStore) DownloadRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	resp, err := a.client.DownloadStream(ctx, a.containerName, key, &azblob.DownloadStreamOptions{
+		Range: blob.HTTPRange{Offset: offset, Count: length},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Body, nil
+}
+
 func (a *AzureStore) Delete(ctx context.Context, key string) error {
 	_, err := a.client.DeleteBlob(ctx, a.containerName, key, nil)
 	return err

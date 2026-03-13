@@ -44,7 +44,7 @@ export const helpTopics: HelpTopic[] = [
     children: [
       { id: 'storage-file', title: 'File Vault', load: md(() => import('./storage-file.md?raw')) },
       { id: 'storage-memory', title: 'Memory Vault', load: md(() => import('./storage-memory.md?raw')) },
-      { id: 'storage-cloud', title: 'Cloud Vault', load: md(() => import('./storage-cloud.md?raw')) },
+      { id: 'storage-cloud', title: 'Sealed Backing (Cloud Storage)', load: md(() => import('./storage-cloud.md?raw')) },
       { id: 'policy-rotation', title: 'Rotation Policies', load: md(() => import('./policy-rotation.md?raw')) },
       { id: 'policy-retention', title: 'Retention Policies', load: md(() => import('./policy-retention.md?raw')) },
     ],

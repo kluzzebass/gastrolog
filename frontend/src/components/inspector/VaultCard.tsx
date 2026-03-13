@@ -10,7 +10,6 @@ import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
-import { ChunkTimeline } from "./ChunkTimeline";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 
 interface VaultCardProps {
@@ -62,7 +61,7 @@ export function VaultCard({
       }
     >
       <VaultActions vaultId={vault.id} dark={dark} />
-      <ChunkList vaultId={vault.id} vaultType={vault.type} dark={dark} />
+      <ChunkList vaultId={vault.id} dark={dark} />
     </ExpandableCard>
   );
 }
@@ -118,7 +117,7 @@ function VaultActions({
   );
 }
 
-function ChunkList({ vaultId, vaultType, dark }: Readonly<{ vaultId: string; vaultType: string; dark: boolean }>) {
+function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(vaultId);
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
@@ -154,18 +153,6 @@ function ChunkList({ vaultId, vaultType, dark }: Readonly<{ vaultId: string; vau
 
   return (
     <div>
-      {/* Timeline visualization */}
-      {chunks.length > 0 && (
-        <ChunkTimeline
-          chunks={chunks}
-          dark={dark}
-          selectedChunkId={expandedChunk}
-          onChunkClick={(id) =>
-            setExpandedChunk(expandedChunk === id ? null : id)
-          }
-        />
-      )}
-
       <table className="w-full border-collapse">
         <thead>
           <tr
@@ -194,7 +181,6 @@ function ChunkList({ vaultId, vaultType, dark }: Readonly<{ vaultId: string; vau
                 key={chunk.id}
                 chunk={chunk}
                 vaultId={vaultId}
-                vaultType={vaultType}
                 start={start}
                 end={end}
                 isExpanded={isExpanded}
@@ -213,7 +199,6 @@ function ChunkList({ vaultId, vaultType, dark }: Readonly<{ vaultId: string; vau
 function ChunkRow({
   chunk,
   vaultId,
-  vaultType,
   start,
   end,
   isExpanded,
@@ -223,7 +208,6 @@ function ChunkRow({
 }: Readonly<{
   chunk: ChunkMeta;
   vaultId: string;
-  vaultType: string;
   start: Date | undefined;
   end: Date | undefined;
   isExpanded: boolean;
@@ -290,7 +274,7 @@ function ChunkRow({
       {isExpanded && (
         <tr>
           <td colSpan={5} className="p-0">
-            <ChunkDetail vaultId={vaultId} chunk={chunk} vaultType={vaultType} dark={dark} />
+            <ChunkDetail vaultId={vaultId} chunk={chunk} dark={dark} />
           </td>
         </tr>
       )}
@@ -301,17 +285,14 @@ function ChunkRow({
 function ChunkDetail({
   vaultId,
   chunk,
-  vaultType,
   dark,
 }: Readonly<{
   vaultId: string;
   chunk: ChunkMeta;
-  vaultType: string;
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const isCloud = vaultType === "cloud";
-  const { data, isLoading } = useIndexes(vaultId, isCloud ? "" : chunk.id);
+  const { data, isLoading } = useIndexes(vaultId, chunk.id);
 
   const logicalBytes = Number(chunk.bytes);
   const diskBytes = Number(chunk.diskBytes);
@@ -324,7 +305,7 @@ function ChunkDetail({
     <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
       {/* Compression / storage info */}
       {showCompression && (
-        <div className={!isCloud ? "mb-3" : ""}>
+        <div className="mb-3">
           <div
             className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
           >
@@ -344,81 +325,60 @@ function ChunkDetail({
           </div>
         </div>
       )}
-      {/* Cloud chunks: compressed without diskBytes, or uncompressed */}
-      {isCloud && !showCompression && logicalBytes > 0 && (
-        <div>
-          <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Storage
-          </div>
-          <div className={`flex items-center gap-3 text-[0.85em]`}>
-            <span
-              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-            >
-              {formatBytes(logicalBytes)}
-            </span>
-          </div>
+
+      {/* Indexes */}
+      <div
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+      >
+        Indexes
+      </div>
+
+      {isLoading && (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Loading indexes...
         </div>
       )}
-
-      {/* Indexes — cloud vaults don't use local indexes */}
-      {!isCloud && (
-        <>
-          <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-          >
-            Indexes
-          </div>
-
-          {isLoading && (
+      {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          No indexes.
+        </div>
+      )}
+      {!isLoading && data?.indexes && data.indexes.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {data.indexes.map((idx) => (
             <div
-              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              key={idx.name}
+              className={`flex items-center gap-3 text-[0.85em]`}
             >
-              Loading indexes...
-            </div>
-          )}
-          {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
-            <div
-              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-            >
-              No indexes.
-            </div>
-          )}
-          {!isLoading && data?.indexes && data.indexes.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              {data.indexes.map((idx) => (
-                <div
-                  key={idx.name}
-                  className={`flex items-center gap-3 text-[0.85em]`}
-                >
+              <span
+                className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}
+              >
+                {idx.name}
+              </span>
+              {idx.exists ? (
+                <>
+                  <Badge variant="info" dark={dark}>ok</Badge>
                   <span
-                    className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}
+                    className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                   >
-                    {idx.name}
+                    {Number(idx.entryCount).toLocaleString()} entries
                   </span>
-                  {idx.exists ? (
-                    <>
-                      <Badge variant="info" dark={dark}>ok</Badge>
-                      <span
-                        className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-                      >
-                        {Number(idx.entryCount).toLocaleString()} entries
-                      </span>
-                      <span
-                        className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-                      >
-                        {formatBytes(Number(idx.sizeBytes))}
-                      </span>
-                    </>
-                  ) : (
-                    <Badge variant="ghost" dark={dark}>missing</Badge>
-                  )}
-                </div>
-              ))}
+                  <span
+                    className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  >
+                    {formatBytes(Number(idx.sizeBytes))}
+                  </span>
+                </>
+              ) : (
+                <Badge variant="ghost" dark={dark}>missing</Badge>
+              )}
             </div>
-          )}
-        </>
+          ))}
+        </div>
       )}
     </div>
   );

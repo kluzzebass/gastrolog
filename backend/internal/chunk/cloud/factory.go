@@ -70,6 +70,10 @@ func NewFactory() chunk.ManagerFactory {
 func NewConnectionTester() func(ctx context.Context, params map[string]string) (string, error) {
 	return func(ctx context.Context, params map[string]string) (string, error) {
 		provider := params[ParamProvider]
+		// Also check sealed_backing for file vaults with cloud backing.
+		if provider == "" {
+			provider = params["sealed_backing"]
+		}
 		if provider == "" {
 			return "", ErrMissingProvider
 		}
@@ -77,12 +81,17 @@ func NewConnectionTester() func(ctx context.Context, params map[string]string) (
 		if err != nil {
 			return "", err
 		}
-		// List with a non-existent prefix to verify credentials without returning data.
-		if _, err := store.List(ctx, "gastrolog-test-connection/"); err != nil {
-			return "", fmt.Errorf("failed to list objects: %w", err)
+		if err := store.EnsureBucket(ctx); err != nil {
+			return "", fmt.Errorf("failed to ensure bucket: %w", err)
 		}
 		return fmt.Sprintf("Connected to %s successfully", provider), nil
 	}
+}
+
+// CreateStore creates a blobstore.Store for the given provider and params.
+// Exported for use by the file vault's sealed backing integration.
+func CreateStore(provider string, params map[string]string) (blobstore.Store, error) {
+	return createStore(provider, params)
 }
 
 func createStore(provider string, params map[string]string) (blobstore.Store, error) {

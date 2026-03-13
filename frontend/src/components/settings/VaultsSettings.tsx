@@ -120,7 +120,6 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       addOptions={[
         { value: "memory", label: "memory" },
         { value: "file", label: "file" },
-        { value: "cloud", label: "cloud" },
       ]}
       onAddSelect={(type) => {
         dispatchAdd({ type: "open", vaultType: type });
@@ -149,16 +148,14 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             />
           </FormField>
           <NodeSelect value={addForm.nodeId} onChange={(v) => dispatchAdd({ type: "set", patch: { nodeId: v } })} dark={dark} />
-          {addForm.type !== "cloud" && (
-            <FormField label="Rotation Policy" dark={dark}>
-              <SelectInput
-                value={addForm.policy}
-                onChange={(v) => dispatchAdd({ type: "set", patch: { policy: v } })}
-                options={policyOptions}
-                dark={dark}
-              />
-            </FormField>
-          )}
+          <FormField label="Rotation Policy" dark={dark}>
+            <SelectInput
+              value={addForm.policy}
+              onChange={(v) => dispatchAdd({ type: "set", patch: { policy: v } })}
+              options={policyOptions}
+              dark={dark}
+            />
+          </FormField>
           <RetentionRuleEditor
             rules={addForm.retentionRules}
             onChange={(rules) => dispatchAdd({ type: "set", patch: { retentionRules: rules } })}

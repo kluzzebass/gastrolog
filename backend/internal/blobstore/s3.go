@@ -84,6 +84,19 @@ func (s *S3Store) Download(ctx context.Context, key string) (io.ReadCloser, erro
 	return out.Body, nil
 }
 
+func (s *S3Store) DownloadRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	rangeHeader := fmt.Sprintf("bytes=%d-%d", offset, offset+length-1)
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+		Range:  &rangeHeader,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out.Body, nil
+}
+
 func (s *S3Store) Delete(ctx context.Context, key string) error {
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: &s.bucket,

@@ -75,7 +75,6 @@ type mockOrch struct {
 	reloadRetentionErr error
 	disableVaultErr    error
 	enableVaultErr     error
-	setCompressionErr  error
 	drainVaultErr      error
 	cancelDrainErr     error
 	isDraining         bool
@@ -112,7 +111,6 @@ func (m *mockOrch) ReloadRotationPolicies(context.Context) error { return m.relo
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
 func (m *mockOrch) DisableVault(uuid.UUID) error                 { return m.disableVaultErr }
 func (m *mockOrch) EnableVault(uuid.UUID) error                  { return m.enableVaultErr }
-func (m *mockOrch) SetVaultCompression(uuid.UUID, bool) error    { return m.setCompressionErr }
 func (m *mockOrch) ForceRemoveVault(id uuid.UUID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr

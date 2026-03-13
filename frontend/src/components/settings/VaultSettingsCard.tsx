@@ -75,7 +75,7 @@ export function VaultSettingsCard({
     retentionRules: vault.retentionRules.map((b): RetentionRuleEdit => ({
       retentionPolicyId: b.retentionPolicyId,
       action: b.action,
-      ejectRouteIds: b.ejectRouteIds ?? [],
+      ejectRouteIds: b.ejectRouteIds,
     })),
     enabled: vault.enabled,
     params: { ...vault.params } as Record<string, string>,
@@ -117,7 +117,7 @@ export function VaultSettingsCard({
   const hasPolicy = vault.policy && policies.some((p) => p.id === vault.policy);
   const hasRetention = vault.retentionRules.length > 0;
   const warnings = [
-    ...(vault.type !== "cloud" && !hasPolicy ? ["no rotation policy"] : []),
+    ...(!hasPolicy ? ["no rotation policy"] : []),
     ...(!hasRetention ? ["no retention policy"] : []),
   ];
 
@@ -126,7 +126,7 @@ export function VaultSettingsCard({
       key={vault.id}
       id={vault.name || vault.id}
       typeBadge={vault.type}
-      secondaryBadge={vault.type === "cloud" ? vault.params["provider"] : undefined}
+      secondaryBadge={vault.params["sealed_backing"] || undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
@@ -263,16 +263,14 @@ export function VaultSettingsCard({
           onChange={(v) => setEdit(vault.id, { nodeId: v })}
           dark={dark}
         />
-        {vault.type !== "cloud" && (
-          <FormField label="Rotation Policy" dark={dark}>
-            <SelectInput
-              value={edit.policy}
-              onChange={(v) => setEdit(vault.id, { policy: v })}
-              options={policyOptions}
-              dark={dark}
-            />
-          </FormField>
-        )}
+        <FormField label="Rotation Policy" dark={dark}>
+          <SelectInput
+            value={edit.policy}
+            onChange={(v) => setEdit(vault.id, { policy: v })}
+            options={policyOptions}
+            dark={dark}
+          />
+        </FormField>
         <RetentionRuleEditor
           rules={edit.retentionRules}
           onChange={(rules) => setEdit(vault.id, { retentionRules: rules })}

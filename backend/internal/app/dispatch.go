@@ -28,7 +28,6 @@ type orchActions interface {
 	ReloadRetentionPolicies(ctx context.Context) error
 	DisableVault(id uuid.UUID) error
 	EnableVault(id uuid.UUID) error
-	SetVaultCompression(vaultID uuid.UUID, enabled bool) error
 	ForceRemoveVault(id uuid.UUID) error
 	UnregisterVault(id uuid.UUID) error
 	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
@@ -163,6 +162,12 @@ func (d *configDispatcher) maybeStartDrain(ctx context.Context, id uuid.UUID, ta
 		return
 	}
 
+	// Legacy: cloud vaults (type="cloud") were sealed-only and could be
+	// reassigned by simply unregistering. With unified vault types, cloud-backed
+	// file vaults have a local active chunk that needs draining, so they use
+	// the normal drain path below.
+	// NOTE: kept for backwards compatibility during rolling upgrades where some
+	// nodes may still report type="cloud" for migrated vaults.
 	if d.orch.VaultType(id) == "cloud" {
 		if err := d.orch.UnregisterVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 			d.logger.Error("dispatch: unregister cloud vault for reassignment", "id", id, "error", err)
@@ -194,9 +199,6 @@ func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uui
 		_ = d.orch.DisableVault(id)
 	} else {
 		_ = d.orch.EnableVault(id)
-	}
-	if cfg.Type == "file" {
-		_ = d.orch.SetVaultCompression(id, cfg.Params["compression"] == "zstd")
 	}
 }
 

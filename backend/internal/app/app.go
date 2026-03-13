@@ -731,6 +731,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			VaultTesters: map[string]server.VaultConnectionTester{
 				"cloud": chunkcloud.NewConnectionTester(),
+				"file":  chunkcloud.NewConnectionTester(),
 			},
 		})
 		// Wire managed file transfer handlers on the cluster server. The HTTP
@@ -818,12 +819,10 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),
 			"memory": chunkmem.NewFactory(),
-			"cloud":  chunkcloud.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			"file":   indexfile.NewFactory(),
 			"memory": indexmem.NewFactory(),
-			"cloud":  chunkcloud.NewIndexFactory(),
 		},
 		Logger:    logger,
 		HomeDir:   homeDir,

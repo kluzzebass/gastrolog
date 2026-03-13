@@ -202,21 +202,6 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 	return nil
 }
 
-// SetVaultCompression enables or disables compression for a vault's chunk manager.
-// No-op if the chunk manager doesn't support compression (e.g. memory vaults).
-func (o *Orchestrator) SetVaultCompression(vaultID uuid.UUID, enabled bool) error {
-	o.mu.RLock()
-	vault := o.vaults[vaultID]
-	o.mu.RUnlock()
-	if vault == nil {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
-	}
-	if compressor, ok := vault.Chunks.(chunk.ChunkCompressor); ok {
-		return compressor.SetCompressionEnabled(enabled)
-	}
-	return nil
-}
-
 // --- Index ops ---
 
 // IndexSizes returns the size in bytes for each index of a chunk.

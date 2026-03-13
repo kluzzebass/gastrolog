@@ -15,7 +15,8 @@ Vaults manage the full lifecycle of your data:
 |------|-------------|
 | [**File**](help:storage-file) | Persists logs to disk with memory-mapped reads — for production use |
 | [**Memory**](help:storage-memory) | Keeps everything in memory — fast but lost on restart, for testing |
-| [**Cloud**](help:storage-cloud) | Archives sealed chunks to S3, Azure Blob, or GCS — for long-term retention |
+
+File vaults support optional [**sealed backing**](help:storage-cloud) — sealed chunks can be uploaded to S3, Azure Blob Storage, or GCS for long-term cloud archival while the active chunk stays on local disk.
 
 In a [cluster](help:clustering), each vault is assigned to a specific [node](help:clustering-nodes). Log data is stored locally on that node and is **not replicated** — clustering replicates configuration only. Searches automatically reach vaults on all nodes.
 

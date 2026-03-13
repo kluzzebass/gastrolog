@@ -71,6 +71,10 @@ func (g *GCSStore) Download(ctx context.Context, key string) (io.ReadCloser, err
 	return g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
 }
 
+func (g *GCSStore) DownloadRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
+	return g.client.Bucket(g.bucket).Object(key).NewRangeReader(ctx, offset, length)
+}
+
 func (g *GCSStore) Delete(ctx context.Context, key string) error {
 	err := g.client.Bucket(g.bucket).Object(key).Delete(ctx)
 	if errors.Is(err, storage.ErrObjectNotExist) {

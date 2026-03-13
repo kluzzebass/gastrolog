@@ -118,6 +118,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		}
 		vaultIDs[vaultCfg.ID] = true
 
+		// Migrate legacy cloud vaults → file vaults with sealed backing.
+		migrateCloudVault(&vaultCfg)
+
 		// Skip vaults belonging to another node.
 		if vaultCfg.NodeID != "" && vaultCfg.NodeID != o.localNodeID {
 			continue

@@ -42,6 +42,10 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	if err != nil {
 		return fmt.Errorf("load config for AddVault: %w", err)
 	}
+
+	// Migrate legacy cloud vaults → file vaults with sealed backing.
+	migrateCloudVault(&vaultCfg)
+
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -363,4 +367,23 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 
 	o.logger.Info("vault filter updated", "id", id, "filter", filter)
 	return nil
+}
+
+// migrateCloudVault rewrites a legacy type:"cloud" vault config to type:"file"
+// with the sealed_backing param set to the original provider. This is a
+// backwards-compatible in-memory migration — the config store is updated on
+// next save.
+func migrateCloudVault(vc *config.VaultConfig) {
+	if vc.Type != "cloud" {
+		return
+	}
+	vc.Type = "file"
+	if vc.Params == nil {
+		vc.Params = make(map[string]string)
+	}
+	// Move provider → sealed_backing.
+	if provider := vc.Params["provider"]; provider != "" {
+		vc.Params["sealed_backing"] = provider
+		delete(vc.Params, "provider")
+	}
 }

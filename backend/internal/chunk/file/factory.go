@@ -1,6 +1,7 @@
 package file
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,9 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	chunkcloud "gastrolog/internal/chunk/cloud"
+
+	"github.com/google/uuid"
 )
 
 // Factory parameter keys.
@@ -17,7 +21,7 @@ const (
 	ParamMaxChunkBytes = "maxChunkBytes"
 	ParamMaxChunkAge   = "maxChunkAge"
 	ParamFileMode      = "fileMode"
-	ParamCompression   = "compression" // "none" or "zstd"
+	ParamSealedBacking = "sealed_backing" // "local", "s3", "azure", "gcs" (default: local)
 
 	// ParamExpectExisting is injected by the orchestrator when loading vaults
 	// from config. It tells the chunk manager to warn if the vault directory
@@ -50,51 +54,11 @@ func NewFactory() chunk.ManagerFactory {
 			ExpectExisting: params[ParamExpectExisting] == "true",
 		}
 
-		// Build rotation policy from params
-		var policies []chunk.RotationPolicy
-
-		// Always include hard limits first (they always win)
-		policies = append(policies, chunk.NewHardLimitPolicy(MaxRawLogSize, MaxAttrLogSize))
-
-		// Add size policy if specified
-		if v, ok := params[ParamMaxChunkBytes]; ok {
-			n, err := strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkBytes, err)
-			}
-			if n <= 0 {
-				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkBytes)
-			}
-			policies = append(policies, chunk.NewSizePolicy(uint64(n)))
-		} else {
-			// Use default size limit
-			policies = append(policies, chunk.NewSizePolicy(DefaultMaxChunkBytes))
+		policy, err := buildRotationPolicy(params)
+		if err != nil {
+			return nil, err
 		}
-
-		// Add age policy if specified
-		if v, ok := params[ParamMaxChunkAge]; ok {
-			d, err := time.ParseDuration(v)
-			if err != nil {
-				return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkAge, err)
-			}
-			if d <= 0 {
-				return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkAge)
-			}
-			policies = append(policies, chunk.NewAgePolicy(d, nil))
-		}
-
-		cfg.RotationPolicy = chunk.NewCompositePolicy(policies...)
-
-		if v, ok := params[ParamCompression]; ok {
-			switch v {
-			case "zstd":
-				cfg.Compression = CompressionZstd
-			case "none", "":
-				cfg.Compression = CompressionNone
-			default:
-				return nil, fmt.Errorf("invalid %s: %q (must be \"none\" or \"zstd\")", ParamCompression, v)
-			}
-		}
+		cfg.RotationPolicy = policy
 
 		if v, ok := params[ParamFileMode]; ok {
 			n, err := strconv.ParseUint(v, 8, 32)
@@ -104,6 +68,72 @@ func NewFactory() chunk.ManagerFactory {
 			cfg.FileMode = os.FileMode(n)
 		}
 
+		// Sealed backing: when set to a cloud provider, sealed chunks
+		// are uploaded to cloud storage after compression.
+		if err := configureSealedBacking(&cfg, params); err != nil {
+			return nil, err
+		}
+
 		return NewManager(cfg)
 	}
+}
+
+// configureSealedBacking sets up cloud store configuration when a sealed
+// backing provider is specified.
+func configureSealedBacking(cfg *Config, params map[string]string) error {
+	backing := params[ParamSealedBacking]
+	if backing == "" || backing == "local" {
+		return nil
+	}
+
+	store, err := chunkcloud.CreateStore(backing, params)
+	if err != nil {
+		return fmt.Errorf("create %s store for sealed backing: %w", backing, err)
+	}
+	if err := store.EnsureBucket(context.Background()); err != nil {
+		return fmt.Errorf("ensure %s bucket for sealed backing: %w", backing, err)
+	}
+	vaultID, err := uuid.Parse(params[chunkcloud.ParamVaultID])
+	if err != nil {
+		return fmt.Errorf("invalid vault ID for sealed backing: %w", err)
+	}
+	cfg.CloudStore = store
+	cfg.VaultID = vaultID
+	return nil
+}
+
+// buildRotationPolicy constructs a composite rotation policy from factory params.
+func buildRotationPolicy(params map[string]string) (chunk.RotationPolicy, error) {
+	var policies []chunk.RotationPolicy
+
+	// Hard limits always apply (4GB for uint32 offsets).
+	policies = append(policies, chunk.NewHardLimitPolicy(MaxRawLogSize, MaxAttrLogSize))
+
+	// Size policy.
+	if v, ok := params[ParamMaxChunkBytes]; ok {
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkBytes, err)
+		}
+		if n <= 0 {
+			return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkBytes)
+		}
+		policies = append(policies, chunk.NewSizePolicy(uint64(n)))
+	} else {
+		policies = append(policies, chunk.NewSizePolicy(DefaultMaxChunkBytes))
+	}
+
+	// Age policy.
+	if v, ok := params[ParamMaxChunkAge]; ok {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s: %w", ParamMaxChunkAge, err)
+		}
+		if d <= 0 {
+			return nil, fmt.Errorf("invalid %s: must be positive", ParamMaxChunkAge)
+		}
+		policies = append(policies, chunk.NewAgePolicy(d, nil))
+	}
+
+	return chunk.NewCompositePolicy(policies...), nil
 }

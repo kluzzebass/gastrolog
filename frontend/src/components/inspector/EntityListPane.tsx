@@ -94,12 +94,13 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
   const { data: config } = useConfig();
   const { expanded, toggle, add } = useToggleSet();
 
-  // Build a vault ID → cloud provider map from config (VaultInfo lacks params).
+  // Build a vault ID → sealed backing provider map from config (VaultInfo lacks params).
   const cloudProviders = new Map<string, string>();
   if (config?.vaults) {
     for (const vc of config.vaults) {
-      if (vc.type === "cloud" && vc.params["provider"]) {
-        cloudProviders.set(vc.id, vc.params["provider"]);
+      const backing = vc.params["sealed_backing"] ?? vc.params["provider"];
+      if (backing) {
+        cloudProviders.set(vc.id, backing);
       }
     }
   }

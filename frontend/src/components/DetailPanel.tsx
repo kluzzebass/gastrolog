@@ -11,6 +11,7 @@ import { syntaxHighlight, type HighlightMode } from "../syntax";
 import { CopyButton } from "./CopyButton";
 import { ContextRecord } from "./ContextRecord";
 import { useDetailPanel } from "../hooks/useDetailPanel";
+import { useConfig } from "../api/hooks";
 
 const MAX_DISPLAY_LINES = 100;
 
@@ -194,16 +195,20 @@ function ReferenceSection({
   styles: DetailStyles;
 }>) {
   const { headerCls, keyCls, borderCls } = styles;
+  const { data: config } = useConfig();
+  const vaultId = record.ref?.vaultId ?? "";
+  const vaultName = config?.vaults.find((v) => v.id === vaultId)?.name;
+
   return (
     <>
       <tr>
         <th colSpan={2} className={headerCls}>Reference</th>
       </tr>
       <tr>
-        <td className={`${keyCls} ${borderCls}`}>vault_id</td>
+        <td className={`${keyCls} ${borderCls}`}>vault</td>
         <ValueCell
-          value={record.ref?.vaultId ?? "N/A"}
-          onClick={record.ref?.vaultId ? () => onVaultSelect(record.ref!.vaultId) : undefined}
+          value={(vaultName ?? vaultId) || "N/A"}
+          onClick={vaultId ? () => onVaultSelect(vaultId) : undefined}
           styles={styles}
         />
       </tr>

@@ -1,8 +1,8 @@
-# Cloud Vault
+# Sealed Backing (Cloud Storage)
 
-Type: `cloud`
+File vaults can optionally upload sealed chunks to cloud object storage. When **Sealed Backing** is set to a cloud provider, chunks are compressed locally, converted to GLCB format, uploaded, and the local copy is deleted. The active chunk always lives on local disk — only sealed chunks move to the cloud.
 
-Archives logs to cloud object storage. Cloud vaults are **sealed-only** — they do not accept live ingestion. Data arrives via a [retention](help:policy-retention) rule with the **eject** action, which streams records from sealed chunks in a file or memory vault through [eject-only routes](help:routing) into cloud storage.
+This replaces the old `cloud` vault type. Existing cloud vaults are automatically migrated to file vaults with sealed backing on startup.
 
 Supported providers:
 
@@ -41,7 +41,9 @@ Supported providers:
 
 ## What You Should Know
 
-- Cloud vaults appear in search results like any other vault — queries scan the full blob since no pre-built indexes exist in cloud storage
-- Each chunk is stored as a single compressed blob (GLCB format with zstd compression)
+- File vaults with sealed backing support **live ingestion** — the active chunk is always local, so `Append` and eject both work normally
+- Cloud-backed sealed chunks appear in search results like any other chunk — queries download the blob and scan it (no pre-built indexes in cloud storage)
+- Each sealed chunk is stored as a single compressed blob (GLCB format with seekable zstd compression)
+- On startup, the vault lists blobs from the cloud store and merges them into the chunk metadata alongside any local chunks
 - Use the **Test Connection** button to verify credentials before saving
-- In a [cluster](help:clustering), cloud vaults are assigned to a node like any other vault, but the data lives in the cloud rather than on local disk
+- In a [cluster](help:clustering), vaults with sealed backing are assigned to a node like any other vault — the active chunk is local to that node, sealed chunks live in the cloud

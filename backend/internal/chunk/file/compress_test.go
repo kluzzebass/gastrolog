@@ -233,7 +233,6 @@ func TestCompressedChunkRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:         dir,
-		Compression: CompressionZstd,
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -325,7 +324,6 @@ func TestCompressedChunkReverseCursor(t *testing.T) {
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:         dir,
-		Compression: CompressionZstd,
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -387,7 +385,7 @@ func TestCompressedFilesAreSmaller(t *testing.T) {
 
 	// Uncompressed.
 	dirNone := t.TempDir()
-	mNone, err := NewManager(Config{Dir: dirNone, Compression: CompressionNone})
+	mNone, err := NewManager(Config{Dir: dirNone})
 	if err != nil {
 		t.Fatalf("new manager (none): %v", err)
 	}
@@ -406,7 +404,7 @@ func TestCompressedFilesAreSmaller(t *testing.T) {
 
 	// Compressed.
 	dirZstd := t.TempDir()
-	mZstd, err := NewManager(Config{Dir: dirZstd, Compression: CompressionZstd})
+	mZstd, err := NewManager(Config{Dir: dirZstd})
 	if err != nil {
 		t.Fatalf("new manager (zstd): %v", err)
 	}
@@ -450,7 +448,6 @@ func TestCompressedChunkRotation(t *testing.T) {
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:            dir,
-		Compression:    CompressionZstd,
 		RotationPolicy: chunk.NewSizePolicy(500),
 	})
 	if err != nil {
@@ -540,7 +537,7 @@ func TestCompressedChunkPersistAcrossRestart(t *testing.T) {
 
 	// First session: write, seal (with compression), close.
 	{
-		m, err := NewManager(Config{Dir: dir, Compression: CompressionZstd})
+		m, err := NewManager(Config{Dir: dir})
 		if err != nil {
 			t.Fatalf("new manager: %v", err)
 		}
@@ -560,7 +557,7 @@ func TestCompressedChunkPersistAcrossRestart(t *testing.T) {
 		}
 	}
 
-	// Second session: reopen WITHOUT compression config (reads must still work).
+	// Second session: reopen and verify compressed chunks are readable.
 	{
 		m, err := NewManager(Config{Dir: dir})
 		if err != nil {
@@ -594,7 +591,6 @@ func TestCompressedEmptyChunk(t *testing.T) {
 	dir := t.TempDir()
 	manager, err := NewManager(Config{
 		Dir:         dir,
-		Compression: CompressionZstd,
 	})
 	if err != nil {
 		t.Fatalf("new manager: %v", err)
@@ -640,7 +636,7 @@ func TestOrphanTempFileCleanup(t *testing.T) {
 
 	// First session: write, seal, close. Leave orphan temp files behind.
 	{
-		m, err := NewManager(Config{Dir: dir, Compression: CompressionZstd})
+		m, err := NewManager(Config{Dir: dir})
 		if err != nil {
 			t.Fatalf("new manager: %v", err)
 		}
