@@ -55,3 +55,24 @@ NEVER close issues without explicit user approval:
 3. Ask if we can close it
 4. Only run `dcat close` after user confirms
 5. Upon closing, commit, merge and push
+
+## Design Context
+
+### Users
+Mixed audience: SREs investigating incidents under pressure, developers debugging during development or post-deploy, and ops/platform teams managing log pipelines and retention. The UI must serve all three — fast search for the urgent, clear configuration for the methodical, and readable log output for everyone.
+
+### Brand Personality
+**Warm, crafted, elegant.** The Observatory theme — copper accents, serif display type, grain texture — evokes a scientific instrument: precise but not clinical, powerful but not overwhelming. Quality over flash.
+
+### Aesthetic Direction
+- **Visual tone:** Refined dark-first interface with warm copper/amber accents. Restrained color use — severity colors are muted, not saturated. Typography-driven hierarchy (Cormorant Garamond display, Libre Franklin body, IBM Plex Mono code).
+- **10 selectable palettes** (Observatory default) + light/dark mode — respect user preference.
+- **Atmosphere:** Subtle grain overlay, stagger animations on entry, gentle focus glows. Never jarring.
+- **Anti-references:** NOT Grafana/Datadog (avoid dense dashboard sprawl), NOT generic SaaS (no Material/Bootstrap corporate feel), NOT marketing-heavy (no selling, just working), NOT spartan CLI dumps (design is intentional).
+
+### Design Principles
+1. **Instrument, not dashboard.** Each view has a focused purpose. Avoid cramming metrics into every surface. Show what's needed for the task at hand.
+2. **Quiet until needed.** Default state is calm. Color, motion, and emphasis appear only when they carry meaning (errors, matches, state changes). Avoid visual noise.
+3. **Typography is the interface.** The four-level text hierarchy (bright → normal → muted → ghost) does most of the visual heavy lifting. Lean on type weight, size, and opacity before reaching for borders or backgrounds.
+4. **Respect the palette.** Every color in the system has a semantic role. Never use raw hex values — always reference design tokens. New UI elements inherit the active palette automatically.
+5. **Crafted details.** Custom scrollbars, resize handles, focus rings, grain texture — these small touches compound into the feeling of quality. Don't skip them for expediency.
