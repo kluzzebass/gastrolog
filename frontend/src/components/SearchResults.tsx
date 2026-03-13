@@ -3,7 +3,7 @@ import { Record as ProtoRecord } from "../api/client";
 import { TableResult } from "../api/gen/gastrolog/v1/query_pb";
 import { sameRecord } from "../utils";
 import { EmptyState } from "./EmptyState";
-import { LogEntry } from "./LogEntry";
+import { LogEntry, type OrderByTS } from "./LogEntry";
 import { VirtualLogList } from "./VirtualLogList";
 import { PipelineResults } from "./PipelineResults";
 import { ResultsToolbar } from "./ResultsToolbar";
@@ -46,6 +46,8 @@ interface SearchResultsProps {
   tokens: string[];
   highlightMode: HighlightMode;
   pollInterval: number | null;
+  // Ordering
+  orderBy: OrderByTS;
   // Refs
   logScrollRef: RefObject<HTMLDivElement | null>;
   sentinelRef: RefObject<HTMLDivElement | null>;
@@ -84,6 +86,7 @@ export function SearchResults({
   tokens,
   highlightMode,
   pollInterval,
+  orderBy,
   logScrollRef,
   sentinelRef,
   selectedRowRef,
@@ -190,6 +193,7 @@ export function SearchResults({
                     onSpanClick={onSpanClick}
                     dark={dark}
                     highlightMode={highlightMode}
+                    orderBy={orderBy}
                   />
                 );
               })}
@@ -208,6 +212,7 @@ export function SearchResults({
                 onSelectRecord={onSelectRecord}
                 onTokenToggle={onTokenToggle}
                 onSpanClick={onSpanClick}
+                orderBy={orderBy}
               />
               {/* Infinite scroll sentinel — same position as before virtualization */}
               <div ref={sentinelRef} className="h-1" />

@@ -42,6 +42,23 @@ function searchHitCls(dark: boolean): string {
     : "bg-light-highlight-bg border border-light-highlight-border text-light-highlight-text px-0.5 rounded-sm";
 }
 
+export type OrderByTS = "ingest_ts" | "source_ts" | "write_ts";
+
+/** Extract the `order=` directive value from a query string. */
+export function parseOrderBy(query: string): OrderByTS {
+  const m = /\border=(\w+)/.exec(query);
+  if (m && (m[1] === "source_ts" || m[1] === "write_ts")) return m[1];
+  return "ingest_ts";
+}
+
+function pickTS(record: ProtoRecord, orderBy: OrderByTS) {
+  switch (orderBy) {
+    case "source_ts": return record.sourceTs;
+    case "write_ts":  return record.writeTs;
+    default:          return record.ingestTs;
+  }
+}
+
 export const LogEntry = forwardRef<
   HTMLElement,
   {
@@ -53,16 +70,18 @@ export const LogEntry = forwardRef<
     onSpanClick?: (value: string) => void;
     dark: boolean;
     highlightMode?: HighlightMode;
+    orderBy?: OrderByTS;
   }
 >(function LogEntry(
-  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark, highlightMode = "full" },
+  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark, highlightMode = "full", orderBy = "ingest_ts" },
   ref,
 ) {
   const rawText = new TextDecoder().decode(record.raw);
   const parts = composeWithSearch(syntaxHighlight(rawText, highlightMode), tokens);
   const severity = detectSeverity(record.attrs);
-  const ingestInstant = record.ingestTs ? protoToInstant(record.ingestTs) : null;
-  const ts = ingestInstant ? formatLocalTime(ingestInstant) : "--:--:--";
+  const tsProto = pickTS(record, orderBy);
+  const tsInstant = tsProto ? protoToInstant(tsProto) : null;
+  const ts = tsInstant ? formatLocalTime(tsInstant) : "--:--:--";
 
   return (
     <article

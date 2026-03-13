@@ -2,7 +2,7 @@ import type { RefObject } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Record as ProtoRecord } from "../api/client";
 import { sameRecord } from "../utils";
-import { LogEntry } from "./LogEntry";
+import { LogEntry, type OrderByTS } from "./LogEntry";
 import type { HighlightMode } from "../hooks/useThemeSync";
 
 interface VirtualLogListProps {
@@ -16,6 +16,7 @@ interface VirtualLogListProps {
   onSelectRecord: (rec: ProtoRecord | null) => void;
   onTokenToggle: (token: string) => void;
   onSpanClick: (value: string) => void;
+  orderBy: OrderByTS;
 }
 
 export function VirtualLogList({
@@ -29,6 +30,7 @@ export function VirtualLogList({
   onSelectRecord,
   onTokenToggle,
   onSpanClick,
+  orderBy,
 }: Readonly<VirtualLogListProps>) {
   // eslint-disable-next-line react-hooks/incompatible-library -- third-party library
   const virtualizer = useVirtualizer({
@@ -74,6 +76,7 @@ export function VirtualLogList({
               onSpanClick={onSpanClick}
               dark={dark}
               highlightMode={highlightMode}
+              orderBy={orderBy}
             />
           </div>
         );

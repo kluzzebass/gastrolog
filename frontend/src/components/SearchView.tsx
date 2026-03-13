@@ -7,6 +7,7 @@ import { HistogramChart } from "./HistogramChart";
 import { SearchSidebar } from "./SearchSidebar";
 import { DetailSidebar } from "./DetailSidebar";
 import { SearchResults } from "./SearchResults";
+import { parseOrderBy } from "./LogEntry";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { InspectorDialog } from "./inspector/InspectorDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
@@ -276,6 +277,7 @@ export function SearchView() {
             tokens={sv.tokens}
             highlightMode={sv.highlightMode}
             pollInterval={sv.pollInterval}
+            orderBy={parseOrderBy(sv.q)}
             logScrollRef={sv.logScrollRef}
             sentinelRef={sv.sentinelRef}
             selectedRowRef={sv.selectedRowRef}
