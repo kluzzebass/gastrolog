@@ -117,11 +117,11 @@ function CronField({
       {trimmed && validation && (
         <div className="mt-1 text-[0.75em]">
           {validation.valid ? (
-            <span className={c("text-green-400", "text-green-600")}>
+            <span className="text-severity-info">
               {description}
             </span>
           ) : (
-            <span className={c("text-red-400", "text-red-600")}>
+            <span className="text-severity-error">
               {validation.error}
             </span>
           )}

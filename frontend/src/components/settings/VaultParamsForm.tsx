@@ -238,8 +238,8 @@ function TestVaultButton({
         <span
           className={`text-[0.8em] ${
             testResult.success
-              ? c("text-green-400", "text-green-600")
-              : c("text-red-400", "text-red-600")
+              ? "text-severity-info"
+              : "text-severity-error"
           }`}
         >
           {testResult.message}

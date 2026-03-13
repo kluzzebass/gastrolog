@@ -204,7 +204,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
             dark={dark}
           />
           {newListenError && (
-            <p className={`text-[0.8em] ${dark ? "text-red-400" : "text-red-600"}`}>
+            <p className={`text-[0.8em] text-severity-error`}>
               {newListenError}
             </p>
           )}
@@ -323,7 +323,7 @@ function IngesterCard({
           dark={dark}
         />
         {listenError && (
-          <p className={`text-[0.8em] ${dark ? "text-red-400" : "text-red-600"}`}>
+          <p className={`text-[0.8em] text-severity-error`}>
             {listenError}
           </p>
         )}

@@ -51,7 +51,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       >
         {!stats.filterSetActive && (
           <div
-            className={`mb-3 px-3 py-2 rounded text-[0.85em] font-medium ${c("bg-red-900/30 text-red-300 border border-red-800/50", "bg-red-100 text-red-800 border border-red-200")}`}
+            className={`mb-3 px-3 py-2 rounded text-[0.85em] font-medium ${c("bg-severity-error/15 text-severity-error border border-severity-error/30", "bg-severity-error/10 text-severity-error border border-severity-error/20")}`}
           >
             Filter set is inactive — no routes compiled. All ingested records are
             being dropped silently.
@@ -207,8 +207,8 @@ function StatBox({
   const c = useThemeClass(dark);
 
   let valueColor = c("text-text-bright", "text-light-text-bright");
-  if (variant === "ok") valueColor = c("text-green-400", "text-green-700");
-  if (variant === "error") valueColor = c("text-red-400", "text-red-700");
+  if (variant === "ok") valueColor = "text-severity-info";
+  if (variant === "error") valueColor = "text-severity-error";
 
   return (
     <div>

@@ -49,7 +49,7 @@
   --color-light-text-bright: #1a1610;
   --color-light-text-normal: #3a3630;
   --color-light-text-muted: #706860;
-  --color-light-text-ghost: #958e84;
+  --color-light-text-ghost: #918a80;
 
   /* Fonts */
   --font-display: "Cormorant Garamond", serif;
@@ -76,7 +76,7 @@
   --color-text-bright: #eceff4;
   --color-text-normal: #d8dee9;
   --color-text-muted: #a0aabb;
-  --color-text-ghost: #6d7a8e;
+  --color-text-ghost: #717e91;
 
   --color-severity-error: #bf616a;
   --color-severity-warn: #ebcb8b;
@@ -101,7 +101,7 @@
   --color-light-text-bright: #2e3440;
   --color-light-text-normal: #3b4252;
   --color-light-text-muted: #616e80;
-  --color-light-text-ghost: #8892a0;
+  --color-light-text-ghost: #808a96;
 }
 
 /* Solarized — precision etched */
@@ -146,7 +146,7 @@
   --color-light-text-bright: #002b36;
   --color-light-text-normal: #073642;
   --color-light-text-muted: #586e75;
-  --color-light-text-ghost: #93a1a1;
+  --color-light-text-ghost: #838e8e;
 }
 
 /* Dracula — vivid neon */
@@ -191,7 +191,7 @@
   --color-light-text-bright: #282a36;
   --color-light-text-normal: #383a46;
   --color-light-text-muted: #626480;
-  --color-light-text-ghost: #8890a8;
+  --color-light-text-ghost: #848ca3;
 }
 
 /* Catppuccin Mocha — soft pastels on warm dark */
@@ -235,8 +235,8 @@
   --color-light-border-subtle: #e4e7ed;
   --color-light-text-bright: #4c4f69;
   --color-light-text-normal: #5c5f77;
-  --color-light-text-muted: #6c6f85;
-  --color-light-text-ghost: #8c8fa1;
+  --color-light-text-muted: #696c81;
+  --color-light-text-ghost: #848797;
 }
 
 /* Gruvbox — retro earthy warmth */
@@ -300,8 +300,8 @@
 
   --color-text-bright: #c0caf5;
   --color-text-normal: #a9b1d6;
-  --color-text-muted: #787c99;
-  --color-text-ghost: #565f89;
+  --color-text-muted: #80849f;
+  --color-text-ghost: #606990;
 
   --color-severity-error: #f7768e;
   --color-severity-warn: #e0af68;
@@ -325,8 +325,8 @@
   --color-light-border-subtle: #d6d9e4;
   --color-light-text-bright: #1a1b26;
   --color-light-text-normal: #343b58;
-  --color-light-text-muted: #6172a8;
-  --color-light-text-ghost: #8890b0;
+  --color-light-text-muted: #556694;
+  --color-light-text-ghost: #7c84a1;
 }
 
 /* Rosé Pine — elegant naturals */
@@ -370,8 +370,8 @@
   --color-light-border-subtle: #ebe5df;
   --color-light-text-bright: #575279;
   --color-light-text-normal: #625e80;
-  --color-light-text-muted: #797593;
-  --color-light-text-ghost: #9893a5;
+  --color-light-text-muted: #6e6b87;
+  --color-light-text-ghost: #8f8b9b;
 }
 
 /* Everforest — nature, easy on the eyes */
@@ -415,8 +415,8 @@
   --color-light-border-subtle: #e2ddc6;
   --color-light-text-bright: #5c6a72;
   --color-light-text-normal: #708089;
-  --color-light-text-muted: #829181;
-  --color-light-text-ghost: #a6b0a0;
+  --color-light-text-muted: #606b5f;
+  --color-light-text-ghost: #7e867a;
 }
 
 /* Synthwave — neon 80s retrofuture */
@@ -461,7 +461,7 @@
   --color-light-text-bright: #1a1028;
   --color-light-text-normal: #382250;
   --color-light-text-muted: #6860a0;
-  --color-light-text-ghost: #9898c0;
+  --color-light-text-ghost: #8787aa;
 }
 
 /* Base */
