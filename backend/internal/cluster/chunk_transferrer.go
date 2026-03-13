@@ -81,6 +81,38 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 	return nil
 }
 
+// ForwardAppend sends records to a remote node via the unary ForwardRecords
+// RPC, which appends them to the destination vault's active chunk (same path
+// as live ingestion forwarding). Synchronous — blocks until the remote node
+// confirms the append. Used by retention eject for remote delivery.
+func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+	conn, err := ct.peers.Conn(nodeID)
+	if err != nil {
+		return fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+
+	exportRecs := make([]*gastrologv1.ExportRecord, len(records))
+	for i, rec := range records {
+		er := chunkRecordToExport(rec)
+		er.IngestSeq = rec.EventID.IngestSeq
+		if rec.EventID.IngesterID != ([16]byte{}) {
+			er.IngesterId = rec.EventID.IngesterID[:]
+		}
+		exportRecs[i] = er
+	}
+
+	req := &gastrologv1.ForwardRecordsRequest{
+		VaultId: vaultID.String(),
+		Records: exportRecs,
+	}
+	resp := &gastrologv1.ForwardRecordsResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("forward append to %s: %w", nodeID, err)
+	}
+	return nil
+}
+
 // WaitVaultReady polls the target node until the vault is registered and
 // accepting records, or ctx expires. Uses ForwardListChunks as a lightweight
 // existence probe — it returns an error if the vault doesn't exist.

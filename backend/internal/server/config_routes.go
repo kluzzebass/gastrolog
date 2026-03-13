@@ -97,6 +97,7 @@ func (s *ConfigServer) PutRoute(
 		Destinations: destinations,
 		Distribution: distribution,
 		Enabled:      req.Msg.Config.Enabled,
+		EjectOnly:    req.Msg.Config.EjectOnly,
 	}
 	if err := s.cfgStore.PutRoute(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -118,6 +119,22 @@ func (s *ConfigServer) DeleteRoute(
 	id, connErr := parseUUID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
+	}
+
+	// Referential integrity: reject if any vault references this route as an eject target.
+	vaults, err := s.cfgStore.ListVaults(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	for _, v := range vaults {
+		for _, rule := range v.RetentionRules {
+			if rule.Action == config.RetentionActionEject {
+				if slices.Contains(rule.EjectRouteIDs, id) {
+					return nil, connect.NewError(connect.CodeFailedPrecondition,
+						fmt.Errorf("route %q is referenced as eject target by vault %q", req.Msg.Id, v.ID))
+				}
+			}
+		}
 	}
 
 	if err := s.cfgStore.DeleteRoute(ctx, id); err != nil {

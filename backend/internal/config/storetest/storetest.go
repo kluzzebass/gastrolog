@@ -386,14 +386,14 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) config.Stor
 
 		id := newID()
 		retID := newID()
-		dstID := newID()
+		ejectRouteID := newID()
 		v := config.VaultConfig{
 			ID:   id,
 			Name: "main",
 			Type: "file",
 			RetentionRules: []config.RetentionRule{
 				{RetentionPolicyID: retID, Action: config.RetentionActionExpire},
-				{RetentionPolicyID: retID, Action: config.RetentionActionMigrate, Destination: &dstID},
+				{RetentionPolicyID: retID, Action: config.RetentionActionEject, EjectRouteIDs: []uuid.UUID{ejectRouteID}},
 			},
 		}
 		if err := s.PutVault(ctx, v); err != nil {
@@ -413,11 +413,11 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) config.Stor
 		if got.RetentionRules[0].Action != config.RetentionActionExpire {
 			t.Errorf("rule[0] action: got %q, want %q", got.RetentionRules[0].Action, config.RetentionActionExpire)
 		}
-		if got.RetentionRules[1].Action != config.RetentionActionMigrate {
-			t.Errorf("rule[1] action: got %q, want %q", got.RetentionRules[1].Action, config.RetentionActionMigrate)
+		if got.RetentionRules[1].Action != config.RetentionActionEject {
+			t.Errorf("rule[1] action: got %q, want %q", got.RetentionRules[1].Action, config.RetentionActionEject)
 		}
-		if got.RetentionRules[1].Destination == nil || *got.RetentionRules[1].Destination != dstID {
-			t.Errorf("rule[1] destination: got %v, want %s", got.RetentionRules[1].Destination, dstID)
+		if len(got.RetentionRules[1].EjectRouteIDs) != 1 || got.RetentionRules[1].EjectRouteIDs[0] != ejectRouteID {
+			t.Errorf("rule[1] ejectRouteIDs: got %v, want [%s]", got.RetentionRules[1].EjectRouteIDs, ejectRouteID)
 		}
 	})
 }

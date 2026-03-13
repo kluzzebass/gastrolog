@@ -91,8 +91,9 @@ message DeleteRetentionPolicyCommand {
 // to avoid naming collisions and to match Go types exactly.
 message VaultRetentionRule {
   string retention_policy_id = 1;
-  string action = 2; // "expire" or "migrate"
-  string destination = 3; // empty = nil
+  string action = 2; // "expire" or "eject"
+  string destination = 3; // deprecated — was target vault for action=migrate
+  repeated string eject_route_ids = 4; // target routes, only for action=eject
 }
 
 message PutVaultCommand {
@@ -245,6 +246,7 @@ message PutRouteCommand {
   repeated string destination_ids = 4;
   string distribution = 5;
   bool enabled = 6;
+  bool eject_only = 7;
 }
 
 message DeleteRouteCommand {

@@ -1203,3 +1203,264 @@ func TestGetRouteStats(t *testing.T) {
 		t.Errorf("expected 5 matched, got %d", vs.RecordsMatched)
 	}
 }
+
+// ---------- Eject route & retention rule validation ----------
+
+func TestPutRouteEjectOnly(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	resp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+		Config: &gastrologv1.RouteConfig{
+			Name:      "eject-route",
+			EjectOnly: true,
+			Enabled:   true,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
+
+	// Verify route is in config and marked eject_only.
+	var found bool
+	for _, r := range resp.Msg.Config.Routes {
+		if r.Name == "eject-route" {
+			found = true
+			if !r.EjectOnly {
+				t.Error("route should be eject_only=true")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("route not found in config response")
+	}
+}
+
+func TestPutVaultEjectRetentionRule(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create a retention policy.
+	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{Name: "eject-retention", MaxChunks: 5},
+	}))
+	if err != nil {
+		t.Fatalf("PutRetentionPolicy: %v", err)
+	}
+	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
+
+	// Create an eject-only route.
+	routeResp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+		Config: &gastrologv1.RouteConfig{
+			Name:      "eject-target",
+			EjectOnly: true,
+			Enabled:   true,
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutRoute: %v", err)
+	}
+	var routeID string
+	for _, r := range routeResp.Msg.Config.Routes {
+		if r.Name == "eject-target" {
+			routeID = r.Id
+		}
+	}
+	if routeID == "" {
+		t.Fatal("eject route not found in config")
+	}
+
+	// Create vault with eject retention rule.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Name: "eject-vault",
+			Type: "memory",
+			RetentionRules: []*gastrologv1.RetentionRule{
+				{
+					RetentionPolicyId: rpID,
+					Action:            "eject",
+					EjectRouteIds:     []string{routeID},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutVault with eject rule: %v", err)
+	}
+}
+
+func TestPutVaultEjectRuleRequiresEjectOnlyRoute(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create retention policy.
+	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-eject-only", MaxChunks: 5},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
+
+	// Create a normal route (NOT eject-only).
+	routeResp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+		Config: &gastrologv1.RouteConfig{
+			Name:    "normal-route",
+			Enabled: true,
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var routeID string
+	for _, r := range routeResp.Msg.Config.Routes {
+		if r.Name == "normal-route" {
+			routeID = r.Id
+		}
+	}
+
+	// Vault with eject rule referencing a non-eject-only route → error.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Name: "bad-eject-vault",
+			Type: "memory",
+			RetentionRules: []*gastrologv1.RetentionRule{
+				{
+					RetentionPolicyId: rpID,
+					Action:            "eject",
+					EjectRouteIds:     []string{routeID},
+				},
+			},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for eject rule referencing non-eject-only route")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestPutVaultEjectRuleMissingRouteIDs(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-missing", MaxChunks: 5},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
+
+	// Eject rule with no route IDs → error.
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Name: "missing-routes-vault",
+			Type: "memory",
+			RetentionRules: []*gastrologv1.RetentionRule{
+				{
+					RetentionPolicyId: rpID,
+					Action:            "eject",
+					EjectRouteIds:     []string{},
+				},
+			},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for eject rule with no route IDs")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestDeleteRouteReferencedByEjectVault(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create retention policy + eject-only route + vault referencing it.
+	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-ref-integrity", MaxChunks: 5},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
+
+	routeResp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
+		Config: &gastrologv1.RouteConfig{Name: "eject-route-ref", EjectOnly: true, Enabled: true},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var routeID string
+	for _, r := range routeResp.Msg.Config.Routes {
+		if r.Name == "eject-route-ref" {
+			routeID = r.Id
+		}
+	}
+
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Name: "vault-with-eject",
+			Type: "memory",
+			RetentionRules: []*gastrologv1.RetentionRule{
+				{
+					RetentionPolicyId: rpID,
+					Action:            "eject",
+					EjectRouteIds:     []string{routeID},
+				},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutVault: %v", err)
+	}
+
+	// Try to delete the route → should fail with FailedPrecondition.
+	_, err = client.DeleteRoute(ctx, connect.NewRequest(&gastrologv1.DeleteRouteRequest{
+		Id: routeID,
+	}))
+	if err == nil {
+		t.Fatal("expected error deleting route referenced by eject vault")
+	}
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("expected FailedPrecondition, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestPutVaultEjectRuleNonexistentRoute(t *testing.T) {
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
+		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-noexist", MaxChunks: 5},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
+
+	// Reference a route that doesn't exist.
+	fakeRouteID := uuid.Must(uuid.NewV7()).String()
+	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
+		Config: &gastrologv1.VaultConfig{
+			Name: "vault-no-route",
+			Type: "memory",
+			RetentionRules: []*gastrologv1.RetentionRule{
+				{
+					RetentionPolicyId: rpID,
+					Action:            "eject",
+					EjectRouteIds:     []string{fakeRouteID},
+				},
+			},
+		},
+	}))
+	if err == nil {
+		t.Fatal("expected error for eject rule referencing non-existent route")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}

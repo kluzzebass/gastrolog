@@ -144,7 +144,7 @@ func TestPutVault(t *testing.T) {
 		Policy: &policyID,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: retPolicyID, Action: config.RetentionActionExpire},
-			{RetentionPolicyID: retPolicyID, Action: config.RetentionActionMigrate, Destination: &destID},
+			{RetentionPolicyID: retPolicyID, Action: config.RetentionActionEject, EjectRouteIDs: []uuid.UUID{destID}},
 		},
 		Enabled: true,
 		Params:  map[string]string{"path": "/data/vault"},
@@ -487,7 +487,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 				Type:   "file",
 				Policy: &policyID,
 				RetentionRules: []config.RetentionRule{
-					{RetentionPolicyID: retPolicyID, Action: config.RetentionActionMigrate, Destination: &destVaultID},
+					{RetentionPolicyID: retPolicyID, Action: config.RetentionActionEject, EjectRouteIDs: []uuid.UUID{destVaultID}},
 				},
 				Enabled: true,
 				Params:  map[string]string{"path": "/data"},

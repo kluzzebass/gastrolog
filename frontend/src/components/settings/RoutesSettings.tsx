@@ -37,6 +37,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   const [newDestinations, setNewDestinations] = useState<DestinationEdit[]>([]);
   const [newDistribution, setNewDistribution] = useState("fanout");
   const [newEnabled, setNewEnabled] = useState(true);
+  const [newEjectOnly, setNewEjectOnly] = useState(false);
 
   const routes = config?.routes ?? [];
   const filters = config?.filters ?? [];
@@ -67,6 +68,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: [] as DestinationEdit[],
         distribution: "fanout",
         enabled: true,
+        ejectOnly: false,
       };
     return {
       name: route.name,
@@ -74,6 +76,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       destinations: route.destinations.map((d) => ({ vaultId: d.vaultId })),
       distribution: route.distribution || "fanout",
       enabled: route.enabled,
+      ejectOnly: route.ejectOnly,
     };
   };
 
@@ -91,6 +94,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: DestinationEdit[];
         distribution: string;
         enabled: boolean;
+        ejectOnly: boolean;
       },
     ) => ({
       id,
@@ -99,6 +103,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       destinations: edit.destinations.map((d) => d.vaultId),
       distribution: edit.distribution,
       enabled: edit.enabled,
+      ejectOnly: edit.ejectOnly,
     }),
     clearEdit,
   });
@@ -115,6 +120,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         destinations: newDestinations.map((d) => d.vaultId),
         distribution: newDistribution,
         enabled: newEnabled,
+        ejectOnly: newEjectOnly,
       });
       addToast(`Route "${name}" created`, "info");
       setAdding(false);
@@ -123,6 +129,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       setNewDestinations([]);
       setNewDistribution("fanout");
       setNewEnabled(true);
+      setNewEjectOnly(false);
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to create route", "error");
     }
@@ -143,6 +150,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
         setNewDestinations([]);
         setNewDistribution("fanout");
         setNewEnabled(true);
+        setNewEjectOnly(false);
         setAdding(!adding);
       }}
       isLoading={isLoading}
@@ -198,6 +206,12 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             label="Enabled"
             dark={dark}
           />
+          <Checkbox
+            checked={newEjectOnly}
+            onChange={setNewEjectOnly}
+            label="Eject Only"
+            dark={dark}
+          />
         </AddFormCard>
       )}
 
@@ -222,6 +236,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 {filterName || "no filter"}
                 {destNames ? ` \u2192 ${destNames}` : ""}
                 {!route.enabled && " (disabled)"}
+                {route.ejectOnly && " (eject only)"}
               </span>
             }
             footer={
@@ -272,6 +287,12 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 onChange={(v) => setEdit(id, { enabled: v })}
                 label="Enabled"
                 dark={dark}
+              />
+              <Checkbox
+                checked={edit.ejectOnly}
+                onChange={(v) => setEdit(id, { ejectOnly: v })}
+                label="Eject Only"
+                    dark={dark}
               />
             </div>
           </SettingsCard>

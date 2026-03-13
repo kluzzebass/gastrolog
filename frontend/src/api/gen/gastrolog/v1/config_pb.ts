@@ -135,18 +135,25 @@ export class RetentionRule extends Message<RetentionRule> {
   retentionPolicyId = "";
 
   /**
-   * "expire" or "migrate"
+   * "expire" or "eject"
    *
    * @generated from field: string action = 2;
    */
   action = "";
 
   /**
-   * target vault, only for action=migrate
+   * deprecated — was target vault for action=migrate
    *
    * @generated from field: string destination_id = 3;
    */
   destinationId = "";
+
+  /**
+   * target routes, only for action=eject
+   *
+   * @generated from field: repeated string eject_route_ids = 4;
+   */
+  ejectRouteIds: string[] = [];
 
   constructor(data?: PartialMessage<RetentionRule>) {
     super();
@@ -159,6 +166,7 @@ export class RetentionRule extends Message<RetentionRule> {
     { no: 1, name: "retention_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "destination_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "eject_route_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionRule {
@@ -334,6 +342,13 @@ export class RouteConfig extends Message<RouteConfig> {
    */
   enabled = false;
 
+  /**
+   * when true, excluded from live ingestion FilterSet; usable only as eject target
+   *
+   * @generated from field: bool eject_only = 7;
+   */
+  ejectOnly = false;
+
   constructor(data?: PartialMessage<RouteConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -348,6 +363,7 @@ export class RouteConfig extends Message<RouteConfig> {
     { no: 4, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 7, name: "eject_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteConfig {

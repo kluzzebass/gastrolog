@@ -154,8 +154,8 @@ func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
 			RetentionPolicyId: b.RetentionPolicyID.String(),
 			Action:            string(b.Action),
 		}
-		if b.Destination != nil {
-			pb.DestinationId = b.Destination.String()
+		for _, eid := range b.EjectRouteIDs {
+			pb.EjectRouteIds = append(pb.EjectRouteIds, eid.String())
 		}
 		vc.RetentionRules = append(vc.RetentionRules, pb)
 	}
@@ -230,6 +230,7 @@ func (s *ConfigServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetConf
 			Name:         rt.Name,
 			Distribution: rt.Distribution,
 			Enabled:      rt.Enabled,
+			EjectOnly:    rt.EjectOnly,
 		}
 		if rt.FilterID != nil {
 			prt.FilterId = rt.FilterID.String()

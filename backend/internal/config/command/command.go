@@ -209,10 +209,14 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 func putVaultCmd(cfg config.VaultConfig) *gastrologv1.PutVaultCommand {
 	rules := make([]*gastrologv1.VaultRetentionRule, len(cfg.RetentionRules))
 	for i, r := range cfg.RetentionRules {
+		ejectIDs := make([]string, len(r.EjectRouteIDs))
+		for j, eid := range r.EjectRouteIDs {
+			ejectIDs[j] = eid.String()
+		}
 		rules[i] = &gastrologv1.VaultRetentionRule{
 			RetentionPolicyId: r.RetentionPolicyID.String(),
 			Action:            string(r.Action),
-			Destination:       uuidPtrToString(r.Destination),
+			EjectRouteIds:     ejectIDs,
 		}
 	}
 	return &gastrologv1.PutVaultCommand{
@@ -260,14 +264,18 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (config.VaultConfig, erro
 		if err != nil {
 			return config.VaultConfig{}, fmt.Errorf("parse retention rule policy id: %w", err)
 		}
-		dest, err := parseOptionalUUID(r.GetDestination())
-		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("parse retention rule destination: %w", err)
+		var ejectRouteIDs []uuid.UUID
+		for _, eid := range r.GetEjectRouteIds() {
+			eID, err := uuid.Parse(eid)
+			if err != nil {
+				return config.VaultConfig{}, fmt.Errorf("parse eject route id: %w", err)
+			}
+			ejectRouteIDs = append(ejectRouteIDs, eID)
 		}
 		rules = append(rules, config.RetentionRule{
 			RetentionPolicyID: rpID,
 			Action:            config.RetentionAction(r.GetAction()),
-			Destination:       dest,
+			EjectRouteIDs:     ejectRouteIDs,
 		})
 	}
 
@@ -356,6 +364,7 @@ func putRouteCmd(cfg config.RouteConfig) *gastrologv1.PutRouteCommand {
 		DestinationIds: dests,
 		Distribution:   cfg.Distribution,
 		Enabled:        cfg.Enabled,
+		EjectOnly:      cfg.EjectOnly,
 	}
 }
 
@@ -400,6 +409,7 @@ func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (config.RouteConfig, erro
 		Destinations: dests,
 		Distribution: cmd.GetDistribution(),
 		Enabled:      cmd.GetEnabled(),
+		EjectOnly:    cmd.GetEjectOnly(),
 	}, nil
 }
 

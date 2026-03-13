@@ -864,8 +864,9 @@ func copyVaultConfig(st config.VaultConfig) config.VaultConfig {
 				RetentionPolicyID: b.RetentionPolicyID,
 				Action:            b.Action,
 			}
-			if b.Destination != nil {
-				c.RetentionRules[i].Destination = new(*b.Destination)
+			if len(b.EjectRouteIDs) > 0 {
+				c.RetentionRules[i].EjectRouteIDs = make([]uuid.UUID, len(b.EjectRouteIDs))
+				copy(c.RetentionRules[i].EjectRouteIDs, b.EjectRouteIDs)
 			}
 		}
 	}
@@ -889,6 +890,7 @@ func copyRouteConfig(rt config.RouteConfig) config.RouteConfig {
 		Name:         rt.Name,
 		Distribution: rt.Distribution,
 		Enabled:      rt.Enabled,
+		EjectOnly:    rt.EjectOnly,
 	}
 	if rt.FilterID != nil {
 		c.FilterID = new(*rt.FilterID)

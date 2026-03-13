@@ -142,8 +142,9 @@ message GetConfigResponse {
 
 message RetentionRule {
   string retention_policy_id = 1;
-  string action = 2;              // "expire" or "migrate"
-  string destination_id = 3;      // target vault, only for action=migrate
+  string action = 2;              // "expire" or "eject"
+  string destination_id = 3;      // deprecated — was target vault for action=migrate
+  repeated string eject_route_ids = 4; // target routes, only for action=eject
 }
 
 message VaultConfig {
@@ -171,6 +172,7 @@ message RouteConfig {
   repeated RouteDestination destinations = 4;
   string distribution = 5;                     // "fanout" (default), "round-robin", or "failover"
   bool enabled = 6;
+  bool eject_only = 7;                          // when true, excluded from live ingestion FilterSet; usable only as eject target
 }
 
 message IngesterConfig {

@@ -927,8 +927,9 @@ func (x *DeleteRetentionPolicyCommand) GetId() string {
 type VaultRetentionRule struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	RetentionPolicyId string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
-	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`           // "expire" or "migrate"
-	Destination       string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"` // empty = nil
+	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                      // "expire" or "eject"
+	Destination       string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`                            // deprecated — was target vault for action=migrate
+	EjectRouteIds     []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"` // target routes, only for action=eject
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -982,6 +983,13 @@ func (x *VaultRetentionRule) GetDestination() string {
 		return x.Destination
 	}
 	return ""
+}
+
+func (x *VaultRetentionRule) GetEjectRouteIds() []string {
+	if x != nil {
+		return x.EjectRouteIds
+	}
+	return nil
 }
 
 type PutVaultCommand struct {
@@ -2237,6 +2245,7 @@ type PutRouteCommand struct {
 	DestinationIds []string               `protobuf:"bytes,4,rep,name=destination_ids,json=destinationIds,proto3" json:"destination_ids,omitempty"`
 	Distribution   string                 `protobuf:"bytes,5,opt,name=distribution,proto3" json:"distribution,omitempty"`
 	Enabled        bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	EjectOnly      bool                   `protobuf:"varint,7,opt,name=eject_only,json=ejectOnly,proto3" json:"eject_only,omitempty"`
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -2309,6 +2318,13 @@ func (x *PutRouteCommand) GetDistribution() string {
 func (x *PutRouteCommand) GetEnabled() bool {
 	if x != nil {
 		return x.Enabled
+	}
+	return false
+}
+
+func (x *PutRouteCommand) GetEjectOnly() bool {
+	if x != nil {
+		return x.EjectOnly
 	}
 	return false
 }
@@ -2700,11 +2716,12 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"_max_bytesB\r\n" +
 	"\v_max_chunks\".\n" +
 	"\x1cDeleteRetentionPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"~\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xa6\x01\n" +
 	"\x12VaultRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12 \n" +
-	"\vdestination\x18\x03 \x01(\tR\vdestination\"\xe3\x02\n" +
+	"\vdestination\x18\x03 \x01(\tR\vdestination\x12&\n" +
+	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\"\xe3\x02\n" +
 	"\x0fPutVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -2800,14 +2817,16 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x10cluster_cert_pem\x18\x03 \x01(\fR\x0eclusterCertPem\x12&\n" +
 	"\x0fcluster_key_pem\x18\x04 \x01(\fR\rclusterKeyPem\x12\x1d\n" +
 	"\n" +
-	"join_token\x18\x05 \x01(\tR\tjoinToken\"\xb9\x01\n" +
+	"join_token\x18\x05 \x01(\tR\tjoinToken\"\xd8\x01\n" +
 	"\x0fPutRouteCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
 	"\tfilter_id\x18\x03 \x01(\tR\bfilterId\x12'\n" +
 	"\x0fdestination_ids\x18\x04 \x03(\tR\x0edestinationIds\x12\"\n" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\"$\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1d\n" +
+	"\n" +
+	"eject_only\x18\a \x01(\bR\tejectOnly\"$\n" +
 	"\x12DeleteRouteCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x88\x01\n" +
 	"\x15PutManagedFileCommand\x12\x0e\n" +

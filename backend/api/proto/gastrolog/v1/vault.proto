@@ -96,6 +96,8 @@ message ChunkMeta {
   int64 bytes = 6;
   bool compressed = 7;    // true if raw.log/attr.log are compressed
   int64 disk_bytes = 8;   // actual on-disk size (may differ from bytes if compressed)
+  google.protobuf.Timestamp ingest_start = 9;
+  google.protobuf.Timestamp ingest_end = 10;
 }
 
 message GetChunkRequest {

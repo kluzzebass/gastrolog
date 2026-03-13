@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -23,9 +22,9 @@ func retentionJobName(vaultID uuid.UUID) string {
 
 // retentionRule is a resolved rule: a compiled policy paired with an action.
 type retentionRule struct {
-	policy      chunk.RetentionPolicy
-	action      config.RetentionAction
-	destination uuid.UUID // target vault ID, only for migrate
+	policy        chunk.RetentionPolicy
+	action        config.RetentionAction
+	ejectRouteIDs []uuid.UUID // target route IDs, only for eject
 }
 
 // retentionRunner manages the retention sweep for a single vault.
@@ -37,7 +36,7 @@ type retentionRunner struct {
 	im       index.IndexManager
 	rules    []retentionRule
 	inflight map[chunk.ChunkID]bool // chunks currently being processed
-	orch     *Orchestrator          // for MoveChunk on migrate action
+	orch     *Orchestrator          // for eject action (loadConfig, Append, transferrer)
 	now      func() time.Time
 	logger   *slog.Logger
 }
@@ -49,7 +48,7 @@ func (r *retentionRunner) setRules(rules []retentionRule) {
 	r.rules = rules
 }
 
-// sweep evaluates all retention rules and applies expire/migrate actions.
+// sweep evaluates all retention rules and applies expire/eject actions.
 func (r *retentionRunner) sweep() {
 	r.mu.Lock()
 	rules := r.rules
@@ -114,8 +113,8 @@ func (r *retentionRunner) sweep() {
 				switch b.action {
 				case config.RetentionActionExpire:
 					r.expireChunk(id)
-				case config.RetentionActionMigrate:
-					r.migrateChunk(id, b.destination)
+				case config.RetentionActionEject:
+					r.ejectChunk(id, b.ejectRouteIDs)
 				default:
 					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
 				}
@@ -147,16 +146,4 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 
 	r.logger.Info("retention: deleted chunk",
 		"vault", r.vaultID, "chunk", id.String())
-}
-
-// migrateChunk moves a single chunk to the destination vault.
-func (r *retentionRunner) migrateChunk(id chunk.ChunkID, dstID uuid.UUID) {
-	ctx := context.Background()
-	if err := r.orch.MoveChunk(ctx, id, r.vaultID, dstID); err != nil {
-		r.logger.Error("retention: failed to migrate chunk",
-			"vault", r.vaultID, "chunk", id.String(), "destination", dstID, "error", err)
-		return
-	}
-	r.logger.Info("retention: migrated chunk",
-		"vault", r.vaultID, "chunk", id.String(), "destination", dstID)
 }

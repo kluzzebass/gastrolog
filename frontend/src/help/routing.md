@@ -15,3 +15,12 @@ When a record arrives, every vault's filter is evaluated against it. A record ca
 ## Configuration
 
 Filters are managed in [Settings → Filters](settings:filters). Each filter has a name and an expression. Vaults reference filters by name — you can share one filter across multiple vaults or give each vault its own.
+
+## Ingestion vs Eject-Only Routes
+
+Routes have an **Eject Only** toggle:
+
+- **Ingestion routes** (default): Participate in live ingestion. When records arrive from ingesters, these routes' filters determine which vaults receive the records.
+- **Eject-only routes**: Excluded from live ingestion entirely. They exist solely as targets for the [eject retention action](help:policy-retention). This prevents loops — ejected records cannot re-match ingestion routes and bounce back.
+
+A route cannot be both. Use eject-only routes when you need to move records from one vault to another based on retention rules, with per-record filtering applied during the move.

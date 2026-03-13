@@ -170,8 +170,9 @@ func (x *GetConfigResponse) GetManagedFiles() []*ManagedFileInfo {
 type RetentionRule struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	RetentionPolicyId string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
-	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                    // "expire" or "migrate"
-	DestinationId     string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"` // target vault, only for action=migrate
+	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                      // "expire" or "eject"
+	DestinationId     string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`   // deprecated — was target vault for action=migrate
+	EjectRouteIds     []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"` // target routes, only for action=eject
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -225,6 +226,13 @@ func (x *RetentionRule) GetDestinationId() string {
 		return x.DestinationId
 	}
 	return ""
+}
+
+func (x *RetentionRule) GetEjectRouteIds() []string {
+	if x != nil {
+		return x.EjectRouteIds
+	}
+	return nil
 }
 
 type VaultConfig struct {
@@ -380,6 +388,7 @@ type RouteConfig struct {
 	Destinations  []*RouteDestination    `protobuf:"bytes,4,rep,name=destinations,proto3" json:"destinations,omitempty"`
 	Distribution  string                 `protobuf:"bytes,5,opt,name=distribution,proto3" json:"distribution,omitempty"` // "fanout" (default), "round-robin", or "failover"
 	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	EjectOnly     bool                   `protobuf:"varint,7,opt,name=eject_only,json=ejectOnly,proto3" json:"eject_only,omitempty"` // when true, excluded from live ingestion FilterSet; usable only as eject target
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -452,6 +461,13 @@ func (x *RouteConfig) GetDistribution() string {
 func (x *RouteConfig) GetEnabled() bool {
 	if x != nil {
 		return x.Enabled
+	}
+	return false
+}
+
+func (x *RouteConfig) GetEjectOnly() bool {
+	if x != nil {
+		return x.EjectOnly
 	}
 	return false
 }
@@ -6531,11 +6547,12 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\fnode_configs\x18\x06 \x03(\v2\x18.gastrolog.v1.NodeConfigR\vnodeConfigs\x121\n" +
 	"\x06routes\x18\a \x03(\v2\x19.gastrolog.v1.RouteConfigR\x06routes\x12%\n" +
 	"\x0econfig_version\x18\t \x01(\x04R\rconfigVersion\x12B\n" +
-	"\rmanaged_files\x18\b \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\"~\n" +
+	"\rmanaged_files\x18\b \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\fmanagedFiles\"\xa6\x01\n" +
 	"\rRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12%\n" +
-	"\x0edestination_id\x18\x03 \x01(\tR\rdestinationId\"\xd6\x02\n" +
+	"\x0edestination_id\x18\x03 \x01(\tR\rdestinationId\x12&\n" +
+	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\"\xd6\x02\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x16\n" +
@@ -6550,14 +6567,16 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\"\xd0\x01\n" +
+	"\bvault_id\x18\x01 \x01(\tR\avaultId\"\xef\x01\n" +
 	"\vRouteConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
 	"\tfilter_id\x18\x03 \x01(\tR\bfilterId\x12B\n" +
 	"\fdestinations\x18\x04 \x03(\v2\x1e.gastrolog.v1.RouteDestinationR\fdestinations\x12\"\n" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
-	"\aenabled\x18\x06 \x01(\bR\aenabled\"\xf8\x01\n" +
+	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1d\n" +
+	"\n" +
+	"eject_only\x18\a \x01(\bR\tejectOnly\"\xf8\x01\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +

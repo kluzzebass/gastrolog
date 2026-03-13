@@ -274,14 +274,11 @@ func resolveRetentionRules(cfg *config.Config, vaultCfg config.VaultConfig) ([]r
 		if policy == nil {
 			continue
 		}
-		rb := retentionRule{
-			policy: policy,
-			action: b.Action,
-		}
-		if b.Destination != nil {
-			rb.destination = *b.Destination
-		}
-		rules = append(rules, rb)
+		rules = append(rules, retentionRule{
+			policy:        policy,
+			action:        b.Action,
+			ejectRouteIDs: b.EjectRouteIDs,
+		})
 	}
 	return rules, nil
 }

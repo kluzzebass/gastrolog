@@ -80,6 +80,9 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 		if !route.Enabled {
 			continue
 		}
+		if route.EjectOnly {
+			continue // eject-only routes excluded from live FilterSet
+		}
 
 		var filterExpr string
 		if route.FilterID != nil {

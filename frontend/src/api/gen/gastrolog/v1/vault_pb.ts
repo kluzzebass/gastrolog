@@ -357,6 +357,16 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   diskBytes = protoInt64.zero;
 
+  /**
+   * @generated from field: google.protobuf.Timestamp ingest_start = 9;
+   */
+  ingestStart?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp ingest_end = 10;
+   */
+  ingestEnd?: Timestamp;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -373,6 +383,8 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 6, name: "bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 7, name: "compressed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "disk_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 9, name: "ingest_start", kind: "message", T: Timestamp },
+    { no: 10, name: "ingest_end", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

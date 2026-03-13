@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { VaultConfig, RotationPolicyConfig, RetentionPolicyConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import type { VaultConfig, RotationPolicyConfig, RetentionPolicyConfig, RouteConfig } from "../../api/gen/gastrolog/v1/config_pb";
 import {
   usePutVault,
   useDeleteVault,
@@ -28,6 +28,7 @@ import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 interface VaultSettingsCardProps {
   vault: VaultConfig;
   vaults: VaultConfig[];
+  routes: RouteConfig[];
   policies: RotationPolicyConfig[];
   retentionPolicies: RetentionPolicyConfig[];
   dark: boolean;
@@ -39,6 +40,7 @@ interface VaultSettingsCardProps {
 export function VaultSettingsCard({
   vault,
   vaults,
+  routes,
   policies,
   retentionPolicies,
   dark,
@@ -73,7 +75,7 @@ export function VaultSettingsCard({
     retentionRules: vault.retentionRules.map((b): RetentionRuleEdit => ({
       retentionPolicyId: b.retentionPolicyId,
       action: b.action,
-      destinationId: b.destinationId,
+      ejectRouteIds: b.ejectRouteIds ?? [],
     })),
     enabled: vault.enabled,
     params: { ...vault.params } as Record<string, string>,
@@ -275,8 +277,7 @@ export function VaultSettingsCard({
           rules={edit.retentionRules}
           onChange={(rules) => setEdit(vault.id, { retentionRules: rules })}
           retentionPolicies={retentionPolicies}
-          vaults={vaults}
-          currentVaultId={vault.id}
+          routes={routes}
           dark={dark}
         />
         <VaultParamsForm

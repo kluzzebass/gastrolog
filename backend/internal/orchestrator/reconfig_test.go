@@ -1091,8 +1091,8 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 	// Now update config to include retention rules on the vault.
 	loader.cfg.Vaults[0].RetentionRules = []config.RetentionRule{{
 		RetentionPolicyID: retPolicyID,
-		Action:            config.RetentionActionMigrate,
-		Destination:       &dstID,
+		Action:            config.RetentionActionEject,
+		EjectRouteIDs:     []uuid.UUID{dstID},
 	}}
 
 	// ReloadRetentionPolicies should create the runner.
@@ -1126,8 +1126,8 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 		Vaults: []config.VaultConfig{
 			{ID: vaultID, Name: "src", Type: "memory", RetentionRules: []config.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
-				Action:            config.RetentionActionMigrate,
-				Destination:       &dstID,
+				Action:            config.RetentionActionEject,
+				EjectRouteIDs:     []uuid.UUID{dstID},
 			}}},
 		},
 	}}

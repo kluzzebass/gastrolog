@@ -396,16 +396,23 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id uuid.UUID) *api
 }
 
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
-	return &apiv1.ChunkMeta{
+	pb := &apiv1.ChunkMeta{
 		Id:          meta.ID.String(),
-		WriteStart:     timestamppb.New(meta.WriteStart),
-		WriteEnd:       timestamppb.New(meta.WriteEnd),
+		WriteStart:  timestamppb.New(meta.WriteStart),
+		WriteEnd:    timestamppb.New(meta.WriteEnd),
 		Sealed:      meta.Sealed,
 		RecordCount: meta.RecordCount,
 		Bytes:       meta.Bytes,
 		Compressed:  meta.Compressed,
 		DiskBytes:   meta.DiskBytes,
 	}
+	if !meta.IngestStart.IsZero() {
+		pb.IngestStart = timestamppb.New(meta.IngestStart)
+	}
+	if !meta.IngestEnd.IsZero() {
+		pb.IngestEnd = timestamppb.New(meta.IngestEnd)
+	}
+	return pb
 }
 
 // ChunkAnalysisToProto converts an analyzer.ChunkAnalysis to a proto ChunkAnalysis.

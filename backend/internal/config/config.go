@@ -486,15 +486,15 @@ type RetentionAction string
 const (
 	// RetentionActionExpire deletes matching chunks (the default behavior).
 	RetentionActionExpire RetentionAction = "expire"
-	// RetentionActionMigrate moves matching chunks to a destination vault.
-	RetentionActionMigrate RetentionAction = "migrate"
+	// RetentionActionEject streams matching chunks' records through named routes.
+	RetentionActionEject RetentionAction = "eject"
 )
 
 // RetentionRule pairs a retention policy with an action.
 type RetentionRule struct {
 	RetentionPolicyID uuid.UUID       `json:"retentionPolicyId"`
 	Action            RetentionAction `json:"action"`
-	Destination       *uuid.UUID      `json:"destination,omitempty"` // target vault, only for migrate
+	EjectRouteIDs     []uuid.UUID     `json:"ejectRouteIds,omitempty"` // target routes, only for eject
 }
 
 // VaultConfig describes a storage backend to instantiate.
@@ -512,7 +512,7 @@ type VaultConfig struct {
 	// Nil means no policy (type-specific default).
 	Policy *uuid.UUID `json:"policy,omitempty"`
 
-	// RetentionRules pairs retention policies with actions (expire or migrate).
+	// RetentionRules pairs retention policies with actions (expire or eject).
 	RetentionRules []RetentionRule `json:"retentionRules,omitempty"`
 
 	// Enabled indicates whether ingestion is enabled for this vault.
@@ -553,6 +553,12 @@ type RouteConfig struct {
 
 	// Enabled controls whether this route is active.
 	Enabled bool `json:"enabled,omitempty"`
+
+	// EjectOnly marks this route as excluded from live ingestion.
+	// When false (default), the route participates in the FilterSet.
+	// When true, the route is excluded from live ingestion and can only
+	// be used as an eject target in retention rules.
+	EjectOnly bool `json:"ejectOnly,omitempty"`
 }
 
 // IngesterConfig describes a ingester to instantiate.

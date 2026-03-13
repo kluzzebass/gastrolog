@@ -73,6 +73,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const nameConflict = existingNames.has(effectiveName);
   const policies = config?.rotationPolicies ?? [];
   const retentionPolicies = config?.retentionPolicies ?? [];
+  const routes = config?.routes ?? [];
 
   // Auto-expand a vault when navigated to from another view.
   const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
@@ -162,8 +163,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
             rules={addForm.retentionRules}
             onChange={(rules) => dispatchAdd({ type: "set", patch: { retentionRules: rules } })}
             retentionPolicies={retentionPolicies}
-            vaults={vaults}
-            currentVaultId=""
+            routes={routes}
             dark={dark}
           />
           <VaultParamsForm
@@ -181,6 +181,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           key={vault.id}
           vault={vault}
           vaults={vaults}
+          routes={routes}
           policies={policies}
           retentionPolicies={retentionPolicies}
           dark={dark}

@@ -10,6 +10,7 @@ export function usePutRoute() {
       destinations: string[];
       distribution: string;
       enabled: boolean;
+      ejectOnly: boolean;
     }) => {
       return configClient.putRoute({
         config: {
@@ -19,6 +20,7 @@ export function usePutRoute() {
           destinations: args.destinations.map((vaultId) => ({ vaultId })),
           distribution: args.distribution,
           enabled: args.enabled,
+          ejectOnly: args.ejectOnly,
         },
       });
     },

@@ -85,9 +85,19 @@ type RecordForwarder interface {
 // RemoteTransferrer sends records to a remote node for cross-node chunk
 // migration. Unlike RecordForwarder (fire-and-forget for ingestion), this
 // is synchronous and reliable — the caller blocks until the remote node
-// confirms the records have been imported as a sealed chunk.
+// confirms delivery.
 type RemoteTransferrer interface {
+	// TransferRecords streams records to a remote node, which imports them
+	// as a new sealed chunk. Used by MoveChunk and DrainVault where
+	// preserving chunk boundaries is desired.
 	TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error
+
+	// ForwardAppend sends records to a remote node, which appends them to
+	// the destination vault's active chunk (same as live ingestion).
+	// Synchronous — blocks until the remote node confirms the append.
+	// Used by retention eject where records should flow through the
+	// destination's normal rotation lifecycle.
+	ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to

@@ -138,6 +138,27 @@ func (s *ConfigServer) PutVault(
 		return nil, connErr
 	}
 
+	// Validate eject route IDs reference existing eject-only routes.
+	for _, rule := range vaultCfg.RetentionRules {
+		if rule.Action != config.RetentionActionEject {
+			continue
+		}
+		for _, routeID := range rule.EjectRouteIDs {
+			route, err := s.cfgStore.GetRoute(ctx, routeID)
+			if err != nil {
+				return nil, connect.NewError(connect.CodeInternal, err)
+			}
+			if route == nil {
+				return nil, connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("eject route %q not found", routeID))
+			}
+			if !route.EjectOnly {
+				return nil, connect.NewError(connect.CodeInvalidArgument,
+					fmt.Errorf("eject route %q is not an eject-only route", routeID))
+			}
+		}
+	}
+
 	// Validate file vault directory against nesting.
 	// When dir is empty, the orchestrator defaults to "vaults/<name>" —
 	// validate using that same default so nesting checks are accurate.
@@ -343,21 +364,36 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 			return config.VaultConfig{}, fmt.Errorf("invalid retention policy ID: %w", err)
 		}
 		b.RetentionPolicyID = rpID
-		if config.RetentionAction(pb.Action) == config.RetentionActionMigrate {
-			if pb.DestinationId == "" {
-				return config.VaultConfig{}, errors.New("migrate rule missing destination ID")
-			}
+
+		if err := validateRetentionAction(pb); err != nil {
+			return config.VaultConfig{}, err
 		}
-		if pb.DestinationId != "" {
-			dstID, err := uuid.Parse(pb.DestinationId)
+
+		for _, eid := range pb.EjectRouteIds {
+			routeID, err := uuid.Parse(eid)
 			if err != nil {
-				return config.VaultConfig{}, fmt.Errorf("invalid destination ID: %w", err)
+				return config.VaultConfig{}, fmt.Errorf("invalid eject route ID: %w", err)
 			}
-			b.Destination = &dstID
+			b.EjectRouteIDs = append(b.EjectRouteIDs, routeID)
 		}
 		cfg.RetentionRules = append(cfg.RetentionRules, b)
 	}
 	return cfg, nil
+}
+
+// validateRetentionAction checks action-specific field requirements.
+func validateRetentionAction(pb *apiv1.RetentionRule) error {
+	switch config.RetentionAction(pb.Action) {
+	case config.RetentionActionExpire:
+		// No additional fields required.
+	case config.RetentionActionEject:
+		if len(pb.EjectRouteIds) == 0 {
+			return errors.New("eject rule requires at least one route ID")
+		}
+	default:
+		return fmt.Errorf("unknown retention action %q", pb.Action)
+	}
+	return nil
 }
 
 // VaultConnectionTester validates connectivity for a vault configuration.
