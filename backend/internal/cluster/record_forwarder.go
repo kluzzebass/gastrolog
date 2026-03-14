@@ -3,11 +3,13 @@ package cluster
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
@@ -57,6 +59,7 @@ type RecordForwarder struct {
 	peers  *PeerConns
 	logger *slog.Logger
 	cw     *chanwatch.Watcher
+	alerts *alert.Collector // optional alert collector
 
 	sent atomic.Int64 // records successfully sent via ForwardRecords RPCs
 
@@ -69,14 +72,16 @@ type RecordForwarder struct {
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
-func NewRecordForwarder(peers *PeerConns, logger *slog.Logger) *RecordForwarder {
+func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Collector) *RecordForwarder {
 	rf := &RecordForwarder{
 		peers:  peers,
 		logger: logger,
+		alerts: alerts,
 		cw:     chanwatch.New(logger, 1*time.Second),
 		nodes:  make(map[string]*nodeForwarder),
 		stop:   make(chan struct{}),
 	}
+	rf.cw.SetAlerts(alerts)
 	// Run the channel pressure watcher until Close().
 	ctx, cancel := context.WithCancel(context.Background())
 	rf.cwCancel = cancel
@@ -107,6 +112,13 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 			if !rf.stopping() {
 				rf.logger.Info("forward buffer full, dropping record",
 					"node", nodeID, "vault", vaultID)
+				if rf.alerts != nil {
+					rf.alerts.Set(
+						"forwarder-overflow:"+nodeID,
+						alert.Warning, "forwarder",
+						fmt.Sprintf("Forward buffer full for node %s, dropping records", nodeID[:8]),
+					)
+				}
 			}
 		}
 	}
@@ -210,18 +222,7 @@ func (rf *RecordForwarder) drainChannel(nf *nodeForwarder, batch []forwardEntry)
 // sendBatchWithBackoff wraps sendBatch with backoff tracking.
 func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder, entries []forwardEntry) {
 	if rf.sendBatch(nodeID, nf, entries) {
-		rf.sent.Add(int64(len(entries)))
-		// Success — reset backoff and log recovery if we were failing.
-		if nf.failures > 0 {
-			rf.logger.Info("forward: connection restored",
-				"node", nodeID, "after_failures", nf.failures)
-		} else if nf.failures == 0 && nf.backoff == 0 && !nf.everSent {
-			rf.logger.Info("forward: first batch sent",
-				"node", nodeID, "records", len(entries))
-			nf.everSent = true
-		}
-		nf.failures = 0
-		nf.backoff = 0
+		rf.handleSendSuccess(nodeID, nf, len(entries))
 		return
 	}
 
@@ -237,6 +238,33 @@ func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder
 	} else {
 		nf.backoff = min(nf.backoff*2, backoffMax)
 	}
+	if rf.alerts != nil && !rf.stopping() {
+		rf.alerts.Set(
+			"forwarder-backoff:"+nodeID,
+			alert.Warning, "forwarder",
+			fmt.Sprintf("Forward to node %s failing (%d consecutive), backing off %s", nodeID[:8], nf.failures, nf.backoff),
+		)
+	}
+}
+
+func (rf *RecordForwarder) handleSendSuccess(nodeID string, nf *nodeForwarder, count int) {
+	rf.sent.Add(int64(count))
+	if nf.failures > 0 {
+		rf.logger.Info("forward: connection restored",
+			"node", nodeID, "after_failures", nf.failures)
+		if rf.alerts != nil {
+			rf.alerts.Clear("forwarder-backoff:" + nodeID)
+		}
+	} else if !nf.everSent {
+		rf.logger.Info("forward: first batch sent",
+			"node", nodeID, "records", count)
+		nf.everSent = true
+	}
+	if rf.alerts != nil {
+		rf.alerts.Clear("forwarder-overflow:" + nodeID)
+	}
+	nf.failures = 0
+	nf.backoff = 0
 }
 
 // sendBatch groups entries by vault and sends one ForwardRecords RPC per vault.

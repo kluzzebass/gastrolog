@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/logging"
@@ -202,6 +203,9 @@ type Orchestrator struct {
 	// Only accessed from digestLoop (single goroutine), no lock needed.
 	ingestSeqs map[string]uint32
 
+	// Alert collector for runtime system alerts.
+	alerts AlertCollector
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -244,6 +248,17 @@ type Config struct {
 	// vaults and ingesters during ApplyConfig — only entities assigned
 	// to this node (or with empty NodeID) are instantiated.
 	LocalNodeID string
+
+	// Alerts is an optional collector for runtime system alerts.
+	// Components call Set to raise alerts and Clear to resolve them.
+	Alerts AlertCollector
+}
+
+// AlertCollector is the interface for raising and clearing system alerts.
+// Satisfied by *alert.Collector.
+type AlertCollector interface {
+	Set(id string, severity alert.Severity, source, message string)
+	Clear(id string)
 }
 
 // New creates an Orchestrator with empty registries.
@@ -277,6 +292,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		cfgLoader:       cfg.ConfigLoader,
 		localNodeID:     cfg.LocalNodeID,
 		ingestSeqs:      make(map[string]uint32),
+		alerts:          cfg.Alerts,
 		now:             cfg.Now,
 		logger:          logger,
 	}

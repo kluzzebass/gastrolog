@@ -107,6 +107,28 @@ message NodeStats {
   // Forwarding stats — records sent and received via ForwardRecords RPCs.
   int64 forwarded_sent = 34;
   int64 forwarded_received = 35;
+
+  // Active system alerts on this node.
+  repeated SystemAlert alerts = 36;
+}
+
+// SystemAlert represents a runtime condition that operators should be aware of.
+// Alerts are keyed by ID for deduplication — the same condition doesn't create
+// multiple alerts. They auto-clear when the component that raised them detects
+// the condition has resolved.
+message SystemAlert {
+  string id = 1;                           // stable key for dedup (e.g. "vault-init:$vaultID")
+  AlertSeverity severity = 2;
+  string source = 3;                       // component name (e.g. "orchestrator", "forwarder")
+  string message = 4;
+  google.protobuf.Timestamp first_seen = 5;
+  google.protobuf.Timestamp last_seen = 6;
+}
+
+enum AlertSeverity {
+  ALERT_SEVERITY_UNSPECIFIED = 0;
+  ALERT_SEVERITY_WARNING = 1;
+  ALERT_SEVERITY_ERROR = 2;
 }
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.

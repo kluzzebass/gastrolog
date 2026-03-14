@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/alert"
 	"gastrolog/internal/sysmetrics"
 )
 
@@ -70,6 +71,12 @@ type ForwardingStatsProvider interface {
 	ForwardingStats() (sent, received int64)
 }
 
+// AlertProvider exposes active system alerts for broadcast.
+// Satisfied by *alert.Collector.
+type AlertProvider interface {
+	ActiveAlerts() []alert.AlertInfo
+}
+
 // JobsProvider returns the current job list for broadcast.
 // Defined at the consumer site to avoid importing orchestrator/server.
 type JobsProvider interface {
@@ -82,6 +89,7 @@ type StatsCollectorConfig struct {
 	RaftStats         RaftStatsProvider
 	Stats             StatsProvider
 	Forwarding        ForwardingStatsProvider // optional; nil if no forwarding
+	Alerts            AlertProvider            // optional; nil if no alert collector
 	Jobs              JobsProvider // optional; nil in single-node mode
 	NodeID            string
 	NodeNameFn        func() string // lazily resolved node name
@@ -210,6 +218,20 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 	// Forwarding stats.
 	if c.cfg.Forwarding != nil {
 		stats.ForwardedSent, stats.ForwardedReceived = c.cfg.Forwarding.ForwardingStats()
+	}
+
+	// Active alerts.
+	if c.cfg.Alerts != nil {
+		for _, a := range c.cfg.Alerts.ActiveAlerts() {
+			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
+				Id:        a.ID,
+				Severity:  gastrologv1.AlertSeverity(a.Severity), //nolint:gosec // bounded enum
+				Source:    a.Source,
+				Message:   a.Message,
+				FirstSeen: timestamppb.New(a.FirstSeen),
+				LastSeen:  timestamppb.New(a.LastSeen),
+			})
+		}
 	}
 
 	// Raft stats.

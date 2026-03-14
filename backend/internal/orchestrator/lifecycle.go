@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
@@ -69,6 +70,9 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 
 	// Channel pressure watchdog.
 	cw := chanwatch.New(o.logger, 1*time.Second)
+	if ac, ok := o.alerts.(*alert.Collector); ok {
+		cw.SetAlerts(ac)
+	}
 	cw.Watch("ingestCh", func() (int, int) {
 		return len(o.ingestCh), cap(o.ingestCh)
 	}, 0.9)

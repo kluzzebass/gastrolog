@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/alert"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
 	"gastrolog/internal/chunk"
@@ -140,11 +141,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
+	alertCollector := alert.New()
+
 	orch, err := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
 		ConfigLoader:      cfgStore,
 		LocalNodeID:       nodeID,
+		Alerts:            alertCollector,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
@@ -171,7 +175,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	var searchForwarder *cluster.SearchForwarder
 	var recordForwarder *cluster.RecordForwarder
 	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
-		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger)
+		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -187,13 +191,14 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Monitor slog capture channel pressure.
 	if cfg.SlogCapture != nil {
 		slogCW := chanwatch.New(logger, 1*time.Second)
+		slogCW.SetAlerts(alertCollector)
 		slogCW.Watch("slogCaptureCh", func() (int, int) {
 			return len(cfg.SlogCapture), cap(cfg.SlogCapture)
 		}, 0.9)
 		go slogCW.Run(ctx)
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, nodeID, cfg.ServerAddr, cfg.PprofAddr)
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr)
 
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
@@ -249,12 +254,13 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 // wireClusterForwarding sets up cross-node record, search, context, vault,
 // and explain forwarding on the cluster server. Returns the search forwarder
 // for the HTTP server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
 	peerConns := clusterSrv.PeerConns()
 
 	recordForwarder := cluster.NewRecordForwarder(
 		peerConns,
 		logger.With("component", "record-forwarder"),
+		alerts,
 	)
 	orch.SetRecordForwarder(recordForwarder)
 	// NOTE: recordForwarder.Close() is not deferred here because the caller
@@ -368,7 +374,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, nodeID string, apiAddr string, pprofAddr string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
@@ -395,6 +401,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config
 		RaftStats:   clusterSrv,
 		Stats:       &orchStatsAdapter{orch: orch},
 		Forwarding:  &forwardingStatsAdapter{srv: clusterSrv, fwd: recordForwarder},
+		Alerts:      alerts,
 		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:      nodeID,
 		NodeNameFn: func() string {

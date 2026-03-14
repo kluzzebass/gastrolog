@@ -6,9 +6,12 @@ package chanwatch
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
+
+	"gastrolog/internal/alert"
 )
 
 // Probe returns the current length and capacity of a channel.
@@ -27,6 +30,7 @@ type channel struct {
 type Watcher struct {
 	logger   *slog.Logger
 	interval time.Duration
+	alerts   *alert.Collector // optional
 
 	mu       sync.Mutex
 	channels []channel
@@ -38,6 +42,13 @@ func New(logger *slog.Logger, interval time.Duration) *Watcher {
 		logger:   logger,
 		interval: interval,
 	}
+}
+
+// SetAlerts configures an alert collector for pressure notifications.
+func (w *Watcher) SetAlerts(a *alert.Collector) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.alerts = a
 }
 
 // Watch adds a channel to monitor. Safe to call after Run has started.
@@ -86,6 +97,13 @@ func (w *Watcher) poll() {
 				"capacity", capacity,
 				"utilization", int(ratio*100),
 			)
+			if w.alerts != nil {
+				w.alerts.Set(
+					"channel-pressure:"+ch.name,
+					alert.Warning, "chanwatch",
+					fmt.Sprintf("Channel %q at %d%% capacity (%d/%d)", ch.name, int(ratio*100), length, capacity),
+				)
+			}
 		} else if ch.pressured && ratio < ch.threshold {
 			ch.pressured = false
 			w.logger.Info("channel pressure resolved",
@@ -94,6 +112,9 @@ func (w *Watcher) poll() {
 				"capacity", capacity,
 				"utilization", int(ratio*100),
 			)
+			if w.alerts != nil {
+				w.alerts.Clear("channel-pressure:" + ch.name)
+			}
 		}
 	}
 }

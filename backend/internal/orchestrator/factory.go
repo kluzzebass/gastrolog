@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
@@ -126,75 +127,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 			continue
 		}
 
-		// Routes are compiled separately — vault-level filter was removed.
-		// Legacy: compile a catch-all for vaults not covered by any route,
-		// or leave the filter set to be built from routes below.
-
-		// Look up chunk manager factory.
-		cmFactory, ok := factories.ChunkManagers[vaultCfg.Type]
-		if !ok {
-			return fmt.Errorf("unknown chunk manager type: %s", vaultCfg.Type)
+		if err := o.initVault(cfg, vaultCfg, factories); err != nil {
+			return err
 		}
-
-		// Create chunk manager with vault-scoped logger.
-		var cmLogger *slog.Logger
-		if factories.Logger != nil {
-			cmLogger = factories.Logger.With("vault", vaultCfg.ID)
-		}
-		// Resolve relative vault dir against VaultsDir and inject _expect_existing
-		// so file vaults can warn about missing directories.
-		cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
-		cmParams["_expect_existing"] = "true"
-		cmParams["_vault_id"] = vaultCfg.ID.String()
-		cm, err := cmFactory(cmParams, cmLogger)
-		if err != nil {
-			o.logger.Error("vault failed to initialize, skipping",
-				"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
-			continue
-		}
-
-		// Apply rotation policy if specified.
-		if vaultCfg.Policy != nil {
-			if err := o.applyRotationPolicy(cfg, vaultCfg, cm); err != nil {
-				return err
-			}
-		}
-
-		// Look up index manager factory.
-		imFactory, ok := factories.IndexManagers[vaultCfg.Type]
-		if !ok {
-			return fmt.Errorf("unknown index manager type: %s", vaultCfg.Type)
-		}
-
-		// Create index manager (needs chunk manager for reading data).
-		var imLogger *slog.Logger
-		if factories.Logger != nil {
-			imLogger = factories.Logger.With("vault", vaultCfg.ID)
-		}
-		im, err := imFactory(cmParams, cm, imLogger)
-		if err != nil {
-			o.logger.Error("vault index manager failed to initialize, skipping",
-				"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
-			_ = cm.Close()
-			continue
-		}
-
-		// Create query engine with scoped logger.
-		var qeLogger *slog.Logger
-		if factories.Logger != nil {
-			qeLogger = factories.Logger.With("vault", vaultCfg.ID)
-		}
-		qe := query.New(cm, im, qeLogger)
-
-		// Register vault.
-		vault := NewVault(vaultCfg.ID, cm, im, qe)
-		vault.Name = vaultCfg.Name
-		vault.Type = vaultCfg.Type
-		vault.Enabled = vaultCfg.Enabled
-		backing := vaultCfg.Params["sealed_backing"]
-		vault.BuildIndexes = backing == "" || backing == "local"
-		o.RegisterVault(vault)
-		o.logger.Info("vault registered", "id", vaultCfg.ID, "name", vaultCfg.Name, "enabled", vaultCfg.Enabled)
 	}
 
 	// Build filter set from routes.
@@ -202,6 +137,82 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		return err
 	}
 
+	return nil
+}
+
+// initVault creates chunk/index/query managers for a single vault and registers it.
+// Returns nil on success and on recoverable init failures (vault is skipped).
+// Returns an error only for structural config problems.
+func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) error {
+	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
+
+	cmFactory, ok := factories.ChunkManagers[vaultCfg.Type]
+	if !ok {
+		return fmt.Errorf("unknown chunk manager type: %s", vaultCfg.Type)
+	}
+
+	var cmLogger *slog.Logger
+	if factories.Logger != nil {
+		cmLogger = factories.Logger.With("vault", vaultCfg.ID)
+	}
+	cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
+	cmParams["_expect_existing"] = "true"
+	cmParams["_vault_id"] = vaultCfg.ID.String()
+
+	cm, err := cmFactory(cmParams, cmLogger)
+	if err != nil {
+		o.logger.Error("vault failed to initialize, skipping",
+			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
+		if o.alerts != nil {
+			o.alerts.Set(alertKey, alert.Error, "orchestrator",
+				fmt.Sprintf("Vault %q failed to initialize: %v", vaultCfg.Name, err))
+		}
+		return nil
+	}
+
+	if vaultCfg.Policy != nil {
+		if err := o.applyRotationPolicy(cfg, vaultCfg, cm); err != nil {
+			return err
+		}
+	}
+
+	imFactory, ok := factories.IndexManagers[vaultCfg.Type]
+	if !ok {
+		return fmt.Errorf("unknown index manager type: %s", vaultCfg.Type)
+	}
+	var imLogger *slog.Logger
+	if factories.Logger != nil {
+		imLogger = factories.Logger.With("vault", vaultCfg.ID)
+	}
+	im, err := imFactory(cmParams, cm, imLogger)
+	if err != nil {
+		o.logger.Error("vault index manager failed to initialize, skipping",
+			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
+		if o.alerts != nil {
+			o.alerts.Set(alertKey, alert.Error, "orchestrator",
+				fmt.Sprintf("Vault %q index manager failed to initialize: %v", vaultCfg.Name, err))
+		}
+		_ = cm.Close()
+		return nil
+	}
+
+	var qeLogger *slog.Logger
+	if factories.Logger != nil {
+		qeLogger = factories.Logger.With("vault", vaultCfg.ID)
+	}
+	qe := query.New(cm, im, qeLogger)
+
+	vault := NewVault(vaultCfg.ID, cm, im, qe)
+	vault.Name = vaultCfg.Name
+	vault.Type = vaultCfg.Type
+	vault.Enabled = vaultCfg.Enabled
+	backing := vaultCfg.Params["sealed_backing"]
+	vault.BuildIndexes = backing == "" || backing == "local"
+	o.RegisterVault(vault)
+	if o.alerts != nil {
+		o.alerts.Clear(alertKey)
+	}
+	o.logger.Info("vault registered", "id", vaultCfg.ID, "name", vaultCfg.Name, "enabled", vaultCfg.Enabled)
 	return nil
 }
 

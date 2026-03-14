@@ -11,6 +11,32 @@ import { PerRouteStats, VaultRouteStats } from "./config_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**
+ * @generated from enum gastrolog.v1.AlertSeverity
+ */
+export enum AlertSeverity {
+  /**
+   * @generated from enum value: ALERT_SEVERITY_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ALERT_SEVERITY_WARNING = 1;
+   */
+  WARNING = 1,
+
+  /**
+   * @generated from enum value: ALERT_SEVERITY_ERROR = 2;
+   */
+  ERROR = 2,
+}
+// Retrieve enum metadata with: proto3.getEnumType(AlertSeverity)
+proto3.util.setEnumType(AlertSeverity, "gastrolog.v1.AlertSeverity", [
+  { no: 0, name: "ALERT_SEVERITY_UNSPECIFIED" },
+  { no: 1, name: "ALERT_SEVERITY_WARNING" },
+  { no: 2, name: "ALERT_SEVERITY_ERROR" },
+]);
+
+/**
  * ForwardApplyRequest carries a pre-marshaled ConfigCommand for the leader
  * to apply via raft.Apply(). Used by followers to proxy config writes.
  *
@@ -557,6 +583,13 @@ export class NodeStats extends Message<NodeStats> {
    */
   forwardedReceived = protoInt64.zero;
 
+  /**
+   * Active system alerts on this node.
+   *
+   * @generated from field: repeated gastrolog.v1.SystemAlert alerts = 36;
+   */
+  alerts: SystemAlert[] = [];
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -600,6 +633,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 33, name: "route_per_route_stats", kind: "message", T: PerRouteStats, repeated: true },
     { no: 34, name: "forwarded_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 35, name: "forwarded_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 36, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -616,6 +650,82 @@ export class NodeStats extends Message<NodeStats> {
 
   static equals(a: NodeStats | PlainMessage<NodeStats> | undefined, b: NodeStats | PlainMessage<NodeStats> | undefined): boolean {
     return proto3.util.equals(NodeStats, a, b);
+  }
+}
+
+/**
+ * SystemAlert represents a runtime condition that operators should be aware of.
+ * Alerts are keyed by ID for deduplication — the same condition doesn't create
+ * multiple alerts. They auto-clear when the component that raised them detects
+ * the condition has resolved.
+ *
+ * @generated from message gastrolog.v1.SystemAlert
+ */
+export class SystemAlert extends Message<SystemAlert> {
+  /**
+   * stable key for dedup (e.g. "vault-init:$vaultID")
+   *
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: gastrolog.v1.AlertSeverity severity = 2;
+   */
+  severity = AlertSeverity.UNSPECIFIED;
+
+  /**
+   * component name (e.g. "orchestrator", "forwarder")
+   *
+   * @generated from field: string source = 3;
+   */
+  source = "";
+
+  /**
+   * @generated from field: string message = 4;
+   */
+  message = "";
+
+  /**
+   * @generated from field: google.protobuf.Timestamp first_seen = 5;
+   */
+  firstSeen?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp last_seen = 6;
+   */
+  lastSeen?: Timestamp;
+
+  constructor(data?: PartialMessage<SystemAlert>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SystemAlert";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "severity", kind: "enum", T: proto3.getEnumType(AlertSeverity) },
+    { no: 3, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "first_seen", kind: "message", T: Timestamp },
+    { no: 6, name: "last_seen", kind: "message", T: Timestamp },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemAlert {
+    return new SystemAlert().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SystemAlert {
+    return new SystemAlert().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SystemAlert {
+    return new SystemAlert().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SystemAlert | PlainMessage<SystemAlert> | undefined, b: SystemAlert | PlainMessage<SystemAlert> | undefined): boolean {
+    return proto3.util.equals(SystemAlert, a, b);
   }
 }
 
