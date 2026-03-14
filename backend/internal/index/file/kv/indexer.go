@@ -46,9 +46,9 @@ type Config struct {
 // This index is heuristic and non-authoritative.
 //
 // For each chunk, it creates three index files:
-//   - _kv_key.idx: maps keys to record positions
-//   - _kv_val.idx: maps values to record positions
-//   - _kv_kv.idx: maps (key, value) pairs to record positions
+//   - kv_key.idx: maps keys to record positions
+//   - kv_val.idx: maps values to record positions
+//   - kv_kv.idx: maps (key, value) pairs to record positions
 //
 // The indexer uses budget-based admission control:
 //  1. Collect all candidate (key,value) pairs and their exact position lists

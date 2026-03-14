@@ -127,66 +127,41 @@ func (o *Orchestrator) forwardRemote(t MatchResult, rec chunk.Record) {
 	}
 }
 
-// postSealWork schedules compression and index builds for a newly sealed chunk.
+// postSealWork schedules the post-seal pipeline for a newly sealed chunk.
 // Safe to call from any context (cron rotation, background sweep, etc.) —
 // acquires the orchestrator lock internally.
 func (o *Orchestrator) postSealWork(storeID uuid.UUID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	o.scheduleCompression(storeID, chunkID)
-	o.scheduleIndexBuild(storeID, chunkID)
+	o.schedulePostSeal(storeID, chunkID)
 }
 
-// scheduleCompression triggers an asynchronous compression job for the given chunk
-// via the shared scheduler. Only dispatched if the ChunkManager implements ChunkCompressor.
-func (o *Orchestrator) scheduleCompression(registryKey uuid.UUID, chunkID chunk.ChunkID) {
+// schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
+// If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
+// as one sequential job. Otherwise falls back to compress-only for non-file managers.
+func (o *Orchestrator) schedulePostSeal(registryKey uuid.UUID, chunkID chunk.ChunkID) {
 	vault := o.vaults[registryKey]
 	if vault == nil {
 		return
 	}
 
+	processor, ok := vault.Chunks.(chunk.ChunkPostSealProcessor)
+	if ok {
+		name := fmt.Sprintf("post-seal:%s:%s", registryKey, chunkID)
+		if err := o.scheduler.RunOnce(name, processor.PostSealProcess, context.Background(), chunkID); err != nil {
+			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
+		}
+		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
+		return
+	}
+
+	// Fallback for non-file managers (e.g. memory) — compress only.
 	compressor, ok := vault.Chunks.(chunk.ChunkCompressor)
 	if !ok {
 		return
 	}
-
 	name := fmt.Sprintf("compress:%s:%s", registryKey, chunkID)
 	if err := o.scheduler.RunOnce(name, compressor.CompressChunk, chunkID); err != nil {
 		o.logger.Warn("failed to schedule compression", "name", name, "error", err)
 	}
-}
-
-// scheduleIndexBuild triggers an asynchronous index build for the given chunk
-// via the shared scheduler. The build is visible in ScheduledJobs() while running
-// and subject to the scheduler's concurrency limit.
-// The IndexManager handles deduplication of concurrent builds for the same chunk.
-func (o *Orchestrator) scheduleIndexBuild(registryKey uuid.UUID, chunkID chunk.ChunkID) {
-	vault := o.vaults[registryKey]
-	if vault == nil || vault.Indexes == nil {
-		return
-	}
-	// Cloud-backed vaults upload sealed chunks to cloud storage and delete
-	// local files. Building indexes on them is wasted work — the index files
-	// would be deleted moments later when the chunk dir is removed.
-	if !vault.BuildIndexes {
-		return
-	}
-
-	// Wrap the index build to refresh chunk disk sizes afterward,
-	// since index files are written into the chunk directory.
-	buildFn := func(ctx context.Context, id chunk.ChunkID) error {
-		if err := vault.Indexes.BuildIndexes(ctx, id); err != nil {
-			return err
-		}
-		if compressor, ok := vault.Chunks.(chunk.ChunkCompressor); ok {
-			compressor.RefreshDiskSizes(id)
-		}
-		return nil
-	}
-
-	name := fmt.Sprintf("index-build:%s:%s", registryKey, chunkID)
-	if err := o.scheduler.RunOnce(name, buildFn, context.Background(), chunkID); err != nil {
-		o.logger.Warn("failed to schedule index build", "name", name, "error", err)
-	}
-	o.scheduler.Describe(name, fmt.Sprintf("Build indexes for chunk %s", chunkID))
 }

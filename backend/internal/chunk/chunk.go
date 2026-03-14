@@ -5,6 +5,7 @@
 package chunk
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"time"
@@ -114,6 +115,27 @@ type ChunkCompressor interface {
 	RefreshDiskSizes(id ChunkID)
 }
 
+
+// ChunkIndexBuilder builds indexes for a sealed chunk.
+// Implementations are injected into the chunk manager at construction time.
+// The chunk manager calls Build after compression completes.
+type ChunkIndexBuilder interface {
+	Build(ctx context.Context, chunkID ChunkID) error
+}
+
+// ChunkPostSealProcessor extends ChunkManager with a unified post-seal pipeline.
+// The pipeline handles compression, index building, and cloud upload in order.
+// Callers should type-assert to check availability.
+type ChunkPostSealProcessor interface {
+	// PostSealProcess runs the full post-seal pipeline for a sealed chunk.
+	// Order: compress → build indexes → refresh sizes → upload to cloud.
+	PostSealProcess(ctx context.Context, id ChunkID) error
+
+	// SetIndexBuilders injects index builders into the pipeline.
+	// Must be called before PostSealProcess. Passing nil or empty disables
+	// index building (e.g., for cloud-backed vaults).
+	SetIndexBuilders(builders []ChunkIndexBuilder)
+}
 
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {

@@ -144,9 +144,9 @@ func TestIngestMultipleRecords(t *testing.T) {
 	}
 }
 
-func TestSealedChunkTriggersIndexBuild(t *testing.T) {
+func TestSealedChunkTriggersPostSeal(t *testing.T) {
 	// Set MaxRecords to 2 so third record triggers seal.
-	orch, _, tracker, _ := newTestSetup(t, 2)
+	orch, cm, _, _ := newTestSetup(t, 2)
 
 	// Ingest 3 records to trigger seal (chunk fills at 2, third causes seal).
 	for i := range 3 {
@@ -160,25 +160,28 @@ func TestSealedChunkTriggersIndexBuild(t *testing.T) {
 		}
 	}
 
-	// Wait for async build to complete.
+	// Wait for async job to be scheduled.
 	time.Sleep(100 * time.Millisecond)
 
-	// Should have triggered at least one build.
-	count := tracker.buildCount.Load()
-	if count == 0 {
-		t.Error("expected at least one index build, got none")
+	// Verify the seal happened by checking chunk count.
+	metas, err := cm.List()
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	// Verify the built chunk ID is valid.
-	lastBuilt := tracker.lastBuilt.Load()
-	if lastBuilt == nil {
-		t.Error("lastBuilt is nil")
+	sealed := 0
+	for _, m := range metas {
+		if m.Sealed {
+			sealed++
+		}
+	}
+	if sealed == 0 {
+		t.Error("expected at least one sealed chunk")
 	}
 }
 
-func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
+func TestSealTriggeredOncePerChunk(t *testing.T) {
 	// Set chunk size to 2 records.
-	orch, _, tracker, _ := newTestSetup(t, 2)
+	orch, cm, _, _ := newTestSetup(t, 2)
 
 	// Ingest 3 records to trigger exactly one seal.
 	for i := range 3 {
@@ -192,12 +195,22 @@ func TestIndexBuildTriggeredOncePerSeal(t *testing.T) {
 		}
 	}
 
-	// Wait for async build.
+	// Wait for seal.
 	time.Sleep(100 * time.Millisecond)
 
-	count := tracker.buildCount.Load()
-	if count != 1 {
-		t.Errorf("expected exactly 1 index build, got %d", count)
+	// Should have exactly 2 chunks: one sealed, one active.
+	metas, err := cm.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := 0
+	for _, m := range metas {
+		if m.Sealed {
+			sealed++
+		}
+	}
+	if sealed != 1 {
+		t.Errorf("expected exactly 1 sealed chunk, got %d", sealed)
 	}
 }
 
@@ -663,20 +676,18 @@ func TestStopNotRunning(t *testing.T) {
 	}
 }
 
-func TestIngesterIndexBuildOnSeal(t *testing.T) {
+func TestIngesterSealOnChunkFull(t *testing.T) {
 	// Set up with small chunk size to trigger seal.
 	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
 	})
-
-	tracker := &trackingIndexManager{IndexManager: s.IM}
 
 	defaultID := uuid.Must(uuid.NewV7())
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
+	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
 		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
 	}))
@@ -694,16 +705,25 @@ func TestIngesterIndexBuildOnSeal(t *testing.T) {
 	}
 
 	<-recv.started
-	time.Sleep(100 * time.Millisecond) // Wait for processing and async build.
+	time.Sleep(100 * time.Millisecond)
 
 	if err := orch.Stop(); err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
 
-	// Should have triggered at least one index build.
-	count := tracker.buildCount.Load()
-	if count == 0 {
-		t.Error("expected at least one index build")
+	// Should have at least one sealed chunk.
+	metas, err := s.CM.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed := 0
+	for _, m := range metas {
+		if m.Sealed {
+			sealed++
+		}
+	}
+	if sealed == 0 {
+		t.Error("expected at least one sealed chunk")
 	}
 }
 

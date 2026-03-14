@@ -116,6 +116,7 @@ func (f *retentionFakeIndexManager) LoadSourceEntries(chunkID chunk.ChunkID) ([]
 func (f *retentionFakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }
+func (f *retentionFakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // ---------- helpers ----------
 

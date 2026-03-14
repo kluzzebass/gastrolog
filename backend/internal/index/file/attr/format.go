@@ -19,9 +19,9 @@ const (
 	entryCountSize = 4
 	headerSize     = format.HeaderSize + entryCountSize
 
-	keyIndexFileName   = "_attr_key.idx"
-	valueIndexFileName = "_attr_val.idx"
-	kvIndexFileName    = "_attr_kv.idx"
+	keyIndexFileName   = "attr_key.idx"
+	valueIndexFileName = "attr_val.idx"
+	kvIndexFileName    = "attr_kv.idx"
 )
 
 // Key index format

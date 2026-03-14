@@ -19,9 +19,9 @@ const (
 	entryCountSize = 4
 	headerSize     = format.HeaderSize + statusSize + entryCountSize
 
-	keyIndexFileName   = "_kv_key.idx"
-	valueIndexFileName = "_kv_val.idx"
-	kvIndexFileName    = "_kv_kv.idx"
+	keyIndexFileName   = "kv_key.idx"
+	valueIndexFileName = "kv_val.idx"
+	kvIndexFileName    = "kv_kv.idx"
 
 	// Status byte values
 	statusComplete = 0x00

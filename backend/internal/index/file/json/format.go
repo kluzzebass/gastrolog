@@ -43,7 +43,7 @@ const (
 	statusComplete = 0x00
 	statusCapped   = 0x01
 
-	indexFileName = "_json.idx"
+	indexFileName = "json.idx"
 )
 
 var (

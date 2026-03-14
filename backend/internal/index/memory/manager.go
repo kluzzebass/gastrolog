@@ -93,6 +93,10 @@ func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	return m.builder.Build(ctx, chunkID, m.indexers)
 }
 
+func (m *Manager) BuildAdapter() chunk.ChunkIndexBuilder {
+	return index.NewBuilderAdapter(m.indexers)
+}
+
 // DeleteIndexes removes all index data for the given chunk from memory stores.
 func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {
 	if m.tokenStore != nil {

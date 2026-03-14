@@ -245,4 +245,9 @@ type IndexManager interface {
 	// For in-memory indexes this is an estimate of the data footprint.
 	// Missing indexes are omitted from the map.
 	IndexSizes(chunkID chunk.ChunkID) map[string]int64
+
+	// BuildAdapter returns a ChunkIndexBuilder that wraps this manager's
+	// indexers. Used to inject index building into the chunk manager's
+	// post-seal pipeline.
+	BuildAdapter() chunk.ChunkIndexBuilder
 }

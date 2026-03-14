@@ -65,6 +65,10 @@ func (m *Manager) BuildIndexes(ctx context.Context, chunkID chunk.ChunkID) error
 	return m.builder.Build(ctx, chunkID, m.indexers)
 }
 
+func (m *Manager) BuildAdapter() chunk.ChunkIndexBuilder {
+	return index.NewBuilderAdapter(m.indexers)
+}
+
 // DeleteIndexes removes all index files and temp files for the given chunk.
 // Also evicts all cached indexes for this chunk.
 func (m *Manager) DeleteIndexes(chunkID chunk.ChunkID) error {

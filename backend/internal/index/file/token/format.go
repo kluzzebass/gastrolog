@@ -24,7 +24,7 @@ const (
 
 	positionSize = 4 // uint32 (4GB max chunk size)
 
-	indexFileName = "_token.idx"
+	indexFileName = "token.idx"
 )
 
 var (

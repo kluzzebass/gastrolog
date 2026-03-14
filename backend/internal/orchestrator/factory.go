@@ -202,12 +202,18 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 	}
 	qe := query.New(cm, im, qeLogger)
 
+	// Inject index builders into the chunk manager's post-seal pipeline.
+	// Cloud-backed vaults skip index building — local files are deleted after upload.
+	backing := vaultCfg.Params["sealed_backing"]
+	buildIndexes := backing == "" || backing == "local"
+	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok && buildIndexes {
+		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+	}
+
 	vault := NewVault(vaultCfg.ID, cm, im, qe)
 	vault.Name = vaultCfg.Name
 	vault.Type = vaultCfg.Type
 	vault.Enabled = vaultCfg.Enabled
-	backing := vaultCfg.Params["sealed_backing"]
-	vault.BuildIndexes = backing == "" || backing == "local"
 	o.RegisterVault(vault)
 	if o.alerts != nil {
 		o.alerts.Clear(alertKey)

@@ -39,7 +39,7 @@ type Config struct {
 
 // Indexer builds a structural JSON index for sealed chunks.
 //
-// For each chunk, it creates a single index file (_json.idx) containing:
+// For each chunk, it creates a single index file (json.idx) containing:
 //   - A shared string dictionary for paths and values
 //   - Path posting table (path -> record positions)
 //   - Path-value posting table ((path,value) -> record positions)

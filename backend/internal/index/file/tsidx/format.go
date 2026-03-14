@@ -18,8 +18,8 @@ const (
 	countSize  = 4
 	headerSize = format.HeaderSize + countSize
 	entrySize  = 12 // ts int64 + pos uint32
-	ingestFile = "_ingest.idx"
-	sourceFile = "_source.idx"
+	ingestFile = "ingest.idx"
+	sourceFile = "source.idx"
 )
 
 var (

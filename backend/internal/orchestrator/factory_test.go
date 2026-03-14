@@ -100,6 +100,7 @@ func (f *fakeIndexManager) LoadSourceEntries(chunkID chunk.ChunkID) ([]index.TSE
 func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 	return map[string]int64{}
 }
+func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // fakeIngester implements Ingester for testing.
 type fakeIngester struct{}

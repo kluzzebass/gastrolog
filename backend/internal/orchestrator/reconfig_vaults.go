@@ -6,6 +6,7 @@ import (
 	"maps"
 	"path/filepath"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/query"
 
@@ -90,12 +91,17 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	}
 	qe := query.New(cm, im, qeLogger)
 
+	// Inject index builders for local-backed vaults.
+	backing := vaultCfg.Params["sealed_backing"]
+	buildIndexes := backing == "" || backing == "local"
+	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok && buildIndexes {
+		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+	}
+
 	// Register vault. AddVault does not apply disabled state (unlike ApplyConfig).
 	vault := NewVault(vaultCfg.ID, cm, im, qe)
 	vault.Name = vaultCfg.Name
 	vault.Type = vaultCfg.Type
-	backing := vaultCfg.Params["sealed_backing"]
-	vault.BuildIndexes = backing == "" || backing == "local"
 	o.vaults[vaultCfg.ID] = vault
 
 	// Rebuild filter set from routes to include the new vault as a destination.

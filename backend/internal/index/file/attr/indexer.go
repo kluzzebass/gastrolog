@@ -18,9 +18,9 @@ import (
 
 // Indexer builds attribute indexes for sealed chunks.
 // For each chunk, it creates three index files:
-//   - _attr_key.idx: maps attribute keys to record positions
-//   - _attr_val.idx: maps attribute values to record positions
-//   - _attr_kv.idx: maps (key, value) pairs to record positions
+//   - attr_key.idx: maps attribute keys to record positions
+//   - attr_val.idx: maps attribute values to record positions
+//   - attr_kv.idx: maps (key, value) pairs to record positions
 //
 // The indexer uses a two-pass algorithm:
 //   - Pass 1: Count occurrences of each key, value, and (key, value) pair

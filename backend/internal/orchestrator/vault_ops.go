@@ -140,8 +140,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	// Detect seal: if Active() changed, the previous chunk was sealed.
 	activeAfter := vault.Chunks.Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-		o.scheduleCompression(vaultID, activeBefore.ID)
-		o.scheduleIndexBuild(vaultID, activeBefore.ID)
+		o.schedulePostSeal(vaultID, activeBefore.ID)
 	}
 
 	return cid, pos, nil
@@ -164,8 +163,7 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID uuid.UUID
 
 	if meta.ID != (chunk.ChunkID{}) {
 		o.mu.RLock()
-		o.scheduleCompression(vaultID, meta.ID)
-		o.scheduleIndexBuild(vaultID, meta.ID)
+		o.schedulePostSeal(vaultID, meta.ID)
 		o.mu.RUnlock()
 	}
 
@@ -192,11 +190,9 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 		return err
 	}
 
-	// Schedule post-seal jobs (same as ingest onSeal callback).
-	// Must hold lock since scheduleCompression/scheduleIndexBuild access o.vaults.
+	// Schedule post-seal pipeline (same as ingest onSeal callback).
 	o.mu.Lock()
-	o.scheduleCompression(vaultID, chunkID)
-	o.scheduleIndexBuild(vaultID, chunkID)
+	o.schedulePostSeal(vaultID, chunkID)
 	o.mu.Unlock()
 
 	return nil

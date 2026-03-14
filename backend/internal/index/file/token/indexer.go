@@ -27,7 +27,7 @@ const (
 // Indexer builds a token index for sealed chunks.
 // For each chunk, it maps every distinct token to the list of
 // record positions where that token appears, and writes the result
-// to <dir>/<chunkID>/_token.idx.
+// to <dir>/<chunkID>/token.idx.
 //
 // Memory invariant: Each distinct token string is allocated exactly once.
 // All subsequent uses reuse that same interned instance.

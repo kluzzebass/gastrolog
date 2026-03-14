@@ -34,8 +34,8 @@ const (
 	idxLogFileName      = "idx.log"
 	attrLogFileName     = "attr.log"
 	attrDictFileName    = "attr_dict.log"
-	ingestBTFileName    = "_ingest.bt"
-	sourceBTFileName    = "_source.bt"
+	ingestBTFileName    = "ingest.bt"
+	sourceBTFileName    = "source.bt"
 )
 
 var (
@@ -94,9 +94,10 @@ type Manager struct {
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
 	zstdEnc  *zstd.Encoder
-	cloudIdx *cloudIndex // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
+	cloudIdx      *cloudIndex              // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
+	indexBuilders []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
 
-	compressWg sync.WaitGroup // tracks in-flight CompressChunk calls
+	postSealWg sync.WaitGroup // tracks in-flight PostSealProcess calls
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
@@ -1532,7 +1533,7 @@ func (m *Manager) Close() error {
 	// Wait for in-flight compression to finish before closing the encoder.
 	// CompressChunk re-acquires the lock for its metadata update, so we must
 	// release first.
-	m.compressWg.Wait()
+	m.postSealWg.Wait()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1884,7 +1885,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		// Wait for in-flight compression to finish — it may be writing
 		// temporary files into this chunk's directory.
 		m.mu.Unlock()
-		m.compressWg.Wait()
+		m.postSealWg.Wait()
 		m.mu.Lock()
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("remove chunk dir %s: %w", id, err)
@@ -1896,9 +1897,8 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 }
 
 // CompressChunk compresses raw.log and attr.log for a sealed chunk using zstd.
-// Returns nil if the chunk is not found or not sealed.
+// Returns nil if the chunk is not found or not sealed. No-op if already compressed.
 // Safe to call concurrently with reads (atomic file replacement via rename).
-// Intended to be called by the orchestrator via the scheduler after sealing.
 func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	m.mu.Lock()
 	if m.closed {
@@ -1910,7 +1910,7 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotFound
 	}
-	if !meta.sealed {
+	if !meta.sealed || meta.compressed {
 		m.mu.Unlock()
 		return nil
 	}
@@ -1918,9 +1918,7 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	attrPath := m.attrLogPath(id)
 	mode := m.cfg.FileMode
 	enc := m.zstdEnc
-	m.compressWg.Add(1)
 	m.mu.Unlock()
-	defer m.compressWg.Done()
 
 	if err := compressFile(rawPath, enc, mode); err != nil {
 		return fmt.Errorf("compress raw.log: %w", err)
@@ -1936,13 +1934,44 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 		meta.diskBytes = m.computeDiskBytes(id)
 	}
 	m.mu.Unlock()
+	return nil
+}
 
-	// If cloud backing is configured, upload the compressed chunk to
-	// cloud storage and delete the local files.
+// SetIndexBuilders injects index builders into the post-seal pipeline.
+// Must be called before PostSealProcess. Passing nil disables index building.
+func (m *Manager) SetIndexBuilders(builders []chunk.ChunkIndexBuilder) {
+	m.indexBuilders = builders
+}
+
+// PostSealProcess runs the full post-seal pipeline for a sealed chunk:
+// compress → build indexes → refresh sizes → upload to cloud.
+// Safe to call concurrently — tracked by postSealWg for clean shutdown.
+func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
+	m.postSealWg.Add(1)
+	defer m.postSealWg.Done()
+
+	// 1. Compress data files.
+	if err := m.CompressChunk(id); err != nil {
+		return err
+	}
+
+	// 2. Build indexes via injected builders.
+	for _, builder := range m.indexBuilders {
+		if err := builder.Build(ctx, id); err != nil {
+			m.logger.Warn("index build failed", "chunk", id, "error", err)
+			// Non-fatal: indexes can be rebuilt later.
+		}
+	}
+
+	// 3. Refresh disk sizes after index files are written.
+	if len(m.indexBuilders) > 0 {
+		m.RefreshDiskSizes(id)
+	}
+
+	// 4. Upload to cloud and delete local if cloud-backed.
 	if m.cfg.CloudStore != nil {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
-			// Non-fatal: chunk stays local, next compression sweep can retry.
 		}
 	}
 
