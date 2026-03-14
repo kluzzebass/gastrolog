@@ -167,18 +167,9 @@ message RecordRef {
 
 // ResumeToken encodes pagination state for multi-vault queries.
 // The positions array tracks the last returned position for each vault/chunk.
-// Remote positions carry opaque tokens for vaults on other nodes.
 message ResumeToken {
   repeated VaultPosition positions = 1;
-  repeated RemoteVaultPosition remote_positions = 2;
-}
-
-// RemoteVaultPosition carries an opaque resume token for a vault owned by
-// another node. The coordinator stores these alongside local positions so that
-// cross-node pagination works transparently.
-message RemoteVaultPosition {
-  string vault_id = 1;
-  bytes resume_token = 2;
+  reserved 2; // was remote_positions (removed: streaming replaces cross-node pagination)
 }
 
 message VaultPosition {

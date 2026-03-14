@@ -124,14 +124,15 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // newSearchExecutor creates a cluster.SearchExecutor that runs local vault
 // searches for ForwardSearch RPCs received from peer nodes. When the query
 // contains a pipeline (stats, timechart), runs RunPipeline and returns the
-// TableResult instead of individual records.
+// TableResult instead of individual records. For regular searches, returns
+// the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error) {
+	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, queryExpr)
 
 		q, pipeline, err := server.ParseExpression(scopedExpr)
 		if err != nil {
-			return nil, nil, nil, nil, false, fmt.Errorf("parse query: %w", err)
+			return nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
 		eng := o.MultiVaultQueryEngine()
@@ -143,42 +144,25 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 			result, err := eng.RunPipeline(ctx, q, pipeline)
 			if err != nil {
-				return nil, nil, nil, nil, false, err
+				return nil, nil, nil, err
 			}
 			if result.Table != nil {
-				return nil, server.TableResultToBasicProto(result.Table), histogram, nil, false, nil
+				return nil, server.TableResultToBasicProto(result.Table), histogram, nil
 			}
-			// Non-table pipeline (sort/tail/slice): return as records.
-			records := make([]*gastrologv1.ExportRecord, 0, len(result.Records))
-			for _, rec := range result.Records {
-				records = append(records, cluster.RecordToExportRecord(rec))
-			}
-			return records, nil, histogram, nil, false, nil
+			// Non-table pipeline (sort/tail/slice): wrap records as iterator.
+			records := result.Records
+			return func(yield func(chunk.Record, error) bool) {
+				for _, rec := range records {
+					if !yield(rec, nil) {
+						return
+					}
+				}
+			}, nil, histogram, nil
 		}
 
-		// Regular search path.
-		var resume *query.ResumeToken
-		if len(resumeToken) > 0 {
-			resume, err = server.ProtoToResumeToken(resumeToken)
-			if err != nil {
-				return nil, nil, nil, nil, false, fmt.Errorf("parse resume token: %w", err)
-			}
-		}
-
-		searchIter, getToken := eng.Search(ctx, q, resume)
-		var records []*gastrologv1.ExportRecord
-		for rec, err := range searchIter {
-			if err != nil {
-				return records, nil, histogram, nil, false, err
-			}
-			records = append(records, cluster.RecordToExportRecord(rec))
-		}
-		token := getToken()
-		var tokenBytes []byte
-		if token != nil {
-			tokenBytes = server.ResumeTokenToProto(token)
-		}
-		return records, nil, histogram, tokenBytes, token != nil, nil
+		// Regular search path: return the iterator directly.
+		searchIter, _ := eng.Search(ctx, q, nil)
+		return searchIter, nil, histogram, nil
 	}
 }
 

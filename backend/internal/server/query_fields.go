@@ -62,14 +62,19 @@ func (s *QueryServer) GetFields(
 	}
 
 	// Include records from remote nodes in the cluster.
-	remoteRes := s.collectRemote(ctx, q, nil)
-	for _, rec := range remoteRes.records {
-		for k, v := range rec.Attrs {
-			attrAgg.add(k, v)
-		}
-		kvPairs := tokenizer.CombinedExtract(rec.Raw, extractors)
-		for _, kv := range kvPairs {
-			kvAgg.add(kv.Key, kv.Value)
+	remoteIter, _ := s.collectRemote(ctx, q)
+	if remoteIter != nil {
+		for rec, iterErr := range remoteIter {
+			if iterErr != nil {
+				break
+			}
+			for k, v := range rec.Attrs {
+				attrAgg.add(k, v)
+			}
+			kvPairs := tokenizer.CombinedExtract(rec.Raw, extractors)
+			for _, kv := range kvPairs {
+				kvAgg.add(kv.Key, kv.Value)
+			}
 		}
 	}
 

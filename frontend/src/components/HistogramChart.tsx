@@ -345,6 +345,7 @@ export function HistogramChart({
     yAxis: {
       type: "value",
       show: false,
+      min: 0,
     },
     tooltip: {
       trigger: "axis",

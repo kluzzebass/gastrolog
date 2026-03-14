@@ -257,22 +257,19 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id uuid.UUID, target
 	return uuid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %s not found", target))
 }
 
-// drainRemoteRecords paginates through collectRemote until all remote
-// records are fetched. Each call returns up to one batch (500) per vault;
-// this loops with resume tokens until every vault reports hasMore=false.
+// drainRemoteRecords collects all remote records into a slice by draining
+// the streaming iterator returned by collectRemote.
 func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query) []chunk.Record {
+	remoteIter, _ := s.collectRemote(ctx, q)
+	if remoteIter == nil {
+		return nil
+	}
 	var all []chunk.Record
-	var positions []query.RemoteVaultPosition
-
-	for {
-		res := s.collectRemote(ctx, q, positions)
-		for _, r := range res.records {
-			all = append(all, protoToChunkRecord(r))
-		}
-		if !res.hasMore {
+	for rec, err := range remoteIter {
+		if err != nil {
 			break
 		}
-		positions = res.remotePositions
+		all = append(all, rec)
 	}
 	return all
 }

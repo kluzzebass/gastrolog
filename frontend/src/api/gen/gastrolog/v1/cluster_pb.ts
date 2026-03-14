@@ -789,11 +789,6 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
    */
   query = "";
 
-  /**
-   * @generated from field: bytes resume_token = 3;
-   */
-  resumeToken = new Uint8Array(0);
-
   constructor(data?: PartialMessage<ForwardSearchRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -804,7 +799,6 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSearchRequest {
@@ -834,16 +828,6 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
   records: ExportRecord[] = [];
 
   /**
-   * @generated from field: bytes resume_token = 2;
-   */
-  resumeToken = new Uint8Array(0);
-
-  /**
-   * @generated from field: bool has_more = 3;
-   */
-  hasMore = false;
-
-  /**
    * Pipeline results (timechart, stats)
    *
    * @generated from field: gastrolog.v1.TableResult table_result = 4;
@@ -866,8 +850,6 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
   static readonly typeName = "gastrolog.v1.ForwardSearchResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "records", kind: "message", T: ExportRecord, repeated: true },
-    { no: 2, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "table_result", kind: "message", T: TableResult },
     { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
   ]);

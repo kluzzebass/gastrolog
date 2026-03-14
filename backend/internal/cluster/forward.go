@@ -22,12 +22,13 @@ import (
 // Used by the ForwardRecords handler to write received records.
 type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error
 
-// SearchExecutor runs a search on a local vault and returns a batch of records.
-// When the query contains a pipeline (stats, timechart), the TableResult is
-// returned instead of individual records. The histogram slice (if non-nil)
-// provides an approximate volume histogram for the searched vault.
+// SearchExecutor runs a search on a local vault and returns results.
+// For regular searches, it returns an iterator over records (the caller
+// streams them as they arrive). For pipeline queries (stats, timechart),
+// it returns a TableResult with a nil iterator. The histogram slice (if
+// non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) ([]*gastrologv1.ExportRecord, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, []byte, bool, error)
+type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
@@ -325,27 +326,71 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 	return nil
 }
 
-// forwardSearch handles the ForwardSearch RPC. Executes a search on a local
-// vault and returns matching records to the requesting node.
-func (s *Server) forwardSearch(ctx context.Context, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
+// forwardSearchStreamHandler handles the server-streaming ForwardSearch RPC.
+// Executes a search on a local vault and streams matching records back to the
+// requesting node in batches of 200. For pipeline queries, sends a single
+// message with the TableResult.
+func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
 	if s.searchExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "search executor not configured")
+		return status.Error(codes.Unavailable, "search executor not configured")
 	}
+
+	req := &gastrologv1.ForwardSearchRequest{}
+	if err := stream.RecvMsg(req); err != nil {
+		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
+	}
+
 	vaultID, err := uuid.Parse(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
-	records, tableResult, histogram, resumeToken, hasMore, err := s.searchExecutor(ctx, vaultID, req.GetQuery(), req.GetResumeToken())
+
+	searchIter, tableResult, histogram, err := s.searchExecutor(stream.Context(), vaultID, req.GetQuery())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "search: %v", err)
+		return status.Errorf(codes.Internal, "search: %v", err)
 	}
-	return &gastrologv1.ForwardSearchResponse{
-		Records:     records,
-		ResumeToken: resumeToken,
-		HasMore:     hasMore,
-		TableResult: tableResult,
-		Histogram:   histogram,
-	}, nil
+
+	// Pipeline path: send single message with TableResult + Histogram.
+	if tableResult != nil {
+		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{
+			TableResult: tableResult,
+			Histogram:   histogram,
+		})
+	}
+
+	// Record path: iterate and batch 200 records per message.
+	const batchSize = 200
+	batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
+	first := true
+	for rec, iterErr := range searchIter {
+		if iterErr != nil {
+			return status.Errorf(codes.Internal, "search record: %v", iterErr)
+		}
+		batch = append(batch, RecordToExportRecord(rec))
+		if len(batch) >= batchSize {
+			resp := &gastrologv1.ForwardSearchResponse{Records: batch}
+			if first {
+				resp.Histogram = histogram
+				first = false
+			}
+			if err := stream.SendMsg(resp); err != nil {
+				return err
+			}
+			batch = make([]*gastrologv1.ExportRecord, 0, batchSize)
+		}
+	}
+	// Send remaining records (or an empty first message with histogram).
+	if len(batch) > 0 || first {
+		resp := &gastrologv1.ForwardSearchResponse{Records: batch}
+		if first {
+			resp.Histogram = histogram
+		}
+		if err := stream.SendMsg(resp); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // forwardGetContext handles the ForwardGetContext RPC. Runs GetContext on a
@@ -712,10 +757,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardRecordsHandler,
 		},
 		{
-			MethodName: "ForwardSearch",
-			Handler:    forwardSearchHandler,
-		},
-		{
 			MethodName: "ForwardGetContext",
 			Handler:    forwardGetContextHandler,
 		},
@@ -779,6 +820,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			ClientStreams: true,
 		},
 		{
+			StreamName:    "ForwardSearch",
+			Handler:       forwardSearchStreamHandler,
+			ServerStreams: true,
+		},
+		{
 			StreamName:    "ForwardFollow",
 			Handler:       forwardFollowStreamHandler,
 			ServerStreams: true,
@@ -797,7 +843,6 @@ type clusterServiceServer interface {
 	enroll(context.Context, *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error)
 	broadcast(context.Context, *gastrologv1.BroadcastRequest) (*gastrologv1.BroadcastResponse, error)
 	forwardRecords(context.Context, *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error)
-	forwardSearch(context.Context, *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error)
 	forwardGetContext(context.Context, *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error)
 	forwardListChunks(context.Context, *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error)
 	forwardGetIndexes(context.Context, *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error)
@@ -848,25 +893,6 @@ func forwardRecordsHandler(srv any, ctx context.Context, dec func(any) error, in
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardRecords(ctx, req.(*gastrologv1.ForwardRecordsRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardSearchHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardSearchRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardSearch(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardSearch",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardSearch(ctx, req.(*gastrologv1.ForwardSearchRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

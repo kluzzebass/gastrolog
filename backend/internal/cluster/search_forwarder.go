@@ -23,18 +23,155 @@ func NewSearchForwarder(peers *PeerConns) *SearchForwarder {
 	return &SearchForwarder{peers: peers}
 }
 
-// Search sends a ForwardSearch RPC to the given node and returns the response.
+// Search sends a ForwardSearch RPC to the given node and collects the full
+// streamed response into a single ForwardSearchResponse. Used by
+// collectRemotePipeline which needs the complete TableResult.
 func (sf *SearchForwarder) Search(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (*gastrologv1.ForwardSearchResponse, error) {
 	conn, err := sf.peers.Conn(nodeID)
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
 	}
-	resp := &gastrologv1.ForwardSearchResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSearch", req, resp); err != nil {
+
+	stream, err := conn.NewStream(ctx,
+		&grpc.StreamDesc{
+			StreamName:    "ForwardSearch",
+			ServerStreams: true,
+		},
+		"/gastrolog.v1.ClusterService/ForwardSearch",
+	)
+	if err != nil {
 		sf.peers.Invalidate(nodeID)
-		return nil, fmt.Errorf("forward search to %s: %w", nodeID, err)
+		return nil, fmt.Errorf("open search stream to %s: %w", nodeID, err)
 	}
-	return resp, nil
+	if err := stream.SendMsg(req); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("send search request to %s: %w", nodeID, err)
+	}
+	if err := stream.CloseSend(); err != nil {
+		return nil, fmt.Errorf("close send to %s: %w", nodeID, err)
+	}
+
+	// Collect the full stream into a single response.
+	merged := &gastrologv1.ForwardSearchResponse{}
+	for {
+		msg := &gastrologv1.ForwardSearchResponse{}
+		if err := stream.RecvMsg(msg); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			sf.peers.Invalidate(nodeID)
+			return nil, fmt.Errorf("search stream from %s: %w", nodeID, err)
+		}
+		merged.Records = append(merged.Records, msg.GetRecords()...)
+		if msg.GetTableResult() != nil {
+			merged.TableResult = msg.GetTableResult()
+		}
+		if msg.GetHistogram() != nil {
+			merged.Histogram = msg.GetHistogram()
+		}
+	}
+	return merged, nil
+}
+
+// SearchStream opens a server-streaming ForwardSearch RPC and returns the
+// results via channels. The histogram and tableResult are extracted from the
+// first message (blocks until available). Record batches arrive on the
+// records channel. The channel is closed when the stream ends or ctx is
+// cancelled.
+func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (
+	records <-chan []*gastrologv1.ExportRecord,
+	histogram []*gastrologv1.HistogramBucket,
+	tableResult *gastrologv1.TableResult,
+	errCh <-chan error,
+) {
+	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	eCh := make(chan error, 1)
+
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		eCh <- fmt.Errorf("dial node %s: %w", nodeID, err)
+		close(recCh)
+		close(eCh)
+		return recCh, nil, nil, eCh
+	}
+
+	stream, err := conn.NewStream(ctx,
+		&grpc.StreamDesc{
+			StreamName:    "ForwardSearch",
+			ServerStreams: true,
+		},
+		"/gastrolog.v1.ClusterService/ForwardSearch",
+	)
+	if err != nil {
+		sf.peers.Invalidate(nodeID)
+		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
+		close(recCh)
+		close(eCh)
+		return recCh, nil, nil, eCh
+	}
+	if err := stream.SendMsg(req); err != nil {
+		sf.peers.Invalidate(nodeID)
+		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
+		close(recCh)
+		close(eCh)
+		return recCh, nil, nil, eCh
+	}
+	if err := stream.CloseSend(); err != nil {
+		eCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
+		close(recCh)
+		close(eCh)
+		return recCh, nil, nil, eCh
+	}
+
+	// Read the first message synchronously to extract histogram + tableResult.
+	first := &gastrologv1.ForwardSearchResponse{}
+	if err := stream.RecvMsg(first); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sf.peers.Invalidate(nodeID)
+			eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
+		}
+		close(recCh)
+		close(eCh)
+		return recCh, nil, nil, eCh
+	}
+	histogram = first.GetHistogram()
+	tableResult = first.GetTableResult()
+
+	// Pipeline response: single message, no records to stream.
+	if tableResult != nil {
+		close(recCh)
+		close(eCh)
+		return recCh, histogram, tableResult, eCh
+	}
+
+	// Send the first batch of records, then start goroutine for the rest.
+	if len(first.GetRecords()) > 0 {
+		recCh <- first.GetRecords()
+	}
+
+	go func() {
+		defer close(recCh)
+		defer close(eCh)
+		for {
+			msg := &gastrologv1.ForwardSearchResponse{}
+			if err := stream.RecvMsg(msg); err != nil {
+				if !errors.Is(err, io.EOF) {
+					sf.peers.Invalidate(nodeID)
+					eCh <- fmt.Errorf("search stream from %s: %w", nodeID, err)
+				}
+				return
+			}
+			if len(msg.GetRecords()) > 0 {
+				select {
+				case recCh <- msg.GetRecords():
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+
+	return recCh, histogram, tableResult, eCh
 }
 
 // GetContext sends a ForwardGetContext RPC to the given node.

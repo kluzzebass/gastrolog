@@ -408,7 +408,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	}
 
 	// Regular search.
-	searchIter, getToken := eng.Search(ctx, q, nil)
+	searchIter, _ := eng.Search(ctx, q, nil)
 
 	var records []*gastrologv1.ExportRecord
 	for rec, err := range searchIter {
@@ -417,17 +417,107 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		}
 		records = append(records, cluster.RecordToExportRecord(rec))
 	}
-	token := getToken()
-	var tokenBytes []byte
-	if token != nil {
-		tokenBytes = server.ResumeTokenToProto(token)
-	}
 	return &gastrologv1.ForwardSearchResponse{
-		Records:     records,
-		Histogram:   histProto,
-		ResumeToken: tokenBytes,
-		HasMore:     token != nil,
+		Records:   records,
+		Histogram: histProto,
 	}, nil
+}
+
+func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, req *gastrologv1.ForwardSearchRequest) (
+	<-chan []*gastrologv1.ExportRecord,
+	[]*gastrologv1.HistogramBucket,
+	*gastrologv1.TableResult,
+	<-chan error,
+) {
+	recCh := make(chan []*gastrologv1.ExportRecord, 16)
+	errCh := make(chan error, 1)
+
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		errCh <- fmt.Errorf("unknown node: %s", nodeID)
+		close(recCh)
+		close(errCh)
+		return recCh, nil, nil, errCh
+	}
+
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		errCh <- fmt.Errorf("invalid vault_id: %w", err)
+		close(recCh)
+		close(errCh)
+		return recCh, nil, nil, errCh
+	}
+
+	scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, req.GetQuery())
+	q, pipeline, parseErr := server.ParseExpression(scopedExpr)
+	if parseErr != nil {
+		errCh <- fmt.Errorf("parse: %w", parseErr)
+		close(recCh)
+		close(errCh)
+		return recCh, nil, nil, errCh
+	}
+
+	eng := orch.MultiVaultQueryEngine()
+
+	// Pipeline query: return table result synchronously.
+	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
+		result, runErr := eng.RunPipeline(ctx, q, pipeline)
+		if runErr != nil {
+			errCh <- runErr
+			close(recCh)
+			close(errCh)
+			return recCh, nil, nil, errCh
+		}
+		if result.Table != nil {
+			close(recCh)
+			close(errCh)
+			return recCh, nil, server.TableResultToBasicProto(result.Table), errCh
+		}
+	}
+
+	// Compute histogram.
+	histogram := eng.ComputeHistogramForVaults(ctx, q, 50, []uuid.UUID{vaultID})
+	var histProto []*gastrologv1.HistogramBucket
+	for _, b := range histogram {
+		histProto = append(histProto, &gastrologv1.HistogramBucket{
+			TimestampMs: b.TimestampMs,
+			Count:       b.Count,
+			GroupCounts: b.GroupCounts,
+		})
+	}
+
+	// Stream records in batches.
+	go func() {
+		defer close(recCh)
+		defer close(errCh)
+
+		searchIter, _ := eng.Search(ctx, q, nil)
+		const batchSize = 200
+		batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
+		for rec, iterErr := range searchIter {
+			if iterErr != nil {
+				errCh <- iterErr
+				return
+			}
+			batch = append(batch, cluster.RecordToExportRecord(rec))
+			if len(batch) >= batchSize {
+				select {
+				case recCh <- batch:
+				case <-ctx.Done():
+					return
+				}
+				batch = make([]*gastrologv1.ExportRecord, 0, batchSize)
+			}
+		}
+		if len(batch) > 0 {
+			select {
+			case recCh <- batch:
+			case <-ctx.Done():
+			}
+		}
+	}()
+
+	return recCh, histProto, nil, errCh
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {

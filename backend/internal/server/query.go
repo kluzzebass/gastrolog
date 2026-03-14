@@ -32,7 +32,18 @@ import (
 // RemoteSearcher sends search and context requests to remote cluster nodes.
 // Nil in single-node mode.
 type RemoteSearcher interface {
+	// Search collects a full streamed ForwardSearch response. Used by
+	// collectRemotePipeline which needs the complete TableResult.
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
+	// SearchStream opens a streaming ForwardSearch and returns channels.
+	// The histogram and tableResult are available immediately (first message).
+	// Record batches arrive on the records channel until closed.
+	SearchStream(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (
+		records <-chan []*apiv1.ExportRecord,
+		histogram []*apiv1.HistogramBucket,
+		tableResult *apiv1.TableResult,
+		errCh <-chan error,
+	)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
 	Follow(ctx context.Context, nodeID string, req *apiv1.ForwardFollowRequest) (<-chan *apiv1.ExportRecord, <-chan error)
@@ -172,10 +183,15 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// Collect raw records from remote nodes (no pipeline — just the base query).
-	remoteRes := s.collectRemote(ctx, q, nil)
+	remoteIter, remoteHist := s.collectRemote(ctx, q)
 	var extraRecords []chunk.Record
-	for _, r := range remoteRes.records {
-		extraRecords = append(extraRecords, protoToChunkRecord(r))
+	if remoteIter != nil {
+		for rec, iterErr := range remoteIter {
+			if iterErr != nil {
+				return connect.NewError(connect.CodeInternal, iterErr)
+			}
+			extraRecords = append(extraRecords, rec)
+		}
 	}
 
 	result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, extraRecords)
@@ -185,7 +201,7 @@ func (s *QueryServer) searchPipelineGlobal(
 
 	// Compute and merge histogram.
 	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
-	histogram := mergeHistogramBuckets(localHist, remoteRes.histogram)
+	histogram := mergeHistogramBuckets(localHist, remoteHist)
 
 	if result.Table != nil {
 		return stream.Send(&apiv1.SearchResponse{
@@ -208,10 +224,8 @@ func (s *QueryServer) searchPipelineGlobal(
 }
 
 // searchDirect streams search results, merging local and remote vault results
-// in timestamp order with deduplication. When transform is non-nil, per-record
-// pipeline transforms are applied. Remote results are only fetched on the first
-// page (no resume token); subsequent pages are local-only since remote results
-// were already included.
+// in timestamp order. When transform is non-nil, per-record pipeline transforms
+// are applied. Remote results stream end-to-end — no full-result-set buffering.
 func (s *QueryServer) searchDirect(
 	ctx context.Context,
 	eng *query.Engine,
@@ -238,25 +252,16 @@ func (s *QueryServer) searchDirect(
 		}
 	}
 
-	// Collect remote results. On the first page (no resume) we fetch all
-	// remote vaults. On subsequent pages we only re-fetch vaults that still
-	// have data (tracked via remote positions in the resume token).
-	var prevRemote []query.RemoteVaultPosition
-	if resume != nil {
-		prevRemote = resume.RemotePositions
-	}
-	var remoteRes remoteResult
-	if resume == nil || len(prevRemote) > 0 {
-		remoteRes = s.collectRemote(ctx, q, prevRemote)
-	}
+	// Collect remote results as a streaming iterator.
+	remoteIter, remoteHist := s.collectRemote(ctx, q)
 
 	// Compute local histogram and merge with remote.
 	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
-	histogram := mergeHistogramBuckets(localHist, remoteRes.histogram)
+	histogram := mergeHistogramBuckets(localHist, remoteHist)
 
-	iter, getToken := eng.Search(ctx, q, resume)
+	localIter, getToken := eng.Search(ctx, q, resume)
 
-	return s.mergeAndStream(ctx, iter, getToken, remoteRes, q.OrderBy, q.Reverse(), transform, histogram, stream)
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), transform, histogram, stream)
 }
 
 func mapSearchError(err error) error {
@@ -336,131 +341,41 @@ func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 	return rec
 }
 
-// emitRemoteRecord writes a remote proto record to the batcher, routing it
-// through the transform when present. Returns (done, err).
-func emitRemoteRecord(ctx context.Context, sb *streamBatcher, r *apiv1.Record, transform *query.RecordTransform) (bool, error) {
-	if transform != nil {
-		return emitRecord(ctx, sb, protoToChunkRecord(r), transform)
-	}
-	return false, sb.add(r)
-}
 
-// remoteRecordTS returns a function that extracts the ordering timestamp
-// from a proto record based on the OrderBy value.
-func remoteRecordTS(orderBy query.OrderBy) func(*apiv1.Record) time.Time {
-	switch orderBy {
-	case query.OrderByIngestTS:
-		return func(r *apiv1.Record) time.Time { return r.GetIngestTs().AsTime() }
-	case query.OrderBySourceTS:
-		return func(r *apiv1.Record) time.Time { return r.GetSourceTs().AsTime() }
-	case query.OrderByWriteTS:
-		return func(r *apiv1.Record) time.Time { return r.GetWriteTs().AsTime() }
-	}
-	return func(r *apiv1.Record) time.Time { return r.GetIngestTs().AsTime() }
-}
-
-// drainRemoteUntil emits remote records (starting at index ri) whose timestamps
-// sort before cutoff according to isBefore. When cutoff is zero, drains all
-// remaining records. remoteTS extracts the ordering timestamp from a proto record.
-// Returns the updated index and whether the transform is done.
-func drainRemoteUntil(
-	ctx context.Context,
-	sb *streamBatcher,
-	remote []*apiv1.Record,
-	ri int,
-	cutoff time.Time,
-	isBefore func(a, b time.Time) bool,
-	remoteTS func(*apiv1.Record) time.Time,
-	transform *query.RecordTransform,
-) (int, bool, error) {
-	for ri < len(remote) {
-		ts := remoteTS(remote[ri])
-		if !cutoff.IsZero() && !isBefore(ts, cutoff) {
-			break
-		}
-		done, err := emitRemoteRecord(ctx, sb, remote[ri], transform)
-		if err != nil {
-			return ri, false, err
-		}
-		if done {
-			return ri, true, nil
-		}
-		ri++
-	}
-	return ri, false, nil
-}
-
-// mergeAndStream interleaves the local engine iterator with pre-fetched remote
-// results in timestamp order, applies optional per-record transforms, and
-// streams batches to the client. When remote is empty (single-node or resume
-// page), the merge is a no-op passthrough with zero overhead.
-// The orderBy parameter determines which timestamp field is used for merge ordering.
+// mergeAndStream interleaves the local engine iterator with a remote iterator
+// in timestamp order, applies optional per-record transforms, and streams
+// batches to the client. When remoteIter is nil (single-node), the merge is
+// a no-op passthrough with zero overhead.
 func (s *QueryServer) mergeAndStream(
 	ctx context.Context,
 	localIter iter.Seq2[chunk.Record, error],
 	getToken func() *query.ResumeToken,
-	remoteRes remoteResult,
+	remoteIter iter.Seq2[chunk.Record, error],
 	orderBy query.OrderBy,
 	reverse bool,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
-	remote := remoteRes.records
-
-	isBefore := func(a, b time.Time) bool {
-		if reverse {
-			return a.After(b)
-		}
-		return a.Before(b)
-	}
-
-	// Select the TS field for remote proto records based on OrderBy.
-	remoteTS := remoteRecordTS(orderBy)
-
 	sb := newStreamBatcher(stream, 100)
-	ri := 0
 
-	for rec, err := range localIter {
-		if err != nil {
-			return mapSearchError(err)
-		}
-
-		localTS := orderBy.RecordTS(rec)
-		var done bool
-		ri, done, err = drainRemoteUntil(ctx, sb, remote, ri, localTS, isBefore, remoteTS, transform)
-		if err != nil {
+	if remoteIter != nil {
+		// Two-way sorted merge of local and remote iterators.
+		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, transform); err != nil {
 			return err
 		}
-		if done {
-			break
-		}
-
-		done, err = emitRecord(ctx, sb, rec, transform)
-		if err != nil {
+	} else {
+		// Fast path: no remote results, just stream local.
+		if err := streamLocal(ctx, sb, localIter, transform); err != nil {
 			return err
-		}
-		if done {
-			break
 		}
 	}
 
-	// Drain remaining remote records (zero cutoff = drain all).
-	if _, _, err := drainRemoteUntil(ctx, sb, remote, ri, time.Time{}, isBefore, remoteTS, transform); err != nil {
-		return err
-	}
-
-	// Build the combined resume token from local + remote state.
+	// Build resume token from local state only (remote is fully streamed).
 	var tokenBytes []byte
 	if transform == nil || !transform.Done() {
 		token := getToken()
-		if token == nil && remoteRes.hasMore {
-			// No local state but remote has more — create a token with only
-			// remote positions so the next page re-fetches from remote.
-			token = &query.ResumeToken{}
-		}
 		if token != nil {
-			token.RemotePositions = remoteRes.remotePositions
 			tokenBytes = ResumeTokenToProto(token)
 		}
 	}
@@ -470,6 +385,115 @@ func (s *QueryServer) mergeAndStream(
 		HasMore:     len(tokenBytes) > 0,
 		Histogram:   histogram,
 	})
+}
+
+// streamLocal streams local iterator results through the batcher.
+func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform) error {
+	for rec, err := range localIter {
+		if err != nil {
+			return mapSearchError(err)
+		}
+		done, emitErr := emitRecord(ctx, sb, rec, transform)
+		if emitErr != nil {
+			return emitErr
+		}
+		if done {
+			return nil
+		}
+	}
+	return nil
+}
+
+// mergeIterators performs a two-way sorted merge of local and remote iterators,
+// emitting records through the stream batcher in timestamp order.
+func mergeIterators(
+	ctx context.Context,
+	sb *streamBatcher,
+	localIter, remoteIter iter.Seq2[chunk.Record, error],
+	orderBy query.OrderBy,
+	reverse bool,
+	transform *query.RecordTransform,
+) error {
+	isBefore := func(a, b time.Time) bool {
+		if reverse {
+			return a.After(b)
+		}
+		return a.Before(b)
+	}
+
+	// Pull one record ahead from each iterator using channels.
+	type recOrErr struct {
+		rec chunk.Record
+		err error
+		ok  bool
+	}
+	localCh := make(chan recOrErr, 1)
+	remoteCh := make(chan recOrErr, 1)
+
+	// Pump iterators into channels in goroutines.
+	go func() {
+		defer close(localCh)
+		for rec, err := range localIter {
+			localCh <- recOrErr{rec, err, true}
+		}
+	}()
+	go func() {
+		defer close(remoteCh)
+		for rec, err := range remoteIter {
+			remoteCh <- recOrErr{rec, err, true}
+		}
+	}()
+
+	var localPending, remotePending *recOrErr
+
+	pull := func(ch <-chan recOrErr) *recOrErr {
+		v, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return &recOrErr{v.rec, v.err, ok}
+	}
+
+	localPending = pull(localCh)
+	remotePending = pull(remoteCh)
+
+	for localPending != nil || remotePending != nil {
+		var rec chunk.Record
+		if localPending != nil && localPending.err != nil {
+			return mapSearchError(localPending.err)
+		}
+		if remotePending != nil && remotePending.err != nil {
+			return mapSearchError(remotePending.err)
+		}
+
+		switch {
+		case localPending == nil:
+			rec = remotePending.rec
+			remotePending = pull(remoteCh)
+		case remotePending == nil:
+			rec = localPending.rec
+			localPending = pull(localCh)
+		default:
+			localTS := orderBy.RecordTS(localPending.rec)
+			remoteTS := orderBy.RecordTS(remotePending.rec)
+			if isBefore(localTS, remoteTS) {
+				rec = localPending.rec
+				localPending = pull(localCh)
+			} else {
+				rec = remotePending.rec
+				remotePending = pull(remoteCh)
+			}
+		}
+
+		done, err := emitRecord(ctx, sb, rec, transform)
+		if err != nil {
+			return err
+		}
+		if done {
+			return nil
+		}
+	}
+	return nil
 }
 
 // emitRecord applies an optional transform to a record and writes it to the
@@ -514,92 +538,66 @@ func (b *streamBatcher) add(rec *apiv1.Record) error {
 
 func (b *streamBatcher) pending() []*apiv1.Record { return b.batch }
 
-// remoteResult holds records and histogram from remote vault queries.
-type remoteResult struct {
-	records   []*apiv1.Record
-	histogram []*apiv1.HistogramBucket
-	// remotePositions carries per-vault resume tokens from remote nodes so the
-	// coordinator can paginate across nodes.
-	remotePositions []query.RemoteVaultPosition
-	hasMore         bool
-}
-
-// collectRemote gathers results from all remote vaults into a single sorted
-// slice. Each vault's results arrive individually sorted, but concatenating
-// multiple vaults breaks that ordering, so we re-sort the combined slice for
-// the merge step. When reverse is true, sort descending (newest first).
-// Also merges histogram buckets from all remote nodes.
-//
-// prevRemote carries per-vault resume tokens from a previous page. On the
-// first page this is nil; on subsequent pages it tells each remote vault
-// where to continue from.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, prevRemote []query.RemoteVaultPosition) remoteResult {
+// collectRemote opens streaming ForwardSearch RPCs to all remote vaults and
+// returns a merged sorted iterator over their records plus the combined
+// histogram. The iterator performs a k-way merge — at most one record per
+// remote vault is held in memory at any time.
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return remoteResult{}
+		return nil, nil
 	}
 	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
 	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
-		return remoteResult{}
+		return nil, nil
 	}
 
 	queryExpr := q.String()
-	reverse := q.Reverse()
 
-	// Build a lookup for previous per-vault resume tokens.
-	prevTokens := make(map[uuid.UUID][]byte, len(prevRemote))
-	for _, rp := range prevRemote {
-		prevTokens[rp.VaultID] = rp.ResumeToken
+	// Fan out streaming RPCs concurrently — one per remote vault.
+	type vaultStream struct {
+		records <-chan []*apiv1.ExportRecord
+		errCh   <-chan error
 	}
+	var streams []vaultStream
+	var allHist []*apiv1.HistogramBucket
+	var mu sync.Mutex
+	var wg sync.WaitGroup
 
-	// Fan out RPCs concurrently — one goroutine per remote vault.
-	type vaultFetch struct {
-		nodeID string
-		vid    uuid.UUID
-	}
-	var fetches []vaultFetch
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
-			fetches = append(fetches, vaultFetch{nodeID, vid})
-		}
-	}
-	results := make([]remoteVaultResult, len(fetches))
-	var wg sync.WaitGroup
-	for i, f := range fetches {
-		wg.Go(func() {
-			results[i] = s.fetchRemoteVault(ctx, f.nodeID, f.vid, queryExpr, prevTokens[f.vid])
-		})
-	}
-	wg.Wait()
-
-	var all []*apiv1.Record
-	var allHist []*apiv1.HistogramBucket
-	var remotePositions []query.RemoteVaultPosition
-	hasMore := false
-	for i, result := range results {
-		all = append(all, result.records...)
-		allHist = mergeHistogramBuckets(allHist, result.histogram)
-		if result.hasMore {
-			hasMore = true
-			remotePositions = append(remotePositions, query.RemoteVaultPosition{
-				VaultID:     fetches[i].vid,
-				ResumeToken: result.resumeToken,
+			wg.Go(func() {
+				recCh, hist, _, eCh := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
+					VaultId: vid.String(),
+					Query:   queryExpr,
+				})
+				mu.Lock()
+				streams = append(streams, vaultStream{records: recCh, errCh: eCh})
+				allHist = mergeHistogramBuckets(allHist, hist)
+				mu.Unlock()
 			})
 		}
 	}
+	wg.Wait()
 
-	// Sort by WriteTS so the merge interleaving is consistent with chunk
-	// scan order and the user's calendar time range selection.
-	slices.SortFunc(all, func(a, b *apiv1.Record) int {
-		ta, tb := a.GetWriteTs().AsTime(), b.GetWriteTs().AsTime()
-		if reverse {
-			return tb.Compare(ta) // descending (newest first)
-		}
-		return ta.Compare(tb) // ascending (oldest first)
-	})
+	if len(streams) == 0 {
+		return nil, allHist
+	}
 
-	s.logger.Debug("search: collected remote records", "nodes", len(byNode), "total", len(all))
-	return remoteResult{records: all, histogram: allHist, remotePositions: remotePositions, hasMore: hasMore}
+	// Convert each channel into an iter.Seq2[chunk.Record, error].
+	var iters []iter.Seq2[chunk.Record, error]
+	for _, vs := range streams {
+		iters = append(iters, channelToIter(vs.records, vs.errCh))
+	}
+
+	// If only one remote vault, return its iterator directly.
+	if len(iters) == 1 {
+		return iters[0], allHist
+	}
+
+	// K-way merge of N iterators using a heap.
+	merged := kWayMerge(iters, q.OrderBy, q.Reverse())
+	return merged, allHist
 }
 
 // mergeHistogramBuckets sums two histogram bucket slices by matching timestamp.
@@ -653,41 +651,156 @@ func histogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket 
 	return out
 }
 
-// remoteVaultResult holds the full response from a single remote vault query.
-type remoteVaultResult struct {
-	records     []*apiv1.Record
-	histogram   []*apiv1.HistogramBucket
-	resumeToken []byte
-	hasMore     bool
+// channelToIter converts a channel of ExportRecord batches + error channel
+// into an iter.Seq2[chunk.Record, error].
+func channelToIter(recCh <-chan []*apiv1.ExportRecord, errCh <-chan error) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		for batch := range recCh {
+			for _, er := range batch {
+				rec := exportRecordToChunkRecord(er)
+				if !yield(rec, nil) {
+					return
+				}
+			}
+		}
+		// Check for stream error after records are drained.
+		if err, ok := <-errCh; ok && err != nil {
+			yield(chunk.Record{}, err)
+		}
+	}
 }
 
-// fetchRemoteVault sends a ForwardSearch RPC and returns the full result.
-func (s *QueryServer) fetchRemoteVault(
-	ctx context.Context,
-	nodeID string,
-	vaultID uuid.UUID,
-	queryExpr string,
-	resumeToken []byte,
-) remoteVaultResult {
-	resp, err := s.remoteSearcher.Search(ctx, nodeID, &apiv1.ForwardSearchRequest{
-		VaultId:     vaultID.String(),
-		Query:       queryExpr,
-		ResumeToken: resumeToken,
-	})
-	if err != nil {
-		s.logger.Warn("search: remote vault failed", "node", nodeID, "vault", vaultID, "err", err)
-		return remoteVaultResult{}
+// exportRecordToChunkRecord converts a proto ExportRecord to a chunk.Record.
+func exportRecordToChunkRecord(er *apiv1.ExportRecord) chunk.Record {
+	rec := chunk.Record{Raw: er.GetRaw()}
+	if er.GetSourceTs() != nil {
+		rec.SourceTS = er.GetSourceTs().AsTime()
 	}
+	if er.GetIngestTs() != nil {
+		rec.IngestTS = er.GetIngestTs().AsTime()
+	}
+	if er.GetWriteTs() != nil {
+		rec.WriteTS = er.GetWriteTs().AsTime()
+	}
+	if len(er.GetAttrs()) > 0 {
+		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
+		maps.Copy(rec.Attrs, er.GetAttrs())
+	}
+	if er.GetVaultId() != "" {
+		rec.VaultID, _ = uuid.Parse(er.GetVaultId())
+	}
+	if er.GetChunkId() != "" {
+		rec.Ref.ChunkID, _ = chunk.ParseChunkID(er.GetChunkId())
+		rec.Ref.Pos = er.GetPos()
+	}
+	rec.EventID.IngestSeq = er.GetIngestSeq()
+	if len(er.GetIngesterId()) == 16 {
+		copy(rec.EventID.IngesterID[:], er.GetIngesterId())
+	}
+	rec.EventID.IngestTS = rec.IngestTS
+	return rec
+}
 
-	var records []*apiv1.Record
-	for _, er := range resp.GetRecords() {
-		records = append(records, exportToRecord(er))
+// mergeEntry holds a record and the index of the source iterator it came from.
+type mergeEntry struct {
+	rec chunk.Record
+	idx int
+}
+
+// mergeState holds the pull function and stop function for one iterator.
+type mergeState struct {
+	next func() (chunk.Record, error, bool)
+	stop func()
+}
+
+// kWayMerge merges N sorted iterators into one sorted iterator.
+// N is small (typically 1-3 remote nodes), so selection-based min-finding
+// is used instead of a heap.
+func kWayMerge(iters []iter.Seq2[chunk.Record, error], orderBy query.OrderBy, reverse bool) iter.Seq2[chunk.Record, error] {
+	return func(yield func(chunk.Record, error) bool) {
+		states, entries, err := initMerge(iters)
+		if err != nil {
+			yield(chunk.Record{}, err)
+			stopAll(states)
+			return
+		}
+		defer stopAll(states)
+
+		less := buildMergeLess(orderBy, reverse)
+		runMerge(yield, states, entries, less)
 	}
-	return remoteVaultResult{
-		records:     records,
-		histogram:   resp.GetHistogram(),
-		resumeToken: resp.GetResumeToken(),
-		hasMore:     resp.GetHasMore(),
+}
+
+// initMerge starts all iterators and pulls the first record from each.
+func initMerge(iters []iter.Seq2[chunk.Record, error]) ([]mergeState, []mergeEntry, error) {
+	states := make([]mergeState, len(iters))
+	var entries []mergeEntry
+	for i, it := range iters {
+		next, stop := iter.Pull2(it)
+		states[i] = mergeState{next: next, stop: stop}
+		rec, err, ok := next()
+		if !ok {
+			stop()
+			states[i].stop = nil
+			continue
+		}
+		if err != nil {
+			return states, nil, err
+		}
+		entries = append(entries, mergeEntry{rec: rec, idx: i})
+	}
+	return states, entries, nil
+}
+
+// stopAll stops all active iterators.
+func stopAll(states []mergeState) {
+	for i := range states {
+		if states[i].stop != nil {
+			states[i].stop()
+		}
+	}
+}
+
+// buildMergeLess returns a comparison function for merge entries.
+func buildMergeLess(orderBy query.OrderBy, reverse bool) func(a, b mergeEntry) bool {
+	return func(a, b mergeEntry) bool {
+		ta := orderBy.RecordTS(a.rec)
+		tb := orderBy.RecordTS(b.rec)
+		if reverse {
+			return ta.After(tb)
+		}
+		return ta.Before(tb)
+	}
+}
+
+// runMerge performs the k-way merge loop.
+func runMerge(yield func(chunk.Record, error) bool, states []mergeState, entries []mergeEntry, less func(a, b mergeEntry) bool) {
+	for len(entries) > 0 {
+		minIdx := 0
+		for i := 1; i < len(entries); i++ {
+			if less(entries[i], entries[minIdx]) {
+				minIdx = i
+			}
+		}
+
+		rec := entries[minIdx].rec
+		srcIdx := entries[minIdx].idx
+
+		nextRec, err, ok := states[srcIdx].next()
+		if err != nil {
+			yield(chunk.Record{}, err)
+			return
+		}
+		if ok {
+			entries[minIdx].rec = nextRec
+		} else {
+			entries[minIdx] = entries[len(entries)-1]
+			entries = entries[:len(entries)-1]
+		}
+
+		if !yield(rec, nil) {
+			return
+		}
 	}
 }
 
@@ -1410,10 +1523,9 @@ func (s *QueryServer) searchContext(
 ) ([]*apiv1.Record, error) {
 	eng := s.orch.MultiVaultQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
-	remote := s.collectRemote(ctx, q, nil).records
+	remoteIter, _ := s.collectRemote(ctx, q)
 
 	reverse := q.Reverse()
-	ri := 0
 	isBefore := func(a, b time.Time) bool {
 		if reverse {
 			return a.After(b)
@@ -1421,6 +1533,9 @@ func (s *QueryServer) searchContext(
 		return a.Before(b)
 	}
 
+	remote := drainIterToProto(remoteIter)
+
+	ri := 0
 	var result []*apiv1.Record
 
 	for rec, err := range localIter {
@@ -1459,6 +1574,22 @@ func (s *QueryServer) searchContext(
 	}
 
 	return result, nil
+}
+
+// drainIterToProto collects all records from an iterator into a slice of
+// proto records. Returns nil if the iterator is nil.
+func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
+	if it == nil {
+		return nil
+	}
+	var out []*apiv1.Record
+	for rec, err := range it {
+		if err != nil {
+			break
+		}
+		out = append(out, recordToProto(rec))
+	}
+	return out
 }
 
 // remoteNodeForVault returns the owning node ID if the vault is remote,
@@ -1864,37 +1995,6 @@ func tableResultToProto(result *query.TableResult, pipeline *querylang.Pipeline)
 	}
 }
 
-// protoToChunkRecord converts a proto Record back to the internal chunk.Record.
-// Used when remote records need to flow through the local pipeline (e.g. head/tail/slice
-// before stats requires gathering all raw records globally).
-func protoToChunkRecord(r *apiv1.Record) chunk.Record {
-	rec := chunk.Record{
-		Raw:   r.Raw,
-		Attrs: r.GetAttrs(),
-	}
-	if t := r.GetIngestTs(); t != nil {
-		rec.IngestTS = t.AsTime()
-	}
-	if t := r.GetWriteTs(); t != nil {
-		rec.WriteTS = t.AsTime()
-	}
-	if t := r.GetSourceTs(); t != nil {
-		rec.SourceTS = t.AsTime()
-	}
-	if ref := r.GetRef(); ref != nil {
-		rec.VaultID, _ = uuid.Parse(ref.VaultId)
-		rec.Ref.ChunkID, _ = chunk.ParseChunkID(ref.ChunkId)
-		rec.Ref.Pos = ref.Pos
-	}
-	// Populate EventID from proto fields.
-	rec.EventID.IngestSeq = r.GetIngestSeq()
-	if len(r.GetIngesterId()) == 16 {
-		copy(rec.EventID.IngesterID[:], r.GetIngesterId())
-	}
-	rec.EventID.IngestTS = rec.IngestTS
-	return rec
-}
-
 // recordToProto converts an internal Record to the proto type.
 func recordToProto(rec chunk.Record) *apiv1.Record {
 	r := &apiv1.Record{
@@ -1949,23 +2049,12 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 		}
 	}
 
-	for _, rp := range protoToken.RemotePositions {
-		vaultID, err := uuid.Parse(rp.VaultId)
-		if err != nil {
-			return nil, fmt.Errorf("invalid vault ID in remote position: %w", err)
-		}
-		token.RemotePositions = append(token.RemotePositions, query.RemoteVaultPosition{
-			VaultID:     vaultID,
-			ResumeToken: rp.ResumeToken,
-		})
-	}
-
 	return token, nil
 }
 
 // ResumeTokenToProto converts an internal resume token to proto bytes.
 func ResumeTokenToProto(token *query.ResumeToken) []byte {
-	if token == nil || (len(token.Positions) == 0 && len(token.RemotePositions) == 0) {
+	if token == nil || len(token.Positions) == 0 {
 		return nil
 	}
 
@@ -1979,13 +2068,6 @@ func ResumeTokenToProto(token *query.ResumeToken) []byte {
 			ChunkId:  pos.ChunkID.String(),
 			Position: pos.Position,
 		}
-	}
-
-	for _, rp := range token.RemotePositions {
-		protoToken.RemotePositions = append(protoToken.RemotePositions, &apiv1.RemoteVaultPosition{
-			VaultId:     rp.VaultID.String(),
-			ResumeToken: rp.ResumeToken,
-		})
 	}
 
 	data, err := proto.Marshal(protoToken)

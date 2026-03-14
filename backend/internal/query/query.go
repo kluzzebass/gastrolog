@@ -250,20 +250,10 @@ type ResumeToken struct {
 	// For multi-vault queries, this may have multiple entries (one per active chunk).
 	Positions []MultiVaultPosition
 
-	// RemotePositions carries opaque resume tokens for vaults on other nodes.
-	// The coordinator stores these so that cross-node pagination works.
-	RemotePositions []RemoteVaultPosition
-
 	// Legacy field for backward compatibility with single-vault resume tokens.
 	//
 	// Deprecated: use Positions instead.
 	Next chunk.RecordRef
-}
-
-// RemoteVaultPosition is an opaque resume token for a vault on another node.
-type RemoteVaultPosition struct {
-	VaultID     uuid.UUID
-	ResumeToken []byte
 }
 
 // Normalize converts a legacy resume token (using Next) to the new format (using Positions).
