@@ -1,8 +1,7 @@
-import { useReducer } from "react";
+import { useReducer, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { EyeIcon, EyeOffIcon } from "../icons";
-import { useSettings, usePutSettings, JWT_KEEP } from "../../api/hooks/useSettings";
+import { useSettings, usePutSettings, useRegenerateJwtSecret } from "../../api/hooks/useSettings";
 import { useCertificates } from "../../api/hooks/useCertificates";
 import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
@@ -16,7 +15,6 @@ import { extractMessage } from "../../utils/errors";
 
 interface ServiceFormState {
   tokenDuration: string;
-  jwtSecret: string;
   minPwLen: string;
   maxJobs: string;
   tlsDefaultCert: string;
@@ -34,16 +32,14 @@ interface ServiceFormState {
   maxResultCount: string;
   broadcastInterval: string;
   initialized: boolean;
-  showSecret: boolean;
 }
 
 type ServiceFormAction =
   | { type: "init"; data: any }
   | { type: "reset"; data: any }
-  | { type: "set"; field: keyof ServiceFormState; value: string | boolean }
-  | { type: "toggleSecret" };
+  | { type: "set"; field: keyof ServiceFormState; value: string | boolean };
 
-function fieldsFromData(data: any): Omit<ServiceFormState, "showSecret"> {
+function fieldsFromData(data: any): ServiceFormState {
   const auth = data.auth;
   const pp = auth?.passwordPolicy;
   const query = data.query;
@@ -51,7 +47,6 @@ function fieldsFromData(data: any): Omit<ServiceFormState, "showSecret"> {
   const tls = data.tls;
   return {
     tokenDuration: auth?.tokenDuration ?? "",
-    jwtSecret: auth?.jwtSecretConfigured ? JWT_KEEP : "",
     minPwLen: pp?.minLength ? String(pp.minLength) : "8",
     maxJobs: sched?.maxConcurrentJobs ? String(sched.maxConcurrentJobs) : "4",
     tlsDefaultCert: tls?.defaultCert ?? "",
@@ -73,26 +68,23 @@ function fieldsFromData(data: any): Omit<ServiceFormState, "showSecret"> {
 }
 
 const INITIAL_STATE: ServiceFormState = {
-  tokenDuration: "", jwtSecret: "", minPwLen: "", maxJobs: "",
+  tokenDuration: "", minPwLen: "", maxJobs: "",
   tlsDefaultCert: "", tlsEnabled: false, httpToHttpsRedirect: false,
   httpsPort: "", requireMixedCase: false, requireDigit: false,
   requireSpecial: false, maxConsecutiveRepeats: "", forbidAnimalNoise: false,
   refreshTokenDuration: "", maxFollowDuration: "", queryTimeout: "",
   maxResultCount: "", broadcastInterval: "", initialized: false,
-  showSecret: false,
 };
 
 function serviceReducer(state: ServiceFormState, action: ServiceFormAction): ServiceFormState {
   switch (action.type) {
     case "init":
       if (state.initialized) return state;
-      return { ...fieldsFromData(action.data), showSecret: false };
+      return fieldsFromData(action.data);
     case "reset":
-      return { ...fieldsFromData(action.data), showSecret: state.showSecret };
+      return fieldsFromData(action.data);
     case "set":
       return { ...state, [action.field]: action.value };
-    case "toggleSecret":
-      return { ...state, showSecret: !state.showSecret };
   }
 }
 
@@ -122,7 +114,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
   const { data, isLoading } = useSettings();
   const { data: certData } = useCertificates();
   const putConfig = usePutSettings();
+  const regenerateJwt = useRegenerateJwtSecret();
   const { addToast } = useToast();
+  const [confirmRegenerate, setConfirmRegenerate] = useState(false);
 
   const [s, dispatch] = useReducer(serviceReducer, INITIAL_STATE);
   const set = (field: keyof ServiceFormState) => (value: string | boolean) =>
@@ -139,7 +133,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     s.initialized &&
     data &&
     (s.tokenDuration !== (data.auth?.tokenDuration ?? "") ||
-      (s.jwtSecret !== JWT_KEEP && s.jwtSecret !== "") ||
       s.minPwLen !== String(data.auth?.passwordPolicy?.minLength || 8) ||
       s.maxJobs !== String(data.scheduler?.maxConcurrentJobs || 4) ||
       s.tlsDefaultCert !== (data.tls?.defaultCert ?? "") ||
@@ -161,7 +154,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     const hasCert = certIdSet.has(s.tlsDefaultCert);
     const effectiveTls = hasCert ? s.tlsEnabled : false;
     const effectiveRedirect = hasCert ? s.httpToHttpsRedirect : false;
-    const effectiveJwtSecret = s.jwtSecret === JWT_KEEP ? JWT_KEEP : s.jwtSecret;
     const effectiveMinPwLen = parseInt(s.minPwLen, 10) || 8;
     const effectiveMaxJobs = parseInt(s.maxJobs, 10) || 4;
     const effectiveMaxRepeats = parseInt(s.maxConsecutiveRepeats, 10) || 0;
@@ -171,7 +163,6 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
       await putConfig.mutateAsync({
         auth: {
           tokenDuration: s.tokenDuration,
-          jwtSecret: effectiveJwtSecret,
           refreshTokenDuration: s.refreshTokenDuration,
           passwordPolicy: {
             minLength: effectiveMinPwLen,
@@ -281,35 +272,51 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
 
               <FormField
                 label="JWT Secret"
-                description="The signing key used for authentication tokens. Never shown; paste a new value to change. Changing this will invalidate all existing sessions."
+                description={data?.auth?.jwtSecretConfigured
+                  ? "A signing key is configured. Regenerating will invalidate all active sessions cluster-wide."
+                  : "No signing key configured. Authentication will not work until one is generated."
+                }
                 dark={dark}
               >
-                <div className="relative">
-                  <input
-                    type={s.showSecret ? "text" : "password"}
-                    value={s.jwtSecret === JWT_KEEP ? "" : s.jwtSecret}
-                    onChange={(e) => dispatch({ type: "set", field: "jwtSecret", value: e.target.value })}
-                    placeholder={data?.auth?.jwtSecretConfigured ? "•••••••• (paste to replace)" : "Set JWT secret"}
-                    className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-                      "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                      "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-                    )}`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => dispatch({ type: "toggleSecret" })}
-                    className={`absolute right-2 top-1/2 -translate-y-1/2 transition-colors ${c(
-                      "text-text-ghost hover:text-text-muted",
-                      "text-light-text-ghost hover:text-light-text-muted",
-                    )}`}
+                {confirmRegenerate ? (
+                  <div className="flex items-center gap-2">
+                    <span className={`text-[0.8em] ${c("text-severity-warn", "text-severity-warn")}`}>
+                      All users will be logged out. Continue?
+                    </span>
+                    <Button
+                      variant="danger"
+                      dark={dark}
+                      onClick={async () => {
+                        try {
+                          await regenerateJwt.mutateAsync(undefined);
+                          addToast("JWT secret regenerated — all sessions invalidated", "info");
+                        } catch (err: unknown) {
+                          addToast(extractMessage(err, "Failed to regenerate JWT secret"), "error");
+                        }
+                        setConfirmRegenerate(false);
+                      }}
+                      disabled={regenerateJwt.isPending}
+                    >
+                      {regenerateJwt.isPending ? "Regenerating..." : "Confirm"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      dark={dark}
+                      onClick={() => setConfirmRegenerate(false)}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    bordered
+                    dark={dark}
+                    onClick={() => setConfirmRegenerate(true)}
                   >
-                    {s.showSecret ? (
-                      <EyeOffIcon className="w-4 h-4" />
-                    ) : (
-                      <EyeIcon className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
+                    Regenerate Secret
+                  </Button>
+                )}
               </FormField>
             </div>
           </ExpandableCard>

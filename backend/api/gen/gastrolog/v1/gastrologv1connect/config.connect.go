@@ -75,6 +75,9 @@ const (
 	// ConfigServicePutSettingsProcedure is the fully-qualified name of the ConfigService's PutSettings
 	// RPC.
 	ConfigServicePutSettingsProcedure = "/gastrolog.v1.ConfigService/PutSettings"
+	// ConfigServiceRegenerateJwtSecretProcedure is the fully-qualified name of the ConfigService's
+	// RegenerateJwtSecret RPC.
+	ConfigServiceRegenerateJwtSecretProcedure = "/gastrolog.v1.ConfigService/RegenerateJwtSecret"
 	// ConfigServiceGetPreferencesProcedure is the fully-qualified name of the ConfigService's
 	// GetPreferences RPC.
 	ConfigServiceGetPreferencesProcedure = "/gastrolog.v1.ConfigService/GetPreferences"
@@ -179,6 +182,9 @@ type ConfigServiceClient interface {
 	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
 	// PutSettings updates system settings. Only fields explicitly set are updated.
 	PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error)
+	// RegenerateJwtSecret generates a new random JWT signing secret, replacing the
+	// existing one. All active sessions are immediately invalidated cluster-wide.
+	RegenerateJwtSecret(context.Context, *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error)
 	// GetPreferences returns the current user's preferences.
 	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
 	// PutPreferences updates the current user's preferences.
@@ -328,6 +334,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			httpClient,
 			baseURL+ConfigServicePutSettingsProcedure,
 			connect.WithSchema(configServiceMethods.ByName("PutSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		regenerateJwtSecret: connect.NewClient[v1.RegenerateJwtSecretRequest, v1.RegenerateJwtSecretResponse](
+			httpClient,
+			baseURL+ConfigServiceRegenerateJwtSecretProcedure,
+			connect.WithSchema(configServiceMethods.ByName("RegenerateJwtSecret")),
 			connect.WithClientOptions(opts...),
 		),
 		getPreferences: connect.NewClient[v1.GetPreferencesRequest, v1.GetPreferencesResponse](
@@ -494,6 +506,7 @@ type configServiceClient struct {
 	deleteIngester        *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
 	getSettings           *connect.Client[v1.GetSettingsRequest, v1.GetSettingsResponse]
 	putSettings           *connect.Client[v1.PutSettingsRequest, v1.PutSettingsResponse]
+	regenerateJwtSecret   *connect.Client[v1.RegenerateJwtSecretRequest, v1.RegenerateJwtSecretResponse]
 	getPreferences        *connect.Client[v1.GetPreferencesRequest, v1.GetPreferencesResponse]
 	putPreferences        *connect.Client[v1.PutPreferencesRequest, v1.PutPreferencesResponse]
 	getSavedQueries       *connect.Client[v1.GetSavedQueriesRequest, v1.GetSavedQueriesResponse]
@@ -593,6 +606,11 @@ func (c *configServiceClient) GetSettings(ctx context.Context, req *connect.Requ
 // PutSettings calls gastrolog.v1.ConfigService.PutSettings.
 func (c *configServiceClient) PutSettings(ctx context.Context, req *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error) {
 	return c.putSettings.CallUnary(ctx, req)
+}
+
+// RegenerateJwtSecret calls gastrolog.v1.ConfigService.RegenerateJwtSecret.
+func (c *configServiceClient) RegenerateJwtSecret(ctx context.Context, req *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error) {
+	return c.regenerateJwtSecret.CallUnary(ctx, req)
 }
 
 // GetPreferences calls gastrolog.v1.ConfigService.GetPreferences.
@@ -747,6 +765,9 @@ type ConfigServiceHandler interface {
 	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
 	// PutSettings updates system settings. Only fields explicitly set are updated.
 	PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error)
+	// RegenerateJwtSecret generates a new random JWT signing secret, replacing the
+	// existing one. All active sessions are immediately invalidated cluster-wide.
+	RegenerateJwtSecret(context.Context, *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error)
 	// GetPreferences returns the current user's preferences.
 	GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error)
 	// PutPreferences updates the current user's preferences.
@@ -892,6 +913,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		ConfigServicePutSettingsProcedure,
 		svc.PutSettings,
 		connect.WithSchema(configServiceMethods.ByName("PutSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceRegenerateJwtSecretHandler := connect.NewUnaryHandler(
+		ConfigServiceRegenerateJwtSecretProcedure,
+		svc.RegenerateJwtSecret,
+		connect.WithSchema(configServiceMethods.ByName("RegenerateJwtSecret")),
 		connect.WithHandlerOptions(opts...),
 	)
 	configServiceGetPreferencesHandler := connect.NewUnaryHandler(
@@ -1070,6 +1097,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceGetSettingsHandler.ServeHTTP(w, r)
 		case ConfigServicePutSettingsProcedure:
 			configServicePutSettingsHandler.ServeHTTP(w, r)
+		case ConfigServiceRegenerateJwtSecretProcedure:
+			configServiceRegenerateJwtSecretHandler.ServeHTTP(w, r)
 		case ConfigServiceGetPreferencesProcedure:
 			configServiceGetPreferencesHandler.ServeHTTP(w, r)
 		case ConfigServicePutPreferencesProcedure:
@@ -1185,6 +1214,10 @@ func (UnimplementedConfigServiceHandler) GetSettings(context.Context, *connect.R
 
 func (UnimplementedConfigServiceHandler) PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutSettings is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) RegenerateJwtSecret(context.Context, *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.RegenerateJwtSecret is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) GetPreferences(context.Context, *connect.Request[v1.GetPreferencesRequest]) (*connect.Response[v1.GetPreferencesResponse], error) {

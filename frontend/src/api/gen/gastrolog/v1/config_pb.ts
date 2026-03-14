@@ -1964,13 +1964,6 @@ export class AuthSettings extends Message<AuthSettings> {
    */
   passwordPolicy?: PasswordPolicySettings;
 
-  /**
-   * only populated when include_secrets
-   *
-   * @generated from field: string jwt_secret = 5;
-   */
-  jwtSecret = "";
-
   constructor(data?: PartialMessage<AuthSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1983,7 +1976,6 @@ export class AuthSettings extends Message<AuthSettings> {
     { no: 2, name: "jwt_secret_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "password_policy", kind: "message", T: PasswordPolicySettings },
-    { no: 5, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AuthSettings {
@@ -2750,11 +2742,6 @@ export class PutAuthSettings extends Message<PutAuthSettings> {
   tokenDuration?: string;
 
   /**
-   * @generated from field: optional string jwt_secret = 2;
-   */
-  jwtSecret?: string;
-
-  /**
    * @generated from field: optional string refresh_token_duration = 3;
    */
   refreshTokenDuration?: string;
@@ -2773,7 +2760,6 @@ export class PutAuthSettings extends Message<PutAuthSettings> {
   static readonly typeName = "gastrolog.v1.PutAuthSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
-    { no: 2, name: "jwt_secret", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 3, name: "refresh_token_duration", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "password_policy", kind: "message", T: PutPasswordPolicySettings },
   ]);
@@ -3208,6 +3194,68 @@ export class PutSettingsResponse extends Message<PutSettingsResponse> {
 
   static equals(a: PutSettingsResponse | PlainMessage<PutSettingsResponse> | undefined, b: PutSettingsResponse | PlainMessage<PutSettingsResponse> | undefined): boolean {
     return proto3.util.equals(PutSettingsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RegenerateJwtSecretRequest
+ */
+export class RegenerateJwtSecretRequest extends Message<RegenerateJwtSecretRequest> {
+  constructor(data?: PartialMessage<RegenerateJwtSecretRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RegenerateJwtSecretRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RegenerateJwtSecretRequest {
+    return new RegenerateJwtSecretRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RegenerateJwtSecretRequest {
+    return new RegenerateJwtSecretRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RegenerateJwtSecretRequest {
+    return new RegenerateJwtSecretRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RegenerateJwtSecretRequest | PlainMessage<RegenerateJwtSecretRequest> | undefined, b: RegenerateJwtSecretRequest | PlainMessage<RegenerateJwtSecretRequest> | undefined): boolean {
+    return proto3.util.equals(RegenerateJwtSecretRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RegenerateJwtSecretResponse
+ */
+export class RegenerateJwtSecretResponse extends Message<RegenerateJwtSecretResponse> {
+  constructor(data?: PartialMessage<RegenerateJwtSecretResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RegenerateJwtSecretResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RegenerateJwtSecretResponse {
+    return new RegenerateJwtSecretResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RegenerateJwtSecretResponse {
+    return new RegenerateJwtSecretResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RegenerateJwtSecretResponse {
+    return new RegenerateJwtSecretResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RegenerateJwtSecretResponse | PlainMessage<RegenerateJwtSecretResponse> | undefined, b: RegenerateJwtSecretResponse | PlainMessage<RegenerateJwtSecretResponse> | undefined): boolean {
+    return proto3.util.equals(RegenerateJwtSecretResponse, a, b);
   }
 }
 

@@ -51,6 +51,10 @@ service ConfigService {
   // PutSettings updates system settings. Only fields explicitly set are updated.
   rpc PutSettings(PutSettingsRequest) returns (PutSettingsResponse);
 
+  // RegenerateJwtSecret generates a new random JWT signing secret, replacing the
+  // existing one. All active sessions are immediately invalidated cluster-wide.
+  rpc RegenerateJwtSecret(RegenerateJwtSecretRequest) returns (RegenerateJwtSecretResponse);
+
   // GetPreferences returns the current user's preferences.
   rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
 
@@ -362,7 +366,7 @@ message AuthSettings {
   bool jwt_secret_configured = 2; // read-only: true when a JWT secret exists
   string refresh_token_duration = 3;
   PasswordPolicySettings password_policy = 4;
-  string jwt_secret = 5;           // only populated when include_secrets
+  reserved 5; // was jwt_secret (removed: secret is never exposed over the API)
 }
 
 message QuerySettings {
@@ -465,7 +469,7 @@ message PutPasswordPolicySettings {
 
 message PutAuthSettings {
   optional string token_duration = 1;
-  optional string jwt_secret = 2;
+  reserved 2; // was jwt_secret (removed: use RegenerateJwtSecret RPC instead)
   optional string refresh_token_duration = 3;
   PutPasswordPolicySettings password_policy = 4;
 }
@@ -520,6 +524,9 @@ message PutSettingsResponse {
   MmdbValidation geoip_validation = 1; // Populated when geoip_db_path was set.
   MmdbValidation asn_validation = 2;   // Populated when asn_db_path was set.
 }
+
+message RegenerateJwtSecretRequest {}
+message RegenerateJwtSecretResponse {}
 
 // MmdbValidation is the result of probing a MaxMind MMDB file on save.
 message MmdbValidation {

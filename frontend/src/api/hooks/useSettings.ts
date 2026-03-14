@@ -12,13 +12,11 @@ export function useSettings() {
   });
 }
 
-export const JWT_KEEP = "__KEEP_EXISTING__";
 export const MAXMIND_KEEP = "__KEEP_EXISTING__";
 
 type PutSettingsArgs = {
   auth?: {
     tokenDuration?: string;
-    jwtSecret?: string;
     refreshTokenDuration?: string;
     passwordPolicy?: {
       minLength?: number;
@@ -83,12 +81,11 @@ type PutSettingsArgs = {
   setupWizardDismissed?: boolean;
 };
 
-/** Build the auth sub-request, filtering out the JWT sentinel value. */
+/** Build the auth sub-request. */
 function buildAuthReq(auth: NonNullable<PutSettingsArgs["auth"]>): Record<string, unknown> {
   const req: Record<string, unknown> = {};
   if (auth.tokenDuration !== undefined) req.tokenDuration = auth.tokenDuration;
   if (auth.refreshTokenDuration !== undefined) req.refreshTokenDuration = auth.refreshTokenDuration;
-  if (auth.jwtSecret !== undefined && auth.jwtSecret !== JWT_KEEP) req.jwtSecret = auth.jwtSecret;
   if (auth.passwordPolicy) req.passwordPolicy = auth.passwordPolicy;
   return req;
 }
@@ -162,4 +159,10 @@ export function usePreviewCSVLookup() {
       return response;
     },
   });
+}
+
+export function useRegenerateJwtSecret() {
+  return useConfigMutation(async () => {
+    return configClient.regenerateJwtSecret({});
+  }, [["settings"]]);
 }

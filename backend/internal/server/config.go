@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -50,6 +52,7 @@ type ConfigServerConfig struct {
 	OnTLSConfigChange  func()
 	OnLookupConfigChange func(config.LookupConfig, config.MaxMindConfig)
 	VaultTesters       map[string]VaultConnectionTester
+	Tokens             *auth.TokenService
 }
 
 // ConfigServer implements the ConfigService.
@@ -67,6 +70,7 @@ type ConfigServer struct {
 	configSignal          *notify.Signal
 	resolveManagedFile    func(ctx context.Context, fileID string) string
 	vaultTesters          map[string]VaultConnectionTester
+	tokens                *auth.TokenService
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
@@ -87,6 +91,7 @@ func NewConfigServer(cfg ConfigServerConfig) *ConfigServer {
 		onTLSConfigChange:    cfg.OnTLSConfigChange,
 		onLookupConfigChange: cfg.OnLookupConfigChange,
 		vaultTesters:         cfg.VaultTesters,
+		tokens:               cfg.Tokens,
 	}
 }
 
@@ -314,7 +319,6 @@ func (s *ConfigServer) GetSettings(
 	}
 
 	if req.Msg.IncludeSecrets {
-		authSettings.JwtSecret = ss.Auth.JWTSecret
 		mm.AccountId = ss.MaxMind.AccountID
 		mm.LicenseKey = ss.MaxMind.LicenseKey
 	}
@@ -396,6 +400,50 @@ func (s *ConfigServer) PutSettings(
 	}
 
 	return connect.NewResponse(&apiv1.PutSettingsResponse{}), nil
+}
+
+// RegenerateJwtSecret generates a new random JWT signing secret, replacing the
+// existing one. All active sessions are immediately invalidated because the old
+// secret can no longer verify existing tokens.
+func (s *ConfigServer) RegenerateJwtSecret(
+	ctx context.Context,
+	_ *connect.Request[apiv1.RegenerateJwtSecretRequest],
+) (*connect.Response[apiv1.RegenerateJwtSecretResponse], error) {
+	ss, err := s.loadServerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	secret := make([]byte, 32)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("generate secret: %w", err))
+	}
+	ss.Auth.JWTSecret = base64.StdEncoding.EncodeToString(secret)
+
+	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// Swap the live signing secret so existing tokens fail verification immediately.
+	if s.tokens != nil {
+		s.tokens.SetSecret(secret)
+	}
+
+	// Invalidate all refresh tokens by setting TokenInvalidatedAt on every user.
+	now := time.Now().UTC()
+	users, err := s.cfgStore.ListUsers(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("list users: %w", err))
+	}
+	for _, u := range users {
+		if err := s.cfgStore.InvalidateTokens(ctx, u.ID, now); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens for %s: %w", u.Username, err))
+		}
+	}
+
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+
+	return connect.NewResponse(&apiv1.RegenerateJwtSecretResponse{}), nil
 }
 
 // PutNodeConfig creates or updates a node configuration.
@@ -534,9 +582,6 @@ func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *config.ServerSetting
 func mergeAuth(a *apiv1.PutAuthSettings, auth *config.AuthConfig) {
 	if a.TokenDuration != nil {
 		auth.TokenDuration = *a.TokenDuration
-	}
-	if a.JwtSecret != nil {
-		auth.JWTSecret = *a.JwtSecret
 	}
 	if a.RefreshTokenDuration != nil {
 		auth.RefreshTokenDuration = *a.RefreshTokenDuration

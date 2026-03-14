@@ -50,7 +50,6 @@ var settingsGroups = []settingsGroup{
 	{name: "auth", short: "Configure authentication", getPath: []string{"auth"}, setPath: []string{"auth"}, fields: []settingsField{
 		{flag: "token-duration", label: "token_duration", getKey: "token_duration", setKey: "token_duration", desc: "Access token lifetime (e.g. \"15m\", \"1h\")"},
 		{flag: "refresh-duration", label: "refresh_token_duration", getKey: "refresh_token_duration", setKey: "refresh_token_duration", desc: "Refresh token lifetime (e.g. \"168h\")"},
-		{flag: "jwt-secret", label: "jwt_secret", getKey: "jwt_secret_configured", setKey: "jwt_secret", desc: "JWT signing secret", secret: true},
 	}},
 	{name: "password-policy", short: "Configure password policy", getPath: []string{"auth", "password_policy"}, setPath: []string{"auth", "password_policy"}, fields: []settingsField{
 		{flag: "min-length", label: "min_length", getKey: "min_length", setKey: "min_length", desc: "Minimum password length"},

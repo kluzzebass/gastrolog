@@ -352,6 +352,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		ConfigSignal:       s.configSignal,
 		ResolveManagedFile: s.ResolveManagedFileByID,
 		VaultTesters:       s.vaultTesters,
+		Tokens:             s.tokens,
 		OnTLSConfigChange:  s.reconfigureTLS,
 		OnLookupConfigChange: func(cfg config.LookupConfig, mm config.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)

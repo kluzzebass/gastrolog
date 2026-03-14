@@ -281,9 +281,6 @@ func buildSettingsRequest(doc *exportDoc) *v1.PutSettingsRequest {
 
 func buildAuthSettings(a *authExport) *v1.PutAuthSettings {
 	pa := &v1.PutAuthSettings{}
-	if a.JWTSecret != "" {
-		pa.JwtSecret = &a.JWTSecret
-	}
 	if a.TokenDuration != "" {
 		pa.TokenDuration = &a.TokenDuration
 	}

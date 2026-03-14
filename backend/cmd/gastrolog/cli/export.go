@@ -54,7 +54,6 @@ type userExport struct {
 // ---------------------------------------------------------------------------
 
 type authExport struct {
-	JWTSecret            string                `json:"jwt_secret,omitempty"` //nolint:gosec // export field name, not a credential
 	TokenDuration        string                `json:"token_duration,omitempty"`
 	RefreshTokenDuration string                `json:"refresh_token_duration,omitempty"`
 	PasswordPolicy       *passwordPolicyExport `json:"password_policy,omitempty"`
@@ -99,7 +98,6 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 	// Auth + PasswordPolicy
 	if a := sc.GetAuth(); a != nil {
 		auth = &authExport{
-			JWTSecret:            a.GetJwtSecret(),
 			TokenDuration:        a.GetTokenDuration(),
 			RefreshTokenDuration: a.GetRefreshTokenDuration(),
 		}
