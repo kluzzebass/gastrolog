@@ -1859,7 +1859,113 @@ func pipeOpName(op PipeOp) string {
 		return "DonutOp"
 	case *MapOp:
 		return "MapOp"
+	case *ExportOp:
+		return "ExportOp"
 	default:
 		return "unknown"
+	}
+}
+
+func TestParsePipelineExport(t *testing.T) {
+	p, err := ParsePipeline("error | export my-vault")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	exp, ok := p.Pipes[0].(*ExportOp)
+	if !ok {
+		t.Fatalf("expected ExportOp, got %T", p.Pipes[0])
+	}
+	if exp.Target != "my-vault" {
+		t.Errorf("target = %q, want %q", exp.Target, "my-vault")
+	}
+}
+
+func TestParsePipelineExportUUID(t *testing.T) {
+	p, err := ParsePipeline("error | export 550e8400-e29b-41d4-a716-446655440000")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 1 {
+		t.Fatalf("expected 1 pipe, got %d", len(p.Pipes))
+	}
+	exp, ok := p.Pipes[0].(*ExportOp)
+	if !ok {
+		t.Fatalf("expected ExportOp, got %T", p.Pipes[0])
+	}
+	if exp.Target != "550e8400-e29b-41d4-a716-446655440000" {
+		t.Errorf("target = %q, want UUID", exp.Target)
+	}
+}
+
+func TestParsePipelineExportWithPipeline(t *testing.T) {
+	p, err := ParsePipeline("level=error | where status>=500 | export errors-vault")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	if len(p.Pipes) != 2 {
+		t.Fatalf("expected 2 pipes, got %d", len(p.Pipes))
+	}
+	if _, ok := p.Pipes[0].(*WhereOp); !ok {
+		t.Errorf("pipe 0: expected WhereOp, got %T", p.Pipes[0])
+	}
+	exp, ok := p.Pipes[1].(*ExportOp)
+	if !ok {
+		t.Fatalf("pipe 1: expected ExportOp, got %T", p.Pipes[1])
+	}
+	if exp.Target != "errors-vault" {
+		t.Errorf("target = %q, want %q", exp.Target, "errors-vault")
+	}
+}
+
+func TestParsePipelineExportString(t *testing.T) {
+	p, err := ParsePipeline("error | export my-vault")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	got := p.Pipes[0].String()
+	if got != "export my-vault" {
+		t.Errorf("String() = %q, want %q", got, "export my-vault")
+	}
+}
+
+func TestParsePipelineExportMissingTarget(t *testing.T) {
+	_, err := ParsePipeline("error | export")
+	if err == nil {
+		t.Fatal("expected error for missing export target")
+	}
+}
+
+func TestHasExportOp(t *testing.T) {
+	p, err := ParsePipeline("error | where status>=500 | export my-vault")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	exp, ok := HasExportOp(p)
+	if !ok {
+		t.Fatal("expected HasExportOp to return true")
+	}
+	if exp.Target != "my-vault" {
+		t.Errorf("target = %q, want %q", exp.Target, "my-vault")
+	}
+}
+
+func TestHasExportOpMissing(t *testing.T) {
+	p, err := ParsePipeline("error | stats count")
+	if err != nil {
+		t.Fatalf("ParsePipeline error: %v", err)
+	}
+	_, ok := HasExportOp(p)
+	if ok {
+		t.Fatal("expected HasExportOp to return false for non-export pipeline")
+	}
+}
+
+func TestHasExportOpNilPipeline(t *testing.T) {
+	_, ok := HasExportOp(nil)
+	if ok {
+		t.Fatal("expected HasExportOp to return false for nil pipeline")
 	}
 }

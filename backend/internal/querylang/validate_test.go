@@ -192,6 +192,24 @@ func TestValidateExpression(t *testing.T) {
 			wantValid:  true,
 			wantOffset: -1,
 		},
+		{
+			name:       "export",
+			expr:       "error | export my-vault",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:       "export with pipeline",
+			expr:       "level=error | where status>=500 | export my-vault",
+			wantValid:  true,
+			wantOffset: -1,
+		},
+		{
+			name:      "export not last",
+			expr:      "error | export my-vault | stats count",
+			wantValid: false,
+			wantMsg:   "export must be the last pipe operator",
+		},
 	}
 
 	for _, tt := range tests {

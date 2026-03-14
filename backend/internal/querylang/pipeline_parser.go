@@ -139,6 +139,8 @@ func (p *parser) parsePipeOp() (PipeOp, error) {
 		return p.parseScatterOp()
 	case "map":
 		return p.parseMapOp()
+	case "export":
+		return p.parseExportOp()
 	default:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unknown pipe operator: %s", p.cur.Lit)
 	}
@@ -1164,6 +1166,25 @@ func (p *parser) parseMapOp() (*MapOp, error) {
 	default:
 		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "unknown map mode: %s (expected 'choropleth' or 'scatter')", p.cur.Lit)
 	}
+}
+
+// parseExportOp parses: "export" TARGET
+// Target is a bareword or quoted string (vault name or UUID).
+func (p *parser) parseExportOp() (*ExportOp, error) {
+	if err := p.advance(); err != nil { // consume "export"
+		return nil, err
+	}
+
+	if p.cur.Kind != TokWord {
+		return nil, newParseError(p.cur.Pos, ErrUnexpectedToken, "expected vault name or UUID after 'export', got %s", p.cur.Kind)
+	}
+
+	target := p.cur.Lit
+	if err := p.advance(); err != nil { // consume target
+		return nil, err
+	}
+
+	return &ExportOp{Target: target}, nil
 }
 
 // checkDuplicateAliases validates that no two aggregations produce the same

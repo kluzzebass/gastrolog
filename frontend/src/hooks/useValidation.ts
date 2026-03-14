@@ -9,6 +9,7 @@ interface ValidationResult {
   expression: string; // what expression these spans are for
   hasPipeline: boolean;
   canFollow: boolean;
+  hasExport: boolean;
 }
 
 const VALID: ValidationResult = {
@@ -19,6 +20,7 @@ const VALID: ValidationResult = {
   expression: "",
   hasPipeline: false,
   canFollow: true,
+  hasExport: false,
 };
 
 /**
@@ -64,6 +66,7 @@ export function useValidation(expression: string): ValidationResult {
               expression: resp.expression,
               hasPipeline: resp.hasPipeline,
               canFollow: resp.canFollow,
+              hasExport: resp.hasExport,
             });
           });
         }

@@ -135,6 +135,9 @@ type Server struct {
 	// reindexVaultExecutor rebuilds all indexes for a local vault.
 	reindexVaultExecutor ReindexVaultExecutor
 
+	// exportToVaultExecutor runs an export-to-vault job on a local vault.
+	exportToVaultExecutor ExportToVaultExecutor
+
 	// managedFileReader opens a managed file for streaming to peers.
 	managedFileReader ManagedFileReader
 

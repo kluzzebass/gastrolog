@@ -36,6 +36,7 @@ type RemoteSearcher interface {
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
 	Follow(ctx context.Context, nodeID string, req *apiv1.ForwardFollowRequest) (<-chan *apiv1.ExportRecord, <-chan error)
+	ExportToVault(ctx context.Context, nodeID string, req *apiv1.ForwardExportToVaultRequest) (*apiv1.ForwardExportToVaultResponse, error)
 }
 
 // QueryServer implements the QueryService.
@@ -83,6 +84,12 @@ func (s *QueryServer) Search(
 	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
+		// Reject queries with export operator — must route through ExportToVault RPC.
+		if _, hasExport := querylang.HasExportOp(pipeline); hasExport {
+			return connect.NewError(connect.CodeInvalidArgument,
+				errors.New("queries with | export must use the ExportToVault RPC"))
+		}
+
 		if query.CanStreamPipeline(pipeline) {
 			// Streamable pipeline: apply ops per-record on top of the
 			// normal search iterator with full resume-token support.
@@ -1491,7 +1498,7 @@ func (s *QueryServer) GetSyntax(
 			"reverse", "start", "end", "last", "limit", "pos",
 			"source_start", "source_end", "ingest_start", "ingest_end",
 		},
-		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "linechart", "barchart", "donut", "heatmap", "scatter", "map"},
+		PipeKeywords:  []string{"stats", "where", "eval", "sort", "head", "tail", "slice", "rename", "fields", "timechart", "dedup", "raw", "lookup", "linechart", "barchart", "donut", "heatmap", "scatter", "map", "export"},
 		PipeFunctions: funcs,
 		LookupTables:  s.lookupNames,
 	}), nil
@@ -1511,7 +1518,11 @@ func (s *QueryServer) ValidateQuery(
 		protoSpans[i] = &apiv1.HighlightSpan{Text: sp.Text, Role: string(sp.Role)}
 	}
 
-	canFollow := valid && (!hasPipeline || canFollowPipeline(expr))
+	// Detect export operator in the pipeline.
+	parsedPipeline := querylang.ParseExpressionPipeline(expr)
+	_, hasExport := querylang.HasExportOp(parsedPipeline)
+
+	canFollow := valid && !hasExport && (!hasPipeline || canFollowPipeline(expr))
 
 	return connect.NewResponse(&apiv1.ValidateQueryResponse{
 		Valid:        valid,
@@ -1521,6 +1532,7 @@ func (s *QueryServer) ValidateQuery(
 		Expression:   expr,
 		HasPipeline:  hasPipeline,
 		CanFollow:    canFollow,
+		HasExport:    hasExport,
 	}), nil
 }
 

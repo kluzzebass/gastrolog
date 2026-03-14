@@ -63,6 +63,10 @@ type SealVaultExecutor func(ctx context.Context, vaultID uuid.UUID) error
 // ReindexVaultExecutor rebuilds all indexes for a local vault.
 type ReindexVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (string, error)
 
+// ExportToVaultExecutor runs an export-to-vault job on a local vault.
+// Returns the job ID.
+type ExportToVaultExecutor func(ctx context.Context, expression string, targetVaultID uuid.UUID) (string, error)
+
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
@@ -139,6 +143,11 @@ func (s *Server) SetSealVaultExecutor(fn SealVaultExecutor) {
 // SetReindexVaultExecutor injects the callback for handling remote ReindexVault requests.
 func (s *Server) SetReindexVaultExecutor(fn ReindexVaultExecutor) {
 	s.reindexVaultExecutor = fn
+}
+
+// SetExportToVaultExecutor injects the callback for handling remote ExportToVault requests.
+func (s *Server) SetExportToVaultExecutor(fn ExportToVaultExecutor) {
+	s.exportToVaultExecutor = fn
 }
 
 // SetManagedFileReader injects the callback for streaming managed files to peers.
@@ -533,6 +542,23 @@ func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.Forwa
 	return &gastrologv1.ForwardReindexVaultResponse{JobId: jobID}, nil
 }
 
+// forwardExportToVault handles the ForwardExportToVault RPC. Runs an
+// export-to-vault job on a local vault.
+func (s *Server) forwardExportToVault(ctx context.Context, req *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error) {
+	if s.exportToVaultExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "export to vault executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetTargetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid target_vault_id: %v", err)
+	}
+	jobID, err := s.exportToVaultExecutor(ctx, req.GetExpression(), vaultID)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "export to vault: %v", err)
+	}
+	return &gastrologv1.ForwardExportToVaultResponse{JobId: jobID}, nil
+}
+
 // forwardExplain handles the ForwardExplain RPC. Returns the explain plan
 // for the requested local vaults.
 func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExplainRequest) (*gastrologv1.ForwardExplainResponse, error) {
@@ -738,6 +764,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:    forwardReindexVaultHandler,
 		},
 		{
+			MethodName: "ForwardExportToVault",
+			Handler:    forwardExportToVaultHandler,
+		},
+		{
 			MethodName: "ListPeerManagedFiles",
 			Handler:    listPeerManagedFilesHandler,
 		},
@@ -780,6 +810,7 @@ type clusterServiceServer interface {
 	forwardAnalyzeChunk(context.Context, *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error)
 	forwardSealVault(context.Context, *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error)
 	forwardReindexVault(context.Context, *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error)
+	forwardExportToVault(context.Context, *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error)
 	listPeerManagedFiles(context.Context, *gastrologv1.ListPeerManagedFilesRequest) (*gastrologv1.ListPeerManagedFilesResponse, error)
 }
 
@@ -1045,6 +1076,25 @@ func forwardReindexVaultHandler(srv any, ctx context.Context, dec func(any) erro
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardReindexVault(ctx, req.(*gastrologv1.ForwardReindexVaultRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardExportToVaultHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardExportToVaultRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardExportToVault(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardExportToVault",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardExportToVault(ctx, req.(*gastrologv1.ForwardExportToVaultRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

@@ -403,6 +403,31 @@ func (s *ScatterOp) String() string {
 	return "scatter " + s.XField + " " + s.YField
 }
 
+// ExportOp represents: export <target>
+// Terminal sink — must be last in pipeline. Target is a vault name or UUID.
+type ExportOp struct {
+	Target string // vault name or UUID string
+}
+
+func (ExportOp) pipeOp() {}
+
+func (e *ExportOp) String() string {
+	return "export " + e.Target
+}
+
+// HasExportOp returns the ExportOp and true if the pipeline contains one.
+func HasExportOp(pipeline *Pipeline) (*ExportOp, bool) {
+	if pipeline == nil {
+		return nil, false
+	}
+	for _, op := range pipeline.Pipes {
+		if exp, ok := op.(*ExportOp); ok {
+			return exp, true
+		}
+	}
+	return nil, false
+}
+
 // PipeExpr is the interface for expressions used in pipe operators.
 // These are distinct from filter Expr — they represent computed values,
 // not boolean search predicates.

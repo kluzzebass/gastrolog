@@ -223,5 +223,19 @@ func (sf *SearchForwarder) Follow(ctx context.Context, nodeID string, req *gastr
 	return recCh, errCh
 }
 
+// ExportToVault sends a ForwardExportToVault RPC to the given node.
+func (sf *SearchForwarder) ExportToVault(ctx context.Context, nodeID string, req *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error) {
+	conn, err := sf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+	resp := &gastrologv1.ForwardExportToVaultResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardExportToVault", req, resp); err != nil {
+		sf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("forward export to vault to %s: %w", nodeID, err)
+	}
+	return resp, nil
+}
+
 // Close is a no-op — connection lifecycle is managed by PeerConns.
 func (sf *SearchForwarder) Close() error { return nil }

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { ExplainRequest, ExplainResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetFieldsRequest, GetFieldsResponse, GetPipelineFieldsRequest, GetPipelineFieldsResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse, ValidateQueryRequest, ValidateQueryResponse } from "./query_pb.js";
+import { ExplainRequest, ExplainResponse, ExportToVaultRequest, ExportToVaultResponse, FollowRequest, FollowResponse, GetContextRequest, GetContextResponse, GetFieldsRequest, GetFieldsResponse, GetPipelineFieldsRequest, GetPipelineFieldsResponse, GetSyntaxRequest, GetSyntaxResponse, SearchRequest, SearchResponse, ValidateQueryRequest, ValidateQueryResponse } from "./query_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -107,6 +107,18 @@ export const QueryService = {
       name: "GetFields",
       I: GetFieldsRequest,
       O: GetFieldsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ExportToVault materializes search results into a target vault as a
+     * background job. Returns a job ID for progress tracking.
+     *
+     * @generated from rpc gastrolog.v1.QueryService.ExportToVault
+     */
+    exportToVault: {
+      name: "ExportToVault",
+      I: ExportToVaultRequest,
+      O: ExportToVaultResponse,
       kind: MethodKind.Unary,
     },
   }

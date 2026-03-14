@@ -58,7 +58,7 @@ func TestEnsureNodeConfig_ExistingNode(t *testing.T) {
 	nodeID := uuid.Must(uuid.NewV7()).String()
 	store := &startupStub{node: &config.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
 
-	name, err := ensureNodeConfig(context.Background(), store, nodeID)
+	name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestEnsureNodeConfig_NewNode(t *testing.T) {
 	nodeID := uuid.Must(uuid.NewV7()).String()
 	store := &startupStub{node: nil}
 
-	name, err := ensureNodeConfig(context.Background(), store, nodeID)
+	name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestEnsureNodeConfig_NewNode(t *testing.T) {
 
 func TestEnsureNodeConfig_InvalidID(t *testing.T) {
 	t.Parallel()
-	_, err := ensureNodeConfig(context.Background(), &startupStub{}, "not-a-uuid")
+	_, err := ensureNodeConfig(context.Background(), &startupStub{}, "not-a-uuid", "")
 	if err == nil {
 		t.Fatal("expected error for invalid UUID")
 	}
@@ -103,7 +103,7 @@ func TestEnsureNodeConfig_GetNodeError(t *testing.T) {
 	nodeID := uuid.Must(uuid.NewV7()).String()
 	store := &startupStub{nodeErr: errors.New("db down")}
 
-	_, err := ensureNodeConfig(context.Background(), store, nodeID)
+	_, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err == nil || !errors.Is(err, store.nodeErr) {
 		t.Fatalf("expected wrapped db error, got %v", err)
 	}
@@ -114,9 +114,60 @@ func TestEnsureNodeConfig_PutNodeError(t *testing.T) {
 	nodeID := uuid.Must(uuid.NewV7()).String()
 	store := &startupStub{node: nil, putNodeErr: errors.New("write failed")}
 
-	_, err := ensureNodeConfig(context.Background(), store, nodeID)
+	_, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err == nil || !errors.Is(err, store.putNodeErr) {
 		t.Fatalf("expected wrapped write error, got %v", err)
+	}
+}
+
+func TestEnsureNodeConfig_PreferredName(t *testing.T) {
+	t.Parallel()
+	nodeID := uuid.Must(uuid.NewV7()).String()
+	store := &startupStub{node: nil}
+
+	name, err := ensureNodeConfig(context.Background(), store, nodeID, "coord")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "coord" {
+		t.Fatalf("expected %q, got %q", "coord", name)
+	}
+	if len(store.putNodes) != 1 || store.putNodes[0].Name != "coord" {
+		t.Fatal("PutNode should store the preferred name")
+	}
+}
+
+func TestEnsureNodeConfig_PreferredNameOverridesExisting(t *testing.T) {
+	t.Parallel()
+	nodeID := uuid.Must(uuid.NewV7()).String()
+	store := &startupStub{node: &config.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
+
+	name, err := ensureNodeConfig(context.Background(), store, nodeID, "data-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "data-1" {
+		t.Fatalf("expected %q, got %q", "data-1", name)
+	}
+	if len(store.putNodes) != 1 || store.putNodes[0].Name != "data-1" {
+		t.Fatal("PutNode should update the name")
+	}
+}
+
+func TestEnsureNodeConfig_PreferredNameMatchesExisting(t *testing.T) {
+	t.Parallel()
+	nodeID := uuid.Must(uuid.NewV7()).String()
+	store := &startupStub{node: &config.NodeConfig{ID: uuid.MustParse(nodeID), Name: "coord"}}
+
+	name, err := ensureNodeConfig(context.Background(), store, nodeID, "coord")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "coord" {
+		t.Fatalf("expected %q, got %q", "coord", name)
+	}
+	if len(store.putNodes) != 0 {
+		t.Fatal("PutNode should not be called when name already matches")
 	}
 }
 

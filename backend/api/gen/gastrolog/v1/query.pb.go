@@ -1705,6 +1705,7 @@ type ValidateQueryResponse struct {
 	Expression    string                 `protobuf:"bytes,5,opt,name=expression,proto3" json:"expression,omitempty"`                         // echo back input for staleness detection
 	HasPipeline   bool                   `protobuf:"varint,6,opt,name=has_pipeline,json=hasPipeline,proto3" json:"has_pipeline,omitempty"`   // whether query contains pipe operators
 	CanFollow     bool                   `protobuf:"varint,7,opt,name=can_follow,json=canFollow,proto3" json:"can_follow,omitempty"`         // whether query is compatible with follow mode
+	HasExport     bool                   `protobuf:"varint,8,opt,name=has_export,json=hasExport,proto3" json:"has_export,omitempty"`         // whether query contains an export operator
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1784,6 +1785,13 @@ func (x *ValidateQueryResponse) GetHasPipeline() bool {
 func (x *ValidateQueryResponse) GetCanFollow() bool {
 	if x != nil {
 		return x.CanFollow
+	}
+	return false
+}
+
+func (x *ValidateQueryResponse) GetHasExport() bool {
+	if x != nil {
+		return x.HasExport
 	}
 	return false
 }
@@ -2168,6 +2176,102 @@ func (x *FieldValue) GetCount() int32 {
 	return 0
 }
 
+type ExportToVaultRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Expression    string                 `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"` // Full query expression
+	Target        string                 `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`         // Vault name or UUID — backend resolves
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportToVaultRequest) Reset() {
+	*x = ExportToVaultRequest{}
+	mi := &file_gastrolog_v1_query_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportToVaultRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportToVaultRequest) ProtoMessage() {}
+
+func (x *ExportToVaultRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_query_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportToVaultRequest.ProtoReflect.Descriptor instead.
+func (*ExportToVaultRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ExportToVaultRequest) GetExpression() string {
+	if x != nil {
+		return x.Expression
+	}
+	return ""
+}
+
+func (x *ExportToVaultRequest) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+type ExportToVaultResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportToVaultResponse) Reset() {
+	*x = ExportToVaultResponse{}
+	mi := &file_gastrolog_v1_query_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportToVaultResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportToVaultResponse) ProtoMessage() {}
+
+func (x *ExportToVaultResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_query_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportToVaultResponse.ProtoReflect.Descriptor instead.
+func (*ExportToVaultResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ExportToVaultResponse) GetJobId() string {
+	if x != nil {
+		return x.JobId
+	}
+	return ""
+}
+
 var File_gastrolog_v1_query_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_query_proto_rawDesc = "" +
@@ -2317,7 +2421,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x14ValidateQueryRequest\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
-	"expression\"\x8a\x02\n" +
+	"expression\"\xa9\x02\n" +
 	"\x15ValidateQueryResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x12#\n" +
 	"\rerror_message\x18\x02 \x01(\tR\ferrorMessage\x12!\n" +
@@ -2328,7 +2432,9 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"expression\x12!\n" +
 	"\fhas_pipeline\x18\x06 \x01(\bR\vhasPipeline\x12\x1d\n" +
 	"\n" +
-	"can_follow\x18\a \x01(\bR\tcanFollow\"7\n" +
+	"can_follow\x18\a \x01(\bR\tcanFollow\x12\x1d\n" +
+	"\n" +
+	"has_export\x18\b \x01(\bR\thasExport\"7\n" +
 	"\rHighlightSpan\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\"s\n" +
@@ -2360,7 +2466,14 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"FieldValue\x12\x14\n" +
 	"\x05value\x18\x01 \x01(\tR\x05value\x12\x14\n" +
-	"\x05count\x18\x02 \x01(\x05R\x05count2\x91\x05\n" +
+	"\x05count\x18\x02 \x01(\x05R\x05count\"N\n" +
+	"\x14ExportToVaultRequest\x12\x1e\n" +
+	"\n" +
+	"expression\x18\x01 \x01(\tR\n" +
+	"expression\x12\x16\n" +
+	"\x06target\x18\x02 \x01(\tR\x06target\".\n" +
+	"\x15ExportToVaultResponse\x12\x15\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId2\xeb\x05\n" +
 	"\fQueryService\x12E\n" +
 	"\x06Search\x12\x1b.gastrolog.v1.SearchRequest\x1a\x1c.gastrolog.v1.SearchResponse0\x01\x12E\n" +
 	"\x06Follow\x12\x1b.gastrolog.v1.FollowRequest\x1a\x1c.gastrolog.v1.FollowResponse0\x01\x12F\n" +
@@ -2370,7 +2483,8 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\tGetSyntax\x12\x1e.gastrolog.v1.GetSyntaxRequest\x1a\x1f.gastrolog.v1.GetSyntaxResponse\x12X\n" +
 	"\rValidateQuery\x12\".gastrolog.v1.ValidateQueryRequest\x1a#.gastrolog.v1.ValidateQueryResponse\x12d\n" +
 	"\x11GetPipelineFields\x12&.gastrolog.v1.GetPipelineFieldsRequest\x1a'.gastrolog.v1.GetPipelineFieldsResponse\x12L\n" +
-	"\tGetFields\x12\x1e.gastrolog.v1.GetFieldsRequest\x1a\x1f.gastrolog.v1.GetFieldsResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\tGetFields\x12\x1e.gastrolog.v1.GetFieldsRequest\x1a\x1f.gastrolog.v1.GetFieldsResponse\x12X\n" +
+	"\rExportToVault\x12\".gastrolog.v1.ExportToVaultRequest\x1a#.gastrolog.v1.ExportToVaultResponseB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_query_proto_rawDescOnce sync.Once
@@ -2384,7 +2498,7 @@ func file_gastrolog_v1_query_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_query_proto_rawDescData
 }
 
-var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_gastrolog_v1_query_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*SearchRequest)(nil),             // 0: gastrolog.v1.SearchRequest
 	(*SearchResponse)(nil),            // 1: gastrolog.v1.SearchResponse
@@ -2419,37 +2533,39 @@ var file_gastrolog_v1_query_proto_goTypes = []any{
 	(*GetFieldsResponse)(nil),         // 30: gastrolog.v1.GetFieldsResponse
 	(*FieldInfo)(nil),                 // 31: gastrolog.v1.FieldInfo
 	(*FieldValue)(nil),                // 32: gastrolog.v1.FieldValue
-	nil,                               // 33: gastrolog.v1.HistogramBucket.GroupCountsEntry
-	nil,                               // 34: gastrolog.v1.Record.AttrsEntry
-	(*timestamppb.Timestamp)(nil),     // 35: google.protobuf.Timestamp
+	(*ExportToVaultRequest)(nil),      // 33: gastrolog.v1.ExportToVaultRequest
+	(*ExportToVaultResponse)(nil),     // 34: gastrolog.v1.ExportToVaultResponse
+	nil,                               // 35: gastrolog.v1.HistogramBucket.GroupCountsEntry
+	nil,                               // 36: gastrolog.v1.Record.AttrsEntry
+	(*timestamppb.Timestamp)(nil),     // 37: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	10, // 0: gastrolog.v1.SearchRequest.query:type_name -> gastrolog.v1.Query
 	12, // 1: gastrolog.v1.SearchResponse.records:type_name -> gastrolog.v1.Record
 	3,  // 2: gastrolog.v1.SearchResponse.table_result:type_name -> gastrolog.v1.TableResult
 	2,  // 3: gastrolog.v1.SearchResponse.histogram:type_name -> gastrolog.v1.HistogramBucket
-	33, // 4: gastrolog.v1.HistogramBucket.group_counts:type_name -> gastrolog.v1.HistogramBucket.GroupCountsEntry
+	35, // 4: gastrolog.v1.HistogramBucket.group_counts:type_name -> gastrolog.v1.HistogramBucket.GroupCountsEntry
 	4,  // 5: gastrolog.v1.TableResult.rows:type_name -> gastrolog.v1.TableRow
 	10, // 6: gastrolog.v1.FollowRequest.query:type_name -> gastrolog.v1.Query
 	12, // 7: gastrolog.v1.FollowResponse.records:type_name -> gastrolog.v1.Record
 	10, // 8: gastrolog.v1.ExplainRequest.query:type_name -> gastrolog.v1.Query
 	17, // 9: gastrolog.v1.ExplainResponse.chunks:type_name -> gastrolog.v1.ChunkPlan
-	35, // 10: gastrolog.v1.ExplainResponse.query_start:type_name -> google.protobuf.Timestamp
-	35, // 11: gastrolog.v1.ExplainResponse.query_end:type_name -> google.protobuf.Timestamp
+	37, // 10: gastrolog.v1.ExplainResponse.query_start:type_name -> google.protobuf.Timestamp
+	37, // 11: gastrolog.v1.ExplainResponse.query_end:type_name -> google.protobuf.Timestamp
 	9,  // 12: gastrolog.v1.ExplainResponse.pipeline_stages:type_name -> gastrolog.v1.QueryPipelineStage
-	35, // 13: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
-	35, // 14: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
+	37, // 13: gastrolog.v1.Query.start:type_name -> google.protobuf.Timestamp
+	37, // 14: gastrolog.v1.Query.end:type_name -> google.protobuf.Timestamp
 	11, // 15: gastrolog.v1.Query.kv_predicates:type_name -> gastrolog.v1.KVPredicate
-	35, // 16: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
-	35, // 17: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
-	34, // 18: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
+	37, // 16: gastrolog.v1.Record.ingest_ts:type_name -> google.protobuf.Timestamp
+	37, // 17: gastrolog.v1.Record.write_ts:type_name -> google.protobuf.Timestamp
+	36, // 18: gastrolog.v1.Record.attrs:type_name -> gastrolog.v1.Record.AttrsEntry
 	13, // 19: gastrolog.v1.Record.ref:type_name -> gastrolog.v1.RecordRef
-	35, // 20: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
+	37, // 20: gastrolog.v1.Record.source_ts:type_name -> google.protobuf.Timestamp
 	16, // 21: gastrolog.v1.ResumeToken.positions:type_name -> gastrolog.v1.VaultPosition
 	15, // 22: gastrolog.v1.ResumeToken.remote_positions:type_name -> gastrolog.v1.RemoteVaultPosition
 	19, // 23: gastrolog.v1.ChunkPlan.steps:type_name -> gastrolog.v1.PipelineStep
-	35, // 24: gastrolog.v1.ChunkPlan.write_start:type_name -> google.protobuf.Timestamp
-	35, // 25: gastrolog.v1.ChunkPlan.write_end:type_name -> google.protobuf.Timestamp
+	37, // 24: gastrolog.v1.ChunkPlan.write_start:type_name -> google.protobuf.Timestamp
+	37, // 25: gastrolog.v1.ChunkPlan.write_end:type_name -> google.protobuf.Timestamp
 	18, // 26: gastrolog.v1.ChunkPlan.branch_plans:type_name -> gastrolog.v1.BranchPlan
 	19, // 27: gastrolog.v1.BranchPlan.steps:type_name -> gastrolog.v1.PipelineStep
 	13, // 28: gastrolog.v1.GetContextRequest.ref:type_name -> gastrolog.v1.RecordRef
@@ -2468,16 +2584,18 @@ var file_gastrolog_v1_query_proto_depIdxs = []int32{
 	24, // 41: gastrolog.v1.QueryService.ValidateQuery:input_type -> gastrolog.v1.ValidateQueryRequest
 	27, // 42: gastrolog.v1.QueryService.GetPipelineFields:input_type -> gastrolog.v1.GetPipelineFieldsRequest
 	29, // 43: gastrolog.v1.QueryService.GetFields:input_type -> gastrolog.v1.GetFieldsRequest
-	1,  // 44: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
-	6,  // 45: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
-	8,  // 46: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
-	21, // 47: gastrolog.v1.QueryService.GetContext:output_type -> gastrolog.v1.GetContextResponse
-	23, // 48: gastrolog.v1.QueryService.GetSyntax:output_type -> gastrolog.v1.GetSyntaxResponse
-	25, // 49: gastrolog.v1.QueryService.ValidateQuery:output_type -> gastrolog.v1.ValidateQueryResponse
-	28, // 50: gastrolog.v1.QueryService.GetPipelineFields:output_type -> gastrolog.v1.GetPipelineFieldsResponse
-	30, // 51: gastrolog.v1.QueryService.GetFields:output_type -> gastrolog.v1.GetFieldsResponse
-	44, // [44:52] is the sub-list for method output_type
-	36, // [36:44] is the sub-list for method input_type
+	33, // 44: gastrolog.v1.QueryService.ExportToVault:input_type -> gastrolog.v1.ExportToVaultRequest
+	1,  // 45: gastrolog.v1.QueryService.Search:output_type -> gastrolog.v1.SearchResponse
+	6,  // 46: gastrolog.v1.QueryService.Follow:output_type -> gastrolog.v1.FollowResponse
+	8,  // 47: gastrolog.v1.QueryService.Explain:output_type -> gastrolog.v1.ExplainResponse
+	21, // 48: gastrolog.v1.QueryService.GetContext:output_type -> gastrolog.v1.GetContextResponse
+	23, // 49: gastrolog.v1.QueryService.GetSyntax:output_type -> gastrolog.v1.GetSyntaxResponse
+	25, // 50: gastrolog.v1.QueryService.ValidateQuery:output_type -> gastrolog.v1.ValidateQueryResponse
+	28, // 51: gastrolog.v1.QueryService.GetPipelineFields:output_type -> gastrolog.v1.GetPipelineFieldsResponse
+	30, // 52: gastrolog.v1.QueryService.GetFields:output_type -> gastrolog.v1.GetFieldsResponse
+	34, // 53: gastrolog.v1.QueryService.ExportToVault:output_type -> gastrolog.v1.ExportToVaultResponse
+	45, // [45:54] is the sub-list for method output_type
+	36, // [36:45] is the sub-list for method input_type
 	36, // [36:36] is the sub-list for extension type_name
 	36, // [36:36] is the sub-list for extension extendee
 	0,  // [0:36] is the sub-list for field type_name
@@ -2494,7 +2612,7 @@ func file_gastrolog_v1_query_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_query_proto_rawDesc), len(file_gastrolog_v1_query_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

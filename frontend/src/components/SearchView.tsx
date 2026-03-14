@@ -13,6 +13,7 @@ import { InspectorDialog } from "./inspector/InspectorDialog";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { PreferencesDialog } from "./PreferencesDialog";
 import { HelpDialog } from "./HelpDialog";
+import { ExportToVaultDialog } from "./ExportToVaultDialog";
 import { HelpProvider } from "../hooks/useHelp";
 import { DetailPanelProvider } from "../hooks/useDetailPanel";
 import { QueryBar } from "./QueryBar";
@@ -195,6 +196,14 @@ export function SearchView() {
             />
           )}
 
+          {sv.showExportToVault && (
+            <ExportToVaultDialog
+              dark={sv.dark}
+              expression={sv.q}
+              onClose={() => sv.setShowExportToVault(false)}
+            />
+          )}
+
           {/* Histogram — server-side for search, client-side for follow */}
           {!sv.isFollowMode &&
             !sv.isPipelineResult &&
@@ -281,6 +290,7 @@ export function SearchView() {
             logScrollRef={sv.logScrollRef}
             sentinelRef={sv.sentinelRef}
             selectedRowRef={sv.selectedRowRef}
+            onExportToVault={() => sv.setShowExportToVault(true)}
           />
         </main>
 

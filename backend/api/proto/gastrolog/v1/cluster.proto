@@ -235,6 +235,17 @@ message ForwardReindexVaultResponse {
   string job_id = 1;
 }
 
+// ForwardExportToVaultRequest asks a remote node to run an export-to-vault job.
+// The remote node owns the target vault and runs the export locally.
+message ForwardExportToVaultRequest {
+  string expression = 1;   // Query expression (export op stripped)
+  string target_vault_id = 2;  // Target vault UUID (already resolved)
+}
+
+message ForwardExportToVaultResponse {
+  string job_id = 1;
+}
+
 // NotifyEvictionRequest is sent by the leader to a node that has been removed
 // from the cluster. The evicted node should initiate a graceful shutdown.
 message NotifyEvictionRequest {

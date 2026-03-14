@@ -1567,6 +1567,93 @@ export class ForwardReindexVaultResponse extends Message<ForwardReindexVaultResp
 }
 
 /**
+ * ForwardExportToVaultRequest asks a remote node to run an export-to-vault job.
+ * The remote node owns the target vault and runs the export locally.
+ *
+ * @generated from message gastrolog.v1.ForwardExportToVaultRequest
+ */
+export class ForwardExportToVaultRequest extends Message<ForwardExportToVaultRequest> {
+  /**
+   * Query expression (export op stripped)
+   *
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  /**
+   * Target vault UUID (already resolved)
+   *
+   * @generated from field: string target_vault_id = 2;
+   */
+  targetVaultId = "";
+
+  constructor(data?: PartialMessage<ForwardExportToVaultRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardExportToVaultRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "target_vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExportToVaultRequest {
+    return new ForwardExportToVaultRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardExportToVaultRequest {
+    return new ForwardExportToVaultRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardExportToVaultRequest {
+    return new ForwardExportToVaultRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardExportToVaultRequest | PlainMessage<ForwardExportToVaultRequest> | undefined, b: ForwardExportToVaultRequest | PlainMessage<ForwardExportToVaultRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardExportToVaultRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardExportToVaultResponse
+ */
+export class ForwardExportToVaultResponse extends Message<ForwardExportToVaultResponse> {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId = "";
+
+  constructor(data?: PartialMessage<ForwardExportToVaultResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardExportToVaultResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExportToVaultResponse {
+    return new ForwardExportToVaultResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardExportToVaultResponse {
+    return new ForwardExportToVaultResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardExportToVaultResponse {
+    return new ForwardExportToVaultResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardExportToVaultResponse | PlainMessage<ForwardExportToVaultResponse> | undefined, b: ForwardExportToVaultResponse | PlainMessage<ForwardExportToVaultResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardExportToVaultResponse, a, b);
+  }
+}
+
+/**
  * NotifyEvictionRequest is sent by the leader to a node that has been removed
  * from the cluster. The evicted node should initiate a graceful shutdown.
  *

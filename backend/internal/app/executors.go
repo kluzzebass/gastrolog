@@ -157,11 +157,6 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		}
 
 		// Regular search path.
-		const maxBatch = 500
-		if q.Limit == 0 || q.Limit > maxBatch {
-			q.Limit = maxBatch
-		}
-
 		var resume *query.ResumeToken
 		if len(resumeToken) > 0 {
 			resume, err = server.ProtoToResumeToken(resumeToken)

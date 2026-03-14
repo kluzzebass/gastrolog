@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/index"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 
@@ -23,7 +24,7 @@ import (
 // When By is set, groups by the named record attribute (requires record scan).
 //
 // Three modes:
-//   - No grouping, no filter, no pre-ops: fast path using FindStartPosition
+//   - No grouping, no filter, no pre-ops: fast path using FindIngestStartPosition
 //     binary search. O(buckets * log(n)) per chunk, no record scanning.
 //   - Grouping, no filter, no pre-ops: attr-only scan using ScanAttrs.
 //     Reads only timestamps + attrs (~88 bytes/record on file vaults), uncapped.
@@ -95,7 +96,7 @@ func (e *Engine) runTimechartStrategy(
 			numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
 	}
 
-	// Exact total counts via binary search — O(buckets × log(n)), instant.
+	// Exact total counts via IngestTS binary search — O(buckets × log(n)), instant.
 	e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts)
 
 	if !hasGroupBy {
@@ -144,20 +145,22 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []uuid.UUID) {
 			if meta.RecordCount == 0 {
 				continue
 			}
-			if q.Start.IsZero() || meta.WriteStart.Before(q.Start) {
-				q.Start = meta.WriteStart
+			if !meta.IngestStart.IsZero() && (q.Start.IsZero() || meta.IngestStart.Before(q.Start)) {
+				q.Start = meta.IngestStart
 			}
-			if q.End.IsZero() || meta.WriteEnd.After(q.End) {
-				q.End = meta.WriteEnd
+			if !meta.IngestEnd.IsZero() && (q.End.IsZero() || meta.IngestEnd.After(q.End)) {
+				q.End = meta.IngestEnd
 			}
 		}
 	}
 }
 
-// timechartFastPath counts records per bucket using binary search (no record scanning).
+// timechartFastPath counts records per bucket using IngestTS binary search (no record scanning).
+// For the active chunk, uses the in-memory B-tree (FindIngestStartPosition).
+// For sealed chunks, uses the persisted IngestTS index (LoadIngestEntries).
 func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
 	for _, vaultID := range selectedVaults {
-		cm, _ := e.getVaultManagers(vaultID)
+		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -169,10 +172,13 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 			if meta.RecordCount == 0 {
 				continue
 			}
-			if meta.WriteEnd.Before(start) || !meta.WriteStart.Before(end) {
+			if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
 				continue
 			}
-			timechartChunkFast(cm, meta, start, bucketWidth, numBuckets, counts)
+			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
+				continue
+			}
+			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts)
 		}
 	}
 }
@@ -187,7 +193,7 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end 
 	const samplePerBucket = 1000
 
 	for _, vaultID := range selectedVaults {
-		cm, _ := e.getVaultManagers(vaultID)
+		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
 			continue
 		}
@@ -199,20 +205,24 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end 
 			if meta.RecordCount == 0 {
 				continue
 			}
-			if meta.WriteEnd.Before(start) || !meta.WriteStart.Before(end) {
+			if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
 				continue
 			}
-			timechartChunkGroups(cm, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
+			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
+				continue
+			}
+			timechartChunkGroups(cm, im, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
 		}
 	}
 }
 
 // timechartChunkGroups samples attrs per bucket within a single chunk.
 // For each bucket that overlaps the chunk, it binary-searches for the position
-// range, scans up to sampleSize records, and scales the observed group
-// proportions to the exact bucket count (from binary search).
+// range via IngestTS, scans up to sampleSize records, and scales the observed
+// group proportions to the exact bucket count (from binary search).
 func timechartChunkGroups(
 	cm chunk.ChunkManager,
+	im index.IndexManager,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
@@ -224,15 +234,15 @@ func timechartChunkGroups(
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
 	firstBucket := 0
-	if meta.WriteStart.After(start) {
-		firstBucket = int(meta.WriteStart.Sub(start) / bucketWidth)
+	if !meta.IngestStart.IsZero() && meta.IngestStart.After(start) {
+		firstBucket = int(meta.IngestStart.Sub(start) / bucketWidth)
 		if firstBucket >= numBuckets {
 			return
 		}
 	}
 	lastBucket := numBuckets - 1
-	if meta.WriteEnd.Before(end) {
-		lastBucket = int(meta.WriteEnd.Sub(start) / bucketWidth)
+	if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(end) {
+		lastBucket = int(meta.IngestEnd.Sub(start) / bucketWidth)
 		if lastBucket >= numBuckets {
 			lastBucket = numBuckets - 1
 		}
@@ -242,15 +252,15 @@ func timechartChunkGroups(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		var startPos uint64
-		if pos, found, err := cm.FindStartPosition(meta.ID, bStart); err == nil && found {
-			startPos = pos
+		startPos, startOK := findIngestPos(cm, im, meta.ID,bStart)
+		if !startOK {
+			continue
 		}
 
 		var endPos uint64
-		if !bEnd.Before(meta.WriteEnd) {
+		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
+		} else if pos, ok := findIngestPos(cm, im, meta.ID,bEnd); ok {
 			endPos = pos
 		}
 
@@ -286,30 +296,31 @@ func timechartChunkGroups(
 // timechartScanPath counts records per bucket via record scanning with optional grouping and pre-ops.
 // Returns (truncated, error) where truncated is true when the 1M scan cap was hit.
 func (e *Engine) timechartScanPath(ctx context.Context, q Query, preOps []querylang.PipeOp, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy, hasPreOps bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
+	orderBy := q.OrderBy
 	q.Limit = 0
 	iter, _ := e.Search(ctx, q, nil)
 
 	if hasPreOps {
-		return false, timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		return false, timechartScanPreOps(ctx, iter, preOps, e.lookupResolver, orderBy, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 	}
-	return timechartScanDirect(iter, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+	return timechartScanDirect(iter, orderBy, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 }
 
 // timechartScanPreOps applies pipeline pre-ops then bins the resulting records.
-func timechartScanPreOps(ctx context.Context, iter iter.Seq2[chunk.Record, error], preOps []querylang.PipeOp, resolve lookup.Resolver, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) error {
+func timechartScanPreOps(ctx context.Context, iter iter.Seq2[chunk.Record, error], preOps []querylang.PipeOp, resolve lookup.Resolver, orderBy OrderBy, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) error {
 	records, err := applyRecordOps(ctx, iter, preOps, resolve)
 	if err != nil {
 		return err
 	}
 	for _, rec := range records {
-		timechartBinRecord(rec.WriteTS, rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		timechartBinRecord(orderBy.RecordTS(rec), rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 	}
 	return nil
 }
 
 // timechartScanDirect iterates records directly and bins them, capped at 1M records.
 // Returns (truncated, error) where truncated is true when the cap was hit.
-func timechartScanDirect(records iter.Seq2[chunk.Record, error], start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
+func timechartScanDirect(records iter.Seq2[chunk.Record, error], orderBy OrderBy, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, hasGroupBy bool, counts []int64, groupCounts []map[string]int64) (bool, error) {
 	const maxScan = 1_000_000
 	scanned := 0
 	for rec, err := range records {
@@ -319,7 +330,7 @@ func timechartScanDirect(records iter.Seq2[chunk.Record, error], start, end time
 			}
 			return false, err
 		}
-		timechartBinRecord(rec.WriteTS, rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
+		timechartBinRecord(orderBy.RecordTS(rec), rec.Attrs, start, end, bucketWidth, numBuckets, groupField, hasGroupBy, counts, groupCounts)
 		scanned++
 		if scanned >= maxScan {
 			return true, nil
@@ -408,28 +419,47 @@ func timechartToTable(groupField string, start time.Time, bucketWidth time.Durat
 	return &TableResult{Columns: columns, Rows: rows}
 }
 
-// timechartChunkFast counts records per bucket using binary search on idx.log.
-// O(buckets * log(n)) per chunk, no record scanning.
-func timechartChunkFast(
+// findIngestPos returns the earliest record position with IngestTS >= ts.
+// Tries chunk manager first (active chunk B-tree), then index manager
+// (sealed chunk on-disk binary search). Both are O(log n).
+func findIngestPos(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.ChunkID, ts time.Time) (uint64, bool) {
+	if pos, found, err := cm.FindIngestStartPosition(chunkID, ts); err == nil && found {
+		return pos, true
+	}
+	if im != nil {
+		if pos, found, err := im.FindIngestStartPosition(chunkID, ts); err == nil && found {
+			return pos, true
+		}
+	}
+	return 0, false
+}
+
+// timechartChunkByIngestTS counts records per bucket using IngestTS binary search.
+// Active chunks: chunk manager's FindIngestStartPosition (in-memory B-tree).
+// Sealed chunks: index manager's FindIngestStartPosition (on-disk binary search).
+// Both are O(buckets × log(n)) with no heap allocation beyond stack buffers.
+func timechartChunkByIngestTS(
 	cm chunk.ChunkManager,
+	im index.IndexManager,
 	meta chunk.ChunkMeta,
 	start time.Time,
 	bucketWidth time.Duration,
 	numBuckets int,
 	counts []int64,
 ) {
+
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
 	firstBucket := 0
-	if meta.WriteStart.After(start) {
-		firstBucket = int(meta.WriteStart.Sub(start) / bucketWidth)
+	if !meta.IngestStart.IsZero() && meta.IngestStart.After(start) {
+		firstBucket = int(meta.IngestStart.Sub(start) / bucketWidth)
 		if firstBucket >= numBuckets {
 			return
 		}
 	}
 	lastBucket := numBuckets - 1
-	if meta.WriteEnd.Before(end) {
-		lastBucket = int(meta.WriteEnd.Sub(start) / bucketWidth)
+	if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(end) {
+		lastBucket = int(meta.IngestEnd.Sub(start) / bucketWidth)
 		if lastBucket >= numBuckets {
 			lastBucket = numBuckets - 1
 		}
@@ -439,15 +469,12 @@ func timechartChunkFast(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		var startPos uint64
-		if pos, found, err := cm.FindStartPosition(meta.ID, bStart); err == nil && found {
-			startPos = pos
-		}
+		startPos, _ := findIngestPos(cm, im, meta.ID,bStart)
 
 		var endPos uint64
-		if !bEnd.Before(meta.WriteEnd) {
+		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if pos, found, err := cm.FindStartPosition(meta.ID, bEnd); err == nil && found {
+		} else if pos, ok := findIngestPos(cm, im, meta.ID,bEnd); ok {
 			endPos = pos
 		}
 
@@ -456,4 +483,3 @@ func timechartChunkFast(
 		}
 	}
 }
-

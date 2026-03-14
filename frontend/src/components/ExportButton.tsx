@@ -81,10 +81,12 @@ export function ExportButton({
   records,
   tableData,
   dark,
+  onExportToVault,
 }: Readonly<{
   records?: ProtoRecord[];
   tableData?: TableData;
   dark: boolean;
+  onExportToVault?: () => void;
 }>) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -144,6 +146,20 @@ export function ExportButton({
               Export as {fmt.toUpperCase()}
             </button>
           ))}
+          {onExportToVault && (
+            <>
+              <div className={`border-t mx-2 my-1 ${c("border-ink-border-subtle", "border-light-border-subtle")}`} />
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onExportToVault();
+                }}
+                className={`block w-full text-left px-3 py-2.5 text-[0.8em] font-mono transition-colors ${c("text-text-muted hover:text-copper hover:bg-ink-hover", "text-light-text-muted hover:text-copper hover:bg-light-hover")}`}
+              >
+                Export to vault
+              </button>
+            </>
+          )}
         </div>
       )}
     </div>

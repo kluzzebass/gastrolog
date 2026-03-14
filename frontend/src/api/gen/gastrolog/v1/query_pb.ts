@@ -1508,6 +1508,13 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
    */
   canFollow = false;
 
+  /**
+   * whether query contains an export operator
+   *
+   * @generated from field: bool has_export = 8;
+   */
+  hasExport = false;
+
   constructor(data?: PartialMessage<ValidateQueryResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1523,6 +1530,7 @@ export class ValidateQueryResponse extends Message<ValidateQueryResponse> {
     { no: 5, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "has_pipeline", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "can_follow", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 8, name: "has_export", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ValidateQueryResponse {
@@ -1876,6 +1884,90 @@ export class FieldValue extends Message<FieldValue> {
 
   static equals(a: FieldValue | PlainMessage<FieldValue> | undefined, b: FieldValue | PlainMessage<FieldValue> | undefined): boolean {
     return proto3.util.equals(FieldValue, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ExportToVaultRequest
+ */
+export class ExportToVaultRequest extends Message<ExportToVaultRequest> {
+  /**
+   * Full query expression
+   *
+   * @generated from field: string expression = 1;
+   */
+  expression = "";
+
+  /**
+   * Vault name or UUID — backend resolves
+   *
+   * @generated from field: string target = 2;
+   */
+  target = "";
+
+  constructor(data?: PartialMessage<ExportToVaultRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ExportToVaultRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "target", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportToVaultRequest {
+    return new ExportToVaultRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ExportToVaultRequest {
+    return new ExportToVaultRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ExportToVaultRequest {
+    return new ExportToVaultRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ExportToVaultRequest | PlainMessage<ExportToVaultRequest> | undefined, b: ExportToVaultRequest | PlainMessage<ExportToVaultRequest> | undefined): boolean {
+    return proto3.util.equals(ExportToVaultRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ExportToVaultResponse
+ */
+export class ExportToVaultResponse extends Message<ExportToVaultResponse> {
+  /**
+   * @generated from field: string job_id = 1;
+   */
+  jobId = "";
+
+  constructor(data?: PartialMessage<ExportToVaultResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ExportToVaultResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportToVaultResponse {
+    return new ExportToVaultResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ExportToVaultResponse {
+    return new ExportToVaultResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ExportToVaultResponse {
+    return new ExportToVaultResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ExportToVaultResponse | PlainMessage<ExportToVaultResponse> | undefined, b: ExportToVaultResponse | PlainMessage<ExportToVaultResponse> | undefined): boolean {
+    return proto3.util.equals(ExportToVaultResponse, a, b);
   }
 }
 

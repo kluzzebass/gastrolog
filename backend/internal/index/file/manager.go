@@ -258,43 +258,25 @@ func (m *Manager) OpenJSONPVIndex(chunkID chunk.ChunkID) (*index.Index[index.JSO
 
 // FindIngestStartPosition implements index.IndexManager.
 func (m *Manager) FindIngestStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
-	key := chunkID.String() + ":ts_ingest"
-	var entries []filetsidx.Entry
-	if v, ok := m.cache.Load(key); ok {
-		entries = v.([]filetsidx.Entry)
-	} else {
-		var err error
-		entries, err = filetsidx.LoadIngestIndex(m.dir, chunkID)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return 0, false, index.ErrIndexNotFound
-			}
-			return 0, false, err
+	pos, found, err := filetsidx.SearchIngestFile(m.dir, chunkID, ts.UnixNano())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, index.ErrIndexNotFound
 		}
-		m.cache.Store(key, entries)
+		return 0, false, err
 	}
-	pos, found := filetsidx.FindStartPosition(entries, ts.UnixNano())
 	return pos, found, nil
 }
 
 // FindSourceStartPosition implements index.IndexManager.
 func (m *Manager) FindSourceStartPosition(chunkID chunk.ChunkID, ts time.Time) (uint64, bool, error) {
-	key := chunkID.String() + ":ts_source"
-	var entries []filetsidx.Entry
-	if v, ok := m.cache.Load(key); ok {
-		entries = v.([]filetsidx.Entry)
-	} else {
-		var err error
-		entries, err = filetsidx.LoadSourceIndex(m.dir, chunkID)
-		if err != nil {
-			if os.IsNotExist(err) {
-				return 0, false, index.ErrIndexNotFound
-			}
-			return 0, false, err
+	pos, found, err := filetsidx.SearchSourceFile(m.dir, chunkID, ts.UnixNano())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, false, index.ErrIndexNotFound
 		}
-		m.cache.Store(key, entries)
+		return 0, false, err
 	}
-	pos, found := filetsidx.FindStartPosition(entries, ts.UnixNano())
 	return pos, found, nil
 }
 

@@ -39,6 +39,7 @@ func TestHighlight_Roundtrip(t *testing.T) {
 		"hello # comment\nworld",
 		"start=2024-01-01 level=error | where level!=debug | stats count by level",
 		"level=",
+		"error | export my-vault",
 	}
 
 	for _, input := range inputs {

@@ -52,6 +52,7 @@ import { useSyntax } from "../api/hooks/useSyntax";
 import { useValidation } from "./useValidation";
 import { usePipelineFields } from "./usePipelineFields";
 import { useFields } from "./useFields";
+import { useExportToVault } from "../api/hooks";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -175,6 +176,9 @@ export function useSearchView() {
     const p = param || sessionStorage.getItem("inspector-last") || "entities:vaults";
     navigate({ search: (prev) => ({ ...prev, inspector: p }) });
   };
+
+  const [showExportToVault, setShowExportToVault] = useState(false);
+  const exportToVault = useExportToVault();
 
   const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(null);
   const selectedRecordRef = useRef<ProtoRecord | null>(null);
@@ -500,6 +504,25 @@ export function useSearchView() {
     setShowHistory(false);
     setShowSavedQueries(false);
     const normalized = normalizeTimeDirectives(draft);
+
+    // If the query has `| export`, route to the export-to-vault mutation instead of search.
+    // The backend extracts the target vault from the expression's ExportOp.
+    if (validation.hasExport && validation.expression === deferredDraft) {
+      queryHistory.add(normalized);
+      exportToVault.mutate(
+        { expression: normalized, target: "" },
+        {
+          onSuccess: (jobId) => {
+            addToast(`Export started (job ${jobId})`, "info");
+          },
+          onError: (err) => {
+            addToast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, "error");
+          },
+        },
+      );
+      return;
+    }
+
     if (normalized === q && !isFollowMode) {
       setSelectedRecord(null);
       scrollToSelectedRef.current = false;
@@ -895,5 +918,9 @@ export function useSearchView() {
     // Auth
     logout, currentUser,
     addToast,
+
+    // Export to vault
+    showExportToVault, setShowExportToVault,
+    exportToVault,
   };
 }

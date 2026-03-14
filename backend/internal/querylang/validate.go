@@ -58,7 +58,13 @@ func ValidateExpression(expr string) (bool, string, int) {
 		return false, pe.Message, originalPos
 	}
 
-	_ = pipeline
+	// Semantic validation: export must be the last pipe operator.
+	for i, op := range pipeline.Pipes {
+		if _, ok := op.(*ExportOp); ok && i != len(pipeline.Pipes)-1 {
+			return false, "export must be the last pipe operator", 0
+		}
+	}
+
 	return true, "", -1
 }
 

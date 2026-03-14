@@ -6,6 +6,7 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"os"
 
 	"connectrpc.com/connect"
 	"gastrolog/internal/home"
@@ -92,6 +93,12 @@ func NewRegisterCommand() *cobra.Command {
 // clientFromCmd builds a Connect RPC client from the persistent flags on cmd.
 // It prefers the unix socket when available (no auth needed), falling back to
 // TCP with an optional bearer token.
+//
+// Socket resolution order:
+//  1. --addr pointing at a .sock file → direct unix socket
+//  2. --home → <home>/gastrolog.sock
+//  3. Platform default home → <default>/gastrolog.sock
+//  4. --addr as HTTP endpoint (with optional --token)
 func clientFromCmd(cmd *cobra.Command) *server.Client {
 	addr, _ := cmd.Flags().GetString("addr")
 	token, _ := cmd.Flags().GetString("token")
@@ -99,8 +106,14 @@ func clientFromCmd(cmd *cobra.Command) *server.Client {
 		token = envToken()
 	}
 
-	// If no explicit token and addr wasn't overridden, try the unix socket.
 	addrChanged := cmd.Flags().Changed("addr")
+
+	// If --addr points at a unix socket, use it directly.
+	if addrChanged && isUnixSocket(addr) {
+		return newUnixClient(addr)
+	}
+
+	// If no explicit token and addr wasn't overridden, try the unix socket.
 	if token == "" && !addrChanged {
 		homeFlag, _ := cmd.Flags().GetString("home")
 		if client, ok := tryUnixSocket(homeFlag); ok {
@@ -113,6 +126,27 @@ func clientFromCmd(cmd *cobra.Command) *server.Client {
 		opts = append(opts, connect.WithInterceptors(newAuthInterceptor(token)))
 	}
 	return server.NewClient(addr, opts...)
+}
+
+// isUnixSocket returns true if path looks like a unix domain socket file.
+func isUnixSocket(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return fi.Mode().Type()&os.ModeSocket != 0
+}
+
+// newUnixClient creates a Connect client that dials the given unix socket.
+func newUnixClient(sockPath string) *server.Client {
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", sockPath)
+			},
+		},
+	}
+	return server.NewClientWithHTTP(httpClient, "http://localhost")
 }
 
 // tryUnixSocket attempts to connect via the unix socket in the home directory.

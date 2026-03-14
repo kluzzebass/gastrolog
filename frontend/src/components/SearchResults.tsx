@@ -42,6 +42,7 @@ interface SearchResultsProps {
   onFollowBufferSizeChange: (size: number) => void;
   resetFollowNewCount: () => void;
   onPollIntervalChange: (ms: number | null) => void;
+  onExportToVault?: () => void;
   // Display
   tokens: string[];
   highlightMode: HighlightMode;
@@ -83,6 +84,7 @@ export function SearchResults({
   onFollowBufferSizeChange,
   resetFollowNewCount,
   onPollIntervalChange,
+  onExportToVault,
   tokens,
   highlightMode,
   pollInterval,
@@ -147,6 +149,7 @@ export function SearchResults({
         pollInterval={pollInterval}
         onPollIntervalChange={onPollIntervalChange}
         onZoomOut={onZoomOut}
+        onExportToVault={onExportToVault}
       />
 
       <div className="relative flex-1 overflow-hidden">

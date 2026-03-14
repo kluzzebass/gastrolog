@@ -67,6 +67,7 @@ type RunConfig struct {
 	JoinAddr    string
 	JoinToken   string
 	Voteless    bool
+	NodeName    string
 
 	// PprofAddr is the pprof HTTP server address (e.g. "localhost:6060").
 	// Empty if pprof is disabled. Advertised to cluster peers via broadcast.
@@ -134,7 +135,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	asyncNodeConfig := fromLocalFSM || appCfg == nil
-	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, asyncNodeConfig, hd)
+	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, cfg.NodeName, asyncNodeConfig, hd)
 	if err != nil {
 		return err
 	}
@@ -491,14 +492,15 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunC
 	return nil
 }
 
-// finalizeNodeSetup ensures this node has a NodeConfig with a petname and
-// resolves the home directory and socket path.
-func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType string, asyncNodeConfig bool, hd home.Dir) (string, string, error) {
+// finalizeNodeSetup ensures this node has a NodeConfig with a name and
+// resolves the home directory and socket path. If preferredName is set, it
+// is used instead of generating a random petname.
+func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType, preferredName string, asyncNodeConfig bool, hd home.Dir) (string, string, error) {
 	if asyncNodeConfig {
 		logNodeIdentity(logger, nodeID, hd.ReadNodeName())
-		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, hd, logger)
+		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, preferredName, hd, logger)
 	} else {
-		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
+		nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID, preferredName)
 		if err != nil {
 			return "", "", fmt.Errorf("ensure node config: %w", err)
 		}
@@ -563,7 +565,7 @@ func waitForServerSettings(ctx context.Context, cfgStore config.Store, timeout t
 	}
 }
 
-func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID string) (string, error) {
+func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID, preferredName string) (string, error) {
 	nodeUUID, err := uuid.Parse(nodeID)
 	if err != nil {
 		return "", fmt.Errorf("parse node ID %q: %w", nodeID, err)
@@ -573,9 +575,20 @@ func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID string)
 		return "", fmt.Errorf("get node: %w", err)
 	}
 	if existing != nil {
+		// If a preferred name was given and differs from the stored name, update it.
+		if preferredName != "" && existing.Name != preferredName {
+			existing.Name = preferredName
+			if err := cfgStore.PutNode(ctx, *existing); err != nil {
+				return "", err
+			}
+			return preferredName, nil
+		}
 		return existing.Name, nil
 	}
-	name := petname.Generate(2, "-")
+	name := preferredName
+	if name == "" {
+		name = petname.Generate(2, "-")
+	}
 	if err := cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
 		return "", err
 	}
@@ -599,11 +612,11 @@ func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logg
 	return nil
 }
 
-func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, configType string, hd home.Dir, logger *slog.Logger) {
+func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, configType, preferredName string, hd home.Dir, logger *slog.Logger) {
 	if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 		return
 	}
-	nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID)
+	nodeName, err := ensureNodeConfig(ctx, cfgStore, nodeID, preferredName)
 	if err != nil {
 		logger.Warn("ensure node config failed (will retry on next start)", "error", err)
 		return
@@ -744,6 +757,10 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			// entry but the file is missing from disk, it calls this to
 			// pull the file from a peer before returning "not found".
 			srv.SetManagedFileRepair(mgr.RepairFile)
+
+			// Wire export-to-vault executor so remote nodes can forward
+			// export jobs to the node that owns the target vault.
+			deps.ClusterSrv.SetExportToVaultExecutor(srv.ExportToVaultFunc())
 
 			// Startup reconciliation with backoff, then periodic drift check.
 			go func() {

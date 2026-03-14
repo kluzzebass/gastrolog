@@ -45,7 +45,7 @@ var pipeKeywordSet = map[string]bool{
 	"stats": true, "where": true, "eval": true, "sort": true,
 	"head": true, "tail": true, "slice": true, "rename": true,
 	"fields": true, "timechart": true, "dedup": true, "raw": true,
-	"lookup": true, "linechart": true, "barchart": true, "donut": true, "heatmap": true, "scatter": true, "map": true,
+	"lookup": true, "linechart": true, "barchart": true, "donut": true, "heatmap": true, "scatter": true, "map": true, "export": true,
 }
 
 // aggFuncSet contains aggregation function names.

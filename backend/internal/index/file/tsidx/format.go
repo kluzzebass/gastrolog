@@ -113,6 +113,85 @@ func FindStartPosition(entries []Entry, ts int64) (uint64, bool) {
 	return uint64(entries[lo].Pos), true
 }
 
+// SearchIngestFile binary-searches the on-disk ingest index for the first
+// entry with TS >= tsNano. O(log n) with fixed 12-byte reads, no heap
+// allocation beyond a single entry buffer.
+// Returns (recordPos, true) if found, (0, false) otherwise.
+func SearchIngestFile(dir string, chunkID chunk.ChunkID, tsNano int64) (uint64, bool, error) {
+	return searchTSIndexFile(IngestIndexPath(dir, chunkID), format.TypeIngestIndex, tsNano)
+}
+
+// SearchSourceFile is the source-TS equivalent of SearchIngestFile.
+func SearchSourceFile(dir string, chunkID chunk.ChunkID, tsNano int64) (uint64, bool, error) {
+	return searchTSIndexFile(SourceIndexPath(dir, chunkID), format.TypeSourceIndex, tsNano)
+}
+
+func searchTSIndexFile(path string, expectedType byte, tsNano int64) (uint64, bool, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = f.Close() }()
+
+	// Read and validate header + count.
+	var hdr [headerSize]byte
+	if _, err := f.ReadAt(hdr[:], 0); err != nil {
+		return 0, false, fmt.Errorf("read tsidx header: %w", err)
+	}
+	h, err := format.DecodeAndValidate(hdr[:format.HeaderSize], expectedType, currentVersion)
+	if err != nil {
+		return 0, false, fmt.Errorf("tsidx: %w", err)
+	}
+	if h.Flags&format.FlagComplete == 0 {
+		return 0, false, ErrIndexIncomplete
+	}
+	n := binary.LittleEndian.Uint32(hdr[format.HeaderSize:])
+	if n == 0 {
+		return 0, false, nil
+	}
+
+	// Binary search: first index i where TS[i] >= tsNano.
+	var buf [entrySize]byte
+	readEntry := func(i uint32) (int64, uint32, error) {
+		off := int64(headerSize) + int64(i)*int64(entrySize)
+		if _, err := f.ReadAt(buf[:], off); err != nil {
+			return 0, 0, err
+		}
+		ts := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115
+		pos := binary.LittleEndian.Uint32(buf[8:])
+		return ts, pos, nil
+	}
+
+	// Quick bounds check.
+	lastTS, _, err := readEntry(n - 1)
+	if err != nil {
+		return 0, false, err
+	}
+	if tsNano > lastTS {
+		return 0, false, nil // past all entries
+	}
+
+	lo, hi := uint32(0), n
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		midTS, _, err := readEntry(mid)
+		if err != nil {
+			return 0, false, err
+		}
+		if midTS < tsNano {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+
+	_, pos, err := readEntry(lo)
+	if err != nil {
+		return 0, false, err
+	}
+	return uint64(pos), true, nil
+}
+
 // IngestIndexPath returns the path to the ingest index file.
 func IngestIndexPath(dir string, chunkID chunk.ChunkID) string {
 	return filepath.Join(dir, chunkID.String(), ingestFile)

@@ -38,6 +38,10 @@ service QueryService {
   // distributions using the backend's full extractor suite (KV, logfmt,
   // access log). Replaces the frontend's client-side field extraction.
   rpc GetFields(GetFieldsRequest) returns (GetFieldsResponse);
+
+  // ExportToVault materializes search results into a target vault as a
+  // background job. Returns a job ID for progress tracking.
+  rpc ExportToVault(ExportToVaultRequest) returns (ExportToVaultResponse);
 }
 
 message SearchRequest {
@@ -250,6 +254,7 @@ message ValidateQueryResponse {
   string expression = 5;              // echo back input for staleness detection
   bool has_pipeline = 6;              // whether query contains pipe operators
   bool can_follow = 7;               // whether query is compatible with follow mode
+  bool has_export = 8;               // whether query contains an export operator
 }
 
 message HighlightSpan {
@@ -287,4 +292,13 @@ message FieldInfo {
 message FieldValue {
   string value = 1;
   int32 count = 2;
+}
+
+message ExportToVaultRequest {
+  string expression = 1;  // Full query expression
+  string target = 2;      // Vault name or UUID — backend resolves
+}
+
+message ExportToVaultResponse {
+  string job_id = 1;
 }

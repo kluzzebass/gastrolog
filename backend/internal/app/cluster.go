@@ -389,7 +389,7 @@ func makeJoinClusterFunc(
 		}
 
 		// 14. Ensure node name
-		if _, err := ensureNodeConfig(ctx, proxy, nodeID); err != nil {
+		if _, err := ensureNodeConfig(ctx, proxy, nodeID, ""); err != nil {
 			logger.Warn("failed to write node name after join", "error", err)
 		}
 

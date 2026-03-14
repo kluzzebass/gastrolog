@@ -17,6 +17,7 @@ Pipeline operators fall into different categories based on how they process data
 | **Bounded streaming** | `tail`, `slice` | No | Stream through all records with a fixed-size buffer (N records for `tail`, range-based for `slice`). Memory usage is proportional to the output size, not the input. However, if preceded by a materializing operator such as `sort`, they fall back to full materialization. In a cluster, records are gathered from all nodes before applying the operator on the coordinator. |
 | **Materializing** | `stats`, `timechart`, `sort` | No | Collect all matching records before producing output. `sort` buffers everything on the coordinator. `stats` and `timechart` aggregate per-node in a cluster and merge results. `stats` and `timechart` occupy the same slot — you can use one or the other, never both. |
 | **Visualization** | `linechart`, `barchart`, `donut`, `heatmap`, `scatter`, `map`, `raw` | No | Control how results are displayed but do not transform data. Must appear at the end of a pipeline, after `stats` or `timechart`. See [Visualizations](help:visualizations). |
+| **Sink** | `export` | No | Materializes results into a target vault as a background job. Must be the last operator. |
 
 ## Stats Operator
 
@@ -317,6 +318,34 @@ Reverse DNS for top talkers:
 ```
 * | stats sum(bytes) as total by src_ip | sort -total | head 20 | lookup rdns src_ip
 ```
+
+## Export Operator
+
+The `export` operator materializes search results into a target vault as a background job. This is useful for pulling archived records from cloud-backed vaults into a local vault for fast indexed queries, or for creating curated subsets of data.
+
+```
+filter | export my-vault
+```
+
+The target can be a vault name or UUID:
+
+```
+level=error last=24h | export incident-archive
+level=error last=24h | export 550e8400-e29b-41d4-a716-446655440000
+```
+
+Export is a **terminal sink** — it must be the last operator in the pipeline. Other operators can precede it to transform or filter records before they are written:
+
+```
+level=error | where status>=500 | export errors-vault
+level=error | eval region = upper(region) | export enriched-logs
+```
+
+When you submit a query with `| export`, the search is not displayed — instead, a background job is created. Track progress in the [Inspector → Jobs](inspector:entities:jobs) panel.
+
+**Same-vault guard:** Exporting into a vault that is also a source of the query is rejected. If you need to export from all vaults, add a `vault_id=` filter to exclude the target.
+
+You can also export results without using the `| export` syntax by clicking **Export to vault** in the export dropdown menu on the results toolbar.
 
 ## Raw Operator
 

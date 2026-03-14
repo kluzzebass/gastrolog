@@ -51,6 +51,9 @@ const (
 	QueryServiceGetPipelineFieldsProcedure = "/gastrolog.v1.QueryService/GetPipelineFields"
 	// QueryServiceGetFieldsProcedure is the fully-qualified name of the QueryService's GetFields RPC.
 	QueryServiceGetFieldsProcedure = "/gastrolog.v1.QueryService/GetFields"
+	// QueryServiceExportToVaultProcedure is the fully-qualified name of the QueryService's
+	// ExportToVault RPC.
+	QueryServiceExportToVaultProcedure = "/gastrolog.v1.QueryService/ExportToVault"
 )
 
 // QueryServiceClient is a client for the gastrolog.v1.QueryService service.
@@ -78,6 +81,9 @@ type QueryServiceClient interface {
 	// distributions using the backend's full extractor suite (KV, logfmt,
 	// access log). Replaces the frontend's client-side field extraction.
 	GetFields(context.Context, *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error)
+	// ExportToVault materializes search results into a target vault as a
+	// background job. Returns a job ID for progress tracking.
+	ExportToVault(context.Context, *connect.Request[v1.ExportToVaultRequest]) (*connect.Response[v1.ExportToVaultResponse], error)
 }
 
 // NewQueryServiceClient constructs a client for the gastrolog.v1.QueryService service. By default,
@@ -139,6 +145,12 @@ func NewQueryServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(queryServiceMethods.ByName("GetFields")),
 			connect.WithClientOptions(opts...),
 		),
+		exportToVault: connect.NewClient[v1.ExportToVaultRequest, v1.ExportToVaultResponse](
+			httpClient,
+			baseURL+QueryServiceExportToVaultProcedure,
+			connect.WithSchema(queryServiceMethods.ByName("ExportToVault")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -152,6 +164,7 @@ type queryServiceClient struct {
 	validateQuery     *connect.Client[v1.ValidateQueryRequest, v1.ValidateQueryResponse]
 	getPipelineFields *connect.Client[v1.GetPipelineFieldsRequest, v1.GetPipelineFieldsResponse]
 	getFields         *connect.Client[v1.GetFieldsRequest, v1.GetFieldsResponse]
+	exportToVault     *connect.Client[v1.ExportToVaultRequest, v1.ExportToVaultResponse]
 }
 
 // Search calls gastrolog.v1.QueryService.Search.
@@ -194,6 +207,11 @@ func (c *queryServiceClient) GetFields(ctx context.Context, req *connect.Request
 	return c.getFields.CallUnary(ctx, req)
 }
 
+// ExportToVault calls gastrolog.v1.QueryService.ExportToVault.
+func (c *queryServiceClient) ExportToVault(ctx context.Context, req *connect.Request[v1.ExportToVaultRequest]) (*connect.Response[v1.ExportToVaultResponse], error) {
+	return c.exportToVault.CallUnary(ctx, req)
+}
+
 // QueryServiceHandler is an implementation of the gastrolog.v1.QueryService service.
 type QueryServiceHandler interface {
 	// Search executes a query and streams matching records.
@@ -219,6 +237,9 @@ type QueryServiceHandler interface {
 	// distributions using the backend's full extractor suite (KV, logfmt,
 	// access log). Replaces the frontend's client-side field extraction.
 	GetFields(context.Context, *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error)
+	// ExportToVault materializes search results into a target vault as a
+	// background job. Returns a job ID for progress tracking.
+	ExportToVault(context.Context, *connect.Request[v1.ExportToVaultRequest]) (*connect.Response[v1.ExportToVaultResponse], error)
 }
 
 // NewQueryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -276,6 +297,12 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(queryServiceMethods.ByName("GetFields")),
 		connect.WithHandlerOptions(opts...),
 	)
+	queryServiceExportToVaultHandler := connect.NewUnaryHandler(
+		QueryServiceExportToVaultProcedure,
+		svc.ExportToVault,
+		connect.WithSchema(queryServiceMethods.ByName("ExportToVault")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.QueryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case QueryServiceSearchProcedure:
@@ -294,6 +321,8 @@ func NewQueryServiceHandler(svc QueryServiceHandler, opts ...connect.HandlerOpti
 			queryServiceGetPipelineFieldsHandler.ServeHTTP(w, r)
 		case QueryServiceGetFieldsProcedure:
 			queryServiceGetFieldsHandler.ServeHTTP(w, r)
+		case QueryServiceExportToVaultProcedure:
+			queryServiceExportToVaultHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -333,4 +362,8 @@ func (UnimplementedQueryServiceHandler) GetPipelineFields(context.Context, *conn
 
 func (UnimplementedQueryServiceHandler) GetFields(context.Context, *connect.Request[v1.GetFieldsRequest]) (*connect.Response[v1.GetFieldsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.GetFields is not implemented"))
+}
+
+func (UnimplementedQueryServiceHandler) ExportToVault(context.Context, *connect.Request[v1.ExportToVaultRequest]) (*connect.Response[v1.ExportToVaultResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.QueryService.ExportToVault is not implemented"))
 }

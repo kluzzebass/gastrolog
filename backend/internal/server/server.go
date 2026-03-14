@@ -168,6 +168,7 @@ type Server struct {
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
 	vaultTesters      map[string]VaultConnectionTester
 	repairManagedFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
+	queryServer       *QueryServer              // stored for ExportToVault executor wiring
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -337,6 +338,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	s.loadInitialLookupConfig(lookupRegistry)
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
+	s.queryServer = queryServer
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
 	configServer := NewConfigServer(ConfigServerConfig{
 		Orch:               s.orch,

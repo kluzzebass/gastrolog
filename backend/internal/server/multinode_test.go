@@ -396,12 +396,19 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		}
 	}
 
-	// Regular search.
-	const maxBatch = 500
-	if q.Limit == 0 || q.Limit > maxBatch {
-		q.Limit = maxBatch
+	// Compute histogram for this vault.
+	histogram := eng.ComputeHistogramForVaults(ctx, q, 50, []uuid.UUID{vaultID})
+	var histProto []*gastrologv1.HistogramBucket
+	for _, b := range histogram {
+		histProto = append(histProto, &gastrologv1.HistogramBucket{
+			TimestampMs: b.TimestampMs,
+			Count:       b.Count,
+			GroupCounts: b.GroupCounts,
+		})
 	}
-	searchIter, _ := eng.Search(ctx, q, nil)
+
+	// Regular search.
+	searchIter, getToken := eng.Search(ctx, q, nil)
 
 	var records []*gastrologv1.ExportRecord
 	for rec, err := range searchIter {
@@ -410,7 +417,17 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		}
 		records = append(records, cluster.RecordToExportRecord(rec))
 	}
-	return &gastrologv1.ForwardSearchResponse{Records: records}, nil
+	token := getToken()
+	var tokenBytes []byte
+	if token != nil {
+		tokenBytes = server.ResumeTokenToProto(token)
+	}
+	return &gastrologv1.ForwardSearchResponse{
+		Records:     records,
+		Histogram:   histProto,
+		ResumeToken: tokenBytes,
+		HasMore:     token != nil,
+	}, nil
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {
@@ -581,6 +598,10 @@ func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *g
 	}()
 
 	return recCh, errCh
+}
+
+func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error) {
+	return &gastrologv1.ForwardExportToVaultResponse{JobId: "test-export-job"}, nil
 }
 
 // directRemoteVaultForwarder implements RemoteVaultForwarder by calling
@@ -1765,5 +1786,44 @@ func TestMultiNode_ListJobsCrossNode(t *testing.T) {
 	}
 	if !peerJobIDs["remote-retain"] {
 		t.Error("expected remote-retain from data-1 in ListJobs")
+	}
+}
+
+func TestMultiNode_HistogramMatchesRecordCount(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+
+	// Insert same number of records in both vaults — simulates duplicate routing.
+	addMNRecords(t, h.Node(t, "data-1"), "D1", 20, nil)
+	addMNRecords(t, h.Node(t, "data-2"), "D2", 20, nil)
+
+	// Use a time range that covers all test records (addMNRecords starts at 2025-06-15T10:00:00Z).
+	expr := "start=2025-06-15T09:59:00Z end=2025-06-15T10:01:00Z"
+
+	// Collect all records and the histogram from the search.
+	stream, err := h.client.Search(context.Background(), connect.NewRequest(&gastrologv1.SearchRequest{
+		Query: &gastrologv1.Query{Expression: expr},
+	}))
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+
+	var records []*gastrologv1.Record
+	var histogramTotal int64
+	for stream.Receive() {
+		records = append(records, stream.Msg().Records...)
+		for _, b := range stream.Msg().Histogram {
+			histogramTotal += b.Count
+		}
+	}
+	if err := stream.Err(); err != nil && err != io.EOF {
+		t.Fatalf("stream error: %v", err)
+	}
+
+	if len(records) != 40 {
+		t.Errorf("expected 40 records (20 per vault), got %d", len(records))
+	}
+	if histogramTotal != int64(len(records)) {
+		t.Errorf("histogram total %d != record count %d", histogramTotal, len(records))
 	}
 }
