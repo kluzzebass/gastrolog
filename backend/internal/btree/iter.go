@@ -1,10 +1,8 @@
 package btree
 
-import "cmp"
-
 // Iter iterates over entries in key order.
 // Use Valid to check position, Key/Value to read, Next to advance.
-type Iter[K cmp.Ordered, V cmp.Ordered] struct {
+type Iter[K, V any] struct {
 	tree    *Tree[K, V]
 	leaf    *node[K, V]
 	leafNum uint32

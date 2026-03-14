@@ -9,6 +9,9 @@ import (
 	"gastrolog/internal/format"
 )
 
+// compare is the function signature for key comparison.
+type compare[K any] func(K, K) int
+
 const (
 	pageSize = 4096
 
@@ -31,6 +34,7 @@ type Codec[K, V any] struct {
 	Key     func([]byte) K
 	PutVal  func([]byte, V)
 	Val     func([]byte) V
+	Compare compare[K]     // key comparison function
 }
 
 // Int64Uint32 is a codec for int64 keys and uint32 values,
@@ -38,10 +42,11 @@ type Codec[K, V any] struct {
 var Int64Uint32 = Codec[int64, uint32]{
 	KeySize: 8,
 	ValSize: 4,
-	PutKey: func(b []byte, k int64) { binary.LittleEndian.PutUint64(b, uint64(k)) },
-	Key:    func(b []byte) int64 { return int64(binary.LittleEndian.Uint64(b)) },
+	PutKey:  func(b []byte, k int64) { binary.LittleEndian.PutUint64(b, uint64(k)) },
+	Key:     func(b []byte) int64 { return int64(binary.LittleEndian.Uint64(b)) },
 	PutVal:  func(b []byte, v uint32) { binary.LittleEndian.PutUint32(b, v) },
 	Val:     func(b []byte) uint32 { return binary.LittleEndian.Uint32(b) },
+	Compare: cmp.Compare[int64],
 }
 
 // Entry is a key-value pair stored in the tree.
@@ -50,14 +55,7 @@ type Entry[K, V any] struct {
 	Value V
 }
 
-func compareEntries[K cmp.Ordered, V cmp.Ordered](a, b Entry[K, V]) int {
-	if c := cmp.Compare(a.Key, b.Key); c != 0 {
-		return c
-	}
-	return cmp.Compare(a.Value, b.Value)
-}
-
-type node[K, V cmp.Ordered] struct {
+type node[K, V any] struct {
 	typ byte
 
 	// Leaf fields.
@@ -108,7 +106,7 @@ func decodeMeta(buf []byte, m *meta) error {
 	return nil
 }
 
-func encodeNode[K cmp.Ordered, V cmp.Ordered](n *node[K, V], c *Codec[K, V], buf []byte) {
+func encodeNode[K, V any](n *node[K, V], c *Codec[K, V], buf []byte) {
 	clear(buf[:pageSize])
 	switch n.typ {
 	case typeLeaf:
@@ -138,7 +136,7 @@ func encodeNode[K cmp.Ordered, V cmp.Ordered](n *node[K, V], c *Codec[K, V], buf
 	}
 }
 
-func decodeNode[K cmp.Ordered, V cmp.Ordered](buf []byte, c *Codec[K, V]) (*node[K, V], error) {
+func decodeNode[K, V any](buf []byte, c *Codec[K, V]) (*node[K, V], error) {
 	if len(buf) < internalHeaderSize {
 		return nil, errors.New("btree: page too small")
 	}

@@ -2,6 +2,7 @@ package blobstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -80,8 +81,7 @@ func (a *AzureStore) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (a *AzureStore) List(ctx context.Context, prefix string) ([]BlobInfo, error) {
-	var result []BlobInfo
+func (a *AzureStore) List(ctx context.Context, prefix string, fn func(BlobInfo) error) error {
 	include := container.ListBlobsInclude{Metadata: true}
 	pager := a.client.NewListBlobsFlatPager(a.containerName, &azblob.ListBlobsFlatOptions{
 		Prefix:  &prefix,
@@ -90,7 +90,7 @@ func (a *AzureStore) List(ctx context.Context, prefix string) ([]BlobInfo, error
 	for pager.More() {
 		page, err := pager.NextPage(ctx)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, item := range page.Segment.BlobItems {
 			info := BlobInfo{
@@ -107,10 +107,15 @@ func (a *AzureStore) List(ctx context.Context, prefix string) ([]BlobInfo, error
 					}
 				}
 			}
-			result = append(result, info)
+			if err := fn(info); err != nil {
+				if errors.Is(err, ErrStopIteration) {
+					return nil
+				}
+				return err
+			}
 		}
 	}
-	return result, nil
+	return nil
 }
 
 func (a *AzureStore) Head(ctx context.Context, key string) (BlobInfo, error) {

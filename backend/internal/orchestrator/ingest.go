@@ -165,6 +165,12 @@ func (o *Orchestrator) scheduleIndexBuild(registryKey uuid.UUID, chunkID chunk.C
 	if vault == nil || vault.Indexes == nil {
 		return
 	}
+	// Cloud-backed vaults upload sealed chunks to cloud storage and delete
+	// local files. Building indexes on them is wasted work — the index files
+	// would be deleted moments later when the chunk dir is removed.
+	if !vault.BuildIndexes {
+		return
+	}
 
 	// Wrap the index build to refresh chunk disk sizes afterward,
 	// since index files are written into the chunk directory.

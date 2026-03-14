@@ -94,6 +94,7 @@ type Manager struct {
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
 	zstdEnc  *zstd.Encoder
+	cloudIdx *cloudIndex // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
 
 	compressWg sync.WaitGroup // tracks in-flight CompressChunk calls
 
@@ -222,7 +223,14 @@ func NewManager(cfg Config) (*Manager, error) {
 
 	// Load cloud-backed chunks if a cloud store is configured.
 	if cfg.CloudStore != nil {
+		cidx, err := openCloudIndex(cfg.Dir)
+		if err != nil {
+			_ = lockFile.Close()
+			return nil, fmt.Errorf("open cloud index: %w", err)
+		}
+		manager.cloudIdx = cidx
 		if err := manager.loadCloudChunks(); err != nil {
+			_ = cidx.Close()
 			_ = lockFile.Close()
 			return nil, fmt.Errorf("load cloud chunks: %w", err)
 		}
@@ -560,6 +568,13 @@ func (m *Manager) loadExisting() error {
 
 		meta, err := m.loadChunkMeta(id)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// Leftover directory from a cloud upload that deleted the
+				// chunk's data files. Clean it up and move on.
+				m.logger.Info("removing leftover chunk directory", "chunk", id)
+				_ = os.RemoveAll(filepath.Join(m.cfg.Dir, entry.Name()))
+				continue
+			}
 			return fmt.Errorf("load chunk meta for %s: %w", id, err)
 		}
 
@@ -1522,6 +1537,14 @@ func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	// Close cloud index.
+	if m.cloudIdx != nil {
+		if err := m.cloudIdx.Close(); err != nil {
+			errs = append(errs, err)
+		}
+		m.cloudIdx = nil
+	}
+
 	// Close zstd encoder.
 	if m.zstdEnc != nil {
 		if err := m.zstdEnc.Close(); err != nil {
@@ -1855,6 +1878,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		if err := m.cfg.CloudStore.Delete(context.Background(), m.blobKey(id)); err != nil {
 			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
 		}
+		m.removeFromCloudIndex(id)
 	} else {
 		dir := m.chunkDir(id)
 		// Wait for in-flight compression to finish — it may be writing
@@ -2051,6 +2075,18 @@ func (m *Manager) Adopt(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 // --- Cloud-backed chunk support ---
 
 // cloudPrefix returns the blob key prefix for this vault's cloud-backed chunks.
+// removeFromCloudIndex removes a chunk from the local cloud index, if present.
+func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
+	if m.cloudIdx == nil {
+		return
+	}
+	if _, err := m.cloudIdx.Delete(id); err != nil {
+		m.logger.Warn("failed to remove from cloud index", "chunk", id, "error", err)
+	} else if err := m.cloudIdx.Sync(); err != nil {
+		m.logger.Warn("failed to sync cloud index after delete", "chunk", id, "error", err)
+	}
+}
+
 func (m *Manager) cloudPrefix() string {
 	return fmt.Sprintf("vault-%s/", m.cfg.VaultID)
 }
@@ -2125,13 +2161,22 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("remove local chunk dir after cloud upload: %w", err)
 	}
 
-	// Update in-memory metadata.
+	// Update in-memory metadata and cloud index.
 	m.mu.Lock()
-	if meta := m.metas[id]; meta != nil {
+	meta := m.metas[id]
+	if meta != nil {
 		meta.cloudBacked = true
 		meta.diskBytes = info.Size
 	}
 	m.mu.Unlock()
+
+	if m.cloudIdx != nil && meta != nil {
+		if err := m.cloudIdx.Insert(id, meta); err != nil {
+			m.logger.Warn("failed to index cloud chunk", "chunk", id, "error", err)
+		} else if err := m.cloudIdx.Sync(); err != nil {
+			m.logger.Warn("failed to sync cloud index", "chunk", id, "error", err)
+		}
+	}
 
 	m.logger.Info("chunk uploaded to cloud",
 		"chunk", id,
@@ -2202,26 +2247,49 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 	return chunkcloud.NewSeekableCursor(rd, id), nil
 }
 
-// loadCloudChunks lists blobs from the cloud store and merges them into the
-// in-memory metadata map. Called during manager initialization when CloudStore
-// is configured.
+// loadCloudChunks populates the in-memory metadata map from cloud chunks.
+// If the local B+ tree index has entries, those are used directly — no cloud
+// API calls needed. Otherwise falls back to store.List() + store.Head() and
+// populates the index for next time.
 func (m *Manager) loadCloudChunks() error {
-	blobs, err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix())
-	if err != nil {
-		return fmt.Errorf("list cloud chunks: %w", err)
+	if m.cloudIdx != nil && m.cloudIdx.Count() > 0 {
+		return m.loadCloudChunksFromIndex()
 	}
+	return m.loadCloudChunksFromStore()
+}
 
-	for _, blob := range blobs {
-		id, ok := m.chunkIDFromBlobKey(blob.Key)
-		if !ok {
-			continue
-		}
+// loadCloudChunksFromIndex loads cloud chunk metadata from the local B+ tree index.
+func (m *Manager) loadCloudChunksFromIndex() error {
+	all, err := m.cloudIdx.LoadAll()
+	if err != nil {
+		return fmt.Errorf("load cloud index: %w", err)
+	}
+	for id, meta := range all {
 		// Don't overwrite local chunks — local always wins.
 		if _, exists := m.metas[id]; exists {
 			continue
 		}
+		m.metas[id] = meta
+	}
+	m.logger.Info("loaded cloud chunks from local index", "count", len(all))
+	return nil
+}
+
+// loadCloudChunksFromStore iterates blobs from the cloud store, merges them
+// into the in-memory metadata map, and populates the local index for next startup.
+func (m *Manager) loadCloudChunksFromStore() error {
+	var indexed int
+	err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix(), func(blob blobstore.BlobInfo) error {
+		id, ok := m.chunkIDFromBlobKey(blob.Key)
+		if !ok {
+			return nil
+		}
+		// Don't overwrite local chunks — local always wins.
+		if _, exists := m.metas[id]; exists {
+			return nil
+		}
 		cm := chunkcloud.BlobMetaToChunkMeta(id, blob)
-		m.metas[id] = &chunkMeta{
+		meta := &chunkMeta{
 			id:          id,
 			writeStart:  cm.WriteStart,
 			writeEnd:    cm.WriteEnd,
@@ -2236,6 +2304,25 @@ func (m *Manager) loadCloudChunks() error {
 			sourceEnd:   cm.SourceEnd,
 			cloudBacked: true,
 		}
+		m.metas[id] = meta
+
+		// Populate the local index for future startups.
+		if m.cloudIdx != nil {
+			if err := m.cloudIdx.Insert(id, meta); err != nil {
+				return fmt.Errorf("index cloud chunk %s: %w", id, err)
+			}
+			indexed++
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("list cloud chunks: %w", err)
+	}
+	if m.cloudIdx != nil && indexed > 0 {
+		if err := m.cloudIdx.Sync(); err != nil {
+			return fmt.Errorf("sync cloud index: %w", err)
+		}
+		m.logger.Info("populated cloud index from store", "count", indexed)
 	}
 	return nil
 }

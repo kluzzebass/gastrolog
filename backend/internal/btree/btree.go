@@ -1,21 +1,21 @@
 // Package btree implements a file-backed B+ tree.
 //
-// The tree maps ordered keys to ordered values. Duplicate keys are allowed;
-// entries with equal keys are secondarily ordered by value.
+// The tree maps keys to values. Key ordering is defined by the codec's Compare
+// function. Duplicate keys are allowed; entries with equal keys are stored in
+// insertion order.
 //
 // Uses pread/pwrite for I/O with an in-process page cache.
 // Not safe for concurrent use; callers must synchronize access.
 package btree
 
 import (
-	"cmp"
 	"fmt"
 	"os"
 	"slices"
 )
 
 // Tree is a file-backed B+ tree.
-type Tree[K cmp.Ordered, V cmp.Ordered] struct {
+type Tree[K, V any] struct {
 	file        *os.File
 	codec       Codec[K, V]
 	meta        meta
@@ -27,7 +27,7 @@ type Tree[K cmp.Ordered, V cmp.Ordered] struct {
 }
 
 // Create creates a new, empty B+ tree at path using the given codec.
-func Create[K cmp.Ordered, V cmp.Ordered](path string, codec Codec[K, V]) (*Tree[K, V], error) {
+func Create[K, V any](path string, codec Codec[K, V]) (*Tree[K, V], error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G304: path is caller-controlled
 	if err != nil {
 		return nil, fmt.Errorf("btree create: %w", err)
@@ -62,7 +62,7 @@ func Create[K cmp.Ordered, V cmp.Ordered](path string, codec Codec[K, V]) (*Tree
 
 // Open opens an existing B+ tree at path.
 // The codec must match the one used to create the tree.
-func Open[K cmp.Ordered, V cmp.Ordered](path string, codec Codec[K, V]) (*Tree[K, V], error) {
+func Open[K, V any](path string, codec Codec[K, V]) (*Tree[K, V], error) {
 	f, err := os.OpenFile(path, os.O_RDWR, 0) //nolint:gosec // G304: path is caller-controlled
 	if err != nil {
 		return nil, fmt.Errorf("btree open: %w", err)
@@ -113,7 +113,15 @@ func (t *Tree[K, V]) Insert(key K, value V) error {
 			return err
 		}
 		if n.typ == typeLeaf {
-			pos, _ := slices.BinarySearchFunc(n.entries, e, compareEntries[K, V])
+			// Use a comparator that treats equal keys as "less than" the
+			// target so the insertion point falls after all existing entries
+			// with the same key, preserving insertion order for duplicates.
+			pos, _ := slices.BinarySearchFunc(n.entries, e, func(a, b Entry[K, V]) int {
+				if c := t.codec.Compare(a.Key, b.Key); c != 0 {
+					return c
+				}
+				return -1
+			})
 			n.entries = slices.Insert(n.entries, pos, e)
 			t.markDirty(pageNum)
 			t.meta.count++
@@ -125,7 +133,7 @@ func (t *Tree[K, V]) Insert(key K, value V) error {
 			return nil
 		}
 
-		childIdx := findChild(n.keys, key)
+		childIdx := t.findChild(n.keys, key)
 		path = append(path, pathEntry{page: pageNum, idx: childIdx})
 		pageNum = n.children[childIdx]
 	}
@@ -143,13 +151,13 @@ func (t *Tree[K, V]) FindGE(key K) (*Iter[K, V], error) {
 		if n.typ == typeLeaf {
 			return t.findInLeaf(n, pageNum, key)
 		}
-		pageNum = n.children[findChild(n.keys, key)]
+		pageNum = n.children[t.findChild(n.keys, key)]
 	}
 }
 
 func (t *Tree[K, V]) findInLeaf(leaf *node[K, V], leafNum uint32, key K) (*Iter[K, V], error) {
 	idx, _ := slices.BinarySearchFunc(leaf.entries, key, func(e Entry[K, V], target K) int {
-		return cmp.Compare(e.Key, target)
+		return t.codec.Compare(e.Key, target)
 	})
 	if idx >= len(leaf.entries) {
 		if leaf.nextLeaf == 0 {
@@ -181,6 +189,248 @@ func (t *Tree[K, V]) Scan() (*Iter[K, V], error) {
 		}
 		pageNum = n.children[0]
 	}
+}
+
+// deleteFrame tracks a parent during tree descent for delete rebalancing.
+type deleteFrame struct {
+	page     uint32
+	childIdx int // index into children that we descended into
+}
+
+// Delete removes the first entry with the given key.
+// Returns (true, nil) if the key was found and removed, (false, nil) if not found.
+func (t *Tree[K, V]) Delete(key K) (bool, error) {
+	path := make([]deleteFrame, 0, t.meta.height)
+	pageNum := t.meta.root
+
+	for {
+		n, err := t.getNode(pageNum)
+		if err != nil {
+			return false, err
+		}
+		if n.typ == typeLeaf {
+			// Binary search for the key.
+			idx, found := slices.BinarySearchFunc(n.entries, key, func(e Entry[K, V], target K) int {
+				return t.codec.Compare(e.Key, target)
+			})
+			if !found {
+				return false, nil
+			}
+			// Remove the entry.
+			n.entries = slices.Delete(n.entries, idx, idx+1)
+			t.markDirty(pageNum)
+			t.meta.count--
+			t.metaDirty = true
+
+			// Rebalance if underflow (unless this is the root).
+			minLeaf := t.maxLeaf / 2
+			if len(n.entries) < minLeaf && len(path) > 0 {
+				return true, t.rebalanceLeaf(path, pageNum, n)
+			}
+			return true, nil
+		}
+		childIdx := t.findChild(n.keys, key)
+		path = append(path, deleteFrame{page: pageNum, childIdx: childIdx})
+		pageNum = n.children[childIdx]
+	}
+}
+
+// rebalanceLeaf rebalances an underflowing leaf by redistributing from a
+// sibling or merging with one.
+func (t *Tree[K, V]) rebalanceLeaf(path []deleteFrame, leafNum uint32, leaf *node[K, V]) error {
+	parent := path[len(path)-1]
+	pNode, err := t.getNode(parent.page)
+	if err != nil {
+		return err
+	}
+
+	// Try left sibling.
+	if parent.childIdx > 0 {
+		return t.rebalanceLeafLeft(path, parent, pNode, leafNum, leaf)
+	}
+
+	// Try right sibling.
+	if parent.childIdx < len(pNode.children)-1 {
+		return t.rebalanceLeafRight(path, parent, pNode, leafNum, leaf)
+	}
+
+	return nil
+}
+
+func (t *Tree[K, V]) rebalanceLeafLeft(path []deleteFrame, parent deleteFrame, pNode *node[K, V], leafNum uint32, leaf *node[K, V]) error {
+	leftNum := pNode.children[parent.childIdx-1]
+	left, err := t.getNode(leftNum)
+	if err != nil {
+		return err
+	}
+	if len(left.entries) > t.maxLeaf/2 {
+		// Redistribute: move last entry from left sibling to this leaf.
+		donor := left.entries[len(left.entries)-1]
+		left.entries = left.entries[:len(left.entries)-1]
+		leaf.entries = slices.Insert(leaf.entries, 0, donor)
+		pNode.keys[parent.childIdx-1] = leaf.entries[0].Key
+		t.markDirty(leftNum)
+		t.markDirty(leafNum)
+		t.markDirty(parent.page)
+		return nil
+	}
+	// Merge into left sibling.
+	left.entries = append(left.entries, leaf.entries...)
+	left.nextLeaf = leaf.nextLeaf
+	if err := t.updatePrevLeaf(leaf.nextLeaf, leftNum); err != nil {
+		return err
+	}
+	t.markDirty(leftNum)
+	delete(t.pages, leafNum)
+	delete(t.dirty, leafNum)
+	pNode.keys = slices.Delete(pNode.keys, parent.childIdx-1, parent.childIdx)
+	pNode.children = slices.Delete(pNode.children, parent.childIdx, parent.childIdx+1)
+	t.markDirty(parent.page)
+	return t.rebalanceInternal(path[:len(path)-1], parent.page, pNode)
+}
+
+func (t *Tree[K, V]) rebalanceLeafRight(path []deleteFrame, parent deleteFrame, pNode *node[K, V], leafNum uint32, leaf *node[K, V]) error {
+	rightNum := pNode.children[parent.childIdx+1]
+	right, err := t.getNode(rightNum)
+	if err != nil {
+		return err
+	}
+	if len(right.entries) > t.maxLeaf/2 {
+		// Redistribute: move first entry from right sibling to this leaf.
+		donor := right.entries[0]
+		right.entries = slices.Delete(right.entries, 0, 1)
+		leaf.entries = append(leaf.entries, donor)
+		pNode.keys[parent.childIdx] = right.entries[0].Key
+		t.markDirty(rightNum)
+		t.markDirty(leafNum)
+		t.markDirty(parent.page)
+		return nil
+	}
+	// Merge right into this leaf.
+	leaf.entries = append(leaf.entries, right.entries...)
+	leaf.nextLeaf = right.nextLeaf
+	if err := t.updatePrevLeaf(right.nextLeaf, leafNum); err != nil {
+		return err
+	}
+	t.markDirty(leafNum)
+	delete(t.pages, rightNum)
+	delete(t.dirty, rightNum)
+	pNode.keys = slices.Delete(pNode.keys, parent.childIdx, parent.childIdx+1)
+	pNode.children = slices.Delete(pNode.children, parent.childIdx+1, parent.childIdx+2)
+	t.markDirty(parent.page)
+	return t.rebalanceInternal(path[:len(path)-1], parent.page, pNode)
+}
+
+// updatePrevLeaf updates the prevLeaf pointer of the successor leaf node.
+func (t *Tree[K, V]) updatePrevLeaf(succNum uint32, newPrev uint32) error {
+	if succNum == 0 {
+		return nil
+	}
+	succ, err := t.getNode(succNum)
+	if err != nil {
+		return err
+	}
+	succ.prevLeaf = newPrev
+	t.markDirty(succNum)
+	return nil
+}
+
+// rebalanceInternal rebalances an underflowing internal node.
+func (t *Tree[K, V]) rebalanceInternal(path []deleteFrame, nodeNum uint32, n *node[K, V]) error {
+	// If this is the root and it has no keys, shrink the tree.
+	if len(path) == 0 {
+		if len(n.keys) == 0 && len(n.children) == 1 {
+			t.meta.root = n.children[0]
+			t.meta.height--
+			t.metaDirty = true
+			delete(t.pages, nodeNum)
+			delete(t.dirty, nodeNum)
+		}
+		return nil
+	}
+
+	minInternal := t.maxInternal / 2
+	if len(n.keys) >= minInternal {
+		return nil
+	}
+
+	parent := path[len(path)-1]
+	pNode, err := t.getNode(parent.page)
+	if err != nil {
+		return err
+	}
+
+	if parent.childIdx > 0 {
+		return t.rebalanceInternalLeft(path, parent, pNode, nodeNum, n)
+	}
+	if parent.childIdx < len(pNode.children)-1 {
+		return t.rebalanceInternalRight(path, parent, pNode, nodeNum, n)
+	}
+	return nil
+}
+
+func (t *Tree[K, V]) rebalanceInternalLeft(path []deleteFrame, parent deleteFrame, pNode *node[K, V], nodeNum uint32, n *node[K, V]) error {
+	leftNum := pNode.children[parent.childIdx-1]
+	left, err := t.getNode(leftNum)
+	if err != nil {
+		return err
+	}
+	minInternal := t.maxInternal / 2
+	if len(left.keys) > minInternal {
+		// Redistribute: rotate right through parent.
+		n.keys = slices.Insert(n.keys, 0, pNode.keys[parent.childIdx-1])
+		n.children = slices.Insert(n.children, 0, left.children[len(left.children)-1])
+		pNode.keys[parent.childIdx-1] = left.keys[len(left.keys)-1]
+		left.keys = left.keys[:len(left.keys)-1]
+		left.children = left.children[:len(left.children)-1]
+		t.markDirty(leftNum)
+		t.markDirty(nodeNum)
+		t.markDirty(parent.page)
+		return nil
+	}
+	// Merge into left sibling: left + separator + this node.
+	left.keys = append(left.keys, pNode.keys[parent.childIdx-1])
+	left.keys = append(left.keys, n.keys...)
+	left.children = append(left.children, n.children...)
+	t.markDirty(leftNum)
+	delete(t.pages, nodeNum)
+	delete(t.dirty, nodeNum)
+	pNode.keys = slices.Delete(pNode.keys, parent.childIdx-1, parent.childIdx)
+	pNode.children = slices.Delete(pNode.children, parent.childIdx, parent.childIdx+1)
+	t.markDirty(parent.page)
+	return t.rebalanceInternal(path[:len(path)-1], parent.page, pNode)
+}
+
+func (t *Tree[K, V]) rebalanceInternalRight(path []deleteFrame, parent deleteFrame, pNode *node[K, V], nodeNum uint32, n *node[K, V]) error {
+	rightNum := pNode.children[parent.childIdx+1]
+	right, err := t.getNode(rightNum)
+	if err != nil {
+		return err
+	}
+	minInternal := t.maxInternal / 2
+	if len(right.keys) > minInternal {
+		// Redistribute: rotate left through parent.
+		n.keys = append(n.keys, pNode.keys[parent.childIdx])
+		n.children = append(n.children, right.children[0])
+		pNode.keys[parent.childIdx] = right.keys[0]
+		right.keys = slices.Delete(right.keys, 0, 1)
+		right.children = slices.Delete(right.children, 0, 1)
+		t.markDirty(rightNum)
+		t.markDirty(nodeNum)
+		t.markDirty(parent.page)
+		return nil
+	}
+	// Merge right into this node: this + separator + right.
+	n.keys = append(n.keys, pNode.keys[parent.childIdx])
+	n.keys = append(n.keys, right.keys...)
+	n.children = append(n.children, right.children...)
+	t.markDirty(nodeNum)
+	delete(t.pages, rightNum)
+	delete(t.dirty, rightNum)
+	pNode.keys = slices.Delete(pNode.keys, parent.childIdx, parent.childIdx+1)
+	pNode.children = slices.Delete(pNode.children, parent.childIdx+1, parent.childIdx+2)
+	t.markDirty(parent.page)
+	return t.rebalanceInternal(path[:len(path)-1], parent.page, pNode)
 }
 
 // Sync writes all dirty pages and fsyncs the file.
@@ -217,11 +467,11 @@ func (t *Tree[K, V]) computeCapacity() {
 
 // findChild returns the child index to descend into for key.
 // Standard B+ tree descent: first child i where keys[i] > key.
-func findChild[K cmp.Ordered](keys []K, key K) int {
+func (t *Tree[K, V]) findChild(keys []K, key K) int {
 	lo, hi := 0, len(keys)
 	for lo < hi {
 		mid := lo + (hi-lo)/2
-		if keys[mid] <= key {
+		if t.codec.Compare(keys[mid], key) <= 0 {
 			lo = mid + 1
 		} else {
 			hi = mid

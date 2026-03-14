@@ -385,6 +385,193 @@ func TestCodecMismatch(t *testing.T) {
 	}
 }
 
+func TestDeleteSingle(t *testing.T) {
+	tree, _ := mustCreate(t)
+	defer tree.Close()
+
+	for i := range 10 {
+		if err := tree.Insert(int64(i*10), uint32(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete from middle.
+	ok, err := tree.Delete(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("Delete(50): want true")
+	}
+	if tree.Count() != 9 {
+		t.Fatalf("count = %d, want 9", tree.Count())
+	}
+
+	// Verify 50 is gone.
+	it, err := tree.FindGE(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Valid() && it.Key() == 50 {
+		t.Fatal("key 50 should have been deleted")
+	}
+
+	// Delete non-existent key.
+	ok, err = tree.Delete(999)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("Delete(999): want false")
+	}
+}
+
+func TestDeleteAll(t *testing.T) {
+	tree, _ := mustCreate(t)
+	defer tree.Close()
+
+	n := 500
+	keys := make([]int64, n)
+	for i := range n {
+		keys[i] = int64(i)
+		if err := tree.Insert(int64(i), uint32(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete all entries.
+	for _, k := range keys {
+		ok, err := tree.Delete(k)
+		if err != nil {
+			t.Fatalf("Delete(%d): %v", k, err)
+		}
+		if !ok {
+			t.Fatalf("Delete(%d): want true", k)
+		}
+	}
+
+	if tree.Count() != 0 {
+		t.Fatalf("count = %d, want 0", tree.Count())
+	}
+	if tree.Height() != 1 {
+		t.Fatalf("height = %d, want 1 after deleting all", tree.Height())
+	}
+
+	it, err := tree.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.Valid() {
+		t.Fatal("scan should be invalid after deleting all")
+	}
+}
+
+func TestDeleteAndReinsert(t *testing.T) {
+	tree, _ := mustCreate(t)
+	defer tree.Close()
+
+	n := 1000
+	for i := range n {
+		if err := tree.Insert(int64(i), uint32(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete every other entry.
+	for i := 0; i < n; i += 2 {
+		ok, err := tree.Delete(int64(i))
+		if err != nil {
+			t.Fatalf("Delete(%d): %v", i, err)
+		}
+		if !ok {
+			t.Fatalf("Delete(%d): want true", i)
+		}
+	}
+	if tree.Count() != uint64(n/2) {
+		t.Fatalf("count = %d, want %d", tree.Count(), n/2)
+	}
+
+	// Re-insert deleted entries.
+	for i := 0; i < n; i += 2 {
+		if err := tree.Insert(int64(i), uint32(i+n)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if tree.Count() != uint64(n) {
+		t.Fatalf("count = %d, want %d", tree.Count(), n)
+	}
+
+	// Verify sorted scan has all entries.
+	it, err := tree.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var prev int64 = -1
+	for it.Valid() {
+		if it.Key() < prev {
+			t.Fatalf("entry %d: key %d < previous %d", count, it.Key(), prev)
+		}
+		prev = it.Key()
+		count++
+		it.Next()
+	}
+	if count != n {
+		t.Fatalf("scanned %d entries, want %d", count, n)
+	}
+}
+
+func TestDeleteLargeRandom(t *testing.T) {
+	tree, _ := mustCreate(t)
+	defer tree.Close()
+
+	rng := rand.New(rand.NewPCG(99, 0))
+	n := 10_000
+
+	keys := make([]int64, n)
+	for i := range n {
+		keys[i] = rng.Int64N(100_000)
+		if err := tree.Insert(keys[i], uint32(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete the first half of inserted keys.
+	deleted := 0
+	for i := range n / 2 {
+		ok, err := tree.Delete(keys[i])
+		if err != nil {
+			t.Fatalf("Delete(%d): %v", keys[i], err)
+		}
+		if ok {
+			deleted++
+		}
+	}
+
+	if tree.Count() != uint64(n-deleted) {
+		t.Fatalf("count = %d, want %d", tree.Count(), n-deleted)
+	}
+
+	// Verify scan is sorted.
+	it, err := tree.Scan()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	var prev int64 = -1
+	for it.Valid() {
+		if it.Key() < prev {
+			t.Fatalf("entry %d: key %d < previous %d", count, it.Key(), prev)
+		}
+		prev = it.Key()
+		count++
+		it.Next()
+	}
+	if count != int(tree.Count()) {
+		t.Fatalf("scanned %d entries, want %d", count, tree.Count())
+	}
+}
+
 func BenchmarkInsert(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "bench.bt")
 	tree, err := btree.Create(path, btree.Int64Uint32)

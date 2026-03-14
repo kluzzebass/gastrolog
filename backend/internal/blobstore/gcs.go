@@ -83,16 +83,15 @@ func (g *GCSStore) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (g *GCSStore) List(ctx context.Context, prefix string) ([]BlobInfo, error) {
-	var result []BlobInfo
+func (g *GCSStore) List(ctx context.Context, prefix string, fn func(BlobInfo) error) error {
 	it := g.client.Bucket(g.bucket).Objects(ctx, &storage.Query{Prefix: prefix})
 	for {
 		attrs, err := it.Next()
 		if errors.Is(err, iterator.Done) {
-			break
+			return nil
 		}
 		if err != nil {
-			return nil, err
+			return err
 		}
 		info := BlobInfo{
 			Key:  attrs.Name,
@@ -101,9 +100,13 @@ func (g *GCSStore) List(ctx context.Context, prefix string) ([]BlobInfo, error) 
 		if len(attrs.Metadata) > 0 {
 			info.Metadata = attrs.Metadata
 		}
-		result = append(result, info)
+		if err := fn(info); err != nil {
+			if errors.Is(err, ErrStopIteration) {
+				return nil
+			}
+			return err
+		}
 	}
-	return result, nil
 }
 
 func (g *GCSStore) Head(ctx context.Context, key string) (BlobInfo, error) {

@@ -8,8 +8,13 @@ package blobstore
 
 import (
 	"context"
+	"errors"
 	"io"
 )
+
+// ErrStopIteration can be returned from a List callback to stop iteration
+// without signaling an error.
+var ErrStopIteration = errors.New("stop iteration")
 
 // Store is the interface for cloud object storage operations.
 type Store interface {
@@ -31,8 +36,10 @@ type Store interface {
 	// Delete removes the blob at the given key. No error if the key doesn't exist.
 	Delete(ctx context.Context, key string) error
 
-	// List returns all blobs matching the prefix, including their metadata.
-	List(ctx context.Context, prefix string) ([]BlobInfo, error)
+	// List iterates over all blobs matching the prefix, calling fn for each.
+	// Includes metadata. Stops early if fn returns a non-nil error;
+	// if fn returns ErrStopIteration, List returns nil.
+	List(ctx context.Context, prefix string, fn func(BlobInfo) error) error
 
 	// Head returns info for a single blob without downloading its contents.
 	Head(ctx context.Context, key string) (BlobInfo, error)

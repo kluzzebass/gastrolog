@@ -20,7 +20,7 @@ import (
 const (
 	// forwardChanCap is the per-node channel capacity. When full, new
 	// records are dropped to bound memory and prevent backpressure.
-	forwardChanCap = 10
+	forwardChanCap = 1000
 
 	// forwardBatchSize is the max records per flush.
 	forwardBatchSize = 100

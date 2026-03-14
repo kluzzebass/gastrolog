@@ -148,7 +148,9 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		cmParams["_vault_id"] = vaultCfg.ID.String()
 		cm, err := cmFactory(cmParams, cmLogger)
 		if err != nil {
-			return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
+			o.logger.Error("vault failed to initialize, skipping",
+				"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
+			continue
 		}
 
 		// Apply rotation policy if specified.
@@ -171,7 +173,10 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		}
 		im, err := imFactory(cmParams, cm, imLogger)
 		if err != nil {
-			return fmt.Errorf("create index manager %s: %w", vaultCfg.ID, err)
+			o.logger.Error("vault index manager failed to initialize, skipping",
+				"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
+			_ = cm.Close()
+			continue
 		}
 
 		// Create query engine with scoped logger.
@@ -186,6 +191,8 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		vault.Name = vaultCfg.Name
 		vault.Type = vaultCfg.Type
 		vault.Enabled = vaultCfg.Enabled
+		backing := vaultCfg.Params["sealed_backing"]
+		vault.BuildIndexes = backing == "" || backing == "local"
 		o.RegisterVault(vault)
 		o.logger.Info("vault registered", "id", vaultCfg.ID, "name", vaultCfg.Name, "enabled", vaultCfg.Enabled)
 	}

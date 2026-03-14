@@ -94,6 +94,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	vault := NewVault(vaultCfg.ID, cm, im, qe)
 	vault.Name = vaultCfg.Name
 	vault.Type = vaultCfg.Type
+	backing := vaultCfg.Params["sealed_backing"]
+	vault.BuildIndexes = backing == "" || backing == "local"
 	o.vaults[vaultCfg.ID] = vault
 
 	// Rebuild filter set from routes to include the new vault as a destination.

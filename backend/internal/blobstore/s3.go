@@ -2,6 +2,7 @@ package blobstore
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -105,8 +106,7 @@ func (s *S3Store) Delete(ctx context.Context, key string) error {
 	return err
 }
 
-func (s *S3Store) List(ctx context.Context, prefix string) ([]BlobInfo, error) {
-	var result []BlobInfo
+func (s *S3Store) List(ctx context.Context, prefix string, fn func(BlobInfo) error) error {
 	paginator := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{
 		Bucket: &s.bucket,
 		Prefix: &prefix,
@@ -114,7 +114,7 @@ func (s *S3Store) List(ctx context.Context, prefix string) ([]BlobInfo, error) {
 	for paginator.HasMorePages() {
 		page, err := paginator.NextPage(ctx)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		for _, obj := range page.Contents {
 			info := BlobInfo{
@@ -124,13 +124,18 @@ func (s *S3Store) List(ctx context.Context, prefix string) ([]BlobInfo, error) {
 			// S3 ListObjectsV2 does not return user metadata — fetch per object.
 			head, err := s.Head(ctx, info.Key)
 			if err != nil {
-				return nil, fmt.Errorf("head %s: %w", info.Key, err)
+				return fmt.Errorf("head %s: %w", info.Key, err)
 			}
 			info.Metadata = head.Metadata
-			result = append(result, info)
+			if err := fn(info); err != nil {
+				if errors.Is(err, ErrStopIteration) {
+					return nil
+				}
+				return err
+			}
 		}
 	}
-	return result, nil
+	return nil
 }
 
 func (s *S3Store) Head(ctx context.Context, key string) (BlobInfo, error) {

@@ -69,6 +69,9 @@ func createStore(provider string, params map[string]string) (blobstore.Store, er
 		if cfg.Bucket == "" {
 			return nil, errors.New("missing required parameter: bucket")
 		}
+		if cfg.Region == "" {
+			return nil, errors.New("missing required parameter: region")
+		}
 		return blobstore.NewS3(context.Background(), cfg)
 
 	case "azure":

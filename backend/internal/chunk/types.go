@@ -89,7 +89,7 @@ var chunkIDEncoding = base32.HexEncoding.WithPadding(base32.NoPadding)
 // ChunkID uniquely identifies a chunk.
 // It is a UUIDv7 (16 bytes) whose string representation is 26-char lowercase
 // base32hex, lexicographically sortable by creation time.
-type ChunkID [16]byte
+type ChunkID uuid.UUID
 
 // NewChunkID creates a ChunkID from a new UUIDv7.
 // UUIDv7 embeds a millisecond timestamp and guarantees monotonically increasing IDs.

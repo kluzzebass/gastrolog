@@ -338,6 +338,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	vaultID := uuid.Must(uuid.NewV7())
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -353,13 +354,17 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
+			{ID: vaultID, Type: "memory", Params: map[string]string{}},
 		},
 	}
 
+	// Vault init failure is non-fatal — node stays up, vault is skipped.
 	err = orch.ApplyConfig(cfg, factories)
-	if err == nil {
-		t.Error("expected error from chunk manager factory")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orch.ChunkManager(vaultID) != nil {
+		t.Error("failed vault should not be registered")
 	}
 }
 
@@ -369,6 +374,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	vaultID := uuid.Must(uuid.NewV7())
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -384,13 +390,17 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
+			{ID: vaultID, Type: "memory", Params: map[string]string{}},
 		},
 	}
 
+	// Vault init failure is non-fatal — node stays up, vault is skipped.
 	err = orch.ApplyConfig(cfg, factories)
-	if err == nil {
-		t.Error("expected error from index manager factory")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orch.ChunkManager(vaultID) != nil {
+		t.Error("failed vault should not be registered")
 	}
 }
 

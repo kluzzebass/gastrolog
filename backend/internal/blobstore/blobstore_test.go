@@ -76,21 +76,23 @@ func storeTest(t *testing.T, store blobstore.Store) {
 	}
 
 	// List
-	items, err := store.List(ctx, "test/")
-	if err != nil {
-		t.Fatalf("List: %v", err)
-	}
-	if len(items) == 0 {
-		t.Fatal("List returned 0 items")
-	}
+	var listCount int
 	found := false
-	for _, item := range items {
+	err = store.List(ctx, "test/", func(item blobstore.BlobInfo) error {
+		listCount++
 		if item.Key == key {
 			found = true
 			if item.Metadata["origin"] != "integration-test" {
 				t.Errorf("List metadata[origin] = %q, want %q", item.Metadata["origin"], "integration-test")
 			}
 		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if listCount == 0 {
+		t.Fatal("List returned 0 items")
 	}
 	if !found {
 		t.Errorf("List did not contain key %q", key)
