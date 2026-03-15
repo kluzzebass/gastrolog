@@ -466,12 +466,25 @@ func (m *Manager) Active() *chunk.ChunkMeta {
 
 func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
-	meta, ok := m.metas[id]
+	meta := m.lookupMeta(id)
 	m.mu.Unlock()
-	if !ok {
+	if meta == nil {
 		return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 	}
 	return meta.toChunkMeta(), nil
+}
+
+// lookupMeta checks the local map first, then the cloud B+ tree index.
+// Must be called with m.mu held.
+func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
+	if meta, ok := m.metas[id]; ok {
+		return meta
+	}
+	if m.cloudIdx == nil {
+		return nil
+	}
+	meta, _ := m.cloudIdx.Lookup(id)
+	return meta
 }
 
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
@@ -481,6 +494,22 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	for _, meta := range m.metas {
 		out = append(out, meta.toChunkMeta())
 	}
+
+	// Append cloud chunks from the B+ tree index.
+	// Pages are loaded during scan but evicted after, keeping data in OS
+	// page cache (kernel-managed) instead of Go heap (GC-managed).
+	if m.cloudIdx != nil {
+		if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+			// Skip if a local version exists (local always wins).
+			if _, exists := m.metas[id]; !exists {
+				out = append(out, meta.toChunkMeta())
+			}
+			return true
+		}); err != nil {
+			return nil, fmt.Errorf("list cloud chunks: %w", err)
+		}
+	}
+
 	// Sort by WriteStart to ensure consistent ordering.
 	slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
 		return a.WriteStart.Compare(b.WriteStart)
@@ -490,9 +519,9 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 
 func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
-	meta, ok := m.metas[id]
+	meta := m.lookupMeta(id)
 	m.mu.Unlock()
-	if !ok {
+	if meta == nil {
 		return nil, chunk.ErrChunkNotFound
 	}
 
@@ -517,8 +546,8 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 // aggregation queries that never inspect message bodies.
 func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
 	m.mu.Lock()
-	meta, ok := m.metas[id]
-	if !ok {
+	meta := m.lookupMeta(id)
+	if meta == nil {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotFound
 	}
@@ -1677,9 +1706,9 @@ func (m *Manager) sourceBTPath(id chunk.ChunkID) string {
 // Uses WriteTS for the search since it's monotonically increasing within a chunk.
 func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
-	meta, ok := m.metas[id]
+	meta := m.lookupMeta(id)
 	m.mu.Unlock()
-	if !ok {
+	if meta == nil {
 		return 0, false, chunk.ErrChunkNotFound
 	}
 
@@ -1797,9 +1826,9 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 	}
 
 	m.mu.Lock()
-	meta, ok := m.metas[id]
+	meta := m.lookupMeta(id)
 	m.mu.Unlock()
-	if !ok {
+	if meta == nil {
 		return nil, chunk.ErrChunkNotFound
 	}
 
@@ -1871,8 +1900,8 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		return chunk.ErrActiveChunk
 	}
 
-	meta, ok := m.metas[id]
-	if !ok {
+	meta := m.lookupMeta(id)
+	if meta == nil {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotFound
 	}
@@ -1902,7 +1931,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		}
 	}
 
-	delete(m.metas, id)
+	delete(m.metas, id) // no-op for cloud chunks (not in metas)
 	m.mu.Unlock()
 	return nil
 }
@@ -2093,8 +2122,8 @@ func (m *Manager) Adopt(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 		return chunk.ChunkMeta{}, ErrManagerClosed
 	}
 
-	// Check if already tracked.
-	if _, ok := m.metas[id]; ok {
+	// Check if already tracked (local or cloud).
+	if m.lookupMeta(id) != nil {
 		return chunk.ChunkMeta{}, fmt.Errorf("chunk %s already tracked", id)
 	}
 
@@ -2206,12 +2235,14 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("remove local chunk dir after cloud upload: %w", err)
 	}
 
-	// Update in-memory metadata and cloud index.
+	// Move metadata from in-memory map to cloud B+ tree index.
+	// The chunk is now cloud-only — remove from Go heap.
 	m.mu.Lock()
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
 		meta.diskBytes = info.Size
+		delete(m.metas, id)
 	}
 	m.mu.Unlock()
 
@@ -2292,36 +2323,19 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 	return chunkcloud.NewSeekableCursor(rd, id), nil
 }
 
-// loadCloudChunks populates the in-memory metadata map from cloud chunks.
-// If the local B+ tree index has entries, those are used directly — no cloud
-// API calls needed. Otherwise falls back to store.List() + store.Head() and
-// populates the index for next time.
+// loadCloudChunks verifies the cloud index is readable and populates it from
+// the cloud store if empty. Cloud chunk metadata is NOT loaded into m.metas —
+// it stays in the B+ tree and is served on demand via lookupMeta/ForEach.
 func (m *Manager) loadCloudChunks() error {
 	if m.cloudIdx != nil && m.cloudIdx.Count() > 0 {
-		return m.loadCloudChunksFromIndex()
+		m.logger.Info("cloud index ready", "count", m.cloudIdx.Count())
+		return nil
 	}
 	return m.loadCloudChunksFromStore()
 }
 
-// loadCloudChunksFromIndex loads cloud chunk metadata from the local B+ tree index.
-func (m *Manager) loadCloudChunksFromIndex() error {
-	all, err := m.cloudIdx.LoadAll()
-	if err != nil {
-		return fmt.Errorf("load cloud index: %w", err)
-	}
-	for id, meta := range all {
-		// Don't overwrite local chunks — local always wins.
-		if _, exists := m.metas[id]; exists {
-			continue
-		}
-		m.metas[id] = meta
-	}
-	m.logger.Info("loaded cloud chunks from local index", "count", len(all))
-	return nil
-}
-
-// loadCloudChunksFromStore iterates blobs from the cloud store, merges them
-// into the in-memory metadata map, and populates the local index for next startup.
+// loadCloudChunksFromStore iterates blobs from the cloud store and populates
+// the local B+ tree index. Does NOT insert into m.metas.
 func (m *Manager) loadCloudChunksFromStore() error {
 	var indexed int
 	err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix(), func(blob blobstore.BlobInfo) error {
@@ -2329,7 +2343,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		if !ok {
 			return nil
 		}
-		// Don't overwrite local chunks — local always wins.
+		// Skip if local version exists (local always wins).
 		if _, exists := m.metas[id]; exists {
 			return nil
 		}
@@ -2349,9 +2363,8 @@ func (m *Manager) loadCloudChunksFromStore() error {
 			sourceEnd:   cm.SourceEnd,
 			cloudBacked: true,
 		}
-		m.metas[id] = meta
 
-		// Populate the local index for future startups.
+		// Populate the local B+ tree index.
 		if m.cloudIdx != nil {
 			if err := m.cloudIdx.Insert(id, meta); err != nil {
 				return fmt.Errorf("index cloud chunk %s: %w", id, err)
@@ -2367,6 +2380,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		if err := m.cloudIdx.Sync(); err != nil {
 			return fmt.Errorf("sync cloud index: %w", err)
 		}
+		m.cloudIdx.EvictClean()
 		m.logger.Info("populated cloud index from store", "count", indexed)
 	}
 	return nil

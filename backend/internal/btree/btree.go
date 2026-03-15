@@ -441,6 +441,18 @@ func (t *Tree[K, V]) Sync() error {
 	return t.file.Sync()
 }
 
+// EvictClean drops all non-dirty pages from the in-process page cache.
+// Pages remain in the OS page cache for fast re-reads via pread, but no
+// longer occupy Go heap memory. Call after bulk scans or point lookups
+// to bound heap usage.
+func (t *Tree[K, V]) EvictClean() {
+	for p := range t.pages {
+		if !t.dirty[p] {
+			delete(t.pages, p)
+		}
+	}
+}
+
 // Close writes dirty pages and closes the file.
 // Does not fsync — call Sync first if durability is needed.
 func (t *Tree[K, V]) Close() error {

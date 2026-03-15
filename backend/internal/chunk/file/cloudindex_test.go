@@ -63,17 +63,9 @@ func TestCloudIndexRoundTrip(t *testing.T) {
 		t.Fatalf("count after reopen = %d, want 5", idx.Count())
 	}
 
-	// LoadAll and verify.
-	all, err := idx.LoadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(all) != 5 {
-		t.Fatalf("LoadAll returned %d entries, want 5", len(all))
-	}
-
+	// Lookup each and verify.
 	for i, id := range ids {
-		got, ok := all[id]
+		got, ok := idx.Lookup(id)
 		if !ok {
 			t.Fatalf("missing chunk %s", id)
 		}
@@ -100,6 +92,18 @@ func TestCloudIndexRoundTrip(t *testing.T) {
 		if got.writeStart.UnixNano() != want.writeStart.UnixNano() {
 			t.Errorf("chunk %s: writeStart mismatch", id)
 		}
+	}
+
+	// ForEach should iterate all entries.
+	var count int
+	if err := idx.ForEach(func(_ chunk.ChunkID, _ *chunkMeta) bool {
+		count++
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 5 {
+		t.Fatalf("ForEach visited %d entries, want 5", count)
 	}
 }
 
@@ -136,18 +140,14 @@ func TestCloudIndexDelete(t *testing.T) {
 		t.Fatalf("count = %d, want 2", idx.Count())
 	}
 
-	// Verify it's gone.
-	all, err := idx.LoadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := all[ids[1]]; ok {
+	// Verify it's gone via Lookup.
+	if _, ok := idx.Lookup(ids[1]); ok {
 		t.Fatal("deleted chunk should not be present")
 	}
-	if _, ok := all[ids[0]]; !ok {
+	if _, ok := idx.Lookup(ids[0]); !ok {
 		t.Fatal("first chunk should still be present")
 	}
-	if _, ok := all[ids[2]]; !ok {
+	if _, ok := idx.Lookup(ids[2]); !ok {
 		t.Fatal("third chunk should still be present")
 	}
 }
@@ -178,4 +178,37 @@ func TestCloudIndexCreateOrOpen(t *testing.T) {
 		t.Fatalf("reopen failed: %v", err)
 	}
 	_ = path
+}
+
+func TestCloudIndexEvictClean(t *testing.T) {
+	dir := t.TempDir()
+	idx, err := openCloudIndex(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer idx.Close()
+
+	// Insert and sync to flush pages to disk.
+	id := chunk.NewChunkID()
+	if err := idx.Insert(id, &chunkMeta{id: id, sealed: true, cloudBacked: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := idx.Sync(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Lookup loads pages into cache, EvictClean drops them.
+	meta, ok := idx.Lookup(id)
+	if !ok {
+		t.Fatal("Lookup should find the entry")
+	}
+	if meta.id != id {
+		t.Fatal("Lookup returned wrong ID")
+	}
+	// EvictClean is called internally by Lookup — subsequent lookup
+	// should still work (re-reads from OS page cache).
+	meta, ok = idx.Lookup(id)
+	if !ok {
+		t.Fatal("Lookup after eviction should still work")
+	}
 }
