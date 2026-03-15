@@ -608,12 +608,32 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 	}
 
 	// Active chunk or index unavailable: build normal scanner then buffer & sort.
+	innerQ := q
+	if meta.Sealed {
+		// For sealed chunks without a TS index, the sequential scanner reads
+		// in WriteTS order and applies IngestTS time bounds — stopping early
+		// when it hits a record with IngestTS before the lower bound. But
+		// WriteTS and IngestTS can differ (forwarded records), so the scanner
+		// misses records that are within the time range but out of WriteTS
+		// order. Strip time bounds from the inner scanner and apply them
+		// after sorting by the correct TS field.
+		// Preserve the reverse flag explicitly since Reverse() has a legacy
+		// fallback that inspects Start/End ordering.
+		innerQ.IsReverse = q.Reverse()
+		innerQ.Start = time.Time{}
+		innerQ.End = time.Time{}
+	}
+
 	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
 		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: b.minPos}); err != nil {
 			return nil, err
 		}
 	}
-	inner := b.build(ctx, cursor, q)
+	inner := b.build(ctx, cursor, innerQ)
+	if meta.Sealed {
+		lower, upper := q.TimeBounds()
+		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper), nil
+	}
 	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
 }
 

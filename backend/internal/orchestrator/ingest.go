@@ -32,8 +32,8 @@ func (o *Orchestrator) Ingest(rec chunk.Record) error {
 // ingest is the internal ingest implementation, called by processMessage.
 // Extracted from Ingest to allow both direct and channel-based ingestion.
 func (o *Orchestrator) ingest(rec chunk.Record) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 
 	o.routeStats.Ingested.Add(1)
 

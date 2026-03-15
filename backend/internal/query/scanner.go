@@ -1629,3 +1629,44 @@ func reorderByTS(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse
 		}
 	}
 }
+
+// reorderByTSWithBounds buffers all records, sorts by the given TS field,
+// applies time bounds AFTER sorting, and yields in order. Used when the inner
+// scanner reads in physical (WriteTS) order and IngestTS bounds can't be
+// applied during the scan without skipping records.
+func reorderByTSWithBounds(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse bool, lower, upper time.Time) iter.Seq2[recordWithRef, error] {
+	return func(yield func(recordWithRef, error) bool) {
+		var buf []recordWithRef
+		for rr, err := range inner {
+			if err != nil {
+				yield(rr, err)
+				return
+			}
+			buf = append(buf, rr)
+		}
+
+		slices.SortStableFunc(buf, func(a, b recordWithRef) int {
+			at := orderBy.RecordTS(a.Record)
+			bt := orderBy.RecordTS(b.Record)
+			if reverse {
+				return bt.Compare(at)
+			}
+			return at.Compare(bt)
+		})
+
+		for _, rr := range buf {
+			if !lower.IsZero() || !upper.IsZero() {
+				ts := orderBy.RecordTS(rr.Record)
+				if !lower.IsZero() && ts.Before(lower) {
+					continue
+				}
+				if !upper.IsZero() && !ts.Before(upper) {
+					continue
+				}
+			}
+			if !yield(rr, nil) {
+				return
+			}
+		}
+	}
+}

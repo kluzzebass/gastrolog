@@ -115,8 +115,8 @@ func (o *Orchestrator) VaultType(vaultID uuid.UUID) string {
 // This is the sole write path for all record sources: local ingesters,
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
+	o.mu.RLock()
+	defer o.mu.RUnlock()
 	return o.appendRecord(vaultID, rec)
 }
 
@@ -191,9 +191,9 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 	}
 
 	// Schedule post-seal pipeline (same as ingest onSeal callback).
-	o.mu.Lock()
+	o.mu.RLock()
 	o.schedulePostSeal(vaultID, chunkID)
-	o.mu.Unlock()
+	o.mu.RUnlock()
 
 	return nil
 }

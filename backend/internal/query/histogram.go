@@ -438,6 +438,10 @@ func findIngestPos(cm chunk.ChunkManager, im index.IndexManager, chunkID chunk.C
 // Active chunks: chunk manager's FindIngestStartPosition (in-memory B-tree).
 // Sealed chunks: index manager's FindIngestStartPosition (on-disk binary search).
 // Both are O(buckets × log(n)) with no heap allocation beyond stack buffers.
+//
+// For chunks without an ingest index (e.g., cloud-backed chunks), falls back to
+// linear interpolation: assumes records are evenly distributed across the chunk's
+// IngestStart → IngestEnd range.
 func timechartChunkByIngestTS(
 	cm chunk.ChunkManager,
 	im index.IndexManager,
@@ -447,7 +451,6 @@ func timechartChunkByIngestTS(
 	numBuckets int,
 	counts []int64,
 ) {
-
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
 	firstBucket := 0
@@ -465,21 +468,83 @@ func timechartChunkByIngestTS(
 		}
 	}
 
+	// Try index-based counting first.
+	if _, ok := findIngestPos(cm, im, meta.ID, start); ok {
+		timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
+		return
+	}
+
+	// No ingest index available — linear interpolation.
+	timechartChunkInterpolated(meta, start, bucketWidth, firstBucket, lastBucket, counts)
+}
+
+// timechartChunkByIndex counts records per bucket using binary search on the ingest index.
+func timechartChunkByIndex(
+	cm chunk.ChunkManager,
+	im index.IndexManager,
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	counts []int64,
+) {
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startPos, _ := findIngestPos(cm, im, meta.ID,bStart)
+		startPos, _ := findIngestPos(cm, im, meta.ID, bStart)
 
 		var endPos uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if pos, ok := findIngestPos(cm, im, meta.ID,bEnd); ok {
+		} else if pos, ok := findIngestPos(cm, im, meta.ID, bEnd); ok {
 			endPos = pos
 		}
 
 		if endPos > startPos {
 			counts[b] += int64(endPos - startPos)
 		}
+	}
+}
+
+// timechartChunkInterpolated distributes records evenly across buckets based on
+// the chunk's IngestStart/IngestEnd time range. Used when no ingest index is
+// available (e.g., cloud-backed chunks).
+func timechartChunkInterpolated(
+	meta chunk.ChunkMeta,
+	start time.Time,
+	bucketWidth time.Duration,
+	firstBucket, lastBucket int,
+	counts []int64,
+) {
+	if meta.IngestStart.IsZero() || meta.IngestEnd.IsZero() || meta.RecordCount == 0 {
+		return
+	}
+	chunkDuration := meta.IngestEnd.Sub(meta.IngestStart)
+	if chunkDuration <= 0 {
+		// All records at the same instant — put them in one bucket.
+		counts[firstBucket] += meta.RecordCount
+		return
+	}
+
+	totalRecords := float64(meta.RecordCount)
+	for b := firstBucket; b <= lastBucket; b++ {
+		bStart := start.Add(bucketWidth * time.Duration(b))
+		bEnd := start.Add(bucketWidth * time.Duration(b+1))
+
+		// Clamp to chunk bounds.
+		if bStart.Before(meta.IngestStart) {
+			bStart = meta.IngestStart
+		}
+		if bEnd.After(meta.IngestEnd) {
+			bEnd = meta.IngestEnd
+		}
+		if !bEnd.After(bStart) {
+			continue
+		}
+
+		// Pro-rate records by time fraction.
+		fraction := float64(bEnd.Sub(bStart)) / float64(chunkDuration)
+		counts[b] += int64(totalRecords * fraction)
 	}
 }

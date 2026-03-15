@@ -1860,39 +1860,50 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 // Returns ErrChunkNotFound if the chunk does not exist.
 func (m *Manager) Delete(id chunk.ChunkID) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 
 	if m.closed {
+		m.mu.Unlock()
 		return ErrManagerClosed
 	}
 
 	if m.active != nil && m.active.meta.id == id {
+		m.mu.Unlock()
 		return chunk.ErrActiveChunk
 	}
 
 	meta, ok := m.metas[id]
 	if !ok {
+		m.mu.Unlock()
 		return chunk.ErrChunkNotFound
 	}
 
 	if meta.cloudBacked {
-		if err := m.cfg.CloudStore.Delete(context.Background(), m.blobKey(id)); err != nil {
+		// Release the lock before the S3 API call — cloud deletes can take
+		// hundreds of milliseconds and would block all Appends.
+		key := m.blobKey(id)
+		m.mu.Unlock()
+		err := m.cfg.CloudStore.Delete(context.Background(), key)
+		m.mu.Lock()
+		if err != nil {
+			m.mu.Unlock()
 			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
 		}
 		m.removeFromCloudIndex(id)
 	} else {
 		dir := m.chunkDir(id)
-		// Wait for in-flight compression to finish — it may be writing
+		// Wait for in-flight post-seal work to finish — it may be writing
 		// temporary files into this chunk's directory.
 		m.mu.Unlock()
 		m.postSealWg.Wait()
 		m.mu.Lock()
 		if err := os.RemoveAll(dir); err != nil {
+			m.mu.Unlock()
 			return fmt.Errorf("remove chunk dir %s: %w", id, err)
 		}
 	}
 
 	delete(m.metas, id)
+	m.mu.Unlock()
 	return nil
 }
 
@@ -1941,6 +1952,11 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 // Must be called before PostSealProcess. Passing nil disables index building.
 func (m *Manager) SetIndexBuilders(builders []chunk.ChunkIndexBuilder) {
 	m.indexBuilders = builders
+}
+
+// HasIndexBuilders reports whether index builders are injected.
+func (m *Manager) HasIndexBuilders() bool {
+	return len(m.indexBuilders) > 0
 }
 
 // PostSealProcess runs the full post-seal pipeline for a sealed chunk:

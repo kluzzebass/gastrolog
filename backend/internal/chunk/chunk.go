@@ -135,6 +135,9 @@ type ChunkPostSealProcessor interface {
 	// Must be called before PostSealProcess. Passing nil or empty disables
 	// index building (e.g., for cloud-backed vaults).
 	SetIndexBuilders(builders []ChunkIndexBuilder)
+
+	// HasIndexBuilders reports whether index builders are injected.
+	HasIndexBuilders() bool
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

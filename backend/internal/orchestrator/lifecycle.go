@@ -282,6 +282,17 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 		if vault == nil {
 			continue
 		}
+
+		// Skip vaults where the post-seal pipeline handles indexes.
+		// Cloud-backed vaults have no index builders — building indexes
+		// for chunks that will be uploaded and deleted is wasted work,
+		// and races with the upload (creating orphaned index files).
+		if proc, ok := vault.Chunks.(chunk.ChunkPostSealProcessor); ok {
+			if !proc.HasIndexBuilders() {
+				continue
+			}
+		}
+
 		cm := vault.Chunks
 		im := vault.Indexes
 
