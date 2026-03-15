@@ -88,23 +88,35 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.ConfigServiceGetSettingsProcedure: true, // password policy needed on register page
 		},
 		admin: map[string]bool{
-			// User management (admin-only)
+			// User management
 			gastrologv1connect.AuthServiceCreateUserProcedure:     true,
 			gastrologv1connect.AuthServiceListUsersProcedure:      true,
 			gastrologv1connect.AuthServiceUpdateUserRoleProcedure: true,
 			gastrologv1connect.AuthServiceResetPasswordProcedure:  true,
 			gastrologv1connect.AuthServiceDeleteUserProcedure:     true,
-			// Lifecycle
-			gastrologv1connect.LifecycleServiceShutdownProcedure: true,
-			// VaultService
-			gastrologv1connect.VaultServiceListVaultsProcedure:   true,
-			gastrologv1connect.VaultServiceGetVaultProcedure:     true,
-			gastrologv1connect.VaultServiceListChunksProcedure:   true,
-			gastrologv1connect.VaultServiceGetChunkProcedure:     true,
-			gastrologv1connect.VaultServiceGetIndexesProcedure:   true,
-			gastrologv1connect.VaultServiceAnalyzeChunkProcedure: true,
-			gastrologv1connect.VaultServiceGetStatsProcedure:     true,
-			// ConfigService
+			gastrologv1connect.AuthServiceRenameUserProcedure:     true,
+			// Lifecycle + cluster
+			gastrologv1connect.LifecycleServiceShutdownProcedure:        true,
+			gastrologv1connect.LifecycleServiceGetClusterStatusProcedure: true,
+			gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: true,
+			gastrologv1connect.LifecycleServiceJoinClusterProcedure:     true,
+			gastrologv1connect.LifecycleServiceRemoveNodeProcedure:      true,
+			// VaultService (inspector + operations)
+			gastrologv1connect.VaultServiceListVaultsProcedure:    true,
+			gastrologv1connect.VaultServiceGetVaultProcedure:      true,
+			gastrologv1connect.VaultServiceListChunksProcedure:    true,
+			gastrologv1connect.VaultServiceGetChunkProcedure:      true,
+			gastrologv1connect.VaultServiceGetIndexesProcedure:    true,
+			gastrologv1connect.VaultServiceAnalyzeChunkProcedure:  true,
+			gastrologv1connect.VaultServiceGetStatsProcedure:      true,
+			gastrologv1connect.VaultServiceReindexVaultProcedure:  true,
+			gastrologv1connect.VaultServiceValidateVaultProcedure: true,
+			gastrologv1connect.VaultServiceMigrateVaultProcedure:  true,
+			gastrologv1connect.VaultServiceExportVaultProcedure:   true,
+			gastrologv1connect.VaultServiceImportRecordsProcedure: true,
+			gastrologv1connect.VaultServiceMergeVaultsProcedure:   true,
+			gastrologv1connect.VaultServiceSealVaultProcedure:     true,
+			// ConfigService — mutations
 			gastrologv1connect.ConfigServiceGetConfigProcedure:             true,
 			gastrologv1connect.ConfigServiceListIngestersProcedure:         true,
 			gastrologv1connect.ConfigServiceGetIngesterStatusProcedure:     true,
@@ -118,7 +130,24 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.ConfigServiceDeleteVaultProcedure:           true,
 			gastrologv1connect.ConfigServicePutIngesterProcedure:           true,
 			gastrologv1connect.ConfigServiceDeleteIngesterProcedure:        true,
-			gastrologv1connect.ConfigServicePutSettingsProcedure:       true,
+			gastrologv1connect.ConfigServicePutSettingsProcedure:           true,
+			gastrologv1connect.ConfigServiceRegenerateJwtSecretProcedure:   true,
+			gastrologv1connect.ConfigServicePutNodeConfigProcedure:         true,
+			gastrologv1connect.ConfigServicePutRouteProcedure:              true,
+			gastrologv1connect.ConfigServiceDeleteRouteProcedure:           true,
+			gastrologv1connect.ConfigServicePauseVaultProcedure:            true,
+			gastrologv1connect.ConfigServiceResumeVaultProcedure:           true,
+			gastrologv1connect.ConfigServiceTriggerIngesterProcedure:       true,
+			// ConfigService — certificates
+			gastrologv1connect.ConfigServiceListCertificatesProcedure:  true,
+			gastrologv1connect.ConfigServiceGetCertificateProcedure:    true,
+			gastrologv1connect.ConfigServicePutCertificateProcedure:    true,
+			gastrologv1connect.ConfigServiceDeleteCertificateProcedure: true,
+			// ConfigService — managed files
+			gastrologv1connect.ConfigServiceListManagedFilesProcedure:  true,
+			gastrologv1connect.ConfigServiceDeleteManagedFileProcedure: true,
+			// QueryService — destructive
+			gastrologv1connect.QueryServiceExportToVaultProcedure: true,
 		},
 	}
 }
