@@ -258,6 +258,37 @@ export function HistogramChart({
     };
   });
 
+  // Add cloud data marker series — small hatched bars where cloud chunks
+  // have data but exact counts are unavailable.
+  const hasCloudData = buckets.some((b) => b.hasCloudData);
+  if (hasCloudData) {
+    const maxCount = Math.max(...buckets.map((b) => b.count).filter((c) => c > 0), 1);
+    const markerHeight = Math.max(maxCount * 0.04, 1); // 4% of max bar or 1
+    seriesData.push({
+      name: "cloud data",
+      type: "bar" as const,
+      stack: "cloud",
+      data: buckets.map((b, i) => ({
+        value: b.hasCloudData ? markerHeight : 0,
+        itemStyle: {
+          color: copperColor,
+          opacity: b.hasCloudData ? (ix.hoveredBar === i ? 0.5 : 0.2) : 0,
+          borderRadius: [1, 1, 0, 0],
+          decal: {
+            symbol: "none",
+            dashArrayX: [1, 0],
+            dashArrayY: [2, 2],
+            rotation: -Math.PI / 4,
+            color: "rgba(255,255,255,0.4)",
+          },
+        },
+      })),
+      emphasis: { disabled: true },
+      barCategoryGap: "8%",
+      cursor: "crosshair",
+    });
+  }
+
   // Time formatting.
   const rangeMs = firstBucket && lastBucket
     ? lastBucket.ts.getTime() - firstBucket.ts.getTime()

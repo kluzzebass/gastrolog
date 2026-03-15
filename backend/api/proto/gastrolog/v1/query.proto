@@ -72,6 +72,7 @@ message HistogramBucket {
   int64 timestamp_ms = 1;              // Bucket start time (milliseconds since epoch)
   int64 count = 2;                     // Total records in this bucket
   map<string, int64> group_counts = 3; // Level → count; records without level → "other"
+  bool has_cloud_data = 4;             // True if cloud chunks cover this bucket (count unknown)
 }
 
 // TableResult holds aggregated results from a pipeline stats operator.

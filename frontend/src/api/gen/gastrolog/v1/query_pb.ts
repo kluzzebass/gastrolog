@@ -148,6 +148,13 @@ export class HistogramBucket extends Message<HistogramBucket> {
    */
   groupCounts: { [key: string]: bigint } = {};
 
+  /**
+   * True if cloud chunks cover this bucket (count unknown)
+   *
+   * @generated from field: bool has_cloud_data = 4;
+   */
+  hasCloudData = false;
+
   constructor(data?: PartialMessage<HistogramBucket>) {
     super();
     proto3.util.initPartial(data, this);
@@ -159,6 +166,7 @@ export class HistogramBucket extends Message<HistogramBucket> {
     { no: 1, name: "timestamp_ms", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "group_counts", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 3 /* ScalarType.INT64 */} },
+    { no: 4, name: "has_cloud_data", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HistogramBucket {
