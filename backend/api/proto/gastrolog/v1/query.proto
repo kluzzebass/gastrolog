@@ -64,6 +64,10 @@ message SearchResponse {
   // Volume histogram, set on the first response message only.
   // Provides an approximate record count distribution by time bucket and level.
   repeated HistogramBucket histogram = 5;
+
+  // Number of chunks skipped because they are in an offline storage tier
+  // (S3 Glacier, Azure Archive). Set on the first response message.
+  int32 archived_chunks = 6;
 }
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.

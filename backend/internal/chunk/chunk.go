@@ -16,6 +16,7 @@ var (
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
+	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
 )
 
 // ManagerFactory creates a ChunkManager from configuration parameters.

@@ -10,6 +10,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 // S3Config holds configuration for an S3-compatible blob store.
@@ -80,6 +82,9 @@ func (s *S3Store) Download(ctx context.Context, key string) (io.ReadCloser, erro
 		Key:    &key,
 	})
 	if err != nil {
+		if isS3ArchivedError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
+		}
 		return nil, err
 	}
 	return out.Body, nil
@@ -93,6 +98,9 @@ func (s *S3Store) DownloadRange(ctx context.Context, key string, offset, length 
 		Range:  &rangeHeader,
 	})
 	if err != nil {
+		if isS3ArchivedError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
+		}
 		return nil, err
 	}
 	return out.Body, nil
@@ -118,8 +126,9 @@ func (s *S3Store) List(ctx context.Context, prefix string, fn func(BlobInfo) err
 		}
 		for _, obj := range page.Contents {
 			info := BlobInfo{
-				Key:  aws.ToString(obj.Key),
-				Size: aws.ToInt64(obj.Size),
+				Key:          aws.ToString(obj.Key),
+				Size:         aws.ToInt64(obj.Size),
+				StorageClass: string(obj.StorageClass),
 			}
 			// S3 ListObjectsV2 does not return user metadata — fetch per object.
 			head, err := s.Head(ctx, info.Key)
@@ -147,8 +156,21 @@ func (s *S3Store) Head(ctx context.Context, key string) (BlobInfo, error) {
 		return BlobInfo{}, err
 	}
 	return BlobInfo{
-		Key:      key,
-		Size:     aws.ToInt64(out.ContentLength),
-		Metadata: out.Metadata,
+		Key:          key,
+		Size:         aws.ToInt64(out.ContentLength),
+		Metadata:     out.Metadata,
+		StorageClass: string(out.StorageClass),
 	}, nil
+}
+
+// isS3ArchivedError checks if an S3 error is InvalidObjectState, which occurs
+// when trying to GetObject on a blob in Glacier Flexible Retrieval or Deep Archive.
+func isS3ArchivedError(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode() == "InvalidObjectState"
+	}
+	// Also check for the typed error from the S3 SDK.
+	var invalidState *types.InvalidObjectState
+	return errors.As(err, &invalidState)
 }

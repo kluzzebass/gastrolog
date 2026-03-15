@@ -61,6 +61,9 @@ func (a *AzureStore) Upload(ctx context.Context, key string, data io.Reader, met
 func (a *AzureStore) Download(ctx context.Context, key string) (io.ReadCloser, error) {
 	resp, err := a.client.DownloadStream(ctx, a.containerName, key, nil)
 	if err != nil {
+		if isAzureArchivedError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
+		}
 		return nil, err
 	}
 	return resp.Body, nil
@@ -71,6 +74,9 @@ func (a *AzureStore) DownloadRange(ctx context.Context, key string, offset, leng
 		Range: blob.HTTPRange{Offset: offset, Count: length},
 	})
 	if err != nil {
+		if isAzureArchivedError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
+		}
 		return nil, err
 	}
 	return resp.Body, nil
@@ -93,20 +99,7 @@ func (a *AzureStore) List(ctx context.Context, prefix string, fn func(BlobInfo) 
 			return err
 		}
 		for _, item := range page.Segment.BlobItems {
-			info := BlobInfo{
-				Key: *item.Name,
-			}
-			if item.Properties != nil && item.Properties.ContentLength != nil {
-				info.Size = *item.Properties.ContentLength
-			}
-			if item.Metadata != nil {
-				info.Metadata = make(map[string]string, len(item.Metadata))
-				for k, v := range item.Metadata {
-					if v != nil {
-						info.Metadata[strings.ToLower(k)] = *v
-					}
-				}
-			}
+			info := azureBlobToInfo(item)
 			if err := fn(info); err != nil {
 				if errors.Is(err, ErrStopIteration) {
 					return nil
@@ -138,4 +131,38 @@ func (a *AzureStore) Head(ctx context.Context, key string) (BlobInfo, error) {
 		}
 	}
 	return info, nil
+}
+
+// azureBlobToInfo converts an Azure BlobItem to a BlobInfo.
+func azureBlobToInfo(item *container.BlobItem) BlobInfo {
+	info := BlobInfo{Key: *item.Name}
+	if item.Properties != nil {
+		if item.Properties.ContentLength != nil {
+			info.Size = *item.Properties.ContentLength
+		}
+		if item.Properties.AccessTier != nil {
+			info.StorageClass = string(*item.Properties.AccessTier)
+		}
+	}
+	if item.Metadata != nil {
+		info.Metadata = make(map[string]string, len(item.Metadata))
+		for k, v := range item.Metadata {
+			if v != nil {
+				info.Metadata[strings.ToLower(k)] = *v
+			}
+		}
+	}
+	return info
+}
+
+// isAzureArchivedError checks if an Azure error is due to the blob being
+// in the Archive tier (409 Conflict with "BlobArchived" error code).
+func isAzureArchivedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	// Azure returns 409 Conflict with "BlobArchived" for archive-tier blobs.
+	errStr := err.Error()
+	return strings.Contains(errStr, "BlobArchived") ||
+		strings.Contains(errStr, "This operation is not permitted on an archived blob")
 }

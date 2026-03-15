@@ -12,9 +12,16 @@ import (
 	"io"
 )
 
-// ErrStopIteration can be returned from a List callback to stop iteration
-// without signaling an error.
-var ErrStopIteration = errors.New("stop iteration")
+var (
+	// ErrStopIteration can be returned from a List callback to stop iteration
+	// without signaling an error.
+	ErrStopIteration = errors.New("stop iteration")
+
+	// ErrBlobArchived indicates the blob exists but is in an offline storage
+	// tier (S3 Glacier Flexible Retrieval/Deep Archive, Azure Archive) and
+	// cannot be read without a restore operation.
+	ErrBlobArchived = errors.New("blob is archived and not immediately readable")
+)
 
 // Store is the interface for cloud object storage operations.
 type Store interface {
@@ -47,7 +54,21 @@ type Store interface {
 
 // BlobInfo describes a single object in the store.
 type BlobInfo struct {
-	Key      string
-	Size     int64
-	Metadata map[string]string
+	Key          string
+	Size         int64
+	Metadata     map[string]string
+	StorageClass string // Provider-specific: S3 StorageClass, Azure AccessTier, GCS StorageClass
+}
+
+// IsArchived returns true if the blob is in an offline storage tier that
+// requires a restore operation before it can be read.
+// S3: GLACIER, DEEP_ARCHIVE. Azure: Archive. GCS: always false (all readable).
+func (b BlobInfo) IsArchived() bool {
+	switch b.StorageClass {
+	case "GLACIER", "DEEP_ARCHIVE": // S3
+		return true
+	case "Archive": // Azure
+		return true
+	}
+	return false
 }
