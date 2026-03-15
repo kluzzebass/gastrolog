@@ -77,6 +77,7 @@ export function VirtualLogList({
               dark={dark}
               highlightMode={highlightMode}
               orderBy={orderBy}
+              rowIndex={virtualRow.index}
             />
           </div>
         );

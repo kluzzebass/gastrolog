@@ -158,12 +158,13 @@ message ForwardRecordsResponse {
 message ForwardSearchRequest {
   string vault_id = 1;
   string query = 2;
-  reserved 3; // was resume_token (removed: streaming replaces pagination)
+  bytes resume_token = 3; // resume token for pagination across pages
 }
 
 message ForwardSearchResponse {
   repeated ExportRecord records = 1;
-  reserved 2, 3; // were resume_token, has_more (removed: streaming replaces pagination)
+  bytes resume_token = 2;
+  bool has_more = 3;
   TableResult table_result = 4;          // Pipeline results (timechart, stats)
   repeated HistogramBucket histogram = 5; // Volume histogram from this node's vaults
 }

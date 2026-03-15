@@ -50,6 +50,7 @@ type mergeState struct {
 	h              heap.Interface
 	scanners       []activeScanner
 	chunkPositions map[mergeKey]uint64
+	chunkResumeTS  map[mergeKey]time.Time // IngestTS-based resume for reordered chunks
 	lastRefs       *[]MultiVaultPosition
 }
 
@@ -66,11 +67,15 @@ func (ms *mergeState) cleanup() {
 func (ms *mergeState) buildLastRefs() {
 	refs := make([]MultiVaultPosition, 0, len(ms.chunkPositions))
 	for key, pos := range ms.chunkPositions {
-		refs = append(refs, MultiVaultPosition{
+		mvp := MultiVaultPosition{
 			VaultID:  key.vaultID,
 			ChunkID:  key.chunkID,
 			Position: pos,
-		})
+		}
+		if ts, ok := ms.chunkResumeTS[key]; ok {
+			mvp.ResumeTS = ts
+		}
+		refs = append(refs, mvp)
 	}
 	*ms.lastRefs = refs
 }
@@ -109,6 +114,7 @@ func (ms *mergeState) advanceScanner(entry *cursorEntry) (error, bool) {
 
 	entry.rec = rr.Record
 	entry.ref = rr.Ref
+	entry.reordered = rr.Reordered
 	heap.Push(ms.h, entry)
 	return nil, true
 }
@@ -164,16 +170,24 @@ func validateResumeToken(resume *ResumeToken, allChunks []vaultChunk) error {
 
 // buildResumePositionMap converts a resume token into a nested map for
 // efficient lookup during heap initialization.
-func buildResumePositionMap(resume *ResumeToken) map[uuid.UUID]map[chunk.ChunkID]uint64 {
-	m := make(map[uuid.UUID]map[chunk.ChunkID]uint64)
+type resumeInfo struct {
+	Position uint64
+	ResumeTS time.Time // non-zero for reordered chunks
+}
+
+func buildResumeMap(resume *ResumeToken) map[uuid.UUID]map[chunk.ChunkID]resumeInfo {
+	m := make(map[uuid.UUID]map[chunk.ChunkID]resumeInfo)
 	if resume == nil {
 		return m
 	}
 	for _, pos := range resume.Positions {
 		if m[pos.VaultID] == nil {
-			m[pos.VaultID] = make(map[chunk.ChunkID]uint64)
+			m[pos.VaultID] = make(map[chunk.ChunkID]resumeInfo)
 		}
-		m[pos.VaultID][pos.ChunkID] = pos.Position
+		m[pos.VaultID][pos.ChunkID] = resumeInfo{
+			Position: pos.Position,
+			ResumeTS: pos.ResumeTS,
+		}
 	}
 	return m
 }
@@ -183,27 +197,27 @@ func newMergeHeap(q Query, capacity int) heap.Interface {
 	return newTSHeap(q.OrderBy, q.Reverse(), capacity)
 }
 
-// lookupResumePosition returns the resume start position for a chunk, if any.
-// Returns nil if no resume position exists. Sets the chunk as exhausted in
+// lookupResumeInfo returns the resume info for a chunk, if any.
+// Returns nil if no resume info exists. Sets the chunk as exhausted in
 // chunkPositions and returns (nil, true) if the chunk was already exhausted.
-func lookupResumePosition(
-	resumePositions map[uuid.UUID]map[chunk.ChunkID]uint64,
+func lookupResumeInfo(
+	resumeMap map[uuid.UUID]map[chunk.ChunkID]resumeInfo,
 	sc vaultChunk,
 	chunkPositions map[mergeKey]uint64,
-) (startPos *uint64, exhausted bool) {
-	vaultPositions, ok := resumePositions[sc.vaultID]
+) (info *resumeInfo, exhausted bool) {
+	vaultEntries, ok := resumeMap[sc.vaultID]
 	if !ok {
 		return nil, false
 	}
-	pos, ok := vaultPositions[sc.meta.ID]
+	ri, ok := vaultEntries[sc.meta.ID]
 	if !ok {
 		return nil, false
 	}
-	if pos == positionExhausted {
+	if ri.Position == positionExhausted {
 		chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted
 		return nil, true
 	}
-	return &pos, false
+	return &ri, false
 }
 
 // resolveStartPosition finds the resume start position for a single chunk
@@ -262,13 +276,28 @@ func (e *Engine) primeHeapWithResume(
 	ctx context.Context,
 	q Query,
 	allChunks []vaultChunk,
-	resumePositions map[uuid.UUID]map[chunk.ChunkID]uint64,
+	resumeMap map[uuid.UUID]map[chunk.ChunkID]resumeInfo,
 	ms *mergeState,
 ) error {
 	for _, sc := range allChunks {
-		startPos, exhausted := lookupResumePosition(resumePositions, sc, ms.chunkPositions)
+		ri, exhausted := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
 		if exhausted {
 			continue
+		}
+
+		var startPos *uint64
+		if ri != nil {
+			if !ri.ResumeTS.IsZero() {
+				// Reordered chunk: don't seek by position. Pass ResumeTS
+				// through the query so reorderByTSWithBounds can skip past it.
+				resumeQ := q
+				resumeQ.ResumeTS = ri.ResumeTS
+				if err := e.openAndPrimeScanner(ctx, resumeQ, sc, nil, ms); err != nil {
+					return err
+				}
+				continue
+			}
+			startPos = &ri.Position
 		}
 
 		if err := e.openAndPrimeScanner(ctx, q, sc, startPos, ms); err != nil {
@@ -320,10 +349,11 @@ func (e *Engine) openAndPrimeScanner(
 	}
 
 	entry := &cursorEntry{
-		vaultID: sc.vaultID,
-		chunkID: sc.meta.ID,
-		rec:     rr.Record,
-		ref:     rr.Ref,
+		vaultID:   sc.vaultID,
+		chunkID:   sc.meta.ID,
+		rec:       rr.Record,
+		ref:       rr.Ref,
+		reordered: rr.Reordered,
 	}
 	heap.Push(ms.h, entry)
 
@@ -364,6 +394,9 @@ func runMergeLoop(
 
 		entry := heap.Pop(ms.h).(*cursorEntry)
 		key := mergeKey{vaultID: entry.vaultID, chunkID: entry.chunkID}
+		if entry.reordered {
+			ms.chunkResumeTS[key] = entry.rec.IngestTS
+		}
 		ms.chunkPositions[key] = entry.ref.Pos
 
 		entry.rec.Ref = entry.ref
@@ -461,11 +494,12 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 		}
 
 		// Multiple chunks: use heap-based merge sort.
-		resumePositions := buildResumePositionMap(resume)
+		resumePositions := buildResumeMap(resume)
 
 		ms := &mergeState{
 			h:              newMergeHeap(q, len(allChunks)),
 			chunkPositions: make(map[mergeKey]uint64),
+			chunkResumeTS:  make(map[mergeKey]time.Time),
 			lastRefs:       &lastRefs,
 		}
 		defer ms.cleanup()
@@ -544,6 +578,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 		ms := &mergeState{
 			h:              newMergeHeap(q, len(allChunks)),
 			chunkPositions: make(map[mergeKey]uint64),
+			chunkResumeTS:  make(map[mergeKey]time.Time),
 			lastRefs:       &lastRefs,
 		}
 		defer ms.cleanup()

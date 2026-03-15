@@ -260,7 +260,7 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id uuid.UUID, target
 // drainRemoteRecords collects all remote records into a slice by draining
 // the streaming iterator returned by collectRemote.
 func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query) []chunk.Record {
-	remoteIter, _ := s.collectRemote(ctx, q)
+	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 	if remoteIter == nil {
 		return nil
 	}

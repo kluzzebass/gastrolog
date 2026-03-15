@@ -8,10 +8,11 @@ import (
 
 // cursorEntry represents a cursor with its current record in the merge heap.
 type cursorEntry struct {
-	vaultID uuid.UUID
-	chunkID chunk.ChunkID
-	rec     chunk.Record
-	ref     chunk.RecordRef
+	vaultID   uuid.UUID
+	chunkID   chunk.ChunkID
+	rec       chunk.Record
+	ref       chunk.RecordRef
+	reordered bool // true when chunk was scanned without TS index (resume by IngestTS, not position)
 }
 
 // tsHeap is a heap of cursor entries ordered by a configurable timestamp field.

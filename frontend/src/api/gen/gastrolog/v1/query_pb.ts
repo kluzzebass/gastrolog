@@ -820,15 +820,29 @@ export class RecordRef extends Message<RecordRef> {
 
 /**
  * ResumeToken encodes pagination state for multi-vault queries.
- * The positions array tracks the last returned position for each vault/chunk.
+ * Each vault — local or remote — gets an opaque token keyed by vault UUID.
+ * The API node routes each token to wherever the vault lives.
  *
  * @generated from message gastrolog.v1.ResumeToken
  */
 export class ResumeToken extends Message<ResumeToken> {
   /**
-   * @generated from field: repeated gastrolog.v1.VaultPosition positions = 1;
+   * @generated from field: map<string, bytes> vault_tokens = 2;
    */
-  positions: VaultPosition[] = [];
+  vaultTokens: { [key: string]: Uint8Array } = {};
+
+  /**
+   * Frozen time bounds from the first page — prevents "last-5m" from
+   * shifting between pages.
+   *
+   * @generated from field: google.protobuf.Timestamp frozen_start = 3;
+   */
+  frozenStart?: Timestamp;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp frozen_end = 4;
+   */
+  frozenEnd?: Timestamp;
 
   constructor(data?: PartialMessage<ResumeToken>) {
     super();
@@ -838,7 +852,9 @@ export class ResumeToken extends Message<ResumeToken> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ResumeToken";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "positions", kind: "message", T: VaultPosition, repeated: true },
+    { no: 2, name: "vault_tokens", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 12 /* ScalarType.BYTES */} },
+    { no: 3, name: "frozen_start", kind: "message", T: Timestamp },
+    { no: 4, name: "frozen_end", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeToken {
@@ -855,6 +871,46 @@ export class ResumeToken extends Message<ResumeToken> {
 
   static equals(a: ResumeToken | PlainMessage<ResumeToken> | undefined, b: ResumeToken | PlainMessage<ResumeToken> | undefined): boolean {
     return proto3.util.equals(ResumeToken, a, b);
+  }
+}
+
+/**
+ * InnerVaultToken is the serialized per-vault resume state.
+ * Stored as the opaque bytes value in ResumeToken.vault_tokens.
+ *
+ * @generated from message gastrolog.v1.InnerVaultToken
+ */
+export class InnerVaultToken extends Message<InnerVaultToken> {
+  /**
+   * @generated from field: repeated gastrolog.v1.VaultPosition positions = 1;
+   */
+  positions: VaultPosition[] = [];
+
+  constructor(data?: PartialMessage<InnerVaultToken>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.InnerVaultToken";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "positions", kind: "message", T: VaultPosition, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): InnerVaultToken {
+    return new InnerVaultToken().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): InnerVaultToken {
+    return new InnerVaultToken().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): InnerVaultToken {
+    return new InnerVaultToken().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: InnerVaultToken | PlainMessage<InnerVaultToken> | undefined, b: InnerVaultToken | PlainMessage<InnerVaultToken> | undefined): boolean {
+    return proto3.util.equals(InnerVaultToken, a, b);
   }
 }
 
@@ -879,6 +935,15 @@ export class VaultPosition extends Message<VaultPosition> {
    */
   position = protoInt64.zero;
 
+  /**
+   * resume_ts is used instead of position for chunks without TS indexes
+   * (e.g., cloud-backed). On resume, the scanner re-reads the chunk and
+   * skips records already past this timestamp.
+   *
+   * @generated from field: google.protobuf.Timestamp resume_ts = 4;
+   */
+  resumeTs?: Timestamp;
+
   constructor(data?: PartialMessage<VaultPosition>) {
     super();
     proto3.util.initPartial(data, this);
@@ -890,6 +955,7 @@ export class VaultPosition extends Message<VaultPosition> {
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "position", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 4, name: "resume_ts", kind: "message", T: Timestamp },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultPosition {

@@ -127,12 +127,12 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // TableResult instead of individual records. For regular searches, returns
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
+	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, queryExpr)
 
 		q, pipeline, err := server.ParseExpression(scopedExpr)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("parse query: %w", err)
+			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
 		eng := o.MultiVaultQueryEngine()
@@ -144,12 +144,11 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
 			result, err := eng.RunPipeline(ctx, q, pipeline)
 			if err != nil {
-				return nil, nil, nil, err
+				return nil, nil, nil, nil, err
 			}
 			if result.Table != nil {
-				return nil, server.TableResultToBasicProto(result.Table), histogram, nil
+				return nil, nil, server.TableResultToBasicProto(result.Table), histogram, nil
 			}
-			// Non-table pipeline (sort/tail/slice): wrap records as iterator.
 			records := result.Records
 			return func(yield func(chunk.Record, error) bool) {
 				for _, rec := range records {
@@ -157,12 +156,28 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 						return
 					}
 				}
-			}, nil, histogram, nil
+			}, nil, nil, histogram, nil
 		}
 
-		// Regular search path: return the iterator directly.
-		searchIter, _ := eng.Search(ctx, q, nil)
-		return searchIter, nil, histogram, nil
+		// Parse resume token if present.
+		var resume *query.ResumeToken
+		if len(resumeTokenData) > 0 {
+			resume, err = server.ProtoToResumeToken(resumeTokenData)
+			if err != nil {
+				return nil, nil, nil, nil, fmt.Errorf("invalid resume token: %w", err)
+			}
+		}
+
+		// Regular search path: return the iterator + token generator.
+		searchIter, getToken := eng.Search(ctx, q, resume)
+		getTokenBytes := func() []byte {
+			token := getToken()
+			if token == nil {
+				return nil
+			}
+			return server.ResumeTokenToProto(token)
+		}
+		return searchIter, getTokenBytes, nil, histogram, nil
 	}
 }
 

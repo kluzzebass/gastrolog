@@ -1634,7 +1634,11 @@ func reorderByTS(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse
 // applies time bounds AFTER sorting, and yields in order. Used when the inner
 // scanner reads in physical (WriteTS) order and IngestTS bounds can't be
 // applied during the scan without skipping records.
-func reorderByTSWithBounds(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse bool, lower, upper time.Time) iter.Seq2[recordWithRef, error] {
+func reorderByTSWithBounds(inner iter.Seq2[recordWithRef, error], orderBy OrderBy, reverse bool, lower, upper time.Time, resumeTS ...time.Time) iter.Seq2[recordWithRef, error] {
+	var skipPast time.Time
+	if len(resumeTS) > 0 {
+		skipPast = resumeTS[0]
+	}
 	return func(yield func(recordWithRef, error) bool) {
 		var buf []recordWithRef
 		for rr, err := range inner {
@@ -1655,18 +1659,34 @@ func reorderByTSWithBounds(inner iter.Seq2[recordWithRef, error], orderBy OrderB
 		})
 
 		for _, rr := range buf {
-			if !lower.IsZero() || !upper.IsZero() {
-				ts := orderBy.RecordTS(rr.Record)
-				if !lower.IsZero() && ts.Before(lower) {
-					continue
-				}
-				if !upper.IsZero() && !ts.Before(upper) {
-					continue
-				}
+			if !reorderRecordVisible(orderBy.RecordTS(rr.Record), lower, upper, skipPast, reverse) {
+				continue
 			}
+			rr.Reordered = true
 			if !yield(rr, nil) {
 				return
 			}
 		}
 	}
+}
+
+// reorderRecordVisible checks whether a record should be included in reordered output.
+// Applies time bounds and resume-skip logic.
+func reorderRecordVisible(ts, lower, upper, skipPast time.Time, reverse bool) bool {
+	if !lower.IsZero() && ts.Before(lower) {
+		return false
+	}
+	if !upper.IsZero() && !ts.Before(upper) {
+		return false
+	}
+	// Resume skip: records already yielded on previous pages.
+	if !skipPast.IsZero() {
+		if reverse && !ts.Before(skipPast) {
+			return false
+		}
+		if !reverse && !skipPast.Before(ts) {
+			return false
+		}
+	}
+	return true
 }

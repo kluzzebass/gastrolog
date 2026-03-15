@@ -1114,6 +1114,7 @@ type ForwardSearchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
+	ResumeToken   []byte                 `protobuf:"bytes,3,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"` // resume token for pagination across pages
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1162,9 +1163,18 @@ func (x *ForwardSearchRequest) GetQuery() string {
 	return ""
 }
 
+func (x *ForwardSearchRequest) GetResumeToken() []byte {
+	if x != nil {
+		return x.ResumeToken
+	}
+	return nil
+}
+
 type ForwardSearchResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Records       []*ExportRecord        `protobuf:"bytes,1,rep,name=records,proto3" json:"records,omitempty"`
+	ResumeToken   []byte                 `protobuf:"bytes,2,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"`
+	HasMore       bool                   `protobuf:"varint,3,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	TableResult   *TableResult           `protobuf:"bytes,4,opt,name=table_result,json=tableResult,proto3" json:"table_result,omitempty"` // Pipeline results (timechart, stats)
 	Histogram     []*HistogramBucket     `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`                        // Volume histogram from this node's vaults
 	unknownFields protoimpl.UnknownFields
@@ -1206,6 +1216,20 @@ func (x *ForwardSearchResponse) GetRecords() []*ExportRecord {
 		return x.Records
 	}
 	return nil
+}
+
+func (x *ForwardSearchResponse) GetResumeToken() []byte {
+	if x != nil {
+		return x.ResumeToken
+	}
+	return nil
+}
+
+func (x *ForwardSearchResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
 }
 
 func (x *ForwardSearchResponse) GetTableResult() *TableResult {
@@ -2924,14 +2948,17 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"A\n" +
 	"\x16ForwardRecordsResponse\x12'\n" +
-	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWritten\"M\n" +
+	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWritten\"j\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x14\n" +
-	"\x05query\x18\x02 \x01(\tR\x05queryJ\x04\b\x03\x10\x04\"\xd4\x01\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
+	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12<\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12!\n" +
+	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
+	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12<\n" +
 	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
-	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogramJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04\"\x90\x01\n" +
+	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\x90\x01\n" +
 	"\x18ForwardGetContextRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x10\n" +

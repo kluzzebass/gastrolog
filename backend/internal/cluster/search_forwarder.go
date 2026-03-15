@@ -83,7 +83,10 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 	histogram []*gastrologv1.HistogramBucket,
 	tableResult *gastrologv1.TableResult,
 	errCh <-chan error,
+	getResumeToken func() []byte,
 ) {
+	var resumeToken []byte
+	getResumeToken = func() []byte { return resumeToken }
 	recCh := make(chan []*gastrologv1.ExportRecord, 16)
 	eCh := make(chan error, 1)
 
@@ -92,7 +95,7 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("dial node %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh
+		return recCh, nil, nil, eCh, getResumeToken
 	}
 
 	stream, err := conn.NewStream(ctx,
@@ -107,20 +110,20 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		eCh <- fmt.Errorf("open search stream to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh
+		return recCh, nil, nil, eCh, getResumeToken
 	}
 	if err := stream.SendMsg(req); err != nil {
 		sf.peers.Invalidate(nodeID)
 		eCh <- fmt.Errorf("send search request to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh
+		return recCh, nil, nil, eCh, getResumeToken
 	}
 	if err := stream.CloseSend(); err != nil {
 		eCh <- fmt.Errorf("close send to %s: %w", nodeID, err)
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh
+		return recCh, nil, nil, eCh, getResumeToken
 	}
 
 	// Read the first message synchronously to extract histogram + tableResult.
@@ -132,7 +135,7 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 		}
 		close(recCh)
 		close(eCh)
-		return recCh, nil, nil, eCh
+		return recCh, nil, nil, eCh, getResumeToken
 	}
 	histogram = first.GetHistogram()
 	tableResult = first.GetTableResult()
@@ -141,12 +144,15 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 	if tableResult != nil {
 		close(recCh)
 		close(eCh)
-		return recCh, histogram, tableResult, eCh
+		return recCh, histogram, tableResult, eCh, getResumeToken
 	}
 
 	// Send the first batch of records, then start goroutine for the rest.
 	if len(first.GetRecords()) > 0 {
 		recCh <- first.GetRecords()
+	}
+	if len(first.GetResumeToken()) > 0 {
+		resumeToken = first.GetResumeToken()
 	}
 
 	go func() {
@@ -168,10 +174,14 @@ func (sf *SearchForwarder) SearchStream(ctx context.Context, nodeID string, req 
 					return
 				}
 			}
+			// Capture resume token from each message (last one wins).
+			if len(msg.GetResumeToken()) > 0 {
+				resumeToken = msg.GetResumeToken()
+			}
 		}
 	}()
 
-	return recCh, histogram, tableResult, eCh
+	return recCh, histogram, tableResult, eCh, getResumeToken
 }
 
 // GetContext sends a ForwardGetContext RPC to the given node.

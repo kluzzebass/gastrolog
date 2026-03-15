@@ -35,14 +35,15 @@ type RemoteSearcher interface {
 	// Search collects a full streamed ForwardSearch response. Used by
 	// collectRemotePipeline which needs the complete TableResult.
 	Search(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (*apiv1.ForwardSearchResponse, error)
-	// SearchStream opens a streaming ForwardSearch and returns channels.
-	// The histogram and tableResult are available immediately (first message).
-	// Record batches arrive on the records channel until closed.
+	// SearchStream opens a streaming ForwardSearch.
+	// Returns record batches channel, histogram, tableResult, error channel,
+	// and a function to retrieve the resume token after draining records.
 	SearchStream(ctx context.Context, nodeID string, req *apiv1.ForwardSearchRequest) (
 		records <-chan []*apiv1.ExportRecord,
 		histogram []*apiv1.HistogramBucket,
 		tableResult *apiv1.TableResult,
 		errCh <-chan error,
+		getResumeToken func() []byte,
 	)
 	GetContext(ctx context.Context, nodeID string, req *apiv1.ForwardGetContextRequest) (*apiv1.ForwardGetContextResponse, error)
 	Explain(ctx context.Context, nodeID string, req *apiv1.ForwardExplainRequest) (*apiv1.ForwardExplainResponse, error)
@@ -183,7 +184,7 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// Collect raw records from remote nodes (no pipeline — just the base query).
-	remoteIter, remoteHist := s.collectRemote(ctx, q)
+	remoteIter, remoteHist, _ := s.collectRemote(ctx, q, nil)
 	var extraRecords []chunk.Record
 	if remoteIter != nil {
 		for rec, iterErr := range remoteIter {
@@ -250,18 +251,86 @@ func (s *QueryServer) searchDirect(
 		if err != nil {
 			return connect.NewError(connect.CodeInvalidArgument, err)
 		}
+		// Restore frozen time bounds from page 1 so "last-5m" doesn't shift.
+		if !resume.FrozenStart.IsZero() {
+			q.Start = resume.FrozenStart
+		}
+		if !resume.FrozenEnd.IsZero() {
+			q.End = resume.FrozenEnd
+		}
 	}
 
+	// The frozen bounds are now in q.Start/q.End (either from the original
+	// query or restored from the resume token above).
+	frozenStart, frozenEnd := q.Start, q.End
+
+	localResume, remoteTokens := s.splitResumeToken(resume)
+
 	// Collect remote results as a streaming iterator.
-	remoteIter, remoteHist := s.collectRemote(ctx, q)
+	remoteIter, remoteHist, getRemoteTokens := s.collectRemote(ctx, q, remoteTokens)
 
 	// Compute local histogram and merge with remote.
 	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
 	histogram := mergeHistogramBuckets(localHist, remoteHist)
 
-	localIter, getToken := eng.Search(ctx, q, resume)
+	localIter, getLocalToken := eng.Search(ctx, q, localResume)
+
+	// Combine local + remote resume tokens into a unified vault token map.
+	getToken := func() *query.ResumeToken {
+		token := getLocalToken()
+		if token == nil {
+			token = &query.ResumeToken{}
+		}
+		if getRemoteTokens != nil {
+			if token.VaultTokens == nil {
+				token.VaultTokens = make(map[uuid.UUID][]byte)
+			}
+			maps.Copy(token.VaultTokens, getRemoteTokens())
+		}
+		hasPositions := len(token.Positions) > 0
+		hasVaultTokens := len(token.VaultTokens) > 0
+		if !hasPositions && !hasVaultTokens {
+			return nil
+		}
+		token.FrozenStart = frozenStart
+		token.FrozenEnd = frozenEnd
+		return token
+	}
 
 	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), transform, histogram, stream)
+}
+
+// splitResumeToken separates a unified resume token into local positions
+// (for eng.Search) and remote opaque blobs (for collectRemote).
+func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[uuid.UUID][]byte) {
+	if resume == nil || len(resume.VaultTokens) == 0 {
+		return nil, nil
+	}
+
+	localVaults := make(map[uuid.UUID]struct{})
+	for _, id := range s.orch.ListVaults() {
+		localVaults[id] = struct{}{}
+	}
+
+	remoteTokens := make(map[uuid.UUID][]byte)
+	var localPositions []query.MultiVaultPosition
+	for vid, tokenData := range resume.VaultTokens {
+		if _, isLocal := localVaults[vid]; isLocal {
+			positions, err := VaultTokenToPositions(tokenData)
+			if err != nil {
+				continue
+			}
+			localPositions = append(localPositions, positions...)
+		} else {
+			remoteTokens[vid] = tokenData
+		}
+	}
+
+	var localResume *query.ResumeToken
+	if len(localPositions) > 0 {
+		localResume = &query.ResumeToken{Positions: localPositions}
+	}
+	return localResume, remoteTokens
 }
 
 func mapSearchError(err error) error {
@@ -542,22 +611,27 @@ func (b *streamBatcher) pending() []*apiv1.Record { return b.batch }
 // returns a merged sorted iterator over their records plus the combined
 // histogram. The iterator performs a k-way merge — at most one record per
 // remote vault is held in memory at any time.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket) {
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[uuid.UUID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, func() map[uuid.UUID][]byte) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
 	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	if len(byNode) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	queryExpr := q.String()
+	if remoteTokens == nil {
+		remoteTokens = make(map[uuid.UUID][]byte)
+	}
 
 	// Fan out streaming RPCs concurrently — one per remote vault.
 	type vaultStream struct {
-		records <-chan []*apiv1.ExportRecord
-		errCh   <-chan error
+		records        <-chan []*apiv1.ExportRecord
+		errCh          <-chan error
+		getResumeToken func() []byte
+		vaultID        uuid.UUID
 	}
 	var streams []vaultStream
 	var allHist []*apiv1.HistogramBucket
@@ -567,12 +641,13 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 	for nodeID, vaultIDs := range byNode {
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
-				recCh, hist, _, eCh := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
-					VaultId: vid.String(),
-					Query:   queryExpr,
+				recCh, hist, _, eCh, getToken := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
+					VaultId:     vid.String(),
+					Query:       queryExpr,
+					ResumeToken: remoteTokens[vid],
 				})
 				mu.Lock()
-				streams = append(streams, vaultStream{records: recCh, errCh: eCh})
+				streams = append(streams, vaultStream{records: recCh, errCh: eCh, getResumeToken: getToken, vaultID: vid})
 				allHist = mergeHistogramBuckets(allHist, hist)
 				mu.Unlock()
 			})
@@ -580,8 +655,20 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 	}
 	wg.Wait()
 
+	getRemoteTokens := func() map[uuid.UUID][]byte {
+		tokens := make(map[uuid.UUID][]byte)
+		for _, vs := range streams {
+			if vs.getResumeToken != nil {
+				if t := vs.getResumeToken(); len(t) > 0 {
+					tokens[vs.vaultID] = t
+				}
+			}
+		}
+		return tokens
+	}
+
 	if len(streams) == 0 {
-		return nil, allHist
+		return nil, allHist, nil
 	}
 
 	// Convert each channel into an iter.Seq2[chunk.Record, error].
@@ -592,12 +679,12 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query) (iter.Se
 
 	// If only one remote vault, return its iterator directly.
 	if len(iters) == 1 {
-		return iters[0], allHist
+		return iters[0], allHist, getRemoteTokens
 	}
 
 	// K-way merge of N iterators using a heap.
 	merged := kWayMerge(iters, q.OrderBy, q.Reverse())
-	return merged, allHist
+	return merged, allHist, getRemoteTokens
 }
 
 // mergeHistogramBuckets sums two histogram bucket slices by matching timestamp.
@@ -1523,7 +1610,7 @@ func (s *QueryServer) searchContext(
 ) ([]*apiv1.Record, error) {
 	eng := s.orch.MultiVaultQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
-	remoteIter, _ := s.collectRemote(ctx, q)
+	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 
 	reverse := q.Reverse()
 	isBefore := func(a, b time.Time) bool {
@@ -2022,52 +2109,124 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 		return nil, nil
 	}
 
-	// Decode proto message
 	var protoToken apiv1.ResumeToken
 	if err := proto.Unmarshal(data, &protoToken); err != nil {
 		return nil, fmt.Errorf("unmarshal resume token: %w", err)
 	}
 
-	// Convert to internal type
-	token := &query.ResumeToken{
-		Positions: make([]query.MultiVaultPosition, len(protoToken.Positions)),
+	token := &query.ResumeToken{}
+	if len(protoToken.VaultTokens) > 0 {
+		token.VaultTokens = make(map[uuid.UUID][]byte, len(protoToken.VaultTokens))
+		for vidStr, tokenData := range protoToken.VaultTokens {
+			vid, err := uuid.Parse(vidStr)
+			if err != nil {
+				continue
+			}
+			token.VaultTokens[vid] = tokenData
+		}
 	}
+	if protoToken.FrozenStart != nil {
+		token.FrozenStart = protoToken.FrozenStart.AsTime()
+	}
+	if protoToken.FrozenEnd != nil {
+		token.FrozenEnd = protoToken.FrozenEnd.AsTime()
+	}
+	return token, nil
+}
 
-	for i, pos := range protoToken.Positions {
+// VaultTokenToPositions deserializes a per-vault opaque token into Positions.
+// Used by searchDirect to extract local vault resume state.
+func VaultTokenToPositions(data []byte) ([]query.MultiVaultPosition, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var inner apiv1.InnerVaultToken
+	if err := proto.Unmarshal(data, &inner); err != nil {
+		return nil, err
+	}
+	positions := make([]query.MultiVaultPosition, len(inner.Positions))
+	for i, pos := range inner.Positions {
 		chunkID, err := chunk.ParseChunkID(pos.ChunkId)
 		if err != nil {
-			return nil, fmt.Errorf("invalid chunk ID in resume token: %w", err)
+			return nil, err
 		}
 		vaultID, err := uuid.Parse(pos.VaultId)
 		if err != nil {
-			return nil, fmt.Errorf("invalid vault ID in resume token: %w", err)
+			return nil, err
 		}
-		token.Positions[i] = query.MultiVaultPosition{
+		mvp := query.MultiVaultPosition{
 			VaultID:  vaultID,
 			ChunkID:  chunkID,
 			Position: pos.Position,
 		}
+		if pos.ResumeTs != nil {
+			mvp.ResumeTS = pos.ResumeTs.AsTime()
+		}
+		positions[i] = mvp
 	}
-
-	return token, nil
+	return positions, nil
 }
 
-// ResumeTokenToProto converts an internal resume token to proto bytes.
-func ResumeTokenToProto(token *query.ResumeToken) []byte {
-	if token == nil || len(token.Positions) == 0 {
+// PositionsToVaultToken serializes Positions into a per-vault opaque token.
+func PositionsToVaultToken(positions []query.MultiVaultPosition) []byte {
+	if len(positions) == 0 {
 		return nil
 	}
-
-	protoToken := &apiv1.ResumeToken{
-		Positions: make([]*apiv1.VaultPosition, len(token.Positions)),
+	inner := &apiv1.InnerVaultToken{
+		Positions: make([]*apiv1.VaultPosition, len(positions)),
 	}
-
-	for i, pos := range token.Positions {
-		protoToken.Positions[i] = &apiv1.VaultPosition{
+	for i, pos := range positions {
+		vp := &apiv1.VaultPosition{
 			VaultId:  pos.VaultID.String(),
 			ChunkId:  pos.ChunkID.String(),
 			Position: pos.Position,
 		}
+		if !pos.ResumeTS.IsZero() {
+			vp.ResumeTs = timestamppb.New(pos.ResumeTS)
+		}
+		inner.Positions[i] = vp
+	}
+	data, err := proto.Marshal(inner)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// ResumeTokenToProto converts an internal resume token to proto bytes.
+func ResumeTokenToProto(token *query.ResumeToken) []byte {
+	if token == nil || (len(token.Positions) == 0 && len(token.VaultTokens) == 0) {
+		return nil
+	}
+
+	protoToken := &apiv1.ResumeToken{}
+
+	// If there are raw Positions (from eng.Search local), serialize them
+	// as per-vault tokens grouped by vault ID.
+	if len(token.Positions) > 0 {
+		byVault := make(map[uuid.UUID][]query.MultiVaultPosition)
+		for _, pos := range token.Positions {
+			byVault[pos.VaultID] = append(byVault[pos.VaultID], pos)
+		}
+		if token.VaultTokens == nil {
+			token.VaultTokens = make(map[uuid.UUID][]byte)
+		}
+		for vid, positions := range byVault {
+			token.VaultTokens[vid] = PositionsToVaultToken(positions)
+		}
+	}
+
+	if len(token.VaultTokens) > 0 {
+		protoToken.VaultTokens = make(map[string][]byte, len(token.VaultTokens))
+		for vid, tokenData := range token.VaultTokens {
+			protoToken.VaultTokens[vid.String()] = tokenData
+		}
+	}
+	if !token.FrozenStart.IsZero() {
+		protoToken.FrozenStart = timestamppb.New(token.FrozenStart)
+	}
+	if !token.FrozenEnd.IsZero() {
+		protoToken.FrozenEnd = timestamppb.New(token.FrozenEnd)
 	}
 
 	data, err := proto.Marshal(protoToken)

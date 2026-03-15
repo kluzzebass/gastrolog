@@ -166,16 +166,31 @@ message RecordRef {
 }
 
 // ResumeToken encodes pagination state for multi-vault queries.
-// The positions array tracks the last returned position for each vault/chunk.
+// Each vault — local or remote — gets an opaque token keyed by vault UUID.
+// The API node routes each token to wherever the vault lives.
 message ResumeToken {
+  reserved 1; // was repeated VaultPosition positions
+  map<string, bytes> vault_tokens = 2;
+  // Frozen time bounds from the first page — prevents "last-5m" from
+  // shifting between pages.
+  google.protobuf.Timestamp frozen_start = 3;
+  google.protobuf.Timestamp frozen_end = 4;
+}
+
+// InnerVaultToken is the serialized per-vault resume state.
+// Stored as the opaque bytes value in ResumeToken.vault_tokens.
+message InnerVaultToken {
   repeated VaultPosition positions = 1;
-  reserved 2; // was remote_positions (removed: streaming replaces cross-node pagination)
 }
 
 message VaultPosition {
   string vault_id = 1;
   string chunk_id = 2;
   uint64 position = 3; // MaxUint64 indicates chunk is exhausted
+  // resume_ts is used instead of position for chunks without TS indexes
+  // (e.g., cloud-backed). On resume, the scanner re-reads the chunk and
+  // skips records already past this timestamp.
+  google.protobuf.Timestamp resume_ts = 4;
 }
 
 message ChunkPlan {

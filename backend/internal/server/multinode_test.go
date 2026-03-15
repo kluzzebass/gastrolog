@@ -428,6 +428,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	[]*gastrologv1.HistogramBucket,
 	*gastrologv1.TableResult,
 	<-chan error,
+	func() []byte,
 ) {
 	recCh := make(chan []*gastrologv1.ExportRecord, 16)
 	errCh := make(chan error, 1)
@@ -437,7 +438,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("unknown node: %s", nodeID)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh
+		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
 	vaultID, err := uuid.Parse(req.GetVaultId())
@@ -445,7 +446,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("invalid vault_id: %w", err)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh
+		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
 	scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, req.GetQuery())
@@ -454,7 +455,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		errCh <- fmt.Errorf("parse: %w", parseErr)
 		close(recCh)
 		close(errCh)
-		return recCh, nil, nil, errCh
+		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
 	eng := orch.MultiVaultQueryEngine()
@@ -466,12 +467,12 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 			errCh <- runErr
 			close(recCh)
 			close(errCh)
-			return recCh, nil, nil, errCh
+			return recCh, nil, nil, errCh, func() []byte { return nil }
 		}
 		if result.Table != nil {
 			close(recCh)
 			close(errCh)
-			return recCh, nil, server.TableResultToBasicProto(result.Table), errCh
+			return recCh, nil, server.TableResultToBasicProto(result.Table), errCh, func() []byte { return nil }
 		}
 	}
 
@@ -517,7 +518,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		}
 	}()
 
-	return recCh, histProto, nil, errCh
+	return recCh, histProto, nil, errCh, func() []byte { return nil }
 }
 
 func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, req *gastrologv1.ForwardGetContextRequest) (*gastrologv1.ForwardGetContextResponse, error) {

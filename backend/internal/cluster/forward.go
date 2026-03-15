@@ -28,7 +28,9 @@ type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Recor
 // it returns a TableResult with a nil iterator. The histogram slice (if
 // non-nil) provides an approximate volume histogram for the searched vault.
 // Used by the ForwardSearch handler to serve remote search requests.
-type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
+// The resumeToken parameter allows resuming a paginated search. The returned
+// getToken function returns a resume token for the next page (nil if exhausted).
+type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
@@ -346,7 +348,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		return status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
 
-	searchIter, tableResult, histogram, err := s.searchExecutor(stream.Context(), vaultID, req.GetQuery())
+	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), vaultID, req.GetQuery(), req.GetResumeToken())
 	if err != nil {
 		return status.Errorf(codes.Internal, "search: %v", err)
 	}
@@ -380,17 +382,16 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 			batch = make([]*gastrologv1.ExportRecord, 0, batchSize)
 		}
 	}
-	// Send remaining records (or an empty first message with histogram).
-	if len(batch) > 0 || first {
-		resp := &gastrologv1.ForwardSearchResponse{Records: batch}
-		if first {
-			resp.Histogram = histogram
-		}
-		if err := stream.SendMsg(resp); err != nil {
-			return err
-		}
+	// Send remaining records + resume token in the final message.
+	resp := &gastrologv1.ForwardSearchResponse{Records: batch}
+	if first {
+		resp.Histogram = histogram
 	}
-	return nil
+	if getToken != nil {
+		resp.ResumeToken = getToken()
+		resp.HasMore = len(resp.ResumeToken) > 0
+	}
+	return stream.SendMsg(resp)
 }
 
 // forwardGetContext handles the ForwardGetContext RPC. Runs GetContext on a

@@ -115,6 +115,10 @@ type Query struct {
 	// Context windows (for SearchWithContext)
 	ContextBefore int // number of records to include before each match
 	ContextAfter  int // number of records to include after each match
+
+	// ResumeTS is set internally when resuming a reordered chunk.
+	// The reorder scanner skips records already past this timestamp.
+	ResumeTS time.Time
 }
 
 // String returns a human-readable representation of the query including all parameters.
@@ -239,15 +243,28 @@ type MultiVaultPosition struct {
 	VaultID  uuid.UUID
 	ChunkID  chunk.ChunkID
 	Position uint64
+	ResumeTS time.Time // non-zero for reordered chunks (no TS index)
 }
 
 // ResumeToken allows resuming a query from where it left off.
-// For multi-vault queries, Positions contains the last position in each active chunk.
-// Tokens are valid as long as the referenced chunks exist.
+// VaultTokens maps vault IDs to opaque per-vault tokens. Each vault — local
+// or remote — serializes its own resume state. The API node routes each
+// token to wherever the vault lives.
 type ResumeToken struct {
+	// VaultTokens maps vault IDs to their opaque resume tokens.
+	// For local vaults, these are deserialized into Positions by the search engine.
+	// For remote vaults, they are forwarded as-is to the owning node.
+	VaultTokens map[uuid.UUID][]byte
+
+	// FrozenStart and FrozenEnd preserve the original query time bounds from
+	// the first page. On subsequent pages, these override the re-parsed time
+	// range (e.g., "last-5m" would shift between pages without this).
+	FrozenStart time.Time
+	FrozenEnd   time.Time
+
 	// Positions contains the last yielded position for each vault/chunk combination.
-	// For single-vault queries with one chunk, this will have one entry.
-	// For multi-vault queries, this may have multiple entries (one per active chunk).
+	// This is the internal representation used by eng.Search() for local vaults.
+	// Populated by deserializing the relevant VaultTokens entry.
 	Positions []MultiVaultPosition
 
 	// Legacy field for backward compatibility with single-vault resume tokens.
@@ -290,9 +307,10 @@ var ErrMultiVaultNotSupported = errors.New("operation not supported in multi-vau
 // recordWithRef combines a record with its reference for internal iteration.
 // VaultID is included for multi-vault queries.
 type recordWithRef struct {
-	VaultID uuid.UUID
-	Record  chunk.Record
-	Ref     chunk.RecordRef
+	VaultID   uuid.UUID
+	Record    chunk.Record
+	Ref       chunk.RecordRef
+	Reordered bool // true when yielded from reorder fallback (resume by IngestTS, not position)
 }
 
 // record returns the Record with Ref and VaultID populated.
@@ -632,7 +650,7 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 	inner := b.build(ctx, cursor, innerQ)
 	if meta.Sealed {
 		lower, upper := q.TimeBounds()
-		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper), nil
+		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper, q.ResumeTS), nil
 	}
 	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
 }

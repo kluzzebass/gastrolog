@@ -71,9 +71,10 @@ export const LogEntry = forwardRef<
     dark: boolean;
     highlightMode?: HighlightMode;
     orderBy?: OrderByTS;
+    rowIndex?: number;
   }
 >(function LogEntry(
-  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark, highlightMode = "full", orderBy = "ingest_ts" },
+  { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark, highlightMode = "full", orderBy = "ingest_ts", rowIndex },
   ref,
 ) {
   const rawText = new TextDecoder().decode(record.raw);
@@ -87,10 +88,17 @@ export const LogEntry = forwardRef<
     <article
       ref={ref}
       onClick={onSelect}
-      className={`group grid grid-cols-[3.5ch_1fr_auto] lg:grid-cols-[10ch_3.5ch_1fr_auto] px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
+      className={`group grid grid-cols-[3.5ch_1fr_auto] lg:grid-cols-[${rowIndex != null ? "5ch_" : ""}10ch_3.5ch_1fr_auto] px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
         entryRowCls(isSelected, dark)
       }`}
     >
+      {rowIndex != null && (
+        <span
+          className={`hidden lg:block font-mono text-[0.65em] tabular-nums self-center text-right pr-1 ${dark ? "text-text-ghost/50" : "text-light-text-ghost/50"}`}
+        >
+          {rowIndex}
+        </span>
+      )}
       <span
         className={`hidden lg:block font-mono text-[0.8em] tabular-nums self-center ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
       >
