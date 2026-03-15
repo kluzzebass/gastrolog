@@ -119,6 +119,10 @@ type Query struct {
 	// ResumeTS is set internally when resuming a reordered chunk.
 	// The reorder scanner skips records already past this timestamp.
 	ResumeTS time.Time
+
+	// SkipCloud skips cloud-backed chunks during search. Used by the
+	// histogram to compute filtered counts from local data only.
+	SkipCloud bool
 }
 
 // String returns a human-readable representation of the query including all parameters.
@@ -433,6 +437,10 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 		if _, ok := chunkSet[m.ID]; !ok {
 			return false
 		}
+	}
+	// Skip cloud chunks if requested (histogram local-only scan).
+	if q.SkipCloud && m.CloudBacked {
+		return false
 	}
 	// Primary filter: IngestTS overlap.
 	// lower/upper come from Query.Start/End which are IngestTS bounds.
@@ -756,7 +764,7 @@ func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm c
 			b.setMinPosition(pos)
 			return
 		}
-		// Fallback: chunk manager handles cloud chunks with embedded TS index.
+		// Fallback: chunk manager handles cloud chunks with locally-cached TS index.
 		if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
 		}
@@ -776,7 +784,7 @@ func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta
 			b.setMinPosition(pos)
 			return
 		}
-		// Fallback: chunk manager handles cloud chunks with embedded TS index.
+		// Fallback: chunk manager handles cloud chunks with locally-cached TS index.
 		if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}

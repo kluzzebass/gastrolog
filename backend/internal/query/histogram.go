@@ -69,10 +69,16 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 	hasPreOps := len(preOps) > 0
 	hasGroupBy := groupField != ""
 
+	acc := &histogramAccum{
+		counts:      counts,
+		groupCounts: groupCounts,
+		cloudFlags:  make([]bool, numBuckets),
+		cloudCounts: make([]int64, numBuckets),
+	}
 	truncated, err := e.runTimechartStrategy(ctx, q, preOps, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, hasPreOps, hasGroupBy, groupField,
-		counts, groupCounts)
+		acc)
 	if err != nil {
 		return nil, err
 	}
@@ -85,23 +91,52 @@ func (e *Engine) runTimechart(ctx context.Context, q Query, tc *querylang.Timech
 // runTimechartStrategy selects the fastest histogram computation path based on query shape.
 // Unfiltered queries use binary search for counts + per-bucket attr sampling for groups.
 // Filtered queries fall back to full record scanning with a 1M cap.
+// histogramAccum collects per-bucket counts during histogram computation.
+type histogramAccum struct {
+	counts      []int64
+	groupCounts []map[string]int64
+	cloudFlags  []bool
+	cloudCounts []int64 // unfiltered cloud contribution per bucket
+}
+
 func (e *Engine) runTimechartStrategy(
 	ctx context.Context, q Query, preOps []querylang.PipeOp, selectedVaults []uuid.UUID,
 	start, end time.Time, bucketWidth time.Duration, numBuckets int,
 	hasFilter, hasPreOps, hasGroupBy bool, groupField string,
-	counts []int64, groupCounts []map[string]int64, cloudFlagsOpt ...[]bool,
+	acc *histogramAccum,
 ) (bool, error) {
-	var cloudFlags []bool
-	if len(cloudFlagsOpt) > 0 {
-		cloudFlags = cloudFlagsOpt[0]
-	}
+	cloudFlags := acc.cloudFlags
+	cloudCounts := acc.cloudCounts
+	counts := acc.counts
+	groupCounts := acc.groupCounts
+
 	if hasFilter || hasPreOps {
-		return e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth,
+		// Compute unfiltered counts for cloud chunks.
+		hasCloud := e.timechartCloudCounts(selectedVaults, start, end, bucketWidth, numBuckets, cloudCounts, cloudFlags)
+
+		// Scan LOCAL chunks only with the filter applied (skip cloud blobs).
+		localQ := q
+		localQ.SkipCloud = true
+		truncated, err := e.timechartScanPath(ctx, localQ, preOps, start, end, bucketWidth,
 			numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
+		if err != nil {
+			return truncated, err
+		}
+
+		if hasCloud {
+			e.applyCloudSelectivity(selectedVaults, start, end, bucketWidth, numBuckets, counts, cloudCounts)
+		}
+
+		return truncated, nil
 	}
 
 	// Exact total counts via IngestTS binary search — O(buckets × log(n)), instant.
-	e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts, cloudFlags)
+	// Cloud counts are computed separately first so cloudCounts[] captures the split.
+	e.timechartCloudCounts(selectedVaults, start, end, bucketWidth, numBuckets, cloudCounts, cloudFlags)
+	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, counts)
+	for b := range numBuckets {
+		counts[b] += cloudCounts[b]
+	}
 
 	if !hasGroupBy {
 		return false, nil
@@ -110,6 +145,33 @@ func (e *Engine) runTimechartStrategy(
 	// Group breakdown via per-bucket sampling — O(buckets × 1000).
 	e.timechartAttrScanGroups(selectedVaults, start, end, bucketWidth, numBuckets, groupField, groupCounts)
 	return false, nil
+}
+
+// applyCloudSelectivity estimates filtered cloud counts using local data selectivity.
+// Computes filteredLocal/localTotal ratio and scales cloud counts by that factor.
+func (e *Engine) applyCloudSelectivity(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts, cloudCounts []int64) {
+	localTotals := make([]int64, numBuckets)
+	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, localTotals)
+
+	var localTotal, filteredLocal int64
+	for b := range numBuckets {
+		localTotal += localTotals[b]
+		filteredLocal += counts[b]
+	}
+	if localTotal > 0 {
+		selectivity := float64(filteredLocal) / float64(localTotal)
+		for b := range numBuckets {
+			if cloudCounts[b] > 0 {
+				estimated := int64(float64(cloudCounts[b]) * selectivity)
+				counts[b] += estimated
+				cloudCounts[b] = estimated
+			}
+		}
+	} else {
+		for b := range numBuckets {
+			counts[b] += cloudCounts[b]
+		}
+	}
 }
 
 // clampBuckets normalizes the bucket count to the valid range [1, 500], defaulting to 50.
@@ -183,6 +245,64 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 				continue
 			}
 			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts, cloudFlags)
+		}
+	}
+}
+
+// timechartCloudCounts fills cloudCounts with unfiltered record counts from
+// cloud-backed chunks only (via TS index binary search). Sets cloudFlags for
+// buckets with cloud data. Returns true if any cloud chunks were found.
+func (e *Engine) timechartCloudCounts(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, cloudCounts []int64, cloudFlags []bool) bool {
+	found := false
+	for _, vaultID := range selectedVaults {
+		cm, im := e.getVaultManagers(vaultID)
+		if cm == nil {
+			continue
+		}
+		metas, err := cm.List()
+		if err != nil {
+			continue
+		}
+		for _, meta := range metas {
+			if !meta.CloudBacked || meta.RecordCount == 0 {
+				continue
+			}
+			if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
+				continue
+			}
+			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
+				continue
+			}
+			found = true
+			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, cloudCounts, cloudFlags)
+		}
+	}
+	return found
+}
+
+// timechartLocalCounts fills counts with unfiltered record counts from
+// local (non-cloud) chunks only.
+func (e *Engine) timechartLocalCounts(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
+	for _, vaultID := range selectedVaults {
+		cm, im := e.getVaultManagers(vaultID)
+		if cm == nil {
+			continue
+		}
+		metas, err := cm.List()
+		if err != nil {
+			continue
+		}
+		for _, meta := range metas {
+			if meta.CloudBacked || meta.RecordCount == 0 {
+				continue
+			}
+			if !meta.IngestEnd.IsZero() && meta.IngestEnd.Before(start) {
+				continue
+			}
+			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
+				continue
+			}
+			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts, nil)
 		}
 	}
 }
@@ -479,25 +599,23 @@ func timechartChunkByIngestTS(
 		}
 	}
 
-	// Cloud chunks: mark buckets as having cloud data. Don't fetch the
-	// TS index from S3 just for histogram bar counts — that latency adds
-	// up across many chunks. The TS index is for search-time seeking.
-	if meta.CloudBacked {
+	// Mark cloud buckets regardless of TS index availability —
+	// the flag means "this bucket includes cloud data" (for hatching),
+	// not "counts are unknown."
+	if meta.CloudBacked && cloudFlags != nil {
 		for b := firstBucket; b <= lastBucket; b++ {
-			if cloudFlags != nil {
-				cloudFlags[b] = true
-			}
+			cloudFlags[b] = true
 		}
-		return
 	}
 
-	// Try index-based counting for local chunks.
+	// Try index-based counting (works for local and cloud chunks —
+	// cloud TS indexes are cached locally after first S3 fetch).
 	if _, ok := findIngestPos(cm, im, meta.ID, start); ok {
 		timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
 		return
 	}
 
-	// No ingest index available — mark buckets as having cloud data.
+	// No ingest index available — interpolate across buckets.
 	for b := firstBucket; b <= lastBucket; b++ {
 		if cloudFlags != nil {
 			cloudFlags[b] = true

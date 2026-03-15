@@ -44,18 +44,14 @@ export function useLiveHistogram(records: ProtoRecord[]): HistogramData | null {
     const bucketWidth = rangeMs / NUM_BUCKETS;
 
     // Initialize buckets.
-    const buckets: {
-      ts: Date;
-      count: number;
-      groupCounts: { [key: string]: number };
-      hasCloudData: boolean;
-    }[] = [];
+    const buckets: HistogramData["buckets"] = [];
     for (let i = 0; i < NUM_BUCKETS; i++) {
       buckets.push({
         ts: new Date(minMs + i * bucketWidth),
         count: 0,
         groupCounts: {},
         hasCloudData: false,
+        cloudCount: 0,
       });
     }
 

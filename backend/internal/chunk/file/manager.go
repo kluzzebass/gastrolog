@@ -95,8 +95,8 @@ type Manager struct {
 	closed   bool
 	zstdEnc  *zstd.Encoder
 	cloudIdx      *cloudIndex              // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
-	indexBuilders []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
-	tsCache       *cloudTSCache            // single-entry cache for cloud TS index downloads
+	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
+	cloudListCache []chunk.ChunkMeta        // cached List() result for cloud chunks; nil = stale
 
 	postSealWg sync.WaitGroup // tracks in-flight PostSealProcess calls
 
@@ -503,19 +503,13 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 		out = append(out, meta.toChunkMeta())
 	}
 
-	// Append cloud chunks from the B+ tree index.
-	// Pages are loaded during scan but evicted after, keeping data in OS
-	// page cache (kernel-managed) instead of Go heap (GC-managed).
+	// Append cloud chunks. The list is cached and rebuilt only when the
+	// cloud index changes (upload or delete).
 	if m.cloudIdx != nil {
-		if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
-			// Skip if a local version exists (local always wins).
-			if _, exists := m.metas[id]; !exists {
-				out = append(out, meta.toChunkMeta())
-			}
-			return true
-		}); err != nil {
-			return nil, fmt.Errorf("list cloud chunks: %w", err)
+		if m.cloudListCache == nil {
+			m.rebuildCloudListCache()
 		}
+		out = append(out, m.cloudListCache...)
 	}
 
 	// Sort by WriteStart to ensure consistent ordering.
@@ -1840,19 +1834,11 @@ func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 	return 0, false, nil
 }
 
-// cloudTSCache caches the last downloaded TS index section to avoid
-// repeated range requests when the histogram does per-bucket binary searches
-// on the same chunk (up to 2×numBuckets calls for one chunk).
-type cloudTSCache struct {
-	chunkID chunk.ChunkID
-	offset  int64
-	data    []byte
-}
+const tsCacheDir = ".ts-cache"
 
-// findCloudTSPosition fetches a TS index section from the cloud blob via
-// range request and binary-searches it for the first entry with TS >= ts.
-// Caches the downloaded data so repeated calls for the same chunk+section
-// avoid redundant range requests (histogram does ~100 lookups per chunk).
+// findCloudTSPosition looks up the TS index for a cloud chunk and binary-searches
+// for the first entry with TS >= ts. The index is cached locally after the first
+// S3 range request — subsequent calls do a local pread binary search.
 func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
 	data, err := m.loadCloudTSIndex(id, offset, size)
 	if err != nil {
@@ -1862,33 +1848,76 @@ func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, si
 	return pos, found, nil
 }
 
-// loadCloudTSIndex returns the TS index data for a cloud chunk, using
-// the single-entry cache to avoid repeated downloads.
+// loadCloudTSIndex returns the TS index data for a cloud chunk via mmap.
+// First checks the local file cache (<vaultDir>/.ts-cache/<chunkID>.<offset>);
+// on miss, downloads via S3 range request and persists locally.
+// The returned slice is mmap'd — no heap allocation, OS manages page cache.
 func (m *Manager) loadCloudTSIndex(id chunk.ChunkID, offset, size int64) ([]byte, error) {
-	m.mu.Lock()
-	if m.tsCache != nil && m.tsCache.chunkID == id && m.tsCache.offset == offset {
-		data := m.tsCache.data
-		m.mu.Unlock()
+	cachePath := m.tsCachePath(id, offset)
+
+	// Try local cache first — mmap the file.
+	data, err := mmapFile(cachePath)
+	if err == nil {
 		return data, nil
 	}
-	m.mu.Unlock()
 
+	// Cache miss — download from S3 directly to file, then mmap.
 	rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), offset, size)
 	if err != nil {
 		return nil, fmt.Errorf("download cloud TS index for %s: %w", id, err)
 	}
 	defer func() { _ = rc.Close() }()
 
-	data, err := io.ReadAll(rc)
+	cacheDir := filepath.Join(m.cfg.Dir, tsCacheDir)
+	_ = os.MkdirAll(cacheDir, 0o750)
+
+	f, err := os.CreateTemp(cacheDir, "ts-*.tmp")
 	if err != nil {
-		return nil, fmt.Errorf("read cloud TS index for %s: %w", id, err)
+		return nil, fmt.Errorf("create temp file for TS index: %w", err)
+	}
+	tmpPath := f.Name()
+
+	if _, err := io.Copy(f, rc); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		return nil, fmt.Errorf("write cloud TS index for %s: %w", id, err)
+	}
+	_ = f.Close()
+
+	if err := os.Rename(tmpPath, cachePath); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		_ = os.Remove(tmpPath)                                //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		return nil, fmt.Errorf("rename TS cache file: %w", err)
 	}
 
-	m.mu.Lock()
-	m.tsCache = &cloudTSCache{chunkID: id, offset: offset, data: data}
-	m.mu.Unlock()
+	return mmapFile(cachePath)
+}
 
+// mmapFile maps a file into memory read-only. Returns the mapped slice.
+func mmapFile(path string) ([]byte, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() == 0 {
+		return nil, errors.New("empty file")
+	}
+
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), //nolint:gosec // G115: Fd() and Size() fit in int on 64-bit
+		syscall.PROT_READ, syscall.MAP_PRIVATE)
+	if err != nil {
+		return nil, fmt.Errorf("mmap %s: %w", path, err)
+	}
 	return data, nil
+}
+
+func (m *Manager) tsCachePath(id chunk.ChunkID, offset int64) string {
+	return filepath.Join(m.cfg.Dir, tsCacheDir, fmt.Sprintf("%s.%d", id, offset))
 }
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
@@ -2232,6 +2261,26 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 	} else if err := m.cloudIdx.Sync(); err != nil {
 		m.logger.Warn("failed to sync cloud index after delete", "chunk", id, "error", err)
 	}
+	m.cloudListCache = nil // invalidate
+	// Clean up cached TS index files.
+	cacheDir := filepath.Join(m.cfg.Dir, tsCacheDir)
+	matches, _ := filepath.Glob(filepath.Join(cacheDir, id.String()+".*"))
+	for _, f := range matches {
+		_ = os.Remove(f)
+	}
+}
+
+// rebuildCloudListCache scans the cloud B+ tree index and caches the result.
+// Must be called with m.mu held.
+func (m *Manager) rebuildCloudListCache() {
+	var cache []chunk.ChunkMeta
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+		if _, exists := m.metas[id]; !exists {
+			cache = append(cache, meta.toChunkMeta())
+		}
+		return true
+	})
+	m.cloudListCache = cache
 }
 
 func (m *Manager) cloudPrefix() string {
@@ -2330,6 +2379,9 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		} else if err := m.cloudIdx.Sync(); err != nil {
 			m.logger.Warn("failed to sync cloud index", "chunk", id, "error", err)
 		}
+		m.mu.Lock()
+		m.cloudListCache = nil // invalidate
+		m.mu.Unlock()
 	}
 
 	m.logger.Info("chunk uploaded to cloud",

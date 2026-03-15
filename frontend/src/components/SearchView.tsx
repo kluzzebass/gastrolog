@@ -214,6 +214,7 @@ export function SearchView() {
                   data={sv.histogramData}
                   dark={sv.dark}
                   truncated={false}
+                  elapsedMs={sv.searchElapsedMs}
                   onBrushSelect={sv.handleBrushSelect}
                   onPan={sv.handlePan}
                   onSegmentClick={sv.handleSegmentClick}

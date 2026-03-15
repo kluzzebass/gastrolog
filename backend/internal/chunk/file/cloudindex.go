@@ -163,16 +163,14 @@ func (ci *cloudIndex) Close() error {
 
 // Lookup returns metadata for a single cloud chunk by ID.
 // Returns (nil, false) if the chunk is not in the index.
-// Evicts B+ tree pages after lookup to keep data in OS page cache, not Go heap.
+// Does NOT evict pages — B+ tree path pages (root + internals) are shared
+// across lookups and should stay cached for the query's lifetime.
 func (ci *cloudIndex) Lookup(id chunk.ChunkID) (*chunkMeta, bool) {
 	it, err := ci.tree.FindGE(id)
 	if err != nil || !it.Valid() || it.Key() != id {
-		ci.tree.EvictClean()
 		return nil, false
 	}
-	meta := decodeCloudMeta(id, it.Value())
-	ci.tree.EvictClean()
-	return meta, true
+	return decodeCloudMeta(id, it.Value()), true
 }
 
 // ForEach iterates all entries in the index, calling fn for each.
