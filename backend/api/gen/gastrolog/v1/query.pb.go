@@ -161,7 +161,6 @@ type HistogramBucket struct {
 	TimestampMs   int64                  `protobuf:"varint,1,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`                                                                           // Bucket start time (milliseconds since epoch)
 	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`                                                                                                          // Total records in this bucket
 	GroupCounts   map[string]int64       `protobuf:"bytes,3,rep,name=group_counts,json=groupCounts,proto3" json:"group_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // Level → count; records without level → "other"
-	HasCloudData  bool                   `protobuf:"varint,4,opt,name=has_cloud_data,json=hasCloudData,proto3" json:"has_cloud_data,omitempty"`                                                                      // True if cloud chunks cover this bucket (count unknown)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -215,13 +214,6 @@ func (x *HistogramBucket) GetGroupCounts() map[string]int64 {
 		return x.GroupCounts
 	}
 	return nil
-}
-
-func (x *HistogramBucket) GetHasCloudData() bool {
-	if x != nil {
-		return x.HasCloudData
-	}
-	return false
 }
 
 // TableResult holds aggregated results from a pipeline stats operator.
@@ -2305,12 +2297,11 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12<\n" +
 	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
-	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\x83\x02\n" +
+	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\xdd\x01\n" +
 	"\x0fHistogramBucket\x12!\n" +
 	"\ftimestamp_ms\x18\x01 \x01(\x03R\vtimestampMs\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12Q\n" +
-	"\fgroup_counts\x18\x03 \x03(\v2..gastrolog.v1.HistogramBucket.GroupCountsEntryR\vgroupCounts\x12$\n" +
-	"\x0ehas_cloud_data\x18\x04 \x01(\bR\fhasCloudData\x1a>\n" +
+	"\fgroup_counts\x18\x03 \x03(\v2..gastrolog.v1.HistogramBucket.GroupCountsEntryR\vgroupCounts\x1a>\n" +
 	"\x10GroupCountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\x03R\x05value:\x028\x01\"\x92\x01\n" +

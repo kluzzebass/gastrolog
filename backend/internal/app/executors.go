@@ -189,10 +189,9 @@ func histogramBucketsToProto(buckets []query.HistogramBucket) []*gastrologv1.His
 	out := make([]*gastrologv1.HistogramBucket, len(buckets))
 	for i, b := range buckets {
 		out[i] = &gastrologv1.HistogramBucket{
-			TimestampMs:       b.TimestampMs,
-			Count:             b.Count,
-			GroupCounts:       b.GroupCounts,
-			HasCloudData: b.HasCloudData,
+			TimestampMs: b.TimestampMs,
+			Count:       b.Count,
+			GroupCounts: b.GroupCounts,
 		}
 	}
 	return out

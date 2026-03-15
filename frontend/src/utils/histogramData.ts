@@ -3,7 +3,6 @@ export interface HistogramData {
     ts: Date;
     count: number;
     groupCounts: Record<string, number>;
-    hasCloudData: boolean;
   }[];
   /** The name of the group-by field (e.g. "level", "status", "host"). */
   groupField: string;
@@ -30,7 +29,6 @@ export function histogramBucketsToData(
         ts: new Date(Number(b.timestampMs)),
         count: Number(b.count),
         groupCounts: gc,
-        hasCloudData: Boolean((b as { hasCloudData?: boolean }).hasCloudData),
       };
     })
     .sort((a, b) => a.ts.getTime() - b.ts.getTime());
@@ -94,7 +92,6 @@ export function tableResultToHistogramData(
       ts: new Date(tsStr),
       count: data.count,
       groupCounts: data.groupCounts,
-      hasCloudData: false,
     }));
 
   const start = buckets.length > 0 ? buckets[0]!.ts : null;
