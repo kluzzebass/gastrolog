@@ -126,20 +126,43 @@ func (ci *cloudIndex) Close() error {
 	return ci.tree.Close()
 }
 
-// LoadAll scans the entire index and returns a map of all cloud chunk metadata.
-func (ci *cloudIndex) LoadAll() (map[chunk.ChunkID]*chunkMeta, error) {
+// Lookup returns metadata for a single cloud chunk by ID.
+// Returns (nil, false) if the chunk is not in the index.
+// Evicts B+ tree pages after lookup to keep data in OS page cache, not Go heap.
+func (ci *cloudIndex) Lookup(id chunk.ChunkID) (*chunkMeta, bool) {
+	it, err := ci.tree.FindGE(id)
+	if err != nil || !it.Valid() || it.Key() != id {
+		ci.tree.EvictClean()
+		return nil, false
+	}
+	meta := decodeCloudMeta(id, it.Value())
+	ci.tree.EvictClean()
+	return meta, true
+}
+
+// ForEach iterates all entries in the index, calling fn for each.
+// Return false from fn to stop iteration early.
+// Evicts B+ tree pages after iteration.
+func (ci *cloudIndex) ForEach(fn func(chunk.ChunkID, *chunkMeta) bool) error {
 	it, err := ci.tree.Scan()
 	if err != nil {
-		return nil, fmt.Errorf("cloud index scan: %w", err)
+		return fmt.Errorf("cloud index scan: %w", err)
 	}
-	result := make(map[chunk.ChunkID]*chunkMeta, ci.tree.Count())
 	for it.Valid() {
 		id := it.Key()
-		result[id] = decodeCloudMeta(id, it.Value())
+		if !fn(id, decodeCloudMeta(id, it.Value())) {
+			break
+		}
 		it.Next()
 	}
+	ci.tree.EvictClean()
 	if err := it.Err(); err != nil {
-		return nil, fmt.Errorf("cloud index iterate: %w", err)
+		return fmt.Errorf("cloud index iterate: %w", err)
 	}
-	return result, nil
+	return nil
+}
+
+// EvictClean drops cached B+ tree pages from Go heap.
+func (ci *cloudIndex) EvictClean() {
+	ci.tree.EvictClean()
 }
