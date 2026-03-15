@@ -36,6 +36,10 @@ pprof:
 conf *args:
   go run ./cmd/gastrolog --home data config {{args}}
 
+# Runs a query against node 1. Usage: just query level=error last=5m
+query +args:
+  go run ./cmd/gastrolog --home data/node1 query "{{args}}"
+
 # Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
 build-cross os arch:
   CGO_ENABLED=0 GOOS={{os}} GOARCH={{arch}} go build -ldflags "-X main.version={{version}}" -o gastrolog-{{os}}-{{arch}} ./cmd/gastrolog

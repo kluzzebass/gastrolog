@@ -131,6 +131,7 @@ func main() {
 		cli.NewUserCommand(),
 		cli.NewLoginCommand(),
 		cli.NewRegisterCommand(),
+		cli.NewQueryCommand(),
 	)
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {
