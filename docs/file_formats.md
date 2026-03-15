@@ -13,16 +13,16 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
     attr_dict.log       Attribute string dictionary (append-only)
     ingest.bt           B+ tree: IngestTS → record position (active only)
     source.bt           B+ tree: SourceTS → record position (active only)
-    _ingest.idx         IngestTS timestamp index (sealed only)
-    _source.idx         SourceTS timestamp index (sealed only)
-    _token.idx          Token inverted index (sealed only)
-    _json.idx           Structural JSON index (sealed only)
-    _attr_key.idx       Attribute key inverted index (sealed only)
-    _attr_val.idx       Attribute value inverted index (sealed only)
-    _attr_kv.idx        Attribute key-value pair index (sealed only)
-    _kv_key.idx         Heuristic KV key inverted index (sealed only)
-    _kv_val.idx         Heuristic KV value inverted index (sealed only)
-    _kv_kv.idx          Heuristic KV pair index (sealed only)
+    ingest.idx          IngestTS timestamp index (sealed only)
+    source.idx          SourceTS timestamp index (sealed only)
+    token.idx           Token inverted index (sealed only)
+    json.idx            Structural JSON index (sealed only)
+    attr_key.idx        Attribute key inverted index (sealed only)
+    attr_val.idx        Attribute value inverted index (sealed only)
+    attr_kv.idx         Attribute key-value pair index (sealed only)
+    kv_key.idx          Heuristic KV key inverted index (sealed only)
+    kv_val.idx          Heuristic KV value inverted index (sealed only)
+    kv_kv.idx           Heuristic KV pair index (sealed only)
 ```
 
 Each chunk has its own subdirectory named by its UUID. Chunks are self-contained: all data needed to reconstruct records is stored within the chunk directory.
@@ -48,16 +48,16 @@ All binary files share a common 4-byte header prefix:
 | `0x64` | `d`  | attr_dict.log     |
 | `0x62` | `b`  | ingest.bt / source.bt |
 | `0x67` | `g`  | cloud blob (GLCB) |
-| `0x49` | `I`  | _ingest.idx       |
-| `0x73` | `s`  | _source.idx       |
-| `0x6B` | `k`  | _token.idx        |
-| `0x4A` | `J`  | _json.idx         |
-| `0x4B` | `K`  | _attr_key.idx     |
-| `0x56` | `V`  | _attr_val.idx     |
-| `0x50` | `P`  | _attr_kv.idx      |
-| `0x4D` | `M`  | _kv_kv.idx        |
-| `0x4E` | `N`  | _kv_key.idx       |
-| `0x4F` | `O`  | _kv_val.idx       |
+| `0x49` | `I`  | ingest.idx        |
+| `0x73` | `s`  | source.idx        |
+| `0x6B` | `k`  | token.idx         |
+| `0x4A` | `J`  | json.idx          |
+| `0x4B` | `K`  | attr_key.idx      |
+| `0x56` | `V`  | attr_val.idx      |
+| `0x50` | `P`  | attr_kv.idx       |
+| `0x4D` | `M`  | kv_kv.idx         |
+| `0x4E` | `N`  | kv_key.idx        |
+| `0x4F` | `O`  | kv_val.idx        |
 
 ### Flags
 
@@ -446,6 +446,8 @@ Duplicate keys are allowed; entries with equal keys are secondarily ordered by v
 
 Single-object format for cloud-archived (sealed) chunks. Each chunk becomes one blob in S3/Azure/GCS with an uncompressed header/dictionary/index prefix followed by seekable zstd record data, enabling O(1) random access to any record.
 
+Sorted IngestTS and SourceTS indexes are embedded after the seekable zstd section, with a TOC footer. This enables time-range seeking via S3 range requests without downloading the full blob.
+
 ### Layout
 
 ```
@@ -461,13 +463,18 @@ Uncompressed prefix:
 +---------------------------+
 Seekable zstd section:
 +---------------------------+
-|     Record Frame 0        |
+|     Compressed Record     |
+|     Frames + Seek Table   |
 +---------------------------+
-|     Record Frame 1        |
+TS indexes + TOC:
 +---------------------------+
-|     ...                   |
+|   IngestTS Index          |
+|   (recordCount × 12)     |
 +---------------------------+
-|     Record Frame N-1      |
+|   SourceTS Index          |
+|   (N × 12, N ≤ records)  |
++---------------------------+
+|     TOC (48 bytes)        |
 +---------------------------+
 ```
 
@@ -532,6 +539,36 @@ Each record is self-framing:
 
 Record data is compressed with seekable zstd (~256KB independent frames). The uncompressed prefix (header, dictionary, record index) is stored in the clear so metadata can be read without decompression. The seekable format enables random-access reads: each frame can be independently decompressed, so reading a single record only fetches the frame(s) containing it.
 
+### Embedded TS Indexes
+
+Two sorted timestamp indexes are appended after the seekable zstd section. Each index uses the same 12-byte entry format as `ingest.idx`/`source.idx`:
+
+| Offset | Size | Field     | Description                          |
+|--------|------|-----------|--------------------------------------|
+| 0      | 8    | timestamp | Timestamp (int64 Unix nanos)         |
+| 8      | 4    | recordPos | Record index (uint32)                |
+
+- **IngestTS Index**: One entry per record, sorted by IngestTS. Size = `recordCount × 12` bytes.
+- **SourceTS Index**: One entry per record with non-zero SourceTS, sorted by SourceTS. Size = `N × 12` bytes where N ≤ recordCount.
+
+No header — the TOC provides section offsets and sizes. Entry count is derived from `sectionSize / 12`.
+
+### TOC Footer (48 bytes)
+
+The Table of Contents identifies embedded TS index sections for range-request access:
+
+| Offset | Size | Field           | Description                                  |
+|--------|------|-----------------|----------------------------------------------|
+| 0      | 4    | magic           | `"GTOC"` (ASCII)                             |
+| 4      | 4    | tocVersion      | `1` (uint32)                                 |
+| 8      | 8    | ingestIdxOffset | Byte offset of IngestTS index (uint64)       |
+| 16     | 8    | ingestIdxSize   | Byte size of IngestTS index (uint64)         |
+| 24     | 8    | sourceIdxOffset | Byte offset of SourceTS index (uint64)       |
+| 32     | 8    | sourceIdxSize   | Byte size of SourceTS index (uint64)         |
+| 40     | 8    | reserved        | Reserved (zero)                              |
+
+The TOC is always the last 48 bytes of the blob. Offsets are absolute (from blob start), enabling direct S3/GCS range requests to fetch individual index sections.
+
 ### Blob Object Metadata
 
 When uploaded, the following user-defined metadata is set on the cloud object for filtering without download:
@@ -558,10 +595,10 @@ All file formats include validation checks on decode:
 | attr_dict.log  | Min size (4 bytes), signature, type, version                   |
 | ingest.bt      | Signature+type, version, codec size match on reopen            |
 | source.bt      | Signature+type, version, codec size match on reopen            |
-| _ingest.idx    | Min size, signature+type, version, complete flag               |
-| _source.idx    | Min size, signature+type, version, complete flag               |
-| _token.idx     | Min size, signature+type, version, key size, posting size      |
-| _json.idx      | Min size, signature+type, version, complete flag, status byte  |
-| _attr_*.idx    | Min size, signature+type, version, complete flag               |
-| _kv_*.idx      | Min size, signature+type, version, complete flag, status byte  |
-| cloud blob     | Signature+type, version, seekable zstd decompression, frame sizes |
+| ingest.idx     | Min size, signature+type, version, complete flag               |
+| source.idx     | Min size, signature+type, version, complete flag               |
+| token.idx      | Min size, signature+type, version, key size, posting size      |
+| json.idx       | Min size, signature+type, version, complete flag, status byte  |
+| attr_*.idx     | Min size, signature+type, version, complete flag               |
+| kv_*.idx       | Min size, signature+type, version, complete flag, status byte  |
+| cloud blob     | Signature+type, version, seekable zstd, TOC magic              |

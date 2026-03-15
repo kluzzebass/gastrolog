@@ -15,14 +15,16 @@ import (
 const cloudIndexFile = "cloud.idx"
 
 // cloudMetaValue is the fixed-size encoded form of cloud chunk metadata.
-// Layout (74 bytes):
+// Layout (106 bytes):
 //   - 9 × int64 (72 bytes): WriteStart, WriteEnd, RecordCount, Bytes, DiskBytes,
 //     IngestStart, IngestEnd, SourceStart, SourceEnd — all unix nanos or raw int64
 //   - 1 × uint16 (2 bytes): flags (bit 0 = sealed, bit 1 = compressed)
-type cloudMetaValue [74]byte
+//   - 4 × int64 (32 bytes): IngestIdxOffset, IngestIdxSize, SourceIdxOffset, SourceIdxSize
+//     — GLCB section offsets for embedded TS indexes (0 = none)
+type cloudMetaValue [106]byte
 
 const (
-	cloudMetaValSize = 74
+	cloudMetaValSize = 106
 	flagSealed       = 1 << 0
 	flagCompressed   = 1 << 1
 )
@@ -32,8 +34,8 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 	binary.LittleEndian.PutUint64(v[0:8], uint64(m.writeStart.UnixNano()))
 	binary.LittleEndian.PutUint64(v[8:16], uint64(m.writeEnd.UnixNano()))
 	binary.LittleEndian.PutUint64(v[16:24], uint64(m.recordCount)) //nolint:gosec // recordCount is always non-negative
-	binary.LittleEndian.PutUint64(v[24:32], uint64(m.bytes))     //nolint:gosec // bytes is always non-negative
-	binary.LittleEndian.PutUint64(v[32:40], uint64(m.diskBytes)) //nolint:gosec // diskBytes is always non-negative
+	binary.LittleEndian.PutUint64(v[24:32], uint64(m.bytes))       //nolint:gosec // bytes is always non-negative
+	binary.LittleEndian.PutUint64(v[32:40], uint64(m.diskBytes))   //nolint:gosec // diskBytes is always non-negative
 	binary.LittleEndian.PutUint64(v[40:48], uint64(m.ingestStart.UnixNano()))
 	binary.LittleEndian.PutUint64(v[48:56], uint64(m.ingestEnd.UnixNano()))
 	binary.LittleEndian.PutUint64(v[56:64], uint64(m.sourceStart.UnixNano()))
@@ -46,25 +48,33 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 		flags |= flagCompressed
 	}
 	binary.LittleEndian.PutUint16(v[72:74], flags)
+	binary.LittleEndian.PutUint64(v[74:82], uint64(m.ingestIdxOffset))  //nolint:gosec // offset is always non-negative
+	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))    //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset))  //nolint:gosec // offset is always non-negative
+	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))   //nolint:gosec // size is always non-negative
 	return v
 }
 
 func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 	flags := binary.LittleEndian.Uint16(v[72:74])
 	return &chunkMeta{
-		id:          id,
-		writeStart:  time.Unix(0, int64(binary.LittleEndian.Uint64(v[0:8]))),   //nolint:gosec // nano timestamp round-trip
-		writeEnd:    time.Unix(0, int64(binary.LittleEndian.Uint64(v[8:16]))),  //nolint:gosec // nano timestamp round-trip
-		recordCount: int64(binary.LittleEndian.Uint64(v[16:24])),               //nolint:gosec // count round-trip
-		bytes:       int64(binary.LittleEndian.Uint64(v[24:32])),               //nolint:gosec // round-trip
-		diskBytes:   int64(binary.LittleEndian.Uint64(v[32:40])),               //nolint:gosec // round-trip
-		ingestStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[40:48]))), //nolint:gosec // round-trip
-		ingestEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))), //nolint:gosec // round-trip
-		sourceStart: time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))), //nolint:gosec // round-trip
-		sourceEnd:   time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))), //nolint:gosec // round-trip
-		sealed:      flags&flagSealed != 0,
-		compressed:  flags&flagCompressed != 0,
-		cloudBacked: true,
+		id:              id,
+		writeStart:      time.Unix(0, int64(binary.LittleEndian.Uint64(v[0:8]))),   //nolint:gosec // nano timestamp round-trip
+		writeEnd:        time.Unix(0, int64(binary.LittleEndian.Uint64(v[8:16]))),   //nolint:gosec // nano timestamp round-trip
+		recordCount:     int64(binary.LittleEndian.Uint64(v[16:24])),                //nolint:gosec // count round-trip
+		bytes:           int64(binary.LittleEndian.Uint64(v[24:32])),                //nolint:gosec // round-trip
+		diskBytes:       int64(binary.LittleEndian.Uint64(v[32:40])),                //nolint:gosec // round-trip
+		ingestStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[40:48]))),  //nolint:gosec // round-trip
+		ingestEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[48:56]))),  //nolint:gosec // round-trip
+		sourceStart:     time.Unix(0, int64(binary.LittleEndian.Uint64(v[56:64]))),  //nolint:gosec // round-trip
+		sourceEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))),  //nolint:gosec // round-trip
+		sealed:          flags&flagSealed != 0,
+		compressed:      flags&flagCompressed != 0,
+		cloudBacked:     true,
+		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),  //nolint:gosec // round-trip
+		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip
+		sourceIdxOffset: int64(binary.LittleEndian.Uint64(v[90:98])),  //nolint:gosec // round-trip
+		sourceIdxSize:   int64(binary.LittleEndian.Uint64(v[98:106])), //nolint:gosec // round-trip
 	}
 }
 
@@ -85,20 +95,45 @@ type cloudIndex struct {
 }
 
 // openCloudIndex opens an existing cloud index or creates a new one.
+// If the existing index has an incompatible codec (e.g., old value size),
+// it is deleted and recreated — loadCloudChunksFromStore will repopulate it.
 func openCloudIndex(dir string) (*cloudIndex, error) {
 	path := filepath.Join(dir, cloudIndexFile)
-	if _, err := os.Stat(path); err == nil {
-		tree, err := btree.Open(path, cloudIndexCodec)
-		if err != nil {
-			return nil, fmt.Errorf("open cloud index: %w", err)
-		}
+
+	tree, err := tryOpenCloudIndex(path)
+	if err == nil {
 		return &cloudIndex{tree: tree}, nil
 	}
-	tree, err := btree.Create(path, cloudIndexCodec)
+
+	// File doesn't exist or codec mismatch — create fresh.
+	tree, err = btree.Create(path, cloudIndexCodec)
 	if err != nil {
 		return nil, fmt.Errorf("create cloud index: %w", err)
 	}
 	return &cloudIndex{tree: tree}, nil
+}
+
+// tryOpenCloudIndex attempts to open an existing cloud index file.
+// Returns the tree on success, or an error if the file doesn't exist
+// or has an incompatible codec (in which case the file is removed).
+func tryOpenCloudIndex(path string) (*btree.Tree[chunk.ChunkID, cloudMetaValue], error) {
+	if _, err := os.Stat(path); err != nil {
+		return nil, err
+	}
+	tree, err := btree.Open(path, cloudIndexCodec)
+	if err != nil {
+		if isCodecMismatch(err) {
+			_ = os.Remove(path)
+		}
+		return nil, err
+	}
+	return tree, nil
+}
+
+// isCodecMismatch checks if the error message indicates a codec mismatch.
+// Fallback for when ErrCodecMismatch is not a sentinel.
+func isCodecMismatch(err error) bool {
+	return err != nil && bytes.Contains([]byte(err.Error()), []byte("codec mismatch"))
 }
 
 // Insert adds or overwrites metadata for a chunk.

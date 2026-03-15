@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,9 +16,16 @@ import (
 	"gastrolog/internal/format"
 )
 
+// tsEntry is a (timestamp, position) pair for the embedded TS index.
+type tsEntry struct {
+	ts  int64  // unix nanos
+	pos uint32 // 0-based record position
+}
+
 // Writer encodes records into the cloud blob format.
 // Records are buffered in memory, then flushed with an uncompressed
-// header/dict/index prefix followed by seekable zstd record data.
+// header/dict/index prefix followed by seekable zstd record data,
+// and finally the embedded TS indexes + TOC footer (v2).
 type Writer struct {
 	chunkID chunk.ChunkID
 	vaultID uuid.UUID
@@ -26,12 +34,18 @@ type Writer struct {
 	frames [][]byte // pre-encoded record frames
 	count  uint32
 
-	writeStart     time.Time
-	writeEnd       time.Time
+	writeStart  time.Time
+	writeEnd    time.Time
 	ingestStart time.Time
 	ingestEnd   time.Time
 	sourceStart time.Time
 	sourceEnd   time.Time
+
+	// TS index entries built during Add(), sorted and written in WriteTo().
+	ingestEntries []tsEntry
+	sourceEntries []tsEntry
+
+	toc BlobTOC // populated by WriteTo
 }
 
 // NewWriter creates a writer for the given chunk and vault.
@@ -75,9 +89,34 @@ func (w *Writer) Add(rec chunk.Record) error {
 	off += 4
 	copy(frame[off:], rec.Raw)
 
+	// Track TS entries for the embedded indexes.
+	w.ingestEntries = append(w.ingestEntries, tsEntry{
+		ts:  rec.IngestTS.UnixNano(),
+		pos: w.count,
+	})
+	if !rec.SourceTS.IsZero() {
+		w.sourceEntries = append(w.sourceEntries, tsEntry{
+			ts:  rec.SourceTS.UnixNano(),
+			pos: w.count,
+		})
+	}
+
 	w.frames = append(w.frames, frame)
 	w.count++
 	return nil
+}
+
+// countWriter wraps an io.Writer and tracks total bytes written,
+// including bytes written by wrapped writers (e.g., seekable zstd's Close).
+type countWriter struct {
+	w io.Writer
+	n int64
+}
+
+func (cw *countWriter) Write(p []byte) (int, error) {
+	n, err := cw.w.Write(p)
+	cw.n += int64(n)
+	return n, err
 }
 
 // WriteTo writes the cloud blob to dst:
@@ -85,8 +124,13 @@ func (w *Writer) Add(rec chunk.Record) error {
 //   - Uncompressed dictionary
 //   - Uncompressed record index (12 bytes per record)
 //   - Seekable zstd compressed record data (256KB frames)
+//   - IngestTS index (sorted entries)
+//   - SourceTS index (sorted entries)
+//   - TOC footer (48 bytes)
 func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
-	var written int64
+	// countWriter tracks total bytes written to dst, including bytes
+	// written by the seekable zstd writer during Close() (seek table).
+	cw := &countWriter{w: dst}
 
 	// --- Encode dictionary to compute dictSize ---
 	var dictBuf []byte
@@ -121,17 +165,13 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	binary.LittleEndian.PutUint32(hdr[88:92], uint32(w.dict.Len())) //nolint:gosec // G115: dict size bounded by StringDict capacity
 	binary.LittleEndian.PutUint32(hdr[92:96], uint32(len(dictBuf))) //nolint:gosec // G115: dict bytes bounded
 
-	n, err := dst.Write(hdr[:])
-	written += int64(n)
-	if err != nil {
-		return written, err
+	if _, err := cw.Write(hdr[:]); err != nil {
+		return cw.n, err
 	}
 
 	// --- Dictionary ---
-	n, err = dst.Write(dictBuf)
-	written += int64(n)
-	if err != nil {
-		return written, err
+	if _, err := cw.Write(dictBuf); err != nil {
+		return cw.n, err
 	}
 
 	// --- Record Index ---
@@ -141,22 +181,22 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 		binary.LittleEndian.PutUint64(idxBuf[off:], idx.Offset)
 		binary.LittleEndian.PutUint32(idxBuf[off+8:], idx.Size)
 	}
-	n, err = dst.Write(idxBuf)
-	written += int64(n)
-	if err != nil {
-		return written, err
+	if _, err := cw.Write(idxBuf); err != nil {
+		return cw.n, err
 	}
 
 	// --- Seekable Zstd Record Data ---
+	// The seekable writer wraps cw so that sw.Close() (which writes the
+	// seek table) is also tracked in cw.n.
 	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
 	if err != nil {
-		return written, fmt.Errorf("create zstd encoder: %w", err)
+		return cw.n, fmt.Errorf("create zstd encoder: %w", err)
 	}
 	defer func() { _ = enc.Close() }()
 
-	sw, err := seekable.NewWriter(dst, enc)
+	sw, err := seekable.NewWriter(cw, enc)
 	if err != nil {
-		return written, fmt.Errorf("create seekable writer: %w", err)
+		return cw.n, fmt.Errorf("create seekable writer: %w", err)
 	}
 
 	// Write record frames in ~256KB batches. Each batch becomes one
@@ -169,28 +209,100 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 		batch = append(batch, frame...)
 
 		if len(batch) >= seekableFrameSize {
-			nn, werr := sw.Write(batch)
-			written += int64(nn)
-			if werr != nil {
+			if _, werr := sw.Write(batch); werr != nil {
 				_ = sw.Close()
-				return written, werr
+				return cw.n, werr
 			}
 			batch = batch[:0]
 		}
 	}
 	if len(batch) > 0 {
-		nn, werr := sw.Write(batch)
-		written += int64(nn)
-		if werr != nil {
+		if _, werr := sw.Write(batch); werr != nil {
 			_ = sw.Close()
-			return written, werr
+			return cw.n, werr
 		}
 	}
 
 	if err := sw.Close(); err != nil {
-		return written, fmt.Errorf("close seekable writer: %w", err)
+		return cw.n, fmt.Errorf("close seekable writer: %w", err)
 	}
-	return written, nil
+
+	// --- Embedded TS Indexes + TOC ---
+	// cw.n now includes all bytes from the seekable writer (data + seek table).
+	if err := w.writeTSIndexes(cw); err != nil {
+		return cw.n, err
+	}
+	return cw.n, nil
+}
+
+// writeTSIndexes sorts and writes the ingest + source TS index sections and TOC.
+func (w *Writer) writeTSIndexes(cw *countWriter) error {
+	// Sort entries by timestamp (stable to preserve position order for equal timestamps).
+	sortEntries := func(entries []tsEntry) {
+		slices.SortStableFunc(entries, func(a, b tsEntry) int {
+			if a.ts != b.ts {
+				if a.ts < b.ts {
+					return -1
+				}
+				return 1
+			}
+			return int(a.pos) - int(b.pos)
+		})
+	}
+
+	encodeEntries := func(entries []tsEntry) []byte {
+		buf := make([]byte, len(entries)*tsIndexEntrySize)
+		for i, e := range entries {
+			off := i * tsIndexEntrySize
+			binary.LittleEndian.PutUint64(buf[off:], uint64(e.ts)) //nolint:gosec // G115: nanosecond timestamps stored as uint64
+			binary.LittleEndian.PutUint32(buf[off+8:], e.pos)
+		}
+		return buf
+	}
+
+	// --- Ingest TS Index ---
+	sortEntries(w.ingestEntries)
+	ingestBuf := encodeEntries(w.ingestEntries)
+	ingestOffset := cw.n
+
+	if _, err := cw.Write(ingestBuf); err != nil {
+		return err
+	}
+
+	// --- Source TS Index ---
+	sortEntries(w.sourceEntries)
+	sourceBuf := encodeEntries(w.sourceEntries)
+	sourceOffset := cw.n
+
+	if _, err := cw.Write(sourceBuf); err != nil {
+		return err
+	}
+
+	// --- TOC (48 bytes) ---
+	w.toc = BlobTOC{
+		IngestIdxOffset: ingestOffset,
+		IngestIdxSize:   int64(len(ingestBuf)),
+		SourceIdxOffset: sourceOffset,
+		SourceIdxSize:   int64(len(sourceBuf)),
+	}
+
+	var tocBuf [tocSize]byte
+	copy(tocBuf[0:4], tocMagic)
+	binary.LittleEndian.PutUint32(tocBuf[4:8], 1) // tocVersion
+	binary.LittleEndian.PutUint64(tocBuf[8:16], uint64(w.toc.IngestIdxOffset))  //nolint:gosec // G115: offset is always positive
+	binary.LittleEndian.PutUint64(tocBuf[16:24], uint64(w.toc.IngestIdxSize))   //nolint:gosec // G115: size is always positive
+	binary.LittleEndian.PutUint64(tocBuf[24:32], uint64(w.toc.SourceIdxOffset)) //nolint:gosec // G115: offset is always positive
+	binary.LittleEndian.PutUint64(tocBuf[32:40], uint64(w.toc.SourceIdxSize))   //nolint:gosec // G115: size is always positive
+	// bytes 40-47: reserved (zero)
+
+	_, err := cw.Write(tocBuf[:])
+	return err
+}
+
+// TOC returns the section offsets for the embedded TS indexes.
+// Only valid after WriteTo has been called.
+func (w *Writer) TOC() BlobTOC {
+	return w.toc
 }
 
 func (w *Writer) updateBounds(rec chunk.Record) {
@@ -228,21 +340,26 @@ func (w *Writer) updateBounds(rec chunk.Record) {
 }
 
 // Meta returns the blob metadata computed from added records.
+// TOC fields are populated only after WriteTo has been called.
 func (w *Writer) Meta() BlobMeta {
 	var rawBytes int64
 	for _, frame := range w.frames {
 		rawBytes += 4 + int64(len(frame)) // u32 frameLen prefix + frame
 	}
 	return BlobMeta{
-		ChunkID:     w.chunkID,
-		VaultID:     w.vaultID,
-		RecordCount: w.count,
-		RawBytes:    rawBytes,
-		WriteStart:     w.writeStart,
-		WriteEnd:       w.writeEnd,
-		IngestStart: w.ingestStart,
-		IngestEnd:   w.ingestEnd,
-		SourceStart: w.sourceStart,
-		SourceEnd:   w.sourceEnd,
+		ChunkID:         w.chunkID,
+		VaultID:         w.vaultID,
+		RecordCount:     w.count,
+		RawBytes:        rawBytes,
+		WriteStart:      w.writeStart,
+		WriteEnd:        w.writeEnd,
+		IngestStart:     w.ingestStart,
+		IngestEnd:       w.ingestEnd,
+		SourceStart:     w.sourceStart,
+		SourceEnd:       w.sourceEnd,
+		IngestIdxOffset: w.toc.IngestIdxOffset,
+		IngestIdxSize:   w.toc.IngestIdxSize,
+		SourceIdxOffset: w.toc.SourceIdxOffset,
+		SourceIdxSize:   w.toc.SourceIdxSize,
 	}
 }

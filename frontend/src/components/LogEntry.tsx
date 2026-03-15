@@ -77,7 +77,7 @@ export const LogEntry = forwardRef<
   { record, tokens, isSelected, onSelect, onFilterToggle, onSpanClick, dark, highlightMode = "full", orderBy = "ingest_ts", rowIndex },
   ref,
 ) {
-  const rawText = new TextDecoder().decode(record.raw);
+  const rawText = new TextDecoder().decode(record.raw).trimEnd();
   const parts = composeWithSearch(syntaxHighlight(rawText, highlightMode), tokens);
   const severity = detectSeverity(record.attrs);
   const tsProto = pickTS(record, orderBy);
@@ -88,7 +88,11 @@ export const LogEntry = forwardRef<
     <article
       ref={ref}
       onClick={onSelect}
-      className={`group grid grid-cols-[3.5ch_1fr_auto] lg:grid-cols-[${rowIndex != null ? "5ch_" : ""}10ch_3.5ch_1fr_auto] px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
+      className={`group grid grid-cols-[3.5ch_1fr_auto] ${
+        rowIndex != null
+          ? "lg:grid-cols-[5ch_10ch_3.5ch_1fr_auto]"
+          : "lg:grid-cols-[10ch_3.5ch_1fr_auto]"
+      } px-4 lg:px-5 py-2 border-b cursor-pointer transition-colors duration-100 ${
         entryRowCls(isSelected, dark)
       }`}
     >
