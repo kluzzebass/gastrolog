@@ -149,6 +149,7 @@ type ChunkMeta struct {
 	IngestEnd   time.Time // max IngestTS in chunk
 	SourceStart time.Time // min SourceTS (excluding zero)
 	SourceEnd   time.Time // max SourceTS in chunk
+	CloudBacked bool      // true = chunk lives in cloud storage, not local disk
 }
 
 // EventID uniquely identifies a record across the cluster.

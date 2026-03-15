@@ -147,6 +147,7 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		IngestEnd:   m.ingestEnd,
 		SourceStart: m.sourceStart,
 		SourceEnd:   m.sourceEnd,
+		CloudBacked: m.cloudBacked,
 	}
 }
 

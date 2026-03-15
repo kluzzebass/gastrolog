@@ -163,8 +163,8 @@ func (s *Server) SetManagedFileIDs(fn ManagedFileIDsLister) {
 	s.managedFileIDs = fn
 }
 
-// forwardRecords handles the ForwardRecords RPC. Converts proto ExportRecords
-// to chunk.Record and writes them via the RecordAppender callback.
+// forwardRecords handles the unary ForwardRecords RPC. Converts proto
+// ExportRecords to chunk.Record and writes them via the RecordAppender callback.
 func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error) {
 	if s.recordAppender == nil {
 		return nil, status.Error(codes.Unavailable, "record appender not configured")
@@ -174,41 +174,57 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
 
-	batchSize := int64(len(req.GetRecords()))
-	s.forwardedReceived.Add(batchSize)
-
 	var written int64
 	for _, exportRec := range req.GetRecords() {
-		rec := chunk.Record{
-			Raw: exportRec.GetRaw(),
-		}
-		if exportRec.GetSourceTs() != nil {
-			rec.SourceTS = exportRec.GetSourceTs().AsTime()
-		}
-		if exportRec.GetIngestTs() != nil {
-			rec.IngestTS = exportRec.GetIngestTs().AsTime()
-		}
-		if len(exportRec.GetAttrs()) > 0 {
-			rec.Attrs = make(chunk.Attributes, len(exportRec.GetAttrs()))
-			maps.Copy(rec.Attrs, exportRec.GetAttrs())
-		}
-		// Populate EventID from proto fields.
-		rec.EventID.IngestSeq = exportRec.GetIngestSeq()
-		if len(exportRec.GetIngesterId()) == 16 {
-			copy(rec.EventID.IngesterID[:], exportRec.GetIngesterId())
-		}
-		rec.EventID.IngestTS = rec.IngestTS
-
+		rec := exportRecordToChunk(exportRec)
 		if err := s.recordAppender(ctx, vaultID, rec); err != nil {
 			s.cfg.Logger.Warn("forward: append failed",
-				"vault", vaultID, "error", err,
-				"received_so_far", s.forwardedReceived.Load())
+				"vault", vaultID, "error", err)
 			return nil, status.Errorf(codes.Internal, "append record: %v", err)
 		}
 		written++
 	}
+	s.forwardedReceived.Add(written)
 
 	return &gastrologv1.ForwardRecordsResponse{RecordsWritten: written}, nil
+}
+
+// streamForwardRecordsHandler handles the client-streaming StreamForwardRecords
+// RPC. Each message is a ForwardRecordsRequest (vault_id + batch of records).
+// This is the same payload as the unary ForwardRecords RPC, but on a persistent
+// stream — eliminating per-RPC connection overhead.
+func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
+	s := srv.(*Server)
+	if s.recordAppender == nil {
+		return status.Error(codes.Unavailable, "record appender not configured")
+	}
+
+	var written int64
+	for {
+		var msg gastrologv1.ForwardRecordsRequest
+		if err := stream.RecvMsg(&msg); err != nil {
+			if errors.Is(err, io.EOF) {
+				return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{
+					RecordsWritten: written,
+				})
+			}
+			return err
+		}
+
+		vaultID, err := uuid.Parse(msg.GetVaultId())
+		if err != nil {
+			continue
+		}
+
+		for _, exportRec := range msg.GetRecords() {
+			rec := exportRecordToChunk(exportRec)
+			if err := s.recordAppender(stream.Context(), vaultID, rec); err != nil {
+				return status.Errorf(codes.Internal, "append: %v", err)
+			}
+			written++
+		}
+		s.forwardedReceived.Add(int64(len(msg.GetRecords())))
+	}
 }
 
 // exportRecordToChunk converts a proto ExportRecord to a chunk.Record.
@@ -834,6 +850,11 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			StreamName:    "PullManagedFile",
 			Handler:       pullManagedFileStreamHandler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "StreamForwardRecords",
+			Handler:       streamForwardRecordsHandler,
+			ClientStreams: true,
 		},
 	},
 }

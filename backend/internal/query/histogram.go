@@ -215,6 +215,12 @@ func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end 
 			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
 				continue
 			}
+			// Skip cloud chunks — ScanAttrs would download the entire blob
+			// from S3 just for level breakdown sampling. Cloud chunks get
+			// accurate total counts via TS index but no group breakdown.
+			if meta.CloudBacked {
+				continue
+			}
 			timechartChunkGroups(cm, im, meta, start, bucketWidth, numBuckets, samplePerBucket, groupField, groupCounts)
 		}
 	}
@@ -473,7 +479,19 @@ func timechartChunkByIngestTS(
 		}
 	}
 
-	// Try index-based counting first.
+	// Cloud chunks: mark buckets as having cloud data. Don't fetch the
+	// TS index from S3 just for histogram bar counts — that latency adds
+	// up across many chunks. The TS index is for search-time seeking.
+	if meta.CloudBacked {
+		for b := firstBucket; b <= lastBucket; b++ {
+			if cloudFlags != nil {
+				cloudFlags[b] = true
+			}
+		}
+		return
+	}
+
+	// Try index-based counting for local chunks.
 	if _, ok := findIngestPos(cm, im, meta.ID, start); ok {
 		timechartChunkByIndex(cm, im, meta, start, bucketWidth, firstBucket, lastBucket, counts)
 		return
