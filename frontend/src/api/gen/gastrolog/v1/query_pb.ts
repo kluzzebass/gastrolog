@@ -88,6 +88,14 @@ export class SearchResponse extends Message<SearchResponse> {
    */
   histogram: HistogramBucket[] = [];
 
+  /**
+   * Number of chunks skipped because they are in an offline storage tier
+   * (S3 Glacier, Azure Archive). Set on the first response message.
+   *
+   * @generated from field: int32 archived_chunks = 6;
+   */
+  archivedChunks = 0;
+
   constructor(data?: PartialMessage<SearchResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -101,6 +109,7 @@ export class SearchResponse extends Message<SearchResponse> {
     { no: 3, name: "has_more", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "table_result", kind: "message", T: TableResult },
     { no: 5, name: "histogram", kind: "message", T: HistogramBucket, repeated: true },
+    { no: 6, name: "archived_chunks", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SearchResponse {

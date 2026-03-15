@@ -94,8 +94,9 @@ func (g *GCSStore) List(ctx context.Context, prefix string, fn func(BlobInfo) er
 			return err
 		}
 		info := BlobInfo{
-			Key:  attrs.Name,
-			Size: attrs.Size,
+			Key:          attrs.Name,
+			Size:         attrs.Size,
+			StorageClass: attrs.StorageClass,
 		}
 		if len(attrs.Metadata) > 0 {
 			info.Metadata = attrs.Metadata
@@ -115,8 +116,9 @@ func (g *GCSStore) Head(ctx context.Context, key string) (BlobInfo, error) {
 		return BlobInfo{}, err
 	}
 	info := BlobInfo{
-		Key:  key,
-		Size: attrs.Size,
+		Key:          key,
+		Size:         attrs.Size,
+		StorageClass: attrs.StorageClass,
 	}
 	if len(attrs.Metadata) > 0 {
 		info.Metadata = attrs.Metadata

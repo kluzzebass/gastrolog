@@ -442,6 +442,10 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 	if q.SkipCloud && m.CloudBacked {
 		return false
 	}
+	// Skip archived chunks — they can't be read without a restore operation.
+	if m.Archived {
+		return false
+	}
 	// Primary filter: IngestTS overlap.
 	// lower/upper come from Query.Start/End which are IngestTS bounds.
 	if !lower.IsZero() && !m.IngestEnd.IsZero() && m.IngestEnd.Before(lower) {

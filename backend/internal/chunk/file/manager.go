@@ -125,6 +125,7 @@ type chunkMeta struct {
 	sourceEnd   time.Time
 
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
+	archived    bool // true = chunk is in offline storage tier (Glacier, Azure Archive)
 
 	// GLCB TOC: section offsets for embedded TS indexes (0 = none).
 	ingestIdxOffset int64
@@ -148,6 +149,7 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		SourceStart: m.sourceStart,
 		SourceEnd:   m.sourceEnd,
 		CloudBacked: m.cloudBacked,
+		Archived:    m.archived,
 	}
 }
 
@@ -2422,6 +2424,9 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
 	if err != nil {
+		if errors.Is(err, blobstore.ErrBlobArchived) {
+			return nil, fmt.Errorf("%w: %s", chunk.ErrChunkArchived, id)
+		}
 		return nil, fmt.Errorf("download cloud chunk %s: %w", id, err)
 	}
 	defer func() { _ = rc.Close() }()
@@ -2492,6 +2497,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 			sourceStart: cm.SourceStart,
 			sourceEnd:   cm.SourceEnd,
 			cloudBacked: true,
+			archived:    blob.IsArchived(),
 		}
 
 		// Populate the local B+ tree index.

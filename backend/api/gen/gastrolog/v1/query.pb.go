@@ -84,9 +84,12 @@ type SearchResponse struct {
 	TableResult *TableResult `protobuf:"bytes,4,opt,name=table_result,json=tableResult,proto3" json:"table_result,omitempty"`
 	// Volume histogram, set on the first response message only.
 	// Provides an approximate record count distribution by time bucket and level.
-	Histogram     []*HistogramBucket `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Histogram []*HistogramBucket `protobuf:"bytes,5,rep,name=histogram,proto3" json:"histogram,omitempty"`
+	// Number of chunks skipped because they are in an offline storage tier
+	// (S3 Glacier, Azure Archive). Set on the first response message.
+	ArchivedChunks int32 `protobuf:"varint,6,opt,name=archived_chunks,json=archivedChunks,proto3" json:"archived_chunks,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SearchResponse) Reset() {
@@ -152,6 +155,13 @@ func (x *SearchResponse) GetHistogram() []*HistogramBucket {
 		return x.Histogram
 	}
 	return nil
+}
+
+func (x *SearchResponse) GetArchivedChunks() int32 {
+	if x != nil {
+		return x.ArchivedChunks
+	}
+	return 0
 }
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.
@@ -2307,13 +2317,14 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x18gastrolog/v1/query.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"j\n" +
 	"\rSearchRequest\x12)\n" +
 	"\x05query\x18\x02 \x01(\v2\x13.gastrolog.v1.QueryR\x05query\x12!\n" +
-	"\fresume_token\x18\x03 \x01(\fR\vresumeTokenJ\x04\b\x01\x10\x02R\x05store\"\xf9\x01\n" +
+	"\fresume_token\x18\x03 \x01(\fR\vresumeTokenJ\x04\b\x01\x10\x02R\x05store\"\xa2\x02\n" +
 	"\x0eSearchResponse\x12.\n" +
 	"\arecords\x18\x01 \x03(\v2\x14.gastrolog.v1.RecordR\arecords\x12!\n" +
 	"\fresume_token\x18\x02 \x01(\fR\vresumeToken\x12\x19\n" +
 	"\bhas_more\x18\x03 \x01(\bR\ahasMore\x12<\n" +
 	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
-	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\xa4\x02\n" +
+	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\x12'\n" +
+	"\x0farchived_chunks\x18\x06 \x01(\x05R\x0earchivedChunks\"\xa4\x02\n" +
 	"\x0fHistogramBucket\x12!\n" +
 	"\ftimestamp_ms\x18\x01 \x01(\x03R\vtimestampMs\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count\x12Q\n" +

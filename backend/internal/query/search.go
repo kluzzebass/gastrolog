@@ -120,12 +120,14 @@ func (ms *mergeState) advanceScanner(entry *cursorEntry) (error, bool) {
 }
 
 // collectVaultChunks gathers chunks from selected vaults that overlap the query.
+// Returns the matching chunks and the count of archived chunks that were skipped.
 func (e *Engine) collectVaultChunks(
 	selectedVaults []uuid.UUID,
 	q Query,
 	chunkIDs []chunk.ChunkID,
-) ([]vaultChunk, error) {
+) ([]vaultChunk, int32, error) {
 	var allChunks []vaultChunk
+	var archivedCount int32
 	for _, vaultID := range selectedVaults {
 		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -134,7 +136,13 @@ func (e *Engine) collectVaultChunks(
 
 		metas, err := cm.List()
 		if err != nil {
-			return nil, err
+			return nil, 0, err
+		}
+
+		for _, meta := range metas {
+			if meta.Archived {
+				archivedCount++
+			}
 		}
 
 		candidates := e.selectChunks(metas, q, chunkIDs)
@@ -142,7 +150,7 @@ func (e *Engine) collectVaultChunks(
 			allChunks = append(allChunks, vaultChunk{vaultID: vaultID, meta: meta})
 		}
 	}
-	return allChunks, nil
+	return allChunks, archivedCount, nil
 }
 
 // validateResumeToken checks that all non-exhausted positions in the resume
@@ -470,7 +478,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 			return
 		}
 
-		allChunks, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
+		allChunks, _, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
 		if err != nil {
 			yield(chunk.Record{}, err)
 			return
@@ -560,7 +568,7 @@ func (e *Engine) SearchThenFollow(ctx context.Context, q Query, resume *ResumeTo
 			return
 		}
 
-		allChunks, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
+		allChunks, _, err := e.collectVaultChunks(selectedVaults, q, chunkIDs)
 		if err != nil {
 			yield(chunk.Record{}, err)
 			return
