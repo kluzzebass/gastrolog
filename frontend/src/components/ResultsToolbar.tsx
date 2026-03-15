@@ -24,6 +24,7 @@ interface ResultsToolbarProps {
   onPollIntervalChange: (ms: number | null) => void;
   onZoomOut: () => void;
   onExportToVault?: () => void;
+  queryExpression?: string;
 }
 
 export function ResultsToolbar({
@@ -45,6 +46,7 @@ export function ResultsToolbar({
   onPollIntervalChange,
   onZoomOut,
   onExportToVault,
+  queryExpression,
 }: Readonly<ResultsToolbarProps>) {
   const c = useThemeClass(dark);
   const effectiveReversed = isFollowMode ? followReversed : isReversed;
@@ -176,7 +178,7 @@ export function ResultsToolbar({
             dark={dark}
           />
         )}
-        <ExportButton records={displayRecords} dark={dark} onExportToVault={onExportToVault} />
+        <ExportButton records={displayRecords} dark={dark} onExportToVault={onExportToVault} queryExpression={queryExpression} />
       </div>
     </div>
   );

@@ -288,3 +288,75 @@ func TestEmptyBlob(t *testing.T) {
 		t.Errorf("expected ErrNoMoreRecords, got %v", err)
 	}
 }
+
+// TestLargeRoundTrip verifies GLCB round-trip with a realistic record count.
+// Mimics scatterbox: 17K records with sequential IngestTS.
+func TestLargeRoundTrip(t *testing.T) {
+	chunkID := chunk.NewChunkID()
+	vaultID := uuid.New()
+	ingesterID := uuid.New()
+	base := time.Now().Truncate(time.Nanosecond)
+
+	const n = 17_000
+	records := make([]chunk.Record, n)
+	for i := range n {
+		records[i] = chunk.Record{
+			IngestTS: base.Add(time.Duration(i) * time.Millisecond),
+			WriteTS:  base.Add(time.Duration(i) * time.Millisecond),
+			EventID:  chunk.EventID{IngesterID: ingesterID, IngestSeq: uint32(i)},
+			Attrs:    chunk.Attributes{"ingester_type": "scatterbox", "seq": string(rune(i))},
+			Raw:      []byte(`{"seq":` + string(rune(i)) + `}`),
+		}
+	}
+
+	tmp := writeBlobToTempFile(t, chunkID, vaultID, records)
+
+	rd, err := cloud.NewReader(tmp)
+	if err != nil {
+		t.Fatalf("NewReader: %v", err)
+	}
+
+	if rd.Meta().RecordCount != n {
+		t.Fatalf("meta.RecordCount = %d, want %d", rd.Meta().RecordCount, n)
+	}
+
+	// Forward cursor: read all records, verify count.
+	cursor := cloud.NewSeekableCursor(rd, chunkID)
+	defer cursor.Close()
+
+	var fwdCount int
+	for {
+		_, _, err := cursor.Next()
+		if err == chunk.ErrNoMoreRecords {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Next[%d]: %v", fwdCount, err)
+		}
+		fwdCount++
+	}
+	if fwdCount != n {
+		t.Fatalf("forward cursor read %d records, want %d", fwdCount, n)
+	}
+
+	// Reverse cursor: read all records from end, verify count.
+	if err := cursor.Seek(chunk.RecordRef{ChunkID: chunkID, Pos: uint64(n)}); err != nil {
+		t.Fatalf("Seek to end: %v", err)
+	}
+	var revCount int
+	for {
+		_, _, err := cursor.Prev()
+		if err == chunk.ErrNoMoreRecords {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Prev[%d]: %v", revCount, err)
+		}
+		revCount++
+	}
+	if revCount != n {
+		t.Fatalf("reverse cursor read %d records, want %d", revCount, n)
+	}
+
+	t.Logf("GLCB round-trip: %d records, forward=%d, reverse=%d — all match", n, fwdCount, revCount)
+}

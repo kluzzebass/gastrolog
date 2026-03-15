@@ -2613,3 +2613,180 @@ func TestSearchComparisonOperatorSealedVsActive(t *testing.T) {
 		}
 	}
 }
+
+// setupWithoutIndexes creates sealed chunks WITHOUT building indexes,
+// simulating cloud-backed chunks where no local indexes exist.
+func setupWithoutIndexes(t *testing.T, batches ...[]chunk.Record) *query.Engine {
+	t.Helper()
+
+	s := memtest.MustNewVault(t, chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+		Now:            fakeClockForBatches(batches),
+	})
+
+	for _, records := range batches {
+		for _, rec := range records {
+			if _, _, err := s.CM.Append(rec); err != nil {
+				t.Fatalf("append: %v", err)
+			}
+		}
+		if err := s.CM.Seal(); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+	}
+
+	// Deliberately do NOT build indexes — simulates cloud chunks.
+	return s.QE
+}
+
+func TestSearchNoIndexes(t *testing.T) {
+	records := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("one")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("two")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("three")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("four")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("five")},
+	}
+
+	eng := setupWithoutIndexes(t, records)
+
+	// Forward search — should return all 5 records.
+	results, err := collect(search(eng, context.Background(), query.Query{
+		Start: t0,
+		End:   t5.Add(time.Second),
+	}))
+	if err != nil {
+		t.Fatalf("forward search: %v", err)
+	}
+	if len(results) != 5 {
+		t.Fatalf("forward: expected 5 results, got %d", len(results))
+	}
+
+	// Reverse search — should return all 5 records in reverse order.
+	results, err = collect(search(eng, context.Background(), query.Query{
+		Start:     t0,
+		End:       t5.Add(time.Second),
+		IsReverse: true,
+	}))
+	if err != nil {
+		t.Fatalf("reverse search: %v", err)
+	}
+	if len(results) != 5 {
+		t.Fatalf("reverse: expected 5 results, got %d", len(results))
+	}
+	// Verify reverse order.
+	if string(results[0].Raw) != "five" {
+		t.Errorf("reverse[0] = %q, want 'five'", results[0].Raw)
+	}
+	if string(results[4].Raw) != "one" {
+		t.Errorf("reverse[4] = %q, want 'one'", results[4].Raw)
+	}
+}
+
+func TestSearchNoIndexesMultipleChunks(t *testing.T) {
+	batch1 := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("a1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("a2")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("b1")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("b2")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("b3")},
+	}
+
+	eng := setupWithoutIndexes(t, batch1, batch2)
+
+	// Search across both chunks — should return all 5 records.
+	results, err := collect(search(eng, context.Background(), query.Query{
+		Start: t0,
+		End:   t5.Add(time.Second),
+	}))
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(results) != 5 {
+		t.Fatalf("expected 5 results, got %d", len(results))
+	}
+
+	// Reverse across both chunks.
+	results, err = collect(search(eng, context.Background(), query.Query{
+		Start:     t0,
+		End:       t5.Add(time.Second),
+		IsReverse: true,
+	}))
+	if err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	if len(results) != 5 {
+		t.Fatalf("reverse: expected 5 results, got %d", len(results))
+	}
+}
+
+// TestSearchNoIndexesIngestTSDiffersFromWriteTS verifies that search works
+// when IngestTS and WriteTS differ (as with forwarded records). This is the
+// exact scenario that breaks with cloud-backed chunks.
+func TestSearchNoIndexesIngestTSDiffersFromWriteTS(t *testing.T) {
+	// Simulate forwarded records: IngestTS is set on the sender (earlier),
+	// WriteTS is set on the receiver (later). Within a chunk, WriteTS is
+	// monotonic but IngestTS might not match.
+	batch1 := []chunk.Record{
+		{IngestTS: t1, Attrs: attrsA, Raw: []byte("r1")},
+		{IngestTS: t2, Attrs: attrsA, Raw: []byte("r2")},
+		{IngestTS: t3, Attrs: attrsA, Raw: []byte("r3")},
+	}
+	batch2 := []chunk.Record{
+		{IngestTS: t3.Add(100 * time.Millisecond), Attrs: attrsA, Raw: []byte("r4")},
+		{IngestTS: t4, Attrs: attrsA, Raw: []byte("r5")},
+		{IngestTS: t5, Attrs: attrsA, Raw: []byte("r6")},
+	}
+
+	eng := setupWithoutIndexes(t, batch1, batch2)
+
+	// Query time range covers all records.
+	q := query.Query{
+		Start: t0,
+		End:   t5.Add(time.Second),
+	}
+
+	// Forward.
+	results, err := collect(search(eng, context.Background(), q))
+	if err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	if len(results) != 6 {
+		t.Fatalf("forward: expected 6 results, got %d", len(results))
+	}
+
+	// Reverse.
+	q.IsReverse = true
+	results, err = collect(search(eng, context.Background(), q))
+	if err != nil {
+		t.Fatalf("reverse: %v", err)
+	}
+	if len(results) != 6 {
+		t.Fatalf("reverse: expected 6 results, got %d", len(results))
+	}
+
+	// Partial time range — should still find records within bounds.
+	partial := query.Query{
+		Start: t2,
+		End:   t4.Add(time.Second),
+	}
+	results, err = collect(search(eng, context.Background(), partial))
+	if err != nil {
+		t.Fatalf("partial: %v", err)
+	}
+	if len(results) != 4 { // t2, t3, t3+100ms, t4
+		t.Fatalf("partial: expected 4 results, got %d", len(results))
+	}
+
+	// Partial reverse.
+	partial.IsReverse = true
+	results, err = collect(search(eng, context.Background(), partial))
+	if err != nil {
+		t.Fatalf("partial reverse: %v", err)
+	}
+	if len(results) != 4 {
+		t.Fatalf("partial reverse: expected 4 results, got %d", len(results))
+	}
+}

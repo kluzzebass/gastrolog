@@ -291,6 +291,7 @@ export function SearchView() {
             sentinelRef={sv.sentinelRef}
             selectedRowRef={sv.selectedRowRef}
             onExportToVault={() => sv.setShowExportToVault(true)}
+            queryExpression={sv.q}
           />
         </main>
 
