@@ -522,29 +522,47 @@ func timechartChunkInterpolated(
 	}
 	chunkDuration := meta.IngestEnd.Sub(meta.IngestStart)
 	if chunkDuration <= 0 {
-		// All records at the same instant — put them in one bucket.
 		counts[firstBucket] += meta.RecordCount
 		return
 	}
 
-	totalRecords := float64(meta.RecordCount)
+	// Compute the overlap between the chunk's time range and the query window.
+	// Only count records within the overlap — the rest are outside the visible range.
+	queryStart := start.Add(bucketWidth * time.Duration(firstBucket))
+	queryEnd := start.Add(bucketWidth * time.Duration(lastBucket+1))
+	overlapStart := meta.IngestStart
+	if queryStart.After(overlapStart) {
+		overlapStart = queryStart
+	}
+	overlapEnd := meta.IngestEnd
+	if queryEnd.Before(overlapEnd) {
+		overlapEnd = queryEnd
+	}
+	if !overlapEnd.After(overlapStart) {
+		return
+	}
+
+	// Pro-rate the total record count to just the overlap portion.
+	overlapFraction := float64(overlapEnd.Sub(overlapStart)) / float64(chunkDuration)
+	overlapRecords := float64(meta.RecordCount) * overlapFraction
+
+	overlapDuration := overlapEnd.Sub(overlapStart)
 	for b := firstBucket; b <= lastBucket; b++ {
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		// Clamp to chunk bounds.
-		if bStart.Before(meta.IngestStart) {
-			bStart = meta.IngestStart
+		// Clamp to overlap bounds.
+		if bStart.Before(overlapStart) {
+			bStart = overlapStart
 		}
-		if bEnd.After(meta.IngestEnd) {
-			bEnd = meta.IngestEnd
+		if bEnd.After(overlapEnd) {
+			bEnd = overlapEnd
 		}
 		if !bEnd.After(bStart) {
 			continue
 		}
 
-		// Pro-rate records by time fraction.
-		fraction := float64(bEnd.Sub(bStart)) / float64(chunkDuration)
-		counts[b] += int64(totalRecords * fraction)
+		fraction := float64(bEnd.Sub(bStart)) / float64(overlapDuration)
+		counts[b] += int64(overlapRecords * fraction)
 	}
 }
