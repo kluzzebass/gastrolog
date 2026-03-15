@@ -70,6 +70,9 @@ func parsePHC(encoded string) (salt, hash []byte, memory, time uint32, threads u
 	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &m, &t, &p); err != nil {
 		return nil, nil, 0, 0, 0, 0, fmt.Errorf("parse params: %w", err)
 	}
+	if t == 0 || p == 0 || m == 0 {
+		return nil, nil, 0, 0, 0, 0, fmt.Errorf("invalid argon2 params: t=%d, p=%d, m=%d (all must be > 0)", t, p, m)
+	}
 
 	salt, err = base64.RawStdEncoding.DecodeString(parts[4])
 	if err != nil {
@@ -81,5 +84,8 @@ func parsePHC(encoded string) (salt, hash []byte, memory, time uint32, threads u
 		return nil, nil, 0, 0, 0, 0, fmt.Errorf("decode hash: %w", err)
 	}
 
+	if len(salt) == 0 || len(hash) == 0 {
+		return nil, nil, 0, 0, 0, 0, fmt.Errorf("invalid argon2 salt/hash: salt=%d hash=%d bytes (both must be > 0)", len(salt), len(hash))
+	}
 	return salt, hash, m, t, p, uint32(len(hash)), nil //nolint:gosec // G115: hash length is always 32 bytes
 }
