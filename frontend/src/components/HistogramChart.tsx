@@ -258,35 +258,38 @@ export function HistogramChart({
     };
   });
 
-  // Add cloud data marker series — small hatched bars where cloud chunks
+  // Add cloud data marker on top of existing bars where cloud chunks
   // have data but exact counts are unavailable.
   const hasCloudData = buckets.some((b) => b.hasCloudData);
   if (hasCloudData) {
     const maxCount = Math.max(...buckets.map((b) => b.count).filter((c) => c > 0), 1);
-    const markerHeight = Math.max(maxCount * 0.04, 1); // 4% of max bar or 1
+    const markerHeight = Math.max(Math.round(maxCount * 0.09), 3);
     seriesData.push({
-      name: "cloud data",
+      name: "cloud (unsearchable)",
       type: "bar" as const,
-      stack: "cloud",
+      stack: "total",
       data: buckets.map((b, i) => ({
         value: b.hasCloudData ? markerHeight : 0,
         itemStyle: {
           color: copperColor,
-          opacity: b.hasCloudData ? (ix.hoveredBar === i ? 0.5 : 0.2) : 0,
-          borderRadius: [1, 1, 0, 0],
-          decal: {
-            symbol: "none",
-            dashArrayX: [1, 0],
-            dashArrayY: [2, 2],
-            rotation: -Math.PI / 4,
-            color: "rgba(255,255,255,0.4)",
-          },
+          opacity: b.hasCloudData ? (ix.hoveredBar === i ? 0.4 : 0.15) : 0,
+          borderRadius: [2, 2, 0, 0] as number | number[],
         },
       })),
       emphasis: { disabled: true },
       barCategoryGap: "8%",
       cursor: "crosshair",
-    });
+      itemStyle: {
+        decal: {
+          symbol: "rect",
+          symbolSize: 1,
+          dashArrayX: [1, 0],
+          dashArrayY: [4, 3],
+          rotation: -Math.PI / 4,
+          color: "rgba(255,255,255,0.3)",
+        },
+      },
+    } as any);
   }
 
   // Time formatting.
@@ -335,6 +338,9 @@ export function HistogramChart({
     }
 
     const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00B7 ${formatTime(bucket.ts)}</div>`;
+    if (bucket.hasCloudData) {
+      lines.push(`<div style="opacity:0.5;font-size:0.85em;margin-top:2px">+ cloud data (count unavailable)</div>`);
+    }
     return header + lines.join("<br/>");
   };
 
@@ -357,6 +363,7 @@ export function HistogramChart({
     : resolveColor("var(--color-light-text-bright)");
 
   const option: EChartsOption = {
+    aria: { decal: { show: true } },
     animation: true,
     animationDuration: 400,
     animationDurationUpdate: 300,
