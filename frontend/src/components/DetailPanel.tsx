@@ -266,7 +266,7 @@ export function DetailPanelContent({
     highlightMode,
   } = useDetailPanel();
   const c = useThemeClass(dark);
-  const rawText = new TextDecoder().decode(record.raw);
+  const rawText = new TextDecoder().decode(record.raw).trimEnd();
   const rawBytes = record.raw.length;
 
   let displayText = rawText;

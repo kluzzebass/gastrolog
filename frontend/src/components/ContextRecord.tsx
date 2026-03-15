@@ -18,7 +18,7 @@ export function ContextRecord({
   highlightMode?: HighlightMode;
 }>) {
   const c = useThemeClass(dark);
-  const rawText = new TextDecoder().decode(record.raw);
+  const rawText = new TextDecoder().decode(record.raw).trimEnd();
   const parts = syntaxHighlight(rawText, highlightMode);
   const severity = detectSeverity(record.attrs);
   const writeInstant = record.writeTs ? protoToInstant(record.writeTs) : null;

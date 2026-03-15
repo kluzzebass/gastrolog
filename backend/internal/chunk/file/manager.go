@@ -96,6 +96,7 @@ type Manager struct {
 	zstdEnc  *zstd.Encoder
 	cloudIdx      *cloudIndex              // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
 	indexBuilders []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
+	tsCache       *cloudTSCache            // single-entry cache for cloud TS index downloads
 
 	postSealWg sync.WaitGroup // tracks in-flight PostSealProcess calls
 
@@ -124,6 +125,12 @@ type chunkMeta struct {
 	sourceEnd   time.Time
 
 	cloudBacked bool // true = chunk lives in cloud, not on local disk
+
+	// GLCB TOC: section offsets for embedded TS indexes (0 = none).
+	ingestIdxOffset int64
+	ingestIdxSize   int64
+	sourceIdxOffset int64
+	sourceIdxSize   int64
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -1781,41 +1788,106 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
+	meta := m.lookupMeta(id)
 	m.mu.Unlock()
 
-	if active == nil || active.meta.id != id {
-		return 0, false, nil
+	// Active chunk: B+ tree lookup.
+	if active != nil && active.meta.id == id {
+		it, err := active.ingestBT.FindGE(ts.UnixNano())
+		if err != nil {
+			return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
+		}
+		if !it.Valid() {
+			return 0, false, nil
+		}
+		return uint64(it.Value()), true, nil
 	}
 
-	it, err := active.ingestBT.FindGE(ts.UnixNano())
-	if err != nil {
-		return 0, false, fmt.Errorf("btree ingest FindGE: %w", err)
+	// Cloud-backed chunk with embedded TS index: range-request binary search.
+	if meta != nil && meta.cloudBacked && meta.ingestIdxSize > 0 {
+		return m.findCloudTSPosition(id, ts, meta.ingestIdxOffset, meta.ingestIdxSize)
 	}
-	if !it.Valid() {
-		return 0, false, nil
-	}
-	return uint64(it.Value()), true, nil
+
+	return 0, false, nil
 }
 
-// FindSourceStartPosition returns the earliest record position with SourceTS >= ts
-// for the active chunk. Returns (0, false, nil) for sealed chunks (use the index manager).
+// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
+// Supports active chunks (B+ tree) and cloud chunks (embedded TS index via range request).
 func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
 	m.mu.Lock()
 	active := m.active
+	meta := m.lookupMeta(id)
 	m.mu.Unlock()
 
-	if active == nil || active.meta.id != id {
-		return 0, false, nil
+	// Active chunk: B+ tree lookup.
+	if active != nil && active.meta.id == id {
+		it, err := active.sourceBT.FindGE(ts.UnixNano())
+		if err != nil {
+			return 0, false, fmt.Errorf("btree source FindGE: %w", err)
+		}
+		if !it.Valid() {
+			return 0, false, nil
+		}
+		return uint64(it.Value()), true, nil
 	}
 
-	it, err := active.sourceBT.FindGE(ts.UnixNano())
+	// Cloud-backed chunk with embedded TS index.
+	if meta != nil && meta.cloudBacked && meta.sourceIdxSize > 0 {
+		return m.findCloudTSPosition(id, ts, meta.sourceIdxOffset, meta.sourceIdxSize)
+	}
+
+	return 0, false, nil
+}
+
+// cloudTSCache caches the last downloaded TS index section to avoid
+// repeated range requests when the histogram does per-bucket binary searches
+// on the same chunk (up to 2×numBuckets calls for one chunk).
+type cloudTSCache struct {
+	chunkID chunk.ChunkID
+	offset  int64
+	data    []byte
+}
+
+// findCloudTSPosition fetches a TS index section from the cloud blob via
+// range request and binary-searches it for the first entry with TS >= ts.
+// Caches the downloaded data so repeated calls for the same chunk+section
+// avoid redundant range requests (histogram does ~100 lookups per chunk).
+func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
+	data, err := m.loadCloudTSIndex(id, offset, size)
 	if err != nil {
-		return 0, false, fmt.Errorf("btree source FindGE: %w", err)
+		return 0, false, err
 	}
-	if !it.Valid() {
-		return 0, false, nil
+	pos, found := chunkcloud.FindStartPosition(data, ts.UnixNano())
+	return pos, found, nil
+}
+
+// loadCloudTSIndex returns the TS index data for a cloud chunk, using
+// the single-entry cache to avoid repeated downloads.
+func (m *Manager) loadCloudTSIndex(id chunk.ChunkID, offset, size int64) ([]byte, error) {
+	m.mu.Lock()
+	if m.tsCache != nil && m.tsCache.chunkID == id && m.tsCache.offset == offset {
+		data := m.tsCache.data
+		m.mu.Unlock()
+		return data, nil
 	}
-	return uint64(it.Value()), true, nil
+	m.mu.Unlock()
+
+	rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), offset, size)
+	if err != nil {
+		return nil, fmt.Errorf("download cloud TS index for %s: %w", id, err)
+	}
+	defer func() { _ = rc.Close() }()
+
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, fmt.Errorf("read cloud TS index for %s: %w", id, err)
+	}
+
+	m.mu.Lock()
+	m.tsCache = &cloudTSCache{chunkID: id, offset: offset, data: data}
+	m.mu.Unlock()
+
+	return data, nil
 }
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.
@@ -2237,11 +2309,16 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	// Move metadata from in-memory map to cloud B+ tree index.
 	// The chunk is now cloud-only — remove from Go heap.
+	toc := w.TOC()
 	m.mu.Lock()
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
 		meta.diskBytes = info.Size
+		meta.ingestIdxOffset = toc.IngestIdxOffset
+		meta.ingestIdxSize = toc.IngestIdxSize
+		meta.sourceIdxOffset = toc.SourceIdxOffset
+		meta.sourceIdxSize = toc.SourceIdxSize
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()

@@ -754,6 +754,11 @@ func seekIngestTS(b *scannerBuilder, lower time.Time, meta chunk.ChunkMeta, cm c
 	if meta.Sealed {
 		if pos, found, err := im.FindIngestStartPosition(meta.ID, lower); err == nil && found {
 			b.setMinPosition(pos)
+			return
+		}
+		// Fallback: chunk manager handles cloud chunks with embedded TS index.
+		if pos, found, err := cm.FindIngestStartPosition(meta.ID, lower); err == nil && found {
+			b.setMinPosition(pos)
 		}
 		return
 	}
@@ -768,6 +773,11 @@ func seekSourceTS(b *scannerBuilder, sourceStart time.Time, meta chunk.ChunkMeta
 	}
 	if meta.Sealed {
 		if pos, found, err := im.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
+			b.setMinPosition(pos)
+			return
+		}
+		// Fallback: chunk manager handles cloud chunks with embedded TS index.
+		if pos, found, err := cm.FindSourceStartPosition(meta.ID, sourceStart); err == nil && found {
 			b.setMinPosition(pos)
 		}
 		return

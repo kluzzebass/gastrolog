@@ -33,6 +33,17 @@
 //	  Record data compressed in ~256KB independent frames with an appended
 //	  seek table for random access via ReadAt.
 //
+//	TS indexes + TOC (after seekable zstd):
+//	  IngestTS Index: [tsNano:i64][pos:u32] × recordCount, sorted by ts
+//	  SourceTS Index: [tsNano:i64][pos:u32] × N (excludes zero-TS records), sorted by ts
+//	  TOC (48 bytes):
+//	    [magic:4]           "GTOC"
+//	    [tocVersion:u32]    1
+//	    [ingestIdxOff:u64]  byte offset from blob start
+//	    [ingestIdxSize:u64] byte count
+//	    [sourceIdxOff:u64]  byte offset from blob start
+//	    [sourceIdxSize:u64] byte count
+//
 // Record frame encoding:
 //
 //	[frameLen:u32]     frame size excluding this field
@@ -69,6 +80,13 @@ const (
 	// Minimum record frame: timestamps (3×8) + ingesterID (16) + ingestSeq (4)
 	// + attrCount (2) + rawLen (4) = 58 bytes.
 	minFrameSize = 58
+
+	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
+	tsIndexEntrySize = 12
+
+	// TOC (Table of Contents) footer: identifies embedded TS index sections.
+	tocSize  = 48
+	tocMagic = "GTOC"
 )
 
 // tsNanos converts a time.Time to nanoseconds, using 0 for the zero value.
@@ -102,6 +120,20 @@ type BlobMeta struct {
 	IngestEnd   time.Time
 	SourceStart time.Time // zero = no source timestamps
 	SourceEnd   time.Time
+
+	// TOC fields — populated for v2 blobs with embedded TS indexes.
+	IngestIdxOffset int64 // byte offset from blob start (0 = none)
+	IngestIdxSize   int64
+	SourceIdxOffset int64 // byte offset from blob start (0 = none)
+	SourceIdxSize   int64
+}
+
+// BlobTOC holds section offsets for embedded TS indexes.
+type BlobTOC struct {
+	IngestIdxOffset int64
+	IngestIdxSize   int64
+	SourceIdxOffset int64
+	SourceIdxSize   int64
 }
 
 // recordIndex is one entry in the record offset index.

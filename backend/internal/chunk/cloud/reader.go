@@ -38,6 +38,7 @@ type Reader struct {
 
 // NewReader opens a cloud blob from a local file.
 // The file is typically a temp file created from an S3 download.
+// Accepts both v1 (no TS indexes) and v2 (embedded TS indexes + TOC).
 func NewReader(f *os.File) (*Reader, error) {
 	// --- Header ---
 	var hdr [headerSize]byte
@@ -75,14 +76,25 @@ func NewReader(f *os.File) (*Reader, error) {
 		}
 	}
 
-	// --- Seekable Zstd Section ---
+	// --- Read TOC from end of blob to get TS index section boundaries ---
 	dataOffset := int64(headerSize) + int64(dictSize) + int64(meta.RecordCount)*int64(indexEntrySize)
 	fileInfo, err := f.Stat()
 	if err != nil {
 		return nil, fmt.Errorf("stat blob file: %w", err)
 	}
-	section := io.NewSectionReader(f, dataOffset, fileInfo.Size()-dataOffset)
 
+	toc, err := readTOC(f, fileInfo.Size())
+	if err != nil {
+		return nil, fmt.Errorf("read TOC: %w", err)
+	}
+	meta.IngestIdxOffset = toc.IngestIdxOffset
+	meta.IngestIdxSize = toc.IngestIdxSize
+	meta.SourceIdxOffset = toc.SourceIdxOffset
+	meta.SourceIdxSize = toc.SourceIdxSize
+
+	// Seekable zstd ends where the ingest TS index section starts.
+	dataEnd := toc.IngestIdxOffset
+	section := io.NewSectionReader(f, dataOffset, dataEnd-dataOffset)
 	seek, err := seekable.NewReader(section, zstdDec)
 	if err != nil {
 		return nil, fmt.Errorf("open seekable reader: %w", err)
@@ -94,6 +106,24 @@ func NewReader(f *os.File) (*Reader, error) {
 		index: index,
 		seek:  seek,
 		file:  f,
+	}, nil
+}
+
+// readTOC reads the 48-byte TOC footer from the end of the blob file.
+func readTOC(f *os.File, fileSize int64) (BlobTOC, error) {
+	var buf [tocSize]byte
+	if _, err := f.ReadAt(buf[:], fileSize-tocSize); err != nil {
+		return BlobTOC{}, err
+	}
+	if string(buf[0:4]) != tocMagic {
+		return BlobTOC{}, errors.New("TOC magic mismatch")
+	}
+	// tocVersion at buf[4:8] — reserved for future use
+	return BlobTOC{
+		IngestIdxOffset: int64(binary.LittleEndian.Uint64(buf[8:16])),  //nolint:gosec // round-trip
+		IngestIdxSize:   int64(binary.LittleEndian.Uint64(buf[16:24])), //nolint:gosec // round-trip
+		SourceIdxOffset: int64(binary.LittleEndian.Uint64(buf[24:32])), //nolint:gosec // round-trip
+		SourceIdxSize:   int64(binary.LittleEndian.Uint64(buf[32:40])), //nolint:gosec // round-trip
 	}, nil
 }
 
