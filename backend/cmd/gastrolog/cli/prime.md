@@ -187,6 +187,38 @@ POLICIES
   Assign policies to vaults via the UI or vault update.
 
 ═══════════════════════════════════════════════════
+QUERYING LOGS
+═══════════════════════════════════════════════════
+
+  gastrolog query 'level=error last=5m'
+  gastrolog query 'status>=500 AND path=/api' --last 1h
+  gastrolog query 'level=error' --count
+  gastrolog query 'level=error' --explain
+  gastrolog query 'level=error | stats count by host' --format table
+
+  Output formats (--format):
+    text     Human-readable, colored (default for TTY)
+    json     JSONL/NDJSON, one object per line (default for pipes)
+    csv      Header row + data rows
+    raw      Raw log body only, one per line
+    table    Columnar output for pipeline/stats results
+
+  Flags:
+    --last 5m          Time range shorthand
+    --start/--end      Explicit time bounds (RFC3339)
+    --limit 100        Cap output (agents need bounded output)
+    --fields a,b,c     Select fields for JSON/CSV
+    --count            Print count only, no records
+    --explain          Print query plan, don't execute
+    -r, --reverse      Newest first
+
+  Exit codes: 0 = results found, 1 = no results, 2 = error
+  Errors go to stderr, data to stdout — safe for piping.
+
+  When stdout is not a TTY, format defaults to json (JSONL).
+  Pipe to jq: gastrolog query 'level=error' | jq .attrs
+
+═══════════════════════════════════════════════════
 COMMON TASKS
 ═══════════════════════════════════════════════════
 
