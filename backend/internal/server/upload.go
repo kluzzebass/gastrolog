@@ -22,6 +22,10 @@ import (
 
 const maxUploadSize = 256 << 20 // 256 MB
 
+// managedFileName is the fixed filename used for all managed files on disk.
+// The user-supplied name is stored only in config metadata, never in the filesystem.
+const managedFileName = "data"
+
 // handleManagedFileUpload handles multipart file uploads for managed files.
 // The file is streamed to disk (never buffered in heap), then metadata is
 // committed to Raft so all cluster nodes learn about the file.
@@ -79,15 +83,9 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 	}
 	_ = tmp.Close()
 
-	// Give the temp file the original filename so RegisterFile can use it.
-	namedTmp := filepath.Join(managedFilesDir, ".upload-"+filepath.Base(header.Filename))
-	if err := os.Rename(tmpPath, namedTmp); err != nil { //nolint:gosec // trusted paths
-		http.Error(w, "rename temp: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = os.Remove(namedTmp) }() // no-op after RegisterFile moves it
-
-	lf, err := s.RegisterFile(r.Context(), namedTmp, header.Filename)
+	// User-supplied filename is metadata only — the file on disk is always "data".
+	displayName := filepath.Base(header.Filename) // sanitize: strip directory components
+	lf, err := s.RegisterFile(r.Context(), tmpPath, displayName)
 	if err != nil {
 		http.Error(w, "register file: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -106,31 +104,31 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 
 // RegisterFile registers a local file as a managed file entity. It computes the
 // SHA256 hash, moves the file into the managed directory structure
-// (<home>/managed-files/<file_id>/<filename>), and commits metadata to Raft.
+// (<home>/managed-files/<file_id>/data), and commits metadata to Raft.
+// The user-supplied name is stored in config metadata only, never in the filesystem.
 // The original file at srcPath is consumed (moved, not copied).
 // If a file with the same name and SHA256 already exists, the duplicate is
 // discarded and the existing entry is returned (deduplication).
-// If name is empty, the base name of srcPath is used.
 func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) (config.ManagedFileConfig, error) {
 	if s.homeDir == "" {
 		return config.ManagedFileConfig{}, errors.New("no home directory")
 	}
 
-	filename := name
-	if filename == "" {
-		filename = filepath.Base(srcPath)
+	displayName := name
+	if displayName == "" {
+		displayName = filepath.Base(srcPath)
 	}
 
 	// Compute SHA256 and size by streaming through the file.
-	f, err := os.Open(srcPath) //nolint:gosec // path from trusted caller
+	f, err := os.Open(filepath.Clean(srcPath)) //nolint:gosec // G703: srcPath from trusted temp dir
 	if err != nil {
-		return config.ManagedFileConfig{}, fmt.Errorf("open %s: %w", srcPath, err)
+		return config.ManagedFileConfig{}, fmt.Errorf("open source file: %w", err)
 	}
 	h := sha256.New()
 	size, err := io.Copy(h, f)
 	_ = f.Close()
 	if err != nil {
-		return config.ManagedFileConfig{}, fmt.Errorf("hash %s: %w", srcPath, err)
+		return config.ManagedFileConfig{}, fmt.Errorf("hash source file: %w", err)
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
@@ -140,8 +138,8 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 		return config.ManagedFileConfig{}, fmt.Errorf("list managed files: %w", err)
 	}
 	for _, ef := range existing {
-		if ef.Name == filename && ef.SHA256 == hash {
-			_ = os.Remove(srcPath) //nolint:gosec,nolintlint // G703: srcPath from trusted caller
+		if ef.Name == displayName && ef.SHA256 == hash {
+			_ = os.Remove(srcPath) //nolint:gosec // G703: srcPath from trusted temp dir
 			return ef, nil
 		}
 	}
@@ -149,26 +147,27 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	fileID := uuid.Must(uuid.NewV7())
 	hd := home.New(s.homeDir)
 	fileDir := hd.ManagedFileDir(fileID.String())
-	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // path from trusted home dir + UUID
+	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // G703: fileDir from trusted home + UUID
 		return config.ManagedFileConfig{}, fmt.Errorf("create dir: %w", err)
 	}
 
-	finalPath := filepath.Join(fileDir, filename)
-	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // trusted caller paths
-		_ = os.RemoveAll(fileDir) //nolint:gosec // cleanup our own dir
+	// Store with a fixed filename — user-supplied name stays in metadata only.
+	finalPath := filepath.Join(fileDir, managedFileName)
+	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // G703: finalPath uses constant filename, srcPath from trusted temp
+		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
 		return config.ManagedFileConfig{}, fmt.Errorf("move file: %w", err)
 	}
 
 	now := time.Now().UTC()
 	lf := config.ManagedFileConfig{
 		ID:         fileID,
-		Name:       filename,
+		Name:       displayName,
 		SHA256:     hash,
 		Size:       size,
 		UploadedAt: now,
 	}
 	if err := s.cfgStore.PutManagedFile(ctx, lf); err != nil {
-		_ = os.RemoveAll(fileDir) //nolint:gosec // cleanup our own dir
+		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
 		return config.ManagedFileConfig{}, fmt.Errorf("commit metadata: %w", err)
 	}
 	s.configSignal.Notify()
@@ -184,7 +183,7 @@ func (s *Server) SetManagedFileRepair(fn func(fileID string) bool) {
 }
 
 // ResolveManagedFilePath returns the on-disk path for a managed file entity
-// matched by filename. If the file is in the manifest but missing from disk,
+// matched by display name. If the file is in the manifest but missing from disk,
 // it triggers an on-demand repair (pull from peer) before giving up.
 // Returns empty string if not found.
 func (s *Server) ResolveManagedFilePath(ctx context.Context, filename string) string {
@@ -198,14 +197,12 @@ func (s *Server) ResolveManagedFilePath(ctx context.Context, filename string) st
 	// Walk in reverse order (UUIDv7 sorted = creation order) to prefer the latest.
 	for i := len(files) - 1; i >= 0; i-- {
 		if files[i].Name == filename {
-			hd := home.New(s.homeDir)
-			fid := files[i].ID.String()
-			dir := hd.ManagedFileDir(fid)
-			path := filepath.Join(dir, filename)
+			path := s.managedFilePath(files[i].ID.String())
 			if _, err := os.Stat(path); err == nil {
 				return path
 			}
 			// File is in manifest but missing from disk — try on-demand repair.
+			fid := files[i].ID.String()
 			if s.repairManagedFile != nil && s.repairManagedFile(fid) {
 				if _, err := os.Stat(path); err == nil {
 					return path
@@ -223,26 +220,22 @@ func (s *Server) ResolveManagedFileByID(ctx context.Context, fileID string) stri
 	if s.homeDir == "" || fileID == "" {
 		return ""
 	}
-	files, err := s.cfgStore.ListManagedFiles(ctx)
-	if err != nil {
-		return ""
+	path := s.managedFilePath(fileID)
+	if _, err := os.Stat(path); err == nil {
+		return path
 	}
-	for i := len(files) - 1; i >= 0; i-- {
-		if files[i].ID.String() == fileID {
-			hd := home.New(s.homeDir)
-			dir := hd.ManagedFileDir(fileID)
-			path := filepath.Join(dir, files[i].Name)
-			if _, err := os.Stat(path); err == nil {
-				return path
-			}
-			if s.repairManagedFile != nil && s.repairManagedFile(fileID) {
-				if _, err := os.Stat(path); err == nil {
-					return path
-				}
-			}
+	if s.repairManagedFile != nil && s.repairManagedFile(fileID) {
+		if _, err := os.Stat(path); err == nil {
+			return path
 		}
 	}
 	return ""
+}
+
+// managedFilePath returns the on-disk path for a managed file by its UUID.
+func (s *Server) managedFilePath(fileID string) string {
+	hd := home.New(s.homeDir)
+	return filepath.Join(hd.ManagedFileDir(fileID), managedFileName)
 }
 
 // registerUploadHandler adds the managed file upload endpoint to the mux.
@@ -255,13 +248,9 @@ func (s *Server) ManagedFileExists(fileID string) bool {
 	if s.homeDir == "" {
 		return false
 	}
-	hd := home.New(s.homeDir)
-	dir := hd.ManagedFileDir(fileID)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return false
-	}
-	return len(entries) > 0
+	path := s.managedFilePath(fileID)
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // ManagedFileIDs returns the IDs of managed files present on disk.
@@ -288,21 +277,22 @@ func (s *Server) ManagedFileReader(fileID string) (name string, rc io.ReadCloser
 	if s.homeDir == "" {
 		return "", nil, "", errors.New("no home directory")
 	}
-	hd := home.New(s.homeDir)
-	dir := hd.ManagedFileDir(fileID)
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return "", nil, "", fmt.Errorf("read dir: %w", err)
-	}
-	if len(entries) == 0 {
-		return "", nil, "", errors.New("empty file directory")
-	}
-
-	fname := entries[0].Name()
-	path := filepath.Join(dir, fname)
-	f, err := os.Open(path) //nolint:gosec // path constructed from trusted home dir
+	path := s.managedFilePath(fileID)
+	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return "", nil, "", err
+	}
+
+	// Look up display name from config.
+	files, listErr := s.cfgStore.ListManagedFiles(context.Background())
+	displayName := managedFileName
+	if listErr == nil {
+		for _, mf := range files {
+			if mf.ID.String() == fileID {
+				displayName = mf.Name
+				break
+			}
+		}
 	}
 
 	// Compute SHA256.
@@ -316,5 +306,5 @@ func (s *Server) ManagedFileReader(fileID string) (name string, rc io.ReadCloser
 		return "", nil, "", err
 	}
 
-	return fname, f, hex.EncodeToString(h.Sum(nil)), nil
+	return displayName, f, hex.EncodeToString(h.Sum(nil)), nil
 }

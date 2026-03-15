@@ -317,10 +317,13 @@ func (s *Server) trackingMiddleware(next http.Handler) http.Handler {
 func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux {
 	mux := http.NewServeMux()
 
-	var handlerOpts []connect.HandlerOption
+	// Cap inbound message size to 4 MB to prevent memory exhaustion.
+	handlerOpts := []connect.HandlerOption{
+		connect.WithReadMaxBytes(4 << 20),
+	}
 	switch {
 	case len(overrideOpts) > 0:
-		handlerOpts = overrideOpts
+		handlerOpts = append(handlerOpts, overrideOpts...)
 	case s.noAuth:
 		handlerOpts = append(handlerOpts, connect.WithInterceptors(&auth.NoAuthInterceptor{}))
 	case s.tokens != nil:
