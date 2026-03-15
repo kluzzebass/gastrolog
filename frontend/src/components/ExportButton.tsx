@@ -163,6 +163,8 @@ export function ExportButton({
         } else {
           download(toCSV(allRecords), `gastrolog-${ts}.csv`, "text/csv");
         }
+      } catch {
+        // drainSearch errors are non-fatal — the export just stops early.
       } finally {
         setExporting(false);
       }

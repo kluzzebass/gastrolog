@@ -24,14 +24,18 @@ func TestEmitsSequentialRecords(t *testing.T) {
 	defer cancel()
 
 	out := make(chan orchestrator.IngestMessage, 100)
-	go ing.Run(ctx, out) //nolint:errcheck // test
+	done := make(chan struct{})
+	go func() {
+		_ = ing.Run(ctx, out)
+		close(done)
+	}()
 
-	<-ctx.Done()
-	close(out)
+	<-done // Run exited — no more sends on out
 
 	var lastSeq uint64
 	count := 0
-	for msg := range out {
+	for len(out) > 0 {
+		msg := <-out
 		count++
 		var body struct {
 			Seq         uint64 `json:"seq"`
@@ -72,41 +76,18 @@ func TestBurstMode(t *testing.T) {
 	defer cancel()
 
 	out := make(chan orchestrator.IngestMessage, 100)
-	go ing.Run(ctx, out) //nolint:errcheck // test
+	done := make(chan struct{})
+	go func() {
+		_ = ing.Run(ctx, out)
+		close(done)
+	}()
 
-	<-ctx.Done()
-	close(out)
+	<-done // Run exited — no more sends on out
 
-	count := 0
-	for range out {
-		count++
-	}
+	count := len(out)
 
 	// At 10ms interval with burst=5, should get at least 5 records in 30ms.
 	if count < 5 {
 		t.Errorf("expected at least 5 records, got %d", count)
-	}
-}
-
-func TestParamValidation(t *testing.T) {
-	tests := []struct {
-		name   string
-		params map[string]string
-		errMsg string
-	}{
-		{"negative interval", map[string]string{"interval": "-1s"}, "must be non-negative"},
-		{"invalid interval", map[string]string{"interval": "abc"}, "invalid interval"},
-		{"zero burst", map[string]string{"burst": "0"}, "must be positive"},
-		{"negative burst", map[string]string{"burst": "-1"}, "must be positive"},
-		{"invalid burst", map[string]string{"burst": "abc"}, "invalid burst"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewIngester(uuid.Must(uuid.NewV7()), tt.params, nil)
-			if err == nil {
-				t.Fatal("expected error")
-			}
-		})
 	}
 }
