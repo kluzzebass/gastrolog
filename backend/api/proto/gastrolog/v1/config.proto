@@ -94,6 +94,10 @@ service ConfigService {
   // GetIngesterDefaults returns default parameter values for each ingester type.
   rpc GetIngesterDefaults(GetIngesterDefaultsRequest) returns (GetIngesterDefaultsResponse);
 
+  // TriggerIngester sends a one-shot trigger to a running ingester.
+  // Only supported by ingesters that implement the Triggerable interface (e.g. scatterbox).
+  rpc TriggerIngester(TriggerIngesterRequest) returns (TriggerIngesterResponse);
+
   // PutNodeConfig creates or updates a node configuration.
   rpc PutNodeConfig(PutNodeConfigRequest) returns (PutNodeConfigResponse);
 
@@ -651,6 +655,12 @@ message TestIngesterResponse {
   bool success = 1;
   string message = 2;
 }
+
+message TriggerIngesterRequest {
+  string id = 1;
+}
+
+message TriggerIngesterResponse {}
 
 message TestVaultRequest {
   string type = 1;

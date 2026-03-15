@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"bytes"
+	"fmt"
 	"slices"
 
 	"gastrolog/internal/chunk"
@@ -76,6 +77,23 @@ func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
 	if s := o.vaults[key]; s != nil {
 		return s.Indexes
 	}
+	return nil
+}
+
+// TriggerIngester triggers a one-shot emission on a Triggerable ingester.
+// Returns an error if the ingester is not found or doesn't support triggering.
+func (o *Orchestrator) TriggerIngester(id uuid.UUID) error {
+	o.mu.RLock()
+	ing, ok := o.ingesters[id]
+	o.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("ingester not found: %s", id)
+	}
+	trig, ok := ing.(Triggerable)
+	if !ok {
+		return fmt.Errorf("ingester %s does not support triggering", id)
+	}
+	trig.Trigger()
 	return nil
 }
 

@@ -30,6 +30,7 @@ const ingesterTypes = [
   { value: "metrics", label: "metrics" },
   { value: "otlp", label: "otlp" },
   { value: "relp", label: "relp" },
+  { value: "scatterbox", label: "scatterbox" },
   { value: "self", label: "self" },
   { value: "syslog", label: "syslog" },
   { value: "tail", label: "tail" },
@@ -321,6 +322,7 @@ function IngesterCard({
           params={edit.params}
           onChange={(p) => setEdit({ params: p })}
           dark={dark}
+          ingesterId={ing.id}
         />
         {listenError && (
           <p className={`text-[0.8em] text-severity-error`}>

@@ -3,6 +3,7 @@ export interface IngesterParamsFormProps {
   params: Record<string, string>;
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
+  ingesterId?: string;
 }
 
 export interface SubFormProps {
@@ -10,4 +11,5 @@ export interface SubFormProps {
   onChange: (params: Record<string, string>) => void;
   dark: boolean;
   defaults: Record<string, string>;
+  ingesterId?: string;
 }

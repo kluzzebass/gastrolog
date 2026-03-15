@@ -4384,6 +4384,74 @@ export class TestIngesterResponse extends Message<TestIngesterResponse> {
 }
 
 /**
+ * @generated from message gastrolog.v1.TriggerIngesterRequest
+ */
+export class TriggerIngesterRequest extends Message<TriggerIngesterRequest> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<TriggerIngesterRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TriggerIngesterRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TriggerIngesterRequest {
+    return new TriggerIngesterRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TriggerIngesterRequest {
+    return new TriggerIngesterRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TriggerIngesterRequest {
+    return new TriggerIngesterRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TriggerIngesterRequest | PlainMessage<TriggerIngesterRequest> | undefined, b: TriggerIngesterRequest | PlainMessage<TriggerIngesterRequest> | undefined): boolean {
+    return proto3.util.equals(TriggerIngesterRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TriggerIngesterResponse
+ */
+export class TriggerIngesterResponse extends Message<TriggerIngesterResponse> {
+  constructor(data?: PartialMessage<TriggerIngesterResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TriggerIngesterResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TriggerIngesterResponse {
+    return new TriggerIngesterResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TriggerIngesterResponse {
+    return new TriggerIngesterResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TriggerIngesterResponse {
+    return new TriggerIngesterResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TriggerIngesterResponse | PlainMessage<TriggerIngesterResponse> | undefined, b: TriggerIngesterResponse | PlainMessage<TriggerIngesterResponse> | undefined): boolean {
+    return proto3.util.equals(TriggerIngesterResponse, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.TestVaultRequest
  */
 export class TestVaultRequest extends Message<TestVaultRequest> {

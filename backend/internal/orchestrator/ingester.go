@@ -30,6 +30,13 @@ type Ingester interface {
 	Run(ctx context.Context, out chan<- IngestMessage) error
 }
 
+// Triggerable is an optional interface for ingesters that support
+// on-demand record emission. The operator can trigger a one-shot
+// burst via the UI without restarting the ingester.
+type Triggerable interface {
+	Trigger()
+}
+
 // IngesterFactory creates a Ingester from configuration parameters.
 // Factories validate required params, apply defaults, and return a fully
 // constructed ingester or a descriptive error.

@@ -42,6 +42,7 @@ import (
 	ingestmetrics "gastrolog/internal/ingester/metrics"
 	ingestotlp "gastrolog/internal/ingester/otlp"
 	ingestrelp "gastrolog/internal/ingester/relp"
+	"gastrolog/internal/ingester/scatterbox"
 	ingestself "gastrolog/internal/ingester/self"
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
@@ -820,6 +821,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 	}
 	ingesterTypes := map[string]orchestrator.IngesterRegistration{
 		"chatterbox": reg(chatterbox.NewIngester, chatterbox.ParamDefaults, nil),
+		"scatterbox": reg(scatterbox.NewIngester, scatterbox.ParamDefaults, nil),
 		"docker": reg(ingestdocker.NewFactory(cfgStore), ingestdocker.ParamDefaults,
 			func(ctx context.Context, params map[string]string) (string, error) {
 				return ingestdocker.TestConnection(ctx, params, cfgStore)

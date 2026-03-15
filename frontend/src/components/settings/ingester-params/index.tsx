@@ -8,6 +8,7 @@ import { KafkaForm } from "./KafkaForm";
 import { MqttForm } from "./MqttForm";
 import { HttpForm } from "./HttpForm";
 import { RelpForm } from "./RelpForm";
+import { ScatterboxForm } from "./ScatterboxForm";
 import { MetricsForm } from "./MetricsForm";
 import { SelfForm } from "./SelfForm";
 import { SyslogForm } from "./SyslogForm";
@@ -23,6 +24,7 @@ const FORM_MAP: Record<
     onChange: (params: Record<string, string>) => void;
     dark: boolean;
     defaults: Record<string, string>;
+    ingesterId?: string;
   }>
 > = {
   chatterbox: ChatterboxForm,
@@ -34,6 +36,7 @@ const FORM_MAP: Record<
   mqtt: MqttForm,
   http: HttpForm,
   relp: RelpForm,
+  scatterbox: ScatterboxForm,
   metrics: MetricsForm,
   self: SelfForm,
   syslog: SyslogForm,
@@ -44,6 +47,7 @@ export function IngesterParamsForm({
   params,
   onChange,
   dark,
+  ingesterId,
 }: Readonly<IngesterParamsFormProps>) {
   const { data: allDefaults } = useIngesterDefaults();
   const defaults = allDefaults?.[ingesterType] ?? {};
@@ -52,6 +56,6 @@ export function IngesterParamsForm({
   if (!Form) return null;
 
   return (
-    <Form params={params} onChange={onChange} dark={dark} defaults={defaults} />
+    <Form params={params} onChange={onChange} dark={dark} defaults={defaults} ingesterId={ingesterId} />
   );
 }

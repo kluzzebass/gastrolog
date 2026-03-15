@@ -117,6 +117,9 @@ const (
 	// ConfigServiceGetIngesterDefaultsProcedure is the fully-qualified name of the ConfigService's
 	// GetIngesterDefaults RPC.
 	ConfigServiceGetIngesterDefaultsProcedure = "/gastrolog.v1.ConfigService/GetIngesterDefaults"
+	// ConfigServiceTriggerIngesterProcedure is the fully-qualified name of the ConfigService's
+	// TriggerIngester RPC.
+	ConfigServiceTriggerIngesterProcedure = "/gastrolog.v1.ConfigService/TriggerIngester"
 	// ConfigServicePutNodeConfigProcedure is the fully-qualified name of the ConfigService's
 	// PutNodeConfig RPC.
 	ConfigServicePutNodeConfigProcedure = "/gastrolog.v1.ConfigService/PutNodeConfig"
@@ -211,6 +214,9 @@ type ConfigServiceClient interface {
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 	// GetIngesterDefaults returns default parameter values for each ingester type.
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
+	// TriggerIngester sends a one-shot trigger to a running ingester.
+	// Only supported by ingesters that implement the Triggerable interface (e.g. scatterbox).
+	TriggerIngester(context.Context, *connect.Request[v1.TriggerIngesterRequest]) (*connect.Response[v1.TriggerIngesterResponse], error)
 	// PutNodeConfig creates or updates a node configuration.
 	PutNodeConfig(context.Context, *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error)
 	// PutRoute creates or updates a route.
@@ -420,6 +426,12 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("GetIngesterDefaults")),
 			connect.WithClientOptions(opts...),
 		),
+		triggerIngester: connect.NewClient[v1.TriggerIngesterRequest, v1.TriggerIngesterResponse](
+			httpClient,
+			baseURL+ConfigServiceTriggerIngesterProcedure,
+			connect.WithSchema(configServiceMethods.ByName("TriggerIngester")),
+			connect.WithClientOptions(opts...),
+		),
 		putNodeConfig: connect.NewClient[v1.PutNodeConfigRequest, v1.PutNodeConfigResponse](
 			httpClient,
 			baseURL+ConfigServicePutNodeConfigProcedure,
@@ -520,6 +532,7 @@ type configServiceClient struct {
 	resumeVault           *connect.Client[v1.ResumeVaultRequest, v1.ResumeVaultResponse]
 	testIngester          *connect.Client[v1.TestIngesterRequest, v1.TestIngesterResponse]
 	getIngesterDefaults   *connect.Client[v1.GetIngesterDefaultsRequest, v1.GetIngesterDefaultsResponse]
+	triggerIngester       *connect.Client[v1.TriggerIngesterRequest, v1.TriggerIngesterResponse]
 	putNodeConfig         *connect.Client[v1.PutNodeConfigRequest, v1.PutNodeConfigResponse]
 	putRoute              *connect.Client[v1.PutRouteRequest, v1.PutRouteResponse]
 	deleteRoute           *connect.Client[v1.DeleteRouteRequest, v1.DeleteRouteResponse]
@@ -678,6 +691,11 @@ func (c *configServiceClient) GetIngesterDefaults(ctx context.Context, req *conn
 	return c.getIngesterDefaults.CallUnary(ctx, req)
 }
 
+// TriggerIngester calls gastrolog.v1.ConfigService.TriggerIngester.
+func (c *configServiceClient) TriggerIngester(ctx context.Context, req *connect.Request[v1.TriggerIngesterRequest]) (*connect.Response[v1.TriggerIngesterResponse], error) {
+	return c.triggerIngester.CallUnary(ctx, req)
+}
+
 // PutNodeConfig calls gastrolog.v1.ConfigService.PutNodeConfig.
 func (c *configServiceClient) PutNodeConfig(ctx context.Context, req *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error) {
 	return c.putNodeConfig.CallUnary(ctx, req)
@@ -794,6 +812,9 @@ type ConfigServiceHandler interface {
 	TestIngester(context.Context, *connect.Request[v1.TestIngesterRequest]) (*connect.Response[v1.TestIngesterResponse], error)
 	// GetIngesterDefaults returns default parameter values for each ingester type.
 	GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error)
+	// TriggerIngester sends a one-shot trigger to a running ingester.
+	// Only supported by ingesters that implement the Triggerable interface (e.g. scatterbox).
+	TriggerIngester(context.Context, *connect.Request[v1.TriggerIngesterRequest]) (*connect.Response[v1.TriggerIngesterResponse], error)
 	// PutNodeConfig creates or updates a node configuration.
 	PutNodeConfig(context.Context, *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error)
 	// PutRoute creates or updates a route.
@@ -999,6 +1020,12 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("GetIngesterDefaults")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServiceTriggerIngesterHandler := connect.NewUnaryHandler(
+		ConfigServiceTriggerIngesterProcedure,
+		svc.TriggerIngester,
+		connect.WithSchema(configServiceMethods.ByName("TriggerIngester")),
+		connect.WithHandlerOptions(opts...),
+	)
 	configServicePutNodeConfigHandler := connect.NewUnaryHandler(
 		ConfigServicePutNodeConfigProcedure,
 		svc.PutNodeConfig,
@@ -1125,6 +1152,8 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceTestIngesterHandler.ServeHTTP(w, r)
 		case ConfigServiceGetIngesterDefaultsProcedure:
 			configServiceGetIngesterDefaultsHandler.ServeHTTP(w, r)
+		case ConfigServiceTriggerIngesterProcedure:
+			configServiceTriggerIngesterHandler.ServeHTTP(w, r)
 		case ConfigServicePutNodeConfigProcedure:
 			configServicePutNodeConfigHandler.ServeHTTP(w, r)
 		case ConfigServicePutRouteProcedure:
@@ -1270,6 +1299,10 @@ func (UnimplementedConfigServiceHandler) TestIngester(context.Context, *connect.
 
 func (UnimplementedConfigServiceHandler) GetIngesterDefaults(context.Context, *connect.Request[v1.GetIngesterDefaultsRequest]) (*connect.Response[v1.GetIngesterDefaultsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.GetIngesterDefaults is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) TriggerIngester(context.Context, *connect.Request[v1.TriggerIngesterRequest]) (*connect.Response[v1.TriggerIngesterResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.TriggerIngester is not implemented"))
 }
 
 func (UnimplementedConfigServiceHandler) PutNodeConfig(context.Context, *connect.Request[v1.PutNodeConfigRequest]) (*connect.Response[v1.PutNodeConfigResponse], error) {

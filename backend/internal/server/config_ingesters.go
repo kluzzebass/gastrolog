@@ -403,6 +403,21 @@ func (s *ConfigServer) TestIngester(
 	}), nil
 }
 
+// TriggerIngester sends a one-shot trigger to a running ingester.
+func (s *ConfigServer) TriggerIngester(
+	_ context.Context,
+	req *connect.Request[apiv1.TriggerIngesterRequest],
+) (*connect.Response[apiv1.TriggerIngesterResponse], error) {
+	id, err := uuid.Parse(req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid ingester ID: %w", err))
+	}
+	if err := s.orch.TriggerIngester(id); err != nil {
+		return nil, connect.NewError(connect.CodeNotFound, err)
+	}
+	return connect.NewResponse(&apiv1.TriggerIngesterResponse{}), nil
+}
+
 // findPeerIngesterStats returns broadcast stats for a remote ingester, or nil.
 func (s *ConfigServer) findPeerIngesterStats(id uuid.UUID) *apiv1.IngesterNodeStats {
 	if s.peerStats == nil {

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TestVaultRequest, TestVaultResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TestVaultRequest, TestVaultResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -332,6 +332,18 @@ export const ConfigService = {
       name: "GetIngesterDefaults",
       I: GetIngesterDefaultsRequest,
       O: GetIngesterDefaultsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * TriggerIngester sends a one-shot trigger to a running ingester.
+     * Only supported by ingesters that implement the Triggerable interface (e.g. scatterbox).
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.TriggerIngester
+     */
+    triggerIngester: {
+      name: "TriggerIngester",
+      I: TriggerIngesterRequest,
+      O: TriggerIngesterResponse,
       kind: MethodKind.Unary,
     },
     /**
