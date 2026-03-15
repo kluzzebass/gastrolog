@@ -89,15 +89,19 @@ func (e *Engine) runTimechartStrategy(
 	ctx context.Context, q Query, preOps []querylang.PipeOp, selectedVaults []uuid.UUID,
 	start, end time.Time, bucketWidth time.Duration, numBuckets int,
 	hasFilter, hasPreOps, hasGroupBy bool, groupField string,
-	counts []int64, groupCounts []map[string]int64,
+	counts []int64, groupCounts []map[string]int64, cloudFlagsOpt ...[]bool,
 ) (bool, error) {
+	var cloudFlags []bool
+	if len(cloudFlagsOpt) > 0 {
+		cloudFlags = cloudFlagsOpt[0]
+	}
 	if hasFilter || hasPreOps {
 		return e.timechartScanPath(ctx, q, preOps, start, end, bucketWidth,
 			numBuckets, groupField, hasGroupBy, hasPreOps, counts, groupCounts)
 	}
 
 	// Exact total counts via IngestTS binary search — O(buckets × log(n)), instant.
-	e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts)
+	e.timechartFastPath(selectedVaults, start, end, bucketWidth, numBuckets, counts, cloudFlags)
 
 	if !hasGroupBy {
 		return false, nil
@@ -158,7 +162,7 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []uuid.UUID) {
 // timechartFastPath counts records per bucket using IngestTS binary search (no record scanning).
 // For the active chunk, uses the in-memory B-tree (FindIngestStartPosition).
 // For sealed chunks, uses the persisted IngestTS index (LoadIngestEntries).
-func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
+func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, cloudFlags []bool) {
 	for _, vaultID := range selectedVaults {
 		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -178,7 +182,7 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 			if !meta.IngestStart.IsZero() && !meta.IngestStart.Before(end) {
 				continue
 			}
-			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts)
+			timechartChunkByIngestTS(cm, im, meta, start, bucketWidth, numBuckets, counts, cloudFlags)
 		}
 	}
 }
@@ -450,6 +454,7 @@ func timechartChunkByIngestTS(
 	bucketWidth time.Duration,
 	numBuckets int,
 	counts []int64,
+	cloudFlags []bool,
 ) {
 	end := start.Add(bucketWidth * time.Duration(numBuckets))
 
@@ -474,8 +479,12 @@ func timechartChunkByIngestTS(
 		return
 	}
 
-	// No ingest index available — linear interpolation.
-	timechartChunkInterpolated(meta, start, bucketWidth, firstBucket, lastBucket, counts)
+	// No ingest index available — mark buckets as having cloud data.
+	for b := firstBucket; b <= lastBucket; b++ {
+		if cloudFlags != nil {
+			cloudFlags[b] = true
+		}
+	}
 }
 
 // timechartChunkByIndex counts records per bucket using binary search on the ingest index.
@@ -507,62 +516,3 @@ func timechartChunkByIndex(
 	}
 }
 
-// timechartChunkInterpolated distributes records evenly across buckets based on
-// the chunk's IngestStart/IngestEnd time range. Used when no ingest index is
-// available (e.g., cloud-backed chunks).
-func timechartChunkInterpolated(
-	meta chunk.ChunkMeta,
-	start time.Time,
-	bucketWidth time.Duration,
-	firstBucket, lastBucket int,
-	counts []int64,
-) {
-	if meta.IngestStart.IsZero() || meta.IngestEnd.IsZero() || meta.RecordCount == 0 {
-		return
-	}
-	chunkDuration := meta.IngestEnd.Sub(meta.IngestStart)
-	if chunkDuration <= 0 {
-		counts[firstBucket] += meta.RecordCount
-		return
-	}
-
-	// Compute the overlap between the chunk's time range and the query window.
-	// Only count records within the overlap — the rest are outside the visible range.
-	queryStart := start.Add(bucketWidth * time.Duration(firstBucket))
-	queryEnd := start.Add(bucketWidth * time.Duration(lastBucket+1))
-	overlapStart := meta.IngestStart
-	if queryStart.After(overlapStart) {
-		overlapStart = queryStart
-	}
-	overlapEnd := meta.IngestEnd
-	if queryEnd.Before(overlapEnd) {
-		overlapEnd = queryEnd
-	}
-	if !overlapEnd.After(overlapStart) {
-		return
-	}
-
-	// Pro-rate the total record count to just the overlap portion.
-	overlapFraction := float64(overlapEnd.Sub(overlapStart)) / float64(chunkDuration)
-	overlapRecords := float64(meta.RecordCount) * overlapFraction
-
-	overlapDuration := overlapEnd.Sub(overlapStart)
-	for b := firstBucket; b <= lastBucket; b++ {
-		bStart := start.Add(bucketWidth * time.Duration(b))
-		bEnd := start.Add(bucketWidth * time.Duration(b+1))
-
-		// Clamp to overlap bounds.
-		if bStart.Before(overlapStart) {
-			bStart = overlapStart
-		}
-		if bEnd.After(overlapEnd) {
-			bEnd = overlapEnd
-		}
-		if !bEnd.After(bStart) {
-			continue
-		}
-
-		fraction := float64(bEnd.Sub(bStart)) / float64(overlapDuration)
-		counts[b] += int64(overlapRecords * fraction)
-	}
-}

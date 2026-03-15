@@ -9,9 +9,10 @@ import (
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.
 type HistogramBucket struct {
-	TimestampMs int64            // Bucket start (milliseconds since epoch)
-	Count       int64            // Total records in this bucket
-	GroupCounts map[string]int64 // Level → count; records without level → "other"
+	TimestampMs  int64            // Bucket start (milliseconds since epoch)
+	Count        int64            // Total records in this bucket
+	GroupCounts  map[string]int64 // Level → count; records without level → "other"
+	HasCloudData bool             // True if cloud chunks cover this bucket (count unknown)
 }
 
 const histogramGroupField = "level"
@@ -45,6 +46,7 @@ func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) 
 	}
 
 	counts := make([]int64, numBuckets)
+	cloudFlags := make([]bool, numBuckets)
 	groupCounts := make([]map[string]int64, numBuckets)
 	for i := range groupCounts {
 		groupCounts[i] = make(map[string]int64)
@@ -54,9 +56,9 @@ func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) 
 	_, _ = e.runTimechartStrategy(ctx, q, nil, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, true, histogramGroupField,
-		counts, groupCounts)
+		counts, groupCounts, cloudFlags)
 
-	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts)
+	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts, cloudFlags)
 }
 
 // ComputeHistogramForVaults computes a histogram for specific vaults only.
@@ -82,6 +84,7 @@ func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuck
 	}
 
 	counts := make([]int64, numBuckets)
+	cloudFlags := make([]bool, numBuckets)
 	groupCounts := make([]map[string]int64, numBuckets)
 	for i := range groupCounts {
 		groupCounts[i] = make(map[string]int64)
@@ -91,18 +94,19 @@ func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuck
 	_, _ = e.runTimechartStrategy(ctx, q, nil, vaultIDs,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, true, histogramGroupField,
-		counts, groupCounts)
+		counts, groupCounts, cloudFlags)
 
-	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts)
+	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts, cloudFlags)
 }
 
 // buildHistogramBuckets converts raw count arrays into HistogramBucket structs.
 // Computes the "other" group as total minus the sum of known groups.
-func buildHistogramBuckets(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64) []HistogramBucket {
+func buildHistogramBuckets(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64, cloudFlags []bool) []HistogramBucket {
 	buckets := make([]HistogramBucket, numBuckets)
 	for i := range numBuckets {
 		buckets[i].TimestampMs = start.Add(bucketWidth * time.Duration(i)).UnixMilli()
-		if counts[i] == 0 {
+		buckets[i].HasCloudData = cloudFlags[i]
+		if counts[i] == 0 && !cloudFlags[i] {
 			continue
 		}
 		buckets[i].Count = counts[i]
