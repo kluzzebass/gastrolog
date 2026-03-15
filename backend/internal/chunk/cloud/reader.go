@@ -207,6 +207,9 @@ func decodeDictFromBuf(buf []byte, dictEntries uint32) (*chunk.StringDict, error
 
 // decodeFrame decodes a record frame into a Record using the given dictionary.
 func decodeFrame(frame []byte, dict *chunk.StringDict) (chunk.Record, error) {
+	if len(frame) < minFrameSize {
+		return chunk.Record{}, fmt.Errorf("frame too small: %d < %d", len(frame), minFrameSize)
+	}
 	off := 0
 	var rec chunk.Record
 
