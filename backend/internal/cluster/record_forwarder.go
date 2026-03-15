@@ -16,6 +16,7 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
 	"github.com/google/uuid"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -24,11 +25,10 @@ const (
 	// records are dropped to bound memory and prevent backpressure.
 	forwardChanCap = 1000
 
-	// forwardBatchSize is the max records per flush.
-	forwardBatchSize = 100
-
-	// forwardFlushInterval is the max time between flushes.
-	forwardFlushInterval = 100 * time.Millisecond
+	// streamBurstSize is the max records drained per burst on the stream.
+	// After one blocking read, up to streamBurstSize-1 more are drained
+	// non-blocking. gRPC's HTTP/2 transport coalesces the SendMsg calls.
+	streamBurstSize = 100
 )
 
 // forwardEntry is a single record queued for forwarding.
@@ -37,15 +37,14 @@ type forwardEntry struct {
 	record  chunk.Record
 }
 
-// nodeForwarder manages a per-node channel and flush goroutine.
+// nodeForwarder manages a per-node channel and stream goroutine.
 type nodeForwarder struct {
 	ch   chan forwardEntry
 	done chan struct{}
 
-	// Backoff state — only accessed from the flushLoop goroutine.
-	failures int           // consecutive send failures
-	backoff  time.Duration // current backoff duration
-	everSent bool          // true after first successful batch
+	// Backoff state — only accessed from the streamLoop goroutine.
+	failures int
+	backoff  time.Duration
 }
 
 const (
@@ -53,22 +52,29 @@ const (
 	backoffMax = 30 * time.Second
 )
 
+// streamForwardRecordsDesc is the gRPC stream descriptor for the
+// client-streaming StreamForwardRecords RPC.
+var streamForwardRecordsDesc = &grpc.StreamDesc{
+	StreamName:    "StreamForwardRecords",
+	ClientStreams: true,
+}
+
 // RecordForwarder implements orchestrator.RecordForwarder with per-node
-// buffered channels and batched unary RPCs.
+// buffered channels and client-streaming RPCs.
 type RecordForwarder struct {
 	peers  *PeerConns
 	logger *slog.Logger
 	cw     *chanwatch.Watcher
 	alerts *alert.Collector // optional alert collector
 
-	sent atomic.Int64 // records successfully sent via ForwardRecords RPCs
+	sent atomic.Int64 // records successfully sent
 
 	mu       sync.Mutex
 	nodes    map[string]*nodeForwarder // keyed by node ID
 	wg       sync.WaitGroup
 	closed   bool
-	stop     chan struct{}          // closed on Close() to unblock backoff sleeps
-	cwCancel context.CancelFunc    // cancels the chanwatch goroutine
+	stop     chan struct{}       // closed on Close() to unblock backoff sleeps
+	cwCancel context.CancelFunc // cancels the chanwatch goroutine
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
@@ -137,205 +143,188 @@ func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
 		return len(nf.ch), cap(nf.ch)
 	}, 0.9)
 	rf.wg.Add(1)
-	go rf.flushLoop(nodeID, nf)
+	go rf.streamLoop(nodeID, nf)
 	return nf
 }
 
-// flushLoop drains the per-node channel in batches.
-func (rf *RecordForwarder) flushLoop(nodeID string, nf *nodeForwarder) {
+// streamLoop maintains a persistent client stream to a remote node.
+// On stream error, it reconnects with exponential backoff.
+func (rf *RecordForwarder) streamLoop(nodeID string, nf *nodeForwarder) {
 	defer rf.wg.Done()
 	defer close(nf.done)
 
-	batch := make([]forwardEntry, 0, forwardBatchSize)
-	timer := time.NewTimer(forwardFlushInterval)
-	defer timer.Stop()
-
 	for {
-		// If backing off, wait for the backoff duration instead of the
-		// normal flush interval. Records keep accumulating in the channel
-		// and will be sent in the next successful batch.
 		if nf.backoff > 0 {
-			// During backoff, DON'T drain the channel. Let it fill up so
-			// Forward() sees the backpressure and logs overflow drops.
-			timer.Reset(nf.backoff)
+			// Wait for backoff or shutdown.
 			select {
-			case <-timer.C:
+			case <-time.After(nf.backoff):
 			case <-rf.stop:
 				return
 			}
-			// Backoff expired — drain channel and retry.
-			batch = rf.drainChannel(nf, batch)
-			if len(batch) > 0 {
-				rf.sendBatchWithBackoff(nodeID, nf, batch)
-				batch = batch[:0]
-			}
-			continue
 		}
 
-		// Wait for first entry or channel close.
-		select {
-		case entry, ok := <-nf.ch:
-			if !ok {
-				// Channel closed — flush remaining and exit.
-				if len(batch) > 0 {
-					rf.sendBatchWithBackoff(nodeID, nf, batch)
-				}
+		stream, err := rf.openStream(nodeID)
+		if err != nil {
+			if rf.stopping() {
 				return
 			}
-			batch = append(batch, entry)
-		case <-timer.C:
-			if len(batch) > 0 {
-				rf.sendBatchWithBackoff(nodeID, nf, batch)
-				batch = batch[:0]
-			}
-			timer.Reset(forwardFlushInterval)
+			rf.bumpBackoff(nodeID, nf, err)
 			continue
 		}
 
-		// Drain up to batch size.
-		batch = rf.drainChannel(nf, batch)
-
-		if len(batch) >= forwardBatchSize {
-			rf.sendBatchWithBackoff(nodeID, nf, batch)
-			batch = batch[:0]
-			timer.Reset(forwardFlushInterval)
+		// Drain channel onto stream until error or shutdown.
+		closed := rf.drainToStream(nodeID, nf, stream)
+		if closed {
+			// Channel closed — shutdown. Try to close the stream gracefully.
+			_ = stream.CloseSend()
+			return
 		}
+		// Stream error — reconnect.
 	}
 }
 
-// drainChannel reads available entries from the channel up to forwardBatchSize.
-func (rf *RecordForwarder) drainChannel(nf *nodeForwarder, batch []forwardEntry) []forwardEntry {
-	for len(batch) < forwardBatchSize {
+// openStream creates a new client-streaming RPC to the remote node.
+func (rf *RecordForwarder) openStream(nodeID string) (grpc.ClientStream, error) {
+	conn, err := rf.peers.Conn(nodeID)
+	if err != nil {
+		return nil, fmt.Errorf("dial: %w", err)
+	}
+	stream, err := conn.NewStream(
+		context.Background(),
+		streamForwardRecordsDesc,
+		"/gastrolog.v1.ClusterService/StreamForwardRecords",
+	)
+	if err != nil {
+		rf.peers.Invalidate(nodeID)
+		return nil, fmt.Errorf("open stream: %w", err)
+	}
+	return stream, nil
+}
+
+// drainToStream reads from the channel and sends records on the stream in bursts.
+// One blocking read, then up to streamBurstSize-1 non-blocking reads, then send all.
+// Returns true if the channel was closed (shutdown), false on stream error.
+func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, stream grpc.ClientStream) bool {
+	for {
+		// Blocking read for the first entry.
+		var first forwardEntry
+		var ok bool
 		select {
-		case entry, ok := <-nf.ch:
+		case first, ok = <-nf.ch:
 			if !ok {
-				return batch
+				return true // channel closed — shutdown
 			}
-			batch = append(batch, entry)
-		default:
-			return batch
+		case <-rf.stop:
+			return true
+		}
+
+		// Non-blocking drain for up to streamBurstSize-1 more.
+		burst := make([]forwardEntry, 1, streamBurstSize)
+		burst[0] = first
+		for len(burst) < streamBurstSize {
+			select {
+			case entry, chOk := <-nf.ch:
+				if !chOk {
+					// Channel closed mid-burst — send what we have, then exit.
+					if err := rf.sendBurst(nodeID, nf, stream, burst); err != nil {
+						return true
+					}
+					return true
+				}
+				burst = append(burst, entry)
+			default:
+				goto send
+			}
+		}
+
+	send:
+		if err := rf.sendBurst(nodeID, nf, stream, burst); err != nil {
+			return false
 		}
 	}
-	return batch
 }
 
-// sendBatchWithBackoff wraps sendBatch with backoff tracking.
-func (rf *RecordForwarder) sendBatchWithBackoff(nodeID string, nf *nodeForwarder, entries []forwardEntry) {
-	if rf.sendBatch(nodeID, nf, entries) {
-		rf.handleSendSuccess(nodeID, nf, len(entries))
-		return
+// sendBurst groups entries by vault and sends one ForwardRecordsRequest per
+// vault on the stream. Returns nil on success.
+func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream grpc.ClientStream, entries []forwardEntry) error {
+	// Group by vault.
+	byVault := make(map[uuid.UUID][]*gastrologv1.ExportRecord, 2)
+	for _, e := range entries {
+		byVault[e.vaultID] = append(byVault[e.vaultID], forwardEntryToProto(e))
 	}
 
-	// Failure — bump backoff. The batch is dropped.
-	if !rf.stopping() {
-		rf.logger.Warn("forward: batch dropped",
-			"node", nodeID, "records", len(entries),
-			"failures", nf.failures+1)
+	for vaultID, records := range byVault {
+		msg := &gastrologv1.ForwardRecordsRequest{
+			VaultId: vaultID.String(),
+			Records: records,
+		}
+		if err := stream.SendMsg(msg); err != nil {
+			if !rf.stopping() {
+				rf.bumpBackoff(nodeID, nf, err)
+				rf.peers.Invalidate(nodeID)
+			}
+			return err
+		}
 	}
+
+	rf.sent.Add(int64(len(entries)))
+
+	// Reset backoff on success.
+	if nf.failures > 0 {
+		rf.logger.Info("forward: stream restored",
+			"node", nodeID, "after_failures", nf.failures)
+		if rf.alerts != nil {
+			rf.alerts.Clear("forwarder-backoff:" + nodeID)
+		}
+		nf.failures = 0
+		nf.backoff = 0
+	}
+	if rf.alerts != nil {
+		rf.alerts.Clear("forwarder-overflow:" + nodeID)
+	}
+	return nil
+}
+
+// forwardEntryToProto converts a forwardEntry to a proto ExportRecord
+// with vault_id and EventID fields populated.
+func forwardEntryToProto(e forwardEntry) *gastrologv1.ExportRecord {
+	rec := &gastrologv1.ExportRecord{
+		VaultId:    e.vaultID.String(),
+		Raw:        e.record.Raw,
+		Attrs:      e.record.Attrs,
+		IngestSeq:  e.record.EventID.IngestSeq,
+		IngesterId: e.record.EventID.IngesterID[:],
+	}
+	if !e.record.SourceTS.IsZero() {
+		rec.SourceTs = timestamppb.New(e.record.SourceTS)
+	}
+	if !e.record.IngestTS.IsZero() {
+		rec.IngestTs = timestamppb.New(e.record.IngestTS)
+	}
+	return rec
+}
+
+// bumpBackoff increases the backoff after a failure.
+func (rf *RecordForwarder) bumpBackoff(nodeID string, nf *nodeForwarder, err error) {
 	nf.failures++
 	if nf.failures == 1 {
 		nf.backoff = backoffMin
 	} else {
 		nf.backoff = min(nf.backoff*2, backoffMax)
 	}
-	if rf.alerts != nil && !rf.stopping() {
-		rf.alerts.Set(
-			"forwarder-backoff:"+nodeID,
-			alert.Warning, "forwarder",
-			fmt.Sprintf("Forward to node %s failing (%d consecutive), backing off %s", nodeID[:8], nf.failures, nf.backoff),
-		)
-	}
-}
-
-func (rf *RecordForwarder) handleSendSuccess(nodeID string, nf *nodeForwarder, count int) {
-	rf.sent.Add(int64(count))
-	if nf.failures > 0 {
-		rf.logger.Info("forward: connection restored",
-			"node", nodeID, "after_failures", nf.failures)
+	if !rf.stopping() {
+		rf.logger.Info("forward: stream error",
+			"node", nodeID, "error", err,
+			"consecutive_failures", nf.failures,
+			"backoff", nf.backoff)
 		if rf.alerts != nil {
-			rf.alerts.Clear("forwarder-backoff:" + nodeID)
-		}
-	} else if !nf.everSent {
-		rf.logger.Info("forward: first batch sent",
-			"node", nodeID, "records", count)
-		nf.everSent = true
-	}
-	if rf.alerts != nil {
-		rf.alerts.Clear("forwarder-overflow:" + nodeID)
-	}
-	nf.failures = 0
-	nf.backoff = 0
-}
-
-// sendBatch groups entries by vault and sends one ForwardRecords RPC per vault.
-// Returns true if all RPCs succeeded, false on any failure.
-func (rf *RecordForwarder) sendBatch(nodeID string, nf *nodeForwarder, entries []forwardEntry) bool {
-	// Group by vault ID.
-	byVault := make(map[uuid.UUID][]*gastrologv1.ExportRecord)
-	for _, e := range entries {
-		rec := &gastrologv1.ExportRecord{
-			Raw:        e.record.Raw,
-			Attrs:      e.record.Attrs,
-			IngestSeq:  e.record.EventID.IngestSeq,
-			IngesterId: e.record.EventID.IngesterID[:],
-		}
-		if !e.record.SourceTS.IsZero() {
-			rec.SourceTs = timestamppb.New(e.record.SourceTS)
-		}
-		if !e.record.IngestTS.IsZero() {
-			rec.IngestTs = timestamppb.New(e.record.IngestTS)
-		}
-		byVault[e.vaultID] = append(byVault[e.vaultID], rec)
-	}
-
-	conn, err := rf.peers.Conn(nodeID)
-	if err != nil {
-		rf.logFailure(nodeID, nf, "dial failed", err)
-		return false
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	for vaultID, records := range byVault {
-		req := &gastrologv1.ForwardRecordsRequest{
-			VaultId: vaultID.String(),
-			Records: records,
-		}
-		resp := &gastrologv1.ForwardRecordsResponse{}
-		err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp)
-		if err != nil {
-			rf.logFailure(nodeID, nf, "RPC failed", err)
-			rf.peers.Invalidate(nodeID)
-			return false
-		}
-		ack := resp.GetRecordsWritten()
-		if ack != int64(len(records)) {
-			rf.logger.Warn("forward: partial write",
-				"node", nodeID, "vault", vaultID,
-				"sent", len(records), "written", ack)
-		} else {
-			rf.logger.Debug("forwarded records",
-				"node", nodeID, "vault", vaultID,
-				"sent", len(records), "written", ack)
+			rf.alerts.Set(
+				"forwarder-backoff:"+nodeID,
+				alert.Warning, "forwarder",
+				fmt.Sprintf("Forward to node %s failing (%d consecutive), backing off %s", nodeID[:8], nf.failures, nf.backoff),
+			)
 		}
 	}
-	return true
-}
-
-// logFailure logs forwarding failures at INFO level. Every failure is logged
-// because silent drops during backoff are extremely hard to diagnose.
-//
-// nf is passed directly by the caller (always within the flushLoop goroutine)
-// to avoid a racy map lookup → read of nf.failures across goroutines.
-func (rf *RecordForwarder) logFailure(nodeID string, nf *nodeForwarder, msg string, err error) {
-	if rf.stopping() {
-		return // suppress noise during shutdown
-	}
-	rf.logger.Info("forward: "+msg,
-		"node", nodeID, "error", err,
-		"consecutive_failures", nf.failures,
-		"backoff", nf.backoff)
 }
 
 // stopping returns true if the forwarder is shutting down.

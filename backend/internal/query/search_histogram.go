@@ -12,7 +12,8 @@ type HistogramBucket struct {
 	TimestampMs  int64            // Bucket start (milliseconds since epoch)
 	Count        int64            // Total records in this bucket
 	GroupCounts  map[string]int64 // Level → count; records without level → "other"
-	HasCloudData bool             // True if cloud chunks cover this bucket (count unknown)
+	HasCloudData bool             // True if cloud chunks cover this bucket
+	CloudCount   int64            // Records from cloud chunks (subset of Count)
 }
 
 const histogramGroupField = "level"
@@ -45,20 +46,23 @@ func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) 
 		bucketWidth = time.Second
 	}
 
-	counts := make([]int64, numBuckets)
-	cloudFlags := make([]bool, numBuckets)
-	groupCounts := make([]map[string]int64, numBuckets)
-	for i := range groupCounts {
-		groupCounts[i] = make(map[string]int64)
+	acc := &histogramAccum{
+		counts:      make([]int64, numBuckets),
+		cloudFlags:  make([]bool, numBuckets),
+		cloudCounts: make([]int64, numBuckets),
+		groupCounts: make([]map[string]int64, numBuckets),
+	}
+	for i := range acc.groupCounts {
+		acc.groupCounts[i] = make(map[string]int64)
 	}
 
 	hasFilter := q.BoolExpr != nil
 	_, _ = e.runTimechartStrategy(ctx, q, nil, selectedVaults,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, true, histogramGroupField,
-		counts, groupCounts, cloudFlags)
+		acc)
 
-	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts, cloudFlags)
+	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
 }
 
 // ComputeHistogramForVaults computes a histogram for specific vaults only.
@@ -83,29 +87,35 @@ func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuck
 		bucketWidth = time.Second
 	}
 
-	counts := make([]int64, numBuckets)
-	cloudFlags := make([]bool, numBuckets)
-	groupCounts := make([]map[string]int64, numBuckets)
-	for i := range groupCounts {
-		groupCounts[i] = make(map[string]int64)
+	acc := &histogramAccum{
+		counts:      make([]int64, numBuckets),
+		cloudFlags:  make([]bool, numBuckets),
+		cloudCounts: make([]int64, numBuckets),
+		groupCounts: make([]map[string]int64, numBuckets),
+	}
+	for i := range acc.groupCounts {
+		acc.groupCounts[i] = make(map[string]int64)
 	}
 
 	hasFilter := q.BoolExpr != nil
 	_, _ = e.runTimechartStrategy(ctx, q, nil, vaultIDs,
 		start, end, bucketWidth, numBuckets,
 		hasFilter, false, true, histogramGroupField,
-		counts, groupCounts, cloudFlags)
+		acc)
 
-	return buildHistogramBuckets(start, bucketWidth, numBuckets, counts, groupCounts, cloudFlags)
+	return buildHistogramBuckets(start, bucketWidth, numBuckets, acc.counts, acc.groupCounts, acc.cloudFlags, acc.cloudCounts)
 }
 
 // buildHistogramBuckets converts raw count arrays into HistogramBucket structs.
 // Computes the "other" group as total minus the sum of known groups.
-func buildHistogramBuckets(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64, cloudFlags []bool) []HistogramBucket {
+func buildHistogramBuckets(start time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, groupCounts []map[string]int64, cloudFlags []bool, cloudCounts []int64) []HistogramBucket {
 	buckets := make([]HistogramBucket, numBuckets)
 	for i := range numBuckets {
 		buckets[i].TimestampMs = start.Add(bucketWidth * time.Duration(i)).UnixMilli()
 		buckets[i].HasCloudData = cloudFlags[i]
+		if cloudCounts != nil {
+			buckets[i].CloudCount = cloudCounts[i]
+		}
 		if counts[i] == 0 && !cloudFlags[i] {
 			continue
 		}

@@ -150,6 +150,7 @@ export function HistogramChart({
   barHeight: barHeightProp,
   showHeader = true,
   truncated = false,
+  elapsedMs,
   onBrushSelect,
   onPan,
   onSegmentClick,
@@ -159,6 +160,7 @@ export function HistogramChart({
   barHeight?: number;
   showHeader?: boolean;
   truncated?: boolean;
+  elapsedMs?: number | null;
   onBrushSelect?: (start: Date, end: Date) => void;
   onPan?: (start: Date, end: Date) => void;
   onSegmentClick?: (level: string) => void;
@@ -196,6 +198,7 @@ export function HistogramChart({
   const firstBucket = buckets[0];
   const lastBucket = buckets.at(-1);
   const totalCount = buckets.reduce((sum, b) => sum + b.count, 0);
+  const hasCloud = buckets.some((b) => b.hasCloudData);
   const barHeight = barHeightProp ?? 96;
 
   const hasGroups = groupKeys.length > 0;
@@ -244,36 +247,40 @@ export function HistogramChart({
       name: displayName,
       type: "bar" as const,
       stack: "total",
-      data: buckets.map((_, i) => ({
-        value: valueGrid[seriesIdx]![i],
-        itemStyle: {
-          color,
-          opacity: ix.hoveredBar === i ? 1 : baseOpacity,
-          borderRadius: topSeriesPerBucket[i] === seriesIdx ? [2, 2, 0, 0] : 0,
-        },
-      })),
+      data: buckets.map((b, i) => {
+        // For cloud buckets, subtract the cloud portion from this series —
+        // it will be rendered by the separate hatched cloud series below.
+        const fullValue = valueGrid[seriesIdx]![i]!;
+        const localValue = b.cloudCount > 0 && b.count > 0
+          ? Math.max(0, Math.round(fullValue * (1 - b.cloudCount / b.count)))
+          : fullValue;
+        return {
+          value: localValue,
+          itemStyle: {
+            color,
+            opacity: ix.hoveredBar === i ? 1 : baseOpacity,
+            borderRadius: topSeriesPerBucket[i] === seriesIdx && b.cloudCount === 0 ? [2, 2, 0, 0] : 0,
+          },
+        };
+      }),
       emphasis: { disabled: true },
       barCategoryGap: "8%",
       cursor: onSegmentClick && !isTotal ? "pointer" : "crosshair",
     };
   });
 
-  // Add cloud data marker on top of existing bars where cloud chunks
-  // have data but exact counts are unavailable.
-  const hasCloudData = buckets.some((b) => b.hasCloudData);
-  if (hasCloudData) {
-    const maxCount = Math.max(...buckets.map((b) => b.count).filter((c) => c > 0), 1);
-    const markerHeight = Math.max(Math.round(maxCount * 0.09), 3);
+  // Add hatched cloud data series on top of existing bars.
+  if (hasCloud) {
     seriesData.push({
-      name: "cloud (unsearchable)",
+      name: "cloud",
       type: "bar" as const,
       stack: "total",
       data: buckets.map((b, i) => ({
-        value: b.hasCloudData ? markerHeight : 0,
+        value: Math.max(b.cloudCount, 0),
         itemStyle: {
           color: copperColor,
-          opacity: b.hasCloudData ? (ix.hoveredBar === i ? 0.4 : 0.15) : 0,
-          borderRadius: [2, 2, 0, 0] as number | number[],
+          opacity: b.cloudCount > 0 ? (ix.hoveredBar === i ? 0.8 : baseOpacity) : 0,
+          borderRadius: b.cloudCount > 0 ? [2, 2, 0, 0] as number | number[] : 0,
         },
       })),
       emphasis: { disabled: true },
@@ -339,7 +346,7 @@ export function HistogramChart({
 
     const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00B7 ${formatTime(bucket.ts)}</div>`;
     if (bucket.hasCloudData) {
-      lines.push(`<div style="opacity:0.5;font-size:0.85em;margin-top:2px">+ cloud data (count unavailable)</div>`);
+      lines.push(`<div style="opacity:0.5;font-size:0.85em;margin-top:2px">includes interpolated cloud data</div>`);
     }
     return header + lines.join("<br/>");
   };
@@ -565,9 +572,9 @@ export function HistogramChart({
           </div>
           <span
             className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
-            title={truncated ? "Approximate — scan limit reached" : undefined}
+            title={truncated ? "Approximate — scan limit reached" : hasCloud ? "Approximate — cloud chunk counts are interpolated" : undefined}
           >
-            {truncated ? "~" : ""}{totalCount.toLocaleString()} records
+            {truncated ? "~" : ""}{totalCount.toLocaleString()} records{elapsedMs != null ? ` in ${elapsedMs >= 1000 ? `${(elapsedMs / 1000).toFixed(1)}s` : `${elapsedMs}ms`}` : ""}
           </span>
         </div>
       ) : (

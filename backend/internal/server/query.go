@@ -730,10 +730,11 @@ func histogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket 
 	out := make([]*apiv1.HistogramBucket, len(buckets))
 	for i, b := range buckets {
 		out[i] = &apiv1.HistogramBucket{
-			TimestampMs:       b.TimestampMs,
-			Count:             b.Count,
-			GroupCounts:       b.GroupCounts,
+			TimestampMs:  b.TimestampMs,
+			Count:        b.Count,
+			GroupCounts:  b.GroupCounts,
 			HasCloudData: b.HasCloudData,
+			CloudCount:   b.CloudCount,
 		}
 	}
 	return out

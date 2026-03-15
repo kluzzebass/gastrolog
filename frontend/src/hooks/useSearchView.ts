@@ -277,6 +277,7 @@ export function useSearchView() {
     hasMore,
     tableResult,
     histogram,
+    elapsedMs,
     search,
     loadMore,
     setRecords,
@@ -885,6 +886,7 @@ export function useSearchView() {
 
     // Histogram
     histogramData,
+    searchElapsedMs: elapsedMs,
     liveHistogramData,
     handleBrushSelect, handleFollowBrushSelect, handlePan,
     handleSegmentClick,

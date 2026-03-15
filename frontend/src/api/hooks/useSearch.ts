@@ -12,6 +12,7 @@ interface SearchState {
   tableResult: TableResult | null;
   histogram: HistogramBucket[] | null;
   version: number;
+  elapsedMs: number | null;
 }
 
 const OPERATORS = new Set(["AND", "OR", "NOT"]);
@@ -79,9 +80,11 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
     tableResult: null,
     histogram: null,
     version: 0,
+    elapsedMs: null,
   });
 
   const abortRef = useRef<AbortController | null>(null);
+  const searchStartRef = useRef<number>(0);
   // Ref mirrors state so callbacks always read fresh values (no stale closures).
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -98,6 +101,9 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         }
       }
       abortRef.current = new AbortController();
+      if (!append) {
+        searchStartRef.current = performance.now();
+      }
 
       // Send the raw query string — the server parses it.
       // limit is set on the proto field (not in expression) to control
@@ -180,6 +186,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
         }
 
         abortRef.current = null;
+        const elapsed = Math.round(performance.now() - searchStartRef.current);
         setState((prev) => ({
           ...prev,
           // In silent mode, this is the single atomic swap.
@@ -189,6 +196,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
           resumeToken: lastResumeToken,
           histogram,
           version: prev.version + 1,
+          elapsedMs: append ? prev.elapsedMs : elapsed,
         }));
       } catch (err) {
         if (
@@ -248,6 +256,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       tableResult: null,
       histogram: null,
       version: 0,
+      elapsedMs: null,
     });
   };
 
@@ -267,6 +276,7 @@ export function useSearch(options?: { onError?: (err: Error) => void }) {
       tableResult: null,
       histogram: null,
       version: prev.version + 1,
+      elapsedMs: null,
     }));
   };
 

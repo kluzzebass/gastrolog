@@ -4,7 +4,6 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"sync"
 	"testing"
 	"time"
 
@@ -13,69 +12,6 @@ import (
 
 	"github.com/google/uuid"
 )
-
-func TestBatching(t *testing.T) {
-	t.Parallel()
-	var mu sync.Mutex
-	var batches []int
-
-	nf := &nodeForwarder{
-		ch:   make(chan forwardEntry, forwardChanCap),
-		done: make(chan struct{}),
-	}
-
-	vaultID := uuid.Must(uuid.NewV7())
-
-	// Fill channel to capacity.
-	for i := 0; i < forwardChanCap; i++ {
-		nf.ch <- forwardEntry{
-			vaultID: vaultID,
-			record:  chunk.Record{Raw: []byte("test")},
-		}
-	}
-
-	if len(nf.ch) != forwardChanCap {
-		t.Fatalf("expected %d entries in channel, got %d", forwardChanCap, len(nf.ch))
-	}
-
-	// Drain in batches of forwardBatchSize (same logic as flushLoop).
-	for len(nf.ch) > 0 {
-		batch := make([]forwardEntry, 0, forwardBatchSize)
-	drain:
-		for len(batch) < forwardBatchSize {
-			select {
-			case entry := <-nf.ch:
-				batch = append(batch, entry)
-			default:
-				break drain
-			}
-		}
-		mu.Lock()
-		batches = append(batches, len(batch))
-		mu.Unlock()
-	}
-
-	// Compute expected batches: ceil(forwardChanCap / forwardBatchSize) full
-	// batches, plus one partial batch if there's a remainder.
-	wantBatches := forwardChanCap / forwardBatchSize
-	remainder := forwardChanCap % forwardBatchSize
-	if remainder > 0 {
-		wantBatches++
-	}
-
-	if len(batches) != wantBatches {
-		t.Fatalf("expected %d batches, got %d: %v", wantBatches, len(batches), batches)
-	}
-
-	// Verify total records drained.
-	total := 0
-	for _, b := range batches {
-		total += b
-	}
-	if total != forwardChanCap {
-		t.Errorf("total drained = %d, want %d", total, forwardChanCap)
-	}
-}
 
 func TestBufferOverflow(t *testing.T) {
 	t.Parallel()
@@ -103,7 +39,8 @@ func TestBufferOverflow(t *testing.T) {
 	}
 }
 
-func TestFlushTimerDrains(t *testing.T) {
+func TestChannelDrain(t *testing.T) {
+	t.Parallel()
 	nf := &nodeForwarder{
 		ch:   make(chan forwardEntry, forwardChanCap),
 		done: make(chan struct{}),
@@ -112,18 +49,58 @@ func TestFlushTimerDrains(t *testing.T) {
 	vaultID := uuid.Must(uuid.NewV7())
 	nf.ch <- forwardEntry{vaultID: vaultID, record: chunk.Record{Raw: []byte("single")}}
 
-	// Simulate timer-based drain: after forwardFlushInterval the entry
-	// should still be in the channel (timers are in flushLoop).
-	// We verify the channel semantics here — the entry is retrievable.
+	// Entry should be retrievable from the channel.
 	time.Sleep(10 * time.Millisecond) // brief yield
 	if len(nf.ch) != 1 {
 		t.Errorf("expected 1 entry in channel, got %d", len(nf.ch))
 	}
 
-	// Drain it.
 	entry := <-nf.ch
 	if string(entry.record.Raw) != "single" {
 		t.Errorf("unexpected record raw: %s", entry.record.Raw)
+	}
+}
+
+func TestForwardEntryToProto(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	ingesterID := uuid.Must(uuid.NewV7())
+	now := time.Now()
+
+	entry := forwardEntry{
+		vaultID: vaultID,
+		record: chunk.Record{
+			Raw:      []byte("test record"),
+			SourceTS: now.Add(-time.Hour),
+			IngestTS: now,
+			Attrs:    chunk.Attributes{"level": "error"},
+			EventID: chunk.EventID{
+				IngesterID: ingesterID,
+				IngestSeq:  42,
+				IngestTS:   now,
+			},
+		},
+	}
+
+	msg := forwardEntryToProto(entry)
+
+	if msg.GetVaultId() != vaultID.String() {
+		t.Errorf("vault_id = %q, want %q", msg.GetVaultId(), vaultID.String())
+	}
+	if string(msg.GetRaw()) != "test record" {
+		t.Errorf("raw = %q, want %q", msg.GetRaw(), "test record")
+	}
+	if msg.GetIngestSeq() != 42 {
+		t.Errorf("ingest_seq = %d, want 42", msg.GetIngestSeq())
+	}
+	if msg.GetAttrs()["level"] != "error" {
+		t.Errorf("attrs[level] = %q, want %q", msg.GetAttrs()["level"], "error")
+	}
+	if msg.GetSourceTs() == nil {
+		t.Error("source_ts should be set")
+	}
+	if msg.GetIngestTs() == nil {
+		t.Error("ingest_ts should be set")
 	}
 }
 
@@ -150,7 +127,7 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 	}
 	rf.nodes[nodeID] = nf
 
-	// Start a dummy flush goroutine that just drains.
+	// Start a dummy stream goroutine that just drains.
 	rf.wg.Add(1)
 	go func() {
 		defer rf.wg.Done()
@@ -183,6 +160,48 @@ func TestForwardClosedReturnsError(t *testing.T) {
 	err := rf.Forward(context.Background(), "node-X", uuid.Must(uuid.NewV7()), []chunk.Record{{Raw: []byte("x")}})
 	if err == nil {
 		t.Error("expected error from closed forwarder")
+	}
+}
+
+func TestBackoffProgression(t *testing.T) {
+	t.Parallel()
+	nf := &nodeForwarder{}
+	rf := &RecordForwarder{
+		logger: discardLogger(),
+		stop:   make(chan struct{}),
+	}
+
+	// First failure: backoff = 1s
+	rf.bumpBackoff("node-1", nf, io.ErrClosedPipe)
+	if nf.backoff != backoffMin {
+		t.Errorf("backoff after 1 failure = %v, want %v", nf.backoff, backoffMin)
+	}
+	if nf.failures != 1 {
+		t.Errorf("failures = %d, want 1", nf.failures)
+	}
+
+	// Second failure: backoff = 2s
+	rf.bumpBackoff("node-1", nf, io.ErrClosedPipe)
+	if nf.backoff != 2*time.Second {
+		t.Errorf("backoff after 2 failures = %v, want 2s", nf.backoff)
+	}
+
+	// Keep bumping until max.
+	for range 10 {
+		rf.bumpBackoff("node-1", nf, io.ErrClosedPipe)
+	}
+	if nf.backoff > backoffMax {
+		t.Errorf("backoff = %v, exceeds max %v", nf.backoff, backoffMax)
+	}
+
+	// Simulate success reset (same logic as sendBurst).
+	nf.failures = 0
+	nf.backoff = 0
+	if nf.failures != 0 {
+		t.Errorf("failures after success = %d, want 0", nf.failures)
+	}
+	if nf.backoff != 0 {
+		t.Errorf("backoff after success = %v, want 0", nf.backoff)
 	}
 }
 
