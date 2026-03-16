@@ -15,16 +15,17 @@ import (
 const cloudIndexFile = "cloud.idx"
 
 // cloudMetaValue is the fixed-size encoded form of cloud chunk metadata.
-// Layout (106 bytes):
+// Layout (110 bytes):
 //   - 9 × int64 (72 bytes): WriteStart, WriteEnd, RecordCount, Bytes, DiskBytes,
 //     IngestStart, IngestEnd, SourceStart, SourceEnd — all unix nanos or raw int64
 //   - 1 × uint16 (2 bytes): flags (bit 0 = sealed, bit 1 = compressed)
 //   - 4 × int64 (32 bytes): IngestIdxOffset, IngestIdxSize, SourceIdxOffset, SourceIdxSize
 //     — GLCB section offsets for embedded TS indexes (0 = none)
-type cloudMetaValue [106]byte
+//   - 1 × int32 (4 bytes): NumFrames — seekable zstd frame count
+type cloudMetaValue [110]byte
 
 const (
-	cloudMetaValSize = 106
+	cloudMetaValSize = 110
 	flagSealed       = 1 << 0
 	flagCompressed   = 1 << 1
 )
@@ -52,6 +53,7 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 	binary.LittleEndian.PutUint64(v[82:90], uint64(m.ingestIdxSize))    //nolint:gosec // size is always non-negative
 	binary.LittleEndian.PutUint64(v[90:98], uint64(m.sourceIdxOffset))  //nolint:gosec // offset is always non-negative
 	binary.LittleEndian.PutUint64(v[98:106], uint64(m.sourceIdxSize))   //nolint:gosec // size is always non-negative
+	binary.LittleEndian.PutUint32(v[106:110], uint32(m.numFrames))      //nolint:gosec // frame count is always non-negative
 	return v
 }
 
@@ -75,6 +77,7 @@ func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip
 		sourceIdxOffset: int64(binary.LittleEndian.Uint64(v[90:98])),  //nolint:gosec // round-trip
 		sourceIdxSize:   int64(binary.LittleEndian.Uint64(v[98:106])), //nolint:gosec // round-trip
+		numFrames:       int32(binary.LittleEndian.Uint32(v[106:110])), //nolint:gosec // round-trip
 	}
 }
 

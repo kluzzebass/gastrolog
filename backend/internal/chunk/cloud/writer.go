@@ -47,7 +47,8 @@ type Writer struct {
 	ingestEntries []tsEntry
 	sourceEntries []tsEntry
 
-	toc BlobTOC // populated by WriteTo
+	toc       BlobTOC // populated by WriteTo
+	numFrames int32   // seekable zstd frame count, populated by WriteTo
 }
 
 // NewWriter creates a writer for the given chunk and vault.
@@ -201,6 +202,7 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	// independently-decompressible zstd frame in the seekable stream.
 	var batch []byte
 	var frameLenBuf [4]byte
+	var frameCount int32
 	for _, frame := range w.frames {
 		binary.LittleEndian.PutUint32(frameLenBuf[:], uint32(len(frame))) //nolint:gosec // G115: frame size bounded
 		batch = append(batch, frameLenBuf[:]...)
@@ -212,6 +214,7 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 				return cw.n, werr
 			}
 			batch = batch[:0]
+			frameCount++
 		}
 	}
 	if len(batch) > 0 {
@@ -219,7 +222,9 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 			_ = sw.Close()
 			return cw.n, werr
 		}
+		frameCount++
 	}
+	w.numFrames = frameCount
 
 	if err := sw.Close(); err != nil {
 		return cw.n, fmt.Errorf("close seekable writer: %w", err)
@@ -301,6 +306,12 @@ func (w *Writer) writeTSIndexes(cw *countWriter) error {
 // Only valid after WriteTo has been called.
 func (w *Writer) TOC() BlobTOC {
 	return w.toc
+}
+
+// NumFrames returns the number of seekable zstd frames written.
+// Only valid after WriteTo has been called.
+func (w *Writer) NumFrames() int32 {
+	return w.numFrames
 }
 
 func (w *Writer) updateBounds(rec chunk.Record) {

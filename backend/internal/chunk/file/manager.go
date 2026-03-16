@@ -132,6 +132,8 @@ type chunkMeta struct {
 	ingestIdxSize   int64
 	sourceIdxOffset int64
 	sourceIdxSize   int64
+
+	numFrames int32 // seekable zstd frame count (cloud chunks only)
 }
 
 func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
@@ -150,6 +152,7 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		SourceEnd:   m.sourceEnd,
 		CloudBacked: m.cloudBacked,
 		Archived:    m.archived,
+		NumFrames:   m.numFrames,
 	}
 }
 
@@ -2473,6 +2476,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
 		meta.sourceIdxSize = toc.SourceIdxSize
+		meta.numFrames = w.NumFrames()
 		delete(m.metas, id)
 	}
 	m.mu.Unlock()

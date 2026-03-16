@@ -255,6 +255,12 @@ function ChunkRow({
             {chunk.compressed && (
               <Badge variant="info" dark={dark}>compr</Badge>
             )}
+            {chunk.cloudBacked && (
+              <Badge variant="muted" dark={dark}>cloud</Badge>
+            )}
+            {chunk.archived && (
+              <Badge variant="warn" dark={dark}>archived</Badge>
+            )}
           </span>
         </td>
         <td className={`px-2 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -292,7 +298,8 @@ function ChunkDetail({
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const { data, isLoading } = useIndexes(vaultId, chunk.id);
+  // Skip index fetch for cloud-backed chunks — they don't have local indexes.
+  const { data, isLoading } = useIndexes(vaultId, chunk.cloudBacked ? "" : chunk.id);
 
   const logicalBytes = Number(chunk.bytes);
   const diskBytes = Number(chunk.diskBytes);
@@ -326,59 +333,90 @@ function ChunkDetail({
         </div>
       )}
 
-      {/* Indexes */}
-      <div
-        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        Indexes
-      </div>
-
-      {isLoading && (
-        <div
-          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          Loading indexes...
-        </div>
-      )}
-      {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
-        <div
-          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-        >
-          No indexes.
-        </div>
-      )}
-      {!isLoading && data?.indexes && data.indexes.length > 0 && (
-        <div className="flex flex-col gap-1.5">
-          {data.indexes.map((idx) => (
-            <div
-              key={idx.name}
-              className={`flex items-center gap-3 text-[0.85em]`}
-            >
-              <span
-                className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}
-              >
-                {idx.name}
+      {/* Cloud-backed chunks: show cloud info instead of local indexes */}
+      {chunk.cloudBacked ? (
+        <>
+          <div
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Cloud Storage
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <div className={`flex items-center gap-3 text-[0.85em]`}>
+              <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>blob</span>
+              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+                {formatBytes(Number(chunk.diskBytes))}
               </span>
-              {idx.exists ? (
-                <>
-                  <Badge variant="info" dark={dark}>ok</Badge>
-                  <span
-                    className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
-                  >
-                    {Number(idx.entryCount).toLocaleString()} entries
-                  </span>
-                  <span
-                    className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
-                  >
-                    {formatBytes(Number(idx.sizeBytes))}
-                  </span>
-                </>
-              ) : (
-                <Badge variant="ghost" dark={dark}>missing</Badge>
-              )}
+              <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                GLCB{chunk.numFrames > 0 ? `, ${chunk.numFrames} seekable zstd frames` : ", seekable zstd"}
+              </span>
             </div>
-          ))}
-        </div>
+            <div className={`flex items-center gap-3 text-[0.85em]`}>
+              <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>ts-index</span>
+              <Badge variant="info" dark={dark}>embedded</Badge>
+              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+                {Number(chunk.recordCount).toLocaleString()} entries
+              </span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* Local indexes */}
+          <div
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Indexes
+          </div>
+
+          {isLoading && (
+            <div
+              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              Loading indexes...
+            </div>
+          )}
+          {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
+            <div
+              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            >
+              No indexes.
+            </div>
+          )}
+          {!isLoading && data?.indexes && data.indexes.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {data.indexes.map((idx) => (
+                <div
+                  key={idx.name}
+                  className={`flex items-center gap-3 text-[0.85em]`}
+                >
+                  <span
+                    className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}
+                  >
+                    {idx.name}
+                  </span>
+                  {idx.exists ? (
+                    <>
+                      <Badge variant="info" dark={dark}>ok</Badge>
+                      <span
+                        className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+                      >
+                        {Number(idx.entryCount).toLocaleString()} entries
+                      </span>
+                      <span
+                        className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                      >
+                        {formatBytes(Number(idx.sizeBytes))}
+                      </span>
+                    </>
+                  ) : (
+                    <Badge variant="ghost" dark={dark}>missing</Badge>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
