@@ -1838,64 +1838,47 @@ func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 
 const tsCacheDir = ".ts-cache"
 
-// findCloudTSPosition looks up the TS index for a cloud chunk and binary-searches
-// for the first entry with TS >= ts. The index is cached locally after the first
-// S3 range request — subsequent calls do a local pread binary search.
-func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
-	data, err := m.loadCloudTSIndex(id, offset, size)
-	if err != nil {
-		return 0, false, err
+// LoadIngestEntries reads the locally-cached ingest TS index for a cloud chunk
+// and returns all entries sorted by IngestTS. Downloads the index from S3 on
+// first access.
+func (m *Manager) LoadIngestEntries(id chunk.ChunkID) ([]chunk.TSEntry, error) {
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil || !meta.cloudBacked || meta.ingestIdxSize == 0 {
+		return nil, chunk.ErrNoTSIndex
 	}
-	pos, found := chunkcloud.FindStartPosition(data, ts.UnixNano())
-	return pos, found, nil
+	return m.loadTSEntries(id, meta.ingestIdxOffset, meta.ingestIdxSize)
 }
 
-// loadCloudTSIndex returns the TS index data for a cloud chunk via mmap.
-// First checks the local file cache (<vaultDir>/.ts-cache/<chunkID>.<offset>);
-// on miss, downloads via S3 range request and persists locally.
-// The returned slice is mmap'd — no heap allocation, OS manages page cache.
-func (m *Manager) loadCloudTSIndex(id chunk.ChunkID, offset, size int64) ([]byte, error) {
+// LoadSourceEntries reads the locally-cached source TS index for a cloud chunk.
+func (m *Manager) LoadSourceEntries(id chunk.ChunkID) ([]chunk.TSEntry, error) {
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+	if meta == nil || !meta.cloudBacked || meta.sourceIdxSize == 0 {
+		return nil, chunk.ErrNoTSIndex
+	}
+	return m.loadTSEntries(id, meta.sourceIdxOffset, meta.sourceIdxSize)
+}
+
+// loadTSEntries reads a TS index cache file and returns all entries.
+// Downloads from S3 on cache miss.
+func (m *Manager) loadTSEntries(id chunk.ChunkID, offset, size int64) ([]chunk.TSEntry, error) {
 	cachePath := m.tsCachePath(id, offset)
 
-	// Try local cache first — mmap the file.
-	data, err := mmapFile(cachePath)
-	if err == nil {
-		return data, nil
+	if _, err := os.Stat(cachePath); err != nil {
+		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
+			return nil, err
+		}
 	}
 
-	// Cache miss — download from S3 directly to file, then mmap.
-	rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), offset, size)
-	if err != nil {
-		return nil, fmt.Errorf("download cloud TS index for %s: %w", id, err)
-	}
-	defer func() { _ = rc.Close() }()
-
-	cacheDir := filepath.Join(m.cfg.Dir, tsCacheDir)
-	_ = os.MkdirAll(cacheDir, 0o750)
-
-	f, err := os.CreateTemp(cacheDir, "ts-*.tmp")
-	if err != nil {
-		return nil, fmt.Errorf("create temp file for TS index: %w", err)
-	}
-	tmpPath := f.Name()
-
-	if _, err := io.Copy(f, rc); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		return nil, fmt.Errorf("write cloud TS index for %s: %w", id, err)
-	}
-	_ = f.Close()
-
-	if err := os.Rename(tmpPath, cachePath); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		_ = os.Remove(tmpPath)                                //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		return nil, fmt.Errorf("rename TS cache file: %w", err)
-	}
-
-	return mmapFile(cachePath)
+	return readTSEntriesFromFile(cachePath)
 }
 
-// mmapFile maps a file into memory read-only. Returns the mapped slice.
-func mmapFile(path string) ([]byte, error) {
+// readTSEntriesFromFile reads all TS index entries from a local file.
+// Each entry is 12 bytes: [tsNano:i64][pos:u32].
+func readTSEntriesFromFile(path string) ([]chunk.TSEntry, error) {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
 		return nil, err
@@ -1906,16 +1889,135 @@ func mmapFile(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if info.Size() == 0 {
-		return nil, errors.New("empty file")
+
+	const entrySize = 12
+	n := int(info.Size()) / entrySize
+	entries := make([]chunk.TSEntry, n)
+
+	var buf [entrySize]byte
+	for i := range n {
+		if _, err := f.ReadAt(buf[:], int64(i)*entrySize); err != nil {
+			return entries[:i], nil // return what we have
+		}
+		entries[i] = chunk.TSEntry{
+			TS:  int64(binary.LittleEndian.Uint64(buf[:8])), //nolint:gosec // G115
+			Pos: binary.LittleEndian.Uint32(buf[8:]),
+		}
+	}
+	return entries, nil
+}
+
+// findCloudTSPosition looks up the TS index for a cloud chunk via pread-based
+// binary search on the local cache file. On cache miss, downloads the TS index
+// from S3 and persists it. Subsequent calls do O(log n) pread calls — no heap
+// allocation beyond a 12-byte buffer, no mmap, no leak.
+func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
+	cachePath := m.tsCachePath(id, offset)
+
+	// Ensure the cache file exists.
+	if _, err := os.Stat(cachePath); err != nil {
+		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
+			return 0, false, err
+		}
 	}
 
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), //nolint:gosec // G115: Fd() and Size() fit in int on 64-bit
-		syscall.PROT_READ, syscall.MAP_PRIVATE)
+	// O(log n) binary search via pread — no heap allocation.
+	return searchTSCacheFile(cachePath, ts.UnixNano())
+}
+
+// downloadTSIndex fetches a TS index section from S3 and writes it to a local
+// cache file. Streams directly to disk — no heap buffering.
+func (m *Manager) downloadTSIndex(id chunk.ChunkID, offset, size int64, cachePath string) error {
+	rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), offset, size)
 	if err != nil {
-		return nil, fmt.Errorf("mmap %s: %w", path, err)
+		return fmt.Errorf("download cloud TS index for %s: %w", id, err)
 	}
-	return data, nil
+	defer func() { _ = rc.Close() }()
+
+	cacheDir := filepath.Join(m.cfg.Dir, tsCacheDir)
+	_ = os.MkdirAll(cacheDir, 0o750)
+
+	f, err := os.CreateTemp(cacheDir, "ts-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file for TS index: %w", err)
+	}
+	tmpPath := f.Name()
+
+	if _, err := io.Copy(f, rc); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from os.CreateTemp
+		return fmt.Errorf("write cloud TS index for %s: %w", id, err)
+	}
+	_ = f.Close()
+
+	if err := os.Rename(tmpPath, cachePath); err != nil { //nolint:gosec // G703: tmpPath from os.CreateTemp
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: cleanup
+		return fmt.Errorf("rename TS cache file: %w", err)
+	}
+	return nil
+}
+
+// searchTSCacheFile does O(log n) binary search on a local TS index cache file
+// using pread. Each entry is 12 bytes: [tsNano:i64][pos:u32]. No heap allocation
+// beyond a single 12-byte buffer.
+func searchTSCacheFile(path string, tsNano int64) (uint64, bool, error) {
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return 0, false, err
+	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return 0, false, err
+	}
+
+	const entrySize = 12
+	n := int(info.Size()) / entrySize
+	if n == 0 {
+		return 0, false, nil
+	}
+
+	var buf [entrySize]byte
+	readEntry := func(i int) (int64, uint32, error) {
+		off := int64(i) * entrySize
+		if _, err := f.ReadAt(buf[:], off); err != nil {
+			return 0, 0, err
+		}
+		ts := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115: nanosecond timestamps fit in int64
+		pos := binary.LittleEndian.Uint32(buf[8:])
+		return ts, pos, nil
+	}
+
+	// Quick bounds check.
+	lastTS, _, err := readEntry(n - 1)
+	if err != nil {
+		return 0, false, err
+	}
+	if tsNano > lastTS {
+		return 0, false, nil
+	}
+
+	// Binary search: first i where TS[i] >= tsNano.
+	lo, hi := 0, n
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		midTS, _, err := readEntry(mid)
+		if err != nil {
+			return 0, false, err
+		}
+		if midTS < tsNano {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+
+	_, pos, err := readEntry(lo)
+	if err != nil {
+		return 0, false, err
+	}
+	return uint64(pos), true, nil
 }
 
 func (m *Manager) tsCachePath(id chunk.ChunkID, offset int64) string {
@@ -2315,7 +2417,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("open cursor for cloud upload: %w", err)
 	}
 
-	w := chunkcloud.NewWriter(id, m.cfg.VaultID)
+	w := chunkcloud.NewWriter(id, m.cfg.VaultID, m.zstdEnc)
 	for {
 		rec, _, recErr := cursor.Next()
 		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
@@ -2418,55 +2520,84 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 	}
 }
 
-// openCloudCursor downloads a cloud-backed chunk to a temp file and returns
-// a seekable cursor. This is the bulk download path — appropriate for search
-// queries, ScanAttrs, and other full-chunk scans.
+// openCloudCursor opens a cloud-backed chunk for random-access record reads
+// via range requests. No full blob download — uses the seekable zstd format
+// to fetch only the compressed frames containing requested records.
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
-	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
+	m.mu.Lock()
+	meta := m.lookupMeta(id)
+	m.mu.Unlock()
+
+	if meta == nil {
+		return nil, chunk.ErrChunkNotFound
+	}
+
+	rd, err := chunkcloud.NewRemoteReader(m.cfg.CloudStore, m.blobKey(id), meta.diskBytes)
 	if err != nil {
-		if errors.Is(err, blobstore.ErrBlobArchived) {
-			return nil, fmt.Errorf("%w: %s", chunk.ErrChunkArchived, id)
-		}
-		return nil, fmt.Errorf("download cloud chunk %s: %w", id, err)
-	}
-	defer func() { _ = rc.Close() }()
-
-	tmp, err := os.CreateTemp("", "glcb-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp file: %w", err)
+		return nil, fmt.Errorf("open remote reader %s: %w", id, err)
 	}
 
-	if _, err := io.Copy(tmp, rc); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
-		return nil, fmt.Errorf("download cloud chunk %s to temp: %w", id, err)
-	}
-
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
-		return nil, err
-	}
-
-	rd, err := chunkcloud.NewReader(tmp)
-	if err != nil {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name()) //nolint:gosec // tmp is from os.CreateTemp, not user input
-		return nil, fmt.Errorf("open cloud reader %s: %w", id, err)
-	}
-
-	return chunkcloud.NewSeekableCursor(rd, id), nil
+	return chunkcloud.NewRemoteSeekableCursor(rd, id), nil
 }
 
 // loadCloudChunks verifies the cloud index is readable and populates it from
 // the cloud store if empty. Cloud chunk metadata is NOT loaded into m.metas —
 // it stays in the B+ tree and is served on demand via lookupMeta/ForEach.
+// After loading, pre-warms the TS index cache so the first query doesn't spike.
 func (m *Manager) loadCloudChunks() error {
 	if m.cloudIdx != nil && m.cloudIdx.Count() > 0 {
 		m.logger.Info("cloud index ready", "count", m.cloudIdx.Count())
+		m.backfillTSOffsets()
 		return nil
 	}
 	return m.loadCloudChunksFromStore()
+}
+
+// backfillTSOffsets reads the GLCB TOC footer for cloud chunks that have zero
+// TS index offsets (pre-existing blobs from before the TS index feature).
+// Updates the cloud.idx B+ tree so subsequent startups skip this.
+func (m *Manager) backfillTSOffsets() {
+	if m.cloudIdx == nil || m.cfg.CloudStore == nil {
+		return
+	}
+	var updated int
+	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+		if meta.ingestIdxSize > 0 {
+			return true // already has offsets
+		}
+		// Read the last 48 bytes (TOC) from the blob.
+		info, err := m.cfg.CloudStore.Head(context.Background(), m.blobKey(id))
+		if err != nil || info.Size < chunkcloud.TOCSize {
+			return true
+		}
+		rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), info.Size-chunkcloud.TOCSize, chunkcloud.TOCSize)
+		if err != nil {
+			return true
+		}
+		var buf [chunkcloud.TOCSize]byte
+		_, err = io.ReadFull(rc, buf[:])
+		_ = rc.Close()
+		if err != nil {
+			return true
+		}
+		toc, err := chunkcloud.ParseTOC(buf[:])
+		if err != nil || toc.IngestIdxOffset == 0 {
+			return true // v1 blob without embedded TS indexes
+		}
+		meta.ingestIdxOffset = toc.IngestIdxOffset
+		meta.ingestIdxSize = toc.IngestIdxSize
+		meta.sourceIdxOffset = toc.SourceIdxOffset
+		meta.sourceIdxSize = toc.SourceIdxSize
+		if err := m.cloudIdx.Insert(id, meta); err == nil {
+			updated++
+		}
+		return true
+	})
+	if updated > 0 {
+		_ = m.cloudIdx.Sync()
+		m.cloudListCache = nil // invalidate
+		m.logger.Info("backfilled TS index offsets", "updated", updated)
+	}
 }
 
 // loadCloudChunksFromStore iterates blobs from the cloud store and populates

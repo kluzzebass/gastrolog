@@ -85,10 +85,17 @@ func ObjectMetadata(bm BlobMeta) map[string]string {
 	return md
 }
 
+// recordReader is the common interface for both local and remote GLCB readers.
+type recordReader interface {
+	Meta() BlobMeta
+	ReadRecord(pos uint32) (chunk.Record, error)
+	Close() error
+}
+
 // --- seekableCursor: random-access cursor backed by seekable zstd ---
 
 type seekableCursor struct {
-	reader      *Reader
+	reader      recordReader
 	id          chunk.ChunkID
 	recordCount uint64
 	fwdIndex    uint64
@@ -97,9 +104,18 @@ type seekableCursor struct {
 	revDone     bool
 }
 
-// NewSeekableCursor creates a seekable cursor from a Reader.
-// Used by the file vault's sealed backing integration.
+// NewSeekableCursor creates a seekable cursor from a local Reader.
 func NewSeekableCursor(rd *Reader, id chunk.ChunkID) chunk.RecordCursor {
+	return newCursor(rd, id)
+}
+
+// NewRemoteSeekableCursor creates a seekable cursor from a RemoteReader.
+// Record reads are backed by range requests — no full blob download.
+func NewRemoteSeekableCursor(rd *RemoteReader, id chunk.ChunkID) chunk.RecordCursor {
+	return newCursor(rd, id)
+}
+
+func newCursor(rd recordReader, id chunk.ChunkID) chunk.RecordCursor {
 	return &seekableCursor{
 		reader:      rd,
 		id:          id,

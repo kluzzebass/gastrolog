@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/klauspost/compress/zstd"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/chunk/cloud"
@@ -82,7 +83,9 @@ func assertRecord(t *testing.T, i int, got, want chunk.Record) {
 func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID uuid.UUID, records []chunk.Record) *os.File {
 	t.Helper()
 
-	w := cloud.NewWriter(chunkID, vaultID)
+	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	defer enc.Close()
+	w := cloud.NewWriter(chunkID, vaultID, enc)
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
 			t.Fatalf("Add: %v", err)
@@ -111,7 +114,9 @@ func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID uuid.UUID,
 func TestRoundTrip(t *testing.T) {
 	chunkID, vaultID, records := testRecords()
 
-	w := cloud.NewWriter(chunkID, vaultID)
+	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
+	defer enc.Close()
+	w := cloud.NewWriter(chunkID, vaultID, enc)
 	for _, rec := range records {
 		if err := w.Add(rec); err != nil {
 			t.Fatalf("Add: %v", err)

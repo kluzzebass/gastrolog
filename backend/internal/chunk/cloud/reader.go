@@ -127,6 +127,23 @@ func readTOC(f *os.File, fileSize int64) (BlobTOC, error) {
 	}, nil
 }
 
+// ParseTOC parses a 48-byte TOC buffer. Exported for use by the chunk manager
+// during backfill of pre-existing blobs.
+func ParseTOC(buf []byte) (BlobTOC, error) {
+	if len(buf) < tocSize {
+		return BlobTOC{}, errors.New("TOC buffer too small")
+	}
+	if string(buf[0:4]) != tocMagic {
+		return BlobTOC{}, errors.New("TOC magic mismatch")
+	}
+	return BlobTOC{
+		IngestIdxOffset: int64(binary.LittleEndian.Uint64(buf[8:16])),  //nolint:gosec // round-trip
+		IngestIdxSize:   int64(binary.LittleEndian.Uint64(buf[16:24])), //nolint:gosec // round-trip
+		SourceIdxOffset: int64(binary.LittleEndian.Uint64(buf[24:32])), //nolint:gosec // round-trip
+		SourceIdxSize:   int64(binary.LittleEndian.Uint64(buf[32:40])), //nolint:gosec // round-trip
+	}, nil
+}
+
 // Meta returns the blob metadata.
 func (rd *Reader) Meta() BlobMeta { return rd.meta }
 

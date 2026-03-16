@@ -607,7 +607,7 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 
 	// TS-ordered scanning: when OrderBy is not WriteTS, we need to reorder results.
 	if q.OrderBy != OrderByWriteTS {
-		return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, im)
+		return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, cm, im)
 	}
 
 	// IngestTS filtering is handled by the scanner's built-in time bounds check
@@ -627,10 +627,15 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 // For sealed chunks with a TS index, it walks the index to produce positions in
 // timestamp order. For active chunks (or when the index is unavailable), it falls
 // back to buffering and sorting.
-func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordCursor, q Query, b *scannerBuilder, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	if meta.Sealed {
 		// Try to load the TS index for this ordering.
+		// The index manager handles local sealed chunks; the chunk manager
+		// handles cloud chunks (via locally-cached TS index files).
 		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
+		if errors.Is(err, index.ErrIndexNotFound) && meta.CloudBacked {
+			tsEntries, err = loadCloudTSEntries(cm, meta.ID, q.OrderBy)
+		}
 		if err == nil {
 			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
 		}
@@ -665,6 +670,35 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 		return reorderByTSWithBounds(inner, q.OrderBy, q.Reverse(), lower, upper, q.ResumeTS), nil
 	}
 	return reorderByTS(inner, q.OrderBy, q.Reverse()), nil
+}
+
+// loadCloudTSEntries loads TS index entries from the chunk manager's cloud
+// TS cache via the TSIndexLoader interface. Returns index.ErrIndexNotFound
+// if the chunk manager doesn't support it.
+func loadCloudTSEntries(cm chunk.ChunkManager, chunkID chunk.ChunkID, orderBy OrderBy) ([]index.TSEntry, error) {
+	loader, ok := cm.(chunk.TSIndexLoader)
+	if !ok {
+		return nil, index.ErrIndexNotFound
+	}
+	var entries []chunk.TSEntry
+	var err error
+	switch orderBy {
+	case OrderByIngestTS:
+		entries, err = loader.LoadIngestEntries(chunkID)
+	case OrderBySourceTS:
+		entries, err = loader.LoadSourceEntries(chunkID)
+	case OrderByWriteTS:
+		return nil, index.ErrIndexNotFound // WriteTS uses physical order
+	}
+	if err != nil {
+		return nil, err
+	}
+	// Convert chunk.TSEntry → index.TSEntry (same layout, different packages).
+	out := make([]index.TSEntry, len(entries))
+	for i, e := range entries {
+		out[i] = index.TSEntry{TS: e.TS, Pos: e.Pos}
+	}
+	return out, nil
 }
 
 // loadTSEntries loads the appropriate TS index entries based on OrderBy.

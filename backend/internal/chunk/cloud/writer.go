@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/format"
 )
 
+
 // tsEntry is a (timestamp, position) pair for the embedded TS index.
 type tsEntry struct {
 	ts  int64  // unix nanos
@@ -30,6 +31,7 @@ type Writer struct {
 	chunkID chunk.ChunkID
 	vaultID uuid.UUID
 	dict    *chunk.StringDict
+	enc     *zstd.Encoder // caller-provided, reused across uploads
 
 	frames [][]byte // pre-encoded record frames
 	count  uint32
@@ -49,11 +51,12 @@ type Writer struct {
 }
 
 // NewWriter creates a writer for the given chunk and vault.
-func NewWriter(chunkID chunk.ChunkID, vaultID uuid.UUID) *Writer {
+func NewWriter(chunkID chunk.ChunkID, vaultID uuid.UUID, enc *zstd.Encoder) *Writer {
 	return &Writer{
 		chunkID: chunkID,
 		vaultID: vaultID,
 		dict:    chunk.NewStringDict(),
+		enc:     enc,
 	}
 }
 
@@ -188,13 +191,8 @@ func (w *Writer) WriteTo(dst io.Writer) (int64, error) {
 	// --- Seekable Zstd Record Data ---
 	// The seekable writer wraps cw so that sw.Close() (which writes the
 	// seek table) is also tracked in cw.n.
-	enc, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
-	if err != nil {
-		return cw.n, fmt.Errorf("create zstd encoder: %w", err)
-	}
-	defer func() { _ = enc.Close() }()
-
-	sw, err := seekable.NewWriter(cw, enc)
+	// The encoder is caller-provided to avoid allocating ~144 MB per call.
+	sw, err := seekable.NewWriter(cw, w.enc)
 	if err != nil {
 		return cw.n, fmt.Errorf("create seekable writer: %w", err)
 	}

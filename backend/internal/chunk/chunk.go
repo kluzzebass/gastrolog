@@ -16,8 +16,22 @@ var (
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
-	ErrChunkArchived  = errors.New("chunk is archived and not immediately readable")
+	ErrChunkArchived = errors.New("chunk is archived and not immediately readable")
+	ErrNoTSIndex     = errors.New("no TS index available")
 )
+
+// TSIndexLoader is an optional interface for chunk managers that can provide
+// TS index entries for cloud-backed chunks.
+type TSIndexLoader interface {
+	LoadIngestEntries(id ChunkID) ([]TSEntry, error)
+	LoadSourceEntries(id ChunkID) ([]TSEntry, error)
+}
+
+// TSEntry is a (timestamp, position) pair from a timestamp index.
+type TSEntry struct {
+	TS  int64  // nanoseconds since Unix epoch
+	Pos uint32 // record position within chunk
+}
 
 // ManagerFactory creates a ChunkManager from configuration parameters.
 // Factories validate required params, apply defaults, and return a fully

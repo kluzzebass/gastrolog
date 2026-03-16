@@ -86,6 +86,7 @@ const (
 
 	// TOC (Table of Contents) footer: identifies embedded TS index sections.
 	tocSize  = 48
+	TOCSize  = tocSize // exported for backfill
 	tocMagic = "GTOC"
 )
 
