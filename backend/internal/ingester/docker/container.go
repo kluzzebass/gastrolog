@@ -122,16 +122,15 @@ func streamOnce(
 			msg := orchestrator.IngestMessage{
 				Attrs:      msgAttrs,
 				Raw:        entry.Line,
+				IngestTS:   time.Now(),
 				IngesterID: ingesterID,
 			}
 			if !entry.Timestamp.IsZero() {
-				msg.IngestTS = entry.Timestamp
+				msg.SourceTS = entry.Timestamp
 				*lastTS = entry.Timestamp
 				if onTimestamp != nil {
 					onTimestamp(info.ID, entry.Timestamp)
 				}
-			} else {
-				msg.IngestTS = time.Now()
 			}
 
 			select {

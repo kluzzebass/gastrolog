@@ -32,6 +32,10 @@ Each record is a JSON object containing all slog fields:
 {"time":"2025-01-15T10:30:00Z","level":"WARN","msg":"TLS certificate expires soon","component":"cert","days_left":7}
 ```
 
+## Timestamps
+
+SourceTS is set to the slog record's timestamp — when the log call was made. IngestTS is set to GastroLog arrival time.
+
 ## Querying
 
 Because records are structured JSON, the KV index picks up all fields automatically:

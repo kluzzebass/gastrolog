@@ -22,6 +22,10 @@ For mutual TLS (mTLS), also provide a CA Certificate File path — clients must 
 
 **Attributes set:** Same as [Syslog](help:ingester-syslog) (facility, severity, hostname, app_name, etc.) plus `remote_ip`.
 
+## Timestamps
+
+IngestTS is set to GastroLog arrival time. SourceTS is not set by this ingester — the syslog timestamp in the RELP payload is unreliable for the same reasons as the [syslog ingester](help:ingester-syslog). The [timestamp digester](help:digester-timestamp) extracts SourceTS during digestion.
+
 ## Recipes
 
 - [rsyslog](help:recipe-rsyslog) — forward logs from rsyslog over RELP

@@ -59,6 +59,10 @@ Deliberately malformed data for stress-testing: random bytes, control characters
 
 **Attributes:** `service` (always `unknown`), `host`
 
+## Timestamps
+
+IngestTS is set to the time the message is generated. SourceTS is set from the chatterbox's simulated event time (which may vary by format). Messages pass through [digestion](help:digesters) for further timestamp extraction.
+
 ### Multi-Record
 
 Multi-line output that arrives as separate records sharing a single source timestamp. Generates stack traces (Go, Java, Python) and CLI help output (kubectl, docker, terraform, etc.).

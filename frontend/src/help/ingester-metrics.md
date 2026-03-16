@@ -54,6 +54,10 @@ Every record is emitted with:
 | `ingest_queue_depth` | Messages currently in the ingest queue |
 | `ingest_queue_capacity` | Total ingest queue capacity |
 
+## Timestamps
+
+SourceTS is set to the time of the metrics sample. IngestTS is set to GastroLog arrival time.
+
 ## Querying
 
 Because the record uses key=value format, the KV index picks up all fields automatically. You can search with expressions like:

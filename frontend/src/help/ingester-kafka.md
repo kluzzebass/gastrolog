@@ -23,7 +23,11 @@ Consumes messages from a Kafka topic using a consumer group. Each message value 
 | `kafka_offset` | Message offset |
 | *(record headers)* | All Kafka record headers as key-value pairs |
 
-The message value is used as the raw log line. The Kafka record timestamp is used as the source timestamp.
+The message value is used as the raw log line.
+
+## Timestamps
+
+SourceTS is set from the Kafka record timestamp, which is always present. Depending on the topic's `message.timestamp.type` setting, this is either `CreateTime` (producer-set) or `LogAppendTime` (broker-set). IngestTS is set to GastroLog arrival time.
 
 ## Offset Management
 

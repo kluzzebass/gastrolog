@@ -303,11 +303,11 @@ func TestSingleContainerTailing(t *testing.T) {
 	if msgs[0].Attrs["image"] != "myimage:latest" {
 		t.Errorf("msg[0] image = %q, want %q", msgs[0].Attrs["image"], "myimage:latest")
 	}
-	if !msgs[0].SourceTS.IsZero() {
-		t.Errorf("msg[0] SourceTS should be zero, got %v", msgs[0].SourceTS)
+	if !msgs[0].SourceTS.Equal(ts) {
+		t.Errorf("msg[0] SourceTS = %v, want %v", msgs[0].SourceTS, ts)
 	}
-	if !msgs[0].IngestTS.Equal(ts) {
-		t.Errorf("msg[0] IngestTS = %v, want %v", msgs[0].IngestTS, ts)
+	if time.Since(msgs[0].IngestTS) > 2*time.Second {
+		t.Errorf("msg[0] IngestTS should be recent, got %v", msgs[0].IngestTS)
 	}
 
 	// Check second message (stderr).

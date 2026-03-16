@@ -496,7 +496,7 @@ func TestOTLPObservedTimeFallback(t *testing.T) {
 
 	observed := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
 	lr := &logspb.LogRecord{
-		// TimeUnixNano is zero — should fall back to ObservedTimeUnixNano.
+		// TimeUnixNano is zero — should fall back to ObservedTimeUnixNano for SourceTS.
 		ObservedTimeUnixNano: uint64(observed.UnixNano()),
 		Body:                 &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "observed time"}},
 	}

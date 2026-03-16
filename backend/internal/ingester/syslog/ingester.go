@@ -346,13 +346,15 @@ func (r *Ingester) TCPAddr() net.Addr {
 
 // buildMessage parses a syslog message using syslogparse and wraps it in an IngestMessage.
 func (r *Ingester) buildMessage(data []byte, remoteIP string) orchestrator.IngestMessage {
-	attrs, sourceTS := syslogparse.ParseMessage(data, remoteIP)
+	attrs, _ := syslogparse.ParseMessage(data, remoteIP)
 	attrs["ingester_type"] = "syslog"
 
+	// SourceTS is not set — syslog timestamps are unreliable (no year in
+	// RFC 3164, optional in RFC 5424, sender clock drift). The timestamp
+	// digester extracts SourceTS from the raw message during digestion.
 	return orchestrator.IngestMessage{
 		Attrs:      attrs,
 		Raw:        data,
-		SourceTS:   sourceTS,
 		IngestTS:   time.Now(),
 		IngesterID: r.id,
 	}

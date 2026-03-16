@@ -19,6 +19,10 @@ Supports all four Fluent Forward message modes: Message, Forward, PackedForward,
 
 The raw log line is extracted from the first matching key: `message`, `log`, or `msg`. If none is found, the entire record is JSON-serialized.
 
+## Timestamps
+
+SourceTS is set from the Fluentd event timestamp, which is always present in the protocol. IngestTS is set to GastroLog arrival time.
+
 ## Acknowledgements
 
 If the sender includes a `chunk` key in the message options, GastroLog responds with an ack after the message is queued. This provides delivery confirmation for senders that require it.

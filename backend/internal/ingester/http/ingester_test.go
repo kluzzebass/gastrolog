@@ -58,11 +58,9 @@ func TestLokiPushSingleStream(t *testing.T) {
 		if msg.Attrs["job"] != "app" {
 			t.Errorf("expected job=app, got %q", msg.Attrs["job"])
 		}
-		// Check source timestamp was parsed from the Loki payload.
 		if msg.SourceTS.UnixNano() != ts {
 			t.Errorf("expected SourceTS %d, got %d", ts, msg.SourceTS.UnixNano())
 		}
-		// IngestTS should be set to current time (approximately).
 		if time.Since(msg.IngestTS) > time.Second {
 			t.Errorf("IngestTS should be recent, got %v", msg.IngestTS)
 		}

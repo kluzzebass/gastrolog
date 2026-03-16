@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"time"
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -69,7 +70,7 @@ func (ing *ingester) convert(cr logging.CapturedRecord) orchestrator.IngestMessa
 		Attrs:      attrs,
 		Raw:        raw,
 		SourceTS:   cr.Time,
-		IngestTS:   cr.Time,
+		IngestTS:   time.Now(),
 		IngesterID: ing.id,
 	}
 }

@@ -212,12 +212,20 @@ func (ing *Ingester) logRecordToMessage(lr *logspb.LogRecord, resourceAttrs, sco
 
 	attrs["ingester_type"] = "otlp"
 
+	// Both OTLP timestamps are preserved as attributes unconditionally.
+	// SourceTS prefers TimeUnixNano, falls back to ObservedTimeUnixNano.
 	var sourceTS time.Time
-	switch {
-	case lr.GetTimeUnixNano() != 0:
-		sourceTS = time.Unix(0, int64(lr.GetTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
-	case lr.GetObservedTimeUnixNano() != 0:
-		sourceTS = time.Unix(0, int64(lr.GetObservedTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
+	if lr.GetTimeUnixNano() != 0 {
+		t := time.Unix(0, int64(lr.GetTimeUnixNano())) //nolint:gosec // G115: OTLP nanosecond timestamps are well within int64 range
+		sourceTS = t
+		attrs["time_unix_nano"] = t.Format(time.RFC3339Nano)
+	}
+	if lr.GetObservedTimeUnixNano() != 0 {
+		t := time.Unix(0, int64(lr.GetObservedTimeUnixNano())) //nolint:gosec // G115
+		if sourceTS.IsZero() {
+			sourceTS = t
+		}
+		attrs["observed_ts"] = t.Format(time.RFC3339Nano)
 	}
 
 	return orchestrator.IngestMessage{

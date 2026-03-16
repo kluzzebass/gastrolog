@@ -47,7 +47,11 @@ Leave the Container Filter empty to collect logs from all containers.
 | `image` | Image name/tag |
 | `stream` | Log source: `stdout`, `stderr`, or `tty` |
 
-Handles both TTY and multiplexed log streams. Docker timestamps are extracted automatically, so the [Timestamp digester](help:digester-timestamp) skips these messages. The [Level digester](help:digester-level) still runs to extract severity from the message content.
+Handles both TTY and multiplexed log streams. The [Level digester](help:digester-level) still runs to extract severity from the message content.
+
+## Timestamps
+
+SourceTS is set from the Docker log entry timestamp — the time the Docker daemon captured the container's output. IngestTS is set to GastroLog arrival time.
 
 ## Recipe
 

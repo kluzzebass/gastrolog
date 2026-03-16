@@ -26,7 +26,11 @@ The ingester always subscribes at QoS 1 (at least once). The broker delivers eac
 | `mqtt_retained` | Whether the message was a retained message |
 | `mqtt_message_id` | MQTT packet identifier |
 
-The message payload is used as the raw log line. MQTT does not include a protocol-level timestamp, so the source timestamp is left unset and the ingest timestamp is used instead.
+The message payload is used as the raw log line.
+
+## Timestamps
+
+MQTT does not include a protocol-level timestamp. IngestTS is set to GastroLog arrival time. SourceTS is not set; use a [timestamp digester](help:digester-timestamp) to extract the original event time from the message payload.
 
 ## Clean Session
 

@@ -29,6 +29,15 @@ When attribute keys collide, record attributes take precedence over scope attrib
 
 The log record body is used as the raw log line. Complex body values (arrays, maps) are JSON-serialized.
 
+## Timestamps
+
+| Field | Source |
+|-------|--------|
+| SourceTS | `TimeUnixNano` (application event time) if present, otherwise `ObservedTimeUnixNano` (collector observation time). |
+| IngestTS | GastroLog arrival time. |
+| `time_unix_nano` attr | Application event time, always stored when present. |
+| `observed_ts` attr | Collector observation time, always stored when present. |
+
 ## Backpressure
 
 Returns HTTP 429 (Too Many Requests) or gRPC `RESOURCE_EXHAUSTED` when the ingest queue is near capacity. Clients should retry with backoff.

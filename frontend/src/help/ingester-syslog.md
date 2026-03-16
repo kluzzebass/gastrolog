@@ -25,6 +25,10 @@ At least one address (UDP or TCP) must be configured.
 | `proc_id` | Process ID (from `[PID]` notation) |
 | `msg_id` | Message ID (RFC 5424 only) |
 
+## Timestamps
+
+IngestTS is set to GastroLog arrival time. SourceTS is not set by this ingester — syslog protocol timestamps are unreliable (RFC 3164 has no year or timezone, RFC 5424 allows omitting the timestamp entirely, and the sender's clock may be drifting). The [timestamp digester](help:digester-timestamp) extracts SourceTS from the raw message during digestion.
+
 ## Recipes
 
 - [rsyslog](help:recipe-rsyslog) — forward logs from rsyslog over UDP, TCP, or RELP
