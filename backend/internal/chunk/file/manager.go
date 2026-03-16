@@ -1838,35 +1838,30 @@ func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint6
 
 const tsCacheDir = ".ts-cache"
 
-// findCloudTSPosition looks up the TS index for a cloud chunk and binary-searches
-// for the first entry with TS >= ts. The index is cached locally after the first
-// S3 range request — subsequent calls do a local pread binary search.
+// findCloudTSPosition looks up the TS index for a cloud chunk via pread-based
+// binary search on the local cache file. On cache miss, downloads the TS index
+// from S3 and persists it. Subsequent calls do O(log n) pread calls — no heap
+// allocation beyond a 12-byte buffer, no mmap, no leak.
 func (m *Manager) findCloudTSPosition(id chunk.ChunkID, ts time.Time, offset, size int64) (uint64, bool, error) {
-	data, err := m.loadCloudTSIndex(id, offset, size)
-	if err != nil {
-		return 0, false, err
-	}
-	pos, found := chunkcloud.FindStartPosition(data, ts.UnixNano())
-	return pos, found, nil
-}
-
-// loadCloudTSIndex returns the TS index data for a cloud chunk via mmap.
-// First checks the local file cache (<vaultDir>/.ts-cache/<chunkID>.<offset>);
-// on miss, downloads via S3 range request and persists locally.
-// The returned slice is mmap'd — no heap allocation, OS manages page cache.
-func (m *Manager) loadCloudTSIndex(id chunk.ChunkID, offset, size int64) ([]byte, error) {
 	cachePath := m.tsCachePath(id, offset)
 
-	// Try local cache first — mmap the file.
-	data, err := mmapFile(cachePath)
-	if err == nil {
-		return data, nil
+	// Ensure the cache file exists.
+	if _, err := os.Stat(cachePath); err != nil {
+		if err := m.downloadTSIndex(id, offset, size, cachePath); err != nil {
+			return 0, false, err
+		}
 	}
 
-	// Cache miss — download from S3 directly to file, then mmap.
+	// O(log n) binary search via pread — no heap allocation.
+	return searchTSCacheFile(cachePath, ts.UnixNano())
+}
+
+// downloadTSIndex fetches a TS index section from S3 and writes it to a local
+// cache file. Streams directly to disk — no heap buffering.
+func (m *Manager) downloadTSIndex(id chunk.ChunkID, offset, size int64, cachePath string) error {
 	rc, err := m.cfg.CloudStore.DownloadRange(context.Background(), m.blobKey(id), offset, size)
 	if err != nil {
-		return nil, fmt.Errorf("download cloud TS index for %s: %w", id, err)
+		return fmt.Errorf("download cloud TS index for %s: %w", id, err)
 	}
 	defer func() { _ = rc.Close() }()
 
@@ -1875,47 +1870,85 @@ func (m *Manager) loadCloudTSIndex(id chunk.ChunkID, offset, size int64) ([]byte
 
 	f, err := os.CreateTemp(cacheDir, "ts-*.tmp")
 	if err != nil {
-		return nil, fmt.Errorf("create temp file for TS index: %w", err)
+		return fmt.Errorf("create temp file for TS index: %w", err)
 	}
 	tmpPath := f.Name()
 
 	if _, err := io.Copy(f, rc); err != nil {
 		_ = f.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		return nil, fmt.Errorf("write cloud TS index for %s: %w", id, err)
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath from os.CreateTemp
+		return fmt.Errorf("write cloud TS index for %s: %w", id, err)
 	}
 	_ = f.Close()
 
-	if err := os.Rename(tmpPath, cachePath); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		_ = os.Remove(tmpPath)                                //nolint:gosec // G703: tmpPath is from os.CreateTemp
-		return nil, fmt.Errorf("rename TS cache file: %w", err)
+	if err := os.Rename(tmpPath, cachePath); err != nil { //nolint:gosec // G703: tmpPath from os.CreateTemp
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: cleanup
+		return fmt.Errorf("rename TS cache file: %w", err)
 	}
-
-	return mmapFile(cachePath)
+	return nil
 }
 
-// mmapFile maps a file into memory read-only. Returns the mapped slice.
-func mmapFile(path string) ([]byte, error) {
+// searchTSCacheFile does O(log n) binary search on a local TS index cache file
+// using pread. Each entry is 12 bytes: [tsNano:i64][pos:u32]. No heap allocation
+// beyond a single 12-byte buffer.
+func searchTSCacheFile(path string, tsNano int64) (uint64, bool, error) {
 	f, err := os.Open(filepath.Clean(path))
 	if err != nil {
-		return nil, err
+		return 0, false, err
 	}
 	defer func() { _ = f.Close() }()
 
 	info, err := f.Stat()
 	if err != nil {
-		return nil, err
-	}
-	if info.Size() == 0 {
-		return nil, errors.New("empty file")
+		return 0, false, err
 	}
 
-	data, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), //nolint:gosec // G115: Fd() and Size() fit in int on 64-bit
-		syscall.PROT_READ, syscall.MAP_PRIVATE)
-	if err != nil {
-		return nil, fmt.Errorf("mmap %s: %w", path, err)
+	const entrySize = 12
+	n := int(info.Size()) / entrySize
+	if n == 0 {
+		return 0, false, nil
 	}
-	return data, nil
+
+	var buf [entrySize]byte
+	readEntry := func(i int) (int64, uint32, error) {
+		off := int64(i) * entrySize
+		if _, err := f.ReadAt(buf[:], off); err != nil {
+			return 0, 0, err
+		}
+		ts := int64(binary.LittleEndian.Uint64(buf[:8])) //nolint:gosec // G115: nanosecond timestamps fit in int64
+		pos := binary.LittleEndian.Uint32(buf[8:])
+		return ts, pos, nil
+	}
+
+	// Quick bounds check.
+	lastTS, _, err := readEntry(n - 1)
+	if err != nil {
+		return 0, false, err
+	}
+	if tsNano > lastTS {
+		return 0, false, nil
+	}
+
+	// Binary search: first i where TS[i] >= tsNano.
+	lo, hi := 0, n
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		midTS, _, err := readEntry(mid)
+		if err != nil {
+			return 0, false, err
+		}
+		if midTS < tsNano {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+
+	_, pos, err := readEntry(lo)
+	if err != nil {
+		return 0, false, err
+	}
+	return uint64(pos), true, nil
 }
 
 func (m *Manager) tsCachePath(id chunk.ChunkID, offset int64) string {
