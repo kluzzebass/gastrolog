@@ -35,16 +35,16 @@ sequenceDiagram
     participant disk as Disk
 
     A->>mu: Lock
-    Note over A,mu: Encode attrs, check rotation,<br/>write dict entries,<br/>encode idx entry,<br/>snapshot offsets (raw=0, attr=0, idx=0),<br/>advance counters, wg.Add(1)
+    Note over A,mu: Encode attrs, check rotation,<br>write dict entries,<br>encode idx entry,<br>snapshot offsets (raw=0, attr=0, idx=0),<br>advance counters, wg.Add(1)
     A->>mu: Unlock
 
     A->>wmu: Lock
 
     B->>mu: Lock
-    Note over B,mu: Encode attrs,<br/>snapshot offsets (raw=150, attr=32, idx=38),<br/>advance counters, wg.Add(1)
+    Note over B,mu: Encode attrs,<br>snapshot offsets (raw=150, attr=32, idx=38),<br>advance counters, wg.Add(1)
     B->>mu: Unlock
 
-    Note over B,wmu: B waits for writeMu<br/>(A is writing)
+    Note over B,wmu: B waits for writeMu<br>(A is writing)
 
     A->>disk: WriteAt(raw.log, pos=4)
     A->>disk: WriteAt(attr.log, pos=4)
@@ -103,12 +103,12 @@ sequenceDiagram
     participant S as Seal caller
     participant mu as mu
 
-    Note over W: WriteAt in progress<br/>(holding writeMu)
+    Note over W: WriteAt in progress<br>(holding writeMu)
 
     S->>mu: Lock
-    Note over S,mu: inflight.Wait()<br/>(blocks until Phase 2 completes;<br/>safe because Phase 2 does not hold mu)
+    Note over S,mu: inflight.Wait()<br>(blocks until Phase 2 completes<br>safe because Phase 2 does not hold mu)
     W-->>S: wg.Done()
-    Note over S,mu: Set sealed flag in headers,<br/>close files, compute sizes
+    Note over S,mu: Set sealed flag in headers,<br>close files, compute sizes
     S->>mu: Unlock
 ```
 
