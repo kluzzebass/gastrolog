@@ -1969,10 +1969,8 @@ func applyDirective(q *query.Query, k, v string) (bool, error) {
 			q.OrderBy = query.OrderByIngestTS
 		case "source_ts":
 			q.OrderBy = query.OrderBySourceTS
-		case "write_ts":
-			q.OrderBy = query.OrderByWriteTS
 		default:
-			return false, fmt.Errorf("invalid order: %s (use ingest_ts, source_ts, or write_ts)", v)
+			return false, fmt.Errorf("invalid order: %s (use ingest_ts or source_ts)", v)
 		}
 		return true, nil
 	default:

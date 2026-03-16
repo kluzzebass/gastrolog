@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,51 +27,34 @@ func NewQueryCommand() *cobra.Command {
 
 Output format is auto-detected: text for TTY, JSONL for pipes. Override with --format.
 
+Time range, limit, and ordering are set via directives in the expression:
+  last=5m    start=2026-01-01T00:00:00Z    end=2026-01-02T00:00:00Z
+  limit=100  reverse=true                  order=source_ts
+
 Examples:
   gastrolog query 'level=error last=5m'
-  gastrolog query 'status>=500 AND path=/api' --last 1h --format json | jq .
+  gastrolog query 'last=1h limit=100 reverse=true' --format json | jq .
   gastrolog query 'level=error' --count
   gastrolog query 'level=error' --explain
   gastrolog query 'level=error | stats count by host' --format table`,
-		Args: cobra.ExactArgs(1),
+		Args: cobra.MinimumNArgs(1),
 		RunE: runQuery,
 	}
 
 	cmd.Flags().String("format", "", "output format: text, json, csv, raw, table (auto-detected if not set)")
-	cmd.Flags().String("last", "", "time range shorthand (e.g. 5m, 1h, 24h)")
-	cmd.Flags().String("start", "", "start time (RFC3339 or relative like -1h)")
-	cmd.Flags().String("end", "", "end time (RFC3339 or relative)")
-	cmd.Flags().Int("limit", 0, "max records to output (0 = unlimited)")
 	cmd.Flags().StringSlice("fields", nil, "fields to include in JSON/CSV output (default: all)")
 	cmd.Flags().Bool("count", false, "print record count only, don't stream records")
 	cmd.Flags().Bool("explain", false, "print query execution plan instead of results")
-	cmd.Flags().BoolP("reverse", "r", false, "newest records first")
 
 	return cmd
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {
 	client := clientFromCmd(cmd)
-	expr := args[0]
+	expr := strings.Join(args, " ")
 
-	// Inject time range directives into expression if flags are set.
-	if v, _ := cmd.Flags().GetString("last"); v != "" {
-		expr += " last=" + v
-	}
-	if v, _ := cmd.Flags().GetString("start"); v != "" {
-		expr += " start=" + v
-	}
-	if v, _ := cmd.Flags().GetString("end"); v != "" {
-		expr += " end=" + v
-	}
-	if rev, _ := cmd.Flags().GetBool("reverse"); rev {
-		expr += " reverse=true"
-	}
-
-	limit, _ := cmd.Flags().GetInt("limit")
-	if limit > 0 {
-		expr += fmt.Sprintf(" limit=%d", limit)
-	}
+	// Extract limit from expression for client-side pagination control.
+	limit := extractLimit(expr)
 
 	// --explain: print the execution plan and exit.
 	if explain, _ := cmd.Flags().GetBool("explain"); explain {
@@ -135,6 +119,19 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}
 	return nil
+}
+
+// extractLimit parses a limit=N directive from the expression string.
+// Returns 0 if no limit is found.
+func extractLimit(expr string) int {
+	for part := range strings.FieldsSeq(expr) {
+		if v, ok := strings.CutPrefix(part, "limit="); ok {
+			if n, err := strconv.Atoi(v); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // streamSearch paginates through the full search result set.
@@ -374,4 +371,3 @@ func runExplain(client *server.Client, expr string) error {
 
 	return nil
 }
-

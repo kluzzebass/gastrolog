@@ -132,10 +132,7 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	if !meta.Sealed {
 		currentPositions := cp.RecordCount
 		currentPositions = e.buildActiveChunkTSSeekSteps(&cp, q, meta, cm, currentPositions)
-		cp.ScanMode = "sequential"
-		if q.OrderBy != OrderByWriteTS {
-			cp.ScanMode = "buffer-sort (" + q.OrderBy.String() + ")"
-		}
+		cp.ScanMode = "buffer-sort (" + q.OrderBy.String() + ")"
 		cp.EstimatedScan = currentPositions
 		cp.RuntimeFilter = e.buildRuntimeFilterDesc(q)
 		return cp
@@ -162,8 +159,8 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 	} else {
 		cp.ScanMode = "sequential"
 	}
-	// TS-ordered scan when using non-WriteTS ordering on sealed chunks.
-	if q.OrderBy != OrderByWriteTS && meta.Sealed {
+	// TS-ordered scan for sealed chunks.
+	if meta.Sealed {
 		cp.ScanMode = "ts-ordered (" + q.OrderBy.String() + ")"
 	}
 	cp.EstimatedScan = currentPositions

@@ -2521,8 +2521,14 @@ func (m *Manager) scanAttrsCloud(id chunk.ChunkID, startPos uint64, fn func(writ
 }
 
 // openCloudCursor opens a cloud-backed chunk for random-access record reads
-// via range requests. No full blob download — uses the seekable zstd format
-// to fetch only the compressed frames containing requested records.
+// via range requests. Downloads only the header, dictionary, record index, and
+// TOC at init (~few KB). Individual records are fetched on demand — each read
+// triggers a range request for the seekable zstd frame containing that record.
+//
+// This is efficient because cloud cursors are rarely opened: bounded queries
+// defer cloud chunks entirely when local chunks can serve the limit. When a
+// cloud cursor IS opened, the TS index narrows access to specific positions,
+// so only a few frames are fetched rather than the full blob.
 func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	m.mu.Lock()
 	meta := m.lookupMeta(id)

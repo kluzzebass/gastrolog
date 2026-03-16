@@ -16,7 +16,7 @@ func FuzzParseExpression(f *testing.F) {
 	f.Add("limit=abc")
 	f.Add("order=source_ts")
 	f.Add("order=ingest_ts")
-	f.Add("order=write_ts")
+	f.Add("order=write_ts") // invalid — should produce error
 	f.Add("order=bogus")
 	f.Add("reverse=true")
 	f.Add("reverse=false")

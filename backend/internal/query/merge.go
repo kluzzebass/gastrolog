@@ -39,12 +39,6 @@ func newTSHeap(orderBy OrderBy, reverse bool, capacity int) *tsHeap {
 		} else {
 			less = func(a, b *cursorEntry) bool { return a.rec.SourceTS.Before(b.rec.SourceTS) }
 		}
-	case OrderByWriteTS:
-		if reverse {
-			less = func(a, b *cursorEntry) bool { return a.rec.WriteTS.After(b.rec.WriteTS) }
-		} else {
-			less = func(a, b *cursorEntry) bool { return a.rec.WriteTS.Before(b.rec.WriteTS) }
-		}
 	}
 
 	return &tsHeap{

@@ -120,7 +120,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	}
 
 	// Compute SHA256 and size by streaming through the file.
-	f, err := os.Open(filepath.Clean(srcPath)) //nolint // gosec G703 false positive (srcPath from temp)
+	f, err := os.Open(filepath.Clean(srcPath)) //nolint:gosec // G703: srcPath from trusted temp file or user upload
 	if err != nil {
 		return config.ManagedFileConfig{}, fmt.Errorf("open source file: %w", err)
 	}

@@ -36,9 +36,9 @@ pprof:
 conf *args:
   go run ./cmd/gastrolog --home data config {{args}}
 
-# Runs a query against node 1. Usage: just query level=error last=5m
+# Runs a query against node 1. Usage: just query 'level=error last=5m' --limit 10
 query +args:
-  go run ./cmd/gastrolog --home data/node1 query "{{args}}"
+  go run ./cmd/gastrolog --home data/node1 query {{args}}
 
 # Cross-compiles for a specific OS/arch. Usage: just build-cross linux amd64
 build-cross os arch:

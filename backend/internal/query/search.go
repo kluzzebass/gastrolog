@@ -52,6 +52,7 @@ type mergeState struct {
 	chunkPositions map[mergeKey]uint64
 	chunkResumeTS  map[mergeKey]time.Time // IngestTS-based resume for reordered chunks
 	lastRefs       *[]MultiVaultPosition
+	deferredChunks []vaultChunk // cloud chunks deferred until local results are exhausted
 }
 
 // cleanup stops all active scanners.
@@ -287,32 +288,61 @@ func (e *Engine) primeHeapWithResume(
 	resumeMap map[uuid.UUID]map[chunk.ChunkID]resumeInfo,
 	ms *mergeState,
 ) error {
+	// Prime local chunks first, defer cloud chunks.
+	var deferred []vaultChunk
 	for _, sc := range allChunks {
 		ri, exhausted := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
 		if exhausted {
 			continue
 		}
-
-		var startPos *uint64
-		if ri != nil {
-			if !ri.ResumeTS.IsZero() {
-				// Reordered chunk: don't seek by position. Pass ResumeTS
-				// through the query so reorderByTSWithBounds can skip past it.
-				resumeQ := q
-				resumeQ.ResumeTS = ri.ResumeTS
-				if err := e.openAndPrimeScanner(ctx, resumeQ, sc, nil, ms); err != nil {
-					return err
-				}
-				continue
-			}
-			startPos = &ri.Position
+		if sc.meta.CloudBacked {
+			deferred = append(deferred, sc)
+			continue
 		}
+		if err := e.primeChunkWithResume(ctx, q, sc, ri, ms); err != nil {
+			return err
+		}
+	}
 
-		if err := e.openAndPrimeScanner(ctx, q, sc, startPos, ms); err != nil {
+	// Skip cloud chunks if local chunks provide enough for the limit.
+	if ms.h.Len() > 0 && q.Limit > 0 {
+		ms.deferredChunks = deferred
+		return nil
+	}
+
+	// Log why we're priming cloud chunks — including local chunk breakdown
+	// to diagnose cases where the active chunk exists but produced no records.
+	if len(deferred) > 0 {
+		localCount := len(allChunks) - len(deferred)
+		e.logger.Debug("⚠️ priming cloud chunks",
+			"heapLen", ms.h.Len(), "limit", q.Limit,
+			"deferred", len(deferred), "localChunks", localCount,
+			"totalChunks", len(allChunks))
+	}
+
+	// No local records or unlimited query — prime cloud too.
+	for _, sc := range deferred {
+		ri, _ := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
+		if err := e.primeChunkWithResume(ctx, q, sc, ri, ms); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// primeChunkWithResume opens a scanner for a single chunk, handling resume
+// position or ResumeTS if present.
+func (e *Engine) primeChunkWithResume(ctx context.Context, q Query, sc vaultChunk, ri *resumeInfo, ms *mergeState) error {
+	if ri != nil && !ri.ResumeTS.IsZero() {
+		resumeQ := q
+		resumeQ.ResumeTS = ri.ResumeTS
+		return e.openAndPrimeScanner(ctx, resumeQ, sc, nil, ms)
+	}
+	var startPos *uint64
+	if ri != nil {
+		startPos = &ri.Position
+	}
+	return e.openAndPrimeScanner(ctx, q, sc, startPos, ms)
 }
 
 // primeHeap opens iterators for each chunk (no resume) and pushes the first
@@ -324,7 +354,27 @@ func (e *Engine) primeHeap(
 	allChunks []vaultChunk,
 	ms *mergeState,
 ) error {
+	// Prime local chunks first. Cloud chunks are deferred — only primed
+	// if the local chunks don't have enough records for the page limit.
+	var deferred []vaultChunk
 	for _, sc := range allChunks {
+		if sc.meta.CloudBacked {
+			deferred = append(deferred, sc)
+			continue
+		}
+		if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
+			return err
+		}
+	}
+	// If we already have records on the heap from local chunks, and
+	// the query has a limit, defer cloud chunks until the merge needs them.
+	// For unlimited queries or when no local records exist, prime cloud too.
+	if ms.h.Len() > 0 && q.Limit > 0 {
+		// Store deferred chunks for lazy priming during merge.
+		ms.deferredChunks = deferred
+		return nil
+	}
+	for _, sc := range deferred {
 		if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
 			return err
 		}

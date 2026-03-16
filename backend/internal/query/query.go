@@ -30,7 +30,6 @@ type OrderBy int
 const (
 	OrderByIngestTS OrderBy = iota // default: order by IngestTS (primary timestamp)
 	OrderBySourceTS                // order by SourceTS
-	OrderByWriteTS                 // order by WriteTS (physical write order)
 )
 
 // String returns a human-readable name for the OrderBy value.
@@ -40,8 +39,6 @@ func (o OrderBy) String() string {
 		return "ingest_ts"
 	case OrderBySourceTS:
 		return "source_ts"
-	case OrderByWriteTS:
-		return "write_ts"
 	}
 	return "ingest_ts"
 }
@@ -53,8 +50,6 @@ func (o OrderBy) RecordTS(rec chunk.Record) time.Time {
 		return rec.IngestTS
 	case OrderBySourceTS:
 		return rec.SourceTS
-	case OrderByWriteTS:
-		return rec.WriteTS
 	}
 	return rec.IngestTS
 }
@@ -470,15 +465,12 @@ func chunkMatchesQuery(m chunk.ChunkMeta, q Query, lower, upper time.Time, chunk
 // sortChunks sorts chunks by the appropriate timestamp bounds based on OrderBy.
 func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
 	startTS := func(m chunk.ChunkMeta) time.Time {
-		switch orderBy {
-		case OrderByIngestTS:
-			return m.IngestStart
+		switch orderBy { //nolint:exhaustive // IngestTS is the default
 		case OrderBySourceTS:
 			return m.SourceStart
-		case OrderByWriteTS:
-			return m.WriteStart
+		default:
+			return m.IngestStart
 		}
-		return m.IngestStart
 	}
 	if reverse {
 		slices.SortFunc(out, func(a, b chunk.ChunkMeta) int {
@@ -605,22 +597,9 @@ func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.Reco
 		b.addFilter(sourceTimeFilter(q.SourceStart, q.SourceEnd))
 	}
 
-	// TS-ordered scanning: when OrderBy is not WriteTS, we need to reorder results.
-	if q.OrderBy != OrderByWriteTS {
-		return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, cm, im)
-	}
-
-	// IngestTS filtering is handled by the scanner's built-in time bounds check
-	// (Start/End are IngestTS bounds), so no separate ingestTimeFilter is needed.
-
-	// Seek cursor to start position if we have one and not using positions.
-	if b.isSequential() && b.hasMinPos && startPos == nil && !q.Reverse() {
-		if err := cursor.Seek(chunk.RecordRef{ChunkID: meta.ID, Pos: b.minPos}); err != nil {
-			return nil, err
-		}
-	}
-
-	return b.build(ctx, cursor, q), nil
+	// Records are stored in physical write order but must be yielded in
+	// IngestTS or SourceTS order. Always go through TS-ordered scanning.
+	return e.buildTSOrderedScanner(ctx, cursor, q, b, meta, startPos, cm, im)
 }
 
 // buildTSOrderedScanner creates a scanner that yields records in TS-index order.
@@ -633,12 +612,14 @@ func (e *Engine) buildTSOrderedScanner(ctx context.Context, cursor chunk.RecordC
 		// The index manager handles local sealed chunks; the chunk manager
 		// handles cloud chunks (via locally-cached TS index files).
 		tsEntries, err := loadTSEntries(im, meta.ID, q.OrderBy)
-		if errors.Is(err, index.ErrIndexNotFound) && meta.CloudBacked {
+		if err != nil && meta.CloudBacked {
 			tsEntries, err = loadCloudTSEntries(cm, meta.ID, q.OrderBy)
 		}
 		if err == nil {
+			e.logger.Debug("✅ TS index scanner activated", "chunk", meta.ID, "entries", len(tsEntries), "cloud", meta.CloudBacked)
 			return buildTSIndexScanner(ctx, cursor, q, b, meta, tsEntries)
 		}
+		e.logger.Debug("❌ TS index unavailable, falling back to reorder buffer", "chunk", meta.ID, "cloud", meta.CloudBacked, "error", err, "isNotFound", errors.Is(err, index.ErrIndexNotFound), "isNoTS", errors.Is(err, chunk.ErrNoTSIndex))
 		// Fall through to buffer-and-sort if index unavailable.
 	}
 
@@ -682,13 +663,11 @@ func loadCloudTSEntries(cm chunk.ChunkManager, chunkID chunk.ChunkID, orderBy Or
 	}
 	var entries []chunk.TSEntry
 	var err error
-	switch orderBy {
-	case OrderByIngestTS:
-		entries, err = loader.LoadIngestEntries(chunkID)
+	switch orderBy { //nolint:exhaustive // IngestTS is the default
 	case OrderBySourceTS:
 		entries, err = loader.LoadSourceEntries(chunkID)
-	case OrderByWriteTS:
-		return nil, index.ErrIndexNotFound // WriteTS uses physical order
+	default:
+		entries, err = loader.LoadIngestEntries(chunkID)
 	}
 	if err != nil {
 		return nil, err
@@ -703,16 +682,12 @@ func loadCloudTSEntries(cm chunk.ChunkManager, chunkID chunk.ChunkID, orderBy Or
 
 // loadTSEntries loads the appropriate TS index entries based on OrderBy.
 func loadTSEntries(im index.IndexManager, chunkID chunk.ChunkID, orderBy OrderBy) ([]index.TSEntry, error) {
-	switch orderBy {
-	case OrderByIngestTS:
-		return im.LoadIngestEntries(chunkID)
+	switch orderBy { //nolint:exhaustive // IngestTS is the default
 	case OrderBySourceTS:
 		return im.LoadSourceEntries(chunkID)
-	case OrderByWriteTS:
-		// WriteTS uses physical order, no TS index needed.
-		return nil, index.ErrIndexNotFound
+	default:
+		return im.LoadIngestEntries(chunkID)
 	}
-	return im.LoadIngestEntries(chunkID)
 }
 
 // buildTSIndexScanner creates a position scanner from TS-index-ordered entries.
