@@ -45,7 +45,8 @@ audit:
 
 # Count lines of code, skipping generated/vendored/build artifacts
 cloc:
-    cloc . --exclude-dir=node_modules,dist,.claude,.dogcats,.github,.zed,deploy,data,stores,gen,vendor --exclude-ext=lock,sum --not-match-f='\.test$'
+    @echo "Repository: $(basename $(git rev-parse --show-toplevel))"
+    @cloc --vcs=git --exclude-ext=lock,sum
 
 # Start cloud storage emulators (MinIO, Azurite, fake-gcs-server)
 cloud-storage-up:
