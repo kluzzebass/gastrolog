@@ -1,10 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { renderHook, act } from "@testing-library/react";
-import { installMockClients } from "../../test/api-mock";
 import { wrapper } from "../../test/render";
-
-// useDialogState uses useIsFetching from react-query, so it needs a QueryClient.
-installMockClients();
 
 import { useDialogState } from "./useDialogState";
 
@@ -28,10 +24,5 @@ describe("useDialogState", () => {
     expect(result.current.showHistory).toBe(true);
     // Plan is still open — dialogs are independent.
     expect(result.current.showPlan).toBe(true);
-  });
-
-  test("inspectorGlow starts false", () => {
-    const { result } = renderHook(() => useDialogState(), { wrapper: wrapper() });
-    expect(result.current.inspectorGlow).toBe(false);
   });
 });

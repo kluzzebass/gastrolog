@@ -28,7 +28,6 @@ export function SearchView() {
 
       <HeaderBar
         dark={sv.dark}
-        inspectorGlow={sv.inspectorGlow}
         onShowHelp={() => sv.openHelp()}
         onShowInspector={() => sv.openInspector()}
         onShowSettings={() => sv.openSettings()}

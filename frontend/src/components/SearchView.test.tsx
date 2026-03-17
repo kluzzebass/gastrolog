@@ -312,8 +312,9 @@ describe("SearchView", () => {
   // ── Dialog rendering ─────────────────────────────────────────────
 
   test("settings dialog shown when settingsParam is set", () => {
-    const { container } = renderSV({ settingsParam: "service" });
-    const dialog = container.querySelector('[role="dialog"][aria-label="Settings"]');
+    renderSV({ settingsParam: "service" });
+    // Dialog renders via portal to document.body, not inside the test container.
+    const dialog = document.querySelector('[role="dialog"][aria-label="Settings"]');
     expect(dialog).toBeTruthy();
   });
 

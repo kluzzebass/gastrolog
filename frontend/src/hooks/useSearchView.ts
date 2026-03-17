@@ -161,7 +161,6 @@ export function useSearchView() {
     showSavedQueries, setShowSavedQueries,
     showChangePassword, setShowChangePassword,
     showPreferences, setShowPreferences,
-    inspectorGlow,
   } = useDialogState();
 
   const openHelp = (topicId?: string) => {
@@ -864,7 +863,6 @@ export function useSearchView() {
     showSavedQueries, setShowSavedQueries,
     showChangePassword, setShowChangePassword,
     showPreferences, setShowPreferences,
-    inspectorGlow,
     openHelp, openSettings, openInspector,
 
     // Search

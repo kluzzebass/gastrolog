@@ -2,7 +2,6 @@ import { useQuery } from "@tanstack/react-query";
 import { configClient } from "../client";
 import { GetRouteStatsResponse } from "../gen/gastrolog/v1/config_pb";
 import { protoSharing } from "./protoSharing";
-
 export function useRouteStats() {
   return useQuery({
     queryKey: ["route-stats"],

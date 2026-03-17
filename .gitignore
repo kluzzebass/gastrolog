@@ -50,3 +50,4 @@ pnpm-lock.yaml
 testfiles/
 *.csv
 logs/
+temp/

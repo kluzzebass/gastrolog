@@ -1,4 +1,5 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
+import { useIsFetching } from "@tanstack/react-query";
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import { AlertPanel } from "./AlertPanel";
@@ -12,7 +13,6 @@ import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
 
 interface HeaderBarProps {
   dark: boolean;
-  inspectorGlow: boolean;
   onShowHelp: () => void;
   onShowInspector: () => void;
   onShowSettings: () => void;
@@ -25,7 +25,6 @@ interface HeaderBarProps {
 export function HeaderBar({
   dark,
   onShowHelp,
-  inspectorGlow,
   onShowInspector,
   onShowSettings,
   currentUser,
@@ -36,6 +35,19 @@ export function HeaderBar({
   const c = useThemeClass(dark);
   const { data: cluster, isLoading } = useClusterStatus();
   const nodes = cluster?.nodes ?? [];
+
+  // Inspector glow: briefly flash when any fetch completes.
+  // Lives here (not in useSearchView) to avoid re-rendering the entire view tree.
+  const fetchCount = useIsFetching();
+  const [inspectorGlow, setInspectorGlow] = useState(false);
+  const glowTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  useEffect(() => {
+    if (fetchCount > 0) {
+      setInspectorGlow(true);
+      if (glowTimer.current) clearTimeout(glowTimer.current);
+      glowTimer.current = setTimeout(() => setInspectorGlow(false), 800);
+    }
+  }, [fetchCount]);
 
   // Aggregate stats across all nodes.
   let totalCpu = 0;

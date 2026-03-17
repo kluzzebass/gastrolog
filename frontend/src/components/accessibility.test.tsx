@@ -27,7 +27,7 @@ describe("Dialog accessibility", () => {
         <p>content</p>
       </Dialog>,
     );
-    const dialog = container.querySelector('[role="dialog"]');
+    const dialog = document.querySelector('[role="dialog"]');
     expect(dialog).toBeTruthy();
     expect(dialog!.getAttribute("aria-modal")).toBe("true");
     expect(dialog!.getAttribute("aria-label")).toBe("Test Dialog");
@@ -51,7 +51,7 @@ describe("Dialog accessibility", () => {
         <p>content</p>
       </Dialog>,
     );
-    const closeBtn = container.querySelector('button[aria-label="Close"]');
+    const closeBtn = document.querySelector('button[aria-label="Close"]');
     expect(closeBtn).toBeTruthy();
   });
 
@@ -61,7 +61,7 @@ describe("Dialog accessibility", () => {
         <p>content</p>
       </Dialog>,
     );
-    const backdrop = container.querySelector('button[aria-label="Close dialog"]');
+    const backdrop = document.querySelector('button[aria-label="Close dialog"]');
     expect(backdrop).toBeTruthy();
     expect(backdrop!.getAttribute("tabindex")).toBe("-1");
   });
@@ -73,7 +73,7 @@ describe("Dialog accessibility", () => {
         <p>content</p>
       </Dialog>,
     );
-    fireEvent.click(container.querySelector('button[aria-label="Close"]')!);
+    fireEvent.click(document.querySelector('button[aria-label="Close"]')!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
@@ -86,7 +86,7 @@ describe("Checkbox keyboard interaction", () => {
     const { container } = render(
       <Checkbox checked={false} onChange={onChange} dark={true} />,
     );
-    const el = container.querySelector('[role="checkbox"]')!;
+    const el = document.querySelector('[role="checkbox"]')!;
     fireEvent.keyDown(el, { key: "Enter" });
     expect(onChange).toHaveBeenCalledWith(true);
   });
@@ -96,7 +96,7 @@ describe("Checkbox keyboard interaction", () => {
     const { container } = render(
       <Checkbox checked={true} onChange={onChange} dark={true} />,
     );
-    const el = container.querySelector('[role="checkbox"]')!;
+    const el = document.querySelector('[role="checkbox"]')!;
     fireEvent.keyDown(el, { key: " " });
     expect(onChange).toHaveBeenCalledWith(false);
   });
@@ -105,7 +105,7 @@ describe("Checkbox keyboard interaction", () => {
     const { container } = render(
       <Checkbox checked={false} onChange={noopFn} dark={true} />,
     );
-    const el = container.querySelector('[role="checkbox"]')!;
+    const el = document.querySelector('[role="checkbox"]')!;
     expect(el.getAttribute("tabindex")).toBe("0");
   });
 
@@ -113,7 +113,7 @@ describe("Checkbox keyboard interaction", () => {
     const { container } = render(
       <Checkbox checked={false} onChange={noopFn} dark={true} />,
     );
-    expect(container.querySelector('[aria-checked="false"]')).toBeTruthy();
+    expect(document.querySelector('[aria-checked="false"]')).toBeTruthy();
   });
 });
 
@@ -126,7 +126,7 @@ describe("ExpandableCard keyboard interaction", () => {
         <p>body</p>
       </ExpandableCard>,
     );
-    const header = container.querySelector('[role="button"]');
+    const header = document.querySelector('[role="button"]');
     expect(header).toBeTruthy();
     expect(header!.getAttribute("tabindex")).toBe("0");
   });
@@ -138,7 +138,7 @@ describe("ExpandableCard keyboard interaction", () => {
         <p>body</p>
       </ExpandableCard>,
     );
-    const header = container.querySelector('[role="button"]')!;
+    const header = document.querySelector('[role="button"]')!;
     fireEvent.keyDown(header, { key: "Enter" });
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
@@ -150,7 +150,7 @@ describe("ExpandableCard keyboard interaction", () => {
         <p>body</p>
       </ExpandableCard>,
     );
-    const header = container.querySelector('[role="button"]')!;
+    const header = document.querySelector('[role="button"]')!;
     fireEvent.keyDown(header, { key: " " });
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
@@ -161,7 +161,7 @@ describe("ExpandableCard keyboard interaction", () => {
         <p>body</p>
       </ExpandableCard>,
     );
-    expect(container.querySelector('[aria-expanded="false"]')).toBeTruthy();
+    expect(document.querySelector('[aria-expanded="false"]')).toBeTruthy();
   });
 
   test("other keys do not trigger onToggle", () => {
@@ -171,7 +171,7 @@ describe("ExpandableCard keyboard interaction", () => {
         <p>body</p>
       </ExpandableCard>,
     );
-    const header = container.querySelector('[role="button"]')!;
+    const header = document.querySelector('[role="button"]')!;
     fireEvent.keyDown(header, { key: "Tab" });
     fireEvent.keyDown(header, { key: "a" });
     expect(onToggle).not.toHaveBeenCalled();
@@ -193,7 +193,7 @@ describe("QueryAutocomplete accessibility", () => {
         onClose={noopFn}
       />,
     );
-    expect(container.querySelector('[role="listbox"]')).toBeTruthy();
+    expect(document.querySelector('[role="listbox"]')).toBeTruthy();
   });
 
   test("options have role=option", () => {
@@ -206,7 +206,7 @@ describe("QueryAutocomplete accessibility", () => {
         onClose={noopFn}
       />,
     );
-    const options = container.querySelectorAll('[role="option"]');
+    const options = document.querySelectorAll('[role="option"]');
     expect(options.length).toBe(3);
   });
 
@@ -220,7 +220,7 @@ describe("QueryAutocomplete accessibility", () => {
         onClose={noopFn}
       />,
     );
-    const options = container.querySelectorAll('[role="option"]');
+    const options = document.querySelectorAll('[role="option"]');
     expect(options[0]!.getAttribute("aria-selected")).toBe("false");
     expect(options[1]!.getAttribute("aria-selected")).toBe("true");
     expect(options[2]!.getAttribute("aria-selected")).toBe("false");
@@ -237,7 +237,7 @@ describe("QueryAutocomplete accessibility", () => {
         onClose={noopFn}
       />,
     );
-    const options = container.querySelectorAll('[role="option"]');
+    const options = document.querySelectorAll('[role="option"]');
     // QueryAutocomplete uses onMouseDown, not onClick
     fireEvent.mouseDown(options[2]!);
     expect(onSelect).toHaveBeenCalledWith(2);
@@ -253,7 +253,7 @@ describe("QueryAutocomplete accessibility", () => {
         onClose={noopFn}
       />,
     );
-    expect(container.querySelector('[role="listbox"]')).toBeNull();
+    expect(document.querySelector('[role="listbox"]')).toBeNull();
   });
 });
 
@@ -330,7 +330,7 @@ describe("Toast accessibility", () => {
       </ToastProvider>,
     );
     fireEvent.click(getByText("trigger"));
-    const status = container.querySelector('[role="status"]');
+    const status = document.querySelector('[role="status"]');
     expect(status).toBeTruthy();
     expect(status!.getAttribute("aria-live")).toBe("polite");
   });
@@ -342,7 +342,7 @@ describe("Toast accessibility", () => {
       </ToastProvider>,
     );
     fireEvent.click(getByText("trigger"));
-    const dismissBtn = container.querySelector('button[aria-label="Dismiss"]');
+    const dismissBtn = document.querySelector('button[aria-label="Dismiss"]');
     expect(dismissBtn).toBeTruthy();
   });
 
@@ -353,7 +353,7 @@ describe("Toast accessibility", () => {
       </ToastProvider>,
     );
     fireEvent.click(getByText("trigger"));
-    const dismissBtn = container.querySelector('button[aria-label="Dismiss"]')!;
+    const dismissBtn = document.querySelector('button[aria-label="Dismiss"]')!;
     // Verify clicking doesn't throw — actual removal is async via useSyncExternalStore
     fireEvent.click(dismissBtn);
   });

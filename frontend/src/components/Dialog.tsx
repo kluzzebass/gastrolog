@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { FocusTrap } from "focus-trap-react";
 import { useThemeClass } from "../hooks/useThemeClass";
 
@@ -44,7 +45,10 @@ export function Dialog({
           "bg-light-raised border border-light-border-subtle",
         );
 
-  return (
+  // Portal to document.body so parent re-renders (e.g. polling-driven
+  // stat updates in SearchView) don't recreate the dialog's DOM and
+  // destroy text selection or steal focus.
+  return createPortal(
     <FocusTrap
       focusTrapOptions={{ escapeDeactivates: false, allowOutsideClick: true }}
     >
@@ -77,6 +81,7 @@ export function Dialog({
           </button>
         </div>
       </div>
-    </FocusTrap>
+    </FocusTrap>,
+    document.body,
   );
 }

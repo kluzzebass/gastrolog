@@ -420,7 +420,7 @@ function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, o
  * Isolated markdown renderer. Callbacks are stored in refs so the components
  * object (and thus react-markdown's DOM) only changes when `dark` flips.
  * Parent re-renders (e.g. polling in SearchView) no longer cause remounts
- * that reset scroll positions inside <pre> blocks.
+ * that reset scroll positions inside <pre> blocks or clear text selection.
  */
 function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly<{
   dark: boolean;
@@ -428,13 +428,31 @@ function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly
   onNavigate: (topicId: string) => void;
   onOpenSettings?: (tab: string) => void;
 }>) {
-  // React Compiler handles memoization — components object only rebuilds
-  // when dark/onNavigate/onOpenSettings actually change.
-  const components = buildMarkdownComponents(dark, onNavigate, onOpenSettings);
+  // Store callbacks in refs so the components object identity only changes
+  // when `dark` changes — not when parent re-renders create new closures.
+  const navigateRef = useRef(onNavigate);
+  navigateRef.current = onNavigate;
+  const settingsRef = useRef(onOpenSettings);
+  settingsRef.current = onOpenSettings;
+
+  const [prevDark, setPrevDark] = useState(dark);
+  const componentsRef = useRef(buildMarkdownComponents(
+    dark,
+    (id: string) => navigateRef.current(id),
+    (tab: string) => settingsRef.current?.(tab),
+  ));
+  if (dark !== prevDark) {
+    setPrevDark(dark);
+    componentsRef.current = buildMarkdownComponents(
+      dark,
+      (id: string) => navigateRef.current(id),
+      (tab: string) => settingsRef.current?.(tab),
+    );
+  }
 
   return (
     <Suspense fallback={null}>
-      <Markdown remarkPlugins={remarkGfmPlugin} components={components} urlTransform={identityUrlTransform}>
+      <Markdown remarkPlugins={remarkGfmPlugin} components={componentsRef.current} urlTransform={identityUrlTransform}>
         {content}
       </Markdown>
     </Suspense>
