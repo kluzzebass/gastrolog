@@ -441,7 +441,13 @@ export function useSearchView() {
 
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries[0]?.isIntersecting && hasMore && !isSearching && loadMoreGateRef.current) {
+        if (
+          entries[0]?.isIntersecting &&
+          hasMore &&
+          !isSearching &&
+          loadMoreGateRef.current &&
+          document.visibilityState === "visible"
+        ) {
           loadMoreGateRef.current = false;
           loadMoreRef.current(expressionRef.current);
         }
