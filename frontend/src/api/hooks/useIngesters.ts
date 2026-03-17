@@ -12,7 +12,7 @@ export function useIngesters() {
       return response.ingesters;
     },
     structuralSharing: protoArraySharing(IngesterConfig.equals),
-    refetchInterval: 10_000,
+    staleTime: 60_000, // push-invalidated by WatchConfig on config changes
   });
 }
 

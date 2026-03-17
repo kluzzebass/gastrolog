@@ -10,6 +10,6 @@ export function useRouteStats() {
       return response;
     },
     structuralSharing: protoSharing(GetRouteStatsResponse.equals),
-    refetchInterval: 3_000,
+    staleTime: 60_000, // push-updated via WatchSystemStatus; polling is a safety net only
   });
 }

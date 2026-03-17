@@ -11,6 +11,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/sysmetrics"
 )
 
@@ -98,6 +99,7 @@ type StatsCollectorConfig struct {
 	Interval          time.Duration
 	ApiAddress        string // HTTP API listen address (e.g. ":4564")
 	PprofAddress      string // pprof listen address, empty if disabled
+	StatsSignal       *notify.Signal // fired after each broadcast to notify WatchSystemStatus streams
 	Logger            *slog.Logger
 }
 
@@ -132,6 +134,9 @@ func (c *StatsCollector) Run(ctx context.Context) {
 					Payload:   &gastrologv1.BroadcastMessage_NodeStats{NodeStats: stats},
 				})
 				c.BroadcastJobs(ctx)
+			}
+			if c.cfg.StatsSignal != nil {
+				c.cfg.StatsSignal.Notify()
 			}
 		}
 	}

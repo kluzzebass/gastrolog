@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse } from "./lifecycle_pb.js";
+import { GetClusterStatusRequest, GetClusterStatusResponse, HealthRequest, HealthResponse, JoinClusterRequest, JoinClusterResponse, RemoveNodeRequest, RemoveNodeResponse, SetNodeSuffrageRequest, SetNodeSuffrageResponse, ShutdownRequest, ShutdownResponse, WatchSystemStatusRequest, WatchSystemStatusResponse } from "./lifecycle_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -81,6 +81,19 @@ export const LifecycleService = {
       I: RemoveNodeRequest,
       O: RemoveNodeResponse,
       kind: MethodKind.Unary,
+    },
+    /**
+     * WatchSystemStatus streams combined system status (cluster, health, route
+     * stats) whenever stats are updated. Replaces polling GetClusterStatus,
+     * Health, and GetRouteStats.
+     *
+     * @generated from rpc gastrolog.v1.LifecycleService.WatchSystemStatus
+     */
+    watchSystemStatus: {
+      name: "WatchSystemStatus",
+      I: WatchSystemStatusRequest,
+      O: WatchSystemStatusResponse,
+      kind: MethodKind.ServerStreaming,
     },
   }
 } as const;

@@ -107,6 +107,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	configSignal := notify.NewSignal()
+	statsSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
 	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
 		Home: hd, NodeID: nodeID, Init: cfg.ClusterInit, JoinAddr: cfg.JoinAddr,
@@ -199,7 +200,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		go slogCW.Run(ctx)
 	}
 
-	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr)
+	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
@@ -239,6 +240,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		NoAuth:              cfg.NoAuth,
 		AfterConfigApply:    nonRaftApplyHook(cfg.ConfigType, disp.Handle),
 		ConfigSignal:        configSignal,
+		StatsSignal:         statsSignal,
 		ClusterSrv:          clusterSrv,
 		Broadcaster:         broadcaster,
 		PeerState:           peerState,
@@ -375,7 +377,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
@@ -421,6 +423,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config
 		Interval:     broadcastInterval,
 		ApiAddress:   apiAddr,
 		PprofAddress: pprofAddr,
+		StatsSignal:  statsSignal,
 		Logger:       logger.With("component", "stats-collector"),
 	})
 
@@ -723,6 +726,7 @@ type serverDeps struct {
 	NoAuth              bool
 	AfterConfigApply    func(raftfsm.Notification)
 	ConfigSignal        *notify.Signal
+	StatsSignal         *notify.Signal
 	ClusterSrv          *cluster.Server
 	Broadcaster         *cluster.Broadcaster
 	PeerState           *cluster.PeerState
@@ -742,7 +746,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		srv = server.New(deps.Orch, deps.CfgStore, deps.Factories, deps.Tokens, server.Config{
 			Logger: deps.Logger, CertManager: deps.CertMgr, NoAuth: deps.NoAuth,
 			HomeDir: deps.HomeDir, NodeID: deps.NodeID, UnixSocket: deps.SocketPath,
-			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal,
+			AfterConfigApply: deps.AfterConfigApply, ConfigSignal: deps.ConfigSignal, StatsSignal: deps.StatsSignal,
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerJobs: deps.PeerJobState,

@@ -13,7 +13,7 @@ export function useVaults() {
       return response.vaults;
     },
     structuralSharing: protoArraySharing(VaultInfo.equals),
-    refetchInterval: 10_000,
+    staleTime: 60_000, // push-invalidated by WatchConfig on config changes
   });
 }
 
@@ -38,7 +38,7 @@ export function useChunks(vaultId: string) {
     },
     structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!vaultId,
-    refetchInterval: 10_000,
+    staleTime: 60_000,
   });
 }
 
@@ -64,7 +64,7 @@ export function useStats(vaultId?: string) {
       return response;
     },
     structuralSharing: protoSharing(GetStatsResponse.equals),
-    refetchInterval: 10_000,
+    staleTime: 60_000, // push-invalidated by WatchConfig on config changes
   });
 }
 

@@ -13,6 +13,7 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -47,6 +48,10 @@ type LifecycleServer struct {
 	joinClusterFn  func(ctx context.Context, leaderAddr, joinToken string) error
 	removeNodeFn        func(ctx context.Context, nodeID string) error
 	setNodeSuffrageFn   func(ctx context.Context, nodeID string, voter bool) error
+	statsSignal         *notify.Signal // fired by stats collector on each broadcast tick
+	peerRouteStats      PeerRouteStatsProvider // for aggregating route stats across cluster
+	listVaultsFn        func(ctx context.Context) []*apiv1.VaultInfo
+	getStatsFn          func(ctx context.Context) *apiv1.GetStatsResponse
 	logger              *slog.Logger
 }
 
@@ -83,6 +88,22 @@ func (s *LifecycleServer) SetRemoveNodeFunc(fn func(ctx context.Context, nodeID 
 // SetNodeSuffrageFunc sets the callback for the SetNodeSuffrage RPC.
 func (s *LifecycleServer) SetNodeSuffrageFunc(fn func(ctx context.Context, nodeID string, voter bool) error) {
 	s.setNodeSuffrageFn = fn
+}
+
+// SetStatsSignal wires the notification signal for system status streaming.
+func (s *LifecycleServer) SetStatsSignal(sig *notify.Signal) {
+	s.statsSignal = sig
+}
+
+// SetPeerRouteStats wires the peer route stats provider for cluster aggregation.
+func (s *LifecycleServer) SetPeerRouteStats(p PeerRouteStatsProvider) {
+	s.peerRouteStats = p
+}
+
+// SetVaultFuncs wires vault data providers for the WatchSystemStatus stream.
+func (s *LifecycleServer) SetVaultFuncs(listVaults func(ctx context.Context) []*apiv1.VaultInfo, getStats func(ctx context.Context) *apiv1.GetStatsResponse) {
+	s.listVaultsFn = listVaults
+	s.getStatsFn = getStats
 }
 
 // Health returns the server health status.
@@ -303,4 +324,130 @@ func (s *LifecycleServer) RemoveNode(
 	}
 	s.logger.Info("node removed from cluster", "node_id", nodeID)
 	return connect.NewResponse(&apiv1.RemoveNodeResponse{}), nil
+}
+
+// WatchSystemStatus streams combined system status whenever stats update.
+// Replaces polling GetClusterStatus, Health, and GetRouteStats.
+func (s *LifecycleServer) WatchSystemStatus(
+	ctx context.Context,
+	req *connect.Request[apiv1.WatchSystemStatusRequest],
+	stream *connect.ServerStream[apiv1.WatchSystemStatusResponse],
+) error {
+	// Send initial snapshot immediately.
+	if err := stream.Send(s.buildSystemStatus(ctx)); err != nil {
+		return err
+	}
+
+	if s.statsSignal == nil {
+		<-ctx.Done()
+		return nil
+	}
+
+	for {
+		ch := s.statsSignal.C()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ch:
+			if err := stream.Send(s.buildSystemStatus(ctx)); err != nil {
+				return err
+			}
+		}
+	}
+}
+
+// buildSystemStatus assembles the combined system status response.
+func (s *LifecycleServer) buildSystemStatus(ctx context.Context) *apiv1.WatchSystemStatusResponse {
+	// Health.
+	status := apiv1.Status_STATUS_HEALTHY
+	if !s.orch.IsRunning() {
+		status = apiv1.Status_STATUS_UNHEALTHY
+	}
+	health := &apiv1.HealthResponse{
+		Status:              status,
+		Version:             Version,
+		UptimeSeconds:       int64(time.Since(s.startTime).Seconds()),
+		IngestQueueDepth:    int64(s.orch.IngestQueueDepth()),
+		IngestQueueCapacity: int64(s.orch.IngestQueueCapacity()),
+	}
+
+	// Cluster status — reuse the existing RPC logic.
+	clusterResp, _ := s.GetClusterStatus(ctx, connect.NewRequest(&apiv1.GetClusterStatusRequest{}))
+	var cluster *apiv1.GetClusterStatusResponse
+	if clusterResp != nil {
+		cluster = clusterResp.Msg
+	}
+
+	// Route stats.
+	routeStats := s.buildRouteStats()
+
+	var vaults []*apiv1.VaultInfo
+	if s.listVaultsFn != nil {
+		vaults = s.listVaultsFn(ctx)
+	}
+	var stats *apiv1.GetStatsResponse
+	if s.getStatsFn != nil {
+		stats = s.getStatsFn(ctx)
+	}
+
+	return &apiv1.WatchSystemStatusResponse{
+		Cluster:    cluster,
+		Health:     health,
+		RouteStats: routeStats,
+		Vaults:     vaults,
+		Stats:      stats,
+	}
+}
+
+// buildRouteStats aggregates route statistics from local + peer sources.
+func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
+	rs := s.orch.GetRouteStats()
+	totalIngested := rs.Ingested.Load()
+	totalDropped := rs.Dropped.Load()
+	totalRouted := rs.Routed.Load()
+	filterActive := s.orch.IsFilterSetActive()
+
+	vaultMap := make(map[string]*apiv1.VaultRouteStats)
+	for vaultID, vs := range s.orch.VaultRouteStatsList() {
+		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
+			VaultId:          vaultID.String(),
+			RecordsMatched:   vs.Matched.Load(),
+			RecordsForwarded: vs.Forwarded.Load(),
+		}
+	}
+
+	routeMap := make(map[string]*apiv1.PerRouteStats)
+	for routeID, ps := range s.orch.PerRouteStatsList() {
+		routeMap[routeID.String()] = &apiv1.PerRouteStats{
+			RouteId:          routeID.String(),
+			RecordsMatched:   ps.Matched.Load(),
+			RecordsForwarded: ps.Forwarded.Load(),
+		}
+	}
+
+	if s.peerRouteStats != nil {
+		pIngested, pDropped, pRouted, pFilterActive, pVaultStats, pRouteStats := s.peerRouteStats.AggregateRouteStats()
+		totalIngested += pIngested
+		totalDropped += pDropped
+		totalRouted += pRouted
+		if pFilterActive {
+			filterActive = true
+		}
+		mergeVaultRouteStats(vaultMap, pVaultStats)
+		mergePerRouteStats(routeMap, pRouteStats)
+	}
+
+	resp := &apiv1.GetRouteStatsResponse{
+		TotalIngested:   totalIngested,
+		TotalDropped:    totalDropped,
+		TotalRouted:     totalRouted,
+		FilterSetActive: filterActive,
+	}
+	for _, vs := range vaultMap {
+		resp.VaultStats = append(resp.VaultStats, vs)
+	}
+	for _, rs := range routeMap {
+		resp.RouteStats = append(resp.RouteStats, rs)
+	}
+	return resp
 }

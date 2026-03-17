@@ -100,7 +100,8 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.LifecycleServiceGetClusterStatusProcedure: true,
 			gastrologv1connect.LifecycleServiceSetNodeSuffrageProcedure: true,
 			gastrologv1connect.LifecycleServiceJoinClusterProcedure:     true,
-			gastrologv1connect.LifecycleServiceRemoveNodeProcedure:      true,
+			gastrologv1connect.LifecycleServiceRemoveNodeProcedure:          true,
+			gastrologv1connect.LifecycleServiceWatchSystemStatusProcedure: true,
 			// VaultService (inspector + operations)
 			gastrologv1connect.VaultServiceListVaultsProcedure:    true,
 			gastrologv1connect.VaultServiceGetVaultProcedure:      true,

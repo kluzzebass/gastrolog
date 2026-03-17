@@ -109,6 +109,10 @@ type Config struct {
 	// May be nil in tests.
 	ConfigSignal *notify.Signal
 
+	// StatsSignal broadcasts stats updates to WatchSystemStatus streams.
+	// Fired by the stats collector on each broadcast tick. May be nil in tests.
+	StatsSignal *notify.Signal
+
 	// ClusterAddress is the cluster gRPC listen address (e.g., ":4566").
 	// Exposed in GetClusterStatus for join info. Empty for non-raft mode.
 	ClusterAddress string
@@ -166,6 +170,7 @@ type Server struct {
 	homeDir          string                     // gastrolog home directory; empty for in-memory config
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
+	statsSignal      *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
 	vaultTesters      map[string]VaultConnectionTester
 	repairManagedFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
 	queryServer       *QueryServer              // stored for ExportToVault executor wiring
@@ -225,6 +230,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		vaultTesters:     cfg.VaultTesters,
 		afterConfigApply: cfg.AfterConfigApply,
 		configSignal:     cfg.ConfigSignal,
+		statsSignal:      cfg.StatsSignal,
 		shutdown:         make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -371,6 +377,19 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	if s.setNodeSuffrageFn != nil {
 		lifecycleServer.SetNodeSuffrageFunc(s.setNodeSuffrageFn)
 	}
+	if s.statsSignal != nil {
+		lifecycleServer.SetStatsSignal(s.statsSignal)
+	}
+	if s.peerRouteStats != nil {
+		lifecycleServer.SetPeerRouteStats(s.peerRouteStats)
+	}
+	lifecycleServer.SetVaultFuncs(vaultServer.allVaultInfos, func(ctx context.Context) *apiv1.GetStatsResponse {
+		resp, _ := vaultServer.GetStats(ctx, connect.NewRequest(&apiv1.GetStatsRequest{}))
+		if resp != nil {
+			return resp.Msg
+		}
+		return nil
+	})
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
 	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs)
 

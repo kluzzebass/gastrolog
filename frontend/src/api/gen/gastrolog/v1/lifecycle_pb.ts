@@ -6,6 +6,8 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
+import { GetRouteStatsResponse } from "./config_pb.js";
+import { GetStatsResponse, VaultInfo } from "./vault_pb.js";
 
 /**
  * @generated from enum gastrolog.v1.Status
@@ -791,6 +793,98 @@ export class RemoveNodeResponse extends Message<RemoveNodeResponse> {
 
   static equals(a: RemoveNodeResponse | PlainMessage<RemoveNodeResponse> | undefined, b: RemoveNodeResponse | PlainMessage<RemoveNodeResponse> | undefined): boolean {
     return proto3.util.equals(RemoveNodeResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchSystemStatusRequest
+ */
+export class WatchSystemStatusRequest extends Message<WatchSystemStatusRequest> {
+  constructor(data?: PartialMessage<WatchSystemStatusRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchSystemStatusRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemStatusRequest {
+    return new WatchSystemStatusRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchSystemStatusRequest {
+    return new WatchSystemStatusRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchSystemStatusRequest {
+    return new WatchSystemStatusRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchSystemStatusRequest | PlainMessage<WatchSystemStatusRequest> | undefined, b: WatchSystemStatusRequest | PlainMessage<WatchSystemStatusRequest> | undefined): boolean {
+    return proto3.util.equals(WatchSystemStatusRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchSystemStatusResponse
+ */
+export class WatchSystemStatusResponse extends Message<WatchSystemStatusResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetClusterStatusResponse cluster = 1;
+   */
+  cluster?: GetClusterStatusResponse;
+
+  /**
+   * @generated from field: gastrolog.v1.HealthResponse health = 2;
+   */
+  health?: HealthResponse;
+
+  /**
+   * @generated from field: gastrolog.v1.GetRouteStatsResponse route_stats = 3;
+   */
+  routeStats?: GetRouteStatsResponse;
+
+  /**
+   * @generated from field: repeated gastrolog.v1.VaultInfo vaults = 4;
+   */
+  vaults: VaultInfo[] = [];
+
+  /**
+   * @generated from field: gastrolog.v1.GetStatsResponse stats = 5;
+   */
+  stats?: GetStatsResponse;
+
+  constructor(data?: PartialMessage<WatchSystemStatusResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchSystemStatusResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "cluster", kind: "message", T: GetClusterStatusResponse },
+    { no: 2, name: "health", kind: "message", T: HealthResponse },
+    { no: 3, name: "route_stats", kind: "message", T: GetRouteStatsResponse },
+    { no: 4, name: "vaults", kind: "message", T: VaultInfo, repeated: true },
+    { no: 5, name: "stats", kind: "message", T: GetStatsResponse },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemStatusResponse {
+    return new WatchSystemStatusResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchSystemStatusResponse {
+    return new WatchSystemStatusResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchSystemStatusResponse {
+    return new WatchSystemStatusResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchSystemStatusResponse | PlainMessage<WatchSystemStatusResponse> | undefined, b: WatchSystemStatusResponse | PlainMessage<WatchSystemStatusResponse> | undefined): boolean {
+    return proto3.util.equals(WatchSystemStatusResponse, a, b);
   }
 }
 

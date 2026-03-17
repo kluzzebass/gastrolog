@@ -50,6 +50,9 @@ const (
 	// LifecycleServiceRemoveNodeProcedure is the fully-qualified name of the LifecycleService's
 	// RemoveNode RPC.
 	LifecycleServiceRemoveNodeProcedure = "/gastrolog.v1.LifecycleService/RemoveNode"
+	// LifecycleServiceWatchSystemStatusProcedure is the fully-qualified name of the LifecycleService's
+	// WatchSystemStatus RPC.
+	LifecycleServiceWatchSystemStatusProcedure = "/gastrolog.v1.LifecycleService/WatchSystemStatus"
 )
 
 // LifecycleServiceClient is a client for the gastrolog.v1.LifecycleService service.
@@ -68,6 +71,10 @@ type LifecycleServiceClient interface {
 	// RemoveNode evicts a node from the cluster. Must be called on the leader.
 	// The evicted node receives a best-effort shutdown notification.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// WatchSystemStatus streams combined system status (cluster, health, route
+	// stats) whenever stats are updated. Replaces polling GetClusterStatus,
+	// Health, and GetRouteStats.
+	WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest]) (*connect.ServerStreamForClient[v1.WatchSystemStatusResponse], error)
 }
 
 // NewLifecycleServiceClient constructs a client for the gastrolog.v1.LifecycleService service. By
@@ -117,17 +124,24 @@ func NewLifecycleServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(lifecycleServiceMethods.ByName("RemoveNode")),
 			connect.WithClientOptions(opts...),
 		),
+		watchSystemStatus: connect.NewClient[v1.WatchSystemStatusRequest, v1.WatchSystemStatusResponse](
+			httpClient,
+			baseURL+LifecycleServiceWatchSystemStatusProcedure,
+			connect.WithSchema(lifecycleServiceMethods.ByName("WatchSystemStatus")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // lifecycleServiceClient implements LifecycleServiceClient.
 type lifecycleServiceClient struct {
-	health           *connect.Client[v1.HealthRequest, v1.HealthResponse]
-	shutdown         *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
-	getClusterStatus *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
-	setNodeSuffrage  *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
-	joinCluster      *connect.Client[v1.JoinClusterRequest, v1.JoinClusterResponse]
-	removeNode       *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
+	health            *connect.Client[v1.HealthRequest, v1.HealthResponse]
+	shutdown          *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
+	getClusterStatus  *connect.Client[v1.GetClusterStatusRequest, v1.GetClusterStatusResponse]
+	setNodeSuffrage   *connect.Client[v1.SetNodeSuffrageRequest, v1.SetNodeSuffrageResponse]
+	joinCluster       *connect.Client[v1.JoinClusterRequest, v1.JoinClusterResponse]
+	removeNode        *connect.Client[v1.RemoveNodeRequest, v1.RemoveNodeResponse]
+	watchSystemStatus *connect.Client[v1.WatchSystemStatusRequest, v1.WatchSystemStatusResponse]
 }
 
 // Health calls gastrolog.v1.LifecycleService.Health.
@@ -160,6 +174,11 @@ func (c *lifecycleServiceClient) RemoveNode(ctx context.Context, req *connect.Re
 	return c.removeNode.CallUnary(ctx, req)
 }
 
+// WatchSystemStatus calls gastrolog.v1.LifecycleService.WatchSystemStatus.
+func (c *lifecycleServiceClient) WatchSystemStatus(ctx context.Context, req *connect.Request[v1.WatchSystemStatusRequest]) (*connect.ServerStreamForClient[v1.WatchSystemStatusResponse], error) {
+	return c.watchSystemStatus.CallServerStream(ctx, req)
+}
+
 // LifecycleServiceHandler is an implementation of the gastrolog.v1.LifecycleService service.
 type LifecycleServiceHandler interface {
 	// Health returns the server health status.
@@ -176,6 +195,10 @@ type LifecycleServiceHandler interface {
 	// RemoveNode evicts a node from the cluster. Must be called on the leader.
 	// The evicted node receives a best-effort shutdown notification.
 	RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error)
+	// WatchSystemStatus streams combined system status (cluster, health, route
+	// stats) whenever stats are updated. Replaces polling GetClusterStatus,
+	// Health, and GetRouteStats.
+	WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest], *connect.ServerStream[v1.WatchSystemStatusResponse]) error
 }
 
 // NewLifecycleServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -221,6 +244,12 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 		connect.WithSchema(lifecycleServiceMethods.ByName("RemoveNode")),
 		connect.WithHandlerOptions(opts...),
 	)
+	lifecycleServiceWatchSystemStatusHandler := connect.NewServerStreamHandler(
+		LifecycleServiceWatchSystemStatusProcedure,
+		svc.WatchSystemStatus,
+		connect.WithSchema(lifecycleServiceMethods.ByName("WatchSystemStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.LifecycleService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case LifecycleServiceHealthProcedure:
@@ -235,6 +264,8 @@ func NewLifecycleServiceHandler(svc LifecycleServiceHandler, opts ...connect.Han
 			lifecycleServiceJoinClusterHandler.ServeHTTP(w, r)
 		case LifecycleServiceRemoveNodeProcedure:
 			lifecycleServiceRemoveNodeHandler.ServeHTTP(w, r)
+		case LifecycleServiceWatchSystemStatusProcedure:
+			lifecycleServiceWatchSystemStatusHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -266,4 +297,8 @@ func (UnimplementedLifecycleServiceHandler) JoinCluster(context.Context, *connec
 
 func (UnimplementedLifecycleServiceHandler) RemoveNode(context.Context, *connect.Request[v1.RemoveNodeRequest]) (*connect.Response[v1.RemoveNodeResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.RemoveNode is not implemented"))
+}
+
+func (UnimplementedLifecycleServiceHandler) WatchSystemStatus(context.Context, *connect.Request[v1.WatchSystemStatusRequest], *connect.ServerStream[v1.WatchSystemStatusResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.LifecycleService.WatchSystemStatus is not implemented"))
 }

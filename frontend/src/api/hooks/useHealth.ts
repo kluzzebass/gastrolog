@@ -10,6 +10,6 @@ export function useHealth() {
       return response;
     },
     structuralSharing: protoSharing(HealthResponse.equals),
-    refetchInterval: 5_000,
+    staleTime: 60_000, // push-updated via WatchSystemStatus; polling is a safety net only
   });
 }

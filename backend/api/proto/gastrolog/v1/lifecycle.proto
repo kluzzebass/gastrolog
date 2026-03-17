@@ -3,6 +3,8 @@ syntax = "proto3";
 package gastrolog.v1;
 
 import "gastrolog/v1/cluster.proto";
+import "gastrolog/v1/config.proto";
+import "gastrolog/v1/vault.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
@@ -27,6 +29,11 @@ service LifecycleService {
   // RemoveNode evicts a node from the cluster. Must be called on the leader.
   // The evicted node receives a best-effort shutdown notification.
   rpc RemoveNode(RemoveNodeRequest) returns (RemoveNodeResponse);
+
+  // WatchSystemStatus streams combined system status (cluster, health, route
+  // stats) whenever stats are updated. Replaces polling GetClusterStatus,
+  // Health, and GetRouteStats.
+  rpc WatchSystemStatus(WatchSystemStatusRequest) returns (stream WatchSystemStatusResponse);
 }
 
 message HealthRequest {}
@@ -126,3 +133,13 @@ message RemoveNodeRequest {
 }
 
 message RemoveNodeResponse {}
+
+message WatchSystemStatusRequest {}
+
+message WatchSystemStatusResponse {
+  GetClusterStatusResponse cluster = 1;
+  HealthResponse health = 2;
+  GetRouteStatsResponse route_stats = 3;
+  repeated VaultInfo vaults = 4;
+  GetStatsResponse stats = 5;
+}
