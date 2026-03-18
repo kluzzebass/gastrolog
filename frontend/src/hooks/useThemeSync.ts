@@ -4,6 +4,7 @@ import type { Theme, Palette } from "../utils";
 
 export type HighlightMode = "full" | "subtle";
 
+
 const PALETTES: Palette[] = ["observatory", "nord", "solarized", "dracula", "catppuccin", "gruvbox", "tokyonight", "rosepine", "everforest", "synthwave"];
 
 function isPalette(v: string): v is Palette {
@@ -108,6 +109,19 @@ export function useThemeSync() {
   }, []);
 
   const dark = theme === "dark" || (theme === "system" && systemDark);
+
+  // Force scrollbar color update on theme change. Browsers cache scrollbar
+  // paint in the compositor and ignore CSS class/custom-property changes.
+  // Setting scrollbar-color directly via inline style is the only reliable fix.
+  useEffect(() => {
+    const thumb = dark
+      ? getComputedStyle(document.documentElement).getPropertyValue("--color-ink-border").trim()
+      : getComputedStyle(document.documentElement).getPropertyValue("--color-light-border").trim();
+    const value = `${thumb} transparent`;
+    for (const el of document.querySelectorAll<HTMLElement>(".app-scroll")) {
+      el.style.scrollbarColor = value;
+    }
+  }, [dark, palette]);
 
   return { theme, setTheme, dark, highlightMode, setHighlightMode, palette, setPalette } as const;
 }

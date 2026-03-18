@@ -61,7 +61,7 @@ export function DetailSidebar({
           </button>
           <div
             {...detailResizeProps}
-            className={`w-3 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+            className={`w-3 cursor-col-resize ${c("bg-ink hover:bg-copper-muted/30", "bg-light-bg hover:bg-copper-muted/20")}`}
           />
         </div>
       )}

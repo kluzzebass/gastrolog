@@ -189,7 +189,7 @@ export function SearchSidebar({
         <div className="relative shrink-0 flex" style={isTablet ? { position: "fixed", left: sidebarWidth, top: 0, height: "100%", zIndex: 30 } : undefined}>
           <div
             {...sidebarResizeProps}
-            className={`w-3 cursor-col-resize transition-colors ${c("hover:bg-copper-muted/30", "hover:bg-copper-muted/20")}`}
+            className={`w-3 cursor-col-resize ${c("bg-ink hover:bg-copper-muted/30", "bg-light-bg hover:bg-copper-muted/20")}`}
           />
           <button
             onClick={() => setSidebarCollapsed(true)}
