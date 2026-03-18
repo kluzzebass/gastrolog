@@ -2,6 +2,12 @@
 
 The role of this file is to describe common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in the project that surprises you, please alert the developer working with you and indicate that this is the case in the CLAUDE.md file to help prevent future agents from having the same issue.
 
+## Cluster-First: Every Feature Must Work on Every Node
+
+GastroLog is a fully distributed system. There is no primary node. Any node can serve any request. Every feature, handler, and piece of state must work correctly regardless of which node the user is connected to. If a correct implementation requires the user to be connected to a specific node, it is wrong.
+
+When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
+
 ## Do not suggest creating PRs.
 
 ## Always create new branches before picking up issues.
