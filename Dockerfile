@@ -20,8 +20,12 @@ ARG TARGETARCH
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "-X main.version=${VERSION}" -o /gastrolog ./cmd/gastrolog
 
 # Stage 3: Runtime
-FROM scratch
+# busybox (~4 MB) instead of scratch — enables entrypoint scripts, exec,
+# and shell-based orchestration for cluster bootstrapping.
+FROM busybox:1.37-musl
 COPY --from=backend /gastrolog /gastrolog
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 EXPOSE 4564
-ENTRYPOINT ["/gastrolog"]
-CMD ["server", "--home", "/config", "--vaults", "/vaults"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["server"]
