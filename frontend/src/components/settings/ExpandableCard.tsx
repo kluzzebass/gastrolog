@@ -50,7 +50,7 @@ export function ExpandableCard({
       >
         <div className="flex items-center gap-2.5 min-w-0">
           <span
-            className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""} ${c("text-text-muted", "text-light-text-muted")}`}
+            className={`text-[0.7em] transition-transform ${expanded ? "rotate-90" : ""}`}
           >
             {"\u25B6"}
           </span>
