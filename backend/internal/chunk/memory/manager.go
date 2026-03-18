@@ -292,14 +292,56 @@ func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, boo
 	return uint64(lo - 1), true, nil //nolint:gosec // G115: lo is always > 0 here (checked above)
 }
 
-// FindIngestStartPosition is not supported by the memory manager.
-func (m *Manager) FindIngestStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
-	return 0, false, nil
+// FindIngestStartPosition returns the earliest record position with IngestTS >= ts.
+// Uses binary search on the in-memory record slice.
+func (m *Manager) FindIngestStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil || len(state.records) == 0 {
+		return 0, false, nil
+	}
+
+	tsNano := ts.UnixNano()
+	lo, hi := 0, len(state.records)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if state.records[mid].IngestTS.UnixNano() < tsNano {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo >= len(state.records) {
+		return 0, false, nil
+	}
+	return uint64(lo), true, nil
 }
 
-// FindSourceStartPosition is not supported by the memory manager.
-func (m *Manager) FindSourceStartPosition(_ chunk.ChunkID, _ time.Time) (uint64, bool, error) {
-	return 0, false, nil
+// FindSourceStartPosition returns the earliest record position with SourceTS >= ts.
+// Uses binary search on the in-memory record slice.
+func (m *Manager) FindSourceStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
+	m.mu.Lock()
+	state := m.findChunkLocked(id)
+	m.mu.Unlock()
+	if state == nil || len(state.records) == 0 {
+		return 0, false, nil
+	}
+
+	tsNano := ts.UnixNano()
+	lo, hi := 0, len(state.records)
+	for lo < hi {
+		mid := lo + (hi-lo)/2
+		if state.records[mid].SourceTS.UnixNano() < tsNano {
+			lo = mid + 1
+		} else {
+			hi = mid
+		}
+	}
+	if lo >= len(state.records) {
+		return 0, false, nil
+	}
+	return uint64(lo), true, nil
 }
 
 // ReadWriteTimestamps reads the WriteTS for each given record position in a chunk.

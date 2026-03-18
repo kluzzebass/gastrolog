@@ -1,5 +1,4 @@
 import { useState, useRef, useEffect } from "react";
-import { useIsFetching } from "@tanstack/react-query";
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import { AlertPanel } from "./AlertPanel";
@@ -36,18 +35,19 @@ export function HeaderBar({
   const { data: cluster, isLoading } = useClusterStatus();
   const nodes = cluster?.nodes ?? [];
 
-  // Inspector glow: briefly flash when any fetch completes.
-  // Lives here (not in useSearchView) to avoid re-rendering the entire view tree.
-  const fetchCount = useIsFetching();
+  // Inspector glow: briefly flash when system status data arrives.
+  // Triggered by cluster data changes (pushed via WatchSystemStatus stream).
   const [inspectorGlow, setInspectorGlow] = useState(false);
   const glowTimer = useRef<ReturnType<typeof setTimeout>>(null);
+  const prevClusterRef = useRef(cluster);
   useEffect(() => {
-    if (fetchCount > 0) {
+    if (cluster && cluster !== prevClusterRef.current) {
+      prevClusterRef.current = cluster;
       setInspectorGlow(true);
       if (glowTimer.current) clearTimeout(glowTimer.current);
       glowTimer.current = setTimeout(() => setInspectorGlow(false), 800);
     }
-  }, [fetchCount]);
+  }, [cluster]);
 
   // Aggregate stats across all nodes.
   let totalCpu = 0;
