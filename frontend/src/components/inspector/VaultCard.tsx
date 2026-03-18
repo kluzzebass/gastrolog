@@ -227,11 +227,18 @@ function ChunkRow({
         aria-expanded={isExpanded}
       >
         <td className="px-4 py-2">
-          <span
-            className={`font-mono truncate block max-w-36 ${c("text-text-muted", "text-light-text-muted")}`}
-            title={chunk.id}
-          >
-            {chunk.id}
+          <span className="flex items-center gap-1.5">
+            <span
+              className={`text-[0.6em] transition-transform inline-block ${isExpanded ? "rotate-90" : ""} ${c("text-text-muted", "text-light-text-muted")}`}
+            >
+              {"\u25B6"}
+            </span>
+            <span
+              className={`font-mono truncate block max-w-36 ${c("text-text-muted", "text-light-text-muted")}`}
+              title={chunk.id}
+            >
+              {chunk.id}
+            </span>
           </span>
         </td>
         <td className="px-2 py-2">
@@ -310,6 +317,20 @@ function ChunkDetail({
 
   return (
     <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
+      {/* Full chunk ID — selectable for copy/paste */}
+      <div className="mb-3">
+        <div
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Chunk ID
+        </div>
+        <div
+          className={`font-mono text-[0.85em] select-all ${c("text-text-muted", "text-light-text-muted")}`}
+        >
+          {chunk.id}
+        </div>
+      </div>
+
       {/* Compression / storage info */}
       {showCompression && (
         <div className="mb-3">
