@@ -38,7 +38,7 @@ export function useChunks(vaultId: string) {
     },
     structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!vaultId,
-    staleTime: 60_000,
+    refetchInterval: 5_000, // detail data — only active when vault card is expanded
   });
 }
 

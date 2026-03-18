@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -32,10 +33,11 @@ type Config struct {
 //   - Logging is intentionally sparse; only lifecycle events are logged
 //   - No logging in hot paths (Append, cursor iteration)
 type Manager struct {
-	mu     sync.Mutex
-	cfg    Config
-	active *chunkState
-	chunks []*chunkState
+	mu            sync.Mutex
+	cfg           Config
+	active        *chunkState
+	chunks        []*chunkState
+	indexBuilders []chunk.ChunkIndexBuilder
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="memory" at construction time.
@@ -475,6 +477,27 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 	return state.meta, nil
 }
 
+// SetIndexBuilders injects index builders into the post-seal pipeline.
+func (m *Manager) SetIndexBuilders(builders []chunk.ChunkIndexBuilder) {
+	m.indexBuilders = builders
+}
+
+// HasIndexBuilders reports whether index builders are injected.
+func (m *Manager) HasIndexBuilders() bool {
+	return len(m.indexBuilders) > 0
+}
+
+// PostSealProcess builds indexes for a sealed chunk.
+// Memory vaults don't compress or upload — only index building is needed.
+func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
+	for _, builder := range m.indexBuilders {
+		if err := builder.Build(ctx, id); err != nil {
+			m.logger.Warn("index build failed", "chunk", id, "error", err)
+		}
+	}
+	return nil
+}
+
 // Close releases resources. For memory manager, this clears internal state.
 func (m *Manager) Close() error {
 	m.mu.Lock()
@@ -484,4 +507,7 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-var _ chunk.ChunkManager = (*Manager)(nil)
+var (
+	_ chunk.ChunkManager          = (*Manager)(nil)
+	_ chunk.ChunkPostSealProcessor = (*Manager)(nil)
+)

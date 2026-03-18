@@ -950,6 +950,10 @@ func TestRebuildMissingIndexes(t *testing.T) {
 
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
+	// Wire index builders so HasIndexBuilders() returns true —
+	// RebuildMissingIndexes skips vaults without builders.
+	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
+
 	defaultID := uuid.Must(uuid.NewV7())
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {

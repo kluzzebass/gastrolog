@@ -354,8 +354,14 @@ function ChunkDetail({
         </div>
       )}
 
-      {/* Cloud-backed chunks: show cloud info instead of local indexes */}
-      {chunk.cloudBacked ? (
+      {/* Active chunks: no indexes yet */}
+      {!chunk.sealed ? (
+        <div
+          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        >
+          Indexes are built when the chunk is sealed.
+        </div>
+      ) : chunk.cloudBacked ? (
         <>
           <div
             className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
