@@ -51,6 +51,7 @@ import (
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
+	"gastrolog/internal/server/routing"
 )
 
 // Version is set by the caller (typically from ldflags).
@@ -176,8 +177,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	orchReady := make(chan struct{})
 	var searchForwarder *cluster.SearchForwarder
 	var recordForwarder *cluster.RecordForwarder
+	var routingForwarder *routing.Forwarder
 	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
 		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
+		routingForwarder = routing.NewForwarder(clusterSrv.PeerConns())
 	}
 
 	// Wire the dispatcher now that orchestrator and factories are available.
@@ -247,6 +250,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		PeerJobState:        peerJobState,
 		LocalStats:          localStatsFn,
 		SearchForwarder:     searchForwarder,
+		RoutingForwarder:    routingForwarder,
 		JoinClusterFunc:     joinClusterFn,
 		RemoveNodeFunc:      removeNodeFn,
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
@@ -733,6 +737,7 @@ type serverDeps struct {
 	PeerJobState        *cluster.PeerJobState
 	LocalStats          func() *gastrologv1.NodeStats
 	SearchForwarder     *cluster.SearchForwarder
+	RoutingForwarder    routing.UnaryForwarder
 	JoinClusterFunc     func(ctx context.Context, leaderAddr, joinToken string) error
 	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
@@ -751,13 +756,19 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerJobs: deps.PeerJobState,
 			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder,
-			RemoteVaultForwarder: deps.SearchForwarder, ClusterAddress: deps.ClusterAddr,
+			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
 			VaultTesters: map[string]server.VaultConnectionTester{
 				"file": chunkcloud.NewConnectionTester(),
 			},
 		})
+		// Provide the cluster's ForwardRPC handler with the internal mux.
+		// NoAuthInterceptor + no routing interceptor prevents loops.
+		if deps.ClusterSrv != nil {
+			deps.ClusterSrv.SetInternalHandler(srv.BuildInternalHandler())
+		}
+
 		// Wire managed file transfer handlers on the cluster server. The HTTP
 		// server owns the managed files on disk; the cluster server streams them
 		// to peers. Must happen after server creation but before serving starts.

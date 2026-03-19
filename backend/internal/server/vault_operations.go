@@ -37,6 +37,7 @@ func (s *VaultServer) makeCleanupFunc(srcID uuid.UUID, srcFileDir string) func(c
 }
 
 // SealVault seals the active chunk of a vault.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) SealVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.SealVaultRequest],
@@ -47,18 +48,6 @@ func (s *VaultServer) SealVault(
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
-	}
-
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		_, err := s.remote.SealVault(ctx, nodeID, &apiv1.ForwardSealVaultRequest{VaultId: vaultID.String()})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.SealVaultResponse{}), nil
 	}
 
 	if !s.orch.VaultExists(vaultID) {
@@ -73,7 +62,7 @@ func (s *VaultServer) SealVault(
 }
 
 // ReindexVault rebuilds all indexes for sealed chunks in a vault.
-// The work is submitted as an async job; the response contains the job ID.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) ReindexVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ReindexVaultRequest],
@@ -84,18 +73,6 @@ func (s *VaultServer) ReindexVault(
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
-	}
-
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		fwdResp, err := s.remote.ReindexVault(ctx, nodeID, &apiv1.ForwardReindexVaultRequest{VaultId: vaultID.String()})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.ReindexVaultResponse{JobId: fwdResp.GetJobId()}), nil
 	}
 
 	if !s.orch.VaultExists(vaultID) {

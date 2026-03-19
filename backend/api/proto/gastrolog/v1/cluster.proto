@@ -349,3 +349,19 @@ message ListPeerManagedFilesRequest {}
 message ListPeerManagedFilesResponse {
   repeated string file_ids = 1;
 }
+
+// ForwardRPCFrame carries a single frame in a generic ForwardRPC
+// bidirectional stream. Replaces per-RPC Forward* messages.
+//
+// Client sends: first frame has procedure + payload (serialized request).
+// Server sends: one or more frames with payload (serialized response).
+//   - Unary: single response frame with end_stream=true.
+//   - Server-streaming: multiple payload frames, last has end_stream=true.
+//   - Error: error_code != 0 with error_message, end_stream=true.
+message ForwardRPCFrame {
+  string procedure = 1;     // Connect procedure path, set in first client frame
+  bytes payload = 2;        // proto-encoded request or response message
+  uint32 error_code = 3;    // Connect error code (0 = success, response only)
+  string error_message = 4; // error detail (response only)
+  bool end_stream = 5;      // true on last response frame
+}

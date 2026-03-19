@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -143,6 +144,12 @@ type Server struct {
 
 	// managedFileIDs returns which managed files exist on this node.
 	managedFileIDs ManagedFileIDsLister
+
+	// internalHandler is the Connect mux used for dispatching ForwardRPC
+	// requests. It has no routing interceptor (preventing loops) and uses
+	// NoAuthInterceptor (mTLS already verified the peer). Set by the
+	// composition root before Start().
+	internalHandler http.Handler
 
 	// forwardedReceived counts records received via ForwardRecords RPCs.
 	forwardedReceived atomic.Int64
@@ -272,6 +279,13 @@ func (s *Server) LeadershipTransfer() error {
 		return errors.New("raft not initialized")
 	}
 	return s.raft.LeadershipTransfer().Error()
+}
+
+// SetInternalHandler provides the Connect mux used for dispatching ForwardRPC
+// requests. This should be a mux with NoAuthInterceptor and NO routing
+// interceptor — ForwardRPC dispatches execute locally without re-routing.
+func (s *Server) SetInternalHandler(h http.Handler) {
+	s.internalHandler = h
 }
 
 // SetApplyFn sets the function used by the ForwardApply handler to apply

@@ -34,6 +34,7 @@ import (
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+	"gastrolog/internal/server/routing"
 )
 
 // configLoadTimeout bounds how long background config store reads can take.
@@ -94,10 +95,6 @@ type Config struct {
 	// Nil in single-node mode.
 	RemoteSearcher RemoteSearcher
 
-	// RemoteVaultForwarder forwards vault RPCs (ListChunks, GetIndexes,
-	// ValidateVault) to remote cluster nodes. Nil in single-node mode.
-	RemoteVaultForwarder RemoteVaultForwarder
-
 	// PeerJobs provides active jobs from peer cluster nodes.
 	// Nil in single-node mode.
 	PeerJobs PeerJobsProvider
@@ -132,6 +129,10 @@ type Config struct {
 	// VaultTesters maps vault types to connection test functions.
 	// Used by the TestVault RPC for cloud vaults.
 	VaultTesters map[string]VaultConnectionTester
+
+	// RoutingForwarder forwards requests to remote nodes via ForwardRPC.
+	// Nil in single-node mode. Satisfies routing.UnaryForwarder.
+	RoutingForwarder routing.UnaryForwarder
 }
 
 // CertManager interface for TLS certificate management.
@@ -158,7 +159,6 @@ type Server struct {
 	peerIngesterStats   PeerIngesterStatsProvider
 	peerRouteStats      PeerRouteStatsProvider
 	remoteSearcher      RemoteSearcher
-	remoteVaultForwarder RemoteVaultForwarder
 	peerJobs             PeerJobsProvider
 	localStatsFn     func() *apiv1.NodeStats
 	localNodeID      string
@@ -172,8 +172,9 @@ type Server struct {
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
 	statsSignal      *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
 	vaultTesters      map[string]VaultConnectionTester
-	repairManagedFile func(fileID string) bool   // on-demand pull from peer; set by app wiring
-	queryServer       *QueryServer              // stored for ExportToVault executor wiring
+	repairManagedFile  func(fileID string) bool   // on-demand pull from peer; set by app wiring
+	queryServer        *QueryServer              // stored for ExportToVault executor wiring
+	routingForwarder   routing.UnaryForwarder     // forwards requests to remote nodes; nil in single-node
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -216,7 +217,6 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		peerIngesterStats: cfg.PeerIngesterStats,
 		peerRouteStats:    cfg.PeerRouteStats,
 		remoteSearcher:       cfg.RemoteSearcher,
-		remoteVaultForwarder: cfg.RemoteVaultForwarder,
 		peerJobs:             cfg.PeerJobs,
 		localStatsFn:     cfg.LocalStats,
 		localNodeID:      cfg.NodeID,
@@ -227,11 +227,12 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
 		unixSocketConfig: cfg.UnixSocket,
-		vaultTesters:     cfg.VaultTesters,
-		afterConfigApply: cfg.AfterConfigApply,
-		configSignal:     cfg.ConfigSignal,
-		statsSignal:      cfg.StatsSignal,
-		shutdown:         make(chan struct{}),
+		vaultTesters:      cfg.VaultTesters,
+		afterConfigApply:  cfg.AfterConfigApply,
+		configSignal:      cfg.ConfigSignal,
+		statsSignal:       cfg.StatsSignal,
+		routingForwarder:  cfg.RoutingForwarder,
+		shutdown:          make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
@@ -251,6 +252,42 @@ func (s *Server) registerProbes(mux *http.ServeMux) {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
 	})
+}
+
+// routingInterceptor returns a routing interceptor if a forwarder is
+// configured (cluster mode). Returns nil slice in single-node mode.
+func (s *Server) routingInterceptor() []connect.Interceptor {
+	if s.routingForwarder == nil && s.cfgStore == nil {
+		return nil
+	}
+	registry := routing.NewRegistry(routing.DefaultRoutes())
+	resolver := &configVaultOwner{cfgStore: s.cfgStore, localNodeID: s.localNodeID}
+	ri := routing.NewRoutingInterceptor(registry, s.localNodeID, resolver, s.routingForwarder)
+	return []connect.Interceptor{ri}
+}
+
+// configVaultOwner resolves vault ownership from the config store.
+type configVaultOwner struct {
+	cfgStore    config.Store
+	localNodeID string
+}
+
+func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string) string {
+	if c.cfgStore == nil {
+		return ""
+	}
+	id, err := uuid.Parse(vaultID)
+	if err != nil {
+		return ""
+	}
+	vc, err := c.cfgStore.GetVault(ctx, id)
+	if err != nil || vc == nil {
+		return ""
+	}
+	if vc.NodeID == "" || vc.NodeID == c.localNodeID {
+		return ""
+	}
+	return vc.NodeID
 }
 
 // isLoopback returns true if host is a loopback address (localhost, 127.0.0.1, ::1).
@@ -329,12 +366,24 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	}
 	switch {
 	case len(overrideOpts) > 0:
+		// Internal mux (unix socket, ForwardRPC dispatch): caller provides
+		// interceptors directly — no routing interceptor to prevent loops.
 		handlerOpts = append(handlerOpts, overrideOpts...)
 	case s.noAuth:
-		handlerOpts = append(handlerOpts, connect.WithInterceptors(&auth.NoAuthInterceptor{}))
+		interceptors := []connect.Interceptor{&auth.NoAuthInterceptor{}}
+		interceptors = append(interceptors, s.routingInterceptor()...)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
 	case s.tokens != nil:
 		authInterceptor := auth.NewAuthInterceptor(s.tokens, s.cfgStore, &tokenValidator{cfgStore: s.cfgStore})
-		handlerOpts = append(handlerOpts, connect.WithInterceptors(authInterceptor))
+		interceptors := []connect.Interceptor{authInterceptor}
+		interceptors = append(interceptors, s.routingInterceptor()...)
+		handlerOpts = append(handlerOpts, connect.WithInterceptors(interceptors...))
+	default:
+		// No auth configured (tests without NoAuth flag). Still need the
+		// routing interceptor for cluster forwarding.
+		if ri := s.routingInterceptor(); len(ri) > 0 {
+			handlerOpts = append(handlerOpts, connect.WithInterceptors(ri...))
+		}
 	}
 
 	queryTimeout, maxFollowDuration, maxResultCount := s.loadQueryConfig()
@@ -348,7 +397,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	s.queryServer = queryServer
-	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteVaultForwarder, s.localNodeID, s.logger)
+	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.localNodeID, s.logger)
 	configServer := NewConfigServer(ConfigServerConfig{
 		Orch:               s.orch,
 		CfgStore:           s.cfgStore,
@@ -971,6 +1020,16 @@ func (s *Server) stopHTTPSLocked() {
 		s.httpsListener = nil
 	}
 	s.httpsPort = ""
+}
+
+// BuildInternalHandler returns an http.Handler backed by a Connect mux with
+// NoAuthInterceptor and NO routing interceptor. Used by the cluster's
+// ForwardRPC handler to dispatch requests locally — mTLS on the cluster
+// port already authenticated the peer, and the lack of routing interceptor
+// prevents forwarding loops.
+func (s *Server) BuildInternalHandler() http.Handler {
+	noAuthOpt := connect.WithInterceptors(&auth.NoAuthInterceptor{})
+	return s.buildMux(noAuthOpt)
 }
 
 // ListenUnix starts a secondary Unix socket listener alongside the primary

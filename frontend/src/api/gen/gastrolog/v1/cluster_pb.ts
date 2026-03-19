@@ -2385,3 +2385,83 @@ export class ListPeerManagedFilesResponse extends Message<ListPeerManagedFilesRe
   }
 }
 
+/**
+ * ForwardRPCFrame carries a single frame in a generic ForwardRPC
+ * bidirectional stream. Replaces per-RPC Forward* messages.
+ *
+ * Client sends: first frame has procedure + payload (serialized request).
+ * Server sends: one or more frames with payload (serialized response).
+ *   - Unary: single response frame with end_stream=true.
+ *   - Server-streaming: multiple payload frames, last has end_stream=true.
+ *   - Error: error_code != 0 with error_message, end_stream=true.
+ *
+ * @generated from message gastrolog.v1.ForwardRPCFrame
+ */
+export class ForwardRPCFrame extends Message<ForwardRPCFrame> {
+  /**
+   * Connect procedure path, set in first client frame
+   *
+   * @generated from field: string procedure = 1;
+   */
+  procedure = "";
+
+  /**
+   * proto-encoded request or response message
+   *
+   * @generated from field: bytes payload = 2;
+   */
+  payload = new Uint8Array(0);
+
+  /**
+   * Connect error code (0 = success, response only)
+   *
+   * @generated from field: uint32 error_code = 3;
+   */
+  errorCode = 0;
+
+  /**
+   * error detail (response only)
+   *
+   * @generated from field: string error_message = 4;
+   */
+  errorMessage = "";
+
+  /**
+   * true on last response frame
+   *
+   * @generated from field: bool end_stream = 5;
+   */
+  endStream = false;
+
+  constructor(data?: PartialMessage<ForwardRPCFrame>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardRPCFrame";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "procedure", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "payload", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "error_code", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 4, name: "error_message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "end_stream", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRPCFrame {
+    return new ForwardRPCFrame().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardRPCFrame {
+    return new ForwardRPCFrame().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardRPCFrame {
+    return new ForwardRPCFrame().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardRPCFrame | PlainMessage<ForwardRPCFrame> | undefined, b: ForwardRPCFrame | PlainMessage<ForwardRPCFrame> | undefined): boolean {
+    return proto3.util.equals(ForwardRPCFrame, a, b);
+  }
+}
+

@@ -1,10 +1,12 @@
 package server_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -140,7 +142,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		remoteOrchestrators[id] = nodes[id].orch
 	}
 	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
-	remoteVaultFwd := &directRemoteVaultForwarder{nodes: remoteOrchestrators}
 
 	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}}
 
@@ -155,15 +156,17 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	peerIngesterStats := &mnPeerIngesterStats{nodes: peerRouteNodes}
 	peerVaultStats := &mnPeerVaultStats{nodes: peerRouteNodes}
 
+	routingFwd := newDirectUnaryForwarder(nodes, cfgStore, coordinatorID)
+
 	coordNode := nodes[coordinatorID]
 	srv := server.New(coordNode.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
-		NodeID:               coordinatorID,
-		RemoteSearcher:       remoteSearcher,
-		RemoteVaultForwarder: remoteVaultFwd,
-		PeerJobs:             peerJobs,
-		PeerRouteStats:       peerRouteStats,
-		PeerIngesterStats:    peerIngesterStats,
-		PeerVaultStats:       peerVaultStats,
+		NodeID:            coordinatorID,
+		RemoteSearcher:    remoteSearcher,
+		RoutingForwarder:  routingFwd,
+		PeerJobs:          peerJobs,
+		PeerRouteStats:    peerRouteStats,
+		PeerIngesterStats: peerIngesterStats,
+		PeerVaultStats:    peerVaultStats,
 	})
 
 	handler := srv.Handler()
@@ -695,161 +698,60 @@ func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gas
 	return &gastrologv1.ForwardExportToVaultResponse{JobId: "test-export-job"}, nil
 }
 
-// directRemoteVaultForwarder implements RemoteVaultForwarder by calling
-// directly into the target node's orchestrator, simulating cluster RPCs.
-type directRemoteVaultForwarder struct {
-	nodes map[string]*orchestrator.Orchestrator
+// directUnaryForwarder implements routing.UnaryForwarder for multi-node tests
+// by dispatching through in-process Connect muxes on each remote node.
+type directUnaryForwarder struct {
+	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func (d *directRemoteVaultForwarder) orch(nodeID string) (*orchestrator.Orchestrator, error) {
-	o, ok := d.nodes[nodeID]
+func newDirectUnaryForwarder(nodes map[string]multinodeTestNode, cfgStore config.Store, coordinatorID string) *directUnaryForwarder {
+	handlers := make(map[string]http.Handler)
+	for id, node := range nodes {
+		if id == coordinatorID {
+			continue
+		}
+		// BuildInternalHandler returns a mux with NoAuthInterceptor and
+		// NO routing interceptor — same as the real ForwardRPC dispatch path.
+		remoteSrv := server.New(node.orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+			NodeID: id,
+			NoAuth: true,
+		})
+		handlers[id] = remoteSrv.BuildInternalHandler()
+	}
+	return &directUnaryForwarder{handlers: handlers}
+}
+
+func (d *directUnaryForwarder) ForwardUnary(ctx context.Context, nodeID, procedure string, reqPayload []byte) ([]byte, error) {
+	handler, ok := d.handlers[nodeID]
 	if !ok {
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
-	return o, nil
-}
 
-func (d *directRemoteVaultForwarder) ListChunks(_ context.Context, nodeID string, req *gastrologv1.ForwardListChunksRequest) (*gastrologv1.ForwardListChunksResponse, error) {
-	o, err := d.orch(nodeID)
+	// Build an HTTP request exactly as the real ForwardRPC handler does.
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", procedure, bytes.NewReader(reqPayload))
 	if err != nil {
 		return nil, err
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	metas, err := o.ListChunkMetas(vaultID)
-	if err != nil {
-		return nil, err
-	}
-	chunks := make([]*gastrologv1.ChunkMeta, 0, len(metas))
-	for _, m := range metas {
-		chunks = append(chunks, server.ChunkMetaToProto(m))
-	}
-	return &gastrologv1.ForwardListChunksResponse{Chunks: chunks}, nil
-}
+	httpReq.Header.Set("Content-Type", "application/proto")
+	httpReq.Header.Set("Connect-Protocol-Version", "1")
 
-func (d *directRemoteVaultForwarder) GetChunk(_ context.Context, nodeID string, req *gastrologv1.ForwardGetChunkRequest) (*gastrologv1.ForwardGetChunkResponse, error) {
-	o, err := d.orch(nodeID)
-	if err != nil {
-		return nil, err
-	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
-	if err != nil {
-		return nil, err
-	}
-	meta, err := o.GetChunkMeta(vaultID, chunkID)
-	if err != nil {
-		return nil, err
-	}
-	return &gastrologv1.ForwardGetChunkResponse{Chunk: server.ChunkMetaToProto(meta)}, nil
-}
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httpReq)
 
-func (d *directRemoteVaultForwarder) GetIndexes(_ context.Context, nodeID string, req *gastrologv1.ForwardGetIndexesRequest) (*gastrologv1.ForwardGetIndexesResponse, error) {
-	o, err := d.orch(nodeID)
-	if err != nil {
-		return nil, err
-	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
-	if err != nil {
-		return nil, err
-	}
-	report, err := o.ChunkIndexInfos(vaultID, chunkID)
-	if err != nil {
-		return nil, err
-	}
-	resp := &gastrologv1.ForwardGetIndexesResponse{Sealed: report.Sealed}
-	for _, idx := range report.Indexes {
-		resp.Indexes = append(resp.Indexes, &gastrologv1.IndexInfo{
-			Name: idx.Name, Exists: idx.Exists,
-			EntryCount: idx.EntryCount, SizeBytes: idx.SizeBytes,
-		})
-	}
-	return resp, nil
-}
+	resp := rec.Result()
+	defer resp.Body.Close()
 
-func (d *directRemoteVaultForwarder) AnalyzeChunk(_ context.Context, nodeID string, req *gastrologv1.ForwardAnalyzeChunkRequest) (*gastrologv1.ForwardAnalyzeChunkResponse, error) {
-	o, err := d.orch(nodeID)
-	if err != nil {
-		return nil, err
+	if resp.StatusCode != http.StatusOK {
+		var errBuf [4096]byte
+		n, _ := resp.Body.Read(errBuf[:])
+		return nil, fmt.Errorf("forward to %s: HTTP %d: %s", nodeID, resp.StatusCode, string(errBuf[:n]))
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	a, err := o.NewAnalyzer(vaultID)
-	if err != nil {
-		return nil, err
-	}
-	if req.GetChunkId() != "" {
-		chunkID, parseErr := chunk.ParseChunkID(req.GetChunkId())
-		if parseErr != nil {
-			return nil, parseErr
-		}
-		analysis, analyzeErr := a.AnalyzeChunk(chunkID)
-		if analyzeErr != nil {
-			return nil, analyzeErr
-		}
-		return &gastrologv1.ForwardAnalyzeChunkResponse{
-			Analyses: []*gastrologv1.ChunkAnalysis{server.ChunkAnalysisToProto(*analysis)},
-		}, nil
-	}
-	agg, err := a.AnalyzeAll()
-	if err != nil {
-		return nil, err
-	}
-	analyses := make([]*gastrologv1.ChunkAnalysis, 0, len(agg.Chunks))
-	for _, ca := range agg.Chunks {
-		analyses = append(analyses, server.ChunkAnalysisToProto(ca))
-	}
-	return &gastrologv1.ForwardAnalyzeChunkResponse{Analyses: analyses}, nil
-}
 
-func (d *directRemoteVaultForwarder) ValidateVault(_ context.Context, nodeID string, req *gastrologv1.ForwardValidateVaultRequest) (*gastrologv1.ForwardValidateVaultResponse, error) {
-	o, err := d.orch(nodeID)
-	if err != nil {
+	var buf bytes.Buffer
+	if _, err := buf.ReadFrom(resp.Body); err != nil {
 		return nil, err
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	metas, err := o.ListChunkMetas(vaultID)
-	if err != nil {
-		return nil, err
-	}
-	resp := server.ValidateVaultLocal(o, vaultID, metas)
-	return &gastrologv1.ForwardValidateVaultResponse{
-		Valid: resp.Valid, Chunks: resp.Chunks,
-	}, nil
-}
-
-func (d *directRemoteVaultForwarder) SealVault(_ context.Context, nodeID string, req *gastrologv1.ForwardSealVaultRequest) (*gastrologv1.ForwardSealVaultResponse, error) {
-	o, err := d.orch(nodeID)
-	if err != nil {
-		return nil, err
-	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	if err := o.SealActive(vaultID); err != nil {
-		return nil, err
-	}
-	return &gastrologv1.ForwardSealVaultResponse{}, nil
-}
-
-func (d *directRemoteVaultForwarder) ReindexVault(_ context.Context, nodeID string, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
-	// In tests we don't have the scheduler wired up, so just return a fake job ID.
-	return &gastrologv1.ForwardReindexVaultResponse{JobId: "test-reindex-job"}, nil
+	return buf.Bytes(), nil
 }
 
 // ---------------------------------------------------------------------------

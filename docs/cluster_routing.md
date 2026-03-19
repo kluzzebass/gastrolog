@@ -6,39 +6,50 @@ handle it and forwards transparently.
 
 ## Routing Strategies
 
-Every RPC handler declares one of four routing strategies:
+Every RPC is classified in `routing/routes.go` with one of four strategies.
+The coverage test (`TestAllProceduresDeclared`) parses the generated
+`*.connect.go` files and verifies every procedure constant appears in the
+registry — adding a new RPC without classifying it fails the test.
 
 ```mermaid
 flowchart TD
-    Request["Incoming RPC"] --> Interceptor["Routing Interceptor"]
+    Request["Incoming RPC"] --> Forwarded{"Already forwarded?"}
+    Forwarded -->|Yes| Local["Execute locally"]
+    Forwarded -->|No| Declared{"Declared in registry?"}
 
-    Interceptor --> CheckStrategy{"Declared strategy?"}
+    Declared -->|No| Reject["Reject: CodeInternal"]
+    Declared -->|Yes| Target{"Explicit X-Target-Node?"}
 
-    CheckStrategy -->|RouteLocal| Local["Execute locally"]
-    CheckStrategy -->|RouteTargeted| FindOwner{"Vault owner = this node?"}
-    CheckStrategy -->|RouteLeader| IsLeader{"This node is leader?"}
-    CheckStrategy -->|RouteFanOut| FanOut["Execute on all nodes + merge"]
-    CheckStrategy -->|Undeclared| Reject["Reject: missing strategy"]
+    Target -->|Yes, remote| ForwardExplicit["Forward to target node"]
+    Target -->|Yes, self| Local
+    Target -->|No| CheckStrategy{"Strategy?"}
 
-    FindOwner -->|Yes| Local
-    FindOwner -->|No| Forward["Forward to owner"]
-    Forward --> ProxyBack["Proxy response back"]
+    CheckStrategy -->|RouteLocal| Local
+    CheckStrategy -->|RouteLeader| Local
+    CheckStrategy -->|RouteFanOut| Local
+    CheckStrategy -->|RouteTargeted| FindOwner{"Duck-type GetVault,<br/>resolve owner"}
 
-    IsLeader -->|Yes| Local
-    IsLeader -->|No| ForwardLeader["Forward to leader"]
-    ForwardLeader --> ProxyBack
+    FindOwner -->|Local or unknown| Local
+    FindOwner -->|Remote| Forward["Forward via ForwardRPC"]
+    Forward --> ProxyBack["Deserialize + return"]
+    ForwardExplicit --> ProxyBack
 ```
 
-| Strategy | When to use | Example RPCs |
-|----------|------------|-------------|
-| **RouteLocal** | Any node can serve from local state (Raft-replicated config, peer broadcasts) | Health, WatchConfig, ListVaults, GetClusterStatus |
-| **RouteTargeted** | Request is about a specific vault owned by one node | GetIndexes, ListChunks, SealVault, GetContext |
-| **RouteFanOut** | Needs data from all nodes, merged at the coordinator | Search, GetFields, ComputeHistogram |
-| **RouteLeader** | Must be applied through Raft consensus | PutVaultConfig, PutIngesterConfig, ForwardApply |
+| Strategy | Count | Interceptor action | Example RPCs |
+|----------|------:|-------------------|-------------|
+| **RouteLocal** | 39 | Pass through | Health, GetConfig, ListVaults, GetStats, WatchConfig |
+| **RouteLeader** | 30 | Pass through (Raft Apply handles leader-forwarding) | PutVault, PutIngester, PutSettings, DeleteVault |
+| **RouteTargeted** | 11 | Auto-forward to vault owner via ForwardRPC | ListChunks, GetIndexes, SealVault, ValidateVault |
+| **RouteFanOut** | 6 | Pass through (handler fans out) | Search, Follow, Explain, GetContext, GetFields |
 
-## Request Flow
+## How Forwarding Works
 
-### RouteTargeted (most common)
+### RouteTargeted — interceptor auto-routing
+
+The interceptor duck-types `GetVault()` on the request proto to extract
+the vault ID, then looks up the owning node from the config store. If the
+vault is on another node, it serializes the request, sends it via the
+generic `ForwardRPC` gRPC stream, and deserializes the response.
 
 ```mermaid
 sequenceDiagram
@@ -46,23 +57,53 @@ sequenceDiagram
     participant Node1 as Node 1 (API)
     participant Node2 as Node 2 (vault owner)
 
-    Client->>Node1: GetIndexes(vault=V)
-    Node1->>Node1: Interceptor: RouteTargeted
-    Node1->>Node1: Lookup vault V owner
+    Client->>Node1: ListChunks(vault=V)
+    Node1->>Node1: Interceptor: GetVault() → V
+    Node1->>Node1: Config store: V owned by Node 2
     alt Vault is local
         Node1->>Node1: Execute handler
         Node1-->>Client: Response
     else Vault is on Node 2
-        Node1->>Node2: ForwardGetIndexes(vault=V)
-        Node2->>Node2: Execute handler locally
-        Node2-->>Node1: Response
+        Node1->>Node2: ForwardRPC stream (procedure + proto bytes)
+        Node2->>Node2: Dispatch through internal Connect mux
+        Node2->>Node2: Handler runs locally
+        Node2-->>Node1: Proto bytes
+        Node1->>Node1: Deserialize via WrapResponse
         Node1-->>Client: Response (proxied)
     end
 ```
 
 The client always talks to one node. Forwarding is invisible.
 
-### RouteFanOut
+### ForwardRPC — the generic dispatch mechanism
+
+`ForwardRPC` is a single bidirectional gRPC stream on the cluster port
+that replaces per-RPC `Forward*` handlers for unary RPCs. One
+`ForwardRPCFrame` message carries any procedure:
+
+```
+ForwardRPCFrame {
+  procedure: "/gastrolog.v1.VaultService/ListChunks"
+  payload:   <serialized ListChunksRequest>
+}
+```
+
+On the receiving node, the handler dispatches through the **internal
+Connect mux** — the same mux used by the unix socket, with
+`NoAuthInterceptor` (mTLS already verified the peer) and no routing
+interceptor (prevents forwarding loops).
+
+The dispatch is an in-process HTTP call:
+1. Build `http.Request` with procedure as URL path, raw proto as body
+2. Set `Content-Type: application/proto` and `Connect-Protocol-Version: 1`
+3. Call `internalHandler.ServeHTTP(recorder, request)`
+4. Read the raw proto response body, send back as `ForwardRPCFrame`
+
+The response flows back through the interceptor, which deserializes it
+using a type-safe `WrapResponse` function (generic over the response
+proto type via `NewRespWrapper[T]`).
+
+### RouteFanOut — handler-managed
 
 ```mermaid
 sequenceDiagram
@@ -81,54 +122,38 @@ sequenceDiagram
     Coord-->>Client: Merged results
 ```
 
-Fan-out RPCs are always streaming. The coordinator merges results from
-all nodes before sending to the client. The merge logic is
-handler-specific (timestamp-ordered for search, union for fields).
+Fan-out RPCs use dedicated streaming `Forward*` handlers (not
+ForwardRPC) because their data flow is fundamentally different — the
+handler manages parallel streams, merge logic, and backpressure.
 
-### RouteLeader
+### RouteLeader — Raft handles it
 
-```mermaid
-sequenceDiagram
-    participant Client
-    participant Follower as Follower Node
-    participant Leader as Leader Node
+The interceptor passes RouteLeader RPCs through without action. The
+handler calls `cfgStore.Apply()` which internally forwards to the Raft
+leader via `ForwardApply` if the current node isn't the leader.
 
-    Client->>Follower: PutVaultConfig(config)
-    Follower->>Follower: Interceptor: RouteLeader
-    Follower->>Follower: Am I leader? No
-    Follower->>Leader: ForwardApply(config)
-    Leader->>Leader: Raft.Apply()
-    Leader-->>Follower: Applied
-    Follower-->>Client: OK
+## Two Muxes
+
+```
+Client-facing mux:  auth interceptor → routing interceptor → handler
+Internal mux:       NoAuthInterceptor → handler  (no routing interceptor)
 ```
 
-Config mutations must go through Raft. If the receiving node is not the
-leader, the interceptor forwards to the current leader automatically.
+The internal mux is used by:
+- **ForwardRPC** handler (cluster gRPC port) — dispatches forwarded requests
+- **Unix socket** listener — local CLI access without auth
+
+The routing interceptor is only on the client-facing mux. This prevents
+forwarding loops: a ForwardRPC dispatch on the receiving node goes
+through the internal mux, which has no routing interceptor, so the
+handler always executes locally.
 
 ## Cluster Communication Channels
 
 All inter-node communication runs over a single gRPC server per node
 (cluster port, mTLS):
 
-```mermaid
-flowchart LR
-    subgraph "Cluster gRPC Port (mTLS)"
-        Raft["Raft Transport"]
-        Admin["Raft Admin"]
-        Health["Leader Health"]
-        CS["ClusterService (23 RPCs)"]
-    end
-
-    subgraph "ClusterService RPCs"
-        Unary["18 Unary RPCs"]
-        Stream["5 Streaming RPCs"]
-    end
-
-    CS --> Unary
-    CS --> Stream
-```
-
-### Unary RPCs (request-response)
+### Legacy per-RPC handlers (cluster/forward.go)
 
 | Category | RPCs |
 |----------|------|
@@ -138,51 +163,43 @@ flowchart LR
 | Ingestion | ForwardRecords |
 | Inspector | ForwardListChunks, ForwardGetIndexes, ForwardGetChunk, ForwardAnalyzeChunk, ForwardValidateVault |
 | Operations | ForwardSealVault, ForwardReindexVault, ForwardExportToVault |
-| Context | ForwardGetContext |
+| Context | ForwardGetContext, ForwardExplain |
 | Membership | NotifyEviction, ForwardRemoveNode, ForwardSetNodeSuffrage |
 | Files | ListPeerManagedFiles |
+| Streaming | ForwardSearch, ForwardFollow, ForwardImportRecords, StreamForwardRecords, PullManagedFile |
 
-### Streaming RPCs
+### Generic handler (cluster/forward_rpc.go)
 
 | RPC | Pattern | Purpose |
 |-----|---------|---------|
-| ForwardSearch | server-streaming | Search results from remote vaults |
-| ForwardFollow | server-streaming | Live tail from remote vaults |
-| ForwardImportRecords | client-streaming | Sealed chunk transfer |
-| StreamForwardRecords | client-streaming | Bulk record ingestion (128 MB max) |
-| PullManagedFile | server-streaming | File transfer between peers |
+| ForwardRPC | bidirectional | Forward any unary RPC to any node |
 
-Streaming RPCs cannot be routed through a generic envelope because
-their data flow is fundamentally different from request-response.
+ForwardRPC coexists with the legacy per-RPC handlers. RouteTargeted
+unary RPCs are routed via the interceptor → ForwardRPC. Streaming RPCs
+and RouteFanOut still use the dedicated per-RPC handlers.
 
-## Interceptor Enforcement
+## Context Helpers
 
-The routing interceptor provides two guarantees:
+Routing intent is transport-agnostic, carried in `context.Context`:
 
-1. **Every RPC must declare a strategy.** Undeclared RPCs are rejected
-   at startup. This prevents the "forgot to add routing" class of bugs.
-
-2. **Targeted RPCs always reach the correct node.** The handler code
-   never checks vault ownership — the interceptor handles it. If the
-   vault is local, the handler runs. If remote, the request is
-   forwarded and the response proxied back. The handler doesn't know
-   the difference.
-
-```mermaid
-flowchart TD
-    Startup["Server startup"] --> Scan["Scan all registered RPCs"]
-    Scan --> Verify{"All have declared strategies?"}
-    Verify -->|Yes| Ready["Server ready"]
-    Verify -->|No| Fail["Refuse to start"]
+```go
+ctx = routing.WithTargetNode(ctx, "data-1")   // explicit targeting
+ctx = routing.WithForwarded(ctx)               // mark as forwarded (loop prevention)
 ```
+
+The interceptor also reads `X-Target-Node` from HTTP request headers,
+so any transport (browser, CLI, unix socket) can target a specific node.
 
 ## What This Does Not Cover
 
 - **Client-side routing optimization.** The infrastructure routes
   correctly regardless of which node the client connects to. If the
   client happens to connect to the wrong node, there is one extra hop.
-  Optimizing client-to-node affinity is a separate concern.
 
 - **Load balancing.** For RouteLocal RPCs, the interceptor could route
-  to the least loaded node using PeerState broadcast stats. This is a
-  future optimization, not a correctness requirement.
+  to the least loaded node. This is a future optimization.
+
+- **Streaming RouteTargeted.** ExportVault is the only streaming
+  RouteTargeted RPC. It uses handler-level routing because the
+  interceptor can't generically receive typed messages from
+  `StreamingHandlerConn`.

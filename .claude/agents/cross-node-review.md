@@ -57,9 +57,11 @@ When reviewing code, check each of these. Report findings as PASS, FAIL, or N/A:
 - [ ] Is backpressure handled across node boundaries?
 
 ### New RPC Endpoints
-- [ ] Is there a corresponding `Forward*` RPC in cluster/forward.go for cross-node calls?
-- [ ] Is the new endpoint registered in the cluster service?
-- [ ] Does single-node mode (nil RemoteSearcher/PeerState) degrade gracefully?
+- [ ] Is the new RPC declared in the routing registry (`internal/server/routing/routes.go`)? The coverage test (`TestAllProceduresDeclared`) enforces this — if not, the test fails.
+- [ ] Is the strategy classification correct? RouteTargeted for vault-scoped ops, RouteFanOut for multi-node merges, RouteLocal for reads, RouteLeader for mutations.
+- [ ] For RouteTargeted unary RPCs: does the request proto have a `vault` field so the interceptor can auto-route?
+- [ ] Is there a corresponding `Forward*` RPC in cluster/forward.go for cross-node calls? (Legacy — new RPCs use ForwardRPC via the routing interceptor.)
+- [ ] Does single-node mode (nil RoutingForwarder/RemoteSearcher/PeerState) degrade gracefully?
 
 ## Common Failure Patterns (Anti-patterns)
 
@@ -68,8 +70,9 @@ These are the bugs that keep recurring. Flag them immediately:
 1. **"Local scheduler only"**: `s.scheduler.GetX(id)` without checking `s.peerJobs` — returns 404 for jobs on other nodes.
 2. **"Local orch only"**: `s.orch.SomeMethod()` without fan-out — only sees local vaults.
 3. **"Summing averages"**: Merging `avg()` across nodes by summing — mathematically wrong. Needs `sum+count` per node, then `totalSum/totalCount`.
-4. **"Missing forward RPC"**: New query type added to server but no `Forward*` handler added to cluster service.
+4. **"Missing route declaration"**: New RPC added to proto but not declared in `routing/routes.go`. The `TestAllProceduresDeclared` coverage test catches this — run it.
 5. **"Config applied locally"**: State change applied directly to in-memory struct instead of going through Raft apply.
+6. **"Wrong strategy"**: RouteLocal for a vault-scoped RPC (should be RouteTargeted) or RouteFanOut for a single-vault read (should be RouteTargeted).
 
 ## Output Format
 

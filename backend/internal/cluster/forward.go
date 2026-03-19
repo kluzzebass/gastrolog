@@ -856,6 +856,12 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			Handler:       streamForwardRecordsHandler,
 			ClientStreams: true,
 		},
+		{
+			StreamName:    "ForwardRPC",
+			Handler:       forwardRPCStreamHandler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
 	},
 }
 

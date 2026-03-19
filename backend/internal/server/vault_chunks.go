@@ -14,8 +14,8 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// ListChunks returns all chunks in a vault. Forwards to the owning node
-// when the vault is remote.
+// ListChunks returns all chunks in a vault.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) ListChunks(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListChunksRequest],
@@ -26,18 +26,6 @@ func (s *VaultServer) ListChunks(
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
-	}
-
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		fwdResp, err := s.remote.ListChunks(ctx, nodeID, &apiv1.ForwardListChunksRequest{VaultId: vaultID.String()})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: fwdResp.GetChunks()}), nil
 	}
 
 	metas, err := s.orch.ListChunkMetas(vaultID)
@@ -57,6 +45,7 @@ func (s *VaultServer) ListChunks(
 }
 
 // GetChunk returns details for a specific chunk.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) GetChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetChunkRequest],
@@ -74,21 +63,6 @@ func (s *VaultServer) GetChunk(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		fwdResp, err := s.remote.GetChunk(ctx, nodeID, &apiv1.ForwardGetChunkRequest{
-			VaultId: vaultID.String(),
-			ChunkId: chunkID.String(),
-		})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.GetChunkResponse{Chunk: fwdResp.GetChunk()}), nil
-	}
-
 	meta, err := s.orch.GetChunkMeta(vaultID, chunkID)
 	if err != nil {
 		return nil, mapVaultError(err)
@@ -99,8 +73,8 @@ func (s *VaultServer) GetChunk(
 	}), nil
 }
 
-// GetIndexes returns index status for a chunk. Forwards to the owning node
-// when the vault is remote.
+// GetIndexes returns index status for a chunk.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) GetIndexes(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIndexesRequest],
@@ -116,24 +90,6 @@ func (s *VaultServer) GetIndexes(
 	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		fwdResp, err := s.remote.GetIndexes(ctx, nodeID, &apiv1.ForwardGetIndexesRequest{
-			VaultId: vaultID.String(),
-			ChunkId: chunkID.String(),
-		})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.GetIndexesResponse{
-			Sealed:  fwdResp.GetSealed(),
-			Indexes: fwdResp.GetIndexes(),
-		}), nil
 	}
 
 	report, err := s.orch.ChunkIndexInfos(vaultID, chunkID)
@@ -159,6 +115,7 @@ func (s *VaultServer) GetIndexes(
 }
 
 // AnalyzeChunk returns detailed index analysis for a chunk.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) AnalyzeChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.AnalyzeChunkRequest],
@@ -169,21 +126,6 @@ func (s *VaultServer) AnalyzeChunk(
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
-	}
-
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		fwdResp, err := s.remote.AnalyzeChunk(ctx, nodeID, &apiv1.ForwardAnalyzeChunkRequest{
-			VaultId: vaultID.String(),
-			ChunkId: req.Msg.ChunkId,
-		})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.AnalyzeChunkResponse{Analyses: fwdResp.GetAnalyses()}), nil
 	}
 
 	a, err := s.orch.NewAnalyzer(vaultID)
@@ -222,8 +164,8 @@ func (s *VaultServer) AnalyzeChunk(
 	return connect.NewResponse(resp), nil
 }
 
-// ValidateVault checks chunk and index integrity for a vault. Forwards to the
-// owning node when the vault is remote.
+// ValidateVault checks chunk and index integrity for a vault.
+// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
 func (s *VaultServer) ValidateVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ValidateVaultRequest],
@@ -234,21 +176,6 @@ func (s *VaultServer) ValidateVault(
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
-	}
-
-	// Forward to remote node if the vault isn't local.
-	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
-		if s.remote == nil {
-			return nil, connect.NewError(connect.CodeUnavailable, errors.New("remote vault forwarding not configured"))
-		}
-		fwdResp, err := s.remote.ValidateVault(ctx, nodeID, &apiv1.ForwardValidateVaultRequest{VaultId: vaultID.String()})
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, err))
-		}
-		return connect.NewResponse(&apiv1.ValidateVaultResponse{
-			Valid:  fwdResp.GetValid(),
-			Chunks: fwdResp.GetChunks(),
-		}), nil
 	}
 
 	metas, err := s.orch.ListChunkMetas(vaultID)
