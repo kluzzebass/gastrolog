@@ -1,6 +1,6 @@
 import { useReducer } from "react";
 import { formatDateOnly } from "../../utils/temporal";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import {
   useListUsers,
   useCreateUser,
@@ -93,7 +93,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
   const { data: settings } = useSettings();
   const { addToast } = useToast();
 
-  const { isExpanded, toggle: toggleCard } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addUserFormReducer, addUserFormInitial);
   const { adding, newUsername, newPassword, newRole, showNewPw } = addForm;

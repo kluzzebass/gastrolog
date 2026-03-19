@@ -1,5 +1,5 @@
 import { useState, useReducer } from "react";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import {
   useConfig,
   usePutVault,
@@ -61,7 +61,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const putVault = usePutVault();
   const { addToast } = useToast();
 
-  const { isExpanded, toggle: toggleCard, setExpanded } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
   const generateName = useGenerateName();
 
   const [addForm, dispatchAdd] = useReducer(addFormReducer, addFormInitial);
@@ -81,7 +81,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     setConsumedExpandTarget(expandTarget);
     const match = configVaults.find((s) => (s.name || s.id) === expandTarget);
     if (match) {
-      setExpanded(match.id);
+      setExpandedCards((prev) => ({ ...prev, [match.id]: true }));
     }
     onExpandTargetConsumed?.();
   }

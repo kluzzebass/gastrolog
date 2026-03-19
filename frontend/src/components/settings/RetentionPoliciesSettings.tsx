@@ -1,6 +1,6 @@
 import { useState, useReducer } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import {
   useConfig,
   usePutRetentionPolicy,
@@ -87,7 +87,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const generateName = useGenerateName();
   const { addToast } = useToast();
 
-  const { isExpanded, toggle: toggleCard } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addRetentionFormReducer, addRetentionFormInitial);
   const { adding, newName, newMaxAge, newMaxBytes, newMaxChunks } = addForm;

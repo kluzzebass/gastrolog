@@ -220,8 +220,8 @@ export function QueryBar({
           /* ── Collapsed: single-line preview ── */
           <div
             className={`flex-1 flex items-center gap-2 min-w-0 cursor-pointer rounded border px-2.5 py-2 font-mono text-sm ${c(
-              "bg-ink-well border-ink-border text-text-secondary hover:border-copper-dim",
-              "bg-light-input border-light-border text-light-text-secondary hover:border-copper",
+              "bg-ink-well border-ink-border text-text-normal hover:border-copper-dim",
+              "bg-light-input border-light-border text-light-text-normal hover:border-copper",
             )}`}
             onMouseDown={expand}
             role="button"

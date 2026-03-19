@@ -1,5 +1,5 @@
 import { useState, useReducer } from "react";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import {
   useConfig,
   usePutRotationPolicy,
@@ -139,7 +139,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
   const generateName = useGenerateName();
   const { addToast } = useToast();
 
-  const { isExpanded, toggle: toggleCard } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addRotationFormReducer, addRotationFormInitial);
   const { adding, newName, newMaxBytes, newMaxRecords, newMaxAge, newCron } = addForm;

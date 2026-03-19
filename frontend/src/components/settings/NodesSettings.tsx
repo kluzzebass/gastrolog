@@ -282,7 +282,7 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
       "bg-ink-well/50 border-ink-border",
       "bg-light-well/50 border-light-border",
     )}`}>
-      <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-primary", "text-light-text-primary")}`}>
+      <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-bright", "text-light-text-bright")}`}>
         Join Cluster
       </h3>
       <p className={`text-[0.75em] mb-3 ${c("text-text-ghost", "text-light-text-ghost")}`}>
@@ -348,7 +348,7 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
       "bg-ink-well/50 border-ink-border",
       "bg-light-well/50 border-light-border",
     )}`}>
-      <h3 className={`text-[0.85em] font-semibold mb-3 ${c("text-text-primary", "text-light-text-primary")}`}>
+      <h3 className={`text-[0.85em] font-semibold mb-3 ${c("text-text-bright", "text-light-text-bright")}`}>
         Cluster Join Info
       </h3>
       <div className="flex flex-col gap-2.5">
@@ -357,7 +357,7 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
             Cluster Address
           </span>
           <div className="flex items-center gap-1.5">
-            <code className={`text-[0.8em] font-mono ${c("text-text-secondary", "text-light-text-secondary")}`}>
+            <code className={`text-[0.8em] font-mono ${c("text-text-normal", "text-light-text-normal")}`}>
               {clusterAddress || "—"}
             </code>
             {clusterAddress && <CopyButton text={clusterAddress} dark={dark} />}
@@ -368,7 +368,7 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
             Join Token
           </span>
           <div className="flex items-center gap-1.5">
-            <code className={`text-[0.8em] font-mono break-all ${c("text-text-secondary", "text-light-text-secondary")}`}>
+            <code className={`text-[0.8em] font-mono break-all ${c("text-text-normal", "text-light-text-normal")}`}>
               {displayToken}
             </code>
             <button

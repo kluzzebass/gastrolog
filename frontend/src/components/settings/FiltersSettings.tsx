@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutFilter, useDeleteFilter, useGenerateName } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -61,7 +61,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
 
   const generateName = useGenerateName();
 
-  const { isExpanded, toggle } = useExpandedCard();
+  const { isExpanded, toggle } = useExpandedCards();
   const [adding, setAdding] = useState(false);
 
   const [newName, setNewName] = useState("");

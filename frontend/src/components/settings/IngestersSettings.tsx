@@ -1,5 +1,5 @@
 import { useState, useReducer } from "react";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutIngester, useDeleteIngester, useGenerateName, useIngesterDefaults, useCheckListenAddrs } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -87,7 +87,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const allDefaults = ingesterDefaults ?? {};
   const { addToast } = useToast();
 
-  const { isExpanded, toggle: toggleCard, setExpanded } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
   const { adding, newName, newType, newParams, newNodeId } = addForm;
@@ -102,7 +102,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
     setConsumedExpandTarget(expandTarget);
     const match = configIngesters.find((i) => (i.name || i.id) === expandTarget);
     if (match) {
-      setExpanded(match.id);
+      setExpandedCards((prev) => ({ ...prev, [match.id]: true }));
     }
     onExpandTargetConsumed?.();
   }

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { formatDateTimestamp } from "../../../utils/temporal";
 import { usePutSettings, MAXMIND_KEEP } from "../../../api/hooks/useSettings";
-import { useExpandedCard } from "../../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { FormField, TextInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
 import { Button } from "../Buttons";
@@ -25,7 +25,7 @@ export function MaxMindCard({
 }>) {
   const c = useThemeClass(dark);
   const putConfig = usePutSettings();
-  const { isExpanded, toggle } = useExpandedCard();
+  const { isExpanded, toggle } = useExpandedCards();
 
   const [autoDownload, setAutoDownload] = useState(savedMaxmind?.autoDownload ?? false);
   const [accountId, setAccountId] = useState("");

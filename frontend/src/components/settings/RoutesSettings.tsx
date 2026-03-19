@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { useExpandedCard } from "../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutRoute, useDeleteRoute, useGenerateName } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -28,7 +28,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   const { addToast } = useToast();
   const generateName = useGenerateName();
 
-  const { isExpanded, toggle: toggleCard } = useExpandedCard();
+  const { isExpanded, toggle: toggleCard } = useExpandedCards();
   const [adding, setAdding] = useState(false);
 
   const [newName, setNewName] = useState("");
@@ -174,6 +174,12 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               dark={dark}
             />
           </FormField>
+          <Checkbox
+            checked={newEnabled}
+            onChange={setNewEnabled}
+            label="Enabled"
+            dark={dark}
+          />
           <FormField label="Filter" dark={dark}>
             <SelectInput
               value={newFilterId}
@@ -198,12 +204,6 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             destinations={newDestinations}
             onChange={setNewDestinations}
             vaults={vaults}
-            dark={dark}
-          />
-          <Checkbox
-            checked={newEnabled}
-            onChange={setNewEnabled}
-            label="Enabled"
             dark={dark}
           />
           <Checkbox
@@ -256,6 +256,12 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                   dark={dark}
                 />
               </FormField>
+              <Checkbox
+                checked={edit.enabled}
+                onChange={(v) => setEdit(id, { enabled: v })}
+                label="Enabled"
+                dark={dark}
+              />
               <FormField label="Filter" dark={dark}>
                 <SelectInput
                   value={edit.filterId}
@@ -283,16 +289,10 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
                 dark={dark}
               />
               <Checkbox
-                checked={edit.enabled}
-                onChange={(v) => setEdit(id, { enabled: v })}
-                label="Enabled"
-                dark={dark}
-              />
-              <Checkbox
                 checked={edit.ejectOnly}
                 onChange={(v) => setEdit(id, { ejectOnly: v })}
                 label="Eject Only"
-                    dark={dark}
+                dark={dark}
               />
             </div>
           </SettingsCard>

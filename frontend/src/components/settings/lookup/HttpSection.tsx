@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, useTestHTTPLookup } from "../../../api/hooks/useSettings";
-import { useExpandedCard } from "../../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { FormField, TextInput, ParamsEditor } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
@@ -99,7 +99,7 @@ export function HttpCards({
   const c = useThemeClass(dark);
   const putConfig = usePutSettings();
   const testLookup = useTestHTTPLookup();
-  const { isExpanded, toggle } = useExpandedCard();
+  const { isExpanded, toggle } = useExpandedCards();
   const [justSaved, setJustSaved] = useState(false);
   const [testValues, setTestValues] = useState<Record<number, Record<string, string>>>({});
   const [testResults, setTestResults] = useState<

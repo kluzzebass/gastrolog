@@ -49,10 +49,10 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
   const scheduled = nodeJobs.filter((j) => j.kind === JobKind.SCHEDULED);
 
-  // Expanded states per section.
-  const [expandedVault, setExpandedVault] = useState<string | null>(null);
-  const [expandedIngester, setExpandedIngester] = useState<string | null>(null);
-  const [expandedJob, setExpandedJob] = useState<string | null>(null);
+  // Expanded states per section (multi-expand).
+  const [expandedVaults, setExpandedVaults] = useState<Record<string, boolean>>({});
+  const [expandedIngesters, setExpandedIngesters] = useState<Record<string, boolean>>({});
+  const [expandedJobs, setExpandedJobs] = useState<Record<string, boolean>>({});
 
   return (
     <div className="flex flex-col gap-6">
@@ -78,8 +78,8 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
                   vault={vault}
                   cloudProvider={cloudProviders.get(vault.id)}
                   dark={dark}
-                  expanded={expandedVault === vault.id}
-                  onToggle={() => setExpandedVault(expandedVault === vault.id ? null : vault.id)}
+                  expanded={!!expandedVaults[vault.id]}
+                  onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vault.id]: !prev[vault.id] }))}
                   showNodeBadge={false}
                   onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vault.id) : undefined}
                 />
@@ -99,8 +99,8 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
                 key={ing.id}
                 ingester={ing}
                 dark={dark}
-                expanded={expandedIngester === ing.id}
-                onToggle={() => setExpandedIngester(expandedIngester === ing.id ? null : ing.id)}
+                expanded={!!expandedIngesters[ing.id]}
+                onToggle={() => setExpandedIngesters((prev) => ({ ...prev, [ing.id]: !prev[ing.id] }))}
                 showNodeBadge={false}
                 onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || ing.id) : undefined}
               />
@@ -129,8 +129,8 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
                 key={job.id}
                 job={job}
                 dark={dark}
-                expanded={expandedJob === job.id}
-                onToggle={() => setExpandedJob(expandedJob === job.id ? null : job.id)}
+                expanded={!!expandedJobs[job.id]}
+                onToggle={() => setExpandedJobs((prev) => ({ ...prev, [job.id]: !prev[job.id] }))}
                 showNodeBadge={false}
               />
             ))}

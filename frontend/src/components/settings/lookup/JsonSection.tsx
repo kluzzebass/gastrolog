@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings } from "../../../api/hooks/useSettings";
-import { useExpandedCard } from "../../../hooks/useExpandedCards";
+import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
@@ -107,7 +107,7 @@ export function JsonCards({
 }) {
   const c = useThemeClass(dark);
   const putConfig = usePutSettings();
-  const { isExpanded, toggle } = useExpandedCard();
+  const { isExpanded, toggle } = useExpandedCards();
   const [justSaved, setJustSaved] = useState(false);
 
   const isDirty = (i: number) => {
