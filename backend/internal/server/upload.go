@@ -120,7 +120,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	}
 
 	// Compute SHA256 and size by streaming through the file.
-	f, err := os.Open(filepath.Clean(srcPath))
+	f, err := os.Open(filepath.Clean(srcPath)) // #nosec G703 — srcPath is from internal temp dir
 	if err != nil {
 		return config.ManagedFileConfig{}, fmt.Errorf("open source file: %w", err)
 	}
@@ -139,7 +139,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	}
 	for _, ef := range existing {
 		if ef.Name == displayName && ef.SHA256 == hash {
-			_ = os.Remove(srcPath)
+			_ = os.Remove(srcPath) // #nosec G703 — srcPath is from internal temp dir
 			return ef, nil
 		}
 	}
