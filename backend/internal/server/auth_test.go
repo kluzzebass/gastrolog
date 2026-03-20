@@ -31,6 +31,33 @@ func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *con
 	return client, cfgStore
 }
 
+// alwaysValidTokenValidator satisfies auth.TokenValidator for tests.
+type alwaysValidTokenValidator struct{}
+
+func (alwaysValidTokenValidator) IsTokenValid(context.Context, string, time.Time) (bool, error) {
+	return true, nil
+}
+
+// newAuthTestClientWithInterceptor returns a client whose requests pass through
+// the auth interceptor, allowing Logout (which reads JWT claims) to work.
+func newAuthTestClientWithInterceptor(t *testing.T) (gastrologv1connect.AuthServiceClient, *configmem.Store, *auth.TokenService) {
+	t.Helper()
+
+	cfgStore := configmem.NewStore()
+	tokens := auth.NewTokenService([]byte("test-secret-32-bytes-long-key!!"), 7*24*time.Hour)
+	authServer := server.NewAuthServer(cfgStore, tokens, nil, false)
+	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, alwaysValidTokenValidator{})
+
+	_, handler := gastrologv1connect.NewAuthServiceHandler(authServer,
+		connect.WithInterceptors(interceptor),
+	)
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+
+	client := gastrologv1connect.NewAuthServiceClient(http.DefaultClient, ts.URL)
+	return client, cfgStore, tokens
+}
+
 func TestGetAuthStatus_NeedsSetup(t *testing.T) {
 	t.Parallel()
 	client, _ := newAuthTestClient(t)
@@ -270,5 +297,71 @@ func TestChangePassword_WrongOldPassword(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeUnauthenticated {
 		t.Errorf("expected Unauthenticated, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestLogout_RevokesOnlyCurrentSession(t *testing.T) {
+	t.Parallel()
+	client, cfgStore, _ := newAuthTestClientWithInterceptor(t)
+	ctx := context.Background()
+
+	// Register a user.
+	_, err := client.Register(ctx, connect.NewRequest(&apiv1.RegisterRequest{
+		Username: "logout-test",
+		Password: "password123",
+	}))
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	// Login from "session A".
+	respA, err := client.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{
+		Username: "logout-test",
+		Password: "password123",
+	}))
+	if err != nil {
+		t.Fatalf("Login A: %v", err)
+	}
+	tokenA := respA.Msg.Token.Token
+	refreshA := respA.Msg.RefreshToken
+
+	// Login from "session B".
+	respB, err := client.Login(ctx, connect.NewRequest(&apiv1.LoginRequest{
+		Username: "logout-test",
+		Password: "password123",
+	}))
+	if err != nil {
+		t.Fatalf("Login B: %v", err)
+	}
+	refreshB := respB.Msg.RefreshToken
+
+	// Verify both refresh tokens exist in the store.
+	hashA := auth.HashRefreshToken(refreshA)
+	hashB := auth.HashRefreshToken(refreshB)
+	if tok, _ := cfgStore.GetRefreshTokenByHash(ctx, hashA); tok == nil {
+		t.Fatal("expected refresh token A to exist before logout")
+	}
+	if tok, _ := cfgStore.GetRefreshTokenByHash(ctx, hashB); tok == nil {
+		t.Fatal("expected refresh token B to exist before logout")
+	}
+
+	// Logout session A — sending its refresh token.
+	logoutReq := connect.NewRequest(&apiv1.LogoutRequest{
+		RefreshToken: refreshA,
+	})
+	logoutReq.Header().Set("Authorization", "Bearer "+tokenA)
+	_, err = client.Logout(ctx, logoutReq)
+	if err != nil {
+		t.Fatalf("Logout: %v", err)
+	}
+
+	// Session A's refresh token should be gone.
+	if tok, _ := cfgStore.GetRefreshTokenByHash(ctx, hashA); tok != nil {
+		t.Error("expected refresh token A to be deleted after logout")
+	}
+
+	// Session B's refresh token should still exist.
+	if tok, _ := cfgStore.GetRefreshTokenByHash(ctx, hashB); tok == nil {
+		t.Error("expected refresh token B to survive logout of session A")
 	}
 }

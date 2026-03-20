@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
-import { authClient, getToken, setToken, setRefreshToken } from "../client";
+import { authClient, getToken, getRefreshToken, setToken, setRefreshToken } from "../client";
 
 export function useAuthStatus() {
   return useQuery({
@@ -91,7 +91,7 @@ export function useLogout() {
   const navigate = useNavigate();
   return useCallback(async () => {
     try {
-      await authClient.logout({});
+      await authClient.logout({ refreshToken: getRefreshToken() ?? "" });
     } catch {
       // Best-effort: clear local state even if the server call fails
       // (e.g. token already expired).

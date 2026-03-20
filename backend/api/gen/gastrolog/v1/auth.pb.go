@@ -1183,7 +1183,10 @@ func (*DeleteUserResponse) Descriptor() ([]byte, []int) {
 }
 
 type LogoutRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The refresh token to revoke. Only this token is deleted — other
+	// sessions for the same user are unaffected.
+	RefreshToken  string `protobuf:"bytes,1,opt,name=refresh_token,json=refreshToken,proto3" json:"refresh_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1216,6 +1219,13 @@ func (x *LogoutRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use LogoutRequest.ProtoReflect.Descriptor instead.
 func (*LogoutRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *LogoutRequest) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
 }
 
 type LogoutResponse struct {
@@ -1323,8 +1333,9 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"#\n" +
 	"\x11DeleteUserRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
-	"\x12DeleteUserResponse\"\x0f\n" +
-	"\rLogoutRequest\"\x10\n" +
+	"\x12DeleteUserResponse\"4\n" +
+	"\rLogoutRequest\x12#\n" +
+	"\rrefresh_token\x18\x01 \x01(\tR\frefreshToken\"\x10\n" +
 	"\x0eLogoutResponse2\xe5\a\n" +
 	"\vAuthService\x12I\n" +
 	"\bRegister\x12\x1d.gastrolog.v1.RegisterRequest\x1a\x1e.gastrolog.v1.RegisterResponse\x12@\n" +

@@ -672,17 +672,18 @@ func (s *AuthServer) Logout(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("no claims in context"))
 	}
 
-	userID, connErr := parseUUID(claims.UserID)
-	if connErr != nil {
-		return nil, connErr
-	}
-
-	now := time.Now().UTC()
-	if err := s.cfgStore.InvalidateTokens(ctx, userID, now); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("invalidate tokens: %w", err))
-	}
-	if err := s.cfgStore.DeleteUserRefreshTokens(ctx, userID); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh tokens: %w", err))
+	// Delete only the refresh token the client sent — other sessions are unaffected.
+	if rt := req.Msg.RefreshToken; rt != "" {
+		hash := auth.HashRefreshToken(rt)
+		stored, err := s.cfgStore.GetRefreshTokenByHash(ctx, hash)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("lookup refresh token: %w", err))
+		}
+		if stored != nil {
+			if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("delete refresh token: %w", err))
+			}
+		}
 	}
 
 	return connect.NewResponse(&apiv1.LogoutResponse{}), nil

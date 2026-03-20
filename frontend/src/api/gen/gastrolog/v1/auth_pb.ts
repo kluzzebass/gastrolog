@@ -988,6 +988,14 @@ export class DeleteUserResponse extends Message<DeleteUserResponse> {
  * @generated from message gastrolog.v1.LogoutRequest
  */
 export class LogoutRequest extends Message<LogoutRequest> {
+  /**
+   * The refresh token to revoke. Only this token is deleted — other
+   * sessions for the same user are unaffected.
+   *
+   * @generated from field: string refresh_token = 1;
+   */
+  refreshToken = "";
+
   constructor(data?: PartialMessage<LogoutRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -996,6 +1004,7 @@ export class LogoutRequest extends Message<LogoutRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.LogoutRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "refresh_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LogoutRequest {

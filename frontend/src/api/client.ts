@@ -60,7 +60,7 @@ export function setToken(token: string | null) {
   }
 }
 
-function getRefreshToken(): string | null {
+export function getRefreshToken(): string | null {
   return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 

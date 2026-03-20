@@ -149,6 +149,10 @@ message DeleteUserRequest {
 
 message DeleteUserResponse {}
 
-message LogoutRequest {}
+message LogoutRequest {
+  // The refresh token to revoke. Only this token is deleted — other
+  // sessions for the same user are unaffected.
+  string refresh_token = 1;
+}
 
 message LogoutResponse {}
