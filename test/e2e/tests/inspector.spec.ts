@@ -35,7 +35,9 @@ test.describe.serial("Inspector", () => {
     await vaultsBtn.click();
 
     // The right panel should show vault details (heading + at least one vault card).
-    await expect(dialog.getByText(/memory|file/i).first()).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText(/memory|file/i).first()).toBeVisible({
+      timeout: 10_000,
+    });
   });
 
   test("shows ingesters in entities view", async ({ page }) => {
@@ -82,7 +84,9 @@ test.describe.serial("Inspector", () => {
 
       await entitiesBtn.click();
       // Entity tabs should appear.
-      await expect(dialog.getByRole("button", { name: "Vaults" })).toBeVisible();
+      await expect(
+        dialog.getByRole("button", { name: "Vaults" }),
+      ).toBeVisible();
     }
   });
 
@@ -90,5 +94,103 @@ test.describe.serial("Inspector", () => {
     const dialog = await openInspector(page);
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
+  });
+
+  // ── Jobs tab (gastrolog-5iji6) ─────────────────────────────────────
+
+  test("shows Jobs tab in entities view", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+
+    const jobsBtn = dialog.getByRole("button", { name: "Jobs" });
+    await expect(jobsBtn).toBeVisible();
+    await jobsBtn.click();
+
+    // Jobs heading should appear.
+    await expect(dialog.getByText("Jobs").first()).toBeVisible();
+  });
+
+  test("Jobs tab shows scheduled jobs or empty state", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+    await dialog.getByRole("button", { name: "Jobs" }).click();
+
+    // The cluster runs scheduled jobs (rotation, retention, indexing).
+    // Either we see job entries or a "No active or scheduled jobs" message.
+    const hasJobs = await dialog
+      .locator("table")
+      .isVisible({ timeout: 10_000 })
+      .catch(() => false);
+
+    if (!hasJobs) {
+      await expect(dialog.getByText(/no.*jobs/i).first()).toBeVisible();
+    }
+  });
+
+  // ── Routes tab (gastrolog-5iji6) ───────────────────────────────────
+
+  test("shows Routes tab in entities view", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+
+    const routesBtn = dialog.getByRole("button", { name: "Routes" });
+    await expect(routesBtn).toBeVisible();
+    await routesBtn.click();
+
+    // Route stats should show the default route.
+    await expect(dialog.getByText("default").first()).toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
+  test("route stats shows throughput metrics", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+    await dialog.getByRole("button", { name: "Routes" }).click();
+
+    // Route stats display should show numeric throughput data.
+    // The "default" route should have processed records from chatterbox.
+    await expect(dialog.getByText("default").first()).toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Look for record/byte count indicators (numeric values in the stats view).
+    await expect(dialog.getByText(/records|bytes|rec\/s/i).first()).toBeVisible(
+      {
+        timeout: 10_000,
+      },
+    );
+  });
+
+  // ── System tab ─────────────────────────────────────────────────────
+
+  test("shows System tab in entities view", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+
+    const systemBtn = dialog.getByRole("button", { name: "System" });
+    await expect(systemBtn).toBeVisible();
+    await systemBtn.click();
+  });
+
+  // ── Node detail shows jobs (gastrolog-5iji6) ───────────────────────
+
+  test("node detail shows jobs section", async ({ page }) => {
+    const dialog = await openInspector(page);
+
+    const nodesBtn = dialog.getByRole("button", { name: "Nodes" });
+    await expect(nodesBtn).toBeVisible({ timeout: 10_000 });
+    await nodesBtn.click();
+
+    // Click node-1 to see its detail.
+    await dialog.getByText("node-1").click();
+    await expect(dialog.getByText("Uptime")).toBeVisible({ timeout: 10_000 });
+
+    // The node detail pane shows a jobs section (scheduled + tasks).
+    // Either scheduled jobs table or "No scheduled jobs" message.
+    const hasScheduled = await dialog
+      .getByText(/scheduled/i)
+      .first()
+      .isVisible({ timeout: 5_000 })
+      .catch(() => false);
+
+    if (!hasScheduled) {
+      await expect(dialog.getByText(/no.*jobs/i).first()).toBeVisible();
+    }
   });
 });

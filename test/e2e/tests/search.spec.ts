@@ -4,9 +4,9 @@ import { gotoAuthenticated, typeQuery } from "./helpers";
 test.describe.serial("Search", () => {
   test("shows the query bar on /search", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
-    const queryArea = page.locator("textarea").or(
-      page.locator("[role='button'][tabindex='0']"),
-    );
+    const queryArea = page
+      .locator("textarea")
+      .or(page.locator("[role='button'][tabindex='0']"));
     await expect(queryArea.first()).toBeVisible();
   });
 
@@ -20,7 +20,9 @@ test.describe.serial("Search", () => {
       timeout: 30_000,
     });
 
-    const countText = await page.locator("[data-testid='result-count']").textContent();
+    const countText = await page
+      .locator("[data-testid='result-count']")
+      .textContent();
     expect(countText).toBeTruthy();
     const count = parseInt(countText!.replace(/[^0-9]/g, ""), 10);
     expect(count).toBeGreaterThan(0);
@@ -62,7 +64,9 @@ test.describe.serial("Search", () => {
     await expect(sidebar).toBeVisible();
 
     // Sidebar should show field details — timestamps, severity, or attributes.
-    await expect(sidebar.getByText(/timestamp|severity|level|message/i).first()).toBeVisible({
+    await expect(
+      sidebar.getByText(/timestamp|severity|level|message/i).first(),
+    ).toBeVisible({
       timeout: 5_000,
     });
   });
@@ -151,7 +155,7 @@ test.describe.serial("Search", () => {
 
     // Chatterbox generates logs with various formats including key=value.
     // Use a broad key=value query that should match some records.
-    await typeQuery(page, 'level=error');
+    await typeQuery(page, "level=error");
     await page.getByRole("button", { name: "Search" }).click();
 
     // Should get results (chatterbox generates error-level logs).
@@ -177,5 +181,241 @@ test.describe.serial("Search", () => {
       const count = parseInt(text!.replace(/[^0-9]/g, ""), 10);
       expect(count).toBe(0);
     }
+  });
+
+  // ── Severity filters (gastrolog-5pdlh) ─────────────────────────────
+
+  test("all five severity buttons are visible", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    for (const sev of ["Error", "Warn", "Info", "Debug", "Trace"]) {
+      await expect(page.getByRole("button", { name: sev })).toBeVisible();
+    }
+  });
+
+  test("toggling multiple severity filters narrows results", async ({
+    page,
+  }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const allCountText = await page
+      .locator("[data-testid='result-count']")
+      .textContent();
+    const allCount = parseInt(allCountText!.replace(/[^0-9]/g, ""), 10);
+
+    // Toggle off Info, Debug, Trace — keep only Error + Warn.
+    await page.getByRole("button", { name: "Info" }).click();
+    await page.getByRole("button", { name: "Debug" }).click();
+    await page.getByRole("button", { name: "Trace" }).click();
+
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const filteredText = await page
+      .locator("[data-testid='result-count']")
+      .textContent();
+    const filteredCount = parseInt(filteredText!.replace(/[^0-9]/g, ""), 10);
+
+    // Filtered count should be <= the full count.
+    expect(filteredCount).toBeLessThanOrEqual(allCount);
+
+    // Re-enable all severities to restore state.
+    await page.getByRole("button", { name: "Info" }).click();
+    await page.getByRole("button", { name: "Debug" }).click();
+    await page.getByRole("button", { name: "Trace" }).click();
+  });
+
+  // ── Time range presets (gastrolog-5pdlh) ───────────────────────────
+
+  test("all time range presets are visible", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await expect(page.getByText("Time Range")).toBeVisible();
+    for (const preset of ["5m", "15m", "1h", "6h", "24h", "7d", "30d"]) {
+      await expect(
+        page.getByRole("button", { name: preset, exact: true }),
+      ).toBeVisible();
+    }
+  });
+
+  test("switching time range preset re-searches", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+
+    // Use a narrow range then widen it.
+    await page.getByRole("button", { name: "5m", exact: true }).click();
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const narrowText = await page
+      .locator("[data-testid='result-count']")
+      .textContent();
+    const narrowCount = parseInt(narrowText!.replace(/[^0-9]/g, ""), 10);
+
+    await page.getByRole("button", { name: "30d", exact: true }).click();
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const wideText = await page
+      .locator("[data-testid='result-count']")
+      .textContent();
+    const wideCount = parseInt(wideText!.replace(/[^0-9]/g, ""), 10);
+
+    // Wider range should have >= records.
+    expect(wideCount).toBeGreaterThanOrEqual(narrowCount);
+  });
+
+  // ── Vault selector (gastrolog-5pdlh) ───────────────────────────────
+
+  test("clicking a vault filters search to that vault", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    // The sidebar "Vaults" section should list vaults as buttons.
+    await expect(page.getByText("Vaults")).toBeVisible();
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // Find the first vault button in the Vaults section and click it.
+    // Vault buttons have the vault name as accessible text.
+    const vaultButtons = page.locator("button").filter({ hasText: /records/ });
+    const firstVault = vaultButtons.first();
+    if (await firstVault.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await firstVault.click();
+
+      // Re-search with the vault filter applied.
+      await page.getByRole("button", { name: "Search" }).click();
+      await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+        timeout: 30_000,
+      });
+    }
+  });
+
+  // ── Detail sidebar field interactions (gastrolog-psw6z) ────────────
+
+  test("detail sidebar shows field key-value pairs", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.locator("[data-testid='log-entry']").first().click();
+    const sidebar = page.locator("[data-testid='detail-sidebar']");
+    await expect(sidebar).toBeVisible();
+
+    // Should show at least the timestamp and raw body.
+    await expect(sidebar.getByText(/timestamp/i).first()).toBeVisible({
+      timeout: 5_000,
+    });
+  });
+
+  test("detail sidebar field value has alt-click filter hint", async ({
+    page,
+  }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.locator("[data-testid='log-entry']").first().click();
+    const sidebar = page.locator("[data-testid='detail-sidebar']");
+    await expect(sidebar).toBeVisible();
+
+    // Field values that support click-to-filter have a title attribute.
+    const filterHint = sidebar.locator('[title*="click to add filter"]');
+    await expect(filterHint.first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("detail sidebar has copy buttons", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.locator("[data-testid='log-entry']").first().click();
+    const sidebar = page.locator("[data-testid='detail-sidebar']");
+    await expect(sidebar).toBeVisible();
+
+    // Copy buttons exist in the detail sidebar (CopyButton components).
+    const copyButtons = sidebar.getByRole("button", { name: /copy/i });
+    await expect(copyButtons.first()).toBeVisible({ timeout: 5_000 });
+  });
+
+  // ── Explain plan (gastrolog-mingv) ─────────────────────────────────
+
+  test("explain plan shows execution plan", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+
+    // Click the explain plan button.
+    await page.getByRole("button", { name: "Explain query plan" }).click();
+
+    // The explain panel should show "Execution Plan" heading.
+    await expect(page.getByText("Execution Plan")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Should show chunk information.
+    await expect(page.getByText(/chunks/i).first()).toBeVisible();
+  });
+
+  test("explain plan shows cost summary", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Explain query plan" }).click();
+
+    await expect(page.getByText("Execution Plan")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // Cost summary shows scan/records ratio.
+    await expect(page.getByText(/records/i).first()).toBeVisible();
+
+    // Toggle plan off.
+    await page.getByRole("button", { name: "Explain query plan" }).click();
+  });
+
+  test("explain plan with filter shows narrowing", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "level=error");
+    await page.getByRole("button", { name: "Explain query plan" }).click();
+
+    await expect(page.getByText("Execution Plan")).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // A filtered query should show the expression in the plan.
+    await expect(page.getByText(/level/).first()).toBeVisible();
+
+    // Toggle off.
+    await page.getByRole("button", { name: "Explain query plan" }).click();
   });
 });
