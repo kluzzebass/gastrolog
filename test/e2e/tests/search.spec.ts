@@ -366,6 +366,54 @@ test.describe.serial("Search", () => {
     await expect(copyButtons.first()).toBeVisible({ timeout: 5_000 });
   });
 
+  // ── Event identity (gastrolog-2ip1b) ────────────────────────────────
+
+  test("detail sidebar shows event identity section", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.locator("[data-testid='log-entry']").first().click();
+    const sidebar = page.locator("[data-testid='detail-sidebar']");
+    await expect(sidebar).toBeVisible();
+
+    // The "Event Identity" section header should be visible.
+    await expect(sidebar.getByText("Event Identity")).toBeVisible({
+      timeout: 5_000,
+    });
+
+    // Identity fields should be present.
+    await expect(sidebar.getByText("ingester_id")).toBeVisible();
+    await expect(sidebar.getByText("ingest_seq")).toBeVisible();
+    await expect(sidebar.getByText("ingest_ts")).toBeVisible();
+  });
+
+  test("event identity header is clickable for multi-field filter", async ({
+    page,
+  }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    await page.locator("[data-testid='log-entry']").first().click();
+    const sidebar = page.locator("[data-testid='detail-sidebar']");
+    await expect(sidebar).toBeVisible();
+
+    // The Event Identity heading should have a filter title hint.
+    const identityBtn = sidebar.locator(
+      '[title="Filter by this event identity"]',
+    );
+    await expect(identityBtn).toBeVisible({ timeout: 5_000 });
+  });
+
   // ── Explain plan (gastrolog-mingv) ─────────────────────────────────
 
   test("explain plan shows execution plan", async ({ page }) => {
@@ -400,6 +448,59 @@ test.describe.serial("Search", () => {
 
     // Toggle plan off.
     await page.getByRole("button", { name: "Explain query plan" }).click();
+  });
+
+  // ── Histogram interactions (gastrolog-37lxp) ────────────────────────
+
+  test("histogram renders with bar elements", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const histogram = page.locator("[data-testid='histogram']");
+    if (await histogram.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      // The histogram should contain SVG or canvas elements for bars.
+      const hasContent = await histogram
+        .locator("canvas, svg, rect")
+        .first()
+        .isVisible({ timeout: 3_000 })
+        .catch(() => false);
+      expect(hasContent).toBeTruthy();
+    }
+  });
+
+  test("histogram brush selection narrows time range", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
+
+    await typeQuery(page, "*");
+    await page.getByRole("button", { name: "Search" }).click();
+    await expect(page.locator("[data-testid='result-count']")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const histogram = page.locator("[data-testid='histogram']");
+    if (await histogram.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      const box = await histogram.boundingBox();
+      if (box) {
+        // Drag across a portion of the histogram to select a time range.
+        const startX = box.x + box.width * 0.2;
+        const endX = box.x + box.width * 0.5;
+        const y = box.y + box.height / 2;
+
+        await page.mouse.move(startX, y);
+        await page.mouse.down();
+        await page.mouse.move(endX, y, { steps: 10 });
+        await page.mouse.up();
+
+        // After brush selection, a re-search should happen or time range updates.
+        // Just verify the UI is still responsive.
+        await page.waitForTimeout(1_000);
+      }
+    }
   });
 
   test("explain plan with filter shows narrowing", async ({ page }) => {

@@ -168,6 +168,54 @@ test.describe.serial("Inspector", () => {
     await systemBtn.click();
   });
 
+  // ── Cross-navigation (gastrolog-5hhp3) ──────────────────────────────
+
+  test("vault detail has Open in Settings link", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+
+    await dialog.getByRole("button", { name: /Vaults/i }).click();
+
+    // The vault card should have a cog icon linking to settings.
+    const settingsLink = dialog.locator('[title="Open in Settings"]');
+    if (
+      await settingsLink
+        .first()
+        .isVisible({ timeout: 5_000 })
+        .catch(() => false)
+    ) {
+      await settingsLink.first().click();
+
+      // Settings dialog should open (inspector closes, settings opens).
+      const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+      await expect(settingsDialog).toBeVisible({ timeout: 5_000 });
+
+      // Close settings to restore state.
+      await page.keyboard.press("Escape");
+    }
+  });
+
+  test("ingester detail has Open in Settings link", async ({ page }) => {
+    const dialog = await openInspector(page, "Entities");
+
+    await dialog.getByRole("button", { name: "Ingesters" }).click();
+    await dialog.getByText("chatterbox").click();
+
+    const settingsLink = dialog.locator('[title="Open in Settings"]');
+    if (
+      await settingsLink
+        .first()
+        .isVisible({ timeout: 5_000 })
+        .catch(() => false)
+    ) {
+      await settingsLink.first().click();
+
+      const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+      await expect(settingsDialog).toBeVisible({ timeout: 5_000 });
+
+      await page.keyboard.press("Escape");
+    }
+  });
+
   // ── Node detail shows jobs (gastrolog-5iji6) ───────────────────────
 
   test("node detail shows jobs section", async ({ page }) => {

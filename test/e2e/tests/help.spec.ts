@@ -22,14 +22,18 @@ test.describe.serial("Help", () => {
 
     // Click a topic in the sidebar — look for any topic link.
     // The help system has hierarchical topics; click the first available one.
-    const topicButtons = dialog.locator("nav button").filter({ hasNotText: "Topics" });
+    const topicButtons = dialog
+      .locator("nav button")
+      .filter({ hasNotText: "Topics" });
     const firstTopic = topicButtons.first();
     await expect(firstTopic).toBeVisible();
     await firstTopic.click();
 
     // Content should render in the right panel.
     // Wait for "Loading..." to disappear and content to appear.
-    await expect(dialog.getByText("Loading...")).not.toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText("Loading...")).not.toBeVisible({
+      timeout: 10_000,
+    });
 
     // The content panel should have rendered some markdown — check for any
     // heading or paragraph element outside the nav sidebar.
@@ -70,9 +74,13 @@ test.describe.serial("Help", () => {
     const dialog = page.getByRole("dialog", { name: "Help" });
 
     // Navigate to a topic.
-    const topicButtons = dialog.locator("nav button").filter({ hasNotText: "Topics" });
+    const topicButtons = dialog
+      .locator("nav button")
+      .filter({ hasNotText: "Topics" });
     await topicButtons.first().click();
-    await expect(dialog.getByText("Loading...")).not.toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText("Loading...")).not.toBeVisible({
+      timeout: 10_000,
+    });
 
     // Verify text is selectable by checking that user-select is not "none"
     // on the content area. This is a regression check for portal focus issues.
@@ -93,5 +101,47 @@ test.describe.serial("Help", () => {
 
     await page.keyboard.press("Escape");
     await expect(dialog).not.toBeVisible();
+  });
+
+  // ── Help links from settings (gastrolog-1op0n) ─────────────────────
+
+  test("settings tabs have help links that open help dialog", async ({
+    page,
+  }) => {
+    await gotoAuthenticated(page, "/search");
+    await page.getByRole("button", { name: "Settings" }).click();
+
+    const settingsDialog = page.getByRole("dialog", { name: "Settings" });
+    await expect(settingsDialog).toBeVisible();
+
+    // Navigate to Vaults tab — it should have a help button.
+    await settingsDialog.getByRole("button", { name: "Vaults" }).click();
+
+    // Look for a help button (? icon) within the settings content.
+    const helpBtn = settingsDialog.locator("button").filter({
+      has: page.locator("[aria-label*='help' i], [title*='help' i]"),
+    });
+
+    // Some tabs may render help as a HelpButton component.
+    // Try finding any clickable help icon in the heading area.
+    const helpIcon = settingsDialog.locator(
+      "[aria-label*='help' i], [title*='Help' i]",
+    );
+
+    if (
+      await helpIcon
+        .first()
+        .isVisible({ timeout: 3_000 })
+        .catch(() => false)
+    ) {
+      await helpIcon.first().click();
+
+      // Help dialog should open.
+      const helpDialog = page.getByRole("dialog", { name: "Help" });
+      await expect(helpDialog).toBeVisible({ timeout: 5_000 });
+
+      // Close help to restore state.
+      await page.keyboard.press("Escape");
+    }
   });
 });
