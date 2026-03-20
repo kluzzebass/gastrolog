@@ -128,6 +128,8 @@ services:
     working_dir: /e2e
     environment:
       E2E_BASE_URL: "http://node-1:4564"
+      E2E_NODE2_URL: "http://node-2:4564"
+      E2E_NODE3_URL: "http://node-3:4564"
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -154,9 +156,9 @@ services:
     profiles: ["dev"]
     entrypoint: ["sleep", "infinity"]
     ports:
-      - "14564:14564"  # node-1
-      - "14574:14574"  # node-2
-      - "14584:14584"  # node-3
+      - "14564:14564" # node-1
+      - "14574:14574" # node-2
+      - "14584:14584" # node-3
     networks:
       - cluster
     depends_on:
