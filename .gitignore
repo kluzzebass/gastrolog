@@ -39,6 +39,7 @@ data
 
 # Lock files
 *.lock
+!test/e2e/bun.lock
 package-lock.json
 pnpm-lock.yaml
 .dogcats/.issues.lock
