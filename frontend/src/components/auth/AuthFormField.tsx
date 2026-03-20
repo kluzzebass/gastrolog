@@ -1,4 +1,4 @@
-import { forwardRef } from "react";
+import { forwardRef, useId } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 
 interface AuthFormFieldProps {
@@ -29,9 +29,11 @@ export const AuthFormField = forwardRef<HTMLInputElement, AuthFormFieldProps>(
     ref,
   ) {
     const c = useThemeClass(dark);
+    const id = useId();
     return (
       <div className="flex flex-col gap-1.5">
         <label
+          htmlFor={id}
           className={`text-[0.78em] font-medium tracking-wide uppercase ${
             error
               ? "text-severity-error"
@@ -42,6 +44,7 @@ export const AuthFormField = forwardRef<HTMLInputElement, AuthFormFieldProps>(
         </label>
         <input
           ref={ref}
+          id={id}
           type={type}
           value={value}
           onChange={(e) => onChange(e.target.value)}

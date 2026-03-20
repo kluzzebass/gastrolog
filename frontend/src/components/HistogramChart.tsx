@@ -591,6 +591,7 @@ export function HistogramChart({
         className="relative"
         style={{ height: barHeight }}
         role="presentation"
+        data-testid="histogram"
         onMouseDown={handleMouseDown}
       >
         {/* Pan delta indicator */}

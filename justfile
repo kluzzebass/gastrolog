@@ -64,6 +64,23 @@ ingester-integration-up:
 ingester-integration-down:
     docker compose -f test/ingester-integration/compose.yml down -v
 
+# Run E2E tests (fully containerized — builds, starts cluster, runs Playwright, tears down)
+e2e:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    docker compose -f test/e2e/compose.yml --profile test up --build --abort-on-container-exit --exit-code-from playwright
+    rc=$?
+    docker compose -f test/e2e/compose.yml --profile test down -v
+    exit $rc
+
+# Start E2E cluster with host ports for local Playwright development
+e2e-up:
+    docker compose -f test/e2e/compose.yml --profile dev up --build -d
+
+# Tear down E2E cluster
+e2e-down:
+    docker compose -f test/e2e/compose.yml --profile dev down -v
+
 # Tag and push to kick off draft release creation via GitHub Actions.
 draft bump:
     #!/usr/bin/env bash

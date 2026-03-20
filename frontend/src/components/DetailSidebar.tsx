@@ -80,6 +80,7 @@ export function DetailSidebar({
       )}
       <aside
         aria-label="Record details"
+        data-testid="detail-sidebar"
         style={{ width: detailCollapsed ? 0 : detailWidth }}
         className={`${asideLayoutCls(isTablet, detailCollapsed, resizing, c)} overflow-hidden ${
           detailCollapsed

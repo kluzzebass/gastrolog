@@ -143,6 +143,7 @@ export function ResultsToolbar({
         <span
           role="status"
           aria-live="polite"
+          data-testid="result-count"
           aria-label={`${isFollowMode ? followRecords.length : records.length}${!isFollowMode && hasMore ? "+" : ""} results`}
           className={`font-mono text-[0.8em] px-2 py-0.5 rounded ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
         >

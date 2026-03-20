@@ -87,6 +87,7 @@ export const LogEntry = forwardRef<
   return (
     <article
       ref={ref}
+      data-testid="log-entry"
       onClick={onSelect}
       className={`group grid grid-cols-[3.5ch_1fr_auto] ${
         rowIndex != null

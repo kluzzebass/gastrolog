@@ -121,7 +121,7 @@ func Bootstrap(ctx context.Context, store Store) error {
 	}
 	authCfg := AuthConfig{
 		JWTSecret:            base64.StdEncoding.EncodeToString(secret),
-		TokenDuration:        "15m",
+		TokenDuration:        "1h",
 		RefreshTokenDuration: "168h", // 7 days
 	}
 	queryCfg := QueryConfig{
@@ -145,7 +145,7 @@ func BootstrapMinimal(ctx context.Context, store Store) error {
 	}
 	authCfg := AuthConfig{
 		JWTSecret:            base64.StdEncoding.EncodeToString(secret),
-		TokenDuration:        "15m",
+		TokenDuration:        "1h",
 		RefreshTokenDuration: "168h", // 7 days
 	}
 	queryCfg := QueryConfig{
