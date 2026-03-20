@@ -48,6 +48,7 @@ pnpm-lock.yaml
 .claude/worktrees/
 
 # test files
+test-results/
 testfiles/
 *.csv
 logs/
