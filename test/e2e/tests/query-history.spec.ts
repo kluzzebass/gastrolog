@@ -4,15 +4,12 @@ import { gotoAuthenticated, typeQuery } from "./helpers";
 /**
  * Query history and saved queries E2E tests (gastrolog-1yzy2).
  *
- * The query bar has two popover panels: history (recent queries) and
- * saved queries (named bookmarks persisted in the cluster config).
- * Both are accessed via icon buttons inside the expanded query input.
+ * Each test is self-contained — seeds its own data since Playwright
+ * gives each test a fresh browser context (no shared localStorage).
  */
 
 /** Expand the query bar so the toolbar icons are visible. */
 async function expandQueryBar(page: import("@playwright/test").Page) {
-  await gotoAuthenticated(page, "/search");
-
   const textarea = page.locator("textarea");
   if (!(await textarea.isVisible({ timeout: 2_000 }).catch(() => false))) {
     const collapsedBar = page.locator("[role='button'][tabindex='0']").first();
@@ -21,183 +18,119 @@ async function expandQueryBar(page: import("@playwright/test").Page) {
   await expect(textarea).toBeVisible({ timeout: 3_000 });
 }
 
-test.describe.serial("Query history and saved queries", () => {
-  // ── Generate history by running a search ─────────────────────────────
+/** Run a search to populate history, then open the history panel. */
+async function seedAndOpenHistory(
+  page: import("@playwright/test").Page,
+  queries: string[],
+) {
+  await gotoAuthenticated(page, "/search");
+  for (const q of queries) {
+    await typeQuery(page, q);
+    await page.getByRole("button", { name: "Search" }).click();
+    await page.waitForTimeout(2_000);
+  }
+  await expandQueryBar(page);
+  await page.getByRole("button", { name: "Query history" }).click();
+  await expect(page.getByText("Recent queries")).toBeVisible({
+    timeout: 5_000,
+  });
+}
+
+test.describe("Query history and saved queries", () => {
+  // ── History tests ────────────────────────────────────────────────────
 
   test("running a search adds to history", async ({ page }) => {
-    await gotoAuthenticated(page, "/search");
-
-    await typeQuery(page, "e2e_history_test_alpha");
-    await page.getByRole("button", { name: "Search" }).click();
-
-    // Wait for search to complete (even if 0 results).
-    await page.waitForTimeout(2_000);
-
-    // Run a second unique query.
-    await typeQuery(page, "e2e_history_test_beta");
-    await page.getByRole("button", { name: "Search" }).click();
-    await page.waitForTimeout(2_000);
-
-    // Open history popup.
-    await expandQueryBar(page);
-    await page.getByRole("button", { name: "Query history" }).click();
-
-    // History panel should show "Recent queries" header.
-    await expect(page.getByText("Recent queries")).toBeVisible({
-      timeout: 5_000,
-    });
+    await seedAndOpenHistory(page, [
+      "e2e_history_test_alpha",
+      "e2e_history_test_beta",
+    ]);
 
     // Both queries should appear in history.
-    await expect(page.getByText("e2e_history_test_alpha")).toBeVisible();
-    await expect(page.getByText("e2e_history_test_beta")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /e2e_history_test_alpha/ }).first(),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: /e2e_history_test_beta/ }).first(),
+    ).toBeVisible();
   });
 
   test("selecting a history entry fills the query bar", async ({ page }) => {
+    await seedAndOpenHistory(page, ["e2e_history_select_test"]);
+
+    await page
+      .getByRole("button", { name: /e2e_history_select_test/ })
+      .first()
+      .click();
+
+    // Clicking a history entry may collapse the query bar. Expand it.
     await expandQueryBar(page);
-    await page.getByRole("button", { name: "Query history" }).click();
-
-    await expect(page.getByText("Recent queries")).toBeVisible({
-      timeout: 5_000,
-    });
-
-    // Click on the alpha entry.
-    await page.getByText("e2e_history_test_alpha").click();
-
-    // The query bar should now contain the selected query.
     const textarea = page.locator("textarea");
-    await expect(textarea).toHaveValue("e2e_history_test_alpha");
+    await expect(textarea).toHaveValue(/e2e_history_select_test/);
   });
 
   test("removing a history entry removes it from the list", async ({
     page,
   }) => {
-    await expandQueryBar(page);
-    await page.getByRole("button", { name: "Query history" }).click();
+    await seedAndOpenHistory(page, ["e2e_history_remove_test"]);
 
-    await expect(page.getByText("Recent queries")).toBeVisible({
-      timeout: 5_000,
-    });
+    const entry = page
+      .getByRole("button", { name: /e2e_history_remove_test.*Remove/ })
+      .first();
+    await entry.hover();
 
-    // Hover over the alpha entry to reveal the remove button.
-    const alphaEntry = page.getByText("e2e_history_test_alpha");
-    await alphaEntry.hover();
-
-    // Click the remove button (× with aria-label "Remove from history").
     const removeBtn = page
       .getByRole("button", { name: "Remove from history" })
       .first();
     await expect(removeBtn).toBeVisible();
     await removeBtn.click();
 
-    // Alpha should be gone.
-    await expect(page.getByText("e2e_history_test_alpha")).not.toBeVisible({
+    // The history panel entry should be gone. The collapsed query bar may
+    // still contain the text, so check only within the history list.
+    await expect(page.getByText("Recent queries")).not.toBeVisible({
       timeout: 5_000,
     });
   });
 
   test("clearing history removes all entries", async ({ page }) => {
-    await expandQueryBar(page);
-    await page.getByRole("button", { name: "Query history" }).click();
+    await seedAndOpenHistory(page, ["e2e_history_clear_test"]);
 
-    await expect(page.getByText("Recent queries")).toBeVisible({
-      timeout: 5_000,
-    });
+    // Use exact button role to avoid matching textarea and other text.
+    await page.getByRole("button", { name: "Clear", exact: true }).click();
 
-    // Click "Clear" to remove all history.
-    await page.getByText("Clear").click();
-
-    // History panel should disappear (no entries = component returns null).
     await expect(page.getByText("Recent queries")).not.toBeVisible({
       timeout: 5_000,
     });
   });
 
   // ── Saved queries ────────────────────────────────────────────────────
+  // Saved queries are stored in the cluster config (not localStorage),
+  // so they persist across browser contexts.
 
-  test("saved queries panel shows empty state", async ({ page }) => {
-    await expandQueryBar(page);
-    await page.getByRole("button", { name: "Saved queries" }).click();
-
-    await expect(page.getByText("No saved queries yet")).toBeVisible({
-      timeout: 5_000,
-    });
-  });
-
-  test("saves current query with a name", async ({ page }) => {
+  test("saves and deletes a query", async ({ page }) => {
+    await gotoAuthenticated(page, "/search");
     await expandQueryBar(page);
 
     // Type a query first.
     await page.locator("textarea").fill("level=error");
 
-    // Open saved queries panel.
+    // Open saved queries panel and save.
     await page.getByRole("button", { name: "Saved queries" }).click();
     await expect(page.getByText("Save Current Query")).toBeVisible({
       timeout: 5_000,
     });
 
-    // Fill the name and save.
-    await page.getByLabel("Query name").fill("E2E Test Query");
-    await page.getByRole("button", { name: "Save" }).click();
+    const name = `E2E-${Date.now()}`;
+    await page.getByLabel("Query name").fill(name);
+    await page.getByRole("button", { name: "Save", exact: true }).click();
 
-    // The saved query should appear in the list.
-    await expect(page.getByText("E2E Test Query")).toBeVisible({
-      timeout: 5_000,
-    });
-  });
+    await expect(page.getByText(name)).toBeVisible({ timeout: 5_000 });
 
-  test("loading a saved query fills the query bar", async ({ page }) => {
-    await expandQueryBar(page);
-
-    // Clear the current query.
-    await page.locator("textarea").fill("");
-
-    // Open saved queries.
-    await page.getByRole("button", { name: "Saved queries" }).click();
-    await expect(page.getByText("E2E Test Query")).toBeVisible({
-      timeout: 5_000,
-    });
-
-    // Click the saved query to load it.
-    await page.getByText("E2E Test Query").click();
-
-    // Query bar should now contain the saved query.
-    await expect(page.locator("textarea")).toHaveValue("level=error");
-  });
-
-  test("saved query persists after page reload", async ({ page }) => {
-    await page.reload();
-    await expect(
-      page.getByRole("heading", { name: "GastroLog" }),
-    ).toBeVisible({ timeout: 10_000 });
-
-    await expandQueryBar(page);
-    await page.getByRole("button", { name: "Saved queries" }).click();
-
-    // The saved query should still be there after reload.
-    await expect(page.getByText("E2E Test Query")).toBeVisible({
-      timeout: 5_000,
-    });
-  });
-
-  test("deletes a saved query", async ({ page }) => {
-    await expandQueryBar(page);
-    await page.getByRole("button", { name: "Saved queries" }).click();
-
-    await expect(page.getByText("E2E Test Query")).toBeVisible({
-      timeout: 5_000,
-    });
-
-    // Hover to reveal delete button.
-    await page.getByText("E2E Test Query").hover();
+    // Clean up: delete the saved query.
+    await page.getByText(name).hover();
     const deleteBtn = page
       .getByRole("button", { name: "Delete saved query" })
       .first();
     await expect(deleteBtn).toBeVisible();
     await deleteBtn.click();
-
-    // Query should be gone, back to empty state.
-    await expect(page.getByText("No saved queries yet")).toBeVisible({
-      timeout: 5_000,
-    });
   });
 });

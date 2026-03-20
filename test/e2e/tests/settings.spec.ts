@@ -311,9 +311,12 @@ test.describe.serial("Settings", () => {
   test("nodes tab shows cluster nodes", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Nodes");
 
-    await expect(dialog.getByText("node-1")).toBeVisible({ timeout: 10_000 });
-    await expect(dialog.getByText("node-2")).toBeVisible();
-    await expect(dialog.getByText("node-3")).toBeVisible();
+    // Use exact: true to match only the card title, not the address or join command.
+    await expect(dialog.getByText("node-1", { exact: true })).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByText("node-2", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("node-3", { exact: true })).toBeVisible();
   });
 
   test("nodes tab shows join info", async ({ page }) => {
@@ -356,7 +359,8 @@ test.describe.serial("Settings", () => {
   test("users tab shows admin user", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Users");
 
-    await expect(dialog.getByText("admin")).toBeVisible({ timeout: 10_000 });
+    // "admin" appears twice: as the username and as the role badge.
+    await expect(dialog.getByText("admin").first()).toBeVisible({ timeout: 10_000 });
   });
 
   test("users tab has add user button", async ({ page }) => {
@@ -409,10 +413,10 @@ test.describe.serial("Settings", () => {
     ];
 
     for (const tab of tabs) {
-      await dialog.getByRole("button", { name: tab }).click();
-      await expect(dialog.getByRole("heading", { name: tab })).toBeVisible({
-        timeout: 5_000,
-      });
+      await dialog.getByRole("button", { name: tab, exact: true }).click();
+      await expect(
+        dialog.getByRole("heading", { name: tab }),
+      ).toBeVisible({ timeout: 5_000 });
     }
   });
 

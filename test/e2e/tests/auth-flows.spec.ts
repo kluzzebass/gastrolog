@@ -61,10 +61,13 @@ test.describe.serial("Auth flows", () => {
   test("user menu shows current username", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await page.getByRole("button", { name: /User menu/ }).click();
+    // The button's aria-label includes the username.
+    const menuBtn = page.getByRole("button", { name: /User menu: admin/ });
+    await expect(menuBtn).toBeVisible();
+    await menuBtn.click();
 
-    // The menu should show "admin" as the logged-in user.
-    await expect(page.getByText("admin")).toBeVisible();
+    // The dropdown header shows the username (first text) and role (second).
+    await expect(page.getByText("admin").first()).toBeVisible();
   });
 
   test("logout redirects to login page", async ({ page }) => {
@@ -79,13 +82,18 @@ test.describe.serial("Auth flows", () => {
       // Should redirect to /login.
       await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
 
-      // Log back in to restore state for subsequent tests.
+      // Log back in — the Logout RPC calls InvalidateTokens which
+      // invalidates the JWT saved in auth-state.json. We must re-save
+      // the storage state after re-login so subsequent tests get a valid token.
       await page.getByLabel("Username").fill("admin");
-      await page
-        .getByLabel("Password", { exact: true })
-        .fill("T3stP@ssw0rd!");
+      await page.getByLabel("Password", { exact: true }).fill("T3stP@ssw0rd!");
       await page.getByRole("button", { name: "Sign In" }).click();
       await expect(page).toHaveURL(/\/search/, { timeout: 15_000 });
+
+      // Re-save auth state with the fresh token.
+      const path = await import("node:path");
+      const stateFile = path.join(__dirname, "..", "auth-state.json");
+      await page.context().storageState({ path: stateFile });
     }
   });
 
@@ -94,17 +102,18 @@ test.describe.serial("Auth flows", () => {
     await page.goto("/search");
 
     // Should redirect to /login if no valid session.
-    await page.waitForURL((url) => {
-      const p = url.pathname;
-      return p === "/search" || p === "/login";
-    }, { timeout: 10_000 });
+    await page.waitForURL(
+      (url) => {
+        const p = url.pathname;
+        return p === "/search" || p === "/login";
+      },
+      { timeout: 10_000 },
+    );
 
     // If redirected, verify the login form is shown.
     if (page.url().includes("/login")) {
       await expect(page.getByLabel("Username")).toBeVisible();
-      await expect(
-        page.getByLabel("Password", { exact: true }),
-      ).toBeVisible();
+      await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
     }
   });
 });

@@ -3,8 +3,12 @@ import fs from "node:fs";
 import path from "node:path";
 
 // Auth tests run without saved state — this is the first project.
-// They register the admin user, complete the setup wizard, test
+// They ensure an admin user exists (registering if needed), test
 // auth flows, and save auth state for other test files.
+//
+// IDEMPOTENT: Works on both fresh clusters (no users → /register)
+// and existing clusters (users exist → /login). The setup wizard
+// and registration tests are skipped when users already exist.
 //
 // IMPORTANT: ChangePassword calls InvalidateTokens on the server,
 // which permanently rejects all JWT tokens issued before the change.
@@ -27,7 +31,9 @@ async function waitForToken(page: import("@playwright/test").Page) {
 }
 
 async function completeSetupWizard(page: import("@playwright/test").Page) {
-  await expect(page.getByText("Welcome to GastroLog")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("Welcome to GastroLog")).toBeVisible({
+    timeout: 10_000,
+  });
   await page.getByRole("button", { name: "Get Started" }).click();
 
   await expect(page.getByText("Configure Vault")).toBeVisible();
@@ -46,30 +52,49 @@ async function completeSetupWizard(page: import("@playwright/test").Page) {
   await expect(page).toHaveURL(/\/search/, { timeout: 15_000 });
 }
 
+/** Navigate to / and determine whether the cluster has users. */
+async function probeClusterState(
+  page: import("@playwright/test").Page,
+): Promise<"fresh" | "existing"> {
+  await page.goto("/");
+  // Wait for the app to settle on either /register or /login.
+  await page.waitForURL(/\/(register|login)/, { timeout: 15_000 });
+  const url = page.url();
+  return url.includes("/register") ? "fresh" : "existing";
+}
+
 test.describe.serial("Authentication", () => {
-  // 0 auth calls.
-  test("redirects to /register when no users exist", async ({ page }) => {
-    await page.goto("/");
-    await expect(page).toHaveURL(/\/register/);
+  let clusterState: "fresh" | "existing";
+
+  test("detects cluster state and registers if needed", async ({ page }) => {
+    clusterState = await probeClusterState(page);
+
+    if (clusterState === "fresh") {
+      // Fresh cluster — register the admin user and complete setup.
+      await page.goto("/register");
+      await page.getByLabel("Username").fill(ADMIN_USER);
+      await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);
+      await page.getByLabel("Confirm Password").fill(ADMIN_PASS);
+      await page.getByRole("button", { name: "Create Account" }).click();
+
+      await expect(page).toHaveURL(/\/setup/, { timeout: 15_000 });
+      await waitForToken(page);
+      await completeSetupWizard(page);
+    }
+    // If existing, nothing to do — user already exists.
+  });
+
+  test("logs in with credentials", async ({ page }) => {
+    await page.goto("/login");
+    await page.getByLabel("Username").fill(ADMIN_USER);
+    await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);
+    await page.getByRole("button", { name: "Sign In" }).click();
+    await expect(page).toHaveURL(/\/search/, { timeout: 15_000 });
     await expect(
-      page.getByRole("button", { name: "Create Account" }),
+      page.getByRole("heading", { name: "GastroLog" }),
     ).toBeVisible();
   });
 
-  // 1 register call. Running total: 1.
-  test("registers first admin and completes setup wizard", async ({ page }) => {
-    await page.goto("/register");
-    await page.getByLabel("Username").fill(ADMIN_USER);
-    await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);
-    await page.getByLabel("Confirm Password").fill(ADMIN_PASS);
-    await page.getByRole("button", { name: "Create Account" }).click();
-
-    await expect(page).toHaveURL(/\/setup/, { timeout: 15_000 });
-    await waitForToken(page);
-    await completeSetupWizard(page);
-  });
-
-  // 1 login call. Running total: 2.
   test("logs out and redirects to /login", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Username").fill(ADMIN_USER);
@@ -82,18 +107,6 @@ test.describe.serial("Authentication", () => {
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
   });
 
-  // 1 login call. Running total: 3.
-  test("logs in with existing credentials", async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("Username").fill(ADMIN_USER);
-    await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);
-    await page.getByRole("button", { name: "Sign In" }).click();
-
-    await expect(page).toHaveURL(/\/search/, { timeout: 15_000 });
-    await expect(page.getByRole("heading", { name: "GastroLog" })).toBeVisible();
-  });
-
-  // 2 login calls (login + re-login after change). Running total: 5 (burst limit).
   test("changes password and verifies new password works", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Username").fill(ADMIN_USER);
@@ -139,7 +152,6 @@ test.describe.serial("Authentication", () => {
     await expect(dialog2).not.toBeVisible({ timeout: 10_000 });
   });
 
-  // 1 login call (after rate limit refill). Running total: 6 (1 refilled by 12s wait above).
   // This MUST be the last test — it saves auth state with a token issued
   // AFTER all password changes (which call InvalidateTokens).
   test("saves auth state for app tests", async ({ page }) => {

@@ -12,9 +12,9 @@ test.describe.serial("Cluster Status", () => {
     await expect(nodesButton).toBeVisible({ timeout: 10_000 });
     await nodesButton.click();
 
-    await expect(dialog.getByText("node-1")).toBeVisible();
-    await expect(dialog.getByText("node-2")).toBeVisible();
-    await expect(dialog.getByText("node-3")).toBeVisible();
+    await expect(dialog.getByText("node-1", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("node-2", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("node-3", { exact: true })).toBeVisible();
   });
 
   test("shows leader badge on one node", async ({ page }) => {

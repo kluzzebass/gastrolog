@@ -77,6 +77,10 @@ e2e:
 e2e-up:
     docker compose -f test/e2e/compose.yml --profile dev up --build -d
 
+# Run Playwright tests locally against the dev cluster (started with e2e-up)
+e2e-test *args:
+    cd test/e2e && bunx playwright test {{args}}
+
 # Tear down E2E cluster
 e2e-down:
     docker compose -f test/e2e/compose.yml --profile dev down -v

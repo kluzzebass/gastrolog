@@ -80,18 +80,59 @@ export async function openSettingsTab(page: Page, tab: string) {
  * Navigate to a path on a specific node (absolute URL), handling auth
  * redirects the same way as gotoAuthenticated. Useful for cross-node
  * tests where you need to verify state on a different cluster member.
+ *
+ * Since each node runs on a different port (different browser origin),
+ * the saved auth state only covers node-1. For other nodes, we inject
+ * the JWT token into localStorage before the app's router runs, avoiding
+ * rate-limited login calls entirely. The JWT is valid across all nodes
+ * since they share the same Raft-replicated signing key.
  */
 export async function gotoNode(page: Page, nodeUrl: string, path: string) {
-  await page.goto(`${nodeUrl}${path}`);
+  const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:14564";
+
+  if (nodeUrl !== baseURL) {
+    // Different origin — need to ensure auth tokens exist in localStorage.
+    // First, navigate to the origin to establish a browsing context.
+    await page.goto(`${nodeUrl}/login`);
+    await page.waitForLoadState("domcontentloaded");
+
+    // Check if this origin already has a token (from a previous gotoNode call).
+    const hasToken = await page.evaluate(
+      () => !!localStorage.getItem("gastrolog_token"),
+    );
+
+    if (!hasToken) {
+      // Read tokens from the auth-state file and inject them.
+      const fs = await import("node:fs");
+      const authPath = await import("node:path");
+      const stateFile = authPath.join(__dirname, "..", "auth-state.json");
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+      const primaryOrigin = state.origins?.find(
+        (o: { origin: string }) => o.origin === baseURL,
+      );
+      const items: { name: string; value: string }[] =
+        primaryOrigin?.localStorage ?? [];
+
+      await page.evaluate((entries) => {
+        for (const { name, value } of entries) {
+          localStorage.setItem(name, value);
+        }
+      }, items);
+    }
+
+    // Now navigate to the target path — the app will find the token and skip login.
+    await page.goto(`${nodeUrl}${path}`);
+  } else {
+    // Same origin as auth state — standard flow.
+    await page.goto(`${nodeUrl}${path}`);
+  }
 
   await page.waitForURL(
-    (url) => {
-      const p = url.pathname;
-      return p === path || p === "/login";
-    },
+    (url) => url.pathname === path || url.pathname === "/login",
     { timeout: 10_000 },
   );
 
+  // Fallback: if the token was expired or invalid, re-login.
   if (page.url().includes("/login")) {
     await page.getByLabel("Username").fill(ADMIN_USER);
     await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);

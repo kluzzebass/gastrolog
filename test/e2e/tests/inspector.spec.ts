@@ -150,12 +150,11 @@ test.describe.serial("Inspector", () => {
       timeout: 10_000,
     });
 
-    // Look for record/byte count indicators (numeric values in the stats view).
-    await expect(dialog.getByText(/records|bytes|rec\/s/i).first()).toBeVisible(
-      {
-        timeout: 10_000,
-      },
-    );
+    // Route stats view shows "Ingested", "Routed", "Dropped" stat boxes
+    // and "Matched"/"Forwarded" column headers for per-route/vault stats.
+    await expect(
+      dialog.getByText(/Ingested|Routed|Matched/i).first(),
+    ).toBeVisible({ timeout: 10_000 });
   });
 
   // ── System tab ─────────────────────────────────────────────────────

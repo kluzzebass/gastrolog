@@ -17,6 +17,9 @@ import {
  *   node-1: localhost:14564 (default)
  *   node-2: localhost:14574
  *   node-3: localhost:14584
+ *
+ * IDEMPOTENT: Cleans up leftover resources from previous runs before
+ * creating new ones.
  */
 
 const PREFIX = "e2e-xnode";
@@ -25,7 +28,40 @@ const FILTER_NAME = `${PREFIX}-filter`;
 const ROUTE_NAME = `${PREFIX}-route`;
 const INGESTER_NAME = `${PREFIX}-scatter`;
 
+/** Delete a named entity from a settings tab if it exists. */
+async function deleteIfExists(
+  page: import("@playwright/test").Page,
+  nodeUrl: string,
+  tab: string,
+  name: string,
+) {
+  const dialog = await openSettingsTabOnNode(page, nodeUrl, tab);
+  const item = dialog.getByText(name, { exact: true });
+  if (await item.isVisible({ timeout: 2_000 }).catch(() => false)) {
+    // Click item to expand the card and reveal the Delete button.
+    await item.click();
+    const deleteBtn = dialog.getByRole("button", { name: "Delete" });
+    await expect(deleteBtn).toBeVisible({ timeout: 5_000 });
+    await deleteBtn.click();
+    // Confirm with "Yes" (the confirm UI shows "Confirm? [Yes] [No]").
+    await dialog.getByRole("button", { name: "Yes" }).click();
+    await expect(item).not.toBeVisible({ timeout: 10_000 });
+  }
+  // Close the settings dialog.
+  await page.keyboard.press("Escape");
+}
+
 test.describe.serial("Cross-node config propagation", () => {
+  // ── Cleanup leftovers from previous runs ────────────────────────────
+
+  test("cleans up leftovers from previous runs", async ({ page }) => {
+    // Delete in reverse dependency order: ingester → route → filter → vault.
+    await deleteIfExists(page, NODE_URLS.node1, "Ingesters", INGESTER_NAME);
+    await deleteIfExists(page, NODE_URLS.node1, "Routes", ROUTE_NAME);
+    await deleteIfExists(page, NODE_URLS.node1, "Filters", FILTER_NAME);
+    await deleteIfExists(page, NODE_URLS.node1, "Vaults", VAULT_NAME);
+  });
+
   // ── Config push: create on node-1, verify on node-2 ─────────────────
 
   test("vault created on node-1 appears on node-2", async ({ page }) => {
@@ -139,9 +175,7 @@ test.describe.serial("Cross-node config propagation", () => {
     );
     await routeDialog.getByRole("button", { name: /Add Route/i }).click();
     await routeDialog.getByLabel("Name").fill(ROUTE_NAME);
-    await routeDialog
-      .getByLabel("Filter")
-      .selectOption({ label: FILTER_NAME });
+    await routeDialog.getByLabel("Filter").selectOption({ label: FILTER_NAME });
     await routeDialog
       .getByLabel("Destinations")
       .selectOption({ label: VAULT_NAME });
@@ -161,9 +195,7 @@ test.describe.serial("Cross-node config propagation", () => {
     );
 
     await dialog.getByRole("button", { name: /Add Ingester/i }).click();
-    await page
-      .getByRole("button", { name: "scatterbox", exact: true })
-      .click();
+    await page.getByRole("button", { name: "scatterbox", exact: true }).click();
     await dialog.getByLabel("Name").fill(INGESTER_NAME);
     await dialog.getByLabel("Interval").fill("0s");
     await dialog.getByLabel("Burst").fill("10");
@@ -222,11 +254,7 @@ test.describe.serial("Cross-node config propagation", () => {
   });
 
   test("cleans up: deletes route from node-3", async ({ page }) => {
-    const dialog = await openSettingsTabOnNode(
-      page,
-      NODE_URLS.node3,
-      "Routes",
-    );
+    const dialog = await openSettingsTabOnNode(page, NODE_URLS.node3, "Routes");
     await dialog.getByText(ROUTE_NAME).click();
     await dialog.getByRole("button", { name: "Delete" }).click();
     await dialog.getByRole("button", { name: "Yes" }).click();

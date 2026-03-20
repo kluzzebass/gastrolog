@@ -63,7 +63,7 @@ test.describe.serial("Collapsible panes", () => {
     });
 
     // Severity buttons should still be clickable.
-    const errorBtn = page.getByRole("button", { name: "Error" });
+    const errorBtn = page.getByRole("button", { name: "Error", exact: true });
     await expect(errorBtn).toBeVisible();
     await errorBtn.click();
 

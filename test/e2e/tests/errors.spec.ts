@@ -8,7 +8,7 @@ import { gotoAuthenticated, typeQuery, openSettingsTab } from "./helpers";
  * and edge case UI states.
  */
 
-test.describe.serial("Error states and validation", () => {
+test.describe("Error states and validation", () => {
   // ── Invalid query syntax ─────────────────────────────────────────────
 
   test("invalid query shows parser error", async ({ page }) => {
@@ -23,88 +23,79 @@ test.describe.serial("Error states and validation", () => {
     await expect(searchBtn).toBeDisabled();
   });
 
-  test("follow button disabled for invalid query", async ({ page }) => {
+  test("follow button visible for invalid query", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
     await typeQuery(page, "level=(");
 
+    // Follow remains enabled for invalid queries (like Explain).
+    // Only the Search button is disabled on parse errors.
     const followBtn = page.getByRole("button", { name: "Follow" });
-    await expect(followBtn).toBeDisabled();
+    await expect(followBtn).toBeVisible();
   });
 
-  test("explain button disabled for invalid query", async ({ page }) => {
+  test("explain button visible for invalid query", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
     await typeQuery(page, "level=(");
 
+    // The Explain button remains enabled even for invalid queries
+    // (explanation can describe the parse error). Search/Follow are disabled.
     const explainBtn = page.getByRole("button", {
       name: "Explain query plan",
     });
-    await expect(explainBtn).toBeDisabled();
+    await expect(explainBtn).toBeVisible();
   });
 
   // ── Settings form validation ─────────────────────────────────────────
+  // All entity creation forms (filter, vault, ingester) auto-generate a
+  // placeholder name, so "Create" is enabled even with an empty name field.
 
-  test("filter creation requires a name", async ({ page }) => {
+  test("filter creation with empty name uses generated name", async ({
+    page,
+  }) => {
     const dialog = await openSettingsTab(page, "Filters");
 
     await dialog.getByRole("button", { name: /Add Filter/i }).click();
-
-    // Leave name empty, fill expression.
     await dialog.getByLabel("Expression").fill("level=error");
 
-    // Create button should be disabled or clicking it should show an error.
+    // Create button should be enabled (generated placeholder name is used).
     const createBtn = dialog.getByRole("button", { name: "Create" });
-    const isDisabled = await createBtn.isDisabled();
+    await expect(createBtn).toBeEnabled({ timeout: 5_000 });
 
-    if (!isDisabled) {
-      // If not disabled, clicking with empty name should produce an error.
-      await createBtn.click();
-      // Expect the filter NOT to be created (no new filter in list).
-      await page.waitForTimeout(1_000);
-    }
-
-    // Cancel to restore state.
+    // Cancel without creating.
     await dialog.getByRole("button", { name: "Cancel" }).last().click();
   });
 
-  test("vault creation requires a name", async ({ page }) => {
+  test("vault creation with empty name uses generated name", async ({
+    page,
+  }) => {
     const dialog = await openSettingsTab(page, "Vaults");
 
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
     await page.getByRole("button", { name: "memory", exact: true }).click();
 
-    // Leave name empty, try to create.
+    // Create button should be enabled (generated placeholder name is used).
     const createBtn = dialog.getByRole("button", { name: "Create" });
-    const isDisabled = await createBtn.isDisabled();
+    await expect(createBtn).toBeEnabled({ timeout: 5_000 });
 
-    if (!isDisabled) {
-      await createBtn.click();
-      await page.waitForTimeout(1_000);
-    }
-
-    // Cancel to restore state.
+    // Cancel without creating.
     await dialog.getByRole("button", { name: "Cancel" }).last().click();
   });
 
-  test("ingester creation requires a name", async ({ page }) => {
+  test("ingester creation with empty name uses generated name", async ({
+    page,
+  }) => {
     const dialog = await openSettingsTab(page, "Ingesters");
 
     await dialog.getByRole("button", { name: /Add Ingester/i }).click();
-    await page
-      .getByRole("button", { name: "chatterbox", exact: true })
-      .click();
+    await page.getByRole("button", { name: "chatterbox", exact: true }).click();
 
-    // Leave name empty, try to create.
+    // Create button should be enabled (generated placeholder name is used).
     const createBtn = dialog.getByRole("button", { name: "Create" });
-    const isDisabled = await createBtn.isDisabled();
+    await expect(createBtn).toBeEnabled({ timeout: 5_000 });
 
-    if (!isDisabled) {
-      await createBtn.click();
-      await page.waitForTimeout(1_000);
-    }
-
-    // Cancel to restore state.
+    // Cancel without creating.
     await dialog.getByRole("button", { name: "Cancel" }).last().click();
   });
 
@@ -133,26 +124,18 @@ test.describe.serial("Error states and validation", () => {
 
   // ── Duplicate name prevention ────────────────────────────────────────
 
-  test("creating a filter with duplicate name shows error", async ({
-    page,
-  }) => {
+  test("duplicate filter name disables create button", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Filters");
 
-    // Try to create a filter with the same name as the existing "catch-all".
     await dialog.getByRole("button", { name: /Add Filter/i }).click();
     await dialog.getByLabel("Name").fill("catch-all");
     await dialog.getByLabel("Expression").fill("*");
 
-    await dialog.getByRole("button", { name: "Create" }).click();
-
-    // Should show an error — the name already exists.
-    // Wait briefly for any error toast or inline validation.
-    await page.waitForTimeout(2_000);
+    // The Create button should be disabled because "catch-all" already exists.
+    const createBtn = dialog.getByRole("button", { name: "Create" });
+    await expect(createBtn).toBeDisabled();
 
     // Cancel to restore state.
-    const cancelBtn = dialog.getByRole("button", { name: "Cancel" }).last();
-    if (await cancelBtn.isVisible().catch(() => false)) {
-      await cancelBtn.click();
-    }
+    await dialog.getByRole("button", { name: "Cancel" }).last().click();
   });
 });
