@@ -50,3 +50,14 @@ export async function gotoAuthenticated(page: Page, path: string) {
     timeout: 10_000,
   });
 }
+
+/** Open settings dialog and navigate to a specific tab. */
+export async function openSettingsTab(page: Page, tab: string) {
+  await gotoAuthenticated(page, "/search");
+  await page.getByRole("button", { name: "Settings" }).click();
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: tab }).click();
+  await expect(dialog.getByRole("heading", { name: tab })).toBeVisible();
+  return dialog;
+}

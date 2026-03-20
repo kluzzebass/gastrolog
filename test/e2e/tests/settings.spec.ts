@@ -1,19 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { gotoAuthenticated } from "./helpers";
-
-/** Open settings dialog and navigate to a specific tab. */
-async function openSettingsTab(
-  page: import("@playwright/test").Page,
-  tab: string,
-) {
-  await gotoAuthenticated(page, "/search");
-  await page.getByRole("button", { name: "Settings" }).click();
-  const dialog = page.getByRole("dialog", { name: "Settings" });
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: tab }).click();
-  await expect(dialog.getByRole("heading", { name: tab })).toBeVisible();
-  return dialog;
-}
+import { gotoAuthenticated, openSettingsTab } from "./helpers";
 
 test.describe.serial("Settings", () => {
   test("opens settings dialog from header", async ({ page }) => {
