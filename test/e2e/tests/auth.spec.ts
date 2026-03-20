@@ -57,8 +57,12 @@ async function probeClusterState(
   page: import("@playwright/test").Page,
 ): Promise<"fresh" | "existing"> {
   await page.goto("/");
-  // Wait for the app to settle on either /register or /login.
+  // The app redirects / → /login, then if needsSetup is true,
+  // /login → /register. Wait for the initial redirect, then give
+  // the secondary redirect time to fire.
   await page.waitForURL(/\/(register|login)/, { timeout: 15_000 });
+  // Allow the needsSetup redirect to settle.
+  await page.waitForTimeout(2_000);
   const url = page.url();
   return url.includes("/register") ? "fresh" : "existing";
 }
@@ -84,7 +88,7 @@ test.describe.serial("Authentication", () => {
     // If existing, nothing to do — user already exists.
   });
 
-  test("logs in with credentials", async ({ page }) => {
+  test("logs in and logs out", async ({ page }) => {
     await page.goto("/login");
     await page.getByLabel("Username").fill(ADMIN_USER);
     await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);
@@ -93,15 +97,8 @@ test.describe.serial("Authentication", () => {
     await expect(
       page.getByRole("heading", { name: "GastroLog" }),
     ).toBeVisible();
-  });
 
-  test("logs out and redirects to /login", async ({ page }) => {
-    await page.goto("/login");
-    await page.getByLabel("Username").fill(ADMIN_USER);
-    await page.getByLabel("Password", { exact: true }).fill(ADMIN_PASS);
-    await page.getByRole("button", { name: "Sign In" }).click();
-    await expect(page).toHaveURL(/\/search/, { timeout: 15_000 });
-
+    // Log out — verify redirect back to /login.
     await page.getByRole("button", { name: /User menu/ }).click();
     await page.getByRole("button", { name: "Sign out" }).click();
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
@@ -126,21 +123,15 @@ test.describe.serial("Authentication", () => {
     await dialog.getByRole("button", { name: "Change Password" }).click();
     await expect(dialog).not.toBeVisible({ timeout: 10_000 });
 
-    // Log out.
-    await page.getByRole("button", { name: /User menu/ }).click();
-    await page.getByRole("button", { name: "Sign out" }).click();
-    await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
-
-    // Wait for rate limiter to refill a token.
-    await page.waitForTimeout(12_000);
-
-    // Login with NEW_PASS — verifies the change worked.
+    // ChangePassword calls InvalidateTokens — the current JWT is now dead.
+    // Navigate to /login explicitly and re-login with the new password.
+    await page.goto("/login");
     await page.getByLabel("Username").fill(ADMIN_USER);
     await page.getByLabel("Password", { exact: true }).fill(NEW_PASS);
     await page.getByRole("button", { name: "Sign In" }).click();
     await expect(page).toHaveURL(/\/search/, { timeout: 15_000 });
 
-    // Restore original password.
+    // Restore original password (now with a fresh JWT from the re-login above).
     await page.getByRole("button", { name: /User menu/ }).click();
     await page.getByRole("button", { name: "Change password" }).click();
 

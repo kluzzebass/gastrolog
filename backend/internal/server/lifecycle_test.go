@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +14,8 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/cluster"
+	cfgmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -20,6 +23,17 @@ import (
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
 )
+
+// mockCluster implements ClusterStatusProvider for testing.
+type mockCluster struct {
+	leaderAddr string
+	leaderID   string
+	servers    []cluster.RaftServer
+}
+
+func (m *mockCluster) LeaderInfo() (string, string) { return m.leaderAddr, m.leaderID }
+func (m *mockCluster) Servers() ([]cluster.RaftServer, error) { return m.servers, nil }
+func (m *mockCluster) LocalStats() map[string]string { return nil }
 
 func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	// Create orchestrator with a vault
@@ -303,4 +317,60 @@ func TestProbeEndpoints(t *testing.T) {
 			t.Errorf("expected 200, got %d", resp.StatusCode)
 		}
 	})
+}
+
+func TestGetClusterStatus_ClusterAddressUsesAdvertised(t *testing.T) {
+	t.Parallel()
+
+	orch, err := orchestrator.New(orchestrator.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mc := &mockCluster{
+		leaderAddr: "node-1:4566",
+		leaderID:   "node-1-id",
+		servers: []cluster.RaftServer{
+			{ID: "node-1-id", Address: "node-1:4566", Suffrage: "Voter"},
+			{ID: "node-2-id", Address: "node-2:4566", Suffrage: "Voter"},
+			{ID: "node-3-id", Address: "node-3:4566", Suffrage: "Voter"},
+		},
+	}
+
+	cfgStore := cfgmem.NewStore()
+
+	// Server's listen address is port-only (the bug condition).
+	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
+		NodeID:         "node-2-id",
+		ClusterAddress: ":4566",
+		Cluster:        mc,
+	})
+	handler := srv.Handler()
+
+	httpClient := &http.Client{
+		Transport: &embeddedTransport{handler: handler},
+	}
+	lifecycleClient := gastrologv1connect.NewLifecycleServiceClient(httpClient, "http://embedded")
+
+	resp, err := lifecycleClient.GetClusterStatus(context.Background(),
+		connect.NewRequest(&gastrologv1.GetClusterStatusRequest{}))
+	if err != nil {
+		t.Fatalf("GetClusterStatus: %v", err)
+	}
+
+	// ClusterAddress should be the advertised address (node-2:4566),
+	// NOT the listen address (:4566).
+	got := resp.Msg.ClusterAddress
+	if got == ":4566" {
+		t.Errorf("ClusterAddress = %q, want advertised address with hostname", got)
+	}
+	if got != "node-2:4566" {
+		t.Errorf("ClusterAddress = %q, want %q", got, "node-2:4566")
+	}
+
+	// The join command in the Nodes settings tab uses ClusterAddress.
+	// Verify it's suitable for cross-host joins.
+	if !strings.Contains(got, "node-2") {
+		t.Errorf("ClusterAddress %q doesn't contain the node hostname", got)
+	}
 }

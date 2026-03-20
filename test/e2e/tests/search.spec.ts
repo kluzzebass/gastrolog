@@ -450,10 +450,10 @@ test.describe.serial("Search", () => {
     await typeQuery(page, "*");
     await page.getByRole("button", { name: "Explain query plan" }).click();
 
-    // The explain RPC can be slow on a loaded cluster. Use generous timeout.
+    // The explain RPC can be slow on a fresh cluster with few sealed chunks.
     const heading = page.getByText("Execution Plan");
     const opened = await heading
-      .isVisible({ timeout: 30_000 })
+      .isVisible({ timeout: 10_000 })
       .catch(() => false);
 
     if (opened) {
@@ -533,7 +533,7 @@ test.describe.serial("Search", () => {
     // The explain RPC can be slow under load. Be resilient.
     const heading = page.getByText("Execution Plan");
     const opened = await heading
-      .isVisible({ timeout: 30_000 })
+      .isVisible({ timeout: 10_000 })
       .catch(() => false);
 
     if (opened) {

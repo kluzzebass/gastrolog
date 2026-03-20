@@ -209,6 +209,16 @@ func (s *LifecycleServer) GetClusterStatus(
 		nodes = append(nodes, node)
 	}
 
+	// Use the local node's advertised Raft address (reachable by other hosts)
+	// rather than the listen address (e.g. ":4566") which only works on localhost.
+	clusterAddr := s.clusterAddress
+	for _, srv := range servers {
+		if srv.ID == s.nodeID && srv.Address != "" {
+			clusterAddr = srv.Address
+			break
+		}
+	}
+
 	resp := &apiv1.GetClusterStatusResponse{
 		ClusterEnabled: true,
 		LeaderId:       leaderID,
@@ -216,7 +226,7 @@ func (s *LifecycleServer) GetClusterStatus(
 		Nodes:          nodes,
 		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
 		LocalNodeId:    s.nodeID,
-		ClusterAddress: s.clusterAddress,
+		ClusterAddress: clusterAddr,
 	}
 
 	// Expose join token from the replicated config (available on all nodes).
