@@ -149,50 +149,46 @@ The vault doesn't care whether a chunk is in memory, on SSD, in S3, or in archiv
 | Object storage | S3 / GCS / R2 | Seconds | $ | Built-in (cloud provider handles AZ redundancy) |
 | Archival | Glacier / Archive / Cool | Minutes–hours | Cents | Built-in (cloud provider) |
 
-### Replication as a tier property
+### Per-tier primary nodes
 
-Replication is not a vault-level concern — it is a property of each tier. Each tier type achieves durability in the way that makes sense for its medium:
+Each tier within a vault has an **elected primary node**. The primary is the single authority for that tier — it receives all writes, decides chunk boundaries, and handles rotation. Secondary nodes for the same tier receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
 
-- **Object storage and archival tiers** replicate for free. S3 stores objects across multiple availability zones. The vault gets durability without any cluster coordination.
-- **Local SSD tiers** can optionally replicate sealed chunks to a peer node. After post-processing (compression + indexing), the chunk is stable and self-contained, so replication is a simple file copy. Configuration: `replicas: 2` on the tier.
-- **Memory tiers** can optionally mirror active writes to a peer's memory buffer, so node failure loses zero records. Or the operator accepts the small loss window (minutes of data, re-ingestable from source). Configuration: `mirror: true` on the tier.
+This model is similar to CockroachDB's range leaders: each range has a leader that handles writes, and leadership can move between nodes. Here, each tier-within-a-vault has a leader.
 
-This dissolves the vault replication question entirely. Instead of "how do we replicate vaults across nodes" (complex, doubles storage, requires failover logic), it becomes "which tiers need redundancy and how does each one achieve it." The answer is usually: object storage handles it, and the active chunk's loss window is acceptable.
+### Replication
 
-```mermaid
-flowchart LR
-    subgraph Ingestion
-        I([fa:fa-plug Ingester]) --> T0
-    end
+The primary for each tier replicates to its secondaries. Each tier type achieves durability in the way that makes sense for its medium:
 
-    subgraph Tier Chain
-        T0[fa:fa-bolt Memory<br/>active chunk] -->|seal & rotate| T1
-        T1[fa:fa-hard-drive Local SSD<br/>mmap · sealed] -->|upload & evict| T2
-        T2[fa:fa-cloud Object Storage<br/>S3 / GCS / R2] -->|archive| T3
-        T3[fa:fa-snowflake Archival<br/>Glacier / Archive]
-    end
+- **Memory tiers**: the primary mirrors writes to secondary nodes' memory buffers. Secondaries receive records tagged with chunk assignment. If the primary dies, a secondary is promoted — it has identical data and can resume streaming to the next tier.
+- **Local SSD tiers**: the primary replicates sealed chunks (post-compression, post-indexing) to secondaries. A sealed chunk is stable and self-contained, so replication is a file copy.
+- **Object storage and archival tiers**: no cluster-level replication needed. The cloud provider handles AZ redundancy (S3 claims eleven nines). Only chunk metadata needs to be shared across the cluster so every node knows what exists.
 
-    subgraph Replication
-        T0 -.->|optional mirror| T0R([fa:fa-bolt Peer Memory])
-        T1 -.->|optional replicas| T1R([fa:fa-hard-drive Peer SSD])
-        T2 -.-|built-in AZ redundancy| T2
-        T3 -.-|built-in AZ redundancy| T3
-    end
+### The golden thread
 
-    subgraph Query
-        Q([fa:fa-search Query]) -.-> T0
-        Q -.-> T1
-        Q -.-> T2
-        Q -.-> T3
-    end
+Tier transitions are **primary-to-primary**. When the memory tier primary rotates, it streams records to the file tier primary. When the file tier primary seals a chunk, it uploads to S3. There is exactly one authoritative path from first insert through every tier:
 
-    style T0 fill:#c4956a,color:#1a1a1a
-    style T1 fill:#a07850,color:#1a1a1a
-    style T2 fill:#6a5040,color:#f0e8e0
-    style T3 fill:#3a3030,color:#f0e8e0
-    style T0R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
-    style T1R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
+Ingester → Memory tier primary (node-1)
+              ├── mirror writes to memory secondary (node-2)
+              └── stream records to ↓
+           File tier primary (node-3)
+              ├── replicate sealed chunks to file secondary (node-1)
+              └── upload sealed chunks to ↓
+           Object storage (S3)
+              └── storage class transition to ↓
+           Archival (Glacier)
+```
+
+No duplicate uploads. No coordination questions about who does what. The primary for each tier is the single decision-maker. If a primary dies, its secondary is promoted and the golden thread reconnects — the new primary picks up where the old one left off, resuming the stream to the next tier's primary.
+
+### Open design question: chunk metadata in Raft
+
+Today, Raft stores only configuration state (vaults, routes, filters, users, policies) — a few KB. The per-tier primary model requires cluster-wide knowledge of chunk metadata: which chunks exist, which tier they're in, which nodes hold them. At scale (10 vaults × 1,000 chunks × ~200 bytes per record), this could grow to megabytes of Raft state.
+
+Options to investigate:
+- **Raft for chunk metadata**: simple, consistent, but adds write amplification and snapshot size. May be acceptable if chunk counts stay in the low thousands.
+- **Separate metadata store**: chunk metadata lives outside Raft (e.g. in a lightweight per-node database), synchronized via gossip or a dedicated metadata protocol. More complex, but decouples data plane metadata from config plane state.
+- **Hybrid**: Raft tracks tier primaries and vault-level summaries; chunk-level metadata is exchanged directly between tier primaries and their secondaries via the replication stream itself.
 
 ### Tier transitions
 
@@ -218,17 +214,17 @@ Records can be moved between vaults based on policies (e.g. eject old records, r
 
 Hot tiers seal frequently (every few minutes or by record count). Moving those tiny sealed chunks to the next tier as-is would create thousands of small index files, killing query performance. Compacting them after the fact adds complexity (merge logic, index rebuilding over combined data).
 
-The simpler model: **each tier is its own ingestion pipeline.** Records stream downward from hotter tiers into colder ones. Each tier receives a record stream, appends to its own active chunk, and seals on its own schedule — tuned for its medium.
+The simpler model: **each tier is its own ingestion pipeline.** Records stream from the primary of one tier to the primary of the next. Each tier's primary appends to its own active chunk and seals on its own schedule — tuned for its medium. The stream between tiers may cross the network (tier primaries can be on different nodes), but it's a single authoritative stream, not a fan-out.
 
 ```mermaid
 flowchart LR
-    subgraph Memory Tier
+    subgraph Node-1 — memory tier primary
         I([fa:fa-plug Ingester]) --> MA[Active chunk<br/>seals every ~5 min]
     end
 
     MA -->|record stream| SA
 
-    subgraph SSD Tier
+    subgraph Node-3 — file tier primary
         SA[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| SS[Sealed chunks<br/>compressed · indexed]
     end
 
@@ -247,9 +243,9 @@ flowchart LR
     style SS fill:#a07850,color:#1a1a1a
 ```
 
-The memory tier's sealed chunks are ephemeral — once their records have been streamed into the SSD tier's active chunk, they're discarded. The SSD tier produces naturally large chunks because its rotation policy is tuned for disk (hours or hundreds of megabytes), not memory (minutes). No compaction, no merge logic. Each tier does what it already knows how to do: accept records, chunk them, seal them.
+The memory tier's sealed chunks are ephemeral — once their records have been streamed to the file tier primary, they can be discarded (the memory secondaries discard theirs too). The file tier produces naturally large chunks because its rotation policy is tuned for disk (hours or hundreds of megabytes), not memory (minutes). No compaction, no merge logic. Each tier just does what it already knows how to do: accept records, chunk them, seal them.
 
-**Object storage and archival** don't need their own chunking — they receive sealed chunks from the SSD tier as complete files. The transition from object storage to archival is typically a storage class change (S3 Standard → Glacier), not a data copy.
+**Object storage and archival** don't need their own chunking — they receive sealed chunks from the file tier primary as complete files. The transition from object storage to archival is typically a storage class change (S3 Standard → Glacier), not a data copy.
 
 ### On-demand promotion
 
