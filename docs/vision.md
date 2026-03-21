@@ -359,19 +359,32 @@ The cluster should not need an operator for steady-state operations. It should h
 
 ---
 
-## Compliance as a Query
+## Security and Compliance
+
+GastroLog is a commercial-grade product for SREs, developers, and operations teams who need to move fast. Its security posture is designed to satisfy SOC 2 and GDPR — not to store classified intelligence. Military-grade security (per-field encryption, HSM-backed key management, zero-trust between components) is fundamentally incompatible with the performance model (mmap, zero-copy, sub-millisecond index lookups, searchable fields). GastroLog chooses usability and performance, with pragmatic security that meets real-world compliance needs.
+
+### Security model
+
+- **Transport**: mTLS between all cluster nodes. HTTPS for client connections.
+- **Authentication**: JWT-based with per-session refresh tokens. RBAC for authorization.
+- **Encryption at rest (local tiers)**: delegated to the operating system or infrastructure — LUKS, dm-crypt, encrypted EBS volumes. Transparent to the application, compatible with mmap. GastroLog does not implement application-level encryption of local data.
+- **Encryption at rest (cloud tiers)**: provider-native encryption — S3 SSE-KMS, GCS CMEK. Per-tenant KMS keys for multi-tenant deployments. BYOK via customer-managed KMS keys.
+- **Sensitive field handling**: two mechanisms, chosen at ingestion time via the route pipeline:
+  - **Role-based display masking**: data stored in plaintext (searchable, indexable), masked at query time based on role. Analysts see `credit_card=****` unless they have the PII role.
+  - **Irreversible redaction**: the `redact` stage removes or hashes fields before they reach any tier. Data is gone — not masked, not encrypted, gone. For fields that must never be stored.
+- **No field-level encryption**: encrypting individual fields would make them unsearchable and unindexable, which conflicts with the query model. This is a deliberate tradeoff, consistent with how Elasticsearch, Splunk, and Loki handle it.
+
+### Compliance
 
 Compliance requirements — data retention, access auditing, right-to-erasure, data residency — should be satisfiable through the same interfaces used for everything else: queries and configuration.
 
-**Right to erasure.** `gastrolog purge user_id=abc123` removes all records containing that user's data across all vaults, all tiers, all nodes. The purge is audited, cryptographically verifiable, and produces a compliance certificate. It is a command, not a project.
-
-**Sensitive field masking.** Sensitive fields (PII, credentials, health data) can be masked at display time based on the user's role. Analysts see `credit_card=****` unless they have the PII role, in which case they see the real value. The data is stored in plaintext (encrypted at the volume/cloud level) so it remains searchable and indexable. For fields that must never be stored in plaintext, the route pipeline's `redact` stage irreversibly removes or hashes them at ingestion — before they reach any tier. This is a deliberate tradeoff: true field-level encryption would make fields unsearchable, which conflicts with the query model.
+**Right to erasure.** `gastrolog purge user_id=abc123` removes all records containing that user's data across all vaults, all tiers, all nodes. The purge is audited and produces a compliance certificate. It is a command, not a project.
 
 **Access auditing.** Every query, every record access, every export is logged to a dedicated audit vault. "Who accessed records containing `patient_id=12345` in the last 90 days?" is a query against the audit vault. The audit trail is itself immutable and tamper-evident.
 
 **Data residency.** Vaults can be pinned to specific nodes or regions. A vault configured with `residency: eu-west-1` will only store data on nodes in that region, and queries against it will only execute on those nodes. Cross-region queries are explicitly opt-in, with clear indication of which data is crossing boundaries.
 
-**Retention enforcement.** Retention policies are not suggestions — they are cryptographic guarantees. When a retention policy says "delete after 90 days," the data is verifiably gone from all tiers after 90 days. The cluster produces retention compliance reports that can be submitted to auditors without manual verification.
+**Retention enforcement.** Retention policies are verifiable. When a retention policy says "delete after 90 days," the data is gone from all tiers after 90 days. The cluster produces retention compliance reports that can be submitted to auditors without manual verification.
 
 ---
 
