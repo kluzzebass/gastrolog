@@ -48,28 +48,17 @@ GastroLog does not need a separate tracing backend. A distributed trace is a set
 
 Routes today are filter-to-vault mappings. At its ceiling, the routing layer is a lightweight data pipeline — the same pipeline language used for queries, applied at ingestion time.
 
-**Transform on ingest.** Parse unstructured logs into fields, enrich with external data, normalize timestamps, redact sensitive fields — all before the record hits storage. The transform pipeline is defined in the route configuration using the same syntax as query pipelines.
+**Transform on ingest.** Parse unstructured logs into fields, enrich with external data, normalize timestamps, redact sensitive fields — all before the record hits storage. The transform pipeline uses the same operator syntax as query pipelines, but is configured visually through the route editor in Settings — not through config files.
 
-```yaml
-route:
-  filter: "ingester_type=syslog"
-  pipeline: |
-    | parse syslog
-    | geoip remote_host
-    | lookup customer_id from billing_api by remote_host
-    | redact credit_card_number
-    | route by customer_tier
-  destinations:
-    premium: vault-premium
-    standard: vault-standard
-    _default: vault-archive
-```
+**Visual route editor.** The route configuration UI extends the existing Settings route panel with a flow builder. Each transform stage is a card: parse, enrich, redact, sample, route-by-field. Cards are added from a categorized picker, configured with forms that show only valid options, and connected visually to their destinations. The flow builder makes it obvious what your options are at each stage — you never guess keywords or read docs to discover that `geoip`, `lookup`, or `redact` exist. The underlying pipeline syntax is generated from the visual representation and displayed as a read-only text preview for users who want to see it, but the source of truth is the visual editor.
 
-**Sampling.** High-volume sources can be sampled at ingestion: keep 100% of errors, 10% of info, 1% of debug. Sampling is configurable per route and adjustable at runtime without restarting ingesters. The sampling rate is recorded as a field on each record so that aggregation queries can extrapolate accurately.
+A syslog route, for example, would show as a chain of cards: **Filter** (ingester_type = syslog) → **Parse** (syslog format) → **Enrich** (geoip on remote_host) → **Lookup** (customer_id from billing_api) → **Redact** (credit_card_number) → **Route by** (customer_tier) — with the "Route by" card fanning out to destination vault cards for premium, standard, and archive. No YAML. No text editing. The same crafted quality as the rest of the UI.
 
-**Fork and fan-out.** A single record can be routed to multiple vaults — the raw record to a high-retention compliance vault, a redacted version to the operational vault, a summary to a metrics vault. Forking happens at the route level, not the ingester level.
+**Sampling.** High-volume sources can be sampled at ingestion: keep 100% of errors, 10% of info, 1% of debug. Sampling is a stage card in the route editor — a slider per severity level, adjustable at runtime without restarting ingesters. The sampling rate is recorded as a field on each record so that aggregation queries can extrapolate accurately.
 
-**The key insight:** the routing language and the query language are the same language. Learn the pipeline syntax once, use it everywhere — in the query bar, in route definitions, in alert conditions, in computed columns.
+**Fork and fan-out.** A single record can be routed to multiple vaults — the raw record to a high-retention compliance vault, a redacted version to the operational vault, a summary to a metrics vault. In the visual editor, a fork is a branch point where the flow splits into parallel paths, each with its own transform stages and destination. Forking happens at the route level, not the ingester level.
+
+**The key insight:** the routing language and the query language share the same operators. The query bar is text-first (experts type fast). The route editor is visual-first (configuration is infrequent and discoverability matters more than speed). Both generate the same pipeline syntax under the hood. Learn the operators once, encounter them in both contexts.
 
 ---
 
