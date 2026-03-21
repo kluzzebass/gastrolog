@@ -242,6 +242,4 @@ Key dependencies that span epics:
 
 4. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
 
-5. **Cloud tier active chunk risk** (1.6): The active chunk for S3/Glacier tiers lives on local disk. If the primary dies before sealing, those records are lost — even though the user expects "their data is in S3." The durability handoff protects data from previous tiers, but not data ingested directly into a cloud tier.
-
-6. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
+5. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
