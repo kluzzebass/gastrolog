@@ -197,6 +197,26 @@ flowchart TB
 
 No duplicate uploads. No coordination questions about who does what. The primary for each tier is the single decision-maker. If a primary dies, its secondary is promoted and the golden thread reconnects — the new primary picks up where the old one left off, resuming the stream to the next tier's primary.
 
+### Durability handoff
+
+A tier must not drop a chunk until the next tier has **received and durably replicated** the records it contained. Without this guarantee, a poorly timed failure loses data:
+
+1. Memory tier drops a sealed chunk ("file tier received it")
+2. File tier primary has the records but hasn't replicated to secondaries yet
+3. File tier primary dies → records lost
+
+The handoff sequence at each tier boundary:
+
+1. Source tier primary streams records from a sealed chunk to the destination tier primary
+2. Destination tier primary appends records to its active chunk
+3. If the destination tier has replication configured, the primary waits for replication ack from its secondaries
+4. Destination tier primary sends a **durable ack** back to the source tier primary
+5. Only then does the source tier mark the chunk as eligible for removal by its retention policy
+
+The same pattern applies at every tier boundary. The file tier doesn't delete a chunk until S3 confirms the upload completed. S3 doesn't transition to Glacier until the class change is confirmed. The ack always means "durably stored according to this tier's replication requirements," not just "received by the primary."
+
+This is effectively a two-phase commit at each tier boundary — the cost is one extra round-trip per chunk transition, which is negligible given that chunks seal on the order of minutes to hours.
+
 ### Open design question: chunk metadata in Raft
 
 Today, Raft stores only configuration state (vaults, routes, filters, users, policies) — a few KB. The per-tier primary model requires cluster-wide knowledge of chunk metadata: which chunks exist, which tier they're in, which nodes hold them. At scale (10 vaults × 1,000 chunks × ~200 bytes per record), this could grow to megabytes of Raft state.
