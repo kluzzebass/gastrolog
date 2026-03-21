@@ -234,16 +234,14 @@ Key dependencies that span epics:
 
 ## Summary of Contradictions and Open Questions
 
-1. **Per-tier primaries vs. "no primary node"** (1.10): Tier primaries are a scoped exception to the no-primary-node principle. The distinction (fine-grained, per-tier-per-vault, dynamic) should be explicitly documented in CLAUDE.md once implemented.
+1. **Durability handoff timeout** (1.14): If the destination tier's replication is slow or unreachable, the source tier can't drop its chunk. Unbounded hold is a resource leak; timeout means potential data loss. Need a policy.
 
-2. **Durability handoff timeout** (1.14): If the destination tier's replication is slow or unreachable, the source tier can't drop its chunk. Unbounded hold is a resource leak; timeout means potential data loss. Need a policy.
+2. **Route pipeline failure mode** (2.14): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
 
-3. **Route pipeline failure mode** (2.14): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
+3. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
 
-4. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
+4. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
 
-5. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
+5. **Cloud tier active chunk risk** (1.6): The active chunk for S3/Glacier tiers lives on local disk. If the primary dies before sealing, those records are lost — even though the user expects "their data is in S3." The durability handoff protects data from previous tiers, but not data ingested directly into a cloud tier.
 
-6. **Cloud tier active chunk risk** (1.6): The active chunk for S3/Glacier tiers lives on local disk. If the primary dies before sealing, those records are lost — even though the user expects "their data is in S3." The durability handoff protects data from previous tiers, but not data ingested directly into a cloud tier.
-
-7. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
+6. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
