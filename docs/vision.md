@@ -212,13 +212,46 @@ A query for `last=90d` scans all tiers automatically. The user doesn't know or c
 
 The sealed chunk is the natural unit for tier movement. Once sealed, the chunk is immutable — no records are added, removed, or modified. It goes through post-processing stages (compression, index building) that transform its on-disk representation, but the record content is fixed. After post-processing, the chunk is self-contained (data + indexes) and ready to move between tiers without further transformation.
 
-Records can be moved between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks:
+Records can be moved between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks.
 
-- **Demote (warm → cold)**: upload the sealed chunk file to object storage as-is. Delete the local copy. Replace with a stub that knows how to fetch from the remote tier.
-- **Promote (cold → warm)**: download the chunk to local SSD, mmap it. Happens on-demand during queries (with caching) or proactively based on access patterns.
+### Compaction
+
+Hot tiers seal frequently (every few minutes or by record count). If each tiny sealed chunk moved to the next tier as-is, the SSD tier would accumulate thousands of small chunks, killing query performance (thousands of index files to scan).
+
+**Compaction** solves this: when small chunks arrive from a hotter tier, the receiving tier merges them into larger ones. The records are the same; the container is repacked. Indexes are rebuilt over the merged set. The small source chunks are deleted after the compacted chunk is finalized. This is analogous to LSM-tree compaction — frequent small flushes from memory, periodic merges on disk.
+
+```mermaid
+flowchart LR
+    subgraph Memory Tier
+        A1[Chunk A<br/>5 min] --> SEAL
+        A2[Chunk B<br/>5 min] --> SEAL
+        A3[Chunk C<br/>5 min] --> SEAL
+        A4[Chunk D<br/>5 min] --> SEAL
+        SEAL[Seal & rotate]
+    end
+
+    SEAL --> COMPACT
+
+    subgraph SSD Tier
+        COMPACT[Compaction<br/>merge + reindex] --> BIG[Compacted chunk<br/>~20 min · single index]
+    end
+
+    BIG -->|upload| S3[(Object Storage)]
+
+    style COMPACT fill:#c4956a,color:#1a1a1a
+    style BIG fill:#a07850,color:#1a1a1a
+```
+
+The chunk lifecycle by tier:
+
+- **Memory → SSD**: small sealed chunks queue up; the SSD tier compacts them into larger chunks on a configurable schedule (by count, by total size, or by age of oldest pending chunk).
+- **SSD → Object storage**: compacted chunks are already large and stable. Upload as-is — no further transformation needed.
+- **Object storage → Archival**: same bytes, different storage class. A metadata change, not a data copy (most cloud providers support in-place storage class transitions).
+
+### On-demand promotion
+
+- **Promote (cold → warm)**: download a chunk from object storage to local SSD, mmap it. Happens on-demand during queries (with caching) or proactively based on access patterns.
 - **Evict (warm cache)**: delete the local cache of a chunk that's already durable in a colder tier. The stub remains; the next query re-fetches it.
-
-No re-indexing, no format conversion. Once post-processed, the chunk is the same bytes at every tier.
 
 ---
 
