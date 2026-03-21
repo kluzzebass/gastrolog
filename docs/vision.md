@@ -171,19 +171,19 @@ Tier transitions are **primary-to-primary**. When the memory tier primary rotate
 flowchart TB
     I([fa:fa-plug Ingester]) --> M1
 
-    subgraph Node-1 — memory tier primary
+    subgraph node1mem [Node-1: memory tier primary]
         M1[fa:fa-bolt Memory<br/>active chunk]
     end
 
-    subgraph Node-2 — memory secondary
+    subgraph node2mem [Node-2: memory secondary]
         M2[fa:fa-bolt Memory<br/>mirror]
     end
 
-    subgraph Node-3 — file tier primary
+    subgraph node3file [Node-3: file tier primary]
         F3[fa:fa-hard-drive File tier<br/>active chunk] -->|seal| FS3[Sealed chunks]
     end
 
-    subgraph Node-1 — file secondary
+    subgraph node1file [Node-1: file secondary]
         F1[fa:fa-hard-drive File tier<br/>replica]
     end
 
@@ -230,7 +230,7 @@ flowchart LR
     Q([fa:fa-search Query]) -.->|microseconds| M[fa:fa-bolt Memory]
     Q -.->|milliseconds| F[fa:fa-hard-drive Local SSD]
     Q -.->|seconds| S3[fa:fa-cloud Object Storage]
-    Q -.->|minutes–hours| ARC[fa:fa-snowflake Archival]
+    Q -.->|minutes to hours| ARC[fa:fa-snowflake Archival]
 
     style M fill:#c4956a,color:#1a1a1a
     style F fill:#a07850,color:#1a1a1a
@@ -252,13 +252,13 @@ The simpler model: **each tier is its own ingestion pipeline.** Records stream f
 
 ```mermaid
 flowchart LR
-    subgraph Node-1 — memory tier primary
+    subgraph node1mem [Node-1: memory tier primary]
         I([fa:fa-plug Ingester]) --> MA[Active chunk<br/>seals every ~5 min]
     end
 
     MA -->|record stream| SA
 
-    subgraph Node-3 — file tier primary
+    subgraph node3file [Node-3: file tier primary]
         SA[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| SS[Sealed chunks<br/>compressed · indexed]
     end
 
