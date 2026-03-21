@@ -135,7 +135,7 @@ Vault "api-logs"
   ├── Tier 1: Local SSD    (sealed, mmap'd, last 7 days)
   ├── Tier 2: S3 Standard  (compressed, last 90 days)
   ├── Tier 3: S3 Glacier   (archived, last 3 years)
-  └── Transition policy: budget $30/month, pin errors to Tier 1 for 30 days
+  └── Transition policy: budget $30/month
 ```
 
 The vault doesn't care whether a chunk is in memory, on SSD, in S3, or in archival storage. It asks the tier chain "store this chunk" and "fetch this chunk" and the tiers handle the rest.
@@ -202,7 +202,7 @@ The transition between tiers is driven by policy. Multiple strategies can coexis
 - **Size-based**: when the current tier exceeds N GB, the oldest chunks demote. Practical for capacity planning.
 - **Budget-based**: the vault has a monthly storage budget; the cluster distributes data across tiers to stay within it. The most powerful model — the operator sets a dollar amount and GastroLog figures out the rest.
 - **Access-based**: chunks that haven't been queried in N days demote. Data that's actively used stays warm; data that's gathering dust moves cold.
-- **Value-based**: high-value records (errors, traced requests) can be pinned to warmer tiers longer than low-value records (debug, info). The pin criteria is a filter expression — the same syntax used in queries and routes.
+- **Value-based differentiation** is handled by routing, not by tier policies. Sealed chunks are immutable and contain mixed severities — you can't demote half a chunk. Instead, use route forking to send high-value records (errors, traced requests) to a vault with a longer warm tier, and low-value records (debug, info) to a vault with aggressive demotion. The visual route editor makes this a natural fork in the flow, not a special tier feature.
 
 ### Transparent query fan-out
 
