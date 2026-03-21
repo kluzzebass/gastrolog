@@ -70,8 +70,8 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 3.1 | Subquery support in pipeline parser | — | Query Language: subqueries |
-| 3.2 | Subquery execution in query engine (nested pipeline evaluation) | 3.1 | Query Language: subqueries |
+| 3.1 | Research: subquery / named result composition model | — | Query Language: subqueries |
+| 3.2 | Subquery execution in query engine | 3.1 | Query Language: subqueries |
 | 3.3 | Computed virtual columns: definition and persistence in cluster config | — | Query Language: computed virtual columns |
 | 3.4 | Computed virtual columns: evaluation during query execution | 3.3 | Query Language: computed virtual columns |
 | 3.5 | Timeline operator (group results by field, render as timeline) | — | Query Language: subqueries (example) |
@@ -238,9 +238,11 @@ Key dependencies that span epics:
 
 3. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
 
-4. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
+4. **Subquery execution model** (3.1): Two approaches to explore. (a) Nested subqueries with parentheses (`where latency > (* | stats p99 ...)`): aggregation subqueries are inherently blocking (must complete before outer query starts); filter/projection subqueries could theoretically stream, but the semantics of a growing result set mid-scan are ambiguous. (b) Named intermediate results (`let p99 = ... | where latency > $p99`): explicit, no evaluation order ambiguity, but always blocking. The streaming architecture favors avoiding heap-heavy materializations — need to determine which composition model fits best.
 
-5. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
+6. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
+
+7. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
 
 ---
 
