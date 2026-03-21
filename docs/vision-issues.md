@@ -46,25 +46,23 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 2.1 | Parse operator for route pipelines (syslog, JSON, logfmt, etc.) | — | Programmable Ingestion: transform on ingest |
-| 2.2 | Enrich operator (geoip on field) | — | Programmable Ingestion: transform on ingest |
-| 2.3 | Lookup operator for route pipelines (external data source join) | — | Programmable Ingestion: transform on ingest |
-| 2.4 | Redact operator (field-level masking at ingestion) | — | Programmable Ingestion: transform on ingest |
-| 2.5 | Sampling stage (per-severity percentage, runtime adjustable) | — | Programmable Ingestion: sampling |
-| 2.6 | Sample rate annotation field on records | 2.5 | Programmable Ingestion: sampling |
-| 2.7 | Sample-aware aggregation (extrapolate in stats queries) | 2.6 | Programmable Ingestion: sampling |
-| 2.8 | Route forking (branch to parallel paths with independent transforms) | — | Programmable Ingestion: fork and fan-out |
-| 2.9 | Route-by-field stage (dynamic destination based on field value) | — | Programmable Ingestion: transform on ingest |
-| 2.10 | Visual route editor: stage card picker (categorized operator list) | 2.1, 2.2, 2.3, 2.4, 2.5, 2.8, 2.9 | Programmable Ingestion: visual route editor |
-| 2.11 | Visual route editor: card configuration forms | 2.10 | Programmable Ingestion: visual route editor |
-| 2.12 | Visual route editor: flow connections and fork visualization | 2.10 | Programmable Ingestion: visual route editor |
-| 2.13 | Visual route editor: read-only pipeline syntax preview | 2.10 | Programmable Ingestion: visual route editor |
-| 2.14 | Route pipeline execution engine (apply pipeline to records at ingestion time) | 2.1 | Programmable Ingestion: transform on ingest |
+| 2.1 | Enrich operator (geoip on field) | — | Programmable Ingestion: transform on ingest |
+| 2.2 | Lookup operator for route pipelines (external data source join) | — | Programmable Ingestion: transform on ingest |
+| 2.3 | Redact operator (field-level masking/removal at ingestion) | — | Programmable Ingestion: transform on ingest |
+| 2.4 | Sampling stage (per-severity percentage, runtime adjustable) | — | Programmable Ingestion: sampling |
+| 2.5 | Sample rate annotation field on records | 2.4 | Programmable Ingestion: sampling |
+| 2.6 | Sample-aware aggregation (extrapolate in stats queries) | 2.5 | Programmable Ingestion: sampling |
+| 2.7 | Route forking (branch to parallel paths with independent transforms) | — | Programmable Ingestion: fork and fan-out |
+| 2.8 | Route-by-field stage (dynamic destination based on field value) | — | Programmable Ingestion: transform on ingest |
+| 2.9 | Visual route editor: stage card picker (categorized operator list) | 2.1–2.8 | Programmable Ingestion: visual route editor |
+| 2.10 | Visual route editor: card configuration forms | 2.9 | Programmable Ingestion: visual route editor |
+| 2.11 | Visual route editor: flow connections and fork visualization | 2.9 | Programmable Ingestion: visual route editor |
+| 2.12 | Visual route editor: read-only pipeline syntax preview | 2.9 | Programmable Ingestion: visual route editor |
+| 2.13 | Route pipeline execution engine (apply transforms to digested records) | 2.1 | Programmable Ingestion: transform on ingest |
 
 **Contradictions / risks:**
 
-- **2.14 + performance**: Running a pipeline (parse, geoip lookup, external API call) on every ingested record adds latency to the ingestion path. If a lookup stage calls an external API that's slow or down, it could block ingestion entirely. Need to define behavior for slow/failed stages — skip, buffer, drop, dead-letter queue?
-- **2.4 + compliance (Epic 7)**: The redact operator is listed here and field-level encryption is in Epic 7. These are different mechanisms (irreversible masking vs. reversible encryption). The vision references both without clarifying when to use which. Should the route editor offer both as distinct stages?
+- **2.13 + performance**: Running a pipeline (geoip lookup, external API call) on every digested record adds latency to the ingestion path. If a lookup stage calls an external API that's slow or down, it could block ingestion entirely. Need to define behavior for slow/failed stages — skip, buffer, drop, dead-letter queue?
 
 ---
 
@@ -139,8 +137,8 @@ The foundation that most other epics depend on. Must be built first.
 |---|-------|-----------|----------------|
 | 7.1 | Purge command: delete records matching expression across all vaults/tiers/nodes | 1.3 | Compliance: right to erasure |
 | 7.2 | Purge audit trail and compliance certificate | 7.1 | Compliance: right to erasure |
-| 7.3 | Field-level encryption at ingestion (route pipeline stage) | 2.14 | Compliance: field-level encryption |
-| 7.4 | Role-based field decryption (PII role sees real values, others see masked) | 7.3 | Compliance: field-level encryption |
+| 7.3 | Role-based display masking (PII role sees real values, others see masked) | — | Security: sensitive field handling |
+| 7.4 | Redact stage in route pipeline (irreversible field removal/hashing) | 2.13 | Security: sensitive field handling |
 | 7.5 | Audit vault (log all queries, record accesses, exports) | — | Compliance: access auditing |
 | 7.6 | Data residency constraints (pin vault tiers to specific nodes/regions) | 1.10 | Compliance: data residency |
 | 7.7 | Cryptographic retention enforcement (verifiable deletion proof) | 1.3 | Compliance: retention enforcement |
@@ -224,19 +222,19 @@ Key dependencies that span epics:
 
 | Downstream | Depends on | Reason |
 |---|---|---|
-| 2.10 (visual route editor) | 2.1–2.9 (all route operators) | Can't build the picker until the operators exist |
+| 2.9 (visual route editor) | 2.1–2.8 (all route operators) | Can't build the picker until the operators exist |
 | 5.6 (investigation model) | — | **Keystone**: collaboration (6.4, 6.5), CLI shared state (11.4), and handoff all build on this |
 | 7.1 (purge) | 1.3 (tier interface) | Must purge across all tiers |
-| 7.3 (field encryption) | 2.14 (route pipeline engine) | Encryption is a pipeline stage |
+| 7.3 (field masking) | 2.13 (route pipeline engine) | Masking/redaction is a pipeline stage |
 | 7.6 (data residency) | 1.10 (per-tier primaries) | Primary election must be residency-aware |
-| 9.5 (tenant routing) | 2.9 (route-by-field) | Tenant identification is a routing decision |
+| 9.5 (tenant routing) | 2.8 (route-by-field) | Tenant identification is a routing decision |
 | 10.1–10.3 (self-healing) | 1.10 (per-tier primaries) | Healing requires re-election and rebalancing of tier primaries |
 
 ## Summary of Contradictions and Open Questions
 
 1. **Durability handoff timeout** (1.14): If the destination tier's replication is slow or unreachable, the source tier can't drop its chunk. Unbounded hold is a resource leak; timeout means potential data loss. Need a policy.
 
-2. **Route pipeline failure mode** (2.14): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
+2. **Route pipeline failure mode** (2.13): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
 
 3. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
 

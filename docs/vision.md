@@ -39,11 +39,11 @@ GastroLog does not need a separate tracing backend. A distributed trace is a set
 
 Routes today are filter-to-vault mappings. At its ceiling, the routing layer is a lightweight data pipeline — the same pipeline language used for queries, applied at ingestion time.
 
-**Transform on ingest.** Parse unstructured logs into fields, enrich with external data, normalize timestamps, redact sensitive fields — all before the record hits storage. The transform pipeline uses the same operator syntax as query pipelines, but is configured visually through the route editor in Settings — not through config files.
+**Transform on ingest.** Enrich with external data, redact sensitive fields, sample by severity — all after digestion but before the record hits storage. Parsing and field extraction are handled upstream by the ingester and digester; the route pipeline operates on fully digested records regardless of ingester type. The transform pipeline uses the same operator syntax as query pipelines, but is configured visually through the route editor in Settings — not through config files.
 
-**Visual route editor.** The route configuration UI extends the existing Settings route panel with a flow builder. Each transform stage is a card: parse, enrich, redact, sample, route-by-field. Cards are added from a categorized picker, configured with forms that show only valid options, and connected visually to their destinations. The flow builder makes it obvious what your options are at each stage — you never guess keywords or read docs to discover that `geoip`, `lookup`, or `redact` exist. The underlying pipeline syntax is generated from the visual representation and displayed as a read-only text preview for users who want to see it, but the source of truth is the visual editor.
+**Visual route editor.** The route configuration UI extends the existing Settings route panel with a flow builder. Each transform stage is a card: enrich, lookup, redact, sample, route-by-field. Cards are added from a categorized picker, configured with forms that show only valid options, and connected visually to their destinations. The flow builder makes it obvious what your options are at each stage — you never guess keywords or read docs to discover that `geoip`, `lookup`, or `redact` exist. The underlying pipeline syntax is generated from the visual representation and displayed as a read-only text preview for users who want to see it, but the source of truth is the visual editor.
 
-A syslog route with enrichment and tiered routing:
+A syslog route with enrichment and tiered routing (parsing already handled by the syslog ingester and digester):
 
 ```mermaid
 flowchart LR
@@ -51,8 +51,7 @@ flowchart LR
 
     subgraph Route Pipeline
         F[fa:fa-filter Filter<br/>ingester_type = syslog]
-        F --> P[fa:fa-code Parse<br/>syslog format]
-        P --> G[fa:fa-globe Enrich<br/>geoip on remote_host]
+        F --> G[fa:fa-globe Enrich<br/>geoip on remote_host]
         G --> L[fa:fa-book Lookup<br/>customer_id from billing_api]
         L --> R[fa:fa-eye-slash Redact<br/>credit_card_number]
         R --> S{fa:fa-code-branch Route by<br/>customer_tier}
@@ -63,7 +62,6 @@ flowchart LR
     S -->|default| V3[(fa:fa-archive vault-archive)]
 
     style F fill:#c4956a,color:#1a1a1a
-    style P fill:#c4956a,color:#1a1a1a
     style G fill:#c4956a,color:#1a1a1a
     style L fill:#c4956a,color:#1a1a1a
     style R fill:#c4956a,color:#1a1a1a
