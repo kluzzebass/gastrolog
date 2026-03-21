@@ -46,19 +46,19 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 2.1 | Enrich operator (geoip on field) | — | Programmable Ingestion: transform post-digest |
-| 2.2 | Lookup operator for route pipelines (external data source join) | — | Programmable Ingestion: transform post-digest |
-| 2.3 | Redact operator (field-level masking/removal at ingestion) | — | Programmable Ingestion: transform post-digest |
+| 2.1 | Enrich operator (geoip on field) | — | Programmable Ingestion: route pipeline transforms |
+| 2.2 | Lookup operator for route pipelines (external data source join) | — | Programmable Ingestion: route pipeline transforms |
+| 2.3 | Redact operator (field-level masking/removal at ingestion) | — | Programmable Ingestion: route pipeline transforms |
 | 2.4 | Sampling stage (per-severity percentage, runtime adjustable) | — | Programmable Ingestion: sampling |
 | 2.5 | Sample rate annotation field on records | 2.4 | Programmable Ingestion: sampling |
 | 2.6 | Sample-aware aggregation (extrapolate in stats queries) | 2.5 | Programmable Ingestion: sampling |
 | 2.7 | Route forking (branch to parallel paths with independent transforms) | — | Programmable Ingestion: fork and fan-out |
-| 2.8 | Route-by-field stage (dynamic destination based on field value) | — | Programmable Ingestion: transform post-digest |
+| 2.8 | Route-by-field stage (dynamic destination based on field value) | — | Programmable Ingestion: route pipeline transforms |
 | 2.9 | Visual route editor: stage card picker (categorized operator list) | 2.1–2.8 | Programmable Ingestion: visual route editor |
 | 2.10 | Visual route editor: card configuration forms | 2.9 | Programmable Ingestion: visual route editor |
 | 2.11 | Visual route editor: flow connections and fork visualization | 2.9 | Programmable Ingestion: visual route editor |
 | 2.12 | Visual route editor: read-only pipeline syntax preview | 2.9 | Programmable Ingestion: visual route editor |
-| 2.13 | Route pipeline execution engine (apply transforms to digested records) | 2.1 | Programmable Ingestion: transform post-digest |
+| 2.13 | Route pipeline execution engine (apply transforms to digested records) | 2.1 | Programmable Ingestion: route pipeline transforms |
 
 **Contradictions / risks:**
 
