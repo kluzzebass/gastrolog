@@ -52,7 +52,52 @@ Routes today are filter-to-vault mappings. At its ceiling, the routing layer is 
 
 **Visual route editor.** The route configuration UI extends the existing Settings route panel with a flow builder. Each transform stage is a card: parse, enrich, redact, sample, route-by-field. Cards are added from a categorized picker, configured with forms that show only valid options, and connected visually to their destinations. The flow builder makes it obvious what your options are at each stage — you never guess keywords or read docs to discover that `geoip`, `lookup`, or `redact` exist. The underlying pipeline syntax is generated from the visual representation and displayed as a read-only text preview for users who want to see it, but the source of truth is the visual editor.
 
-A syslog route, for example, would show as a chain of cards: **Filter** (ingester_type = syslog) → **Parse** (syslog format) → **Enrich** (geoip on remote_host) → **Lookup** (customer_id from billing_api) → **Redact** (credit_card_number) → **Route by** (customer_tier) — with the "Route by" card fanning out to destination vault cards for premium, standard, and archive. No YAML. No text editing. The same crafted quality as the rest of the UI.
+A syslog route with enrichment and tiered routing:
+
+```mermaid
+flowchart LR
+    IN([fa:fa-plug Syslog Ingester]) --> F
+
+    subgraph Route Pipeline
+        F[fa:fa-filter Filter<br/>ingester_type = syslog]
+        F --> P[fa:fa-code Parse<br/>syslog format]
+        P --> G[fa:fa-globe Enrich<br/>geoip on remote_host]
+        G --> L[fa:fa-book Lookup<br/>customer_id from billing_api]
+        L --> R[fa:fa-eye-slash Redact<br/>credit_card_number]
+        R --> S{fa:fa-code-branch Route by<br/>customer_tier}
+    end
+
+    S -->|premium| V1[(fa:fa-database vault-premium)]
+    S -->|standard| V2[(fa:fa-database vault-standard)]
+    S -->|default| V3[(fa:fa-archive vault-archive)]
+
+    style F fill:#c4956a,color:#1a1a1a
+    style P fill:#c4956a,color:#1a1a1a
+    style G fill:#c4956a,color:#1a1a1a
+    style L fill:#c4956a,color:#1a1a1a
+    style R fill:#c4956a,color:#1a1a1a
+    style S fill:#c4956a,color:#1a1a1a
+```
+
+A fork route that sends raw data to compliance and redacted data to operations:
+
+```mermaid
+flowchart LR
+    IN([fa:fa-plug HTTP Ingester]) --> F[fa:fa-filter Filter<br/>path = /api/payments]
+
+    F --> FORK{fa:fa-code-branch Fork}
+
+    FORK --> R1[fa:fa-eye-slash Redact<br/>PII fields]
+    R1 --> V1[(fa:fa-database ops-vault<br/>30d retention)]
+
+    FORK --> V2[(fa:fa-archive compliance-vault<br/>7yr retention)]
+
+    style F fill:#c4956a,color:#1a1a1a
+    style FORK fill:#c4956a,color:#1a1a1a
+    style R1 fill:#c4956a,color:#1a1a1a
+```
+
+Each node in these diagrams is a card in the visual editor. No YAML. No text editing. The same crafted quality as the rest of the UI.
 
 **Sampling.** High-volume sources can be sampled at ingestion: keep 100% of errors, 10% of info, 1% of debug. Sampling is a stage card in the route editor — a slider per severity level, adjustable at runtime without restarting ingesters. The sampling rate is recorded as a field on each record so that aggregation queries can extrapolate accurately.
 
@@ -90,6 +135,32 @@ Storage should be a budget, not a cliff. Today, retention policies delete data a
 | Frozen | Archival storage (Glacier/Archive) | Minutes–hours | Cents | Legal hold, regulatory archives |
 
 **Transparent query fan-out.** A query for `last=90d` scans hot, warm, and cold tiers automatically. The user doesn't know or care where the data lives. Cold-tier results stream in after warm-tier results, with a subtle loading indicator showing that older data is still arriving.
+
+```mermaid
+flowchart LR
+    subgraph Ingestion
+        I([fa:fa-plug Ingester]) --> HOT
+    end
+
+    subgraph Storage Tiers
+        HOT[fa:fa-bolt Hot<br/>Memory<br/>~5 min] -->|seal & rotate| WARM
+        WARM[fa:fa-hard-drive Warm<br/>Local SSD · mmap<br/>days–weeks] -->|upload & evict| COLD
+        COLD[fa:fa-cloud Cold<br/>S3 / GCS / R2<br/>months–years] -->|archive| FROZEN
+        FROZEN[fa:fa-snowflake Frozen<br/>Glacier / Archive<br/>years–forever]
+    end
+
+    subgraph Query
+        Q([fa:fa-search Query]) -.->|microseconds| HOT
+        Q -.->|milliseconds| WARM
+        Q -.->|seconds| COLD
+        Q -.->|minutes–hours| FROZEN
+    end
+
+    style HOT fill:#c4956a,color:#1a1a1a
+    style WARM fill:#a07850,color:#1a1a1a
+    style COLD fill:#6a5040,color:#f0e8e0
+    style FROZEN fill:#3a3030,color:#f0e8e0
+```
 
 **Budget-driven retention.** Instead of "keep 30 days," the policy is "spend at most $50/month on storage for this vault." GastroLog monitors storage costs across tiers and migrates data downward as needed to stay within budget. High-value data (errors, traced requests) can be pinned to warmer tiers longer than low-value data (debug noise).
 
