@@ -123,11 +123,13 @@ A vault should be the **logical container** — it owns the records, the indexes
 ```
 Vault "api-logs"
   ├── Tier 0: Memory      (active + sealed chunks in RAM, last ~5 min)
-  ├── Tier 1: Local SSD    (sealed chunks, mmap'd, last 7 days)
-  ├── Tier 2: S3 Standard  (sealed chunks, compressed, last 90 days)
-  ├── Tier 3: S3 Glacier   (sealed chunks, archived, last 3 years)
+  ├── Tier 1: Local SSD    (active + sealed chunks on disk, mmap'd, last 7 days)
+  ├── Tier 2: S3 Standard  (active chunk on local disk, sealed chunks in S3, last 90 days)
+  ├── Tier 3: S3 Glacier   (active chunk on local disk, sealed chunks in Glacier, last 3 years)
   └── Transition policy: budget $30/month
 ```
+
+Cloud tiers (S3, Glacier) can't append to remote objects, so their active chunk lives on the tier primary's local disk. When the active chunk seals, it's uploaded to the cloud backend and the local copy is deleted. The sealed chunks exist only in the cloud; the active chunk exists only locally.
 
 Every tier is a full chunk manager — it has an active chunk that receives writes, seals on its own schedule, and maintains its own set of sealed chunks with its own rotation and retention policies. The memory tier is not just a write buffer; it holds an active chunk plus sealed chunks in RAM, queryable at microsecond latency. When sealed chunks in one tier age past their transition policy, the records stream to the next tier's active chunk.
 
