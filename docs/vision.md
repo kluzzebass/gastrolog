@@ -303,9 +303,9 @@ Each tier is a full chunk manager with its own active chunk and sealed chunks. T
 
 Multi-tenancy is not an afterthought bolted onto single-tenant architecture. It is a fundamental property of the vault model.
 
-**Tenant isolation at the vault level.** Each tenant gets dedicated vaults with independent encryption keys, retention policies, and storage budgets. A query from tenant A physically cannot access tenant B's data — the isolation is enforced at the index level, before any records are read.
+**Tenant isolation at the vault level.** Each tenant gets dedicated vaults with independent retention policies and storage budgets. A query from tenant A physically cannot access tenant B's data — the isolation is enforced at the index level, before any records are read.
 
-**Per-tenant encryption.** Each tenant's data is encrypted with a tenant-specific key. The cluster operator can rotate keys per tenant without affecting others. A tenant can bring their own key (BYOK) so that even the cluster operator cannot read their data without the tenant's cooperation.
+**Per-tenant encryption.** For local tiers, encryption is handled at the volume/filesystem level (LUKS, encrypted EBS volumes), transparent to the application and compatible with mmap. For cloud tiers, provider-native encryption with per-tenant keys is standard (S3 SSE-KMS with customer-managed keys, GCS CMEK). A tenant can bring their own KMS key (BYOK) for cloud tiers, giving them independent control over their data's encryption without the cluster operator holding plaintext keys.
 
 **Tenant-aware routing.** The ingestion pipeline identifies tenant boundaries (by source IP, API key, field value, or ingester configuration) and routes records to the correct tenant vault. Cross-tenant data never mingles in storage.
 
@@ -365,7 +365,7 @@ Compliance requirements — data retention, access auditing, right-to-erasure, d
 
 **Right to erasure.** `gastrolog purge user_id=abc123` removes all records containing that user's data across all vaults, all tiers, all nodes. The purge is audited, cryptographically verifiable, and produces a compliance certificate. It is a command, not a project.
 
-**Field-level encryption.** Sensitive fields (PII, credentials, health data) can be encrypted at the field level, not just the vault level. The raw record is stored with the sensitive field encrypted; the decryption key is scoped to a role. Analysts see `credit_card=****` unless they have the PII role, in which case they see the real value. The encryption happens at ingestion time via the route pipeline.
+**Sensitive field masking.** Sensitive fields (PII, credentials, health data) can be masked at display time based on the user's role. Analysts see `credit_card=****` unless they have the PII role, in which case they see the real value. The data is stored in plaintext (encrypted at the volume/cloud level) so it remains searchable and indexable. For fields that must never be stored in plaintext, the route pipeline's `redact` stage irreversibly removes or hashes them at ingestion — before they reach any tier. This is a deliberate tradeoff: true field-level encryption would make fields unsearchable, which conflicts with the query model.
 
 **Access auditing.** Every query, every record access, every export is logged to a dedicated audit vault. "Who accessed records containing `patient_id=12345` in the last 90 days?" is a query against the audit vault. The audit trail is itself immutable and tamper-evident.
 
@@ -489,7 +489,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Capability | Status | Notes |
 |---|---|---|
 | Tenant model | Not started | No tenant concept in config or proto |
-| Per-tenant encryption | Not started | No field-level or vault-level tenant keys |
+| Per-tenant encryption | Not started | Volume-level for local tiers, SSE-KMS for cloud tiers |
 | Resource quotas | Not started | No per-tenant rate/storage limits |
 | Tenant-aware routing | Not started | No tenant boundary detection |
 
@@ -531,7 +531,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 |---|---|---|
 | Retention policies | Done | Per-vault time/count/size-based with expire or eject |
 | Right to erasure | Not started | No purge command |
-| Field-level encryption | Not started | No per-field encryption |
+| Sensitive field masking | Not started | Role-based display masking, not encryption. Redact stage for irreversible removal |
 | Access auditing | Not started | No audit vault |
 | Data residency | Not started | No regional vault pinning |
 
