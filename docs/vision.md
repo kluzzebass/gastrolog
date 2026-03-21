@@ -10,14 +10,22 @@ The pipeline query language is GastroLog's most important interface. Today it ha
 
 **Computed virtual columns.** Fields that don't exist in the raw data can be defined as expressions and used as if they were real columns. A `latency` field derived from `response_ts - request_ts` is queryable, sortable, and aggregatable. Virtual columns persist as named definitions in the cluster config, available to all users.
 
-**Subqueries.** The output of one pipeline stage can feed the input of another. "Find the p99 latency over the last hour, then show me every request that exceeded it" is a single query, not two.
+**Inline stats.** The `inline_stats` operator computes an aggregate and appends it as a field to every record without collapsing rows. "Find the p99 latency and show me every request that exceeded it" is a single, streaming query:
 
 ```
-* | where latency > (
-    * | stats percentile(latency, 99) as p99 last=1h
-  )
+* | inline_stats percentile(latency, 99) as p99
+  | where latency > p99
   | timeline trace_id
 ```
+
+**Named intermediate results.** For multi-step composition, `let` statements bind a name to a query result that can be referenced later:
+
+```
+let error_users = level=error last=1h | fields user_id
+* | where user_id in $error_users
+```
+
+The `let` query runs to completion first (blocking). The main query uses the result as a lookup set. This handles set-membership cases that `inline_stats` can't express.
 
 **Live dashboards from queries.** A saved query with a poll interval is a dashboard panel. A collection of saved queries is a dashboard. No separate dashboard builder, no drag-and-drop widget editor. The query language is the dashboard language. If you can write the query, you can build the dashboard.
 
@@ -450,7 +458,8 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Capability | Status | Notes |
 |---|---|---|
 | Pipeline operators | 20 operators | stats, where, eval, sort, head, tail, slice, rename, fields, timechart, dedup, raw, lookup, linechart, barchart, donut, heatmap, map, scatter, export |
-| Subqueries | Not started | No nested pipeline stages |
+| Inline stats | Not started | Append aggregate as field without collapsing rows |
+| Let statements | Not started | Named intermediate results for multi-step composition |
 | Computed virtual columns | Not started | No persisted derived fields |
 | Live dashboards from queries | Not started | Saved queries exist but are name + expression only |
 

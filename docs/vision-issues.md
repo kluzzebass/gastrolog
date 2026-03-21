@@ -70,13 +70,14 @@ The foundation that most other epics depend on. Must be built first.
 
 | # | Issue | Depends on | Vision section |
 |---|-------|-----------|----------------|
-| 3.1 | Research: subquery / named result composition model | — | Query Language: subqueries |
-| 3.2 | Subquery execution in query engine | 3.1 | Query Language: subqueries |
-| 3.3 | Computed virtual columns: definition and persistence in cluster config | — | Query Language: computed virtual columns |
-| 3.4 | Computed virtual columns: evaluation during query execution | 3.3 | Query Language: computed virtual columns |
-| 3.5 | Timeline operator (group results by field, render as timeline) | — | Query Language: subqueries (example) |
-| 3.6 | Saved query poll interval (auto-refresh) | — | Query Language: live dashboards |
-| 3.7 | Dashboard view (collection of saved queries as panels) | 3.6 | Query Language: live dashboards |
+| 3.1 | `inline_stats` operator (append aggregate as field without collapsing rows) | — | Query Language: subqueries |
+| 3.2 | `let` statement for named intermediate results (blocking, explicit) | — | Query Language: subqueries |
+| 3.3 | `let` execution engine (materialize result, reference by name in main query) | 3.2 | Query Language: subqueries |
+| 3.4 | Computed virtual columns: definition and persistence in cluster config | — | Query Language: computed virtual columns |
+| 3.5 | Computed virtual columns: evaluation during query execution | 3.4 | Query Language: computed virtual columns |
+| 3.6 | Timeline operator (group results by field, render as timeline) | — | Query Language: subqueries (example) |
+| 3.7 | Saved query poll interval (auto-refresh) | — | Query Language: live dashboards |
+| 3.8 | Dashboard view (collection of saved queries as panels) | 3.7 | Query Language: live dashboards |
 
 ---
 
@@ -238,7 +239,7 @@ Key dependencies that span epics:
 
 3. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
 
-4. **Subquery execution model** (3.1): Two approaches to explore. (a) Nested subqueries with parentheses (`where latency > (* | stats p99 ...)`): aggregation subqueries are inherently blocking (must complete before outer query starts); filter/projection subqueries could theoretically stream, but the semantics of a growing result set mid-scan are ambiguous. (b) Named intermediate results (`let p99 = ... | where latency > $p99`): explicit, no evaluation order ambiguity, but always blocking. The streaming architecture favors avoiding heap-heavy materializations — need to determine which composition model fits best.
+4. **Query composition model** (3.1–3.3): Industry research shows three tiers. (a) `inline_stats` (Splunk's `eventstats`, ES|QL's `INLINE STATS`): appends aggregate as field to every row, streaming-compatible, no parser changes beyond a new operator — handles the p99-then-filter case with zero subquery machinery. (b) `let` statements (Kusto, Cribl, ClickHouse CTEs): named intermediate results, blocking, explicit — handles set-membership cases (`where user_id in $error_users`). (c) Nested subqueries (Splunk `[...]`): most flexible but has caps (Splunk: 10K results, 60s), blocking, complex. Recommended order: ship `inline_stats` first (most common case, streaming), then `let` (composition), defer nested subqueries (may never be needed).
 
 6. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
 
