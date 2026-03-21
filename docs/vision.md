@@ -414,3 +414,132 @@ Instead, you think of a question about your system, and you ask it. The answer a
 The Observatory aesthetic — the copper accents, the serif typography, the grain texture, the gentle animations — is not decoration. It is a signal that every detail has been considered. That someone cared about the scrollbar, the focus ring, the loading state, the empty state. That this is a tool built by people who use tools like this, for people who use tools like this.
 
 The kind of tool where people say "wait, you should see this" and pull up the UI to show a colleague. Not because they have to. Because they want to.
+
+---
+
+## Current State vs. Vision
+
+A snapshot of where GastroLog is today against each pillar of the vision. This section should be kept up to date as work progresses.
+
+### Query Language
+
+| Capability | Status | Notes |
+|---|---|---|
+| Pipeline operators | 20 operators | stats, where, eval, sort, head, tail, slice, rename, fields, timechart, dedup, raw, lookup, linechart, barchart, donut, heatmap, map, scatter, export |
+| Cross-vault joins | Not started | No `join` operator |
+| Subqueries | Not started | No nested pipeline stages |
+| Computed virtual columns | Not started | No persisted derived fields |
+| Live dashboards from queries | Not started | Saved queries exist but are name + expression only |
+
+### Traces and Logs
+
+| Capability | Status | Notes |
+|---|---|---|
+| OTLP span ingestion | Done | trace_id, span_id, parent_span_id stored as attributes |
+| Automatic shape detection | Not started | UI doesn't auto-render waterfall when span fields present |
+| Span-aware query operators | Not started | No `children`, `critical_path`, `correlate` operators |
+| Implicit time-window correlation | Not started | No automatic grouping by shared field values |
+
+### Programmable Ingestion
+
+| Capability | Status | Notes |
+|---|---|---|
+| Filter-based routing | Done | Filter expression → vault destinations |
+| Multi-destination fanout | Done | Fanout, round-robin, failover distribution |
+| Transform pipelines on ingest | Not started | No parse, enrich, redact, sample stages in routes |
+| Visual route editor | Not started | Routes configured via form fields, no flow builder |
+| Sampling | Not started | No per-severity sampling at ingestion |
+
+### Tiered Storage
+
+| Capability | Status | Notes |
+|---|---|---|
+| Memory vault backend | Done | In-memory chunks with rotation/retention |
+| File vault backend | Done | Local SSD, mmap'd reads, sealed chunk compression |
+| Cloud vault backend | Done | S3/GCS for sealed chunks and indexes |
+| Vault as logical container | Not started | Vault type is still coupled to a single backend |
+| Tier chains | Not started | No multi-tier progression within a vault |
+| Per-tier primary nodes | Not started | Vaults have a single owner node |
+| Inter-tier record streaming | Not started | No record-level streaming between tiers |
+| Budget-driven retention | Not started | Retention is time/count/size-based only |
+| On-demand promotion | Not started | No cold → warm cache fetching |
+
+### Anomaly Detection
+
+| Capability | Status | Notes |
+|---|---|---|
+| Behavioral baselines | Not started | No probabilistic modeling |
+| Anomaly scoring | Not started | No anomaly_score field |
+| Root cause correlation | Not started | No automatic field change detection |
+
+### Multi-Tenancy
+
+| Capability | Status | Notes |
+|---|---|---|
+| Tenant model | Not started | No tenant concept in config or proto |
+| Per-tenant encryption | Not started | No field-level or vault-level tenant keys |
+| Resource quotas | Not started | No per-tenant rate/storage limits |
+| Tenant-aware routing | Not started | No tenant boundary detection |
+
+### UI as Instrument
+
+| Capability | Status | Notes |
+|---|---|---|
+| Keyboard shortcuts | Partial | Escape, arrow keys, Enter. Not comprehensive |
+| Detail panel | Done | Field inspector with click-to-filter, copy |
+| Saveable investigations | Not started | No persistent investigation state |
+| Investigation permalinks | Not started | URL encodes query + time range, but not selected records or annotations |
+| Record diffing | Not started | No side-by-side comparison |
+| Responsive density | Partial | Works across screen sizes but not density-adaptive |
+
+### Collaboration
+
+| Capability | Status | Notes |
+|---|---|---|
+| Saved queries | Partial | Personal name + expression. No team namespace |
+| Presence awareness | Not started | No multi-user visibility |
+| Shared investigations | Not started | No investigation sharing or handoff |
+| Investigation timeline | Not started | No audit trail of who looked at what |
+
+### Self-Healing Cluster
+
+| Capability | Status | Notes |
+|---|---|---|
+| Raft consensus | Done | Config replication, leader election |
+| Cross-node query fan-out | Done | ForwardSearch, collectRemote |
+| Config push (WatchConfig) | Done | Real-time config propagation |
+| Automatic vault rebalancing | Not started | Vaults stay on their assigned node |
+| Storage pressure management | Not started | No automatic tier demotion under pressure |
+| Graceful degradation | Partial | Queries fan out but don't indicate missing data |
+| Capacity planning signals | Not started | No forward-looking metrics |
+
+### Compliance
+
+| Capability | Status | Notes |
+|---|---|---|
+| Retention policies | Done | Per-vault time/count/size-based with expire or eject |
+| Right to erasure | Not started | No purge command |
+| Field-level encryption | Not started | No per-field encryption |
+| Access auditing | Not started | No audit vault |
+| Data residency | Not started | No regional vault pinning |
+
+### CLI
+
+| Capability | Status | Notes |
+|---|---|---|
+| Query command | Done | Full query language, multiple output formats |
+| Follow command | Done | Live streaming with severity coloring |
+| Config management | Done | Full CRUD for all config entities |
+| Cluster management | Done | Join, bootstrap, status, node removal |
+| Stdin piping | Not started | No `--stdin` mode for chaining queries |
+| Terminal charts | Not started | No Unicode chart rendering |
+
+### Performance
+
+| Capability | Status | Notes |
+|---|---|---|
+| Index-driven queries | Done | Token, attribute, timestamp, KV, JSON indexes |
+| Streaming results | Done | Server-streaming RPC, incremental rendering |
+| Follow mode latency | Done | Sub-second ingestion to screen |
+| Mmap reads | Done | Zero-copy for sealed file chunks |
+| Startup time | Not measured | No benchmark target enforced |
