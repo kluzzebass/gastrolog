@@ -240,17 +240,13 @@ flowchart LR
     style ARC fill:#3a3030,color:#f0e8e0
 ```
 
-### Zero-copy tier transitions
-
-The sealed chunk is the natural unit for tier movement. Once sealed, the chunk is immutable — no records are added, removed, or modified. It goes through post-processing stages (compression, index building) that transform its on-disk representation, but the record content is fixed. After post-processing, the chunk is self-contained (data + indexes) and ready to move between tiers without further transformation.
-
-Records can be moved between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks.
-
 ### Inter-tier record streaming
 
-Hot tiers seal frequently (every few minutes or by record count). Moving those tiny sealed chunks to the next tier as-is would create thousands of small index files, killing query performance. Compacting them after the fact adds complexity (merge logic, index rebuilding over combined data).
+Chunks never move between tiers. **Records do.** Each tier is its own ingestion pipeline — it receives a record stream from the tier above, appends to its own active chunk, seals on its own schedule, and manages its own sealed chunks with its own retention policy. Each tier's chunk size, rotation schedule, and compression strategy are tuned for its medium independently.
 
-The simpler model: **each tier is its own ingestion pipeline.** Records stream from the primary of one tier to the primary of the next. Each tier's primary appends to its own active chunk and seals on its own schedule — tuned for its medium. The stream between tiers may cross the network (tier primaries can be on different nodes), but it's a single authoritative stream, not a fan-out.
+This means each tier produces different chunks from the same records. The memory tier might have dozens of small 5-minute chunks. The file tier might have a few large hourly chunks. The object storage tier might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern.
+
+Records can also move between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks.
 
 ```mermaid
 flowchart LR
@@ -281,7 +277,7 @@ flowchart LR
 
 Each tier is a full chunk manager with its own active chunk and sealed chunks. The memory tier seals frequently and keeps sealed chunks in RAM for fast queries. When a memory tier sealed chunk reaches its transition age, its records stream to the file tier primary's active chunk, and the memory tier drops the chunk per its retention policy. The file tier produces naturally large chunks because its rotation policy is tuned for disk (hours or hundreds of megabytes), not memory (minutes). No compaction, no merge logic. Each tier just does what it already knows how to do: accept records, chunk them, seal them.
 
-**Object storage and archival** don't need their own chunking — they receive sealed chunks from the file tier primary as complete files. The transition from object storage to archival is typically a storage class change (S3 Standard → Glacier), not a data copy.
+**Every tier in the chain is a full chunk manager** — including object storage. The file tier streams records to the object storage tier, which chunks them on its own schedule, optimized for its medium (fewer, larger objects to minimize per-request overhead and listing costs). The only exception is the archival transition: moving from S3 Standard to Glacier is a storage class change on the same object, not a re-chunking.
 
 ### On-demand promotion
 
