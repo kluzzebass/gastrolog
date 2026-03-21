@@ -8,14 +8,6 @@ This document describes GastroLog at its ceiling — the product it becomes give
 
 The pipeline query language is GastroLog's most important interface. Today it handles filtering, aggregation, and visualization. At its ceiling, it becomes a full analytical substrate — expressive enough that people build dashboards, define alerts, and run investigations entirely from the query bar.
 
-**Cross-vault joins.** Queries can correlate records across vaults by time window or shared field values. An SRE investigating a payment failure joins the API gateway vault with the payment processor vault on `trace_id`, seeing the full request lifecycle without leaving the query bar.
-
-```
-api_gateway | where path="/payments" status=500 last=1h
-  | join payment_processor on trace_id window=30s
-  | sort -latency
-```
-
 **Computed virtual columns.** Fields that don't exist in the raw data can be defined as expressions and used as if they were real columns. A `latency` field derived from `response_ts - request_ts` is queryable, sortable, and aggregatable. Virtual columns persist as named definitions in the cluster config, available to all users.
 
 **Subqueries.** The output of one pipeline stage can feed the input of another. "Find the p99 latency over the last hour, then show me every request that exceeded it" is a single query, not two.
@@ -426,7 +418,6 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Capability | Status | Notes |
 |---|---|---|
 | Pipeline operators | 20 operators | stats, where, eval, sort, head, tail, slice, rename, fields, timechart, dedup, raw, lookup, linechart, barchart, donut, heatmap, map, scatter, export |
-| Cross-vault joins | Not started | No `join` operator |
 | Subqueries | Not started | No nested pipeline stages |
 | Computed virtual columns | Not started | No persisted derived fields |
 | Live dashboards from queries | Not started | Saved queries exist but are name + expression only |
