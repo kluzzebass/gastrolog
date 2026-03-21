@@ -243,3 +243,71 @@ Key dependencies that span epics:
 4. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
 
 5. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
+
+---
+
+## Architectural Conflict: Encryption
+
+The vision mentions per-tenant encryption, field-level encryption, and BYOK in several places, but these claims conflict with fundamental architectural decisions elsewhere in the vision. This section documents the conflicts and how comparable systems handle them.
+
+### Conflict 1: Encryption at rest vs. mmap
+
+The performance pillar depends on mmap for zero-copy reads of sealed chunks on local SSD. Encryption at rest is incompatible with mmap — you can't memory-map an encrypted file and read plaintext records from it. Decrypting requires reading into heap memory, which is the exact pattern GastroLog's architecture forbids (see CLAUDE.md: "NEVER use os.ReadFile to slurp entire files into heap memory").
+
+**How others handle it:**
+
+- **Elasticsearch**: Does not encrypt data at rest natively. Delegates to filesystem-level encryption (LUKS, dm-crypt, BitLocker) or cloud-managed encrypted volumes (AWS EBS encryption, GCP CMEK). The application never sees the encryption — the OS transparently decrypts on read. Lucene segments are mmap'd as usual.
+- **Splunk**: Same approach — relies on OS/volume-level encryption. Splunk's indexer mmap's tsidx files directly. Encryption is below the application layer.
+- **ClickHouse**: Supports application-level encryption of MergeTree parts via encrypted disks, but this uses a virtual filesystem layer that decrypts blocks on read into buffers — no mmap. Performance penalty acknowledged in docs.
+- **Loki**: No encryption at rest. Delegates to the object store's encryption (S3 SSE, GCS CMEK).
+
+**Implication for GastroLog:** Application-level encryption of the local SSD tier would break the mmap architecture. The practical path is filesystem/volume-level encryption (LUKS, encrypted EBS volumes), which is transparent to the application. The vision's claim of "per-tenant encryption keys" at the vault level is not achievable with mmap unless each tenant's data lives on a separate encrypted filesystem — possible but operationally complex. For cloud tiers, server-side encryption (S3 SSE-KMS) handles per-tenant keys naturally.
+
+### Conflict 2: Field-level encryption vs. indexing
+
+If a field is encrypted at ingestion, its value is opaque to the index. You cannot search for `credit_card=1234` if the credit card number is encrypted. You cannot aggregate, sort, or filter on encrypted fields. This conflicts with the "query anything" model.
+
+**How others handle it:**
+
+- **Elastic**: Field-level encryption is not supported. PII handling is done via ingest pipeline `remove` processors (irreversible deletion) or document-level security (access control, not encryption). The data is searchable because it's plaintext in the index.
+- **Splunk**: Offers field-level hashing (one-way, not reversible) for compliance. Hashed fields can be compared for equality (same hash = same value) but not searched by plaintext value, not range-queried, not aggregated. This is a deliberate tradeoff — compliance over queryability.
+- **Datadog**: Sensitive Data Scanner redacts or hashes fields at ingestion. Redacted fields show `[REDACTED]` in the UI. No reversible encryption. No search on redacted values.
+- **CockroachDB**: Column-level encryption planned but not shipped as of 2025. Acknowledged as fundamentally incompatible with secondary indexes on encrypted columns.
+
+**Implication for GastroLog:** True field-level encryption (reversible, with role-based decryption) means encrypted fields are unsearchable and unindexable. The vision's example ("analysts see `credit_card=****` unless they have the PII role") is achievable only if the field is stored in plaintext and masked at query time based on role — which is access control, not encryption. The data is still on disk in the clear. If actual encryption is required (data at rest must be ciphertext), the field becomes opaque to queries. The vision should clarify which model it means: role-based display masking (practical, queryable) vs. actual field-level encryption (compliant, not queryable).
+
+### Conflict 3: Encryption vs. compression
+
+Encrypted data does not compress. The correct order is compress-then-encrypt. But GastroLog's sealed chunk format has indexes that reference byte offsets into the compressed data. If encryption wraps the compressed data:
+
+- **Indexes outside encryption boundary**: Index files contain field names, token lists, timestamp ranges — metadata that reveals the structure and content of the encrypted data. An attacker with disk access sees what fields exist, what values are indexed, and when records were written, even without the decryption key.
+- **Indexes inside encryption boundary**: Every index lookup requires decryption first. For a query that checks 1,000 chunk indexes to find matching ones, this means 1,000 decryption operations before the query engine even knows which chunks are relevant. This destroys the "index-driven queries return in milliseconds" goal.
+
+**How others handle it:**
+
+- **Elasticsearch / Splunk / Loki**: Avoid the problem entirely by using volume-level encryption (transparent to the application). Indexes and data are both encrypted at the filesystem level, decrypted transparently on read by the OS.
+- **ClickHouse**: Encrypted disk implementation encrypts whole files (data + indexes together) and decrypts blocks on read. No mmap. Accepts the performance cost.
+
+**Implication for GastroLog:** Application-level encrypt-after-compress with separate index treatment is complex and leaks metadata. Volume-level encryption avoids all of these issues. For cloud tiers, S3 SSE-KMS provides per-key encryption transparently.
+
+### Conflict 4: BYOK trust model
+
+"Even the cluster operator cannot read their data without the tenant's cooperation" requires that decryption keys never touch the server in plaintext. This is only achievable with envelope encryption backed by an external KMS (AWS KMS, GCP Cloud KMS, HashiCorp Vault). The data encryption key (DEK) is stored alongside the data but encrypted with a key-encryption key (KEK) that lives in the external KMS. Decryption requires an API call to the KMS, which the tenant controls.
+
+**How others handle it:**
+
+- **Elasticsearch**: Supports KMS-backed encryption via the keystore and encrypted snapshot repositories. BYOK via AWS KMS or GCP CMEK. The server holds wrapped DEKs; the KEK never leaves the KMS.
+- **Splunk**: BYOK via AWS KMS for Splunk Cloud. Self-managed Splunk has no BYOK — the operator controls everything.
+- **Datadog / Loki**: No BYOK. SaaS trust model — you trust the provider.
+
+**Implication for GastroLog:** BYOK is achievable for cloud tiers (S3 SSE-KMS with customer-managed keys is a standard AWS feature). For local tiers, it requires integration with an external KMS for envelope encryption, plus the performance cost of KMS API calls on every chunk seal/read. The vision should scope BYOK to cloud tiers initially and treat local-tier BYOK as a separate, later effort.
+
+### Recommendation
+
+Update the vision's encryption claims to reflect reality:
+
+1. **At-rest encryption** for local tiers: delegate to volume/filesystem-level encryption (LUKS, encrypted EBS). Transparent to the application, preserves mmap.
+2. **At-rest encryption** for cloud tiers: use provider-native encryption (S3 SSE-KMS, GCS CMEK). Per-tenant keys are natural here.
+3. **Field-level "encryption"**: clarify as role-based display masking (data stored in plaintext, masked at query time by role). Actual field-level encryption makes fields unsearchable — document this tradeoff explicitly.
+4. **BYOK**: scope to cloud tiers via KMS integration. Local-tier BYOK deferred.
+5. Remove claims about application-level encryption of local vault data unless the mmap architecture is also reconsidered.
