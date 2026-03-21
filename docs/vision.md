@@ -123,48 +123,100 @@ Traditional alerting is threshold-based: "alert when error rate exceeds 5%." Thi
 
 ## Tiered and Infinite Storage
 
-Storage should be a budget, not a cliff. Today, retention policies delete data after a fixed period. At its ceiling, GastroLog manages a multi-tier storage hierarchy where data flows downward as it ages, and queries fan out across all tiers transparently.
+Storage should be a budget, not a cliff. Today, a vault is tightly coupled to a single storage backend — you create a memory vault, a file vault, or a cloud vault. The vault *is* its storage. That's the wrong abstraction.
 
-**Four tiers.**
+### The vault as logical container
 
-| Tier | Medium | Access latency | Cost | Use case |
-|------|--------|----------------|------|----------|
-| Hot | Memory | Microseconds | $$$$ | Active ingestion, follow mode, last-5-minute queries |
-| Warm | Local SSD (mmap) | Milliseconds | $$$ | Recent history, most interactive queries |
-| Cold | Object storage (S3/GCS/R2) | Seconds | $ | Historical queries, compliance retention |
-| Frozen | Archival storage (Glacier/Archive) | Minutes–hours | Cents | Legal hold, regulatory archives |
+A vault should be the **logical container** — it owns the records, the indexes, the retention policy, the access controls. The vault type distinction (memory/file/cloud) goes away entirely. Every vault has the same type. Underneath, a vault has a **tier chain**: an ordered set of storage backends that data flows through as it ages.
 
-**Transparent query fan-out.** A query for `last=90d` scans hot, warm, and cold tiers automatically. The user doesn't know or care where the data lives. Cold-tier results stream in after warm-tier results, with a subtle loading indicator showing that older data is still arriving.
+```
+Vault "api-logs"
+  ├── Tier 0: Memory      (active chunk, last ~5 min)
+  ├── Tier 1: Local SSD    (sealed, mmap'd, last 7 days)
+  ├── Tier 2: S3 Standard  (compressed, last 90 days)
+  ├── Tier 3: S3 Glacier   (archived, last 3 years)
+  └── Transition policy: budget $30/month, pin errors to Tier 1 for 30 days
+```
+
+The vault doesn't care whether a chunk is in memory, on SSD, in S3, or in archival storage. It asks the tier chain "store this chunk" and "fetch this chunk" and the tiers handle the rest.
+
+### Tier types
+
+| Tier | Medium | Latency | Cost | Replication |
+|------|--------|---------|------|-------------|
+| Memory | RAM | Microseconds | $$$$ | Optional write-mirror to peer |
+| Local SSD | File, mmap'd | Milliseconds | $$$ | Optional peer forwarding of sealed chunks |
+| Object storage | S3 / GCS / R2 | Seconds | $ | Built-in (cloud provider handles AZ redundancy) |
+| Archival | Glacier / Archive / Cool | Minutes–hours | Cents | Built-in (cloud provider) |
+
+### Replication as a tier property
+
+Replication is not a vault-level concern — it is a property of each tier. Each tier type achieves durability in the way that makes sense for its medium:
+
+- **Object storage and archival tiers** replicate for free. S3 stores objects across multiple availability zones. The vault gets durability without any cluster coordination.
+- **Local SSD tiers** can optionally replicate sealed chunks to a peer node. The sealed chunk is immutable and self-contained (data + indexes), so replication is a simple file copy. Configuration: `replicas: 2` on the tier.
+- **Memory tiers** can optionally mirror active writes to a peer's memory buffer, so node failure loses zero records. Or the operator accepts the small loss window (minutes of data, re-ingestable from source). Configuration: `mirror: true` on the tier.
+
+This dissolves the vault replication question entirely. Instead of "how do we replicate vaults across nodes" (complex, doubles storage, requires failover logic), it becomes "which tiers need redundancy and how does each one achieve it." The answer is usually: object storage handles it, and the active chunk's loss window is acceptable.
 
 ```mermaid
 flowchart LR
     subgraph Ingestion
-        I([fa:fa-plug Ingester]) --> HOT
+        I([fa:fa-plug Ingester]) --> T0
     end
 
-    subgraph Storage Tiers
-        HOT[fa:fa-bolt Hot<br/>Memory<br/>~5 min] -->|seal & rotate| WARM
-        WARM[fa:fa-hard-drive Warm<br/>Local SSD · mmap<br/>days–weeks] -->|upload & evict| COLD
-        COLD[fa:fa-cloud Cold<br/>S3 / GCS / R2<br/>months–years] -->|archive| FROZEN
-        FROZEN[fa:fa-snowflake Frozen<br/>Glacier / Archive<br/>years–forever]
+    subgraph Tier Chain
+        T0[fa:fa-bolt Memory<br/>active chunk] -->|seal & rotate| T1
+        T1[fa:fa-hard-drive Local SSD<br/>mmap · sealed] -->|upload & evict| T2
+        T2[fa:fa-cloud Object Storage<br/>S3 / GCS / R2] -->|archive| T3
+        T3[fa:fa-snowflake Archival<br/>Glacier / Archive]
+    end
+
+    subgraph Replication
+        T0 -.->|optional mirror| T0R([fa:fa-bolt Peer Memory])
+        T1 -.->|optional replicas| T1R([fa:fa-hard-drive Peer SSD])
+        T2 -.-|built-in AZ redundancy| T2
+        T3 -.-|built-in AZ redundancy| T3
     end
 
     subgraph Query
-        Q([fa:fa-search Query]) -.->|microseconds| HOT
-        Q -.->|milliseconds| WARM
-        Q -.->|seconds| COLD
-        Q -.->|minutes–hours| FROZEN
+        Q([fa:fa-search Query]) -.-> T0
+        Q -.-> T1
+        Q -.-> T2
+        Q -.-> T3
     end
 
-    style HOT fill:#c4956a,color:#1a1a1a
-    style WARM fill:#a07850,color:#1a1a1a
-    style COLD fill:#6a5040,color:#f0e8e0
-    style FROZEN fill:#3a3030,color:#f0e8e0
+    style T0 fill:#c4956a,color:#1a1a1a
+    style T1 fill:#a07850,color:#1a1a1a
+    style T2 fill:#6a5040,color:#f0e8e0
+    style T3 fill:#3a3030,color:#f0e8e0
+    style T0R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
+    style T1R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
 
-**Budget-driven retention.** Instead of "keep 30 days," the policy is "spend at most $50/month on storage for this vault." GastroLog monitors storage costs across tiers and migrates data downward as needed to stay within budget. High-value data (errors, traced requests) can be pinned to warmer tiers longer than low-value data (debug noise).
+### Tier transitions
 
-**Zero-copy tier transitions.** Moving data from warm to cold doesn't require rewriting — sealed chunk files are uploaded to object storage as-is, with their indexes. The local copy is deleted and replaced with a stub that knows how to fetch from the remote tier. Queries check the stub, download the relevant byte range, and decompress on the fly.
+The transition between tiers is driven by policy. Multiple strategies can coexist, with the most restrictive one winning:
+
+- **Time-based**: chunks older than N days demote to the next tier. Simple, predictable.
+- **Size-based**: when the current tier exceeds N GB, the oldest chunks demote. Practical for capacity planning.
+- **Budget-based**: the vault has a monthly storage budget; the cluster distributes data across tiers to stay within it. The most powerful model — the operator sets a dollar amount and GastroLog figures out the rest.
+- **Access-based**: chunks that haven't been queried in N days demote. Data that's actively used stays warm; data that's gathering dust moves cold.
+- **Value-based**: high-value records (errors, traced requests) can be pinned to warmer tiers longer than low-value records (debug, info). The pin criteria is a filter expression — the same syntax used in queries and routes.
+
+### Transparent query fan-out
+
+A query for `last=90d` scans all tiers automatically. The user doesn't know or care where the data lives. Results from warmer tiers arrive first; colder tiers stream in progressively, with a subtle loading indicator showing that older data is still arriving.
+
+### Zero-copy tier transitions
+
+The sealed chunk is the natural unit for tier movement. It's immutable, self-contained (data + indexes), and already has a well-defined lifecycle (seal → compress → index). Moving a chunk between tiers is:
+
+- **Demote (warm → cold)**: upload the sealed chunk file to object storage as-is. Delete the local copy. Replace with a stub that knows how to fetch from the remote tier.
+- **Promote (cold → warm)**: download the chunk to local SSD, mmap it. Happens on-demand during queries (with caching) or proactively based on access patterns.
+- **Evict (warm cache)**: delete the local cache of a chunk that's already durable in a colder tier. The stub remains; the next query re-fetches it.
+
+No rewriting, no re-indexing, no format conversion. The chunk is the same bytes at every tier.
 
 ---
 
@@ -218,11 +270,11 @@ Investigating incidents is a team activity, but most tools treat it as a solo on
 
 The cluster should not need an operator for steady-state operations. It should heal itself, rebalance itself, and operate within its resource budget without human intervention.
 
-**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing happens in the background — queries continue to work during the migration, with the routing layer forwarding requests to whichever node currently owns each vault.
+**Automatic vault rebalancing.** When a node joins or leaves the cluster, vaults are redistributed across the remaining nodes to maintain even load. The rebalancing is lightweight because most data lives in object storage tiers — only the active chunk and warm-tier cache need to migrate. Queries continue to work during rebalancing; the routing layer forwards requests to whichever node currently owns each vault.
 
-**Storage pressure management.** When local storage approaches capacity, the cluster automatically migrates cold data to object storage, compresses warm data more aggressively, or accelerates rotation policies. The operator sets the budget; the cluster manages within it.
+**Storage pressure management.** When local storage approaches capacity, the tier chain handles it automatically — warm-tier chunks are promoted to object storage, local caches are evicted, and rotation accelerates. This isn't a separate mechanism; it's the tier transition policy responding to its size-based trigger. The operator sets the budget; the tier chain manages within it.
 
-**Graceful degradation.** When a minority of nodes are unreachable, the cluster continues to serve queries from the available data, with a clear indication of which vaults are temporarily unavailable. When the nodes return, data resyncs automatically. The cluster never refuses to answer a query because some data is unavailable — it answers with what it has and tells you what's missing.
+**Graceful degradation.** When a node goes down, its vaults' sealed data is already durable in object storage tiers. Another node picks up ingestion for the affected vaults, and queries against sealed chunks continue to work (they're in S3, not on the dead node's disk). The only data at risk is the active memory-tier chunk — minutes of records, recoverable from the peer mirror if configured, or re-ingested from source. The cluster never refuses to answer a query because a node is down — it answers with what's durable and tells you what's missing.
 
 **Capacity planning signals.** The cluster exposes forward-looking metrics: "At current ingestion rate, local storage will be full in 14 days." "Adding one node would reduce average query latency by 30%." These are not alerts — they are planning signals visible in the inspector, available when you need them, invisible when you don't.
 
