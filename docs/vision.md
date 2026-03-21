@@ -165,18 +165,39 @@ The primary for each tier replicates to its secondaries. Each tier type achieves
 
 ### The golden thread
 
-Tier transitions are **primary-to-primary**. When the memory tier primary rotates, it streams records to the file tier primary. When the file tier primary seals a chunk, it uploads to S3. There is exactly one authoritative path from first insert through every tier:
+Tier transitions are **primary-to-primary**. When the memory tier primary rotates, it streams records to the file tier primary. When the file tier primary seals a chunk, it uploads to S3. There is exactly one authoritative path from first insert through every tier — the golden thread:
 
-```
-Ingester → Memory tier primary (node-1)
-              ├── mirror writes to memory secondary (node-2)
-              └── stream records to ↓
-           File tier primary (node-3)
-              ├── replicate sealed chunks to file secondary (node-1)
-              └── upload sealed chunks to ↓
-           Object storage (S3)
-              └── storage class transition to ↓
-           Archival (Glacier)
+```mermaid
+flowchart TB
+    I([fa:fa-plug Ingester]) --> M1
+
+    subgraph Node-1 — memory tier primary
+        M1[fa:fa-bolt Memory<br/>active chunk]
+    end
+
+    subgraph Node-2 — memory secondary
+        M2[fa:fa-bolt Memory<br/>mirror]
+    end
+
+    subgraph Node-3 — file tier primary
+        F3[fa:fa-hard-drive File tier<br/>active chunk] -->|seal| FS3[Sealed chunks]
+    end
+
+    subgraph Node-1 — file secondary
+        F1[fa:fa-hard-drive File tier<br/>replica]
+    end
+
+    M1 -.->|mirror writes| M2
+    M1 -->|record stream| F3
+    FS3 -->|upload| S3[(fa:fa-cloud S3)]
+    FS3 -.->|chunk copy| F1
+    S3 -->|storage class| ARC[(fa:fa-snowflake Glacier)]
+
+    style M1 fill:#c4956a,color:#1a1a1a
+    style F3 fill:#a07850,color:#1a1a1a
+    style FS3 fill:#a07850,color:#1a1a1a
+    style M2 fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
+    style F1 fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
 
 No duplicate uploads. No coordination questions about who does what. The primary for each tier is the single decision-maker. If a primary dies, its secondary is promoted and the golden thread reconnects — the new primary picks up where the old one left off, resuming the stream to the next tier's primary.
@@ -203,6 +224,19 @@ The transition between tiers is driven by policy. Multiple strategies can coexis
 ### Transparent query fan-out
 
 A query for `last=90d` scans all tiers automatically. The user doesn't know or care where the data lives. Results from warmer tiers arrive first; colder tiers stream in progressively, with a subtle loading indicator showing that older data is still arriving.
+
+```mermaid
+flowchart LR
+    Q([fa:fa-search Query]) -.->|microseconds| M[fa:fa-bolt Memory]
+    Q -.->|milliseconds| F[fa:fa-hard-drive Local SSD]
+    Q -.->|seconds| S3[fa:fa-cloud Object Storage]
+    Q -.->|minutes–hours| ARC[fa:fa-snowflake Archival]
+
+    style M fill:#c4956a,color:#1a1a1a
+    style F fill:#a07850,color:#1a1a1a
+    style S3 fill:#6a5040,color:#f0e8e0
+    style ARC fill:#3a3030,color:#f0e8e0
+```
 
 ### Zero-copy tier transitions
 
