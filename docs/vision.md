@@ -154,7 +154,7 @@ The vault doesn't care whether a chunk is in memory, on SSD, in S3, or in archiv
 Replication is not a vault-level concern — it is a property of each tier. Each tier type achieves durability in the way that makes sense for its medium:
 
 - **Object storage and archival tiers** replicate for free. S3 stores objects across multiple availability zones. The vault gets durability without any cluster coordination.
-- **Local SSD tiers** can optionally replicate sealed chunks to a peer node. The sealed chunk is immutable and self-contained (data + indexes), so replication is a simple file copy. Configuration: `replicas: 2` on the tier.
+- **Local SSD tiers** can optionally replicate sealed chunks to a peer node. After post-processing (compression + indexing), the chunk is stable and self-contained, so replication is a simple file copy. Configuration: `replicas: 2` on the tier.
 - **Memory tiers** can optionally mirror active writes to a peer's memory buffer, so node failure loses zero records. Or the operator accepts the small loss window (minutes of data, re-ingestable from source). Configuration: `mirror: true` on the tier.
 
 This dissolves the vault replication question entirely. Instead of "how do we replicate vaults across nodes" (complex, doubles storage, requires failover logic), it becomes "which tiers need redundancy and how does each one achieve it." The answer is usually: object storage handles it, and the active chunk's loss window is acceptable.
@@ -210,13 +210,15 @@ A query for `last=90d` scans all tiers automatically. The user doesn't know or c
 
 ### Zero-copy tier transitions
 
-The sealed chunk is the natural unit for tier movement. It's immutable, self-contained (data + indexes), and already has a well-defined lifecycle (seal → compress → index). Moving a chunk between tiers is:
+The sealed chunk is the natural unit for tier movement. Once sealed, the chunk is immutable — no records are added, removed, or modified. It goes through post-processing stages (compression, index building) that transform its on-disk representation, but the record content is fixed. After post-processing, the chunk is self-contained (data + indexes) and ready to move between tiers without further transformation.
+
+Records can be moved between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks:
 
 - **Demote (warm → cold)**: upload the sealed chunk file to object storage as-is. Delete the local copy. Replace with a stub that knows how to fetch from the remote tier.
 - **Promote (cold → warm)**: download the chunk to local SSD, mmap it. Happens on-demand during queries (with caching) or proactively based on access patterns.
 - **Evict (warm cache)**: delete the local cache of a chunk that's already durable in a colder tier. The stub remains; the next query re-fetches it.
 
-No rewriting, no re-indexing, no format conversion. The chunk is the same bytes at every tier.
+No re-indexing, no format conversion. Once post-processed, the chunk is the same bytes at every tier.
 
 ---
 
