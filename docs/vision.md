@@ -131,12 +131,14 @@ A vault should be the **logical container** — it owns the records, the indexes
 
 ```
 Vault "api-logs"
-  ├── Tier 0: Memory      (active chunk, last ~5 min)
-  ├── Tier 1: Local SSD    (sealed, mmap'd, last 7 days)
-  ├── Tier 2: S3 Standard  (compressed, last 90 days)
-  ├── Tier 3: S3 Glacier   (archived, last 3 years)
+  ├── Tier 0: Memory      (active + sealed chunks in RAM, last ~5 min)
+  ├── Tier 1: Local SSD    (sealed chunks, mmap'd, last 7 days)
+  ├── Tier 2: S3 Standard  (sealed chunks, compressed, last 90 days)
+  ├── Tier 3: S3 Glacier   (sealed chunks, archived, last 3 years)
   └── Transition policy: budget $30/month
 ```
+
+Every tier is a full chunk manager — it has an active chunk that receives writes, seals on its own schedule, and maintains its own set of sealed chunks with its own rotation and retention policies. The memory tier is not just a write buffer; it holds an active chunk plus sealed chunks in RAM, queryable at microsecond latency. When sealed chunks in one tier age past their transition policy, the records stream to the next tier's active chunk.
 
 The vault doesn't care whether a chunk is in memory, on SSD, in S3, or in archival storage. It asks the tier chain "store this chunk" and "fetch this chunk" and the tiers handle the rest.
 
@@ -172,11 +174,11 @@ flowchart TB
     I([fa:fa-plug Ingester]) --> M1
 
     subgraph node1mem [Node-1: memory tier primary]
-        M1[fa:fa-bolt Memory<br/>active chunk]
+        M1[fa:fa-bolt Memory<br/>active + sealed chunks]
     end
 
     subgraph node2mem [Node-2: memory secondary]
-        M2[fa:fa-bolt Memory<br/>mirror]
+        M2[fa:fa-bolt Memory<br/>replica]
     end
 
     subgraph node3file [Node-3: file tier primary]
@@ -253,10 +255,10 @@ The simpler model: **each tier is its own ingestion pipeline.** Records stream f
 ```mermaid
 flowchart LR
     subgraph node1mem [Node-1: memory tier primary]
-        I([fa:fa-plug Ingester]) --> MA[Active chunk<br/>seals every ~5 min]
+        I([fa:fa-plug Ingester]) --> MA[Active + sealed chunks<br/>seals every ~5 min]
     end
 
-    MA -->|record stream| SA
+    MA -->|stream from sealed chunks| SA
 
     subgraph node3file [Node-3: file tier primary]
         SA[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| SS[Sealed chunks<br/>compressed · indexed]
@@ -277,7 +279,7 @@ flowchart LR
     style SS fill:#a07850,color:#1a1a1a
 ```
 
-The memory tier's sealed chunks are ephemeral — once their records have been streamed to the file tier primary, they can be discarded (the memory secondaries discard theirs too). The file tier produces naturally large chunks because its rotation policy is tuned for disk (hours or hundreds of megabytes), not memory (minutes). No compaction, no merge logic. Each tier just does what it already knows how to do: accept records, chunk them, seal them.
+Each tier is a full chunk manager with its own active chunk and sealed chunks. The memory tier seals frequently and keeps sealed chunks in RAM for fast queries. When a memory tier sealed chunk reaches its transition age, its records stream to the file tier primary's active chunk, and the memory tier drops the chunk per its retention policy. The file tier produces naturally large chunks because its rotation policy is tuned for disk (hours or hundreds of megabytes), not memory (minutes). No compaction, no merge logic. Each tier just does what it already knows how to do: accept records, chunk them, seal them.
 
 **Object storage and archival** don't need their own chunking — they receive sealed chunks from the file tier primary as complete files. The transition from object storage to archival is typically a storage class change (S3 Standard → Glacier), not a data copy.
 
