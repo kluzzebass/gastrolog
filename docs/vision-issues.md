@@ -147,7 +147,6 @@ The foundation that most other epics depend on. Must be built first.
 
 **Contradictions / risks:**
 
-- **7.1 + sealed chunk immutability**: The vision states sealed chunks are immutable. But purging a single record from a sealed chunk requires either (a) rewriting the chunk without that record, which violates immutability, or (b) maintaining a per-chunk tombstone list and filtering at query time, which means "deleted" data is still on disk. For compliance (GDPR), option (b) may not be legally sufficient — the data must be actually gone, not just hidden. This is a fundamental tension that needs a clear design decision.
 - **7.6 + per-tier primaries (1.10)**: If a vault has a data residency constraint (EU only), all tier primaries for that vault must be on EU nodes. The tier primary election (1.10) must be residency-aware. If no EU nodes are available, the vault can't accept writes — need to define this failure mode.
 
 ---
@@ -235,18 +234,16 @@ Key dependencies that span epics:
 
 ## Summary of Contradictions and Open Questions
 
-1. **Sealed chunk immutability vs. purge** (7.1): Purging a record from a sealed chunk either violates immutability (rewrite) or leaves data on disk (tombstone). GDPR may require actual deletion. Needs design decision.
+1. **Per-tier primaries vs. "no primary node"** (1.10): Tier primaries are a scoped exception to the no-primary-node principle. The distinction (fine-grained, per-tier-per-vault, dynamic) should be explicitly documented in CLAUDE.md once implemented.
 
-2. **Per-tier primaries vs. "no primary node"** (1.10): Tier primaries are a scoped exception to the no-primary-node principle. The distinction (fine-grained, per-tier-per-vault, dynamic) should be explicitly documented in CLAUDE.md once implemented.
+2. **Durability handoff timeout** (1.14): If the destination tier's replication is slow or unreachable, the source tier can't drop its chunk. Unbounded hold is a resource leak; timeout means potential data loss. Need a policy.
 
-3. **Durability handoff timeout** (1.14): If the destination tier's replication is slow or unreachable, the source tier can't drop its chunk. Unbounded hold is a resource leak; timeout means potential data loss. Need a policy.
+3. **Route pipeline failure mode** (2.14): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
 
-4. **Route pipeline failure mode** (2.14): A slow or failed pipeline stage (external API lookup) could block ingestion. Need defined behavior: skip, buffer, dead-letter, timeout.
+4. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
 
-5. **Anomaly score storage** (8.3): Per-record scores are expensive to store; per-bucket scores change query semantics. Need to decide granularity.
+5. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
 
-6. **Automatic shape detection threshold** (4.3): When do results switch from log list to waterfall? All results must have span fields? Majority? Per-record rendering? Surprising behavior if mixed.
+6. **Cloud tier active chunk risk** (1.6): The active chunk for S3/Glacier tiers lives on local disk. If the primary dies before sealing, those records are lost — even though the user expects "their data is in S3." The durability handoff protects data from previous tiers, but not data ingested directly into a cloud tier.
 
-7. **Cloud tier active chunk risk** (1.6): The active chunk for S3/Glacier tiers lives on local disk. If the primary dies before sealing, those records are lost — even though the user expects "their data is in S3." The durability handoff protects data from previous tiers, but not data ingested directly into a cloud tier.
-
-8. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
+7. **Presence state dissemination** (6.2): User presence is ephemeral, high-frequency state that doesn't fit Raft or PeerState broadcasts. Needs its own mechanism (dedicated WebSocket hub, CRDT, or gossip protocol).
