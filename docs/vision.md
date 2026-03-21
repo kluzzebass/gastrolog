@@ -214,39 +214,42 @@ The sealed chunk is the natural unit for tier movement. Once sealed, the chunk i
 
 Records can be moved between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks.
 
-### Compaction
+### Inter-tier record streaming
 
-Hot tiers seal frequently (every few minutes or by record count). If each tiny sealed chunk moved to the next tier as-is, the SSD tier would accumulate thousands of small chunks, killing query performance (thousands of index files to scan).
+Hot tiers seal frequently (every few minutes or by record count). Moving those tiny sealed chunks to the next tier as-is would create thousands of small index files, killing query performance. Compacting them after the fact adds complexity (merge logic, index rebuilding over combined data).
 
-**Compaction** solves this: when small chunks arrive from a hotter tier, the receiving tier merges them into larger ones. The records are the same; the container is repacked. Indexes are rebuilt over the merged set. The small source chunks are deleted after the compacted chunk is finalized. This is analogous to LSM-tree compaction — frequent small flushes from memory, periodic merges on disk.
+The simpler model: **each tier is its own ingestion pipeline.** Records stream downward from hotter tiers into colder ones. Each tier receives a record stream, appends to its own active chunk, and seals on its own schedule — tuned for its medium.
 
 ```mermaid
 flowchart LR
     subgraph Memory Tier
-        A1[Chunk A<br/>5 min] --> SEAL
-        A2[Chunk B<br/>5 min] --> SEAL
-        A3[Chunk C<br/>5 min] --> SEAL
-        A4[Chunk D<br/>5 min] --> SEAL
-        SEAL[Seal & rotate]
+        I([fa:fa-plug Ingester]) --> MA[Active chunk<br/>seals every ~5 min]
     end
 
-    SEAL --> COMPACT
+    MA -->|record stream| SA
 
     subgraph SSD Tier
-        COMPACT[Compaction<br/>merge + reindex] --> BIG[Compacted chunk<br/>~20 min · single index]
+        SA[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| SS[Sealed chunks<br/>compressed · indexed]
     end
 
-    BIG -->|upload| S3[(Object Storage)]
+    SS -->|upload| OBJ
 
-    style COMPACT fill:#c4956a,color:#1a1a1a
-    style BIG fill:#a07850,color:#1a1a1a
+    subgraph Object Storage
+        OBJ[(S3 / GCS / R2)] -->|storage class transition| ARC
+    end
+
+    subgraph Archival
+        ARC[(Glacier / Archive)]
+    end
+
+    style MA fill:#c4956a,color:#1a1a1a
+    style SA fill:#a07850,color:#1a1a1a
+    style SS fill:#a07850,color:#1a1a1a
 ```
 
-The chunk lifecycle by tier:
+The memory tier's sealed chunks are ephemeral — once their records have been streamed into the SSD tier's active chunk, they're discarded. The SSD tier produces naturally large chunks because its rotation policy is tuned for disk (hours or hundreds of megabytes), not memory (minutes). No compaction, no merge logic. Each tier does what it already knows how to do: accept records, chunk them, seal them.
 
-- **Memory → SSD**: small sealed chunks queue up; the SSD tier compacts them into larger chunks on a configurable schedule (by count, by total size, or by age of oldest pending chunk).
-- **SSD → Object storage**: compacted chunks are already large and stable. Upload as-is — no further transformation needed.
-- **Object storage → Archival**: same bytes, different storage class. A metadata change, not a data copy (most cloud providers support in-place storage class transitions).
+**Object storage and archival** don't need their own chunking — they receive sealed chunks from the SSD tier as complete files. The transition from object storage to archival is typically a storage class change (S3 Standard → Glacier), not a data copy.
 
 ### On-demand promotion
 
