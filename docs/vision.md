@@ -16,8 +16,7 @@ The pipeline query language is GastroLog's most important interface. Today it ha
 * | where latency > (
     * | stats percentile(latency, 99) as p99 last=1h
   )
-  | correlate trace_id
-  | timeline
+  | timeline trace_id
 ```
 
 **Live dashboards from queries.** A saved query with a poll interval is a dashboard panel. A collection of saved queries is a dashboard. No separate dashboard builder, no drag-and-drop widget editor. The query language is the dashboard language. If you can write the query, you can build the dashboard.
