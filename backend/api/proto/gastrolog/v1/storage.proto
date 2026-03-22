@@ -4,6 +4,7 @@ package gastrolog.v1;
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
+
 // StorageArea declares a locally-attached storage resource on a node.
 // Storage class ranks local storage by speed: lower = faster.
 // Multiple areas can share the same storage class (they form a pool).

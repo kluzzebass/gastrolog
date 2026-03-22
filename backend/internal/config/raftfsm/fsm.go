@@ -43,6 +43,8 @@ const (
 	NotifyCloudServicePut
 	NotifyCloudServiceDeleted
 	NotifyNodeStorageConfigSet
+	NotifyTierPut
+	NotifyTierDeleted
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -126,7 +128,9 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_DeleteManagedFile,
 		*gastrologv1.ConfigCommand_PutCloudService,
 		*gastrologv1.ConfigCommand_DeleteCloudService,
-		*gastrologv1.ConfigCommand_SetNodeStorageConfig:
+		*gastrologv1.ConfigCommand_SetNodeStorageConfig,
+		*gastrologv1.ConfigCommand_PutTier,
+		*gastrologv1.ConfigCommand_DeleteTier:
 		return f.applyConfig(ctx, cmd, l.Index)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -245,6 +249,10 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 		return f.applyDeleteCloudService(ctx, c.DeleteCloudService)
 	case *gastrologv1.ConfigCommand_SetNodeStorageConfig:
 		return f.applySetNodeStorageConfig(ctx, c.SetNodeStorageConfig)
+	case *gastrologv1.ConfigCommand_PutTier:
+		return f.applyPutTier(ctx, c.PutTier)
+	case *gastrologv1.ConfigCommand_DeleteTier:
+		return f.applyDeleteTier(ctx, c.DeleteTier)
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -473,6 +481,28 @@ func (f *FSM) applySetNodeStorageConfig(ctx context.Context, pb *gastrologv1.Set
 		return nil, err
 	}
 	return &Notification{Kind: NotifyNodeStorageConfigSet}, nil
+}
+
+func (f *FSM) applyPutTier(ctx context.Context, pb *gastrologv1.PutTierCommand) (*Notification, error) {
+	tier, err := command.ExtractPutTier(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutTier(ctx, tier); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyTierPut, ID: tier.ID}, nil
+}
+
+func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteTier(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteTier(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyTierDeleted, ID: id}, nil
 }
 
 // applyUser dispatches user-management commands.
@@ -732,6 +762,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	for _, nsc := range cfg.NodeStorageConfigs {
 		if err := newStore.SetNodeStorageConfig(ctx, nsc); err != nil {
 			return fmt.Errorf("restore node storage config %s: %w", nsc.NodeID, err)
+		}
+	}
+	for _, tier := range cfg.Tiers {
+		if err := newStore.PutTier(ctx, tier); err != nil {
+			return fmt.Errorf("restore tier %s: %w", tier.ID, err)
 		}
 	}
 

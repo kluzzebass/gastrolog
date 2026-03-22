@@ -44,6 +44,8 @@ message ConfigCommand {
     PutCloudServiceCommand put_cloud_service = 32;
     DeleteCloudServiceCommand delete_cloud_service = 33;
     SetNodeStorageConfigCommand set_node_storage_config = 34;
+    PutTierCommand put_tier = 35;
+    DeleteTierCommand delete_tier = 36;
   }
 }
 
@@ -309,6 +311,25 @@ message StorageAreaCommand {
   uint64 memory_budget_bytes = 6;
 }
 
+// --- Tiers ---
+
+message PutTierCommand {
+  string id = 1;
+  string name = 2;
+  string type = 3;              // "memory", "local", "cloud"
+  string rotation_policy_id = 4;
+  repeated VaultRetentionRule retention_rules = 5;
+  uint64 memory_budget_bytes = 6;
+  uint32 storage_class = 7;
+  string cloud_service_id = 8;
+  uint32 active_chunk_class = 9;
+  uint32 cache_class = 10;
+}
+
+message DeleteTierCommand {
+  string id = 1;
+}
+
 // --- Snapshot ---
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -330,4 +351,5 @@ message ConfigSnapshot {
   repeated PutManagedFileCommand managed_files = 13;
   repeated PutCloudServiceCommand cloud_services = 14;
   repeated SetNodeStorageConfigCommand node_storage_configs = 15;
+  repeated PutTierCommand tiers = 16;
 }

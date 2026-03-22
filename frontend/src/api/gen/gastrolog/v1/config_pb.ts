@@ -8,6 +8,40 @@ import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
+ * TierType identifies the storage medium for a tier.
+ *
+ * @generated from enum gastrolog.v1.TierType
+ */
+export enum TierType {
+  /**
+   * @generated from enum value: TIER_TYPE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: TIER_TYPE_MEMORY = 1;
+   */
+  MEMORY = 1,
+
+  /**
+   * @generated from enum value: TIER_TYPE_LOCAL = 2;
+   */
+  LOCAL = 2,
+
+  /**
+   * @generated from enum value: TIER_TYPE_CLOUD = 3;
+   */
+  CLOUD = 3,
+}
+// Retrieve enum metadata with: proto3.getEnumType(TierType)
+proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
+  { no: 0, name: "TIER_TYPE_UNSPECIFIED" },
+  { no: 1, name: "TIER_TYPE_MEMORY" },
+  { no: 2, name: "TIER_TYPE_LOCAL" },
+  { no: 3, name: "TIER_TYPE_CLOUD" },
+]);
+
+/**
  * @generated from message gastrolog.v1.GetConfigRequest
  */
 export class GetConfigRequest extends Message<GetConfigRequest> {
@@ -100,6 +134,11 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
    */
   nodeStorageConfigs: NodeStorageConfig[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.TierConfig tiers = 12;
+   */
+  tiers: TierConfig[] = [];
+
   constructor(data?: PartialMessage<GetConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -119,6 +158,7 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 8, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
     { no: 10, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 11, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
+    { no: 12, name: "tiers", kind: "message", T: TierConfig, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetConfigResponse {
@@ -4695,6 +4735,101 @@ export class NodeConfig extends Message<NodeConfig> {
 
   static equals(a: NodeConfig | PlainMessage<NodeConfig> | undefined, b: NodeConfig | PlainMessage<NodeConfig> | undefined): boolean {
     return proto3.util.equals(NodeConfig, a, b);
+  }
+}
+
+/**
+ * TierConfig defines a storage tier. A vault contains an ordered list
+ * of tiers. Each tier is a full chunk manager with its own rotation
+ * and retention policies. Not bound to a node.
+ *
+ * @generated from message gastrolog.v1.TierConfig
+ */
+export class TierConfig extends Message<TierConfig> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * @generated from field: gastrolog.v1.TierType type = 3;
+   */
+  type = TierType.UNSPECIFIED;
+
+  /**
+   * @generated from field: string rotation_policy_id = 4;
+   */
+  rotationPolicyId = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.RetentionRule retention_rules = 5;
+   */
+  retentionRules: RetentionRule[] = [];
+
+  /**
+   * @generated from field: uint64 memory_budget_bytes = 6;
+   */
+  memoryBudgetBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 storage_class = 7;
+   */
+  storageClass = 0;
+
+  /**
+   * @generated from field: string cloud_service_id = 8;
+   */
+  cloudServiceId = "";
+
+  /**
+   * @generated from field: uint32 active_chunk_class = 9;
+   */
+  activeChunkClass = 0;
+
+  /**
+   * @generated from field: uint32 cache_class = 10;
+   */
+  cacheClass = 0;
+
+  constructor(data?: PartialMessage<TierConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TierConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(TierType) },
+    { no: 4, name: "rotation_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
+    { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {
+    return new TierConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierConfig {
+    return new TierConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierConfig {
+    return new TierConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TierConfig | PlainMessage<TierConfig> | undefined, b: TierConfig | PlainMessage<TierConfig> | undefined): boolean {
+    return proto3.util.equals(TierConfig, a, b);
   }
 }
 

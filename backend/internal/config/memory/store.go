@@ -43,6 +43,7 @@ type Store struct {
 	nodes         map[uuid.UUID]config.NodeConfig    // keyed by node ID
 	managedFiles       map[uuid.UUID]config.ManagedFileConfig
 	cloudServices      map[uuid.UUID]config.CloudService
+	tiers              map[uuid.UUID]config.TierConfig
 	nodeStorageConfigs map[string]config.NodeStorageConfig // keyed by nodeID
 	clusterTLS         *config.ClusterTLS
 }
@@ -64,6 +65,7 @@ func NewStore() *Store {
 		nodes:         make(map[uuid.UUID]config.NodeConfig),
 		managedFiles:       make(map[uuid.UUID]config.ManagedFileConfig),
 		cloudServices:      make(map[uuid.UUID]config.CloudService),
+		tiers:              make(map[uuid.UUID]config.TierConfig),
 		nodeStorageConfigs: make(map[string]config.NodeStorageConfig),
 	}
 }
@@ -74,8 +76,8 @@ func (s *Store) isEmpty() bool {
 		len(s.retentionPolicies) == 0 && len(s.vaults) == 0 &&
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
 		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
-		len(s.nodeStorageConfigs) == 0 && !s.ss.hasServerSettings &&
-		s.clusterTLS == nil
+		len(s.tiers) == 0 && len(s.nodeStorageConfigs) == 0 &&
+		!s.ss.hasServerSettings && s.clusterTLS == nil
 }
 
 // Load returns the full configuration.
@@ -152,6 +154,14 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) { //nolint:goc
 			cfg.CloudServices = append(cfg.CloudServices, cs)
 		}
 		slices.SortFunc(cfg.CloudServices, func(a, b config.CloudService) int { return cmpUUID(a.ID, b.ID) })
+	}
+
+	if len(s.tiers) > 0 {
+		cfg.Tiers = make([]config.TierConfig, 0, len(s.tiers))
+		for _, tier := range s.tiers {
+			cfg.Tiers = append(cfg.Tiers, tier)
+		}
+		slices.SortFunc(cfg.Tiers, func(a, b config.TierConfig) int { return cmpUUID(a.ID, b.ID) })
 	}
 
 	if len(s.nodeStorageConfigs) > 0 {
@@ -602,6 +612,47 @@ func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
 	defer s.mu.Unlock()
 
 	delete(s.cloudServices, id)
+	return nil
+}
+
+// Tiers
+
+func (s *Store) GetTier(ctx context.Context, id uuid.UUID) (*config.TierConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	tier, ok := s.tiers[id]
+	if !ok {
+		return nil, nil
+	}
+	return &tier, nil
+}
+
+func (s *Store) ListTiers(ctx context.Context) ([]config.TierConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]config.TierConfig, 0, len(s.tiers))
+	for _, tier := range s.tiers {
+		result = append(result, tier)
+	}
+	slices.SortFunc(result, func(a, b config.TierConfig) int { return cmpUUID(a.ID, b.ID) })
+	return result, nil
+}
+
+func (s *Store) PutTier(ctx context.Context, tier config.TierConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.tiers[tier.ID] = tier
+	return nil
+}
+
+func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.tiers, id)
 	return nil
 }
 

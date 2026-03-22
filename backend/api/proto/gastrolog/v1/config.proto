@@ -150,6 +150,7 @@ message GetConfigResponse {
   repeated ManagedFileInfo managed_files = 8;
   repeated CloudService cloud_services = 10;
   repeated NodeStorageConfig node_storage_configs = 11;
+  repeated TierConfig tiers = 12;
 }
 
 message RetentionRule {
@@ -689,6 +690,30 @@ message GetIngesterDefaultsResponse {
 message NodeConfig {
   string id = 1;
   string name = 2;
+}
+
+// TierType identifies the storage medium for a tier.
+enum TierType {
+  TIER_TYPE_UNSPECIFIED = 0;
+  TIER_TYPE_MEMORY = 1;
+  TIER_TYPE_LOCAL = 2;
+  TIER_TYPE_CLOUD = 3;
+}
+
+// TierConfig defines a storage tier. A vault contains an ordered list
+// of tiers. Each tier is a full chunk manager with its own rotation
+// and retention policies. Not bound to a node.
+message TierConfig {
+  string id = 1;
+  string name = 2;
+  TierType type = 3;
+  string rotation_policy_id = 4;
+  repeated RetentionRule retention_rules = 5;
+  uint64 memory_budget_bytes = 6;
+  uint32 storage_class = 7;
+  string cloud_service_id = 8;
+  uint32 active_chunk_class = 9;
+  uint32 cache_class = 10;
 }
 
 message PutNodeConfigRequest {

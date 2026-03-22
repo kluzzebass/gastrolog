@@ -957,6 +957,9 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	for _, nsc := range cfg.NodeStorageConfigs {
 		snap.NodeStorageConfigs = append(snap.NodeStorageConfigs, setNodeStorageConfigCmd(nsc))
 	}
+	for _, tier := range cfg.Tiers {
+		snap.Tiers = append(snap.Tiers, putTierCmd(tier))
+	}
 
 	// Include ClusterTLS if present on Config.
 	if cfg.ClusterTLS != nil {
@@ -1059,6 +1062,13 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 			return nil, nil, nil, nil, fmt.Errorf("restore node storage config: %w", err)
 		}
 		cfg.NodeStorageConfigs = append(cfg.NodeStorageConfigs, nc)
+	}
+	for _, tier := range snap.GetTiers() {
+		tc, err := ExtractPutTier(tier)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("restore tier: %w", err)
+		}
+		cfg.Tiers = append(cfg.Tiers, tc)
 	}
 
 	users := make([]config.User, 0, len(snap.GetUsers()))

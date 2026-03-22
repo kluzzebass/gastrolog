@@ -504,6 +504,58 @@ func TestApplyDeleteCloudService(t *testing.T) {
 	}
 }
 
+func TestApplyPutTier(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	rpID := newID()
+	csID := newID()
+	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{
+		ID: id, Name: "hot-tier", Type: config.TierTypeLocal,
+		RotationPolicyID:  &rpID,
+		MemoryBudgetBytes: 512 * 1024 * 1024,
+		StorageClass:      1,
+		CloudServiceID:    &csID,
+		ActiveChunkClass:  2,
+		CacheClass:        3,
+	}))
+
+	got, err := fsm.Store().GetTier(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Name != "hot-tier" || got.Type != config.TierTypeLocal {
+		t.Fatalf("unexpected tier: %+v", got)
+	}
+	if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
+		t.Fatalf("unexpected rotation policy: %v", got.RotationPolicyID)
+	}
+	if got.CloudServiceID == nil || *got.CloudServiceID != csID {
+		t.Fatalf("unexpected cloud service: %v", got.CloudServiceID)
+	}
+	if got.ActiveChunkClass != 2 || got.CacheClass != 3 {
+		t.Fatalf("unexpected classes: active=%d cache=%d", got.ActiveChunkClass, got.CacheClass)
+	}
+}
+
+func TestApplyDeleteTier(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{
+		ID: id, Name: "tier", Type: config.TierTypeMemory,
+	}))
+	applyCmd(t, fsm, command.NewDeleteTier(id))
+
+	got, err := fsm.Store().GetTier(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+}
+
 func TestApplySetNodeStorageConfig(t *testing.T) {
 	t.Parallel()
 	fsm := New()

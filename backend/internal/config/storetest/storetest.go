@@ -39,6 +39,7 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 	testUsers(t, newStore)
 	testAuth(t, newStore)
 	testCloudServices(t, newStore)
+	testTiers(t, newStore)
 	testNodeStorageConfigs(t, newStore)
 }
 
@@ -1654,6 +1655,152 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		// Delete non-existent is a no-op.
 		if err := s.DeleteCloudService(ctx, uuid.Must(uuid.NewV7())); err != nil {
+			t.Fatalf("Delete non-existent: %v", err)
+		}
+	})
+}
+
+func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
+	t.Run("PutGetTier", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		rpID := newID()
+		csID := newID()
+		tier := config.TierConfig{
+			ID:                id,
+			Name:              "hot",
+			Type:              config.TierTypeLocal,
+			RotationPolicyID:  &rpID,
+			MemoryBudgetBytes: 256 * 1024 * 1024,
+			StorageClass:      1,
+			CloudServiceID:    &csID,
+			ActiveChunkClass:  2,
+			CacheClass:        3,
+		}
+		if err := s.PutTier(ctx, tier); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetTier(ctx, id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected tier, got nil")
+		}
+		if got.Name != "hot" {
+			t.Errorf("Name: expected %q, got %q", "hot", got.Name)
+		}
+		if got.Type != config.TierTypeLocal {
+			t.Errorf("Type: expected %q, got %q", config.TierTypeLocal, got.Type)
+		}
+		if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
+			t.Errorf("RotationPolicyID: expected %s, got %v", rpID, got.RotationPolicyID)
+		}
+		if got.CloudServiceID == nil || *got.CloudServiceID != csID {
+			t.Errorf("CloudServiceID: expected %s, got %v", csID, got.CloudServiceID)
+		}
+		if got.ActiveChunkClass != 2 {
+			t.Errorf("ActiveChunkClass: expected 2, got %d", got.ActiveChunkClass)
+		}
+		if got.CacheClass != 3 {
+			t.Errorf("CacheClass: expected 3, got %d", got.CacheClass)
+		}
+	})
+
+	t.Run("ListTiersSorted", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		all, err := s.ListTiers(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 0 {
+			t.Fatalf("expected 0, got %d", len(all))
+		}
+
+		idA := newID()
+		idB := newID()
+		if err := s.PutTier(ctx, config.TierConfig{ID: idA, Name: "alpha", Type: config.TierTypeMemory}); err != nil {
+			t.Fatalf("Put a: %v", err)
+		}
+		if err := s.PutTier(ctx, config.TierConfig{ID: idB, Name: "beta", Type: config.TierTypeLocal}); err != nil {
+			t.Fatalf("Put b: %v", err)
+		}
+
+		all, err = s.ListTiers(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("expected 2, got %d", len(all))
+		}
+
+		ids := map[uuid.UUID]bool{}
+		for _, tier := range all {
+			ids[tier.ID] = true
+		}
+		if !ids[idA] || !ids[idB] {
+			t.Errorf("expected tiers %s and %s, got %v", idA, idB, ids)
+		}
+	})
+
+	t.Run("UpdateTier", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		if err := s.PutTier(ctx, config.TierConfig{ID: id, Name: "tier", Type: config.TierTypeLocal}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.PutTier(ctx, config.TierConfig{ID: id, Name: "tier-updated", Type: config.TierTypeCloud}); err != nil {
+			t.Fatalf("Put upsert: %v", err)
+		}
+
+		got, err := s.GetTier(ctx, id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != "tier-updated" || got.Type != config.TierTypeCloud {
+			t.Errorf("expected name=tier-updated type=cloud, got name=%s type=%s", got.Name, got.Type)
+		}
+
+		all, err := s.ListTiers(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 1 {
+			t.Fatalf("expected 1 tier after upsert, got %d", len(all))
+		}
+	})
+
+	t.Run("DeleteTier", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		if err := s.PutTier(ctx, config.TierConfig{ID: id, Name: "del", Type: config.TierTypeMemory}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.DeleteTier(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		got, err := s.GetTier(ctx, id)
+		if err != nil {
+			t.Fatalf("Get after delete: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after delete, got %+v", got)
+		}
+
+		// Delete non-existent is a no-op.
+		if err := s.DeleteTier(ctx, uuid.Must(uuid.NewV7())); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})

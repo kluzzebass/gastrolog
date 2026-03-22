@@ -135,6 +135,12 @@ type Store interface {
 	PutCloudService(ctx context.Context, svc CloudService) error
 	DeleteCloudService(ctx context.Context, id uuid.UUID) error
 
+	// Tiers
+	GetTier(ctx context.Context, id uuid.UUID) (*TierConfig, error)
+	ListTiers(ctx context.Context) ([]TierConfig, error)
+	PutTier(ctx context.Context, tier TierConfig) error
+	DeleteTier(ctx context.Context, id uuid.UUID) error
+
 	// Node storage (per-node)
 	GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error)
 	ListNodeStorageConfigs(ctx context.Context) ([]NodeStorageConfig, error)
@@ -194,6 +200,7 @@ type Config struct {
 	ManagedFiles       []ManagedFileConfig      `json:"managedFiles,omitempty"`
 	CloudServices      []CloudService           `json:"cloudServices,omitempty"`
 	NodeStorageConfigs []NodeStorageConfig      `json:"nodeStorageConfigs,omitempty"`
+	Tiers              []TierConfig             `json:"tiers,omitempty"`
 
 	// Server-level settings.
 	Auth                 AuthConfig      `json:"auth,omitzero"`
@@ -648,6 +655,29 @@ type CloudService struct {
 	StorageClass     string    `json:"storageClass,omitempty"`
 	ActiveChunkClass uint32    `json:"activeChunkClass"`
 	CacheClass       uint32    `json:"cacheClass"`
+}
+
+// TierType identifies the storage medium for a tier.
+type TierType string
+
+const (
+	TierTypeMemory TierType = "memory"
+	TierTypeLocal  TierType = "local"
+	TierTypeCloud  TierType = "cloud"
+)
+
+// TierConfig defines a storage tier within the tiered storage system.
+type TierConfig struct {
+	ID                uuid.UUID       `json:"id"`
+	Name              string          `json:"name"`
+	Type              TierType        `json:"type"`
+	RotationPolicyID  *uuid.UUID      `json:"rotationPolicyId,omitempty"`
+	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
+	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`
+	StorageClass      uint32          `json:"storageClass,omitempty"`
+	CloudServiceID    *uuid.UUID      `json:"cloudServiceId,omitempty"`
+	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
+	CacheClass        uint32          `json:"cacheClass,omitempty"`
 }
 
 // ClusterTLS holds mTLS material for the cluster gRPC port.

@@ -126,6 +126,7 @@ func (s *ConfigServer) buildFullConfig(ctx context.Context) *apiv1.GetConfigResp
 		s.loadConfigNodeConfigs(ctx, resp)
 		s.loadConfigManagedFiles(ctx, resp)
 		s.loadConfigCloudServices(ctx, resp)
+		s.loadConfigTiers(ctx, resp)
 		s.loadConfigNodeStorageConfigs(ctx, resp)
 	}
 	if s.configSignal != nil {
@@ -286,6 +287,54 @@ func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			ActiveChunkClass: cs.ActiveChunkClass,
 			CacheClass:       cs.CacheClass,
 		})
+	}
+}
+
+func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfigResponse) {
+	tiers, err := s.cfgStore.ListTiers(ctx)
+	if err != nil {
+		return
+	}
+	for _, tier := range tiers {
+		tc := &apiv1.TierConfig{
+			Id:                tier.ID.String(),
+			Name:              tier.Name,
+			Type:              tierTypeToProto(tier.Type),
+			MemoryBudgetBytes: tier.MemoryBudgetBytes,
+			StorageClass:      tier.StorageClass,
+			ActiveChunkClass:  tier.ActiveChunkClass,
+			CacheClass:        tier.CacheClass,
+		}
+		if tier.RotationPolicyID != nil {
+			tc.RotationPolicyId = tier.RotationPolicyID.String()
+		}
+		if tier.CloudServiceID != nil {
+			tc.CloudServiceId = tier.CloudServiceID.String()
+		}
+		for _, r := range tier.RetentionRules {
+			pb := &apiv1.RetentionRule{
+				RetentionPolicyId: r.RetentionPolicyID.String(),
+				Action:            string(r.Action),
+			}
+			for _, eid := range r.EjectRouteIDs {
+				pb.EjectRouteIds = append(pb.EjectRouteIds, eid.String())
+			}
+			tc.RetentionRules = append(tc.RetentionRules, pb)
+		}
+		resp.Tiers = append(resp.Tiers, tc)
+	}
+}
+
+func tierTypeToProto(t config.TierType) apiv1.TierType {
+	switch t {
+	case config.TierTypeMemory:
+		return apiv1.TierType_TIER_TYPE_MEMORY
+	case config.TierTypeLocal:
+		return apiv1.TierType_TIER_TYPE_LOCAL
+	case config.TierTypeCloud:
+		return apiv1.TierType_TIER_TYPE_CLOUD
+	default:
+		return apiv1.TierType_TIER_TYPE_UNSPECIFIED
 	}
 }
 

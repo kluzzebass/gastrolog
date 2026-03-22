@@ -212,6 +212,14 @@ func (s *Store) ListCloudServices(ctx context.Context) ([]config.CloudService, e
 	return s.fsm.Store().ListCloudServices(ctx)
 }
 
+func (s *Store) GetTier(ctx context.Context, id uuid.UUID) (*config.TierConfig, error) {
+	return s.fsm.Store().GetTier(ctx, id)
+}
+
+func (s *Store) ListTiers(ctx context.Context) ([]config.TierConfig, error) {
+	return s.fsm.Store().ListTiers(ctx)
+}
+
 func (s *Store) GetNodeStorageConfig(ctx context.Context, nodeID string) (*config.NodeStorageConfig, error) {
 	return s.fsm.Store().GetNodeStorageConfig(ctx, nodeID)
 }
@@ -354,6 +362,14 @@ func (s *Store) PutCloudService(ctx context.Context, svc config.CloudService) er
 
 func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
 	return s.apply(command.NewDeleteCloudService(id))
+}
+
+func (s *Store) PutTier(ctx context.Context, tier config.TierConfig) error {
+	return s.apply(command.NewPutTier(tier))
+}
+
+func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID) error {
+	return s.apply(command.NewDeleteTier(id))
 }
 
 func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg config.NodeStorageConfig) error {

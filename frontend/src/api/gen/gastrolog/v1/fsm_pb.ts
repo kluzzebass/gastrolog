@@ -220,6 +220,18 @@ export class ConfigCommand extends Message<ConfigCommand> {
      */
     value: SetNodeStorageConfigCommand;
     case: "setNodeStorageConfig";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.PutTierCommand put_tier = 35;
+     */
+    value: PutTierCommand;
+    case: "putTier";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.DeleteTierCommand delete_tier = 36;
+     */
+    value: DeleteTierCommand;
+    case: "deleteTier";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<ConfigCommand>) {
@@ -264,6 +276,8 @@ export class ConfigCommand extends Message<ConfigCommand> {
     { no: 32, name: "put_cloud_service", kind: "message", T: PutCloudServiceCommand, oneof: "command" },
     { no: 33, name: "delete_cloud_service", kind: "message", T: DeleteCloudServiceCommand, oneof: "command" },
     { no: 34, name: "set_node_storage_config", kind: "message", T: SetNodeStorageConfigCommand, oneof: "command" },
+    { no: 35, name: "put_tier", kind: "message", T: PutTierCommand, oneof: "command" },
+    { no: 36, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigCommand {
@@ -2135,6 +2149,136 @@ export class StorageAreaCommand extends Message<StorageAreaCommand> {
 }
 
 /**
+ * @generated from message gastrolog.v1.PutTierCommand
+ */
+export class PutTierCommand extends Message<PutTierCommand> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name = "";
+
+  /**
+   * "memory", "local", "cloud"
+   *
+   * @generated from field: string type = 3;
+   */
+  type = "";
+
+  /**
+   * @generated from field: string rotation_policy_id = 4;
+   */
+  rotationPolicyId = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.VaultRetentionRule retention_rules = 5;
+   */
+  retentionRules: VaultRetentionRule[] = [];
+
+  /**
+   * @generated from field: uint64 memory_budget_bytes = 6;
+   */
+  memoryBudgetBytes = protoInt64.zero;
+
+  /**
+   * @generated from field: uint32 storage_class = 7;
+   */
+  storageClass = 0;
+
+  /**
+   * @generated from field: string cloud_service_id = 8;
+   */
+  cloudServiceId = "";
+
+  /**
+   * @generated from field: uint32 active_chunk_class = 9;
+   */
+  activeChunkClass = 0;
+
+  /**
+   * @generated from field: uint32 cache_class = 10;
+   */
+  cacheClass = 0;
+
+  constructor(data?: PartialMessage<PutTierCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutTierCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "rotation_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "retention_rules", kind: "message", T: VaultRetentionRule, repeated: true },
+    { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 7, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {
+    return new PutTierCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutTierCommand {
+    return new PutTierCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutTierCommand {
+    return new PutTierCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutTierCommand | PlainMessage<PutTierCommand> | undefined, b: PutTierCommand | PlainMessage<PutTierCommand> | undefined): boolean {
+    return proto3.util.equals(PutTierCommand, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteTierCommand
+ */
+export class DeleteTierCommand extends Message<DeleteTierCommand> {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id = "";
+
+  constructor(data?: PartialMessage<DeleteTierCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteTierCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteTierCommand {
+    return new DeleteTierCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteTierCommand {
+    return new DeleteTierCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteTierCommand {
+    return new DeleteTierCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteTierCommand | PlainMessage<DeleteTierCommand> | undefined, b: DeleteTierCommand | PlainMessage<DeleteTierCommand> | undefined): boolean {
+    return proto3.util.equals(DeleteTierCommand, a, b);
+  }
+}
+
+/**
  * ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -2217,6 +2361,11 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
    */
   nodeStorageConfigs: SetNodeStorageConfigCommand[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.PutTierCommand tiers = 16;
+   */
+  tiers: PutTierCommand[] = [];
+
   constructor(data?: PartialMessage<ConfigSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2240,6 +2389,7 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
     { no: 13, name: "managed_files", kind: "message", T: PutManagedFileCommand, repeated: true },
     { no: 14, name: "cloud_services", kind: "message", T: PutCloudServiceCommand, repeated: true },
     { no: 15, name: "node_storage_configs", kind: "message", T: SetNodeStorageConfigCommand, repeated: true },
+    { no: 16, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigSnapshot {
