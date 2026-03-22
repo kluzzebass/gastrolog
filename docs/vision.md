@@ -130,12 +130,15 @@ A vault should be the **logical container** — it owns the records, the indexes
 
 Every storage area has a **numeric priority** (0 = fastest/most expensive, higher = slower/cheaper). Priority 0 is always memory-backed, implicit on every node. All other priorities are declared per-node with a label, and either a local path with capacity or a reference to a cluster-wide cloud backend.
 
+Multiple storage areas can share the same priority — they form a pool at that level. Two NVMe drives at priority 1, two S3 buckets at priority 5. The system distributes across areas at the same priority.
+
 Cloud backend definitions (bucket, credentials, region) are cluster-wide config in Raft — any node can talk to the same S3 bucket. Per-node declarations specify which cloud backends the node can serve and which local storage to use for active chunk buffers and caching.
 
 ```
 Node storage declaration:
   priority 0: Memory (implicit, budget: 4GB)
-  priority 1: label=NVMe, path=/data/nvme, capacity=200GB
+  priority 1: label=NVMe-1, path=/data/nvme0, capacity=200GB
+  priority 1: label=NVMe-2, path=/data/nvme1, capacity=200GB
   priority 3: label=NAS, path=/mnt/nas, capacity=10TB
   priority 5: cloud backend=s3-prod, active-buffer=3, cache=3
   priority 7: cloud backend=glacier-archive, active-buffer=3, cache=3
