@@ -592,3 +592,66 @@ func (p *StoreProxy) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UU
 	}
 	return p.inner.DeleteUserRefreshTokens(ctx, userID)
 }
+
+func (p *StoreProxy) GetCloudService(ctx context.Context, id uuid.UUID) (*CloudService, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.GetCloudService(ctx, id)
+}
+
+func (p *StoreProxy) ListCloudServices(ctx context.Context) ([]CloudService, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.ListCloudServices(ctx)
+}
+
+func (p *StoreProxy) PutCloudService(ctx context.Context, svc CloudService) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.PutCloudService(ctx, svc)
+}
+
+func (p *StoreProxy) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.DeleteCloudService(ctx, id)
+}
+
+func (p *StoreProxy) GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.GetNodeStorageConfig(ctx, nodeID)
+}
+
+func (p *StoreProxy) ListNodeStorageConfigs(ctx context.Context) ([]NodeStorageConfig, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.ListNodeStorageConfigs(ctx)
+}
+
+func (p *StoreProxy) SetNodeStorageConfig(ctx context.Context, cfg NodeStorageConfig) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetNodeStorageConfig(ctx, cfg)
+}

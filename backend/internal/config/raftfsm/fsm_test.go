@@ -465,6 +465,68 @@ func TestApplyDeleteUserRefreshTokens(t *testing.T) {
 	}
 }
 
+func TestApplyPutCloudService(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	applyCmd(t, fsm, command.NewPutCloudService(config.CloudService{
+		ID: id, Name: "prod-s3", Provider: "aws", Bucket: "my-bucket",
+		Region: "us-east-1", ActiveChunkClass: 1, CacheClass: 2,
+	}))
+
+	got, err := fsm.Store().GetCloudService(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Name != "prod-s3" || got.Provider != "aws" || got.Bucket != "my-bucket" {
+		t.Fatalf("unexpected cloud service: %+v", got)
+	}
+	if got.ActiveChunkClass != 1 || got.CacheClass != 2 {
+		t.Fatalf("unexpected classes: active=%d cache=%d", got.ActiveChunkClass, got.CacheClass)
+	}
+}
+
+func TestApplyDeleteCloudService(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	id := newID()
+	applyCmd(t, fsm, command.NewPutCloudService(config.CloudService{
+		ID: id, Name: "svc", Provider: "aws", Bucket: "b",
+	}))
+	applyCmd(t, fsm, command.NewDeleteCloudService(id))
+
+	got, err := fsm.Store().GetCloudService(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil, got %+v", got)
+	}
+}
+
+func TestApplySetNodeStorageConfig(t *testing.T) {
+	t.Parallel()
+	fsm := New()
+	areaID := newID()
+	applyCmd(t, fsm, command.NewSetNodeStorageConfig(config.NodeStorageConfig{
+		NodeID: "node-1",
+		Areas: []config.StorageArea{
+			{ID: areaID, StorageClass: 1, Label: "fast", Path: "/data/fast"},
+		},
+	}))
+
+	got, err := fsm.Store().GetNodeStorageConfig(context.Background(), "node-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.NodeID != "node-1" {
+		t.Fatalf("unexpected node storage config: %+v", got)
+	}
+	if len(got.Areas) != 1 || got.Areas[0].Label != "fast" || got.Areas[0].StorageClass != 1 {
+		t.Fatalf("unexpected areas: %+v", got.Areas)
+	}
+}
+
 // TestCompoundDeleteRotationPolicy verifies the cascade: deleting a rotation
 // policy clears the Policy reference on vaults that used it.
 func TestCompoundDeleteRotationPolicy(t *testing.T) {

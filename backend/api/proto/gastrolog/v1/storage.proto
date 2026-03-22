@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package gastrolog.v1;
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// StorageArea declares a locally-attached storage resource on a node.
+// Storage class ranks local storage by speed: lower = faster.
+// Multiple areas can share the same storage class (they form a pool).
+message StorageArea {
+  string id = 1;
+  uint32 storage_class = 2;
+  string label = 3;
+  string path = 4;
+  uint64 capacity_bytes = 5;
+  uint64 memory_budget_bytes = 6;
+}
+
+// NodeStorageConfig declares all locally-attached storage available on a node.
+message NodeStorageConfig {
+  string node_id = 1;
+  repeated StorageArea areas = 2;
+}
+
+// CloudService defines a cluster-wide cloud storage endpoint.
+// Not tied to any node. Active chunks and cached chunks live on
+// local storage, referenced by storage class.
+message CloudService {
+  string id = 1;
+  string name = 2;
+  string provider = 3;
+  string bucket = 4;
+  string region = 5;
+  string endpoint = 6;
+  string access_key = 7;
+  string secret_key = 8;
+  string container = 9;
+  string connection_string = 10;
+  string credentials_json = 11;
+  string storage_class = 12;
+  uint32 active_chunk_class = 13;
+  uint32 cache_class = 14;
+}

@@ -4,6 +4,7 @@ package memory
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"maps"
@@ -40,8 +41,10 @@ type Store struct {
 	users         map[uuid.UUID]config.User         // keyed by ID (UUID)
 	refreshTokens map[uuid.UUID]config.RefreshToken // keyed by token ID
 	nodes         map[uuid.UUID]config.NodeConfig    // keyed by node ID
-	managedFiles   map[uuid.UUID]config.ManagedFileConfig
-	clusterTLS    *config.ClusterTLS
+	managedFiles       map[uuid.UUID]config.ManagedFileConfig
+	cloudServices      map[uuid.UUID]config.CloudService
+	nodeStorageConfigs map[string]config.NodeStorageConfig // keyed by nodeID
+	clusterTLS         *config.ClusterTLS
 }
 
 var _ config.Store = (*Store)(nil)
@@ -59,7 +62,9 @@ func NewStore() *Store {
 		users:         make(map[uuid.UUID]config.User),
 		refreshTokens: make(map[uuid.UUID]config.RefreshToken),
 		nodes:         make(map[uuid.UUID]config.NodeConfig),
-		managedFiles:   make(map[uuid.UUID]config.ManagedFileConfig),
+		managedFiles:       make(map[uuid.UUID]config.ManagedFileConfig),
+		cloudServices:      make(map[uuid.UUID]config.CloudService),
+		nodeStorageConfigs: make(map[string]config.NodeStorageConfig),
 	}
 }
 
@@ -68,13 +73,14 @@ func (s *Store) isEmpty() bool {
 	return len(s.filters) == 0 && len(s.rotationPolicies) == 0 &&
 		len(s.retentionPolicies) == 0 && len(s.vaults) == 0 &&
 		len(s.ingesters) == 0 && len(s.routes) == 0 &&
-		len(s.managedFiles) == 0 && !s.ss.hasServerSettings &&
+		len(s.managedFiles) == 0 && len(s.cloudServices) == 0 &&
+		len(s.nodeStorageConfigs) == 0 && !s.ss.hasServerSettings &&
 		s.clusterTLS == nil
 }
 
 // Load returns the full configuration.
 // Returns nil if no entities exist.
-func (s *Store) Load(ctx context.Context) (*config.Config, error) {
+func (s *Store) Load(ctx context.Context) (*config.Config, error) { //nolint:gocognit // flat field aggregation, grows linearly with entity count
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -138,6 +144,24 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 			cfg.ManagedFiles = append(cfg.ManagedFiles, lf)
 		}
 		slices.SortFunc(cfg.ManagedFiles, func(a, b config.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
+	}
+
+	if len(s.cloudServices) > 0 {
+		cfg.CloudServices = make([]config.CloudService, 0, len(s.cloudServices))
+		for _, cs := range s.cloudServices {
+			cfg.CloudServices = append(cfg.CloudServices, cs)
+		}
+		slices.SortFunc(cfg.CloudServices, func(a, b config.CloudService) int { return cmpUUID(a.ID, b.ID) })
+	}
+
+	if len(s.nodeStorageConfigs) > 0 {
+		cfg.NodeStorageConfigs = make([]config.NodeStorageConfig, 0, len(s.nodeStorageConfigs))
+		for _, nsc := range s.nodeStorageConfigs {
+			cfg.NodeStorageConfigs = append(cfg.NodeStorageConfigs, copyNodeStorageConfig(nsc))
+		}
+		slices.SortFunc(cfg.NodeStorageConfigs, func(a, b config.NodeStorageConfig) int {
+			return cmp.Compare(a.NodeID, b.NodeID)
+		})
 	}
 
 	if len(s.certs) > 0 {
@@ -540,6 +564,83 @@ func (s *Store) PutClusterTLS(ctx context.Context, tls config.ClusterTLS) error 
 	return nil
 }
 
+// Cloud services
+
+func (s *Store) GetCloudService(ctx context.Context, id uuid.UUID) (*config.CloudService, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	cs, ok := s.cloudServices[id]
+	if !ok {
+		return nil, nil
+	}
+	return &cs, nil
+}
+
+func (s *Store) ListCloudServices(ctx context.Context) ([]config.CloudService, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]config.CloudService, 0, len(s.cloudServices))
+	for _, cs := range s.cloudServices {
+		result = append(result, cs)
+	}
+	slices.SortFunc(result, func(a, b config.CloudService) int { return cmpUUID(a.ID, b.ID) })
+	return result, nil
+}
+
+func (s *Store) PutCloudService(ctx context.Context, svc config.CloudService) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.cloudServices[svc.ID] = svc
+	return nil
+}
+
+func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.cloudServices, id)
+	return nil
+}
+
+// Node storage configs
+
+func (s *Store) GetNodeStorageConfig(ctx context.Context, nodeID string) (*config.NodeStorageConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	nsc, ok := s.nodeStorageConfigs[nodeID]
+	if !ok {
+		return nil, nil
+	}
+	c := copyNodeStorageConfig(nsc)
+	return &c, nil
+}
+
+func (s *Store) ListNodeStorageConfigs(ctx context.Context) ([]config.NodeStorageConfig, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	result := make([]config.NodeStorageConfig, 0, len(s.nodeStorageConfigs))
+	for _, nsc := range s.nodeStorageConfigs {
+		result = append(result, copyNodeStorageConfig(nsc))
+	}
+	slices.SortFunc(result, func(a, b config.NodeStorageConfig) int {
+		return cmp.Compare(a.NodeID, b.NodeID)
+	})
+	return result, nil
+}
+
+func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg config.NodeStorageConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.nodeStorageConfigs[cfg.NodeID] = copyNodeStorageConfig(cfg)
+	return nil
+}
+
 // Certificates
 
 func (s *Store) ListCertificates(ctx context.Context) ([]config.CertPEM, error) {
@@ -911,6 +1012,17 @@ func copyCertPEM(cert config.CertPEM) config.CertPEM {
 		CertFile: cert.CertFile,
 		KeyFile:  cert.KeyFile,
 	}
+}
+
+func copyNodeStorageConfig(nsc config.NodeStorageConfig) config.NodeStorageConfig {
+	c := config.NodeStorageConfig{
+		NodeID: nsc.NodeID,
+	}
+	if len(nsc.Areas) > 0 {
+		c.Areas = make([]config.StorageArea, len(nsc.Areas))
+		copy(c.Areas, nsc.Areas)
+	}
+	return c
 }
 
 func copyParams(params map[string]string) map[string]string {

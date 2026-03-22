@@ -4,6 +4,8 @@ package gastrolog.v1;
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
+import "gastrolog/v1/storage.proto";
+
 // ConfigService provides configuration management.
 service ConfigService {
   // GetConfig returns the current configuration.
@@ -146,6 +148,8 @@ message GetConfigResponse {
   // Used by the frontend to avoid regressing the cache with stale reads.
   uint64 config_version = 9;
   repeated ManagedFileInfo managed_files = 8;
+  repeated CloudService cloud_services = 10;
+  repeated NodeStorageConfig node_storage_configs = 11;
 }
 
 message RetentionRule {

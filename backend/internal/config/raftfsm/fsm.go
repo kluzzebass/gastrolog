@@ -40,6 +40,9 @@ const (
 	NotifyNodeConfigDeleted
 	NotifyManagedFilePut
 	NotifyManagedFileDeleted
+	NotifyCloudServicePut
+	NotifyCloudServiceDeleted
+	NotifyNodeStorageConfigSet
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -120,7 +123,10 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.ConfigCommand_PutRoute,
 		*gastrologv1.ConfigCommand_DeleteRoute,
 		*gastrologv1.ConfigCommand_PutManagedFile,
-		*gastrologv1.ConfigCommand_DeleteManagedFile:
+		*gastrologv1.ConfigCommand_DeleteManagedFile,
+		*gastrologv1.ConfigCommand_PutCloudService,
+		*gastrologv1.ConfigCommand_DeleteCloudService,
+		*gastrologv1.ConfigCommand_SetNodeStorageConfig:
 		return f.applyConfig(ctx, cmd, l.Index)
 
 	case *gastrologv1.ConfigCommand_CreateUser,
@@ -161,7 +167,7 @@ func (f *FSM) applyConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand, r
 // dispatchConfig routes a config command to the store and returns a
 // notification describing the mutation, or nil for commands that don't
 // need orchestrator side effects (settings delete, certificates).
-func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand) (*Notification, error) {
+func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand) (*Notification, error) { //nolint:gocyclo // flat dispatch, grows linearly with command count
 	switch c := cmd.Command.(type) {
 	case *gastrologv1.ConfigCommand_PutFilter:
 		return f.applyPutFilter(ctx, c.PutFilter)
@@ -233,6 +239,12 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.ConfigCommand
 		return f.applyPutManagedFile(ctx, c.PutManagedFile)
 	case *gastrologv1.ConfigCommand_DeleteManagedFile:
 		return f.applyDeleteManagedFile(ctx, c.DeleteManagedFile)
+	case *gastrologv1.ConfigCommand_PutCloudService:
+		return f.applyPutCloudService(ctx, c.PutCloudService)
+	case *gastrologv1.ConfigCommand_DeleteCloudService:
+		return f.applyDeleteCloudService(ctx, c.DeleteCloudService)
+	case *gastrologv1.ConfigCommand_SetNodeStorageConfig:
+		return f.applySetNodeStorageConfig(ctx, c.SetNodeStorageConfig)
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -428,6 +440,39 @@ func (f *FSM) applyDeleteManagedFile(ctx context.Context, pb *gastrologv1.Delete
 		return nil, err
 	}
 	return &Notification{Kind: NotifyManagedFileDeleted, ID: id}, nil
+}
+
+func (f *FSM) applyPutCloudService(ctx context.Context, pb *gastrologv1.PutCloudServiceCommand) (*Notification, error) {
+	svc, err := command.ExtractPutCloudService(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.PutCloudService(ctx, svc); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyCloudServicePut, ID: svc.ID}, nil
+}
+
+func (f *FSM) applyDeleteCloudService(ctx context.Context, pb *gastrologv1.DeleteCloudServiceCommand) (*Notification, error) {
+	id, err := command.ExtractDeleteCloudService(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.DeleteCloudService(ctx, id); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyCloudServiceDeleted, ID: id}, nil
+}
+
+func (f *FSM) applySetNodeStorageConfig(ctx context.Context, pb *gastrologv1.SetNodeStorageConfigCommand) (*Notification, error) {
+	cfg, err := command.ExtractSetNodeStorageConfig(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.SetNodeStorageConfig(ctx, cfg); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyNodeStorageConfigSet}, nil
 }
 
 // applyUser dispatches user-management commands.
@@ -677,6 +722,16 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	for _, cert := range cfg.Certs {
 		if err := newStore.PutCertificate(ctx, cert); err != nil {
 			return fmt.Errorf("restore certificate %s: %w", cert.ID, err)
+		}
+	}
+	for _, cs := range cfg.CloudServices {
+		if err := newStore.PutCloudService(ctx, cs); err != nil {
+			return fmt.Errorf("restore cloud service %s: %w", cs.ID, err)
+		}
+	}
+	for _, nsc := range cfg.NodeStorageConfigs {
+		if err := newStore.SetNodeStorageConfig(ctx, nsc); err != nil {
+			return fmt.Errorf("restore node storage config %s: %w", nsc.NodeID, err)
 		}
 	}
 

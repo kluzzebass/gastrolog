@@ -951,6 +951,12 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 	for _, n := range nodes {
 		snap.NodeConfigs = append(snap.NodeConfigs, putNodeConfigCmd(n))
 	}
+	for _, cs := range cfg.CloudServices {
+		snap.CloudServices = append(snap.CloudServices, putCloudServiceCmd(cs))
+	}
+	for _, nsc := range cfg.NodeStorageConfigs {
+		snap.NodeStorageConfigs = append(snap.NodeStorageConfigs, setNodeStorageConfigCmd(nsc))
+	}
 
 	// Include ClusterTLS if present on Config.
 	if cfg.ClusterTLS != nil {
@@ -963,7 +969,7 @@ func BuildSnapshot(cfg *config.Config, users []config.User, tokens []config.Refr
 // RestoreSnapshot converts a ConfigSnapshot back to Go config types.
 // If the snapshot's Settings map contains a "server" key, it is parsed
 // into the Config's server-level fields (Auth, Query, etc.).
-func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeConfig, error) { //nolint:gocognit // flat field mapping from snapshot proto
+func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config.User, []config.RefreshToken, []config.NodeConfig, error) { //nolint:gocognit,gocyclo // flat field mapping from snapshot proto
 	cfg := &config.Config{}
 
 	// Migrate server settings from the Settings map.
@@ -1039,6 +1045,20 @@ func RestoreSnapshot(snap *gastrologv1.ConfigSnapshot) (*config.Config, []config
 			return nil, nil, nil, nil, fmt.Errorf("restore certificate: %w", err)
 		}
 		cfg.Certs = append(cfg.Certs, cc)
+	}
+	for _, cs := range snap.GetCloudServices() {
+		svc, err := ExtractPutCloudService(cs)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("restore cloud service: %w", err)
+		}
+		cfg.CloudServices = append(cfg.CloudServices, svc)
+	}
+	for _, nsc := range snap.GetNodeStorageConfigs() {
+		nc, err := ExtractSetNodeStorageConfig(nsc)
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("restore node storage config: %w", err)
+		}
+		cfg.NodeStorageConfigs = append(cfg.NodeStorageConfigs, nc)
 	}
 
 	users := make([]config.User, 0, len(snap.GetUsers()))

@@ -105,6 +105,9 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		if d.managedFileHandler != nil {
 			d.managedFileHandler.OnDelete(n.ID)
 		}
+	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
+		raftfsm.NotifyNodeStorageConfigSet:
+		// No orchestrator side effects yet; configSignal fires below.
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.

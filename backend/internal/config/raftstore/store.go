@@ -204,6 +204,22 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]config.RefreshToken, e
 	return s.fsm.Store().ListRefreshTokens(ctx)
 }
 
+func (s *Store) GetCloudService(ctx context.Context, id uuid.UUID) (*config.CloudService, error) {
+	return s.fsm.Store().GetCloudService(ctx, id)
+}
+
+func (s *Store) ListCloudServices(ctx context.Context) ([]config.CloudService, error) {
+	return s.fsm.Store().ListCloudServices(ctx)
+}
+
+func (s *Store) GetNodeStorageConfig(ctx context.Context, nodeID string) (*config.NodeStorageConfig, error) {
+	return s.fsm.Store().GetNodeStorageConfig(ctx, nodeID)
+}
+
+func (s *Store) ListNodeStorageConfigs(ctx context.Context) ([]config.NodeStorageConfig, error) {
+	return s.fsm.Store().ListNodeStorageConfigs(ctx)
+}
+
 // ---------------------------------------------------------------------------
 // Write methods — serialize → raft.Apply
 // ---------------------------------------------------------------------------
@@ -330,4 +346,16 @@ func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
 
 func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
 	return s.apply(command.NewDeleteUserRefreshTokens(userID))
+}
+
+func (s *Store) PutCloudService(ctx context.Context, svc config.CloudService) error {
+	return s.apply(command.NewPutCloudService(svc))
+}
+
+func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
+	return s.apply(command.NewDeleteCloudService(id))
+}
+
+func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg config.NodeStorageConfig) error {
+	return s.apply(command.NewSetNodeStorageConfig(cfg))
 }

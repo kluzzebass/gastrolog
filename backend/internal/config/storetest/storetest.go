@@ -38,6 +38,8 @@ func TestStore(t *testing.T, newStore func(t *testing.T) config.Store) {
 	testServerSettings(t, newStore)
 	testUsers(t, newStore)
 	testAuth(t, newStore)
+	testCloudServices(t, newStore)
+	testNodeStorageConfigs(t, newStore)
 }
 
 func testFilters(t *testing.T, newStore func(t *testing.T) config.Store) {
@@ -1513,6 +1515,275 @@ func testAuth(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 		if cfg != nil {
 			t.Errorf("expected nil config (users are not config entities), got %+v", cfg)
+		}
+	})
+}
+
+func testCloudServices(t *testing.T, newStore func(t *testing.T) config.Store) {
+	t.Run("PutGetCloudService", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		cs := config.CloudService{
+			ID:               id,
+			Name:             "prod-s3",
+			Provider:         "aws",
+			Bucket:           "my-bucket",
+			Region:           "us-east-1",
+			StorageClass:     "STANDARD",
+			ActiveChunkClass: 1,
+			CacheClass:       2,
+		}
+		if err := s.PutCloudService(ctx, cs); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		got, err := s.GetCloudService(ctx, id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected cloud service, got nil")
+		}
+		if got.Name != "prod-s3" {
+			t.Errorf("Name: expected %q, got %q", "prod-s3", got.Name)
+		}
+		if got.Provider != "aws" {
+			t.Errorf("Provider: expected %q, got %q", "aws", got.Provider)
+		}
+		if got.Bucket != "my-bucket" {
+			t.Errorf("Bucket: expected %q, got %q", "my-bucket", got.Bucket)
+		}
+		if got.ActiveChunkClass != 1 {
+			t.Errorf("ActiveChunkClass: expected 1, got %d", got.ActiveChunkClass)
+		}
+		if got.CacheClass != 2 {
+			t.Errorf("CacheClass: expected 2, got %d", got.CacheClass)
+		}
+	})
+
+	t.Run("ListCloudServicesSorted", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		all, err := s.ListCloudServices(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 0 {
+			t.Fatalf("expected 0, got %d", len(all))
+		}
+
+		idA := newID()
+		idB := newID()
+		if err := s.PutCloudService(ctx, config.CloudService{ID: idA, Name: "alpha", Provider: "aws", Bucket: "a"}); err != nil {
+			t.Fatalf("Put a: %v", err)
+		}
+		if err := s.PutCloudService(ctx, config.CloudService{ID: idB, Name: "beta", Provider: "gcs", Bucket: "b"}); err != nil {
+			t.Fatalf("Put b: %v", err)
+		}
+
+		all, err = s.ListCloudServices(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("expected 2, got %d", len(all))
+		}
+
+		ids := map[uuid.UUID]bool{}
+		for _, cs := range all {
+			ids[cs.ID] = true
+		}
+		if !ids[idA] || !ids[idB] {
+			t.Errorf("expected cloud services %s and %s, got %v", idA, idB, ids)
+		}
+	})
+
+	t.Run("UpdateCloudService", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		if err := s.PutCloudService(ctx, config.CloudService{ID: id, Name: "svc", Provider: "aws", Bucket: "old"}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.PutCloudService(ctx, config.CloudService{ID: id, Name: "svc", Provider: "gcs", Bucket: "new"}); err != nil {
+			t.Fatalf("Put upsert: %v", err)
+		}
+
+		got, err := s.GetCloudService(ctx, id)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Provider != "gcs" || got.Bucket != "new" {
+			t.Errorf("expected provider=gcs bucket=new, got provider=%s bucket=%s", got.Provider, got.Bucket)
+		}
+
+		all, err := s.ListCloudServices(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 1 {
+			t.Fatalf("expected 1 cloud service after upsert, got %d", len(all))
+		}
+	})
+
+	t.Run("DeleteCloudService", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		if err := s.PutCloudService(ctx, config.CloudService{ID: id, Name: "del", Provider: "aws", Bucket: "b"}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+
+		if err := s.DeleteCloudService(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		got, err := s.GetCloudService(ctx, id)
+		if err != nil {
+			t.Fatalf("Get after delete: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil after delete, got %+v", got)
+		}
+
+		// Delete non-existent is a no-op.
+		if err := s.DeleteCloudService(ctx, uuid.Must(uuid.NewV7())); err != nil {
+			t.Fatalf("Delete non-existent: %v", err)
+		}
+	})
+}
+
+func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Store) {
+	t.Run("SetGetNodeStorageConfig", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		areaID := newID()
+		nsc := config.NodeStorageConfig{
+			NodeID: "node-1",
+			Areas: []config.StorageArea{
+				{
+					ID:                areaID,
+					StorageClass:      1,
+					Label:             "fast",
+					Path:              "/data/fast",
+					CapacityBytes:     1024 * 1024 * 1024,
+					MemoryBudgetBytes: 256 * 1024 * 1024,
+				},
+			},
+		}
+		if err := s.SetNodeStorageConfig(ctx, nsc); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+
+		got, err := s.GetNodeStorageConfig(ctx, "node-1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got == nil {
+			t.Fatal("expected node storage config, got nil")
+		}
+		if got.NodeID != "node-1" {
+			t.Errorf("NodeID: expected %q, got %q", "node-1", got.NodeID)
+		}
+		if len(got.Areas) != 1 {
+			t.Fatalf("expected 1 area, got %d", len(got.Areas))
+		}
+		if got.Areas[0].ID != areaID {
+			t.Errorf("Area ID: expected %s, got %s", areaID, got.Areas[0].ID)
+		}
+		if got.Areas[0].Label != "fast" {
+			t.Errorf("Area Label: expected %q, got %q", "fast", got.Areas[0].Label)
+		}
+		if got.Areas[0].StorageClass != 1 {
+			t.Errorf("Area StorageClass: expected 1, got %d", got.Areas[0].StorageClass)
+		}
+	})
+
+	t.Run("ListNodeStorageConfigsSorted", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		all, err := s.ListNodeStorageConfigs(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 0 {
+			t.Fatalf("expected 0, got %d", len(all))
+		}
+
+		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{NodeID: "node-b"}); err != nil {
+			t.Fatalf("Set b: %v", err)
+		}
+		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{NodeID: "node-a"}); err != nil {
+			t.Fatalf("Set a: %v", err)
+		}
+
+		all, err = s.ListNodeStorageConfigs(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("expected 2, got %d", len(all))
+		}
+		// Verify sorted by NodeID.
+		if all[0].NodeID != "node-a" || all[1].NodeID != "node-b" {
+			t.Errorf("expected sorted by NodeID, got [%s, %s]", all[0].NodeID, all[1].NodeID)
+		}
+	})
+
+	t.Run("UpdateNodeStorageConfig", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+			NodeID: "node-1",
+			Areas:  []config.StorageArea{{ID: newID(), Label: "old"}},
+		}); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+
+		newAreaID := newID()
+		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+			NodeID: "node-1",
+			Areas:  []config.StorageArea{{ID: newAreaID, Label: "new"}},
+		}); err != nil {
+			t.Fatalf("Set update: %v", err)
+		}
+
+		got, err := s.GetNodeStorageConfig(ctx, "node-1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if len(got.Areas) != 1 || got.Areas[0].Label != "new" {
+			t.Errorf("expected updated area label 'new', got %+v", got.Areas)
+		}
+
+		all, err := s.ListNodeStorageConfigs(ctx)
+		if err != nil {
+			t.Fatalf("List: %v", err)
+		}
+		if len(all) != 1 {
+			t.Fatalf("expected 1 config after update, got %d", len(all))
+		}
+	})
+
+	t.Run("GetNodeStorageConfigNotFound", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		got, err := s.GetNodeStorageConfig(ctx, "nonexistent")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got != nil {
+			t.Fatalf("expected nil, got %+v", got)
 		}
 	})
 }

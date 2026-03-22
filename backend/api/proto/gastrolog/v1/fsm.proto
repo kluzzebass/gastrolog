@@ -41,6 +41,9 @@ message ConfigCommand {
     DeleteRouteCommand delete_route = 29;
     PutManagedFileCommand put_managed_file = 30;
     DeleteManagedFileCommand delete_managed_file = 31;
+    PutCloudServiceCommand put_cloud_service = 32;
+    DeleteCloudServiceCommand delete_cloud_service = 33;
+    SetNodeStorageConfigCommand set_node_storage_config = 34;
   }
 }
 
@@ -267,6 +270,45 @@ message DeleteManagedFileCommand {
   string id = 1;
 }
 
+// --- Cloud Services ---
+
+message PutCloudServiceCommand {
+  string id = 1;
+  string name = 2;
+  string provider = 3;
+  string bucket = 4;
+  string region = 5;
+  string endpoint = 6;
+  string access_key = 7;
+  string secret_key = 8;
+  string container = 9;
+  string connection_string = 10;
+  string credentials_json = 11;
+  string storage_class = 12;
+  uint32 active_chunk_class = 13;
+  uint32 cache_class = 14;
+}
+
+message DeleteCloudServiceCommand {
+  string id = 1;
+}
+
+// --- Node Storage ---
+
+message SetNodeStorageConfigCommand {
+  string node_id = 1;
+  repeated StorageAreaCommand areas = 2;
+}
+
+message StorageAreaCommand {
+  string id = 1;
+  uint32 storage_class = 2;
+  string label = 3;
+  string path = 4;
+  uint64 capacity_bytes = 5;
+  uint64 memory_budget_bytes = 6;
+}
+
 // --- Snapshot ---
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -286,4 +328,6 @@ message ConfigSnapshot {
   PutClusterTLSCommand cluster_tls = 11;
   repeated PutRouteCommand routes = 12;
   repeated PutManagedFileCommand managed_files = 13;
+  repeated PutCloudServiceCommand cloud_services = 14;
+  repeated SetNodeStorageConfigCommand node_storage_configs = 15;
 }

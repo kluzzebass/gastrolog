@@ -5,6 +5,7 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
+import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
  * @generated from message gastrolog.v1.GetConfigRequest
@@ -89,6 +90,16 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
    */
   managedFiles: ManagedFileInfo[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.CloudService cloud_services = 10;
+   */
+  cloudServices: CloudService[] = [];
+
+  /**
+   * @generated from field: repeated gastrolog.v1.NodeStorageConfig node_storage_configs = 11;
+   */
+  nodeStorageConfigs: NodeStorageConfig[] = [];
+
   constructor(data?: PartialMessage<GetConfigResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -106,6 +117,8 @@ export class GetConfigResponse extends Message<GetConfigResponse> {
     { no: 7, name: "routes", kind: "message", T: RouteConfig, repeated: true },
     { no: 9, name: "config_version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 8, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
+    { no: 10, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
+    { no: 11, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetConfigResponse {

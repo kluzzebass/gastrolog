@@ -125,6 +125,8 @@ func (s *ConfigServer) buildFullConfig(ctx context.Context) *apiv1.GetConfigResp
 		s.loadConfigRoutes(ctx, resp)
 		s.loadConfigNodeConfigs(ctx, resp)
 		s.loadConfigManagedFiles(ctx, resp)
+		s.loadConfigCloudServices(ctx, resp)
+		s.loadConfigNodeStorageConfigs(ctx, resp)
 	}
 	if s.configSignal != nil {
 		resp.ConfigVersion = s.configSignal.Version()
@@ -258,6 +260,55 @@ func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 		resp.NodeConfigs = append(resp.NodeConfigs, &apiv1.NodeConfig{
 			Id:   n.ID.String(),
 			Name: n.Name,
+		})
+	}
+}
+
+func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetConfigResponse) {
+	services, err := s.cfgStore.ListCloudServices(ctx)
+	if err != nil {
+		return
+	}
+	for _, cs := range services {
+		resp.CloudServices = append(resp.CloudServices, &apiv1.CloudService{
+			Id:               cs.ID.String(),
+			Name:             cs.Name,
+			Provider:         cs.Provider,
+			Bucket:           cs.Bucket,
+			Region:           cs.Region,
+			Endpoint:         cs.Endpoint,
+			AccessKey:        cs.AccessKey,
+			SecretKey:        cs.SecretKey,
+			Container:        cs.Container,
+			ConnectionString: cs.ConnectionString,
+			CredentialsJson:  cs.CredentialsJSON,
+			StorageClass:     cs.StorageClass,
+			ActiveChunkClass: cs.ActiveChunkClass,
+			CacheClass:       cs.CacheClass,
+		})
+	}
+}
+
+func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *apiv1.GetConfigResponse) {
+	configs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return
+	}
+	for _, nsc := range configs {
+		areas := make([]*apiv1.StorageArea, len(nsc.Areas))
+		for i, a := range nsc.Areas {
+			areas[i] = &apiv1.StorageArea{
+				Id:                a.ID.String(),
+				StorageClass:      a.StorageClass,
+				Label:             a.Label,
+				Path:              a.Path,
+				CapacityBytes:     a.CapacityBytes,
+				MemoryBudgetBytes: a.MemoryBudgetBytes,
+			}
+		}
+		resp.NodeStorageConfigs = append(resp.NodeStorageConfigs, &apiv1.NodeStorageConfig{
+			NodeId: nsc.NodeID,
+			Areas:  areas,
 		})
 	}
 }

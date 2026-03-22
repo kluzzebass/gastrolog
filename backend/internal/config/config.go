@@ -128,6 +128,17 @@ type Store interface {
 	ListRefreshTokens(ctx context.Context) ([]RefreshToken, error)
 	DeleteRefreshToken(ctx context.Context, id uuid.UUID) error
 	DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error
+
+	// Cloud services (cluster-wide)
+	GetCloudService(ctx context.Context, id uuid.UUID) (*CloudService, error)
+	ListCloudServices(ctx context.Context) ([]CloudService, error)
+	PutCloudService(ctx context.Context, svc CloudService) error
+	DeleteCloudService(ctx context.Context, id uuid.UUID) error
+
+	// Node storage (per-node)
+	GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error)
+	ListNodeStorageConfigs(ctx context.Context) ([]NodeStorageConfig, error)
+	SetNodeStorageConfig(ctx context.Context, cfg NodeStorageConfig) error
 }
 
 // LoadServerSettings reads the server-level settings from the store.
@@ -180,7 +191,9 @@ type Config struct {
 	Routes            []RouteConfig           `json:"routes,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
 	Nodes             []NodeConfig            `json:"nodes,omitempty"`
-	ManagedFiles      []ManagedFileConfig      `json:"managedFiles,omitempty"`
+	ManagedFiles       []ManagedFileConfig      `json:"managedFiles,omitempty"`
+	CloudServices      []CloudService           `json:"cloudServices,omitempty"`
+	NodeStorageConfigs []NodeStorageConfig      `json:"nodeStorageConfigs,omitempty"`
 
 	// Server-level settings.
 	Auth                 AuthConfig      `json:"auth,omitzero"`
@@ -601,6 +614,40 @@ type CertPEM struct {
 type NodeConfig struct {
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
+}
+
+// StorageArea defines a local storage area on a node.
+type StorageArea struct {
+	ID                uuid.UUID `json:"id"`
+	StorageClass      uint32    `json:"storageClass"`
+	Label             string    `json:"label"`
+	Path              string    `json:"path,omitempty"`
+	CapacityBytes     uint64    `json:"capacityBytes,omitempty"`
+	MemoryBudgetBytes uint64    `json:"memoryBudgetBytes,omitempty"`
+}
+
+// NodeStorageConfig defines the storage areas for a specific cluster node.
+type NodeStorageConfig struct {
+	NodeID string        `json:"nodeId"`
+	Areas  []StorageArea `json:"areas"`
+}
+
+// CloudService defines a cluster-wide cloud storage endpoint.
+type CloudService struct {
+	ID               uuid.UUID `json:"id"`
+	Name             string    `json:"name"`
+	Provider         string    `json:"provider"`
+	Bucket           string    `json:"bucket"`
+	Region           string    `json:"region,omitempty"`
+	Endpoint         string    `json:"endpoint,omitempty"`
+	AccessKey        string    `json:"accessKey,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
+	SecretKey        string    `json:"secretKey,omitempty"` //nolint:gosec // G117: config field, not a hardcoded credential
+	Container        string    `json:"container,omitempty"`
+	ConnectionString string    `json:"connectionString,omitempty"`
+	CredentialsJSON  string    `json:"credentialsJson,omitempty"`
+	StorageClass     string    `json:"storageClass,omitempty"`
+	ActiveChunkClass uint32    `json:"activeChunkClass"`
+	CacheClass       uint32    `json:"cacheClass"`
 }
 
 // ClusterTLS holds mTLS material for the cluster gRPC port.
