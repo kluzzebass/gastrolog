@@ -126,47 +126,48 @@ Storage should be a budget, not a cliff. Today, a vault is tightly coupled to a 
 
 A vault should be the **logical container** — it owns the records, the indexes, the retention policy, the access controls. The vault type distinction (memory/file/cloud) goes away entirely. Every vault has the same type. Underneath, a vault has a **tier chain**: an ordered list of storage priorities that data flows through as it ages.
 
-### Storage priorities
+### Storage building blocks
 
-Every storage area has a **numeric priority** (0 = fastest/most expensive, higher = slower/cheaper). Priority 0 is always memory-backed, implicit on every node. All other priorities are declared per-node with a label, and either a local path with capacity or a reference to a cluster-wide cloud backend.
+Three separate concepts make up the storage model:
 
-Multiple storage areas can share the same priority — they form a pool at that level. Two NVMe drives at priority 1, two S3 buckets at priority 5. The system distributes across areas at the same priority.
-
-Cloud backend definitions (bucket, credentials, region) are cluster-wide config in Raft — any node can talk to the same S3 bucket. Per-node declarations specify which cloud backends the node can serve and which local storage to use for active chunk buffers and caching.
+**StorageArea** — per-node declaration of locally-attached storage. Each has a path, a **storage class** (numeric — lower is faster), and a capacity. A node can declare multiple storage areas. Two NVMe drives can both be class 1; a NAS at class 3.
 
 ```
-Node storage declaration:
-  priority 0: Memory (implicit, budget: 4GB)
-  priority 1: label=NVMe-1, path=/data/nvme0, capacity=200GB
-  priority 1: label=NVMe-2, path=/data/nvme1, capacity=200GB
-  priority 3: label=NAS, path=/mnt/nas, capacity=10TB
-  priority 5: cloud backend=s3-prod, active-buffer=3, cache=3
-  priority 7: cloud backend=glacier-archive, active-buffer=3, cache=3
-
-Cluster-wide cloud backends:
-  s3-prod: bucket=logs-prod, region=eu-west-1
-  glacier-archive: bucket=logs-archive, region=eu-west-1, storage-class=GLACIER
+Node-1 storage areas:
+  class 1: label=NVMe-1, path=/data/nvme0, capacity=200GB
+  class 1: label=NVMe-2, path=/data/nvme1, capacity=200GB
+  class 3: label=NAS, path=/mnt/nas, capacity=10TB
 ```
 
-A vault's tier chain is just a list of ascending priorities:
+**CloudService** — cluster-wide definition of a cloud storage service. S3 bucket, credentials, region, storage class. Multiple can exist (production S3, archival Glacier, etc.). Not tied to any node — any node can access it.
+
+```
+Cloud services:
+  s3-prod: provider=s3, bucket=logs-prod, region=eu-west-1
+  glacier-archive: provider=s3, bucket=logs-archive, region=eu-west-1, storage-class=GLACIER
+```
+
+**Tier** — three types, each a full chunk manager:
+
+- **Memory tier**: RAM-backed. Active + sealed chunks in memory. Budget limits how much RAM it can use.
+- **Local tier**: disk-backed. Has a storage class requirement — the system matches it to StorageAreas on nodes that declare that class. That's where its chunks live.
+- **Cloud tier**: references a CloudService for sealed chunk storage. Has a storage class requirement for the **active chunk** (needs local disk to write to before sealing and uploading). Has a separate storage class requirement for the **chunk cache** (local disk for caching sealed chunks fetched from the cloud during queries).
+
+A vault contains one or more tiers, ordered:
 
 ```
 Vault "api-logs"
-  ├── Tier: priority 0 (memory, ~5 min)
-  ├── Tier: priority 1 (NVMe, last 7 days)
-  ├── Tier: priority 5 (S3, last 90 days)
+  ├── Memory tier (budget: 4GB)
+  ├── Local tier (storage class: 1, last 7 days)
+  ├── Cloud tier (service: s3-prod, active chunk class: 3, cache class: 3, last 90 days)
   └── Transition policy: budget $30/month
 ```
 
-There is no distinction between "local tiers" and "cloud tiers" in the chain. The storage area definition determines the implementation — whether a priority is RAM, local disk, or object storage. The operator can skip priorities (e.g., [0, 1, 5] skips 3) or omit the memory tier if desired.
-
-The system validates that priorities in the tier chain are ascending and that at least one node can serve each priority. If a referenced priority doesn't exist on any node, vault creation fails. At runtime, if a tier's nodes become unavailable, the upstream tier holds its data (see durability handoff below) — effectively failing up until the operator resolves the issue.
-
-**Why numeric priorities** instead of labels or a fixed enum: freeform labels (like CockroachDB store attributes) can't be ordered — the system can't validate tier chains. Fixed enums (like HDFS's RAM_DISK/SSD/DISK/ARCHIVE) can't accommodate SAN, NAS, USB, NVMe-oF, or future storage media. A network NVMe-oF array might outperform a local SATA SSD — device type is not performance. Numeric priorities let the operator define ordering based on their actual hardware.
-
-Every tier is a full chunk manager — it has an active chunk that receives writes, seals on its own schedule, and maintains its own set of sealed chunks with its own rotation and retention policies. The memory tier is not just a write buffer; it holds an active chunk plus sealed chunks in RAM, queryable at microsecond latency. Cloud-backed tiers can't append to remote objects, so their active chunk lives on a local disk (specified by the `active-buffer` priority). When the active chunk seals, it's uploaded to the cloud backend.
+Every tier is a full chunk manager — it has an active chunk that receives writes, seals on its own schedule, and maintains its own set of sealed chunks with its own rotation and retention policies. The memory tier is not just a write buffer; it holds an active chunk plus sealed chunks in RAM, queryable at microsecond latency. Cloud tiers can't append to remote objects, so their active chunk lives on local disk matching the active chunk storage class. When the active chunk seals, it's uploaded to the cloud service.
 
 The vault doesn't care where its data lives. It hands records to the first tier in the chain, and each tier manages its own chunking, sealing, and transition to the next tier. Queries fan out across all tiers transparently.
+
+At configuration time, the system validates that at least one node can serve each tier's storage class requirement. At runtime, if a tier's nodes become unavailable, the upstream tier holds its data (see durability handoff below) — effectively failing up until the operator resolves the issue.
 
 ### Per-tier primary nodes
 
@@ -176,47 +177,46 @@ This model is similar to CockroachDB's range leaders: each range has a leader th
 
 ### Replication
 
-The primary for each tier replicates to its secondaries. How replication works depends on the storage medium behind the priority:
+The primary for each tier replicates to its secondaries. How replication works depends on the tier type:
 
-- **Memory-backed priorities**: the primary mirrors writes to secondary nodes' memory buffers. Secondaries receive records tagged with chunk assignment. If the primary dies, a secondary is promoted — it has identical data and can resume streaming to the next tier.
-- **Local-disk-backed priorities**: the primary replicates sealed chunks (post-compression, post-indexing) to secondaries. A sealed chunk is stable and self-contained, so replication is a file copy.
-- **Cloud-backed priorities**: no cluster-level replication needed. The cloud provider handles AZ redundancy. Only chunk metadata needs to be shared across the cluster so every node knows what exists. The active chunk buffer (on local disk) is replicated the same way as any local-disk-backed tier.
+- **Memory tiers**: the primary mirrors writes to secondary nodes' memory buffers. Secondaries receive records tagged with chunk assignment. If the primary dies, a secondary is promoted — it has identical data and can resume streaming to the next tier.
+- **Local tiers**: the primary replicates sealed chunks (post-compression, post-indexing) to secondaries. A sealed chunk is stable and self-contained, so replication is a file copy.
+- **Cloud tiers**: no cluster-level replication of sealed chunks needed — the cloud provider handles AZ redundancy. Only chunk metadata needs to be shared across the cluster so every node knows what exists. The active chunk (on local disk) is replicated the same way as a local tier.
 
 ### The golden thread
 
-Tier transitions are **primary-to-primary**. When a tier's primary rotates sealed chunks, it streams records to the next tier's primary. There is exactly one authoritative path from first insert through every priority level — the golden thread:
+Tier transitions are **primary-to-primary**. When a tier's primary rotates sealed chunks, it streams records to the next tier's primary. There is exactly one authoritative path from first insert through every tier — the golden thread:
 
 ```mermaid
 flowchart TB
-    I([fa:fa-plug Ingester]) --> P0
+    I([fa:fa-plug Ingester]) --> M
 
-    subgraph node1p0 [Node-1: priority 0 primary]
-        P0[fa:fa-bolt Memory<br/>active + sealed chunks]
+    subgraph node1mem [Node-1: memory tier primary]
+        M[fa:fa-bolt Memory<br/>active + sealed chunks]
     end
 
-    subgraph node2p0 [Node-2: priority 0 secondary]
-        P0R[fa:fa-bolt Memory<br/>replica]
+    subgraph node2mem [Node-2: memory tier secondary]
+        MR[fa:fa-bolt Memory<br/>replica]
     end
 
-    subgraph node3p1 [Node-3: priority 1 primary]
-        P1[fa:fa-hard-drive NVMe<br/>active chunk] -->|seal| P1S[Sealed chunks]
+    subgraph node3local [Node-3: local tier primary]
+        L[fa:fa-hard-drive Local tier<br/>active chunk] -->|seal| LS[Sealed chunks]
     end
 
-    subgraph node1p1 [Node-1: priority 1 secondary]
-        P1R[fa:fa-hard-drive NVMe<br/>replica]
+    subgraph node1local [Node-1: local tier secondary]
+        LR[fa:fa-hard-drive Local tier<br/>replica]
     end
 
-    P0 -.->|mirror writes| P0R
-    P0 -->|record stream| P1
-    P1S -->|record stream| P5[(fa:fa-cloud Priority 5: S3)]
-    P1S -.->|chunk copy| P1R
-    P5 -->|storage class| P7[(fa:fa-snowflake Priority 7: Glacier)]
+    M -.->|mirror writes| MR
+    M -->|record stream| L
+    LS -->|record stream| CS[(fa:fa-cloud Cloud tier: S3)]
+    LS -.->|chunk copy| LR
 
-    style P0 fill:#c4956a,color:#1a1a1a
-    style P1 fill:#a07850,color:#1a1a1a
-    style P1S fill:#a07850,color:#1a1a1a
-    style P0R fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
-    style P1R fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
+    style M fill:#c4956a,color:#1a1a1a
+    style L fill:#a07850,color:#1a1a1a
+    style LS fill:#a07850,color:#1a1a1a
+    style MR fill:#c4956a33,color:#c4956a,stroke:#c4956a,stroke-dasharray:5
+    style LR fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
 
 No duplicate uploads. No coordination questions about who does what. The primary for each tier is the single decision-maker. If a primary dies, its secondary is promoted and the golden thread reconnects — the new primary picks up where the old one left off, resuming the stream to the next tier's primary.
@@ -278,52 +278,52 @@ A query for `last=90d` scans all tiers automatically. The user doesn't know or c
 
 ```mermaid
 flowchart LR
-    Q([fa:fa-search Query]) -.->|microseconds| P0[fa:fa-bolt Priority 0: Memory]
-    Q -.->|milliseconds| P1[fa:fa-hard-drive Priority 1: NVMe]
-    Q -.->|seconds| P5[fa:fa-cloud Priority 5: S3]
-    Q -.->|minutes to hours| P7[fa:fa-snowflake Priority 7: Glacier]
+    Q([fa:fa-search Query]) -.->|microseconds| MT[fa:fa-bolt Memory tier]
+    Q -.->|milliseconds| LT[fa:fa-hard-drive Local tier]
+    Q -.->|seconds| CT[fa:fa-cloud Cloud tier: S3]
+    Q -.->|minutes to hours| AT[fa:fa-snowflake Cloud tier: Glacier]
 
-    style P0 fill:#c4956a,color:#1a1a1a
-    style P1 fill:#a07850,color:#1a1a1a
-    style P5 fill:#6a5040,color:#f0e8e0
-    style P7 fill:#3a3030,color:#f0e8e0
+    style MT fill:#c4956a,color:#1a1a1a
+    style LT fill:#a07850,color:#1a1a1a
+    style CT fill:#6a5040,color:#f0e8e0
+    style AT fill:#3a3030,color:#f0e8e0
 ```
 
 ### Inter-tier record streaming
 
 Chunks never move between tiers. **Records do.** Each tier is its own ingestion pipeline — it receives a record stream from the tier above, appends to its own active chunk, seals on its own schedule, and manages its own sealed chunks with its own retention policy. Each tier's chunk size, rotation schedule, and compression strategy are tuned for its medium independently.
 
-This means each tier produces different chunks from the same records. A memory-backed priority might have dozens of small 5-minute chunks. A local-disk priority might have a few large hourly chunks. A cloud-backed priority might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern.
+This means each tier produces different chunks from the same records. A memory tier might have dozens of small 5-minute chunks. A local tier might have a few large hourly chunks. A cloud tier might have even fewer, multi-GB chunks. Same records, different containers, each optimized for its access pattern.
 
 Records can also move between vaults based on policies (e.g. eject old records, re-route by severity), but this operates at the vault level — selecting which chunks to keep or discard — not by mutating individual chunks.
 
 ```mermaid
 flowchart LR
-    subgraph node1p0 [Node-1: priority 0 primary]
-        I([fa:fa-plug Ingester]) --> P0[Active + sealed chunks<br/>seals every ~5 min]
+    subgraph node1mem [Node-1: memory tier primary]
+        I([fa:fa-plug Ingester]) --> MT[Active + sealed chunks<br/>seals every ~5 min]
     end
 
-    P0 -->|stream from sealed chunks| P1
+    MT -->|stream from sealed chunks| LT
 
-    subgraph node3p1 [Node-3: priority 1 primary]
-        P1[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| P1S[Sealed chunks<br/>compressed · indexed]
+    subgraph node3local [Node-3: local tier primary]
+        LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>compressed · indexed]
     end
 
-    P1S -->|record stream| P5
+    LTS -->|record stream| CT
 
-    subgraph cloud5 [Priority 5: S3]
-        P5[Active chunk on local disk<br/>seals into large objects] -->|seal + upload| P5S[(Sealed chunks in S3)]
+    subgraph clouds3 [Cloud tier: S3]
+        CT[Active chunk on local disk<br/>seals into large objects] -->|seal + upload| CTS[(Sealed chunks in S3)]
     end
 
-    style P0 fill:#c4956a,color:#1a1a1a
-    style P1 fill:#a07850,color:#1a1a1a
-    style P1S fill:#a07850,color:#1a1a1a
-    style P5 fill:#6a5040,color:#f0e8e0
+    style MT fill:#c4956a,color:#1a1a1a
+    style LT fill:#a07850,color:#1a1a1a
+    style LTS fill:#a07850,color:#1a1a1a
+    style CT fill:#6a5040,color:#f0e8e0
 ```
 
-Each tier is a full chunk manager with its own active chunk and sealed chunks. When a sealed chunk at one priority reaches its transition threshold, its records stream to the next priority's primary. Each tier just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
+Each tier is a full chunk manager with its own active chunk and sealed chunks. When a sealed chunk in one tier reaches its transition threshold, its records stream to the next tier's primary. Each tier just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
 
-**Every tier in the chain is a full chunk manager** — including cloud-backed priorities. They receive a record stream, buffer into an active chunk on local disk (using the `active-buffer` priority), and seal into objects optimized for their medium (fewer, larger objects to minimize per-request overhead and listing costs). The only exception is the archival transition (e.g. S3 Standard → Glacier): a storage class change on the same object, not a re-chunking.
+**Every tier in the chain is a full chunk manager** — including cloud tiers. Cloud tiers receive a record stream, buffer into an active chunk on local disk (matching the active chunk storage class requirement), and seal into objects optimized for their medium (fewer, larger objects to minimize per-request overhead and listing costs). The only exception is the archival transition (e.g. S3 Standard → Glacier): a storage class change on the same object, not a re-chunking.
 
 ### On-demand promotion and caching
 
@@ -519,15 +519,16 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Memory chunk manager | Done | In-memory chunks with rotation/retention |
 | File chunk manager | Done | Local SSD, mmap'd reads, sealed chunk compression |
 | Cloud chunk manager | Done | S3/GCS for sealed chunks and indexes |
-| Storage priority model | Not started | Numeric priorities per node, cloud backends cluster-wide |
+| StorageArea model | Not started | Per-node local storage declarations with storage classes |
+| CloudService model | Not started | Cluster-wide cloud service definitions |
+| Three tier types (memory/local/cloud) | Not started | Tiers reference storage classes and cloud services |
 | Vault as logical container | Not started | Vault type is still coupled to a single backend |
-| Tier chains (list of priorities) | Not started | No multi-tier progression within a vault |
 | Per-tier primary election | Not started | Vaults have a single owner node |
 | Inter-tier record streaming | Not started | No record-level streaming between tiers |
 | Durability handoff | Not started | No durable ack protocol between tiers |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
 | Cloud chunk caching | Not started | No local LRU/TTL cache for cloud-stored chunks |
-| Memory tier budget enforcement | Not started | No per-node memory budget for priority 0 |
+| Memory tier budget enforcement | Not started | No per-node memory budget |
 
 ### Anomaly Detection
 
