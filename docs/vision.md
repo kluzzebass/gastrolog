@@ -260,6 +260,18 @@ The transition between tiers is driven by policy. Multiple strategies can coexis
 - **Access-based**: chunks that haven't been queried in N days demote. Data that's actively used stays warm; data that's gathering dust moves cold.
 - **Value-based differentiation** is handled by routing, not by tier policies. Sealed chunks are immutable and contain mixed severities — you can't demote half a chunk. Instead, use route forking to send high-value records (errors, traced requests) to a vault with a longer warm tier, and low-value records (debug, info) to a vault with aggressive demotion. The visual route editor makes this a natural fork in the flow, not a special tier feature.
 
+### Live tier chain reconfiguration
+
+A vault's tier chain can be modified while the vault is live — adding tiers, removing tiers, or changing transition policies. The principle: **reconfiguration affects the future, not the past.**
+
+**Adding a tier** (e.g., [0, 1, 5] → [0, 1, 3, 5]): new data from priority 1 streams to priority 3 instead of 5. Existing data already in priority 5 stays there — no back-migration.
+
+**Removing a tier** (e.g., [0, 1, 3, 5] → [0, 1, 5]): new data from priority 1 streams directly to priority 5. Priority 3 enters a **wind-down** state: it stops receiving new records, but its existing sealed chunks remain part of the vault. They are still queryable, still count toward storage metrics, and still visible in the inspector. The wind-down tier drains forward — its sealed chunks stream to the next active tier (priority 5) in the background. Once drained, the tier is empty and can be fully removed.
+
+The key invariant: **orphaned data in a removed tier still belongs to the vault.** It doesn't disappear, it doesn't become invisible, it doesn't move to a different vault. Queries still hit it. The inspector shows it as a draining tier. The operator can see exactly how much data remains and how long the drain will take.
+
+**Changing transition policies**: new thresholds apply to future transitions. Data already seated in a tier is unaffected until its next evaluation.
+
 ### Transparent query fan-out
 
 A query for `last=90d` scans all tiers automatically. The user doesn't know or care where the data lives. Results from warmer tiers arrive first; colder tiers stream in progressively, with a subtle loading indicator showing that older data is still arriving.
