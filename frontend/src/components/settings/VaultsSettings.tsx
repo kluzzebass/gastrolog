@@ -339,7 +339,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     for (const nsc of config?.nodeStorageConfigs ?? []) {
       for (const area of nsc.areas) {
         if (!seen.has(area.storageClass)) {
-          seen.set(area.storageClass, area.label || `Class ${area.storageClass}`);
+          seen.set(area.storageClass, area.name || `Class ${area.storageClass}`);
         }
       }
     }

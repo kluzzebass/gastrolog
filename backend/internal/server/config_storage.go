@@ -284,7 +284,7 @@ func protoToNodeStorageConfig(p *apiv1.NodeStorageConfig) config.NodeStorageConf
 	for _, a := range p.Areas {
 		area := config.StorageArea{
 			StorageClass:      a.StorageClass,
-			Label:             a.Label,
+			Name:              a.Name,
 			Path:              a.Path,
 			MemoryBudgetBytes: a.MemoryBudgetBytes,
 		}

@@ -1809,7 +1809,7 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 				{
 					ID:                areaID,
 					StorageClass:      1,
-					Label:             "fast",
+					Name:              "fast",
 					Path:              "/data/fast",
 					MemoryBudgetBytes: 256 * 1024 * 1024,
 				},
@@ -1835,8 +1835,8 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 		if got.Areas[0].ID != areaID {
 			t.Errorf("Area ID: expected %s, got %s", areaID, got.Areas[0].ID)
 		}
-		if got.Areas[0].Label != "fast" {
-			t.Errorf("Area Label: expected %q, got %q", "fast", got.Areas[0].Label)
+		if got.Areas[0].Name != "fast" {
+			t.Errorf("Area Name: expected %q, got %q", "fast", got.Areas[0].Name)
 		}
 		if got.Areas[0].StorageClass != 1 {
 			t.Errorf("Area StorageClass: expected 1, got %d", got.Areas[0].StorageClass)
@@ -1881,7 +1881,7 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 
 		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 			NodeID: "node-1",
-			Areas:  []config.StorageArea{{ID: newID(), Label: "old"}},
+			Areas:  []config.StorageArea{{ID: newID(), Name: "old"}},
 		}); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
@@ -1889,7 +1889,7 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 		newAreaID := newID()
 		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 			NodeID: "node-1",
-			Areas:  []config.StorageArea{{ID: newAreaID, Label: "new"}},
+			Areas:  []config.StorageArea{{ID: newAreaID, Name: "new"}},
 		}); err != nil {
 			t.Fatalf("Set update: %v", err)
 		}
@@ -1898,8 +1898,8 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if len(got.Areas) != 1 || got.Areas[0].Label != "new" {
-			t.Errorf("expected updated area label 'new', got %+v", got.Areas)
+		if len(got.Areas) != 1 || got.Areas[0].Name != "new" {
+			t.Errorf("expected updated area name 'new', got %+v", got.Areas)
 		}
 
 		all, err := s.ListNodeStorageConfigs(ctx)

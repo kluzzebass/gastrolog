@@ -15,7 +15,7 @@ func setNodeStorageConfigCmd(cfg config.NodeStorageConfig) *gastrologv1.SetNodeS
 		areas[i] = &gastrologv1.StorageAreaCommand{
 			Id:                a.ID.String(),
 			StorageClass:      a.StorageClass,
-			Label:             a.Label,
+			Name:              a.Name,
 			Path:              a.Path,
 			MemoryBudgetBytes: a.MemoryBudgetBytes,
 		}
@@ -46,7 +46,7 @@ func ExtractSetNodeStorageConfig(cmd *gastrologv1.SetNodeStorageConfigCommand) (
 		areas = append(areas, config.StorageArea{
 			ID:                id,
 			StorageClass:      a.GetStorageClass(),
-			Label:             a.GetLabel(),
+			Name:              a.GetName(),
 			Path:              a.GetPath(),
 			MemoryBudgetBytes: a.GetMemoryBudgetBytes(),
 		})

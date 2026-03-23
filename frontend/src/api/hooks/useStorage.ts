@@ -61,7 +61,7 @@ export function useSetNodeStorageConfig() {
       areas: {
         id: string;
         storageClass: number;
-        label: string;
+        name: string;
         path: string;
         memoryBudgetBytes: bigint;
       }[];

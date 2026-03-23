@@ -564,7 +564,7 @@ func TestApplySetNodeStorageConfig(t *testing.T) {
 	applyCmd(t, fsm, command.NewSetNodeStorageConfig(config.NodeStorageConfig{
 		NodeID: "node-1",
 		Areas: []config.StorageArea{
-			{ID: areaID, StorageClass: 1, Label: "fast", Path: "/data/fast"},
+			{ID: areaID, StorageClass: 1, Name: "fast", Path: "/data/fast"},
 		},
 	}))
 
@@ -575,7 +575,7 @@ func TestApplySetNodeStorageConfig(t *testing.T) {
 	if got == nil || got.NodeID != "node-1" {
 		t.Fatalf("unexpected node storage config: %+v", got)
 	}
-	if len(got.Areas) != 1 || got.Areas[0].Label != "fast" || got.Areas[0].StorageClass != 1 {
+	if len(got.Areas) != 1 || got.Areas[0].Name != "fast" || got.Areas[0].StorageClass != 1 {
 		t.Fatalf("unexpected areas: %+v", got.Areas)
 	}
 }

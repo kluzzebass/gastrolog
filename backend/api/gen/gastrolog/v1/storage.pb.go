@@ -28,7 +28,7 @@ type StorageArea struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	StorageClass      uint32                 `protobuf:"varint,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	Label             string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	Name              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
 	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
 	unknownFields     protoimpl.UnknownFields
@@ -79,9 +79,9 @@ func (x *StorageArea) GetStorageClass() uint32 {
 	return 0
 }
 
-func (x *StorageArea) GetLabel() string {
+func (x *StorageArea) GetName() string {
 	if x != nil {
-		return x.Label
+		return x.Name
 	}
 	return ""
 }
@@ -308,11 +308,11 @@ var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xa2\x01\n" +
+	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xa0\x01\n" +
 	"\vStorageArea\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x14\n" +
-	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
+	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
+	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"]\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +

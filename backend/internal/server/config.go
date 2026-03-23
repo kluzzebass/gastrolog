@@ -336,7 +336,7 @@ func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 			areas[i] = &apiv1.StorageArea{
 				Id:                a.ID.String(),
 				StorageClass:      a.StorageClass,
-				Label:             a.Label,
+				Name:              a.Name,
 				Path:              a.Path,
 				MemoryBudgetBytes: a.MemoryBudgetBytes,
 			}

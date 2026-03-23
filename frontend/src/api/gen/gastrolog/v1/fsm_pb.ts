@@ -2070,9 +2070,9 @@ export class StorageAreaCommand extends Message<StorageAreaCommand> {
   storageClass = 0;
 
   /**
-   * @generated from field: string label = 3;
+   * @generated from field: string name = 3;
    */
-  label = "";
+  name = "";
 
   /**
    * @generated from field: string path = 4;
@@ -2094,7 +2094,7 @@ export class StorageAreaCommand extends Message<StorageAreaCommand> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 3, name: "label", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);

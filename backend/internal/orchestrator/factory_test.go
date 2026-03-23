@@ -531,7 +531,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 		NodeStorageConfigs: []config.NodeStorageConfig{
 			{NodeID: "node-1", Areas: []config.StorageArea{
-				{ID: areaID, StorageClass: 1, Label: "fast", Path: "/data/chunks"},
+				{ID: areaID, StorageClass: 1, Name: "fast", Path: "/data/chunks"},
 			}},
 		},
 	}

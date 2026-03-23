@@ -613,7 +613,7 @@ type NodeConfig struct {
 type StorageArea struct {
 	ID                uuid.UUID `json:"id"`
 	StorageClass      uint32    `json:"storageClass"`
-	Label             string    `json:"label"`
+	Name              string    `json:"name"`
 	Path              string    `json:"path,omitempty"`
 	MemoryBudgetBytes uint64    `json:"memoryBudgetBytes,omitempty"`
 }

@@ -148,7 +148,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         areas: updated.map((a) => ({
           id: a.id,
           storageClass: a.storageClass,
-          label: a.label,
+          name: a.name,
           path: a.path,
           memoryBudgetBytes: a.memoryBudgetBytes,
         })),
@@ -164,12 +164,18 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [addingArea, setAddingArea] = useState(false);
   const [areaPath, setAreaPath] = useState("");
   const [areaClass, setAreaClass] = useState("");
-  const [areaLabel, setAreaLabel] = useState("");
+  const [areaName, setAreaName] = useState("");
+  const [areaNamePlaceholder, setAreaNamePlaceholder] = useState("");
+  const openAreaForm = () => {
+    setAddingArea(true);
+    generateName.mutateAsync().then(setAreaNamePlaceholder);
+  };
   const resetAreaForm = () => {
     setAddingArea(false);
     setAreaPath("");
     setAreaClass("");
-    setAreaLabel("");
+    setAreaName("");
+    setAreaNamePlaceholder("");
   };
 
   const handleCreateArea = async () => {
@@ -177,12 +183,12 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     const cls = parseInt(areaClass, 10);
     if (!path || isNaN(cls)) return;
 
-    const label = areaLabel.trim() || path.split("/").pop() || path;
+    const name = areaName.trim() || areaNamePlaceholder || "storage-area";
 
     const newArea = {
       id: crypto.randomUUID(),
       storageClass: cls,
-      label,
+      name,
       path,
       memoryBudgetBytes: BigInt(0),
     };
@@ -190,7 +196,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     const updated = [...localAreas.map((a) => ({
       id: a.id,
       storageClass: a.storageClass,
-      label: a.label,
+      name: a.name,
       path: a.path,
       memoryBudgetBytes: a.memoryBudgetBytes,
     })), newArea];
@@ -200,7 +206,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         nodeId: localNodeId,
         areas: updated,
       });
-      addToast(`Storage area "${label}" created`, "info");
+      addToast(`Storage area "${name}" created`, "info");
       resetAreaForm();
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to create storage area", "error");
@@ -296,7 +302,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
             {addingArea ? (
               <Button onClick={resetAreaForm}>Cancel</Button>
             ) : (
-              <Button onClick={() => setAddingArea(true)}>Add Storage Area</Button>
+              <Button onClick={openAreaForm}>Add Storage Area</Button>
             )}
           </div>
         )}
@@ -311,6 +317,14 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               isPending={setNodeStorage.isPending}
               createDisabled={!areaPath.trim() || !areaClass.trim() || isNaN(parseInt(areaClass, 10))}
             >
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={areaName}
+                  onChange={setAreaName}
+                  placeholder={areaNamePlaceholder || "storage-area"}
+                  dark={dark}
+                />
+              </FormField>
               <FormField label="Path" dark={dark} description="Relative to the node's home directory, or absolute if starting with /.">
                 <TextInput
                   value={areaPath}
@@ -327,14 +341,6 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                   placeholder=""
                   dark={dark}
                   min={0}
-                />
-              </FormField>
-              <FormField label="Label" dark={dark} description="Human-readable name. Defaults to the directory basename if empty.">
-                <TextInput
-                  value={areaLabel}
-                  onChange={setAreaLabel}
-                  placeholder={areaPath ? areaPath.split("/").pop() || "" : ""}
-                  dark={dark}
                 />
               </FormField>
             </AddFormCard>
@@ -356,7 +362,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
             {sortedNodeConfigs.map((nsc) => {
               const isLocal = nsc.nodeId === localNodeId;
               const nodeName = resolveNodeName(nsc.nodeId);
-              const areas = [...nsc.areas].sort((a, b) => a.storageClass - b.storageClass || a.label.localeCompare(b.label));
+              const areas = [...nsc.areas].sort((a, b) => a.storageClass - b.storageClass || a.name.localeCompare(b.name));
               return (
                 <div
                   key={nsc.nodeId}
@@ -390,7 +396,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                             class {area.storageClass}
                           </Badge>
                           <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
-                            {area.label || area.id}
+                            {area.name || area.id}
                           </span>
                           <span className={`text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
                             {area.path}
