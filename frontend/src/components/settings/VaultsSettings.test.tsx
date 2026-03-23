@@ -36,6 +36,7 @@ const sampleConfig = {
 beforeEach(() => {
   m(mocks.configClient, "getConfig").mockClear();
   m(mocks.configClient, "putVault").mockClear();
+  m(mocks.configClient, "putTier").mockClear();
   m(mocks.configClient, "deleteVault").mockClear();
   m(mocks.configClient, "generateName").mockClear();
   m(mocks.vaultClient, "sealVault").mockClear();
@@ -228,9 +229,8 @@ describe("VaultsSettings", () => {
     });
   });
 
-  test("create vault calls API", async () => {
+  test("create button disabled with no tiers", async () => {
     m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
-    m(mocks.configClient, "putVault").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
 
@@ -241,9 +241,44 @@ describe("VaultsSettings", () => {
     fireEvent.click(getByText("Add Vault"));
 
     await waitFor(() => expect(getByText("Create")).toBeTruthy());
-    fireEvent.click(getByText("Create"));
+    const createBtn = getByText("Create").closest("button")!;
+    expect(createBtn.disabled).toBe(true);
+  });
+
+  test("create vault with memory tier calls putTier then putVault", async () => {
+    m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.configClient, "putTier").mockResolvedValueOnce({
+      config: {
+        ...sampleConfig,
+        tiers: [
+          ...sampleConfig.tiers,
+          { id: "t-new", name: "happy-fox-tier-0", type: 1 },
+        ],
+      },
+    });
+    m(mocks.configClient, "putVault").mockResolvedValueOnce({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
+
+    const { getByText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    fireEvent.click(getByText("Add Vault"));
+    await waitFor(() => expect(getByText("Create")).toBeTruthy());
+
+    // Add a memory tier via the dropdown
+    fireEvent.click(getByText("+ Add Tier"));
+    fireEvent.click(getByText("Memory"));
+
+    // Create button should now be enabled
+    const createBtn = getByText("Create").closest("button")!;
+    expect(createBtn.disabled).toBe(false);
+
+    fireEvent.click(createBtn);
 
     await waitFor(() => {
+      expect(m(mocks.configClient, "putTier")).toHaveBeenCalledTimes(1);
       expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(1);
     });
   });
