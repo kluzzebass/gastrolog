@@ -51,3 +51,10 @@ export { useRouteStats } from "./useRouteStats";
 export { useUploadManagedFile } from "./useUploadManagedFile";
 export { useDeleteManagedFile } from "./useManagedFiles";
 export { useExportToVault } from "./useExportToVault";
+export {
+  usePutCloudService,
+  useDeleteCloudService,
+  useSetNodeStorageConfig,
+  usePutTier,
+  useDeleteTier,
+} from "./useStorage";

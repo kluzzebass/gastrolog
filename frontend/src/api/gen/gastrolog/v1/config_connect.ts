@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PutCertificateRequest, PutCertificateResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TestVaultRequest, TestVaultResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetConfigRequest, GetConfigResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TestVaultRequest, TestVaultResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchConfigRequest, WatchConfigResponse } from "./config_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -465,6 +465,57 @@ export const ConfigService = {
       name: "PreviewCSVLookup",
       I: PreviewCSVLookupRequest,
       O: PreviewCSVLookupResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Cloud services
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutCloudService
+     */
+    putCloudService: {
+      name: "PutCloudService",
+      I: PutCloudServiceRequest,
+      O: PutCloudServiceResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteCloudService
+     */
+    deleteCloudService: {
+      name: "DeleteCloudService",
+      I: DeleteCloudServiceRequest,
+      O: DeleteCloudServiceResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Node storage
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.SetNodeStorageConfig
+     */
+    setNodeStorageConfig: {
+      name: "SetNodeStorageConfig",
+      I: SetNodeStorageConfigRequest,
+      O: SetNodeStorageConfigResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Tiers
+     *
+     * @generated from rpc gastrolog.v1.ConfigService.PutTier
+     */
+    putTier: {
+      name: "PutTier",
+      I: PutTierRequest,
+      O: PutTierResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * @generated from rpc gastrolog.v1.ConfigService.DeleteTier
+     */
+    deleteTier: {
+      name: "DeleteTier",
+      I: DeleteTierRequest,
+      O: DeleteTierResponse,
       kind: MethodKind.Unary,
     },
   }

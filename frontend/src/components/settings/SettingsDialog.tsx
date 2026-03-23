@@ -14,6 +14,7 @@ import {
   LookupIcon,
   ClusterIcon,
   FilesIcon,
+  StorageIcon,
 } from "../icons";
 import { VaultsSettings } from "./VaultsSettings";
 import { IngestersSettings } from "./IngestersSettings";
@@ -26,6 +27,7 @@ import { UsersSettings } from "./UsersSettings";
 import { LookupsSettings } from "./LookupsSettings";
 import { FilesSettings } from "./FilesSettings";
 import { NodesSettings } from "./NodesSettings";
+import { StorageSettings } from "./StorageSettings";
 import { ServiceSettings } from "./ServiceSettings";
 import { HelpButton } from "../HelpButton";
 
@@ -35,6 +37,7 @@ export type SettingsTab =
   | "certificates"
   | "files"
   | "lookups"
+  | "storage"
   | "vaults"
   | "ingesters"
   | "filters"
@@ -69,6 +72,7 @@ const allTabs: TabDef[] = [
   { id: "files", label: "Files", icon: FilesIcon, helpTopicId: "managed-files" },
   { id: "lookups", label: "Lookups", icon: LookupIcon, helpTopicId: "lookups-settings" },
   { id: "users", label: "Users", icon: UsersIcon, adminOnly: true, helpTopicId: "user-management" },
+  { id: "storage", label: "Storage", icon: StorageIcon, helpTopicId: "storage-config" },
   { id: "ingesters", label: "Ingesters", icon: IngestersIcon, helpTopicId: "ingesters" },
   { id: "policies", label: "Rotation Policies", icon: PolicyIcon, helpTopicId: "policy-rotation" },
   { id: "retention", label: "Retention Policies", icon: RetentionIcon, helpTopicId: "policy-retention" },
@@ -167,6 +171,7 @@ export function SettingsDialog({
           {tab === "files" && <FilesSettings dark={dark} />}
           {tab === "lookups" && <LookupsSettings dark={dark} />}
           {tab === "users" && <UsersSettings dark={dark} noAuth={noAuth} />}
+          {tab === "storage" && <StorageSettings dark={dark} />}
           {tab === "ingesters" && <IngestersSettings dark={dark} expandTarget={expandTarget} onExpandTargetConsumed={clearExpandTarget} onOpenInspector={onOpenInspector} />}
           {tab === "filters" && <FiltersSettings dark={dark} onNavigateTo={navigateTo} />}
           {tab === "routes" && <RoutesSettings dark={dark} onNavigateTo={navigateTo} />}

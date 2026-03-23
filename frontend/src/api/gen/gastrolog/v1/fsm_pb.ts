@@ -2178,6 +2178,13 @@ export class PutTierCommand extends Message<PutTierCommand> {
    */
   cacheClass = 0;
 
+  /**
+   * temporary: explicit node assignment until tier election
+   *
+   * @generated from field: string node_id = 11;
+   */
+  nodeId = "";
+
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2196,6 +2203,7 @@ export class PutTierCommand extends Message<PutTierCommand> {
     { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 11, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {

@@ -151,6 +151,20 @@ const (
 	// ConfigServicePreviewCSVLookupProcedure is the fully-qualified name of the ConfigService's
 	// PreviewCSVLookup RPC.
 	ConfigServicePreviewCSVLookupProcedure = "/gastrolog.v1.ConfigService/PreviewCSVLookup"
+	// ConfigServicePutCloudServiceProcedure is the fully-qualified name of the ConfigService's
+	// PutCloudService RPC.
+	ConfigServicePutCloudServiceProcedure = "/gastrolog.v1.ConfigService/PutCloudService"
+	// ConfigServiceDeleteCloudServiceProcedure is the fully-qualified name of the ConfigService's
+	// DeleteCloudService RPC.
+	ConfigServiceDeleteCloudServiceProcedure = "/gastrolog.v1.ConfigService/DeleteCloudService"
+	// ConfigServiceSetNodeStorageConfigProcedure is the fully-qualified name of the ConfigService's
+	// SetNodeStorageConfig RPC.
+	ConfigServiceSetNodeStorageConfigProcedure = "/gastrolog.v1.ConfigService/SetNodeStorageConfig"
+	// ConfigServicePutTierProcedure is the fully-qualified name of the ConfigService's PutTier RPC.
+	ConfigServicePutTierProcedure = "/gastrolog.v1.ConfigService/PutTier"
+	// ConfigServiceDeleteTierProcedure is the fully-qualified name of the ConfigService's DeleteTier
+	// RPC.
+	ConfigServiceDeleteTierProcedure = "/gastrolog.v1.ConfigService/DeleteTier"
 )
 
 // ConfigServiceClient is a client for the gastrolog.v1.ConfigService service.
@@ -239,6 +253,14 @@ type ConfigServiceClient interface {
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
 	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
+	// Cloud services
+	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
+	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
+	// Node storage
+	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
+	// Tiers
+	PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error)
+	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
 }
 
 // NewConfigServiceClient constructs a client for the gastrolog.v1.ConfigService service. By
@@ -498,6 +520,36 @@ func NewConfigServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(configServiceMethods.ByName("PreviewCSVLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		putCloudService: connect.NewClient[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse](
+			httpClient,
+			baseURL+ConfigServicePutCloudServiceProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutCloudService")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteCloudService: connect.NewClient[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteCloudServiceProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteCloudService")),
+			connect.WithClientOptions(opts...),
+		),
+		setNodeStorageConfig: connect.NewClient[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse](
+			httpClient,
+			baseURL+ConfigServiceSetNodeStorageConfigProcedure,
+			connect.WithSchema(configServiceMethods.ByName("SetNodeStorageConfig")),
+			connect.WithClientOptions(opts...),
+		),
+		putTier: connect.NewClient[v1.PutTierRequest, v1.PutTierResponse](
+			httpClient,
+			baseURL+ConfigServicePutTierProcedure,
+			connect.WithSchema(configServiceMethods.ByName("PutTier")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteTier: connect.NewClient[v1.DeleteTierRequest, v1.DeleteTierResponse](
+			httpClient,
+			baseURL+ConfigServiceDeleteTierProcedure,
+			connect.WithSchema(configServiceMethods.ByName("DeleteTier")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -544,6 +596,11 @@ type configServiceClient struct {
 	testVault             *connect.Client[v1.TestVaultRequest, v1.TestVaultResponse]
 	testHTTPLookup        *connect.Client[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse]
 	previewCSVLookup      *connect.Client[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse]
+	putCloudService       *connect.Client[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse]
+	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
+	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
+	putTier               *connect.Client[v1.PutTierRequest, v1.PutTierResponse]
+	deleteTier            *connect.Client[v1.DeleteTierRequest, v1.DeleteTierResponse]
 }
 
 // GetConfig calls gastrolog.v1.ConfigService.GetConfig.
@@ -751,6 +808,31 @@ func (c *configServiceClient) PreviewCSVLookup(ctx context.Context, req *connect
 	return c.previewCSVLookup.CallUnary(ctx, req)
 }
 
+// PutCloudService calls gastrolog.v1.ConfigService.PutCloudService.
+func (c *configServiceClient) PutCloudService(ctx context.Context, req *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {
+	return c.putCloudService.CallUnary(ctx, req)
+}
+
+// DeleteCloudService calls gastrolog.v1.ConfigService.DeleteCloudService.
+func (c *configServiceClient) DeleteCloudService(ctx context.Context, req *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error) {
+	return c.deleteCloudService.CallUnary(ctx, req)
+}
+
+// SetNodeStorageConfig calls gastrolog.v1.ConfigService.SetNodeStorageConfig.
+func (c *configServiceClient) SetNodeStorageConfig(ctx context.Context, req *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error) {
+	return c.setNodeStorageConfig.CallUnary(ctx, req)
+}
+
+// PutTier calls gastrolog.v1.ConfigService.PutTier.
+func (c *configServiceClient) PutTier(ctx context.Context, req *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error) {
+	return c.putTier.CallUnary(ctx, req)
+}
+
+// DeleteTier calls gastrolog.v1.ConfigService.DeleteTier.
+func (c *configServiceClient) DeleteTier(ctx context.Context, req *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error) {
+	return c.deleteTier.CallUnary(ctx, req)
+}
+
 // ConfigServiceHandler is an implementation of the gastrolog.v1.ConfigService service.
 type ConfigServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -837,6 +919,14 @@ type ConfigServiceHandler interface {
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
 	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
+	// Cloud services
+	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
+	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
+	// Node storage
+	SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error)
+	// Tiers
+	PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error)
+	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
 }
 
 // NewConfigServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -1092,6 +1182,36 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(configServiceMethods.ByName("PreviewCSVLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	configServicePutCloudServiceHandler := connect.NewUnaryHandler(
+		ConfigServicePutCloudServiceProcedure,
+		svc.PutCloudService,
+		connect.WithSchema(configServiceMethods.ByName("PutCloudService")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteCloudServiceHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteCloudServiceProcedure,
+		svc.DeleteCloudService,
+		connect.WithSchema(configServiceMethods.ByName("DeleteCloudService")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceSetNodeStorageConfigHandler := connect.NewUnaryHandler(
+		ConfigServiceSetNodeStorageConfigProcedure,
+		svc.SetNodeStorageConfig,
+		connect.WithSchema(configServiceMethods.ByName("SetNodeStorageConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServicePutTierHandler := connect.NewUnaryHandler(
+		ConfigServicePutTierProcedure,
+		svc.PutTier,
+		connect.WithSchema(configServiceMethods.ByName("PutTier")),
+		connect.WithHandlerOptions(opts...),
+	)
+	configServiceDeleteTierHandler := connect.NewUnaryHandler(
+		ConfigServiceDeleteTierProcedure,
+		svc.DeleteTier,
+		connect.WithSchema(configServiceMethods.ByName("DeleteTier")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.ConfigService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case ConfigServiceGetConfigProcedure:
@@ -1176,6 +1296,16 @@ func NewConfigServiceHandler(svc ConfigServiceHandler, opts ...connect.HandlerOp
 			configServiceTestHTTPLookupHandler.ServeHTTP(w, r)
 		case ConfigServicePreviewCSVLookupProcedure:
 			configServicePreviewCSVLookupHandler.ServeHTTP(w, r)
+		case ConfigServicePutCloudServiceProcedure:
+			configServicePutCloudServiceHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteCloudServiceProcedure:
+			configServiceDeleteCloudServiceHandler.ServeHTTP(w, r)
+		case ConfigServiceSetNodeStorageConfigProcedure:
+			configServiceSetNodeStorageConfigHandler.ServeHTTP(w, r)
+		case ConfigServicePutTierProcedure:
+			configServicePutTierHandler.ServeHTTP(w, r)
+		case ConfigServiceDeleteTierProcedure:
+			configServiceDeleteTierHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1347,4 +1477,24 @@ func (UnimplementedConfigServiceHandler) TestHTTPLookup(context.Context, *connec
 
 func (UnimplementedConfigServiceHandler) PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PreviewCSVLookup is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutCloudService is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteCloudService is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) SetNodeStorageConfig(context.Context, *connect.Request[v1.SetNodeStorageConfigRequest]) (*connect.Response[v1.SetNodeStorageConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.SetNodeStorageConfig is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.PutTier is not implemented"))
+}
+
+func (UnimplementedConfigServiceHandler) DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.ConfigService.DeleteTier is not implemented"))
 }

@@ -132,6 +132,17 @@ service ConfigService {
 
   // PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
   rpc PreviewCSVLookup(PreviewCSVLookupRequest) returns (PreviewCSVLookupResponse);
+
+  // Cloud services
+  rpc PutCloudService(PutCloudServiceRequest) returns (PutCloudServiceResponse);
+  rpc DeleteCloudService(DeleteCloudServiceRequest) returns (DeleteCloudServiceResponse);
+
+  // Node storage
+  rpc SetNodeStorageConfig(SetNodeStorageConfigRequest) returns (SetNodeStorageConfigResponse);
+
+  // Tiers
+  rpc PutTier(PutTierRequest) returns (PutTierResponse);
+  rpc DeleteTier(DeleteTierRequest) returns (DeleteTierResponse);
 }
 
 message GetConfigRequest {}
@@ -827,4 +838,50 @@ message PreviewCSVLookupResponse {
 
 message CSVPreviewRow {
   repeated string values = 1;            // cell values in column order
+}
+
+// --- Cloud Services ---
+
+message PutCloudServiceRequest {
+  CloudService config = 1;
+}
+
+message PutCloudServiceResponse {
+  GetConfigResponse config = 1;
+}
+
+message DeleteCloudServiceRequest {
+  string id = 1;
+}
+
+message DeleteCloudServiceResponse {
+  GetConfigResponse config = 1;
+}
+
+// --- Node Storage ---
+
+message SetNodeStorageConfigRequest {
+  NodeStorageConfig config = 1;
+}
+
+message SetNodeStorageConfigResponse {
+  GetConfigResponse config = 1;
+}
+
+// --- Tiers ---
+
+message PutTierRequest {
+  TierConfig config = 1;
+}
+
+message PutTierResponse {
+  GetConfigResponse config = 1;
+}
+
+message DeleteTierRequest {
+  string id = 1;
+}
+
+message DeleteTierResponse {
+  GetConfigResponse config = 1;
 }
