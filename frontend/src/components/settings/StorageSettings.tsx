@@ -17,6 +17,7 @@ import { CloudServiceCard } from "./CloudServiceCard";
 import { CloudServiceFields } from "./CloudServiceFields";
 import { Badge } from "../Badge";
 import { Button } from "./Buttons";
+import { NodeSelect } from "./NodeSelect";
 
 // ─── Cloud Storage Add Form ──────────────────────────────────
 
@@ -135,16 +136,15 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   };
 
-  // ─── Add/Remove storage area for local node ────────────────
+  // ─── Add/Remove storage area on any node ────────────────────
 
-  const localNodeConfig = nodeStorageConfigs.find((n) => n.nodeId === localNodeId);
-  const localAreas = localNodeConfig?.areas ?? [];
-
-  const handleRemoveArea = async (areaId: string) => {
-    const updated = localAreas.filter((a) => a.id !== areaId);
+  const handleRemoveArea = async (nodeId: string, areaId: string) => {
+    const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
+    const currentAreas = nsc?.areas ?? [];
+    const updated = currentAreas.filter((a) => a.id !== areaId);
     try {
       await setNodeStorage.mutateAsync({
-        nodeId: localNodeId,
+        nodeId,
         areas: updated.map((a) => ({
           id: a.id,
           storageClass: a.storageClass,
@@ -162,16 +162,19 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   // ─── Storage area add form ──────────────────────────────────
 
   const [addingArea, setAddingArea] = useState(false);
+  const [areaNodeId, setAreaNodeId] = useState("");
   const [areaPath, setAreaPath] = useState("");
   const [areaClass, setAreaClass] = useState("");
   const [areaName, setAreaName] = useState("");
   const [areaNamePlaceholder, setAreaNamePlaceholder] = useState("");
   const openAreaForm = () => {
     setAddingArea(true);
+    setAreaNodeId(localNodeId);
     generateName.mutateAsync().then(setAreaNamePlaceholder);
   };
   const resetAreaForm = () => {
     setAddingArea(false);
+    setAreaNodeId("");
     setAreaPath("");
     setAreaClass("");
     setAreaName("");
@@ -179,9 +182,10 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const handleCreateArea = async () => {
+    const targetNodeId = areaNodeId || localNodeId;
     const path = areaPath.trim();
     const cls = parseInt(areaClass, 10);
-    if (!path || isNaN(cls)) return;
+    if (!targetNodeId || !path || isNaN(cls)) return;
 
     const name = areaName.trim() || areaNamePlaceholder || "storage-area";
 
@@ -193,7 +197,9 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
       memoryBudgetBytes: BigInt(0),
     };
 
-    const updated = [...localAreas.map((a) => ({
+    const nsc = nodeStorageConfigs.find((n) => n.nodeId === targetNodeId);
+    const existingAreas = nsc?.areas ?? [];
+    const updated = [...existingAreas.map((a) => ({
       id: a.id,
       storageClass: a.storageClass,
       name: a.name,
@@ -203,7 +209,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
     try {
       await setNodeStorage.mutateAsync({
-        nodeId: localNodeId,
+        nodeId: targetNodeId,
         areas: updated,
       });
       addToast(`Storage area "${name}" created`, "info");
@@ -297,7 +303,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         </p>
 
         {/* Add Storage Area button */}
-        {!isLoading && localNodeId && (
+        {!isLoading && (
           <div className="flex items-center justify-end mb-5">
             {addingArea ? (
               <Button onClick={resetAreaForm}>Cancel</Button>
@@ -317,6 +323,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               isPending={setNodeStorage.isPending}
               createDisabled={!areaPath.trim() || !areaClass.trim() || isNaN(parseInt(areaClass, 10))}
             >
+              <NodeSelect value={areaNodeId} onChange={setAreaNodeId} dark={dark} />
               <FormField label="Name" dark={dark}>
                 <TextInput
                   value={areaName}
@@ -402,18 +409,16 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                             {area.path}
                           </span>
                           <span className="flex-1" />
-                          {isLocal && (
-                            <button
-                              onClick={() => handleRemoveArea(area.id)}
-                              disabled={setNodeStorage.isPending}
-                              className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                                "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                                "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
-                              )} disabled:opacity-50`}
-                            >
-                              Remove
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleRemoveArea(nsc.nodeId, area.id)}
+                            disabled={setNodeStorage.isPending}
+                            className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                              "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
+                              "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                            )} disabled:opacity-50`}
+                          >
+                            Remove
+                          </button>
                         </div>
                       ))}
                     </div>
