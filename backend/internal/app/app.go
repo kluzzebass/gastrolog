@@ -205,6 +205,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
+	// Start tier placement manager (cluster mode only).
+	if clusterSrv != nil && peerState != nil {
+		pm := &placementManager{
+			cfgStore:    cfgStore,
+			clusterSrv:  clusterSrv,
+			peerState:   peerState,
+			alerts:      alertCollector,
+			localNodeID: nodeID,
+			logger:      logger.With("component", "placement"),
+		}
+		go pm.Run(ctx)
+	}
+
 	// For replication cases: block until server settings replicate from the leader.
 	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
 		return err

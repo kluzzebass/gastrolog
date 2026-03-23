@@ -57,7 +57,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		return fmt.Errorf("build tier instances for vault %s: %w", vaultCfg.ID, err)
 	}
 
-	// temporary: if all tiers are assigned to other nodes, skip this vault locally (until tier election)
+	// If all tiers are assigned to other nodes, skip this vault locally.
 	if len(tiers) == 0 {
 		o.logger.Info("vault has no local tiers, skipping AddVault", "id", vaultCfg.ID, "name", vaultCfg.Name)
 		return nil
@@ -418,8 +418,8 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 }
 
 // buildTierInstances creates TierInstance objects for each tier in the vault config.
-// Tiers with a NodeID that does not match the local node are skipped (temporary:
-// explicit node assignment until tier election).
+// Tiers with a NodeID that does not match the local node are skipped
+// (placement manager assigns NodeID via Raft).
 func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) ([]*TierInstance, error) {
 	if len(vaultCfg.TierIDs) == 0 {
 		return nil, fmt.Errorf("vault %s has no tier IDs", vaultCfg.ID)
@@ -432,7 +432,7 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			return nil, fmt.Errorf("tier %s not found in config", tierID)
 		}
 
-		// temporary: skip tiers assigned to another node (until tier election)
+		// Skip tiers assigned to another node (placement manager assigns NodeID).
 		if tierCfg.NodeID != "" && tierCfg.NodeID != o.localNodeID {
 			continue
 		}

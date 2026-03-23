@@ -142,10 +142,6 @@ func (s *ConfigServer) PutTier(
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
-	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
-	}
-
 	id, connErr := parseUUID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
@@ -155,15 +151,6 @@ func (s *ConfigServer) PutTier(
 	tierType := protoToTierType(req.Msg.Config.Type)
 	if tierType == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, local, or cloud"))
-	}
-
-	// Reject duplicate names.
-	tiers, err := s.cfgStore.ListTiers(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	if connErr := checkNameConflict("tier", id, req.Msg.Config.Name, tiers, func(t config.TierConfig) (uuid.UUID, string) { return t.ID, t.Name }); connErr != nil {
-		return nil, connErr
 	}
 
 	// For cloud tiers, validate the referenced cloud service exists.
@@ -206,6 +193,14 @@ func (s *ConfigServer) PutTier(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 	cfg.ID = id
+
+	// NodeID is system-managed by the placement manager. Preserve the
+	// existing assignment on updates; leave empty on create so the
+	// placement manager assigns it.
+	cfg.NodeID = ""
+	if existing, _ := s.cfgStore.GetTier(ctx, id); existing != nil {
+		cfg.NodeID = existing.NodeID
+	}
 
 	if err := s.cfgStore.PutTier(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -319,7 +314,6 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		StorageClass:      p.StorageClass,
 		ActiveChunkClass:  p.ActiveChunkClass,
 		CacheClass:        p.CacheClass,
-		NodeID:            p.NodeId,
 	}
 
 	if p.RotationPolicyId != "" {

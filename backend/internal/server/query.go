@@ -350,7 +350,7 @@ func mapSearchError(err error) error {
 // When selectedVaults is non-nil, only vaults in that set are included
 // (used when the query contains a vault_id=X filter).
 //
-// temporary: uses tier-level NodeID for node assignment until tier election.
+// Uses tier-level NodeID (set by the placement manager) for node assignment.
 func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []uuid.UUID) map[string][]uuid.UUID {
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
@@ -385,7 +385,7 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		if _, isLocal := localVaults[v.ID]; isLocal {
 			continue
 		}
-		// temporary: find the tier's NodeID to determine the owning node (until tier election).
+		// Find the tier's NodeID (set by placement manager) to determine the owning node.
 		for _, tierID := range v.TierIDs {
 			tc := tierMap[tierID]
 			if tc == nil {
@@ -1692,7 +1692,7 @@ func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
 // remoteNodeForVault returns the owning node ID if the vault is remote,
 // or "" if the vault is local or lookup fails.
 //
-// temporary: uses tier-level NodeID for node assignment until tier election.
+// Uses tier-level NodeID (set by the placement manager) for node assignment.
 func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID) string {
 	// If the vault is registered locally, it's not remote.
 	if slices.Contains(s.orch.ListVaults(), vaultID) {

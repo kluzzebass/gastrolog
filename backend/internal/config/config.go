@@ -663,7 +663,7 @@ type TierConfig struct {
 	CloudServiceID    *uuid.UUID      `json:"cloudServiceId,omitempty"`
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
-	NodeID            string          `json:"nodeId,omitempty"` // temporary: explicit node assignment until tier election
+	NodeID            string          `json:"nodeId,omitempty"` // system-managed: assigned by the placement manager
 }
 
 // ClusterTLS holds mTLS material for the cluster gRPC port.

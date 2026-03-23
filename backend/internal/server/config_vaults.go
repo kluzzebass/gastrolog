@@ -43,17 +43,13 @@ func (s *ConfigServer) PutVault(
 		return nil, connErr
 	}
 
-	// Validate that all tier IDs reference existing TierConfig entries.
-	for _, tierID := range vaultCfg.TierIDs {
-		tier, err := s.cfgStore.GetTier(ctx, tierID)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		if tier == nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("tier %q not found", tierID))
-		}
-	}
+	// Note: tier ID validation is intentionally omitted here.
+	// RouteLeader RPCs run on any node with Raft writes forwarded to the leader,
+	// but reads are local. In a multi-node cluster, tiers created moments before
+	// the vault may not have replicated to this node's FSM yet. The orchestrator's
+	// buildTierInstances handles missing tiers gracefully (logs a warning, skips).
+	// Referential integrity is enforced on the delete path (DeleteTier rejects
+	// if any vault references the tier).
 
 	// Persist to config store. For raft stores, the FSM notification callback
 	// handles orchestrator side effects. For non-raft stores, notify() does.

@@ -1,6 +1,8 @@
 import { useState } from "react";
-import type { VaultConfig, TierConfig, RouteConfig } from "../../api/gen/gastrolog/v1/config_pb";
-import { TierType } from "../../api/gen/gastrolog/v1/config_pb";
+import { protoInt64 } from "@bufbuild/protobuf";
+import type { VaultConfig, RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import type { NodeStorageConfig } from "../../api/gen/gastrolog/v1/storage_pb";
+import { TierConfig, TierType } from "../../api/gen/gastrolog/v1/config_pb";
 import {
   usePutVault,
   useDeleteVault,
@@ -8,6 +10,7 @@ import {
   useReindexVault,
   useMigrateVault,
   useMergeVaults,
+  usePutTier,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
 import { useEditState } from "../../hooks/useEditState";
@@ -15,19 +18,50 @@ import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput } from "./FormField";
-import { Button } from "./Buttons";
+import { Button, DropdownButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { JobProgress } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 import { useThemeClass } from "../../hooks/useThemeClass";
+function formatBytes(b: bigint | number): string {
+  const n = typeof b === "bigint" ? Number(b) : b;
+  if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TB`;
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${String(n)} B`;
+}
+
+function tierTypeLabel(type: TierType): string {
+  switch (type) {
+    case TierType.MEMORY: return "memory";
+    case TierType.LOCAL: return "local";
+    case TierType.CLOUD: return "cloud";
+    default: return "unknown";
+  }
+}
+
+import {
+  TierEntryCard,
+  emptyTierEntry,
+  tierTypeEnum,
+  parseMemoryBudget,
+  isTierComplete,
+  type TierEntry,
+  type TierTypeLabel,
+} from "./VaultsSettings";
 
 interface VaultSettingsCardProps {
   vault: VaultConfig;
   vaults: VaultConfig[];
   tiers: TierConfig[];
   routes: RouteConfig[];
+  nodeConfigs: NodeConfig[];
+  nodeStorageConfigs: NodeStorageConfig[];
+  storageClassOptions: { value: string; label: string }[];
+  cloudServiceOptions: { value: string; label: string }[];
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -38,7 +72,11 @@ export function VaultSettingsCard({
   vault,
   vaults,
   tiers,
-  routes,
+  routes: _routes,
+  nodeConfigs,
+  nodeStorageConfigs: _nodeStorageConfigs,
+  storageClassOptions,
+  cloudServiceOptions,
   dark,
   expanded,
   onToggle,
@@ -46,6 +84,7 @@ export function VaultSettingsCard({
 }: Readonly<VaultSettingsCardProps>) {
   const c = useThemeClass(dark);
   const putVault = usePutVault();
+  const putTier = usePutTier();
   const deleteVault = useDeleteVault();
   const seal = useSealVault();
   const reindex = useReindexVault();
@@ -53,33 +92,36 @@ export function VaultSettingsCard({
   const merge = useMergeVaults();
   const { addToast } = useToast();
 
+  // Inline tier creation state.
+  const [newTier, setNewTier] = useState<TierEntry | null>(null);
+  const [creatingTier, setCreatingTier] = useState(false);
+
   // Per-vault state — previously Record maps in the parent.
   const [deleteData, setDeleteData] = useState(false);
   const [migrateTarget, setMigrateTarget] = useState<{ name: string; type: string; dir: string } | null>(null);
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<{ jobId: string; label: string } | null>(null);
 
-  // Resolve vault's tiers from the tier list.
-  const tierMap = new Map(tiers.map((t) => [t.id, t]));
-  const vaultTiers = vault.tierIds.map((id) => tierMap.get(id)).filter((t): t is TierConfig => !!t);
-
-  const tierTypeLabel = (type: TierType): string => {
-    switch (type) {
-      case TierType.MEMORY: return "memory";
-      case TierType.LOCAL: return "local";
-      case TierType.CLOUD: return "cloud";
-      default: return "unknown";
-    }
-  };
-
   const defaults = (_id: string) => ({
     name: vault.name,
-    tierIds: [...vault.tierIds],
     enabled: vault.enabled,
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
   const edit = getEdit(vault.id);
+
+  // Tier IDs managed separately — useEditState discards edits on config push,
+  // which breaks reordering because the placement manager writes PutTier.
+  const [localTierIds, setLocalTierIds] = useState<string[]>([...vault.tierIds]);
+  const tierIdsDirty = JSON.stringify(localTierIds) !== JSON.stringify([...vault.tierIds]);
+
+  // Resolve vault's tiers from local state (reflects unsaved reorder/remove).
+  const tierMap = new Map(tiers.map((t) => [t.id, t]));
+  const vaultTiers = localTierIds.map((id) => tierMap.get(id)).filter((t): t is TierConfig => !!t);
+
+  // Node name resolution for tier placement display.
+  const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
+  const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
 
   const { handleSave: saveVault, handleDelete } = useCrudHandlers({
     mutation: putVault,
@@ -200,9 +242,19 @@ export function VaultSettingsCard({
           >
             {mergeTarget !== null ? "Cancel Merge" : "Merge Into..."}
           </Button>
+          {(isDirty(vault.id) || tierIdsDirty) && (
+            <Button
+              variant="ghost"
+              bordered
+              dark={dark}
+              onClick={() => { clearEdit(vault.id); setLocalTierIds([...vault.tierIds]); setNewTier(null); }}
+            >
+              Cancel
+            </Button>
+          )}
           <Button
-            onClick={() => saveVault(vault.id, edit)}
-            disabled={putVault.isPending || !isDirty(vault.id)}
+            onClick={() => saveVault(vault.id, { ...edit, tierIds: localTierIds })}
+            disabled={putVault.isPending || (!isDirty(vault.id) && !tierIdsDirty)}
           >
             {putVault.isPending ? "Saving..." : "Save"}
           </Button>
@@ -240,23 +292,164 @@ export function VaultSettingsCard({
           label="Enabled"
           dark={dark}
         />
-        {/* Tier list (read-only summary; tier editing is a separate issue) */}
-        <div className="flex flex-col gap-1.5">
+        {/* Tier list */}
+        <div className="flex flex-col gap-2">
           <span className={`text-[0.75em] font-medium uppercase tracking-[0.12em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
             Tiers
           </span>
-          {vaultTiers.length === 0 ? (
+          {vaultTiers.length === 0 && !newTier && (
             <span className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
               No tiers assigned.
             </span>
-          ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {vaultTiers.map((tier) => (
-                <Badge key={tier.id} variant="muted" dark={dark}>
-                  {tier.name || tier.id} ({tierTypeLabel(tier.type)})
-                </Badge>
-              ))}
+          )}
+          {vaultTiers.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              {vaultTiers.map((tier, i) => {
+                const nodeName = tier.nodeId ? resolveNodeName(tier.nodeId) : null;
+                const csName = tier.cloudServiceId
+                  ? cloudServiceOptions.find((cs) => cs.value === tier.cloudServiceId)?.label || tier.cloudServiceId
+                  : null;
+                return (
+                  <div
+                    key={tier.id}
+                    className={`flex flex-col gap-1 px-3 py-2 rounded border ${c(
+                      "border-ink-border/60 bg-ink-base/40",
+                      "border-light-border/60 bg-light-base/40",
+                    )}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[0.7em] font-mono tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                        {i + 1}
+                      </span>
+                      <Badge variant="copper" dark={dark}>
+                        {tierTypeLabel(tier.type)}
+                      </Badge>
+                      {i === 0 && (
+                        <span className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                          hottest
+                        </span>
+                      )}
+                      <span className="flex-1" />
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => {
+                            if (i === 0) return;
+                            const ids = [...localTierIds];
+                            const tmp = ids[i - 1]!; ids[i - 1] = ids[i]!; ids[i] = tmp;
+                            setLocalTierIds(ids);
+                          }}
+                          disabled={i === 0}
+                          className={`px-1 py-0.5 text-[0.75em] rounded transition-colors ${c(
+                            "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
+                            "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
+                          )} disabled:opacity-20 disabled:pointer-events-none`}
+                          title="Move up"
+                        >
+                          {"\u25B2"}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (i >= vaultTiers.length - 1) return;
+                            const ids = [...localTierIds];
+                            const tmp = ids[i]!; ids[i] = ids[i + 1]!; ids[i + 1] = tmp;
+                            setLocalTierIds(ids);
+                          }}
+                          disabled={i === vaultTiers.length - 1}
+                          className={`px-1 py-0.5 text-[0.75em] rounded transition-colors ${c(
+                            "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
+                            "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
+                          )} disabled:opacity-20 disabled:pointer-events-none`}
+                          title="Move down"
+                        >
+                          {"\u25BC"}
+                        </button>
+                      </div>
+                      <button
+                        onClick={() => setLocalTierIds(localTierIds.filter((id) => id !== tier.id))}
+                        className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                          "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
+                          "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                        )}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                    <div className={`flex items-center gap-3 pl-6 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                      {nodeName && <span>{"node: " + nodeName}</span>}
+                      {!nodeName && <span className={c("text-text-ghost", "text-light-text-ghost")}>unplaced</span>}
+                      {tier.type === TierType.LOCAL && tier.storageClass > 0 && (
+                        <span className="font-mono">{`class ${String(tier.storageClass)}`}</span>
+                      )}
+                      {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
+                        <span className="font-mono">{formatBytes(tier.memoryBudgetBytes)}</span>
+                      )}
+                      {tier.type === TierType.CLOUD && csName && <span>{csName}</span>}
+                      {tier.type === TierType.CLOUD && tier.activeChunkClass > 0 && (
+                        <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          )}
+          {newTier ? (
+            <div className="flex flex-col gap-2">
+              <TierEntryCard
+                tier={newTier}
+                index={vaultTiers.length}
+                dark={dark}
+                storageClassOptions={storageClassOptions}
+                cloudServiceOptions={cloudServiceOptions}
+                onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
+                onRemove={() => setNewTier(null)}
+              />
+              <div className="flex justify-end gap-2">
+                <Button onClick={() => setNewTier(null)}>Cancel</Button>
+                <Button
+                  onClick={async () => {
+                    if (!isTierComplete(newTier, cloudServiceOptions.length > 0)) return;
+                    const tierId = crypto.randomUUID();
+                    const tierCfg = new TierConfig({
+                      id: tierId,
+                      name: newTier.type,
+                      type: tierTypeEnum(newTier.type),
+                      storageClass: newTier.type === "local" ? parseInt(newTier.storageClass, 10) || 0 : 0,
+                      cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
+                      activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
+                      cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
+                      memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
+                    });
+                    setCreatingTier(true);
+                    try {
+                      await putTier.mutateAsync({ config: tierCfg });
+                      setLocalTierIds([...localTierIds, tierId]);
+                      setNewTier(null);
+                      setCreatingTier(false);
+                      addToast("Tier created — save to apply", "info");
+                    } catch (err: unknown) {
+                      setCreatingTier(false);
+                      const msg = err instanceof Error ? err.message : "Failed to add tier";
+                      addToast(msg, "error");
+                    }
+                  }}
+                  disabled={creatingTier || !isTierComplete(newTier, cloudServiceOptions.length > 0)}
+                >
+                  {creatingTier ? "Creating..." : "Create Tier"}
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <DropdownButton
+              label="+ Add Tier"
+              items={[
+                { value: "memory", label: "Memory" },
+                { value: "local", label: "Local" },
+                { value: "cloud", label: "Cloud" },
+              ]}
+              onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}
+              dark={dark}
+            />
           )}
         </div>
         {migrateTarget && (

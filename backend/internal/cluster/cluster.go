@@ -500,6 +500,27 @@ func (s *Server) LocalStats() map[string]string {
 	return s.raft.Stats()
 }
 
+// IsLeader returns true if this node is the current Raft leader.
+func (s *Server) IsLeader() bool {
+	if s.raft == nil {
+		return false
+	}
+	return s.raft.State() == hraft.Leader
+}
+
+// RegisterLeaderObserver registers a channel to receive Raft LeaderObservation
+// events. The placement manager uses this to react immediately to leadership
+// changes rather than polling.
+func (s *Server) RegisterLeaderObserver(ch chan hraft.Observation) {
+	if s.raft == nil {
+		return
+	}
+	s.raft.RegisterObserver(hraft.NewObserver(ch, true, func(o *hraft.Observation) bool {
+		_, ok := o.Data.(hraft.LeaderObservation)
+		return ok
+	}))
+}
+
 // Addr returns the listener address, or empty if not started.
 func (s *Server) Addr() string {
 	if s.listener != nil {

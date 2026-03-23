@@ -142,6 +142,20 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 	return
 }
 
+// LivePeers returns the node IDs of all peers whose stats have not expired.
+func (p *PeerState) LivePeers() []string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	now := time.Now()
+	var live []string
+	for id, e := range p.entries {
+		if now.Sub(e.received) <= p.ttl {
+			live = append(live, id)
+		}
+	}
+	return live
+}
+
 // HandleBroadcast is a subscriber callback for the cluster broadcast system.
 // It extracts NodeStats from the broadcast message and stores it.
 func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {

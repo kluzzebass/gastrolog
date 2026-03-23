@@ -89,7 +89,7 @@ export function DropdownButton({
       </Button>
       {open && (
         <div
-          className={`absolute right-0 top-full mt-1 min-w-[10rem] rounded border shadow-lg z-50 py-1 ${c(
+          className={`absolute left-0 bottom-full mb-1 min-w-[10rem] rounded border shadow-lg z-50 py-1 ${c(
             "bg-ink-surface border-ink-border",
             "bg-light-surface border-light-border",
           )}`}

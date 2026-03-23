@@ -21,9 +21,9 @@ import { VaultSettingsCard } from "./VaultSettingsCard";
 // Tier entry types
 // ---------------------------------------------------------------------------
 
-type TierTypeLabel = "memory" | "local" | "cloud";
+export type TierTypeLabel = "memory" | "local" | "cloud";
 
-interface TierEntry {
+export interface TierEntry {
   key: string;
   type: TierTypeLabel;
   storageClass: string;
@@ -33,7 +33,7 @@ interface TierEntry {
   memoryBudget: string;
 }
 
-function emptyTierEntry(type: TierTypeLabel): TierEntry {
+export function emptyTierEntry(type: TierTypeLabel): TierEntry {
   return {
     key: crypto.randomUUID(),
     type,
@@ -57,11 +57,11 @@ const SIZE_MULTIPLIERS: Record<string, bigint> = {
   TB: 1024n * 1024n * 1024n * 1024n,
 };
 
-function parseMemoryBudget(raw: string): bigint {
+export function parseMemoryBudget(raw: string): bigint {
   const s = raw.trim().toUpperCase();
   if (!s) return protoInt64.zero;
-  const match = s.match(/^(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)?$/);
-  if (!match || !match[1]) return protoInt64.zero;
+  const match = /^(\d+(?:\.\d+)?)\s*(TB|GB|MB|KB|B)?$/.exec(s);
+  if (!match?.[1]) return protoInt64.zero;
   const num = parseFloat(match[1]);
   const unit = match[2] ?? "B";
   const mult = SIZE_MULTIPLIERS[unit] ?? 1n;
@@ -72,7 +72,7 @@ function parseMemoryBudget(raw: string): bigint {
 // Tier type enum conversion
 // ---------------------------------------------------------------------------
 
-function tierTypeEnum(t: TierTypeLabel): TierType {
+export function tierTypeEnum(t: TierTypeLabel): TierType {
   switch (t) {
     case "memory":
       return TierType.MEMORY;
@@ -87,7 +87,25 @@ function tierTypeEnum(t: TierTypeLabel): TierType {
 // Tier completeness check
 // ---------------------------------------------------------------------------
 
-function isTierComplete(tier: TierEntry, hasCloudServices: boolean): boolean {
+// Extracted outside component so try/catch doesn't block the React Compiler.
+async function createVaultWithTiers(
+  configs: TierConfig[],
+  putTier: { mutateAsync: (args: { config: TierConfig }) => Promise<unknown> },
+  name: string,
+  tierIds: string[],
+  putVault: { mutateAsync: (args: { id: string; name: string; tierIds: string[] }) => Promise<unknown> },
+): Promise<void> {
+  for (const config of configs) {
+    await putTier.mutateAsync({ config });
+  }
+  await putVault.mutateAsync({ id: "", name, tierIds });
+}
+
+function extractErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback;
+}
+
+export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): boolean {
   switch (tier.type) {
     case "memory":
       return true;
@@ -162,7 +180,7 @@ const tierTypeLabels: Record<TierTypeLabel, string> = {
 // Tier entry card
 // ---------------------------------------------------------------------------
 
-function TierEntryCard({
+export function TierEntryCard({
   tier,
   index,
   dark,
@@ -333,19 +351,29 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const tiers = config?.tiers ?? [];
   const routes = config?.routes ?? [];
 
-  // Derive storage class options from all local storage configs
+  // Derive storage class options with node availability.
+  const nodeNameMap = new Map((config?.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
   const storageClassOptions = (() => {
-    const seen = new Map<number, string>();
+    const classNodes = new Map<number, string[]>();
     for (const nsc of config?.nodeStorageConfigs ?? []) {
+      const nodeName = nodeNameMap.get(nsc.nodeId) || nsc.nodeId;
       for (const area of nsc.areas) {
-        if (!seen.has(area.storageClass)) {
-          seen.set(area.storageClass, area.name || `Class ${area.storageClass}`);
+        const nodes = classNodes.get(area.storageClass);
+        if (nodes) {
+          if (!nodes.includes(nodeName)) {
+            nodes.push(nodeName);
+          }
+        } else {
+          classNodes.set(area.storageClass, [nodeName]);
         }
       }
     }
-    return [...seen.entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([sc, label]) => ({ value: String(sc), label: `${label} (class ${sc})` }));
+    return [...classNodes.entries()]
+      .toSorted(([a], [b]) => a - b)
+      .map(([sc, nodes]) => ({
+        value: String(sc),
+        label: `Class ${String(sc)} — ${nodes.toSorted().join(", ")}`,
+      }));
   })();
 
   // Derive cloud storage options
@@ -369,39 +397,35 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     onExpandTargetConsumed?.();
   }
 
-  const handleCreate = async () => {
+  const handleCreate = () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "vault";
-    setIsCreating(true);
-    try {
-      // Create tier configs first, collect their IDs
-      const tierIds: string[] = [];
-      for (const [i, tier] of addForm.tiers.entries()) {
-        const tierName = `${name}-tier-${i}`;
-        const result = await putTier.mutateAsync({
-          config: new TierConfig({
-            name: tierName,
-            type: tierTypeEnum(tier.type),
-            storageClass: tier.type === "local" ? parseInt(tier.storageClass, 10) || 0 : 0,
-            cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
-            activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
-            cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
-            memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
-          }),
-        });
-        // The response contains the full config — find the tier we just created by name
-        const created = result.config?.tiers?.find((t) => t.name === tierName);
-        if (created) tierIds.push(created.id);
-      }
 
-      // Create the vault referencing the tiers
-      await putVault.mutateAsync({ id: "", name, tierIds });
-      addToast(`Vault "${name}" created`, "info");
-      dispatchAdd({ type: "reset" });
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to create vault", "error");
-    } finally {
-      setIsCreating(false);
-    }
+    // Build tier configs outside try/catch (React Compiler can't optimize
+    // conditional expressions inside try/catch).
+    const tierConfigs = addForm.tiers.map((tier) => {
+      const tierId = crypto.randomUUID();
+      return {
+        tierId,
+        config: new TierConfig({
+          id: tierId,
+          name: tier.type,
+          type: tierTypeEnum(tier.type),
+          storageClass: tier.type === "local" ? parseInt(tier.storageClass, 10) || 0 : 0,
+          cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
+          activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
+          cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
+          memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
+        }),
+      };
+    });
+
+    const tierIds = tierConfigs.map((tc) => tc.tierId);
+    const configs = tierConfigs.map((tc) => tc.config);
+    setIsCreating(true);
+    createVaultWithTiers(configs, putTier, name, tierIds, putVault).then(
+      () => { setIsCreating(false); addToast(`Vault "${name}" created`, "info"); dispatchAdd({ type: "reset" }); },
+      (err: unknown) => { setIsCreating(false); addToast(extractErrorMessage(err, "Failed to create vault"), "error"); },
+    );
   };
 
   const isPending = isCreating || putVault.isPending || putTier.isPending;
@@ -502,6 +526,10 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           vaults={vaults}
           tiers={tiers}
           routes={routes}
+          nodeConfigs={config?.nodeConfigs ?? []}
+          nodeStorageConfigs={config?.nodeStorageConfigs ?? []}
+          storageClassOptions={storageClassOptions}
+          cloudServiceOptions={cloudServiceOptions}
           dark={dark}
           expanded={isExpanded(vault.id)}
           onToggle={() => toggleCard(vault.id)}

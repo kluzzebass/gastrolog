@@ -105,10 +105,13 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		if d.managedFileHandler != nil {
 			d.managedFileHandler.OnDelete(n.ID)
 		}
+	case raftfsm.NotifyTierPut:
+		d.handleTierPut(ctx, n.ID)
+	case raftfsm.NotifyTierDeleted:
+		d.handleTierDeleted(ctx, n.ID)
 	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
-		raftfsm.NotifyNodeStorageConfigSet,
-		raftfsm.NotifyTierPut, raftfsm.NotifyTierDeleted:
-		// No orchestrator side effects yet; configSignal fires below.
+		raftfsm.NotifyNodeStorageConfigSet:
+		// No orchestrator side effects; configSignal fires below.
 	}
 
 	// Notify WatchConfig streams for all user-visible config changes.
@@ -301,6 +304,72 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 	if ss.Scheduler.MaxConcurrentJobs > 0 {
 		if err := d.orch.UpdateMaxConcurrentJobs(ss.Scheduler.MaxConcurrentJobs); err != nil {
 			d.logger.Error("dispatch: update max concurrent jobs", "error", err)
+		}
+	}
+}
+
+// handleTierPut adjusts vault registration when a tier's NodeID changes.
+// Runs on ALL nodes — each node independently decides whether it gained or lost
+// ownership based on the tier's new NodeID vs localNodeID.
+func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) {
+	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
+	if err != nil || tierCfg == nil {
+		d.logger.Error("dispatch: read tier config", "tier", tierID, "error", err)
+		return
+	}
+
+	vaults, err := d.cfgStore.ListVaults(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list vaults for tier change", "tier", tierID, "error", err)
+		return
+	}
+
+	for _, v := range vaults {
+		if !slices.Contains(v.TierIDs, tierID) {
+			continue
+		}
+
+		isLocalVault := slices.Contains(d.orch.ListVaults(), v.ID)
+		tierBelongsHere := tierCfg.NodeID == "" || tierCfg.NodeID == d.localNodeID
+
+		switch {
+		case tierBelongsHere && !isLocalVault:
+			// Gained a tier — register the vault locally.
+			if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
+				d.logger.Error("dispatch: add vault for gained tier",
+					"vault", v.ID, "tier", tierID, "error", err)
+			}
+		case !tierBelongsHere && isLocalVault:
+			// Lost a tier — unregister the vault locally.
+			if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+				d.logger.Error("dispatch: unregister vault for lost tier",
+					"vault", v.ID, "tier", tierID, "error", err)
+			}
+			// tierBelongsHere && isLocalVault: no action needed — vault already registered.
+		}
+	}
+}
+
+// handleTierDeleted removes vaults that no longer have any local tiers.
+func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UUID) {
+	vaults, err := d.cfgStore.ListVaults(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list vaults for tier deletion", "tier", tierID, "error", err)
+		return
+	}
+
+	for _, v := range vaults {
+		if !slices.Contains(v.TierIDs, tierID) {
+			continue
+		}
+		if slices.Contains(d.orch.ListVaults(), v.ID) {
+			// Vault references a deleted tier — rebuild to pick up the change.
+			if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+				d.logger.Error("dispatch: unregister vault for deleted tier", "vault", v.ID, "error", err)
+			}
+			if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
+				d.logger.Error("dispatch: re-add vault after tier deletion", "vault", v.ID, "error", err)
+			}
 		}
 	}
 }
