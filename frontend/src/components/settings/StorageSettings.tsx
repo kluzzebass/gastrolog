@@ -18,7 +18,7 @@ import { CloudServiceFields } from "./CloudServiceFields";
 import { Badge } from "../Badge";
 import { Button } from "./Buttons";
 
-// ─── Cloud Service Add Form ──────────────────────────────────
+// ─── Cloud Storage Add Form ──────────────────────────────────
 
 interface AddFormState {
   adding: boolean;
@@ -102,7 +102,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
   const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
 
-  // Sort node storage configs: local node first, then alphabetical by node name.
+  // Sort local storage configs: local node first, then alphabetical by node name.
   const sortedNodeConfigs = [...nodeStorageConfigs].sort((a, b) => {
     if (a.nodeId === localNodeId) return -1;
     if (b.nodeId === localNodeId) return 1;
@@ -128,10 +128,10 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         activeChunkClass: addForm.activeChunkClass ? parseInt(addForm.activeChunkClass, 10) : 0,
         cacheClass: addForm.cacheClass ? parseInt(addForm.cacheClass, 10) : 0,
       });
-      addToast(`Cloud service "${name}" created`, "info");
+      addToast(`Cloud storage "${name}" created`, "info");
       dispatchAdd({ type: "reset" });
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to create cloud service", "error");
+      addToast(err instanceof Error ? err.message : "Failed to create cloud storage", "error");
     }
   };
 
@@ -215,16 +215,16 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   return (
     <div className="flex flex-col gap-8">
-      {/* ── Section 1: Cloud Services ────────────────────────── */}
+      {/* ── Section 1: Cloud Storage ─────────────────────────── */}
       <div>
         <h3 className={`font-display text-[1.1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}>
-          Cloud Services
+          Cloud Storage
         </h3>
         <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           Cluster-wide cloud storage endpoints. Tiers reference a cloud service by ID.
         </p>
         <SettingsSection
-          addLabel="Add Cloud Service"
+          addLabel="Add Cloud Storage"
           adding={addForm.adding}
           onToggleAdd={() => {
             if (!addForm.adding) {
@@ -236,7 +236,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           }}
           isLoading={isLoading}
           isEmpty={cloudServices.length === 0}
-          emptyMessage='No cloud services configured. Click "Add Cloud Service" to create one.'
+          emptyMessage='No cloud storage configured. Click "Add Cloud Storage" to create one.'
           dark={dark}
         >
           {addForm.adding && (
@@ -287,10 +287,10 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         </SettingsSection>
       </div>
 
-      {/* ── Section 2: Node Storage Areas ────────────────────── */}
+      {/* ── Section 2: Local Storage ─────────────────────────── */}
       <div>
         <h3 className={`font-display text-[1.1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}>
-          Node Storage Areas
+          Local Storage
         </h3>
         <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           Locally-attached storage resources declared per node. Storage class ranks speed: lower = faster.
@@ -354,7 +354,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         )}
         {!isLoading && sortedNodeConfigs.length === 0 && !addingArea && (
           <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            No node storage configurations found. Click &quot;Add Storage Area&quot; to create one.
+            No local storage configured. Click &quot;Add Storage Area&quot; to create one.
           </div>
         )}
         {!isLoading && sortedNodeConfigs.length > 0 && (

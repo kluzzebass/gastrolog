@@ -261,13 +261,13 @@ function TierEntryCard({
 
       {tier.type === "cloud" && (
         <>
-          <FormField label="Cloud Service" dark={dark}>
+          <FormField label="Cloud Storage" dark={dark}>
             {cloudServiceOptions.length > 0 ? (
               <SelectInput
                 value={tier.cloudServiceId}
                 onChange={(v) => onUpdate({ cloudServiceId: v })}
                 options={[
-                  { value: "", label: "Select cloud service..." },
+                  { value: "", label: "Select cloud storage..." },
                   ...cloudServiceOptions,
                 ]}
                 dark={dark}
@@ -276,7 +276,7 @@ function TierEntryCard({
               <TextInput
                 value={tier.cloudServiceId}
                 onChange={(v) => onUpdate({ cloudServiceId: v })}
-                placeholder="Cloud service ID"
+                placeholder="Cloud storage ID"
                 dark={dark}
                 mono
               />
@@ -333,7 +333,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const tiers = config?.tiers ?? [];
   const routes = config?.routes ?? [];
 
-  // Derive storage class options from all node storage configs
+  // Derive storage class options from all local storage configs
   const storageClassOptions = (() => {
     const seen = new Map<number, string>();
     for (const nsc of config?.nodeStorageConfigs ?? []) {
@@ -348,7 +348,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       .map(([sc, label]) => ({ value: String(sc), label: `${label} (class ${sc})` }));
   })();
 
-  // Derive cloud service options
+  // Derive cloud storage options
   const cloudServiceOptions = (config?.cloudServices ?? [])
     .slice()
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))

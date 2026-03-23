@@ -22,7 +22,7 @@ interface CloudServiceFieldsProps {
 }
 
 /**
- * Provider-specific fields for cloud service configuration.
+ * Provider-specific fields for cloud storage configuration.
  * Used by both the add form and the edit card.
  */
 export function CloudServiceFields({

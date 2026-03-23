@@ -79,7 +79,7 @@ export function CloudServiceCard({
   const { handleSave, handleDelete } = useCrudHandlers({
     mutation: putCloudService,
     deleteMutation: deleteCloudService,
-    label: "Cloud Service",
+    label: "Cloud Storage",
     onSaveTransform: (id, e: CloudServiceEdit) => ({
       id,
       name: e.name,
