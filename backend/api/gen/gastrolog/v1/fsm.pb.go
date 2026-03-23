@@ -1073,17 +1073,13 @@ func (x *VaultRetentionRule) GetEjectRouteIds() []string {
 }
 
 type PutVaultCommand struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Type           string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
-	Policy         string                 `protobuf:"bytes,5,opt,name=policy,proto3" json:"policy,omitempty"` // empty = nil
-	RetentionRules []*VaultRetentionRule  `protobuf:"bytes,6,rep,name=retention_rules,json=retentionRules,proto3" json:"retention_rules,omitempty"`
-	Enabled        bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Params         map[string]string      `protobuf:"bytes,8,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	NodeId         string                 `protobuf:"bytes,9,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	TierIds       []string               `protobuf:"bytes,10,rep,name=tier_ids,json=tierIds,proto3" json:"tier_ids,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PutVaultCommand) Reset() {
@@ -1130,27 +1126,6 @@ func (x *PutVaultCommand) GetName() string {
 	return ""
 }
 
-func (x *PutVaultCommand) GetType() string {
-	if x != nil {
-		return x.Type
-	}
-	return ""
-}
-
-func (x *PutVaultCommand) GetPolicy() string {
-	if x != nil {
-		return x.Policy
-	}
-	return ""
-}
-
-func (x *PutVaultCommand) GetRetentionRules() []*VaultRetentionRule {
-	if x != nil {
-		return x.RetentionRules
-	}
-	return nil
-}
-
 func (x *PutVaultCommand) GetEnabled() bool {
 	if x != nil {
 		return x.Enabled
@@ -1158,18 +1133,11 @@ func (x *PutVaultCommand) GetEnabled() bool {
 	return false
 }
 
-func (x *PutVaultCommand) GetParams() map[string]string {
+func (x *PutVaultCommand) GetTierIds() []string {
 	if x != nil {
-		return x.Params
+		return x.TierIds
 	}
 	return nil
-}
-
-func (x *PutVaultCommand) GetNodeId() string {
-	if x != nil {
-		return x.NodeId
-	}
-	return ""
 }
 
 type DeleteVaultCommand struct {
@@ -2913,6 +2881,7 @@ type PutTierCommand struct {
 	CloudServiceId    string                 `protobuf:"bytes,8,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
 	ActiveChunkClass  uint32                 `protobuf:"varint,9,opt,name=active_chunk_class,json=activeChunkClass,proto3" json:"active_chunk_class,omitempty"`
 	CacheClass        uint32                 `protobuf:"varint,10,opt,name=cache_class,json=cacheClass,proto3" json:"cache_class,omitempty"`
+	NodeId            string                 `protobuf:"bytes,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // temporary: explicit node assignment until tier election
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -3015,6 +2984,13 @@ func (x *PutTierCommand) GetCacheClass() uint32 {
 		return x.CacheClass
 	}
 	return 0
+}
+
+func (x *PutTierCommand) GetNodeId() string {
+	if x != nil {
+		return x.NodeId
+	}
+	return ""
 }
 
 type DeleteTierCommand struct {
@@ -3319,19 +3295,14 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12 \n" +
 	"\vdestination\x18\x03 \x01(\tR\vdestination\x12&\n" +
-	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\"\xe3\x02\n" +
+	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\"\x8e\x01\n" +
 	"\x0fPutVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04type\x18\x03 \x01(\tR\x04type\x12\x16\n" +
-	"\x06policy\x18\x05 \x01(\tR\x06policy\x12I\n" +
-	"\x0fretention_rules\x18\x06 \x03(\v2 .gastrolog.v1.VaultRetentionRuleR\x0eretentionRules\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\x12A\n" +
-	"\x06params\x18\b \x03(\v2).gastrolog.v1.PutVaultCommand.ParamsEntryR\x06params\x12\x17\n" +
-	"\anode_id\x18\t \x01(\tR\x06nodeId\x1a9\n" +
-	"\vParamsEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x04\x10\x05\"E\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
+	"\aenabled\x18\a \x01(\bR\aenabled\x12\x19\n" +
+	"\btier_ids\x18\n" +
+	" \x03(\tR\atierIdsJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
+	"\"E\n" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vdelete_data\x18\x02 \x01(\bR\n" +
@@ -3466,7 +3437,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12%\n" +
 	"\x0ecapacity_bytes\x18\x05 \x01(\x04R\rcapacityBytes\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\"\x8f\x03\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\"\xa8\x03\n" +
 	"\x0ePutTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -3479,7 +3450,8 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x12active_chunk_class\x18\t \x01(\rR\x10activeChunkClass\x12\x1f\n" +
 	"\vcache_class\x18\n" +
 	" \x01(\rR\n" +
-	"cacheClass\"#\n" +
+	"cacheClass\x12\x17\n" +
+	"\anode_id\x18\v \x01(\tR\x06nodeId\"#\n" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\xae\t\n" +
 	"\x0eConfigSnapshot\x128\n" +
@@ -3517,7 +3489,7 @@ func file_gastrolog_v1_fsm_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_fsm_proto_rawDescData
 }
 
-var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
+var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
 var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*ConfigCommand)(nil),                  // 0: gastrolog.v1.ConfigCommand
 	(*PutFilterCommand)(nil),               // 1: gastrolog.v1.PutFilterCommand
@@ -3559,10 +3531,9 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*PutTierCommand)(nil),                 // 37: gastrolog.v1.PutTierCommand
 	(*DeleteTierCommand)(nil),              // 38: gastrolog.v1.DeleteTierCommand
 	(*ConfigSnapshot)(nil),                 // 39: gastrolog.v1.ConfigSnapshot
-	nil,                                    // 40: gastrolog.v1.PutVaultCommand.ParamsEntry
-	nil,                                    // 41: gastrolog.v1.PutIngesterCommand.ParamsEntry
-	nil,                                    // 42: gastrolog.v1.ConfigSnapshot.SettingsEntry
-	(*timestamppb.Timestamp)(nil),          // 43: google.protobuf.Timestamp
+	nil,                                    // 40: gastrolog.v1.PutIngesterCommand.ParamsEntry
+	nil,                                    // 41: gastrolog.v1.ConfigSnapshot.SettingsEntry
+	(*timestamppb.Timestamp)(nil),          // 42: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	1,  // 0: gastrolog.v1.ConfigCommand.put_filter:type_name -> gastrolog.v1.PutFilterCommand
@@ -3601,38 +3572,36 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	35, // 33: gastrolog.v1.ConfigCommand.set_node_storage_config:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
 	37, // 34: gastrolog.v1.ConfigCommand.put_tier:type_name -> gastrolog.v1.PutTierCommand
 	38, // 35: gastrolog.v1.ConfigCommand.delete_tier:type_name -> gastrolog.v1.DeleteTierCommand
-	7,  // 36: gastrolog.v1.PutVaultCommand.retention_rules:type_name -> gastrolog.v1.VaultRetentionRule
-	40, // 37: gastrolog.v1.PutVaultCommand.params:type_name -> gastrolog.v1.PutVaultCommand.ParamsEntry
-	41, // 38: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
-	43, // 39: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
-	43, // 40: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
-	43, // 41: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
-	43, // 42: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
-	43, // 43: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
-	43, // 44: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
-	36, // 45: gastrolog.v1.SetNodeStorageConfigCommand.areas:type_name -> gastrolog.v1.StorageAreaCommand
-	7,  // 46: gastrolog.v1.PutTierCommand.retention_rules:type_name -> gastrolog.v1.VaultRetentionRule
-	1,  // 47: gastrolog.v1.ConfigSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
-	3,  // 48: gastrolog.v1.ConfigSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
-	5,  // 49: gastrolog.v1.ConfigSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
-	8,  // 50: gastrolog.v1.ConfigSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
-	10, // 51: gastrolog.v1.ConfigSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
-	42, // 52: gastrolog.v1.ConfigSnapshot.settings:type_name -> gastrolog.v1.ConfigSnapshot.SettingsEntry
-	14, // 53: gastrolog.v1.ConfigSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
-	16, // 54: gastrolog.v1.ConfigSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
-	23, // 55: gastrolog.v1.ConfigSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	26, // 56: gastrolog.v1.ConfigSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
-	28, // 57: gastrolog.v1.ConfigSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	29, // 58: gastrolog.v1.ConfigSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
-	31, // 59: gastrolog.v1.ConfigSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
-	33, // 60: gastrolog.v1.ConfigSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
-	35, // 61: gastrolog.v1.ConfigSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	37, // 62: gastrolog.v1.ConfigSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
-	63, // [63:63] is the sub-list for method output_type
-	63, // [63:63] is the sub-list for method input_type
-	63, // [63:63] is the sub-list for extension type_name
-	63, // [63:63] is the sub-list for extension extendee
-	0,  // [0:63] is the sub-list for field type_name
+	40, // 36: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
+	42, // 37: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
+	42, // 38: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
+	42, // 39: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
+	42, // 40: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
+	42, // 41: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
+	42, // 42: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
+	36, // 43: gastrolog.v1.SetNodeStorageConfigCommand.areas:type_name -> gastrolog.v1.StorageAreaCommand
+	7,  // 44: gastrolog.v1.PutTierCommand.retention_rules:type_name -> gastrolog.v1.VaultRetentionRule
+	1,  // 45: gastrolog.v1.ConfigSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
+	3,  // 46: gastrolog.v1.ConfigSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
+	5,  // 47: gastrolog.v1.ConfigSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
+	8,  // 48: gastrolog.v1.ConfigSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
+	10, // 49: gastrolog.v1.ConfigSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
+	41, // 50: gastrolog.v1.ConfigSnapshot.settings:type_name -> gastrolog.v1.ConfigSnapshot.SettingsEntry
+	14, // 51: gastrolog.v1.ConfigSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
+	16, // 52: gastrolog.v1.ConfigSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
+	23, // 53: gastrolog.v1.ConfigSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	26, // 54: gastrolog.v1.ConfigSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
+	28, // 55: gastrolog.v1.ConfigSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	29, // 56: gastrolog.v1.ConfigSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
+	31, // 57: gastrolog.v1.ConfigSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
+	33, // 58: gastrolog.v1.ConfigSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
+	35, // 59: gastrolog.v1.ConfigSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	37, // 60: gastrolog.v1.ConfigSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
+	61, // [61:61] is the sub-list for method output_type
+	61, // [61:61] is the sub-list for method input_type
+	61, // [61:61] is the sub-list for extension type_name
+	61, // [61:61] is the sub-list for extension extendee
+	0,  // [0:61] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_fsm_proto_init() }
@@ -3686,7 +3655,7 @@ func file_gastrolog_v1_fsm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_fsm_proto_rawDesc), len(file_gastrolog_v1_fsm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   43,
+			NumMessages:   42,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

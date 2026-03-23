@@ -27,6 +27,25 @@ func (f *fakeConfigLoader) Load(_ context.Context) (*config.Config, error) {
 	return f.cfg, nil
 }
 
+// memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.
+// It also adds the TierConfig to the loader's config if present, so AddVault
+// can find it via buildTierInstances.
+func memVaultCfg(vaultID uuid.UUID, loader *fakeConfigLoader) config.VaultConfig {
+	tierID := uuid.Must(uuid.NewV7())
+	tc := config.TierConfig{
+		ID:   tierID,
+		Name: "tier-" + vaultID.String()[:8],
+		Type: config.TierTypeMemory,
+	}
+	if loader != nil && loader.cfg != nil {
+		loader.cfg.Tiers = append(loader.cfg.Tiers, tc)
+	}
+	return config.VaultConfig{
+		ID:      vaultID,
+		TierIDs: []uuid.UUID{tierID},
+	}
+}
+
 func TestReloadFilters(t *testing.T) {
 	t.Parallel()
 	loader := &fakeConfigLoader{}
@@ -174,10 +193,7 @@ func TestAddVault(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -231,10 +247,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -274,10 +287,7 @@ func TestRemoveVaultEmpty(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -321,10 +331,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -388,10 +395,7 @@ func TestForceRemoveVault(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -478,10 +482,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -507,7 +508,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set catch-all filter.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")
@@ -599,7 +600,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, cm, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, cm, nil, nil))
 
 	ingesterID := uuid.Must(uuid.NewV7())
 	recv := newBlockingIngester()
@@ -677,10 +678,7 @@ func TestVaultConfig(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -788,10 +786,7 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -850,10 +845,7 @@ func TestPauseVault(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -924,10 +916,7 @@ func TestResumeVault(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -1002,10 +991,7 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)
@@ -1046,11 +1032,12 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 func TestReloadRetentionCreatesRunner(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 
-	// Config starts WITHOUT retention rules on the vault.
+	// Config starts WITHOUT retention rules on the tier.
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -1061,8 +1048,11 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 		RetentionPolicies: []config.RetentionPolicyConfig{
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
+		Tiers: []config.TierConfig{
+			{ID: tierID, Name: "tier", Type: config.TierTypeMemory},
+		},
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, Name: "src", Type: "memory"},
+			{ID: vaultID, Name: "src", TierIDs: []uuid.UUID{tierID}},
 		},
 	}}
 
@@ -1075,9 +1065,7 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
 		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
 	}
-	if err := orch.AddVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "src", Type: "memory",
-	}, factories); err != nil {
+	if err := orch.AddVault(context.Background(), loader.cfg.Vaults[0], factories); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1088,8 +1076,8 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 		t.Fatal("retention job should not exist before rules are added")
 	}
 
-	// Now update config to include retention rules on the vault.
-	loader.cfg.Vaults[0].RetentionRules = []config.RetentionRule{{
+	// Now update config to include retention rules on the tier.
+	loader.cfg.Tiers[0].RetentionRules = []config.RetentionRule{{
 		RetentionPolicyID: retPolicyID,
 		Action:            config.RetentionActionEject,
 		EjectRouteIDs:     []uuid.UUID{dstID},
@@ -1108,11 +1096,12 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 func TestReloadRetentionRemovesRunner(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 
-	// Config starts WITH retention rules.
+	// Config starts WITH retention rules on the tier.
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -1123,12 +1112,15 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 		RetentionPolicies: []config.RetentionPolicyConfig{
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
-		Vaults: []config.VaultConfig{
-			{ID: vaultID, Name: "src", Type: "memory", RetentionRules: []config.RetentionRule{{
+		Tiers: []config.TierConfig{
+			{ID: tierID, Name: "tier", Type: config.TierTypeMemory, RetentionRules: []config.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
 				Action:            config.RetentionActionEject,
 				EjectRouteIDs:     []uuid.UUID{dstID},
 			}}},
+		},
+		Vaults: []config.VaultConfig{
+			{ID: vaultID, Name: "src", TierIDs: []uuid.UUID{tierID}},
 		},
 	}}
 
@@ -1151,8 +1143,8 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 		t.Fatal("retention job should exist after AddVault with rules")
 	}
 
-	// Remove retention rules from config.
-	loader.cfg.Vaults[0].RetentionRules = nil
+	// Remove retention rules from the tier config.
+	loader.cfg.Tiers[0].RetentionRules = nil
 
 	if err := orch.ReloadRetentionPolicies(context.Background()); err != nil {
 		t.Fatalf("ReloadRetentionPolicies: %v", err)
@@ -1205,10 +1197,7 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 		},
 	}
 
-	vaultCfg := config.VaultConfig{
-		ID:   vaultID,
-		Type: "memory",
-	}
+	vaultCfg := memVaultCfg(vaultID, loader)
 
 	if err := orch.AddVault(context.Background(), vaultCfg, factories); err != nil {
 		t.Fatalf("AddVault: %v", err)

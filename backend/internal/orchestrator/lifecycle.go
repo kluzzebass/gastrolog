@@ -287,14 +287,14 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 		// Cloud-backed vaults have no index builders — building indexes
 		// for chunks that will be uploaded and deleted is wasted work,
 		// and races with the upload (creating orphaned index files).
-		if proc, ok := vault.Chunks.(chunk.ChunkPostSealProcessor); ok {
+		if proc, ok := vault.ChunkManager().(chunk.ChunkPostSealProcessor); ok {
 			if !proc.HasIndexBuilders() {
 				continue
 			}
 		}
 
-		cm := vault.Chunks
-		im := vault.Indexes
+		cm := vault.ChunkManager()
+		im := vault.IndexManager()
 
 		metas, err := cm.List()
 		if err != nil {
@@ -317,7 +317,7 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 					"chunk", meta.ID.String())
 
 				name := fmt.Sprintf("index-rebuild:%s:%s", vaultID, meta.ID)
-				if err := o.scheduler.RunOnce(name, vault.Indexes.BuildIndexes, context.Background(), meta.ID); err != nil {
+				if err := o.scheduler.RunOnce(name, vault.IndexManager().BuildIndexes, context.Background(), meta.ID); err != nil {
 					o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
 				}
 				o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))

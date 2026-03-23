@@ -322,7 +322,7 @@ func (s *QueryServer) remoteNodeForTargetVault(ctx context.Context, vaultID uuid
 	}
 	for _, vc := range allCfg {
 		if vc.ID == vaultID {
-			return vc.NodeID
+			return "" // vaults no longer have a NodeID
 		}
 	}
 	return ""

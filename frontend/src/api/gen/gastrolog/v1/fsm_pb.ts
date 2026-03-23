@@ -664,36 +664,14 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
   name = "";
 
   /**
-   * @generated from field: string type = 3;
-   */
-  type = "";
-
-  /**
-   * empty = nil
-   *
-   * @generated from field: string policy = 5;
-   */
-  policy = "";
-
-  /**
-   * @generated from field: repeated gastrolog.v1.VaultRetentionRule retention_rules = 6;
-   */
-  retentionRules: VaultRetentionRule[] = [];
-
-  /**
    * @generated from field: bool enabled = 7;
    */
   enabled = false;
 
   /**
-   * @generated from field: map<string, string> params = 8;
+   * @generated from field: repeated string tier_ids = 10;
    */
-  params: { [key: string]: string } = {};
-
-  /**
-   * @generated from field: string node_id = 9;
-   */
-  nodeId = "";
+  tierIds: string[] = [];
 
   constructor(data?: PartialMessage<PutVaultCommand>) {
     super();
@@ -705,12 +683,8 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "retention_rules", kind: "message", T: VaultRetentionRule, repeated: true },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 8, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
-    { no: 9, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 10, name: "tier_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutVaultCommand {

@@ -105,6 +105,19 @@ func makeTestRecords(n int, attrs chunk.Attributes) []chunk.Record {
 	return records
 }
 
+// ---------- recording chunk manager for destination vaults ----------
+
+// appendRecordingCM records all Append calls for test assertions.
+type appendRecordingCM struct {
+	noopChunkManager
+	appended []chunk.Record
+}
+
+func (a *appendRecordingCM) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
+	a.appended = append(a.appended, rec)
+	return chunk.ChunkID{}, uint64(len(a.appended)), nil
+}
+
 // ---------- tests ----------
 
 func TestMatchesEjectFilter(t *testing.T) {
@@ -189,8 +202,8 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	// Create orchestrator with dst vault registered.
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-A"},
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -213,7 +226,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	}
 
 	// Register destination vault so Append works.
-	orch.RegisterVault(NewVault(dstVaultID, dstCM, &retentionFakeIndexManager{}, nil))
+	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, &retentionFakeIndexManager{}, nil))
 
 	r := &retentionRunner{
 		vaultID: srcVaultID,
@@ -232,7 +245,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	}
 }
 
-func TestEjectChunkRemoteDelivery(t *testing.T) {
+func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 	t.Parallel()
 
 	srcVaultID := uuid.Must(uuid.NewV7())
@@ -254,18 +267,18 @@ func TestEjectChunkRemoteDelivery(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-B"}, // remote
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []config.RouteConfig{
-			{ID: routeID, Name: "eject-remote", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "eject-separate", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
-	mock := &ejectFakeTransferrer{}
+	dstCM := &appendRecordingCM{}
 
 	orch, err := New(Config{
 		ConfigLoader: loader,
@@ -274,7 +287,8 @@ func TestEjectChunkRemoteDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.SetRemoteTransferrer(mock)
+	// Register destination vault locally.
+	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
 	r := &retentionRunner{
 		vaultID: srcVaultID,
@@ -287,19 +301,9 @@ func TestEjectChunkRemoteDelivery(t *testing.T) {
 
 	r.ejectChunk(chunkID, []uuid.UUID{routeID})
 
-	// Verify remote transfer was called.
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 TransferRecords call, got %d", len(mock.calls))
-	}
-	call := mock.calls[0]
-	if call.nodeID != "node-B" {
-		t.Errorf("nodeID = %q, want %q", call.nodeID, "node-B")
-	}
-	if call.vaultID != dstVaultID {
-		t.Errorf("vaultID = %s, want %s", call.vaultID, dstVaultID)
-	}
-	if len(call.records) != 3 {
-		t.Errorf("expected 3 records, got %d", len(call.records))
+	// Verify records were appended to destination vault.
+	if len(dstCM.appended) != 3 {
+		t.Fatalf("expected 3 appended records, got %d", len(dstCM.appended))
 	}
 
 	// Source chunk should be deleted after successful delivery.
@@ -336,8 +340,8 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-B"},
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "level=error"}, // only matches error records
@@ -347,7 +351,7 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 		},
 	}}
 
-	mock := &ejectFakeTransferrer{}
+	dstCM := &appendRecordingCM{}
 
 	orch, err := New(Config{
 		ConfigLoader: loader,
@@ -356,7 +360,8 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.SetRemoteTransferrer(mock)
+	// Register destination vault locally.
+	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
 	r := &retentionRunner{
 		vaultID: srcVaultID,
@@ -369,12 +374,9 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 
 	r.ejectChunk(chunkID, []uuid.UUID{routeID})
 
-	// Only 2 records should be transferred (level=error).
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(mock.calls))
-	}
-	if len(mock.calls[0].records) != 2 {
-		t.Errorf("expected 2 filtered records, got %d", len(mock.calls[0].records))
+	// Only 2 records should be appended (level=error).
+	if len(dstCM.appended) != 2 {
+		t.Fatalf("expected 2 filtered records, got %d", len(dstCM.appended))
 	}
 
 	// Source chunk deleted regardless (all records processed).
@@ -411,9 +413,9 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstA, NodeID: "node-B"},
-			{ID: dstB, NodeID: "node-C"},
+			{ID: srcVaultID},
+			{ID: dstA},
+			{ID: dstB},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterAll, Expression: "*"},
@@ -425,7 +427,8 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 		},
 	}}
 
-	mock := &ejectFakeTransferrer{}
+	dstACM := &appendRecordingCM{}
+	dstBCM := &appendRecordingCM{}
 
 	orch, err := New(Config{
 		ConfigLoader: loader,
@@ -434,7 +437,9 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.SetRemoteTransferrer(mock)
+	// Register destination vaults locally.
+	orch.RegisterVault(NewVaultFromComponents(dstA, dstACM, nil, nil))
+	orch.RegisterVault(NewVaultFromComponents(dstB, dstBCM, nil, nil))
 
 	r := &retentionRunner{
 		vaultID: srcVaultID,
@@ -447,25 +452,13 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 
 	r.ejectChunk(chunkID, []uuid.UUID{routeA, routeB})
 
-	// Route A (catch-all → dstA on node-B): 2 records
-	// Route B (level=error → dstB on node-C): 1 record
-	if len(mock.calls) != 2 {
-		t.Fatalf("expected 2 TransferRecords calls, got %d", len(mock.calls))
+	// Route A (catch-all → dstA): 2 records
+	// Route B (level=error → dstB): 1 record
+	if len(dstACM.appended) != 2 {
+		t.Errorf("route-all: expected 2 records, got %d", len(dstACM.appended))
 	}
-
-	// Build lookup by nodeID for deterministic assertion.
-	callsByNode := make(map[string]ejectTransferCall)
-	for _, c := range mock.calls {
-		callsByNode[c.nodeID] = c
-	}
-
-	callA := callsByNode["node-B"]
-	if len(callA.records) != 2 {
-		t.Errorf("route-all: expected 2 records, got %d", len(callA.records))
-	}
-	callB := callsByNode["node-C"]
-	if len(callB.records) != 1 {
-		t.Errorf("route-errors: expected 1 record, got %d", len(callB.records))
+	if len(dstBCM.appended) != 1 {
+		t.Errorf("route-errors: expected 1 record, got %d", len(dstBCM.appended))
 	}
 }
 
@@ -491,8 +484,8 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-B"},
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -552,8 +545,8 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-B"},
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -609,8 +602,8 @@ func TestEjectChunkNoFilter(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-B"},
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Routes: []config.RouteConfig{
 			// Route with no filter ID — matchesEjectFilter returns false for nil.
@@ -676,8 +669,8 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 
 	loader := &ejectConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: srcVaultID, NodeID: "node-A"},
-			{ID: dstVaultID, NodeID: "node-B"},
+			{ID: srcVaultID},
+			{ID: dstVaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -687,7 +680,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 		},
 	}}
 
-	mock := &ejectFakeTransferrer{}
+	dstCM := &appendRecordingCM{}
 
 	orch, err := New(Config{
 		ConfigLoader: loader,
@@ -696,7 +689,8 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.SetRemoteTransferrer(mock)
+	// Register destination vault locally.
+	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
 	// Policy: keep 1 chunk → oldest chunk (chunkID) is flagged.
 	r := &retentionRunner{
@@ -718,11 +712,8 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	r.sweep()
 
 	// Verify eject was executed via sweep for the oldest chunk.
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 TransferRecords call via sweep, got %d", len(mock.calls))
-	}
-	if len(mock.calls[0].records) != 2 {
-		t.Errorf("expected 2 records, got %d", len(mock.calls[0].records))
+	if len(dstCM.appended) != 2 {
+		t.Fatalf("expected 2 appended records via sweep, got %d", len(dstCM.appended))
 	}
 	if len(cm.deleted) != 1 {
 		t.Errorf("expected 1 source chunk deleted via sweep, got %d", len(cm.deleted))

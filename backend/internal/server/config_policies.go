@@ -77,15 +77,15 @@ func (s *ConfigServer) DeleteRotationPolicy(
 		return nil, connErr
 	}
 
-	// Clear policy reference on any vaults that use it.
-	stores, err := s.cfgStore.ListVaults(ctx)
+	// Clear policy reference on any tiers that use it.
+	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	for _, st := range stores {
-		if st.Policy != nil && *st.Policy == id {
-			st.Policy = nil
-			if err := s.cfgStore.PutVault(ctx, st); err != nil {
+	for _, t := range tiers {
+		if t.RotationPolicyID != nil && *t.RotationPolicyID == id {
+			t.RotationPolicyID = nil
+			if err := s.cfgStore.PutTier(ctx, t); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
 		}
@@ -158,15 +158,15 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		return nil, connErr
 	}
 
-	// Clear retention rules that reference this policy.
-	stores, err := s.cfgStore.ListVaults(ctx)
+	// Clear retention rules that reference this policy from tiers.
+	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	for _, st := range stores {
+	for _, t := range tiers {
 		changed := false
 		var kept []config.RetentionRule
-		for _, b := range st.RetentionRules {
+		for _, b := range t.RetentionRules {
 			if b.RetentionPolicyID == id {
 				changed = true
 				continue
@@ -174,8 +174,8 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 			kept = append(kept, b)
 		}
 		if changed {
-			st.RetentionRules = kept
-			if err := s.cfgStore.PutVault(ctx, st); err != nil {
+			t.RetentionRules = kept
+			if err := s.cfgStore.PutTier(ctx, t); err != nil {
 				return nil, connect.NewError(connect.CodeInternal, err)
 			}
 		}

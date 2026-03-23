@@ -24,7 +24,7 @@ func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, uuid.UUID) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(id, s.CM, s.IM, s.QE))
 	return orch, id
 }
 
@@ -312,8 +312,8 @@ func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
 	s2 := memtest.MustNewVault(t, chunkmem.Config{})
 	id1 := uuid.Must(uuid.NewV7())
 	id2 := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(id1, s1.CM, s1.IM, s1.QE))
-	orch.RegisterVault(orchestrator.NewVault(id2, s2.CM, s2.IM, s2.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(id1, s1.CM, s1.IM, s1.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(id2, s2.CM, s2.IM, s2.QE))
 
 	// Memory vaults don't support ChunkMover.
 	if orch.SupportsChunkMove(id1, id2) {
@@ -335,8 +335,8 @@ func TestCopyRecords(t *testing.T) {
 
 	srcID := uuid.Must(uuid.NewV7())
 	dstID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(srcID, srcVault.CM, srcVault.IM, srcVault.QE))
-	orch.RegisterVault(orchestrator.NewVault(dstID, dstVault.CM, dstVault.IM, dstVault.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(srcID, srcVault.CM, srcVault.IM, srcVault.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(dstID, dstVault.CM, dstVault.IM, dstVault.QE))
 
 	// Append records to source.
 	for i := range 8 {

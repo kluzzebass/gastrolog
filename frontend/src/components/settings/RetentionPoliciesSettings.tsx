@@ -15,7 +15,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
-import { UsedByStatus, ruleRefsFor } from "./UsedByStatus";
+import { UsedByStatus, tierRuleRefsFor } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 
@@ -97,7 +97,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const existingNames = new Set(policies.map((p) => p.name));
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
-  const vaults = config?.vaults ?? [];
+  const tiers = config?.tiers ?? [];
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
@@ -127,12 +127,12 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       };
     },
     onDeleteSuccess: (id) => {
-      const referencedBy = vaults
-        .filter((s) => s.retentionRules.some((b: { retentionPolicyId: string }) => b.retentionPolicyId === id))
-        .map((s) => s.name || s.id);
+      const referencedBy = tiers
+        .filter((t) => t.retentionRules.some((r: { retentionPolicyId: string }) => r.retentionPolicyId === id))
+        .map((t) => t.name || t.id);
       if (referencedBy.length > 0) {
         addToast(
-          `Retention policy "${id}" deleted (was used by: ${referencedBy.join(", ")})`,
+          `Retention policy "${id}" deleted (was used by tiers: ${referencedBy.join(", ")})`,
           "warn",
         );
       } else {
@@ -238,7 +238,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       {sortByName(policies).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = ruleRefsFor(vaults, id);
+        const refs = tierRuleRefsFor(tiers, id);
         return (
           <SettingsCard
             key={id}
@@ -255,7 +255,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
+            status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

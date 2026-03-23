@@ -52,27 +52,31 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 		if !ok {
 			continue // Vault not registered in orchestrator.
 		}
-		cm := vault.Chunks
-		if vaultCfg.Policy == nil {
-			continue // Vault doesn't reference a policy.
+		cm := vault.ChunkManager()
+
+		// Resolve rotation policy from the first tier's config.
+		if len(vaultCfg.TierIDs) == 0 {
+			continue
+		}
+		tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
+		if tierCfg == nil || tierCfg.RotationPolicyID == nil {
+			continue
 		}
 
-		policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.Policy)
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
 		if policyCfg == nil {
 			// Policy was deleted — nothing to do; vault keeps its current policy.
-			// We can't revert to "type default" from here, and the dangling
-			// reference will be caught on next restart or vault edit.
-			o.logger.Warn("vault references unknown policy", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *vaultCfg.Policy)
+			o.logger.Warn("tier references unknown policy", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *tierCfg.RotationPolicyID)
 			continue
 		}
 
 		policy, err := policyCfg.ToRotationPolicy()
 		if err != nil {
-			return fmt.Errorf("invalid policy %s for vault %s: %w", *vaultCfg.Policy, vaultCfg.ID, err)
+			return fmt.Errorf("invalid policy %s for vault %s: %w", *tierCfg.RotationPolicyID, vaultCfg.ID, err)
 		}
 		if policy != nil {
-			vault.Chunks.SetRotationPolicy(policy)
-			o.logger.Info("vault rotation policy updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *vaultCfg.Policy)
+			vault.ChunkManager().SetRotationPolicy(policy)
+			o.logger.Info("vault rotation policy updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *tierCfg.RotationPolicyID)
 		}
 
 		// Update cron rotation job.
@@ -125,13 +129,23 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 			continue // Vault not registered locally.
 		}
 
+		// Resolve retention rules from the first tier.
+		var tierRetentionRules []config.RetentionRule
+		if len(vaultCfg.TierIDs) > 0 {
+			tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
+			if tierCfg != nil {
+				tierRetentionRules = tierCfg.RetentionRules
+			}
+		}
+
 		runner, hasRunner := o.retention[vaultCfg.ID]
-		hasRules := len(vaultCfg.RetentionRules) > 0
+		hasRules := len(tierRetentionRules) > 0
 
 		switch {
 		case hasRules && hasRunner:
 			// Update existing runner's rules.
-			rules, err := resolveRetentionRules(cfg, vaultCfg)
+			tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
+			rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
 			if err != nil {
 				o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
 				continue
@@ -141,7 +155,8 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 
 		case hasRules && !hasRunner:
 			// Create new runner for vault that gained retention rules.
-			rules, err := resolveRetentionRules(cfg, vaultCfg)
+			tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
+			rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
 			if err != nil {
 				o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
 				continue
@@ -151,8 +166,8 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 			}
 			newRunner := &retentionRunner{
 				vaultID: vaultCfg.ID,
-				cm:      vault.Chunks,
-				im:      vault.Indexes,
+				cm:      vault.ChunkManager(),
+				im:      vault.IndexManager(),
 				rules:   rules,
 				orch:    o,
 				now:     o.now,

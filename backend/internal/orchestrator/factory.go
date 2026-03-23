@@ -10,7 +10,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
-	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
 )
@@ -108,8 +107,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	return nil
 }
 
-// applyVaults creates chunk/index/query managers for each vault in the config,
-// compiles filters, applies rotation policies, and registers vaults.
+// applyVaults creates tier instances for each vault in the config,
+// compiles filters, and registers vaults.
 func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error {
 	vaultIDs := make(map[uuid.UUID]bool)
 
@@ -118,14 +117,6 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 			return fmt.Errorf("duplicate vault ID: %s", vaultCfg.ID)
 		}
 		vaultIDs[vaultCfg.ID] = true
-
-		// Migrate legacy cloud vaults → file vaults with sealed backing.
-		migrateCloudVault(&vaultCfg)
-
-		// Skip vaults belonging to another node.
-		if vaultCfg.NodeID != "" && vaultCfg.NodeID != o.localNodeID {
-			continue
-		}
 
 		if err := o.initVault(cfg, vaultCfg, factories); err != nil {
 			return err
@@ -140,26 +131,18 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 	return nil
 }
 
-// initVault creates chunk/index/query managers for a single vault and registers it.
+// initVault creates tier instances for a single vault and registers it.
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
 func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) error {
 	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
 
-	cmFactory, ok := factories.ChunkManagers[vaultCfg.Type]
-	if !ok {
-		return fmt.Errorf("unknown chunk manager type: %s", vaultCfg.Type)
+	if len(vaultCfg.TierIDs) == 0 {
+		o.logger.Warn("vault has no tier IDs, skipping", "id", vaultCfg.ID, "name", vaultCfg.Name)
+		return nil
 	}
 
-	var cmLogger *slog.Logger
-	if factories.Logger != nil {
-		cmLogger = factories.Logger.With("vault", vaultCfg.ID)
-	}
-	cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
-	cmParams["_expect_existing"] = "true"
-	cmParams["_vault_id"] = vaultCfg.ID.String()
-
-	cm, err := cmFactory(cmParams, cmLogger)
+	tiers, err := o.buildTierInstances(cfg, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
 			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
@@ -170,49 +153,14 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 		return nil
 	}
 
-	if vaultCfg.Policy != nil {
-		if err := o.applyRotationPolicy(cfg, vaultCfg, cm); err != nil {
-			return err
-		}
-	}
-
-	imFactory, ok := factories.IndexManagers[vaultCfg.Type]
-	if !ok {
-		return fmt.Errorf("unknown index manager type: %s", vaultCfg.Type)
-	}
-	var imLogger *slog.Logger
-	if factories.Logger != nil {
-		imLogger = factories.Logger.With("vault", vaultCfg.ID)
-	}
-	im, err := imFactory(cmParams, cm, imLogger)
-	if err != nil {
-		o.logger.Error("vault index manager failed to initialize, skipping",
-			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
-		if o.alerts != nil {
-			o.alerts.Set(alertKey, alert.Error, "orchestrator",
-				fmt.Sprintf("Vault %q index manager failed to initialize: %v", vaultCfg.Name, err))
-		}
-		_ = cm.Close()
+	// temporary: if all tiers are assigned to other nodes, skip this vault locally (until tier election)
+	if len(tiers) == 0 {
+		o.logger.Info("vault has no local tiers, skipping", "id", vaultCfg.ID, "name", vaultCfg.Name)
 		return nil
 	}
 
-	var qeLogger *slog.Logger
-	if factories.Logger != nil {
-		qeLogger = factories.Logger.With("vault", vaultCfg.ID)
-	}
-	qe := query.New(cm, im, qeLogger)
-
-	// Inject index builders into the chunk manager's post-seal pipeline.
-	// Cloud-backed vaults skip index building — local files are deleted after upload.
-	backing := vaultCfg.Params["sealed_backing"]
-	buildIndexes := backing == "" || backing == "local"
-	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok && buildIndexes {
-		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
-	}
-
-	vault := NewVault(vaultCfg.ID, cm, im, qe)
+	vault := NewVault(vaultCfg.ID, tiers...)
 	vault.Name = vaultCfg.Name
-	vault.Type = vaultCfg.Type
 	vault.Enabled = vaultCfg.Enabled
 	o.RegisterVault(vault)
 	if o.alerts != nil {
@@ -222,35 +170,15 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 	return nil
 }
 
-// applyRotationPolicy resolves and applies a rotation policy (and optional cron schedule)
-// to a chunk manager.
-func (o *Orchestrator) applyRotationPolicy(cfg *config.Config, vaultCfg config.VaultConfig, cm chunk.ChunkManager) error {
-	policyCfg := findRotationPolicy(cfg.RotationPolicies, *vaultCfg.Policy)
-	if policyCfg == nil {
-		return fmt.Errorf("vault %s references unknown policy: %s", vaultCfg.ID, *vaultCfg.Policy)
-	}
-	policy, err := policyCfg.ToRotationPolicy()
-	if err != nil {
-		return fmt.Errorf("invalid policy %s for vault %s: %w", *vaultCfg.Policy, vaultCfg.ID, err)
-	}
-	if policy != nil {
-		cm.SetRotationPolicy(policy)
-	}
-
-	// Set up cron rotation if configured.
-	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
-		if err := o.cronRotation.addJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, cm); err != nil {
-			return fmt.Errorf("cron rotation for vault %s: %w", vaultCfg.ID, err)
-		}
-	}
-
-	return nil
-}
-
-// applyRetention sets up retention jobs for vaults that have retention rules.
+// applyRetention sets up retention jobs for vaults whose first tier has retention rules.
 func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 	for _, vaultCfg := range cfg.Vaults {
-		if len(vaultCfg.RetentionRules) == 0 {
+		if len(vaultCfg.TierIDs) == 0 {
+			continue
+		}
+
+		tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
+		if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
 			continue
 		}
 
@@ -259,7 +187,7 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 			continue
 		}
 
-		rules, err := resolveRetentionRules(cfg, vaultCfg)
+		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
 		if err != nil {
 			return err
 		}
@@ -268,13 +196,13 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 		}
 
 		runner := &retentionRunner{
-			vaultID:  vaultCfg.ID,
-			cm:       vault.Chunks,
-			im:       vault.Indexes,
-			rules: rules,
-			orch:     o,
-			now:      o.now,
-			logger:   o.logger,
+			vaultID: vaultCfg.ID,
+			cm:      vault.ChunkManager(),
+			im:      vault.IndexManager(),
+			rules:   rules,
+			orch:    o,
+			now:     o.now,
+			logger:  o.logger,
 		}
 		o.retention[vaultCfg.ID] = runner
 		if err := o.scheduler.AddJob(retentionJobName(vaultCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
@@ -284,30 +212,6 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 	}
 
 	return nil
-}
-
-// resolveRetentionRules converts config rules to resolved retentionRule objects.
-func resolveRetentionRules(cfg *config.Config, vaultCfg config.VaultConfig) ([]retentionRule, error) {
-	var rules []retentionRule
-	for _, b := range vaultCfg.RetentionRules {
-		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
-		if retCfg == nil {
-			return nil, fmt.Errorf("vault %s references unknown retention policy: %s", vaultCfg.ID, b.RetentionPolicyID)
-		}
-		policy, err := retCfg.ToRetentionPolicy()
-		if err != nil {
-			return nil, fmt.Errorf("invalid retention policy %s for vault %s: %w", b.RetentionPolicyID, vaultCfg.ID, err)
-		}
-		if policy == nil {
-			continue
-		}
-		rules = append(rules, retentionRule{
-			policy:        policy,
-			action:        b.Action,
-			ejectRouteIDs: b.EjectRouteIDs,
-		})
-	}
-	return rules, nil
 }
 
 // applyIngesters creates and registers ingesters from the config.

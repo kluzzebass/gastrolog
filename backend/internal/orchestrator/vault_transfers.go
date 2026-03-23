@@ -97,6 +97,8 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 }
 
 // resolveVaultNode loads config and returns the NodeID for the given vault.
+// With tiered storage, vaults no longer have a NodeID. All nodes can serve
+// all vaults. This always returns empty string (local).
 func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) (string, error) {
 	if o.cfgLoader == nil {
 		return "", errors.New("config loader not configured")
@@ -107,7 +109,7 @@ func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) 
 	}
 	for _, v := range cfg.Vaults {
 		if v.ID == vaultID {
-			return v.NodeID, nil
+			return "", nil
 		}
 	}
 	return "", fmt.Errorf("%w: %s (not in config)", ErrVaultNotFound, vaultID)
@@ -137,8 +139,8 @@ func (o *Orchestrator) deleteSourceChunk(srcID uuid.UUID, srcCM chunk.ChunkManag
 	o.mu.RLock()
 	srcVault := o.vaults[srcID]
 	o.mu.RUnlock()
-	if srcVault != nil && srcVault.Indexes != nil {
-		if err := srcVault.Indexes.DeleteIndexes(chunkID); err != nil {
+	if srcVault != nil && srcVault.IndexManager() != nil {
+		if err := srcVault.IndexManager().DeleteIndexes(chunkID); err != nil {
 			o.logger.Warn("retention migrate: failed to delete source indexes",
 				"chunk", chunkID.String(), "error", err)
 		}
@@ -325,8 +327,8 @@ func (o *Orchestrator) finishDrain(vaultID uuid.UUID) {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
-	if err := vault.Chunks.Close(); err != nil {
-		o.logger.Warn("drain: failed to close chunk manager", "vault", vaultID, "error", err)
+	if err := vault.Close(); err != nil {
+		o.logger.Warn("drain: failed to close vault", "vault", vaultID, "error", err)
 	}
 
 	delete(o.vaults, vaultID)

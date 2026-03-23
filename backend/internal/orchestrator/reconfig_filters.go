@@ -33,13 +33,9 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 }
 
 // resolveVaultNodeID looks up the NodeID for a vault in the config.
-// Returns empty string if the vault is not found or has no node assignment.
-func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
-	for i := range cfg.Vaults {
-		if cfg.Vaults[i].ID == vaultID {
-			return cfg.Vaults[i].NodeID
-		}
-	}
+// With tiered storage, vaults no longer have a NodeID. All nodes
+// instantiate all tiers. Always returns empty string.
+func resolveVaultNodeID(_ *config.Config, _ uuid.UUID) string {
 	return ""
 }
 

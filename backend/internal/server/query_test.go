@@ -43,7 +43,7 @@ func newQueryTestSetup(t *testing.T, numRecords int) gastrologv1connect.QuerySer
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()
@@ -347,7 +347,7 @@ func TestGetFields(t *testing.T) {
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()

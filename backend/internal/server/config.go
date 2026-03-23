@@ -149,23 +149,10 @@ func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
 	vc := &apiv1.VaultConfig{
 		Id:      vaultCfg.ID.String(),
 		Name:    vaultCfg.Name,
-		Type:    vaultCfg.Type,
-		Params:  vaultCfg.Params,
 		Enabled: vaultCfg.Enabled,
-		NodeId:  vaultCfg.NodeID,
 	}
-	if vaultCfg.Policy != nil {
-		vc.Policy = vaultCfg.Policy.String()
-	}
-	for _, b := range vaultCfg.RetentionRules {
-		pb := &apiv1.RetentionRule{
-			RetentionPolicyId: b.RetentionPolicyID.String(),
-			Action:            string(b.Action),
-		}
-		for _, eid := range b.EjectRouteIDs {
-			pb.EjectRouteIds = append(pb.EjectRouteIds, eid.String())
-		}
-		vc.RetentionRules = append(vc.RetentionRules, pb)
+	for _, tid := range vaultCfg.TierIDs {
+		vc.TierIds = append(vc.TierIds, tid.String())
 	}
 	return vc
 }

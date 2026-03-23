@@ -33,6 +33,7 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 		CloudServiceId:    uuidPtrToString(tier.CloudServiceID),
 		ActiveChunkClass:  tier.ActiveChunkClass,
 		CacheClass:        tier.CacheClass,
+		NodeId:            tier.NodeID, // temporary: explicit node assignment until tier election
 	}
 }
 
@@ -99,6 +100,7 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 		CloudServiceID:    cloudServiceID,
 		ActiveChunkClass:  cmd.GetActiveChunkClass(),
 		CacheClass:        cmd.GetCacheClass(),
+		NodeID:            cmd.GetNodeId(), // temporary: explicit node assignment until tier election
 	}, nil
 }
 

@@ -38,7 +38,7 @@ func TestMetricsEndpoint(t *testing.T) {
 	}
 
 	vaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(vaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
 	handler := srv.Handler()

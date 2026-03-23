@@ -129,7 +129,6 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID uuid.UUID, me
 		Enabled:    s.orch.IsVaultEnabled(vaultID),
 	}
 	if cfg, err := s.getFullVaultConfig(ctx, vaultID); err == nil {
-		stat.Type = cfg.Type
 		stat.Name = cfg.Name
 	}
 
@@ -322,8 +321,6 @@ func (s *VaultServer) vaultInfoFromConfig(cfg config.VaultConfig, localSet map[u
 	info := &apiv1.VaultInfo{
 		Id:      cfg.ID.String(),
 		Name:    cfg.Name,
-		Type:    cfg.Type,
-		NodeId:  cfg.NodeID,
 		Enabled: cfg.Enabled,
 	}
 
@@ -376,13 +373,9 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id uuid.UUID) *api
 		Enabled: s.orch.IsVaultEnabled(id),
 	}
 
-	// Try to get name/type from config store even in fallback path.
+	// Try to get name from config store even in fallback path.
 	if cfg, err := s.getFullVaultConfig(ctx, id); err == nil {
 		info.Name = cfg.Name
-		info.Type = cfg.Type
-		if cfg.NodeID != "" {
-			info.NodeId = cfg.NodeID
-		}
 	}
 
 	if metas, err := s.orch.ListChunkMetas(id); err == nil {

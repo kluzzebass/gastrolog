@@ -78,7 +78,7 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 
 	memtest.BuildIndexes(t, s.CM, s.IM)
 
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set filter so orchestrator knows about the vault.
 	filter, _ := orchestrator.CompileFilter(defaultID, "*")
@@ -306,9 +306,13 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	}
 
 	// Create default vault via config + orchestrator.
+	tierID := uuid.Must(uuid.NewV7())
+	cfgStore.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "default-tier", Type: config.TierTypeMemory,
+	})
 	vaultCfg := config.VaultConfig{
-		ID:   defaultID,
-		Type: "memory",
+		ID:      defaultID,
+		TierIDs: []uuid.UUID{tierID},
 	}
 	cfgStore.PutVault(context.Background(), vaultCfg)
 
@@ -654,6 +658,14 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
+	// Create a memory tier for vault factories.
+	tierID := uuid.Must(uuid.NewV7())
+	if err := cfgStore.PutTier(ctx, config.TierConfig{
+		ID: tierID, Name: "merge-tier", Type: config.TierTypeMemory,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "merge-catch-all", Expression: "*"},
 	}))
@@ -667,9 +679,10 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	}{{srcID, "merge-src"}, {dstID, "merge-dst"}} {
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:   v.id.String(),
-				Name: v.name,
-				Type: "memory",
+				Id:      v.id.String(),
+				Name:    v.name,
+				Enabled: true,
+				TierIds: []string{tierID.String()},
 			},
 		}))
 		if err != nil {
@@ -797,12 +810,25 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		name string
 	}{{srcID, "file-merge-src"}, {dstID, "file-merge-dst"}} {
 		vaultDir := filepath.Join(homeDir, "vaults", v.id.String())
+		// Create a local tier + node storage config for the vault directory.
+		fileTierID := uuid.Must(uuid.NewV7())
+		if err := cfgStore.PutTier(ctx, config.TierConfig{
+			ID: fileTierID, Name: v.name + "-tier", Type: config.TierTypeLocal, StorageClass: 1,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		areaID := uuid.Must(uuid.NewV7())
+		if err := cfgStore.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+			NodeID: "", Areas: []config.StorageArea{{ID: areaID, StorageClass: 1, Path: vaultDir}},
+		}); err != nil {
+			t.Fatal(err)
+		}
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:     v.id.String(),
-				Name:   v.name,
-				Type:   "file",
-				Params: map[string]string{"dir": vaultDir},
+				Id:      v.id.String(),
+				Name:    v.name,
+				Enabled: true,
+				TierIds: []string{fileTierID.String()},
 			},
 		}))
 		if err != nil {
@@ -945,24 +971,8 @@ func TestMergeVaultsSameVault(t *testing.T) {
 	}
 }
 
-func TestMigrateVaultFileRequiresDir(t *testing.T) {
-	t.Parallel()
-	tc := newFullVaultTestSetup(t, 5)
-	ctx := context.Background()
-
-	// Migrating to "file" type without providing dir should fail.
-	_, err := tc.vault.MigrateVault(ctx, connect.NewRequest(&gastrologv1.MigrateVaultRequest{
-		Source:          tc.defaultID.String(),
-		Destination:     "file-vault",
-		DestinationType: "file",
-	}))
-	if err == nil {
-		t.Fatal("expected error for file type without dir")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
-	}
-}
+// TestMigrateVaultFileRequiresDir was removed: MigrateVault now inherits
+// tiers from the source vault. The DestinationType field is no longer used.
 
 func TestMergeVaultsAutoDisablesSource(t *testing.T) {
 	t.Parallel()

@@ -272,6 +272,7 @@ type configVaultOwner struct {
 	localNodeID string
 }
 
+// temporary: uses tier-level NodeID for node assignment until tier election.
 func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string) string {
 	if c.cfgStore == nil {
 		return ""
@@ -280,14 +281,32 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 	if err != nil {
 		return ""
 	}
-	vc, err := c.cfgStore.GetVault(ctx, id)
-	if err != nil || vc == nil {
+	vaultCfg, err := c.cfgStore.GetVault(ctx, id)
+	if err != nil || vaultCfg == nil {
 		return ""
 	}
-	if vc.NodeID == "" || vc.NodeID == c.localNodeID {
+
+	tiers, err := c.cfgStore.ListTiers(ctx)
+	if err != nil {
 		return ""
 	}
-	return vc.NodeID
+
+	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
+	for i := range tiers {
+		tierMap[tiers[i].ID] = &tiers[i]
+	}
+
+	// temporary: find the tier's NodeID to determine the owning node (until tier election).
+	for _, tierID := range vaultCfg.TierIDs {
+		tc := tierMap[tierID]
+		if tc == nil {
+			continue
+		}
+		if tc.NodeID != "" && tc.NodeID != c.localNodeID {
+			return tc.NodeID
+		}
+	}
+	return ""
 }
 
 // isLoopback returns true if host is a loopback address (localhost, 127.0.0.1, ::1).

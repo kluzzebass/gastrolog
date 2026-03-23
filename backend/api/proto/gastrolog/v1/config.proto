@@ -162,16 +162,16 @@ message RetentionRule {
 
 message VaultConfig {
   string id = 1;
-  string type = 2;
-  // field 3 was 'filter' (UUID) — routing moved to RouteConfig
-  reserved 3;
-  string policy = 4;
-  map<string, string> params = 5;
-  // field 6 was 'retention' (single UUID) — removed
+  reserved 2;  // was: type
+  reserved 3;  // was: filter
+  reserved 4;  // was: policy
+  reserved 5;  // was: params
+  reserved 6;  // was: retention (single UUID)
   bool enabled = 7;
   string name = 8;
-  repeated RetentionRule retention_rules = 9;
-  string node_id = 10;
+  reserved 9;  // was: retention_rules (moved to TierConfig)
+  reserved 10; // was: node_id (tiers placed by election, not operator)
+  repeated string tier_ids = 11;
 }
 
 message RouteDestination {
@@ -702,7 +702,10 @@ enum TierType {
 
 // TierConfig defines a storage tier. A vault contains an ordered list
 // of tiers. Each tier is a full chunk manager with its own rotation
-// and retention policies. Not bound to a node.
+// and retention policies. In the final model, tiers are placed on
+// nodes by election based on storage class availability. The node_id
+// field is a temporary stand-in until tier primary election is
+// implemented — it explicitly assigns a tier to a node.
 message TierConfig {
   string id = 1;
   string name = 2;
@@ -714,6 +717,7 @@ message TierConfig {
   string cloud_service_id = 8;
   uint32 active_chunk_class = 9;
   uint32 cache_class = 10;
+  string node_id = 11;  // temporary: explicit node assignment until tier election
 }
 
 message PutNodeConfigRequest {

@@ -56,7 +56,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -142,7 +142,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 	}
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -217,7 +217,7 @@ func TestShutdownWithoutDrain(t *testing.T) {
 	})
 
 	defaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})

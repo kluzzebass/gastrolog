@@ -127,7 +127,7 @@ func (s *Server) writeVaultMetrics(w http.ResponseWriter, orch *orchestrator.Orc
 		cfgStores, err := s.cfgStore.ListVaults(context.Background())
 		if err == nil {
 			for _, st := range cfgStores {
-				metaMap[st.ID.String()] = vaultMeta{name: st.Name, vaultType: st.Type}
+				metaMap[st.ID.String()] = vaultMeta{name: st.Name, vaultType: ""}
 			}
 		}
 	}

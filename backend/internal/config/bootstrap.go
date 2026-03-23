@@ -16,6 +16,7 @@ func DefaultConfig() *Config {
 	filterID := uuid.Must(uuid.NewV7())
 	rotationID := uuid.Must(uuid.NewV7())
 	retentionID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 	routeID := uuid.Must(uuid.NewV7())
 	ingesterID := uuid.Must(uuid.NewV7())
@@ -30,16 +31,23 @@ func DefaultConfig() *Config {
 		RetentionPolicies: []RetentionPolicyConfig{
 			{ID: retentionID, Name: "default", MaxChunks: new(int64(10))},
 		},
+		Tiers: []TierConfig{
+			{
+				ID:               tierID,
+				Name:             "default",
+				Type:             TierTypeMemory,
+				RotationPolicyID: new(rotationID),
+				RetentionRules: []RetentionRule{
+					{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
+				},
+			},
+		},
 		Vaults: []VaultConfig{
 			{
 				ID:      vaultID,
 				Name:    "default",
-				Type:    "memory",
 				Enabled: true,
-				Policy:  new(rotationID),
-				RetentionRules: []RetentionRule{
-					{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
-				},
+				TierIDs: []uuid.UUID{tierID},
 			},
 		},
 		Routes: []RouteConfig{
@@ -86,6 +94,11 @@ func Bootstrap(ctx context.Context, store Store) error {
 	}
 	for _, rp := range cfg.RetentionPolicies {
 		if err := store.PutRetentionPolicy(ctx, rp); err != nil {
+			return err
+		}
+	}
+	for _, tier := range cfg.Tiers {
+		if err := store.PutTier(ctx, tier); err != nil {
 			return err
 		}
 	}

@@ -145,7 +145,7 @@ func (o *Orchestrator) schedulePostSeal(registryKey uuid.UUID, chunkID chunk.Chu
 		return
 	}
 
-	processor, ok := vault.Chunks.(chunk.ChunkPostSealProcessor)
+	processor, ok := vault.ChunkManager().(chunk.ChunkPostSealProcessor)
 	if ok {
 		name := fmt.Sprintf("post-seal:%s:%s", registryKey, chunkID)
 		if err := o.scheduler.RunOnce(name, processor.PostSealProcess, context.Background(), chunkID); err != nil {
@@ -156,7 +156,7 @@ func (o *Orchestrator) schedulePostSeal(registryKey uuid.UUID, chunkID chunk.Chu
 	}
 
 	// Fallback for non-file managers (e.g. memory) — compress only.
-	compressor, ok := vault.Chunks.(chunk.ChunkCompressor)
+	compressor, ok := vault.ChunkManager().(chunk.ChunkCompressor)
 	if !ok {
 		return
 	}

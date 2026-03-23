@@ -136,16 +136,17 @@ func TestApplyPutVault(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	id := newID()
+	tierID := newID()
 	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{
-		ID: id, Name: "vault", Type: "file", Enabled: true,
-		Params: map[string]string{"path": "/data"},
+		ID: id, Name: "vault", Enabled: true,
+		TierIDs: []uuid.UUID{tierID},
 	}))
 
 	got, err := fsm.Store().GetVault(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "vault" || !got.Enabled || got.Params["path"] != "/data" {
+	if got == nil || got.Name != "vault" || !got.Enabled || len(got.TierIDs) != 1 || got.TierIDs[0] != tierID {
 		t.Fatalf("unexpected vault: %+v", got)
 	}
 }
@@ -154,7 +155,7 @@ func TestApplyDeleteVault(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	id := newID()
-	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: id, Name: "v", Type: "file"}))
+	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: id, Name: "v"}))
 	applyCmd(t, fsm, command.NewDeleteVault(id, false))
 
 	got, err := fsm.Store().GetVault(context.Background(), id)
@@ -188,7 +189,7 @@ func TestApplyDeleteIngester(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	id := newID()
-	applyCmd(t, fsm, command.NewPutIngester(config.IngesterConfig{ID: id, Name: "ing", Type: "syslog-udp"}))
+	applyCmd(t, fsm, command.NewPutIngester(config.IngesterConfig{ID: id, Name: "ing"}))
 	applyCmd(t, fsm, command.NewDeleteIngester(id))
 
 	got, err := fsm.Store().GetIngester(context.Background(), id)
@@ -580,69 +581,69 @@ func TestApplySetNodeStorageConfig(t *testing.T) {
 }
 
 // TestCompoundDeleteRotationPolicy verifies the cascade: deleting a rotation
-// policy clears the Policy reference on vaults that used it.
+// policy clears the RotationPolicyID reference on tiers that used it.
 func TestCompoundDeleteRotationPolicy(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 
 	policyID := newID()
 	otherPolicyID := newID()
-	vault1 := newID()
-	vault2 := newID()
-	vault3 := newID()
+	tier1 := newID()
+	tier2 := newID()
+	tier3 := newID()
 
 	// Create policies.
 	applyCmd(t, fsm, command.NewPutRotationPolicy(config.RotationPolicyConfig{ID: policyID, Name: "target"}))
 	applyCmd(t, fsm, command.NewPutRotationPolicy(config.RotationPolicyConfig{ID: otherPolicyID, Name: "other"}))
 
-	// Create vaults: vault1 and vault2 reference the target policy, vault3 references the other.
-	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: vault1, Name: "v1", Type: "file", Policy: &policyID}))
-	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: vault2, Name: "v2", Type: "file", Policy: &policyID}))
-	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{ID: vault3, Name: "v3", Type: "file", Policy: &otherPolicyID}))
+	// Create tiers: tier1 and tier2 reference the target policy, tier3 references the other.
+	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{ID: tier1, Name: "t1", Type: config.TierTypeMemory, RotationPolicyID: &policyID}))
+	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{ID: tier2, Name: "t2", Type: config.TierTypeMemory, RotationPolicyID: &policyID}))
+	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{ID: tier3, Name: "t3", Type: config.TierTypeMemory, RotationPolicyID: &otherPolicyID}))
 
 	// Delete the target policy.
 	applyCmd(t, fsm, command.NewDeleteRotationPolicy(policyID))
 
 	ctx := context.Background()
 
-	// vault1 and vault2 should have nil Policy.
-	for _, id := range []uuid.UUID{vault1, vault2} {
-		v, err := fsm.Store().GetVault(ctx, id)
+	// tier1 and tier2 should have nil RotationPolicyID.
+	for _, id := range []uuid.UUID{tier1, tier2} {
+		tr, err := fsm.Store().GetTier(ctx, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if v.Policy != nil {
-			t.Errorf("vault %s still has policy %s", v.Name, v.Policy)
+		if tr.RotationPolicyID != nil {
+			t.Errorf("tier %s still has rotation policy %s", tr.Name, tr.RotationPolicyID)
 		}
 	}
 
-	// vault3 should still reference the other policy.
-	v3, err := fsm.Store().GetVault(ctx, vault3)
+	// tier3 should still reference the other policy.
+	tr3, err := fsm.Store().GetTier(ctx, tier3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v3.Policy == nil || *v3.Policy != otherPolicyID {
-		t.Errorf("vault3 policy should be %s, got %v", otherPolicyID, v3.Policy)
+	if tr3.RotationPolicyID == nil || *tr3.RotationPolicyID != otherPolicyID {
+		t.Errorf("tier3 rotation policy should be %s, got %v", otherPolicyID, tr3.RotationPolicyID)
 	}
 }
 
 // TestCompoundDeleteRetentionPolicy verifies the cascade: deleting a retention
-// policy removes matching retention rules from vaults.
+// policy removes matching retention rules from tiers.
 func TestCompoundDeleteRetentionPolicy(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 
 	policyID := newID()
 	otherPolicyID := newID()
-	vaultID := newID()
+	tierID := newID()
 
 	// Create policies.
 	applyCmd(t, fsm, command.NewPutRetentionPolicy(config.RetentionPolicyConfig{ID: policyID, Name: "target"}))
 	applyCmd(t, fsm, command.NewPutRetentionPolicy(config.RetentionPolicyConfig{ID: otherPolicyID, Name: "other"}))
 
-	// Create vault with two retention rules: one referencing each policy.
-	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{
-		ID: vaultID, Name: "vault", Type: "file",
+	// Create tier with two retention rules: one referencing each policy.
+	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{
+		ID: tierID, Name: "tier", Type: config.TierTypeMemory,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: policyID, Action: config.RetentionActionExpire},
 			{RetentionPolicyID: otherPolicyID, Action: config.RetentionActionExpire},
@@ -653,17 +654,17 @@ func TestCompoundDeleteRetentionPolicy(t *testing.T) {
 	applyCmd(t, fsm, command.NewDeleteRetentionPolicy(policyID))
 
 	ctx := context.Background()
-	v, err := fsm.Store().GetVault(ctx, vaultID)
+	tr, err := fsm.Store().GetTier(ctx, tierID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Only the other policy rule should remain.
-	if len(v.RetentionRules) != 1 {
-		t.Fatalf("expected 1 retention rule, got %d", len(v.RetentionRules))
+	if len(tr.RetentionRules) != 1 {
+		t.Fatalf("expected 1 retention rule, got %d", len(tr.RetentionRules))
 	}
-	if v.RetentionRules[0].RetentionPolicyID != otherPolicyID {
-		t.Errorf("remaining rule should reference %s, got %s", otherPolicyID, v.RetentionRules[0].RetentionPolicyID)
+	if tr.RetentionRules[0].RetentionPolicyID != otherPolicyID {
+		t.Errorf("remaining rule should reference %s, got %s", otherPolicyID, tr.RetentionRules[0].RetentionPolicyID)
 	}
 }
 
@@ -687,19 +688,25 @@ func TestSnapshotRestore(t *testing.T) {
 	retID := newID()
 	applyCmd(t, fsm1, command.NewPutRetentionPolicy(config.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAge: &retMaxAge}))
 
-	vaultID := newID()
-	applyCmd(t, fsm1, command.NewPutVault(config.VaultConfig{
-		ID: vaultID, Name: "vault1", Type: "file",
-		Policy: &rpID, Enabled: true,
-		Params: map[string]string{"path": "/data"},
+	tierID := newID()
+	applyCmd(t, fsm1, command.NewPutTier(config.TierConfig{
+		ID: tierID, Name: "tier1", Type: config.TierTypeMemory,
+		RotationPolicyID: &rpID,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: retID, Action: config.RetentionActionExpire},
 		},
 	}))
 
+	vaultID := newID()
+	applyCmd(t, fsm1, command.NewPutVault(config.VaultConfig{
+		ID: vaultID, Name: "vault1",
+		Enabled: true,
+		TierIDs: []uuid.UUID{tierID},
+	}))
+
 	ingID := newID()
 	applyCmd(t, fsm1, command.NewPutIngester(config.IngesterConfig{
-		ID: ingID, Name: "ing1", Type: "syslog-udp", Enabled: true,
+		ID: ingID, Name: "ing1", Enabled: true,
 		Params: map[string]string{"port": "514"},
 	}))
 
@@ -765,8 +772,16 @@ func TestSnapshotRestore(t *testing.T) {
 	if gotVault == nil || gotVault.Name != "vault1" || !gotVault.Enabled {
 		t.Errorf("vault: %+v", gotVault)
 	}
-	if gotVault != nil && len(gotVault.RetentionRules) != 1 {
-		t.Errorf("vault retention rules: %+v", gotVault.RetentionRules)
+	if gotVault != nil && len(gotVault.TierIDs) != 1 {
+		t.Errorf("vault tier IDs: %+v", gotVault.TierIDs)
+	}
+
+	gotTier, _ := fsm2.Store().GetTier(ctx, tierID)
+	if gotTier == nil || gotTier.Name != "tier1" {
+		t.Errorf("tier: %+v", gotTier)
+	}
+	if gotTier != nil && len(gotTier.RetentionRules) != 1 {
+		t.Errorf("tier retention rules: %+v", gotTier.RetentionRules)
 	}
 
 	gotIng, _ := fsm2.Store().GetIngester(ctx, ingID)

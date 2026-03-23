@@ -383,21 +383,18 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) config.Stor
 		}
 	})
 
-	t.Run("VaultRetentionRules", func(t *testing.T) {
+	t.Run("VaultTierIDs", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
-		retID := newID()
-		ejectRouteID := newID()
+		tierID1 := newID()
+		tierID2 := newID()
 		v := config.VaultConfig{
-			ID:   id,
-			Name: "main",
-			Type: "file",
-			RetentionRules: []config.RetentionRule{
-				{RetentionPolicyID: retID, Action: config.RetentionActionExpire},
-				{RetentionPolicyID: retID, Action: config.RetentionActionEject, EjectRouteIDs: []uuid.UUID{ejectRouteID}},
-			},
+			ID:      id,
+			Name:    "main",
+			Enabled: true,
+			TierIDs: []uuid.UUID{tierID1, tierID2},
 		}
 		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -407,20 +404,14 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) config.Stor
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if len(got.RetentionRules) != 2 {
-			t.Fatalf("expected 2 rules, got %d", len(got.RetentionRules))
+		if len(got.TierIDs) != 2 {
+			t.Fatalf("expected 2 tier IDs, got %d", len(got.TierIDs))
 		}
-		if got.RetentionRules[0].RetentionPolicyID != retID {
-			t.Errorf("rule[0] policy: got %s, want %s", got.RetentionRules[0].RetentionPolicyID, retID)
+		if got.TierIDs[0] != tierID1 {
+			t.Errorf("tierIDs[0]: got %s, want %s", got.TierIDs[0], tierID1)
 		}
-		if got.RetentionRules[0].Action != config.RetentionActionExpire {
-			t.Errorf("rule[0] action: got %q, want %q", got.RetentionRules[0].Action, config.RetentionActionExpire)
-		}
-		if got.RetentionRules[1].Action != config.RetentionActionEject {
-			t.Errorf("rule[1] action: got %q, want %q", got.RetentionRules[1].Action, config.RetentionActionEject)
-		}
-		if len(got.RetentionRules[1].EjectRouteIDs) != 1 || got.RetentionRules[1].EjectRouteIDs[0] != ejectRouteID {
-			t.Errorf("rule[1] ejectRouteIDs: got %v, want [%s]", got.RetentionRules[1].EjectRouteIDs, ejectRouteID)
+		if got.TierIDs[1] != tierID2 {
+			t.Errorf("tierIDs[1]: got %s, want %s", got.TierIDs[1], tierID2)
 		}
 	})
 }
@@ -431,13 +422,12 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		policyID := newID()
+		tierID := newID()
 		v := config.VaultConfig{
-			ID:     id,
-			Name:   "main",
-			Type:   "file",
-			Policy: &policyID,
-			Params: map[string]string{"dir": "/var/log"},
+			ID:      id,
+			Name:    "main",
+			Enabled: true,
+			TierIDs: []uuid.UUID{tierID},
 		}
 
 		if err := s.PutVault(ctx, v); err != nil {
@@ -457,12 +447,11 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if got.Name != "main" {
 			t.Errorf("Name: expected %q, got %q", "main", got.Name)
 		}
-		if got.Type != "file" {
-			t.Errorf("Type: expected %q, got %q", "file", got.Type)
+		if !got.Enabled {
+			t.Error("Enabled: expected true")
 		}
-		assertUUIDPtr(t, "Policy", got.Policy, policyID)
-		if got.Params["dir"] != "/var/log" {
-			t.Errorf("Params[dir]: expected %q, got %q", "/var/log", got.Params["dir"])
+		if len(got.TierIDs) != 1 || got.TierIDs[0] != tierID {
+			t.Errorf("TierIDs: expected [%s], got %v", tierID, got.TierIDs)
 		}
 	})
 
@@ -471,12 +460,14 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		v1 := config.VaultConfig{ID: id, Name: "s1", Type: "file"}
+		tierID1 := newID()
+		tierID2 := newID()
+		v1 := config.VaultConfig{ID: id, Name: "s1", TierIDs: []uuid.UUID{tierID1}}
 		if err := s.PutVault(ctx, v1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		v2 := config.VaultConfig{ID: id, Name: "s1", Type: "memory"}
+		v2 := config.VaultConfig{ID: id, Name: "s1", TierIDs: []uuid.UUID{tierID2}}
 		if err := s.PutVault(ctx, v2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -485,8 +476,8 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Type != "memory" {
-			t.Errorf("Type after upsert: expected %q, got %q", "memory", got.Type)
+		if len(got.TierIDs) != 1 || got.TierIDs[0] != tierID2 {
+			t.Errorf("TierIDs after upsert: expected [%s], got %v", tierID2, got.TierIDs)
 		}
 
 		all, err := s.ListVaults(ctx)
@@ -512,10 +503,10 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 
 		idA := newID()
 		idB := newID()
-		if err := s.PutVault(ctx, config.VaultConfig{ID: idA, Name: "a", Type: "file"}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: idA, Name: "a"}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutVault(ctx, config.VaultConfig{ID: idB, Name: "b", Type: "memory"}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: idB, Name: "b"}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -541,7 +532,7 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutVault(ctx, config.VaultConfig{ID: id, Name: "del", Type: "file"}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: id, Name: "del"}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
@@ -563,12 +554,12 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	t.Run("NilVaultParams", func(t *testing.T) {
+	t.Run("NilVaultTierIDs", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
-		v := config.VaultConfig{ID: id, Name: "s1", Type: "memory", Params: nil}
+		v := config.VaultConfig{ID: id, Name: "s1", TierIDs: nil}
 		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
@@ -577,8 +568,8 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Params != nil {
-			t.Errorf("expected nil Params, got %v", got.Params)
+		if got.TierIDs != nil {
+			t.Errorf("expected nil TierIDs, got %v", got.TierIDs)
 		}
 	})
 }
@@ -760,7 +751,7 @@ func testIntegration(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err := s.PutRotationPolicy(ctx, config.RotationPolicyConfig{ID: rpSlowID, Name: "slow", MaxAge: new("1h")}); err != nil {
 			t.Fatalf("PutRotationPolicy: %v", err)
 		}
-		if err := s.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "main", Type: "file", Policy: &rpFastID}); err != nil {
+		if err := s.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "main", Enabled: true}); err != nil {
 			t.Fatalf("PutVault: %v", err)
 		}
 		if err := s.PutIngester(ctx, config.IngesterConfig{ID: ing1ID, Name: "sys1", Type: "syslog-udp", Enabled: true, Params: map[string]string{"port": "514"}}); err != nil {

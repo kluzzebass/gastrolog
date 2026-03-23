@@ -126,16 +126,10 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 		return
 	}
 
-	if vaultCfg.NodeID != "" && vaultCfg.NodeID != d.localNodeID {
-		d.maybeStartDrain(ctx, id, vaultCfg.NodeID)
-		// Always reload filters so forwarding targets point to the new node.
-		// maybeStartDrain handles the source node (drain updates filters),
-		// but on every OTHER node the filter set still has the old target.
-		d.reloadFilters(ctx)
-		return
-	}
+	// With tiered storage, vaults no longer have a NodeID. Every node
+	// instantiates all tiers it can serve.
 
-	// Vault assigned to this node — cancel any in-progress drain.
+	// Cancel any in-progress drain.
 	if d.orch.IsDraining(id) {
 		if err := d.orch.CancelDrain(ctx, id); err != nil {
 			d.logger.Error("dispatch: cancel drain", "id", id, "error", err)
@@ -145,7 +139,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
-			d.logger.Error("dispatch: add vault", "id", id, "name", vaultCfg.Name, "type", vaultCfg.Type, "error", err)
+			d.logger.Error("dispatch: add vault", "id", id, "name", vaultCfg.Name, "error", err)
 		}
 		return
 	}
@@ -210,7 +204,7 @@ func (d *configDispatcher) handleVaultDeleted(n raftfsm.Notification) {
 	if err := d.orch.ForceRemoveVault(n.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		d.logger.Error("dispatch: force remove vault", "id", n.ID, "name", n.Name, "error", err)
 	}
-	if n.DeleteData && n.Dir != "" && (n.NodeID == "" || n.NodeID == d.localNodeID) {
+	if n.DeleteData && n.Dir != "" {
 		if err := os.RemoveAll(n.Dir); err != nil {
 			d.logger.Error("dispatch: remove vault directory", "id", n.ID, "name", n.Name, "dir", n.Dir, "error", err)
 		}

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { VaultConfig, RotationPolicyConfig, RetentionPolicyConfig, RouteConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import type { VaultConfig, TierConfig, RouteConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import { TierType } from "../../api/gen/gastrolog/v1/config_pb";
 import {
   usePutVault,
   useDeleteVault,
@@ -13,24 +14,20 @@ import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
-import { FormField, TextInput, SelectInput } from "./FormField";
-import { VaultParamsForm } from "./VaultParamsForm";
+import { FormField, TextInput } from "./FormField";
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
-import { NodeBadge } from "./NodeBadge";
-import { NodeSelect } from "./NodeSelect";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
-import { JobProgress, RetentionRuleEditor, retentionRulesValid } from "./VaultHelpers";
-import type { RetentionRuleEdit } from "./VaultHelpers";
+import { JobProgress } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
+import { useThemeClass } from "../../hooks/useThemeClass";
 
 interface VaultSettingsCardProps {
   vault: VaultConfig;
   vaults: VaultConfig[];
+  tiers: TierConfig[];
   routes: RouteConfig[];
-  policies: RotationPolicyConfig[];
-  retentionPolicies: RetentionPolicyConfig[];
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -40,14 +37,14 @@ interface VaultSettingsCardProps {
 export function VaultSettingsCard({
   vault,
   vaults,
+  tiers,
   routes,
-  policies,
-  retentionPolicies,
   dark,
   expanded,
   onToggle,
   onOpenInspector,
 }: Readonly<VaultSettingsCardProps>) {
+  const c = useThemeClass(dark);
   const putVault = usePutVault();
   const deleteVault = useDeleteVault();
   const seal = useSealVault();
@@ -62,24 +59,23 @@ export function VaultSettingsCard({
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<{ jobId: string; label: string } | null>(null);
 
-  const policyOptions = [
-    { value: "", label: "(none)" },
-    ...policies
-      .map((p) => ({ value: p.id, label: p.name || p.id }))
-      .sort((a, b) => a.label.localeCompare(b.label)),
-  ];
+  // Resolve vault's tiers from the tier list.
+  const tierMap = new Map(tiers.map((t) => [t.id, t]));
+  const vaultTiers = vault.tierIds.map((id) => tierMap.get(id)).filter((t): t is TierConfig => !!t);
+
+  const tierTypeLabel = (type: TierType): string => {
+    switch (type) {
+      case TierType.MEMORY: return "memory";
+      case TierType.LOCAL: return "local";
+      case TierType.CLOUD: return "cloud";
+      default: return "unknown";
+    }
+  };
 
   const defaults = (_id: string) => ({
     name: vault.name,
-    policy: vault.policy,
-    retentionRules: vault.retentionRules.map((b): RetentionRuleEdit => ({
-      retentionPolicyId: b.retentionPolicyId,
-      action: b.action,
-      ejectRouteIds: b.ejectRouteIds,
-    })),
+    tierIds: [...vault.tierIds],
     enabled: vault.enabled,
-    params: { ...vault.params } as Record<string, string>,
-    nodeId: vault.nodeId,
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -93,46 +89,33 @@ export function VaultSettingsCard({
       id,
       e: {
         name: string;
-        policy: string;
-        retentionRules: RetentionRuleEdit[];
+        tierIds: string[];
         enabled: boolean;
-        params: Record<string, string>;
-        type: string;
-        nodeId: string;
       },
     ) => ({
       id,
       name: e.name,
-      type: e.type,
-      policy: e.policy,
-      retentionRules: e.retentionRules,
-      params: e.params,
+      tierIds: e.tierIds,
       enabled: e.enabled,
-      nodeId: e.nodeId,
     }),
     onDeleteTransform: (id) => ({ id, force: true, deleteData }),
     clearEdit,
   });
 
-  const hasPolicy = vault.policy && policies.some((p) => p.id === vault.policy);
-  const hasRetention = vault.retentionRules.length > 0;
-  const warnings = [
-    ...(!hasPolicy ? ["no rotation policy"] : []),
-    ...(!hasRetention ? ["no retention policy"] : []),
-  ];
+  const warnings: string[] = [];
+  if (vaultTiers.length === 0) warnings.push("no tiers configured");
 
   return (
     <SettingsCard
       key={vault.id}
       id={vault.name || vault.id}
-      typeBadge={vault.type}
-      secondaryBadge={vault.params["sealed_backing"] || undefined}
+      typeBadge={vaultTiers.length > 0 ? vaultTiers.map((t) => tierTypeLabel(t.type)).join(", ") : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       onDelete={() => handleDelete(vault.id)}
       deleteLabel="Delete"
-      deleteConfirmExtra={vault.type === "file" ? (
+      deleteConfirmExtra={vaultTiers.some((t) => t.type === TierType.LOCAL) ? (
         <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
           <input
             type="checkbox"
@@ -218,8 +201,8 @@ export function VaultSettingsCard({
             {mergeTarget !== null ? "Cancel Merge" : "Merge Into..."}
           </Button>
           <Button
-            onClick={() => saveVault(vault.id, { ...edit, type: vault.type })}
-            disabled={putVault.isPending || !isDirty(vault.id) || !retentionRulesValid(edit.retentionRules)}
+            onClick={() => saveVault(vault.id, edit)}
+            disabled={putVault.isPending || !isDirty(vault.id)}
           >
             {putVault.isPending ? "Saving..." : "Save"}
           </Button>
@@ -227,7 +210,6 @@ export function VaultSettingsCard({
       }
       headerRight={
         <span className="flex items-center gap-2">
-          <NodeBadge nodeId={edit.nodeId} dark={dark} />
           {!vault.enabled && (
             <Badge variant="ghost" dark={dark}>disabled</Badge>
           )}
@@ -258,33 +240,25 @@ export function VaultSettingsCard({
           label="Enabled"
           dark={dark}
         />
-        <NodeSelect
-          value={edit.nodeId}
-          onChange={(v) => setEdit(vault.id, { nodeId: v })}
-          dark={dark}
-        />
-        <FormField label="Rotation Policy" dark={dark}>
-          <SelectInput
-            value={edit.policy}
-            onChange={(v) => setEdit(vault.id, { policy: v })}
-            options={policyOptions}
-            dark={dark}
-          />
-        </FormField>
-        <RetentionRuleEditor
-          rules={edit.retentionRules}
-          onChange={(rules) => setEdit(vault.id, { retentionRules: rules })}
-          retentionPolicies={retentionPolicies}
-          routes={routes}
-          dark={dark}
-        />
-        <VaultParamsForm
-          vaultType={vault.type}
-          params={edit.params}
-          onChange={(p) => setEdit(vault.id, { params: p })}
-          dark={dark}
-          vaultName={edit.name || vault.name}
-        />
+        {/* Tier list (read-only summary; tier editing is a separate issue) */}
+        <div className="flex flex-col gap-1.5">
+          <span className={`text-[0.75em] font-medium uppercase tracking-[0.12em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            Tiers
+          </span>
+          {vaultTiers.length === 0 ? (
+            <span className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              No tiers assigned.
+            </span>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {vaultTiers.map((tier) => (
+                <Badge key={tier.id} variant="muted" dark={dark}>
+                  {tier.name || tier.id} ({tierTypeLabel(tier.type)})
+                </Badge>
+              ))}
+            </div>
+          )}
+        </div>
         {migrateTarget && (
           <MigrateVaultForm
             dark={dark}

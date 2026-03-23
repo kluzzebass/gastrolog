@@ -1001,26 +1001,11 @@ func copyVaultConfig(st config.VaultConfig) config.VaultConfig {
 	c := config.VaultConfig{
 		ID:      st.ID,
 		Name:    st.Name,
-		Type:    st.Type,
-		Params:  copyParams(st.Params),
 		Enabled: st.Enabled,
-		NodeID:  st.NodeID,
 	}
-	if st.Policy != nil {
-		c.Policy = new(*st.Policy)
-	}
-	if len(st.RetentionRules) > 0 {
-		c.RetentionRules = make([]config.RetentionRule, len(st.RetentionRules))
-		for i, b := range st.RetentionRules {
-			c.RetentionRules[i] = config.RetentionRule{
-				RetentionPolicyID: b.RetentionPolicyID,
-				Action:            b.Action,
-			}
-			if len(b.EjectRouteIDs) > 0 {
-				c.RetentionRules[i].EjectRouteIDs = make([]uuid.UUID, len(b.EjectRouteIDs))
-				copy(c.RetentionRules[i].EjectRouteIDs, b.EjectRouteIDs)
-			}
-		}
+	if len(st.TierIDs) > 0 {
+		c.TierIDs = make([]uuid.UUID, len(st.TierIDs))
+		copy(c.TierIDs, st.TierIDs)
 	}
 	return c
 }

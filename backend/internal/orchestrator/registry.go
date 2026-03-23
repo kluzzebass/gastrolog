@@ -64,7 +64,7 @@ func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
-		return s.Chunks
+		return s.ChunkManager()
 	}
 	return nil
 }
@@ -75,7 +75,7 @@ func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
-		return s.Indexes
+		return s.IndexManager()
 	}
 	return nil
 }
@@ -134,7 +134,7 @@ func (o *Orchestrator) QueryEngine(key uuid.UUID) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
-		return s.Query
+		return s.QueryEngine()
 	}
 	return nil
 }

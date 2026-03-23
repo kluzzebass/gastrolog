@@ -349,10 +349,21 @@ func mapSearchError(err error) error {
 // remoteVaultsByNode groups remote vault IDs by their owning node.
 // When selectedVaults is non-nil, only vaults in that set are included
 // (used when the query contains a vault_id=X filter).
+//
+// temporary: uses tier-level NodeID for node assignment until tier election.
 func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []uuid.UUID) map[string][]uuid.UUID {
-	allCfg, err := s.cfgStore.ListVaults(ctx)
+	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil
+	}
+	tiers, err := s.cfgStore.ListTiers(ctx)
+	if err != nil {
+		return nil
+	}
+
+	selected := make(map[uuid.UUID]bool, len(selectedVaults))
+	for _, id := range selectedVaults {
+		selected[id] = true
 	}
 
 	localVaults := make(map[uuid.UUID]struct{})
@@ -360,29 +371,31 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		localVaults[id] = struct{}{}
 	}
 
-	// Build selected set for O(1) lookup.
-	var selected map[uuid.UUID]struct{}
-	if selectedVaults != nil {
-		selected = make(map[uuid.UUID]struct{}, len(selectedVaults))
-		for _, id := range selectedVaults {
-			selected[id] = struct{}{}
-		}
+	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
+	for i := range tiers {
+		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
 	byNode := make(map[string][]uuid.UUID)
-	for _, vc := range allCfg {
-		if _, local := localVaults[vc.ID]; local {
+	for _, v := range vaults {
+		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		if vc.NodeID == "" || vc.NodeID == s.localNodeID {
+		// Skip vaults already local to this node.
+		if _, isLocal := localVaults[v.ID]; isLocal {
 			continue
 		}
-		if selected != nil {
-			if _, ok := selected[vc.ID]; !ok {
+		// temporary: find the tier's NodeID to determine the owning node (until tier election).
+		for _, tierID := range v.TierIDs {
+			tc := tierMap[tierID]
+			if tc == nil {
 				continue
 			}
+			if tc.NodeID != "" && tc.NodeID != s.localNodeID {
+				byNode[tc.NodeID] = append(byNode[tc.NodeID], v.ID)
+				break // one node per vault for now
+			}
 		}
-		byNode[vc.NodeID] = append(byNode[vc.NodeID], vc.ID)
 	}
 	return byNode
 }
@@ -1241,14 +1254,9 @@ func (s *QueryServer) Explain(
 		if nid, ok := vaultNodeCache[vaultID]; ok {
 			return nid
 		}
-		var nid string
-		if s.cfgStore != nil {
-			if vc, err := s.cfgStore.GetVault(ctx, vaultID); err == nil && vc != nil {
-				nid = vc.NodeID
-			}
-		}
-		vaultNodeCache[vaultID] = nid
-		return nid
+		// With tiered storage, vaults no longer have a NodeID.
+		vaultNodeCache[vaultID] = ""
+		return ""
 	}
 
 	for _, cp := range plan.ChunkPlans {
@@ -1683,22 +1691,44 @@ func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
 
 // remoteNodeForVault returns the owning node ID if the vault is remote,
 // or "" if the vault is local or lookup fails.
+//
+// temporary: uses tier-level NodeID for node assignment until tier election.
 func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID) string {
-	if s.remoteSearcher == nil || s.cfgStore == nil {
-		return ""
-	}
-	// Check local first — fast path.
+	// If the vault is registered locally, it's not remote.
 	if slices.Contains(s.orch.ListVaults(), vaultID) {
 		return ""
 	}
-	vc, err := s.cfgStore.GetVault(ctx, vaultID)
-	if err != nil || vc == nil {
+
+	if s.cfgStore == nil {
 		return ""
 	}
-	if vc.NodeID == "" || vc.NodeID == s.localNodeID {
+
+	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
+	if err != nil || vaultCfg == nil {
 		return ""
 	}
-	return vc.NodeID
+
+	tiers, err := s.cfgStore.ListTiers(ctx)
+	if err != nil {
+		return ""
+	}
+
+	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
+	for i := range tiers {
+		tierMap[tiers[i].ID] = &tiers[i]
+	}
+
+	// temporary: find the tier's NodeID to determine the owning node (until tier election).
+	for _, tierID := range vaultCfg.TierIDs {
+		tc := tierMap[tierID]
+		if tc == nil {
+			continue
+		}
+		if tc.NodeID != "" && tc.NodeID != s.localNodeID {
+			return tc.NodeID
+		}
+	}
+	return ""
 }
 
 // GetSyntax returns the query language keyword sets for frontend tokenization.

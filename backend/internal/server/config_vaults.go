@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -16,90 +13,6 @@ import (
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/orchestrator"
 )
-
-// validateVaultDir checks that a file vault's directory does not overlap (nest
-// inside or contain) any other file vault's directory.
-//
-// For vaults on the same node (or with no node set), path comparison is always
-// performed. For vaults on a different node, os.Stat determines whether the
-// directory is accessible on this host (e.g. two nodes on the same machine);
-// if stat fails the directory is on a remote host and the check is skipped.
-//
-// When both directories exist on disk, os.SameFile provides an additional
-// inode-level check that catches symlinks and bind mounts.
-func (s *ConfigServer) validateVaultDir(ctx context.Context, vaultID uuid.UUID, newNodeID, dir string) error {
-	vaultsDir := s.factories.VaultsDir
-
-	// Resolve relative path against vaultsDir (same logic as orchestrator).
-	if !filepath.IsAbs(dir) && vaultsDir != "" {
-		dir = filepath.Join(vaultsDir, dir)
-	}
-	absDir, err := filepath.Abs(dir)
-	if err != nil {
-		return fmt.Errorf("resolve path: %w", err)
-	}
-	normDir := filepath.Clean(absDir) + string(filepath.Separator)
-
-	existing, err := s.cfgStore.ListVaults(ctx)
-	if err != nil {
-		return fmt.Errorf("list vaults: %w", err)
-	}
-
-	// Stat the new directory (may not exist yet for new vaults).
-	newInfo, _ := os.Stat(absDir)
-
-	for _, st := range existing {
-		if st.ID == vaultID {
-			continue // Updating self is OK.
-		}
-		if st.Type != "file" {
-			continue // Only check file vaults.
-		}
-		otherDir := st.Params["dir"]
-		if otherDir == "" {
-			continue
-		}
-		// Resolve the other vault's dir against vaultsDir too.
-		if !filepath.IsAbs(otherDir) && vaultsDir != "" {
-			otherDir = filepath.Join(vaultsDir, otherDir)
-		}
-		absOther, err := filepath.Abs(otherDir)
-		if err != nil {
-			continue
-		}
-
-		sameNode := st.NodeID == "" || newNodeID == "" || st.NodeID == newNodeID
-
-		// Stat the other vault's directory for inode comparison.
-		otherInfo, otherStatErr := os.Stat(absOther)
-
-		if !sameNode && otherStatErr != nil {
-			// Different node and directory not accessible on this host — skip.
-			continue
-		}
-
-		// Inode check: catches symlinks, bind mounts, hardlinks even across
-		// nodes on the same machine.
-		if newInfo != nil && otherStatErr == nil && os.SameFile(newInfo, otherInfo) {
-			return fmt.Errorf("directory %q is already used by vault %q", dir, st.ID)
-		}
-
-		// Path-based nesting check using clean absolute paths.
-		normOther := filepath.Clean(absOther) + string(filepath.Separator)
-
-		if normDir == normOther {
-			return fmt.Errorf("directory %q is already used by vault %q", dir, st.ID)
-		}
-		if strings.HasPrefix(normDir, normOther) {
-			return fmt.Errorf("directory %q is nested inside vault %q directory %q", dir, st.ID, otherDir)
-		}
-		if strings.HasPrefix(normOther, normDir) {
-			return fmt.Errorf("directory %q contains vault %q directory %q", dir, st.ID, otherDir)
-		}
-	}
-
-	return nil
-}
 
 // PutVault creates or updates a vault.
 func (s *ConfigServer) PutVault(
@@ -115,18 +28,10 @@ func (s *ConfigServer) PutVault(
 	if req.Msg.Config.Name == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
 	}
-	if req.Msg.Config.Type == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault type required"))
-	}
 
 	vaultCfg, err := protoToVaultConfig(req.Msg.Config)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
-	}
-
-	// Auto-assign local node ID when not specified.
-	if vaultCfg.NodeID == "" {
-		vaultCfg.NodeID = s.localNodeID
 	}
 
 	// Reject duplicate names.
@@ -138,37 +43,15 @@ func (s *ConfigServer) PutVault(
 		return nil, connErr
 	}
 
-	// Validate eject route IDs reference existing eject-only routes.
-	for _, rule := range vaultCfg.RetentionRules {
-		if rule.Action != config.RetentionActionEject {
-			continue
+	// Validate that all tier IDs reference existing TierConfig entries.
+	for _, tierID := range vaultCfg.TierIDs {
+		tier, err := s.cfgStore.GetTier(ctx, tierID)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
 		}
-		for _, routeID := range rule.EjectRouteIDs {
-			route, err := s.cfgStore.GetRoute(ctx, routeID)
-			if err != nil {
-				return nil, connect.NewError(connect.CodeInternal, err)
-			}
-			if route == nil {
-				return nil, connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("eject route %q not found", routeID))
-			}
-			if !route.EjectOnly {
-				return nil, connect.NewError(connect.CodeInvalidArgument,
-					fmt.Errorf("eject route %q is not an eject-only route", routeID))
-			}
-		}
-	}
-
-	// Validate file vault directory against nesting.
-	// When dir is empty, the orchestrator defaults to "vaults/<name>" —
-	// validate using that same default so nesting checks are accurate.
-	if vaultCfg.Type == "file" {
-		dir := vaultCfg.Params["dir"]
-		if dir == "" {
-			dir = filepath.Join("vaults", vaultCfg.Name)
-		}
-		if err := s.validateVaultDir(ctx, vaultCfg.ID, vaultCfg.NodeID, dir); err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		if tier == nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("tier %q not found", tierID))
 		}
 	}
 
@@ -238,10 +121,6 @@ func (s *ConfigServer) forceDeleteVault(id uuid.UUID) error {
 	if err := s.orch.ForceRemoveVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return connect.NewError(connect.CodeInternal, err)
 	}
-	// Directory cleanup is handled by the FSM dispatcher on the owning node
-	// (see configDispatcher.handleVaultDeleted). Doing it here would remove
-	// the directory on whichever node handles the HTTP request, which may
-	// not be the node that owns the vault's data.
 	return nil
 }
 
@@ -337,63 +216,16 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 	cfg := config.VaultConfig{
 		ID:      id,
 		Name:    p.Name,
-		Type:    p.Type,
-		Params:  p.Params,
 		Enabled: p.Enabled,
-		NodeID:  p.NodeId,
 	}
-	if p.Policy != "" {
-		pid, err := uuid.Parse(p.Policy)
+	for _, tid := range p.TierIds {
+		tierID, err := uuid.Parse(tid)
 		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("invalid policy ID: %w", err)
+			return config.VaultConfig{}, fmt.Errorf("invalid tier ID: %w", err)
 		}
-		cfg.Policy = new(pid)
-	}
-	if len(p.RetentionRules) > 1 {
-		return config.VaultConfig{}, errors.New("at most one retention rule per vault")
-	}
-	for _, pb := range p.RetentionRules {
-		if pb.RetentionPolicyId == "" {
-			return config.VaultConfig{}, errors.New("retention rule missing policy ID")
-		}
-		b := config.RetentionRule{
-			Action: config.RetentionAction(pb.Action),
-		}
-		rpID, err := uuid.Parse(pb.RetentionPolicyId)
-		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("invalid retention policy ID: %w", err)
-		}
-		b.RetentionPolicyID = rpID
-
-		if err := validateRetentionAction(pb); err != nil {
-			return config.VaultConfig{}, err
-		}
-
-		for _, eid := range pb.EjectRouteIds {
-			routeID, err := uuid.Parse(eid)
-			if err != nil {
-				return config.VaultConfig{}, fmt.Errorf("invalid eject route ID: %w", err)
-			}
-			b.EjectRouteIDs = append(b.EjectRouteIDs, routeID)
-		}
-		cfg.RetentionRules = append(cfg.RetentionRules, b)
+		cfg.TierIDs = append(cfg.TierIDs, tierID)
 	}
 	return cfg, nil
-}
-
-// validateRetentionAction checks action-specific field requirements.
-func validateRetentionAction(pb *apiv1.RetentionRule) error {
-	switch config.RetentionAction(pb.Action) {
-	case config.RetentionActionExpire:
-		// No additional fields required.
-	case config.RetentionActionEject:
-		if len(pb.EjectRouteIds) == 0 {
-			return errors.New("eject rule requires at least one route ID")
-		}
-	default:
-		return fmt.Errorf("unknown retention action %q", pb.Action)
-	}
-	return nil
 }
 
 // VaultConnectionTester validates connectivity for a vault configuration.

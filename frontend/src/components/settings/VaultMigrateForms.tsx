@@ -19,7 +19,7 @@ export function MigrateVaultForm({
   onSubmit,
 }: Readonly<{
   dark: boolean;
-  vault: Pick<VaultConfig, "id" | "name" | "type">;
+  vault: Pick<VaultConfig, "id" | "name">;
   target: MigrateTarget;
   isPending: boolean;
   activeJob: boolean;
@@ -27,8 +27,7 @@ export function MigrateVaultForm({
   onSubmit: () => void;
 }>) {
   const c = useThemeClass(dark);
-  const resolvedType = target.type || vault.type;
-  const dirRequired = resolvedType === "file";
+  const dirRequired = target.type === "file";
   const canSubmit = target.name.trim() && (!dirRequired || target.dir.trim());
 
   return (
@@ -61,7 +60,7 @@ export function MigrateVaultForm({
             value={target.type}
             onChange={(v) => onTargetChange({ type: v, dir: "" })}
             options={[
-              { value: "", label: `same (${vault.type})` },
+              { value: "", label: "(same)" },
               { value: "memory", label: "memory" },
               { value: "file", label: "file" },
             ]}

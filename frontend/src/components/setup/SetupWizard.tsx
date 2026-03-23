@@ -143,14 +143,9 @@ export function SetupWizard() {
     const rotationId = hasRotation ? crypto.randomUUID() : "";
     const retentionId = hasRetention ? crypto.randomUUID() : "";
 
-    const vaultParams: Record<string, string> = {};
-    if (vault.type === "file" && vault.dir) {
-      vaultParams["dir"] = vault.dir;
-    }
-    const retentionRules: { retentionPolicyId: string; action: string }[] = [];
-    if (retentionId) {
-      retentionRules.push({ retentionPolicyId: retentionId, action: "expire" });
-    }
+    // Setup wizard should create a TierConfig with the rotation/retention
+    // policies and vault type, then reference it from the vault's tierIds.
+    // For now, policies are created but not linked to tiers (gastrolog-e0s05).
 
     // Build policy promises outside try so the compiler can optimize conditionals.
     const policyPromises: Promise<unknown>[] = [
@@ -190,16 +185,13 @@ export function SetupWizard() {
       // 1. Create independent policies in parallel.
       await Promise.all(policyPromises);
 
-      // 2. Create vault (references rotation + retention from step 1).
+      // 2. Create vault (tier assignment will be handled in a follow-up).
       await configClient.putVault({
         config: {
           id: vaultId,
           name: vaultName,
-          type: vault.type,
           enabled: true,
-          policy: rotationId,
-          retentionRules,
-          params: vaultParams,
+          tierIds: [],
         },
       });
 

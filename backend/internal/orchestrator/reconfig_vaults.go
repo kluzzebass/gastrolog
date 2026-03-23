@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"strconv"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
@@ -36,16 +37,13 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultName string) map[
 }
 
 // AddVault adds a new vault (chunk manager, index manager, query engine) and updates the filter set.
-// Loads the full config internally to resolve the vault's filter ID to a filter expression.
+// Loads the full config internally to resolve the vault's tier IDs to tier configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig, factories Factories) error {
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for AddVault: %w", err)
 	}
-
-	// Migrate legacy cloud vaults → file vaults with sealed backing.
-	migrateCloudVault(&vaultCfg)
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -54,54 +52,20 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		return fmt.Errorf("%w: %s", ErrDuplicateID, vaultCfg.ID)
 	}
 
-	// Create chunk manager.
-	cmFactory, ok := factories.ChunkManagers[vaultCfg.Type]
-	if !ok {
-		return fmt.Errorf("unknown chunk manager type: %s", vaultCfg.Type)
-	}
-	var cmLogger = factories.Logger
-	if cmLogger != nil {
-		cmLogger = cmLogger.With("vault", vaultCfg.ID)
-	}
-	cmParams := resolveVaultDir(vaultCfg.Params, factories.VaultsDir, vaultCfg.Name)
-	cmParams["_vault_id"] = vaultCfg.ID.String()
-	cm, err := cmFactory(cmParams, cmLogger)
+	tiers, err := o.buildTierInstances(cfg, vaultCfg, factories)
 	if err != nil {
-		return fmt.Errorf("create chunk manager %s: %w", vaultCfg.ID, err)
+		return fmt.Errorf("build tier instances for vault %s: %w", vaultCfg.ID, err)
 	}
 
-	// Create index manager.
-	imFactory, ok := factories.IndexManagers[vaultCfg.Type]
-	if !ok {
-		return fmt.Errorf("unknown index manager type: %s", vaultCfg.Type)
-	}
-	var imLogger = factories.Logger
-	if imLogger != nil {
-		imLogger = imLogger.With("vault", vaultCfg.ID)
-	}
-	im, err := imFactory(cmParams, cm, imLogger)
-	if err != nil {
-		return fmt.Errorf("create index manager %s: %w", vaultCfg.ID, err)
+	// temporary: if all tiers are assigned to other nodes, skip this vault locally (until tier election)
+	if len(tiers) == 0 {
+		o.logger.Info("vault has no local tiers, skipping AddVault", "id", vaultCfg.ID, "name", vaultCfg.Name)
+		return nil
 	}
 
-	// Create query engine.
-	var qeLogger = factories.Logger
-	if qeLogger != nil {
-		qeLogger = qeLogger.With("vault", vaultCfg.ID)
-	}
-	qe := query.New(cm, im, qeLogger)
-
-	// Inject index builders for local-backed vaults.
-	backing := vaultCfg.Params["sealed_backing"]
-	buildIndexes := backing == "" || backing == "local"
-	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok && buildIndexes {
-		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
-	}
-
-	// Register vault. AddVault does not apply disabled state (unlike ApplyConfig).
-	vault := NewVault(vaultCfg.ID, cm, im, qe)
+	// Register vault.
+	vault := NewVault(vaultCfg.ID, tiers...)
 	vault.Name = vaultCfg.Name
-	vault.Type = vaultCfg.Type
 	o.vaults[vaultCfg.ID] = vault
 
 	// Rebuild filter set from routes to include the new vault as a destination.
@@ -111,38 +75,101 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		return err
 	}
 
-	// Set up retention job if applicable.
-	if len(vaultCfg.RetentionRules) > 0 && cfg != nil {
-		rules, err := resolveRetentionRules(cfg, vaultCfg)
+	// Set up retention and rotation from tier configs.
+	if cfg != nil {
+		o.applyTierPolicies(cfg, vaultCfg, vault)
+	}
+
+	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "tiers", len(tiers))
+	return nil
+}
+
+// applyTierPolicies applies rotation and retention policies from the first tier config.
+func (o *Orchestrator) applyTierPolicies(cfg *config.Config, vaultCfg config.VaultConfig, vault *Vault) {
+	if len(vaultCfg.TierIDs) == 0 {
+		return
+	}
+	tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
+	if tierCfg == nil {
+		return
+	}
+
+	// Apply rotation policy from tier.
+	if tierCfg.RotationPolicyID != nil { //nolint:nestif // policy resolution
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
+		if policyCfg != nil {
+			policy, err := policyCfg.ToRotationPolicy()
+			if err != nil {
+				o.logger.Warn("invalid rotation policy for vault", "vault", vaultCfg.ID, "error", err)
+			} else if policy != nil {
+				vault.ChunkManager().SetRotationPolicy(policy)
+			}
+			if policyCfg.Cron != nil && *policyCfg.Cron != "" {
+				if err := o.cronRotation.addJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, vault.ChunkManager()); err != nil {
+					o.logger.Warn("failed to add cron rotation", "vault", vaultCfg.ID, "error", err)
+				}
+			}
+		}
+	}
+
+	// Apply retention rules from tier.
+	if len(tierCfg.RetentionRules) > 0 {
+		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
 		if err != nil {
-			o.logger.Warn("invalid retention rules for new vault", "vault", vaultCfg.ID, "error", err)
-		} else if len(rules) > 0 {
+			o.logger.Warn("invalid retention rules for vault", "vault", vaultCfg.ID, "error", err)
+			return
+		}
+		if len(rules) > 0 {
 			runner := &retentionRunner{
-				vaultID:  vaultCfg.ID,
-				cm:       cm,
-				im:       im,
-				rules: rules,
-				orch:     o,
-				now:      o.now,
-				logger:   o.logger,
+				vaultID: vaultCfg.ID,
+				cm:      vault.ChunkManager(),
+				im:      vault.IndexManager(),
+				rules:   rules,
+				orch:    o,
+				now:     o.now,
+				logger:  o.logger,
 			}
 			o.retention[vaultCfg.ID] = runner
 			if err := o.scheduler.AddJob(retentionJobName(vaultCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
-				o.logger.Warn("failed to add retention job for new vault", "vault", vaultCfg.ID, "error", err)
+				o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "error", err)
 			}
 			o.scheduler.Describe(retentionJobName(vaultCfg.ID), fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
 		}
 	}
+}
 
-	// Apply rotation policy (per-append threshold checks + cron schedule).
-	if vaultCfg.Policy != nil && cfg != nil {
-		if err := o.applyRotationPolicy(cfg, vaultCfg, cm); err != nil {
-			o.logger.Warn("failed to apply rotation policy for new vault", "vault", vaultCfg.ID, "error", err)
+// findTierConfig finds a TierConfig by ID in a slice.
+func findTierConfig(tiers []config.TierConfig, id uuid.UUID) *config.TierConfig {
+	for i := range tiers {
+		if tiers[i].ID == id {
+			return &tiers[i]
 		}
 	}
-
-	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "type", vaultCfg.Type)
 	return nil
+}
+
+// resolveRetentionRulesFromTier converts tier retention rules to resolved retentionRule objects.
+func resolveRetentionRulesFromTier(cfg *config.Config, tierCfg *config.TierConfig) ([]retentionRule, error) {
+	var rules []retentionRule
+	for _, b := range tierCfg.RetentionRules {
+		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
+		if retCfg == nil {
+			return nil, fmt.Errorf("tier %s references unknown retention policy: %s", tierCfg.ID, b.RetentionPolicyID)
+		}
+		policy, err := retCfg.ToRetentionPolicy()
+		if err != nil {
+			return nil, fmt.Errorf("invalid retention policy %s for tier %s: %w", b.RetentionPolicyID, tierCfg.ID, err)
+		}
+		if policy == nil {
+			continue
+		}
+		rules = append(rules, retentionRule{
+			policy:        policy,
+			action:        b.Action,
+			ejectRouteIDs: b.EjectRouteIDs,
+		})
+	}
+	return rules, nil
 }
 
 // RemoveVault removes a vault if it's empty (no chunks with data).
@@ -156,7 +183,7 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	cm := vault.Chunks
+	cm := vault.ChunkManager()
 
 	// Check if vault has any data.
 	metas, err := cm.List()
@@ -185,7 +212,7 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 	// Rebuild filter set without this vault.
 	o.rebuildFilterSetLocked()
 
-	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type)
+	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
 
@@ -202,7 +229,7 @@ func (o *Orchestrator) DisableVault(id uuid.UUID) error {
 	}
 
 	vault.Enabled = false
-	o.logger.Info("vault disabled", "id", id, "name", vault.Name, "type", vault.Type)
+	o.logger.Info("vault disabled", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
 
@@ -218,7 +245,7 @@ func (o *Orchestrator) EnableVault(id uuid.UUID) error {
 	}
 
 	vault.Enabled = true
-	o.logger.Info("vault enabled", "id", id, "name", vault.Name, "type", vault.Type)
+	o.logger.Info("vault enabled", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
 
@@ -244,8 +271,8 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	cm := vault.Chunks
-	im := vault.Indexes
+	cm := vault.ChunkManager()
+	im := vault.IndexManager()
 
 	// Seal active chunk if present.
 	if active := cm.Active(); active != nil {
@@ -278,9 +305,9 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
-	// Close the chunk manager to release file locks.
-	if err := cm.Close(); err != nil {
-		o.logger.Warn("failed to close chunk manager during force remove",
+	// Close all tiers to release file locks.
+	if err := vault.Close(); err != nil {
+		o.logger.Warn("failed to close vault during force remove",
 			"vault", id, "error", err)
 	}
 
@@ -297,7 +324,7 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	// Rebuild filter set without this vault.
 	o.rebuildFilterSetLocked()
 
-	o.logger.Info("vault force-removed", "id", id, "name", vault.Name, "type", vault.Type)
+	o.logger.Info("vault force-removed", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
 
@@ -320,8 +347,8 @@ func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
-	if err := vault.Chunks.Close(); err != nil {
-		o.logger.Warn("failed to close chunk manager during unregister",
+	if err := vault.Close(); err != nil {
+		o.logger.Warn("failed to close vault during unregister",
 			"vault", id, "error", err)
 	}
 
@@ -334,7 +361,7 @@ func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
 	delete(o.vaults, id)
 	o.rebuildFilterSetLocked()
 
-	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type)
+	o.logger.Info("vault unregistered (data preserved)", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
 
@@ -350,7 +377,6 @@ func (o *Orchestrator) VaultConfig(id uuid.UUID) (config.VaultConfig, error) {
 
 	cfg := config.VaultConfig{
 		ID: id,
-		// Type and Params are not tracked after creation.
 	}
 
 	return cfg, nil
@@ -377,21 +403,206 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 	return nil
 }
 
-// migrateCloudVault rewrites a legacy type:"cloud" vault config to type:"file"
-// with the sealed_backing param set to the original provider. This is a
-// backwards-compatible in-memory migration — the config store is updated on
-// next save.
-func migrateCloudVault(vc *config.VaultConfig) {
-	if vc.Type != "cloud" {
-		return
+// buildTierInstances creates TierInstance objects for each tier in the vault config.
+// Tiers with a NodeID that does not match the local node are skipped (temporary:
+// explicit node assignment until tier election).
+func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) ([]*TierInstance, error) {
+	if len(vaultCfg.TierIDs) == 0 {
+		return nil, fmt.Errorf("vault %s has no tier IDs", vaultCfg.ID)
 	}
-	vc.Type = "file"
-	if vc.Params == nil {
-		vc.Params = make(map[string]string)
+
+	tiers := make([]*TierInstance, 0, len(vaultCfg.TierIDs))
+	for _, tierID := range vaultCfg.TierIDs {
+		tierCfg := findTierConfig(cfg.Tiers, tierID)
+		if tierCfg == nil {
+			return nil, fmt.Errorf("tier %s not found in config", tierID)
+		}
+
+		// temporary: skip tiers assigned to another node (until tier election)
+		if tierCfg.NodeID != "" && tierCfg.NodeID != o.localNodeID {
+			continue
+		}
+
+		ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories)
+		if err != nil {
+			// Close already-created tiers on error.
+			for _, t := range tiers {
+				_ = t.Chunks.Close()
+			}
+			return nil, fmt.Errorf("build tier %s: %w", tierID, err)
+		}
+		tiers = append(tiers, ti)
 	}
-	// Move provider → sealed_backing.
-	if provider := vc.Params["provider"]; provider != "" {
-		vc.Params["sealed_backing"] = provider
-		delete(vc.Params, "provider")
+	return tiers, nil
+}
+
+// buildTierInstance creates a single TierInstance from a TierConfig.
+func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories) (*TierInstance, error) {
+	// Map TierConfig.Type to factory name.
+	factoryName := mapTierTypeToFactory(tierCfg.Type)
+
+	// Build params from tier config.
+	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
+
+	cmFactory, ok := factories.ChunkManagers[factoryName]
+	if !ok {
+		return nil, fmt.Errorf("unknown chunk manager type: %s (mapped from tier type %s)", factoryName, tierCfg.Type)
 	}
+
+	var cmLogger = factories.Logger
+	if cmLogger != nil {
+		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+	}
+
+	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.Name)
+	cmParams["_expect_existing"] = "true"
+	cmParams["_vault_id"] = vaultCfg.ID.String()
+
+	cm, err := cmFactory(cmParams, cmLogger)
+	if err != nil {
+		return nil, fmt.Errorf("create chunk manager: %w", err)
+	}
+
+	// Apply rotation policy from tier.
+	if tierCfg.RotationPolicyID != nil { //nolint:nestif // policy resolution
+		policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
+		if policyCfg != nil {
+			policy, pErr := policyCfg.ToRotationPolicy()
+			if pErr != nil {
+				_ = cm.Close()
+				return nil, fmt.Errorf("invalid rotation policy %s: %w", *tierCfg.RotationPolicyID, pErr)
+			}
+			if policy != nil {
+				cm.SetRotationPolicy(policy)
+			}
+		}
+	}
+
+	imFactory, ok := factories.IndexManagers[factoryName]
+	if !ok {
+		_ = cm.Close()
+		return nil, fmt.Errorf("unknown index manager type: %s (mapped from tier type %s)", factoryName, tierCfg.Type)
+	}
+	var imLogger = factories.Logger
+	if imLogger != nil {
+		imLogger = imLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+	}
+	im, err := imFactory(cmParams, cm, imLogger)
+	if err != nil {
+		_ = cm.Close()
+		return nil, fmt.Errorf("create index manager: %w", err)
+	}
+
+	var qeLogger = factories.Logger
+	if qeLogger != nil {
+		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
+	}
+	qe := query.New(cm, im, qeLogger)
+
+	// Inject index builders into the chunk manager's post-seal pipeline.
+	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
+		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+	}
+
+	return &TierInstance{
+		TierID:  tierCfg.ID,
+		Type:    string(tierCfg.Type),
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
+	}, nil
+}
+
+// mapTierTypeToFactory maps a TierType to the factory name used in Factories maps.
+func mapTierTypeToFactory(t config.TierType) string {
+	switch t {
+	case config.TierTypeMemory:
+		return "memory"
+	case config.TierTypeLocal:
+		return "file"
+	case config.TierTypeCloud:
+		return "file"
+	default:
+		return string(t)
+	}
+}
+
+// buildTierParams builds a params map from a TierConfig suitable for factory consumption.
+func buildTierParams(cfg *config.Config, _ config.VaultConfig, tierCfg config.TierConfig, localNodeID string) map[string]string { //nolint:gocognit // flat type-switch mapping
+	params := make(map[string]string)
+
+	switch tierCfg.Type {
+	case config.TierTypeMemory:
+		if tierCfg.MemoryBudgetBytes > 0 {
+			// Estimate ~1KB per record to derive maxRecords from budget.
+			maxRecords := tierCfg.MemoryBudgetBytes / 1024
+			if maxRecords == 0 {
+				maxRecords = 10000
+			}
+			params["maxRecords"] = strconv.FormatUint(maxRecords, 10)
+		} else {
+			params["maxRecords"] = "10000"
+		}
+
+	case config.TierTypeLocal:
+		// Find a StorageArea matching this tier's StorageClass on the local node.
+		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.StorageClass); area != nil {
+			params["dir"] = area.Path
+		}
+
+	case config.TierTypeCloud:
+		if tierCfg.CloudServiceID != nil { //nolint:nestif // cloud params resolution
+			cs := findCloudService(cfg, *tierCfg.CloudServiceID)
+			if cs != nil {
+				params["sealed_backing"] = cs.Provider
+				params["bucket"] = cs.Bucket
+				if cs.Region != "" {
+					params["region"] = cs.Region
+				}
+				if cs.Endpoint != "" {
+					params["endpoint"] = cs.Endpoint
+				}
+				if cs.AccessKey != "" {
+					params["access_key"] = cs.AccessKey
+				}
+				if cs.SecretKey != "" {
+					params["secret_key"] = cs.SecretKey
+				}
+			}
+		}
+		// Cloud tiers also need a local area for active chunks.
+		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.ActiveChunkClass); area != nil {
+			params["dir"] = area.Path
+		}
+	}
+
+	return params
+}
+
+// findLocalStorageArea finds a StorageArea on the given node with the given storage class.
+func findLocalStorageArea(cfg *config.Config, nodeID string, storageClass uint32) *config.StorageArea {
+	if storageClass == 0 {
+		return nil
+	}
+	for _, nsc := range cfg.NodeStorageConfigs {
+		if nsc.NodeID != nodeID {
+			continue
+		}
+		for i := range nsc.Areas {
+			if nsc.Areas[i].StorageClass == storageClass {
+				return &nsc.Areas[i]
+			}
+		}
+	}
+	return nil
+}
+
+// findCloudService finds a CloudService by ID in the config.
+func findCloudService(cfg *config.Config, id uuid.UUID) *config.CloudService {
+	for i := range cfg.CloudServices {
+		if cfg.CloudServices[i].ID == id {
+			return &cfg.CloudServices[i]
+		}
+	}
+	return nil
 }

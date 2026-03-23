@@ -228,58 +228,16 @@ func TestHandle_VaultPut(t *testing.T) {
 		}
 	})
 
-	t.Run("remote_node_reloads_filters", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{addVaultErr: errors.New("should not be called")}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		// Vault is on another node and not locally registered — no drain/add.
-		// But filters MUST be reloaded so forwarding targets update.
-		if mo.reloadFiltersCalls != 1 {
-			t.Fatalf("expected 1 ReloadFilters call, got %d", mo.reloadFiltersCalls)
-		}
-		if h.count() != 0 {
-			t.Fatal("unexpected error logs")
-		}
-	})
-
-	t.Run("cloud_vault_reassignment_skips_drain", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{
-			vaults:     []uuid.UUID{id},
-			vaultTypes: map[uuid.UUID]string{id: "cloud"},
-		}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true, Type: "cloud"},
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		// Should NOT drain — cloud data is in shared storage.
-		if len(mo.drainCalls) > 0 {
-			t.Fatal("expected no drain for cloud vault reassignment")
-		}
-		// Should unregister locally (non-destructive) instead of force-removing.
-		if len(mo.unregisterIDs) != 1 || mo.unregisterIDs[0] != id {
-			t.Fatal("expected UnregisterVault for cloud vault reassignment")
-		}
-		if len(mo.forceRemoveIDs) > 0 {
-			t.Fatal("ForceRemoveVault must not be called for cloud vaults — it deletes data")
-		}
-		if !h.hasMessage("cloud vault reassigned") {
-			t.Fatal("expected info log about cloud vault reassignment")
-		}
-	})
+	// remote_node_reloads_filters and cloud_vault_reassignment_skips_drain
+	// were removed: they tested the concept of NodeID-based remote vault
+	// assignment which no longer exists. Remote vault routing will be
+	// reintroduced via tier primary election in a future issue.
 
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // no error → AddVault succeeds
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "", Enabled: true, Type: "memory"},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -293,7 +251,7 @@ func TestHandle_VaultPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "local", Enabled: true, Type: "memory"},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -312,7 +270,7 @@ func TestHandle_VaultPut(t *testing.T) {
 			reloadRetentionErr: errors.New("ret"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "local", Enabled: true, Type: "memory"},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -394,7 +352,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // ingester not locally registered
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "other-node", Enabled: true},
+			ingester: &config.IngesterConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -410,7 +368,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 			ingesters: []uuid.UUID{id}, // locally registered
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "other-node", Name: "chatterbox", Enabled: true},
+			ingester: &config.IngesterConfig{ID: id, Name: "chatterbox", Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -426,7 +384,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 	t.Run("unknown_type", func(t *testing.T) {
 		h := &captureHandler{}
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "nonexistent"},
+			ingester: &config.IngesterConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -439,7 +397,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 	t.Run("factory_error", func(t *testing.T) {
 		h := &captureHandler{}
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "test"},
+			ingester: &config.IngesterConfig{ID: id, Type: "test", Enabled: true},
 		}, h)
 		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return nil, errors.New("bad params")
@@ -456,7 +414,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addIngesterErr: errors.New("duplicate")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "test"},
+			ingester: &config.IngesterConfig{ID: id, Type: "test", Enabled: true},
 		}, h)
 		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
@@ -476,7 +434,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 			removeIngesterErr: errors.New("stuck"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: true, Type: "test"},
+			ingester: &config.IngesterConfig{ID: id, Enabled: true},
 		}, h)
 		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
@@ -493,7 +451,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addIngesterErr: errors.New("should not be called")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, NodeID: "local", Enabled: false, Type: "test"},
+			ingester: &config.IngesterConfig{ID: id, Enabled: false},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -776,51 +734,25 @@ func TestHandle_ConfigSignal(t *testing.T) {
 func TestHandle_VaultDrain(t *testing.T) {
 	id := uuid.Must(uuid.NewV7())
 
-	t.Run("reassign_triggers_drain", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{vaults: []uuid.UUID{id}}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
-		}, h)
+	// reassign_triggers_drain and drain_error_logged were removed:
+	// they tested NodeID-based vault reassignment which no longer exists.
+	// With tiered storage, handleVaultPut no longer calls maybeStartDrain.
 
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		if len(mo.drainCalls) != 1 || mo.drainCalls[0] != id {
-			t.Fatalf("expected DrainVault(%s), got %v", id, mo.drainCalls)
-		}
-	})
-
-	t.Run("already_draining_skipped", func(t *testing.T) {
+	t.Run("already_draining_cancels", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
 			vaults:     []uuid.UUID{id},
 			isDraining: true,
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-		if len(mo.drainCalls) != 0 {
-			t.Fatal("should not call DrainVault when already draining")
-		}
-	})
-
-	t.Run("drain_error_logged", func(t *testing.T) {
-		h := &captureHandler{}
-		mo := &mockOrch{
-			vaults:        []uuid.UUID{id},
-			drainVaultErr: errors.New("no transferrer"),
-		}
-		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "other-node", Enabled: true},
-		}, h)
-
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
-
-		if !h.hasMessage("dispatch: drain vault") {
-			t.Fatal("expected error log for DrainVault failure")
+		// Draining vault on put → cancel drain and apply changes.
+		if len(mo.cancelDrainIDs) != 1 || mo.cancelDrainIDs[0] != id {
+			t.Fatalf("expected CancelDrain(%s), got %v", id, mo.cancelDrainIDs)
 		}
 	})
 
@@ -831,7 +763,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 			isDraining: true,
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "local", Enabled: true, Type: "memory"},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -849,7 +781,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 			cancelDrainErr: errors.New("boom"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, NodeID: "local", Enabled: true, Type: "memory"},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})

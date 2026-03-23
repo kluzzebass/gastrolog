@@ -82,3 +82,32 @@ export function ruleRefsFor(
     )
     .map((s) => s.name || s.id);
 }
+
+interface Tier {
+  id: string;
+  name: string;
+  rotationPolicyId: string;
+  retentionRules: { retentionPolicyId: string }[];
+}
+
+export function tierRefsForRotationPolicy(
+  tiers: Tier[],
+  rotationPolicyId: string,
+): string[] {
+  return tiers
+    .filter((t) => t.rotationPolicyId === rotationPolicyId)
+    .map((t) => t.name || t.id);
+}
+
+export function tierRuleRefsFor(
+  tiers: Tier[],
+  retentionPolicyId: string,
+): string[] {
+  return tiers
+    .filter((t) =>
+      (t.retentionRules ?? []).some(
+        (r) => r.retentionPolicyId === retentionPolicyId,
+      ),
+    )
+    .map((t) => t.name || t.id);
+}

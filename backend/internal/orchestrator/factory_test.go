@@ -102,6 +102,21 @@ func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 }
 func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
+// testVaultCfg creates a VaultConfig + TierConfig pair for tests.
+// tierType is the tier type (e.g., config.TierTypeMemory or "test").
+func testVaultCfg(vaultID uuid.UUID, tierType config.TierType) (config.VaultConfig, config.TierConfig) {
+	tierID := uuid.Must(uuid.NewV7())
+	return config.VaultConfig{
+			ID:      vaultID,
+			Enabled: true,
+			TierIDs: []uuid.UUID{tierID},
+		}, config.TierConfig{
+			ID:   tierID,
+			Name: "tier-" + vaultID.String()[:8],
+			Type: tierType,
+		}
+}
+
 // fakeIngester implements Ingester for testing.
 type fakeIngester struct{}
 
@@ -142,12 +157,12 @@ func TestApplyConfigVaults(t *testing.T) {
 
 	vault1ID := uuid.Must(uuid.NewV7())
 	vault2ID := uuid.Must(uuid.NewV7())
+	vc1, tc1 := testVaultCfg(vault1ID, config.TierTypeMemory)
+	vc2, tc2 := testVaultCfg(vault2ID, config.TierTypeMemory)
 
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: vault1ID, Type: "memory", Params: map[string]string{}},
-			{ID: vault2ID, Type: "memory", Params: map[string]string{}},
-		},
+		Vaults: []config.VaultConfig{vc1, vc2},
+		Tiers:  []config.TierConfig{tc1, tc2},
 	}
 
 	err = orch.ApplyConfig(cfg, factories)
@@ -189,8 +204,8 @@ func TestApplyConfigIngesters(t *testing.T) {
 	recv2ID := uuid.Must(uuid.NewV7())
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: recv1ID, Type: "test", Enabled: true, Params: map[string]string{}},
-			{ID: recv2ID, Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: recv1ID, Type: "test", Enabled: true},
+			{ID: recv2ID, Type: "test", Enabled: true},
 		},
 	}
 
@@ -210,18 +225,23 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	vaultID := uuid.Must(uuid.NewV7())
+	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "unknown", Params: map[string]string{}},
-		},
+		Vaults: []config.VaultConfig{vc},
+		Tiers:  []config.TierConfig{tc},
 	}
 
+	// Vault init failure is non-fatal (vault skipped), so no error returned.
 	err = orch.ApplyConfig(cfg, Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{},
 		IndexManagers: map[string]index.ManagerFactory{},
 	})
-	if err == nil {
-		t.Error("expected error for unknown chunk manager type")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orch.ChunkManager(vaultID) != nil {
+		t.Error("vault with unknown chunk manager type should not be registered")
 	}
 }
 
@@ -231,6 +251,8 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	vaultID := uuid.Must(uuid.NewV7())
+	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -241,14 +263,17 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "memory", Params: map[string]string{}},
-		},
+		Vaults: []config.VaultConfig{vc},
+		Tiers:  []config.TierConfig{tc},
 	}
 
+	// Vault init failure is non-fatal (vault skipped), so no error returned.
 	err = orch.ApplyConfig(cfg, factories)
-	if err == nil {
-		t.Error("expected error for unknown index manager type")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if orch.ChunkManager(vaultID) != nil {
+		t.Error("vault with unknown index manager type should not be registered")
 	}
 }
 
@@ -260,7 +285,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "unknown", Enabled: true, Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Enabled: true},
 		},
 	}
 
@@ -292,11 +317,11 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 	}
 
 	dupID := uuid.Must(uuid.NewV7())
+	vc1, tc1 := testVaultCfg(dupID, config.TierTypeMemory)
+	vc2 := vc1 // duplicate ID, same tier
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: dupID, Type: "memory", Params: map[string]string{}},
-			{ID: dupID, Type: "memory", Params: map[string]string{}}, // duplicate
-		},
+		Vaults: []config.VaultConfig{vc1, vc2},
+		Tiers:  []config.TierConfig{tc1},
 	}
 
 	err = orch.ApplyConfig(cfg, factories)
@@ -322,8 +347,8 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 	dupIngID := uuid.Must(uuid.NewV7())
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: dupIngID, Type: "test", Enabled: true, Params: map[string]string{}},
-			{ID: dupIngID, Type: "test", Enabled: true, Params: map[string]string{}}, // duplicate
+			{ID: dupIngID, Enabled: true},
+			{ID: dupIngID, Enabled: true}, // duplicate
 		},
 	}
 
@@ -340,6 +365,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	}
 
 	vaultID := uuid.Must(uuid.NewV7())
+	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -354,9 +380,8 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: vaultID, Type: "memory", Params: map[string]string{}},
-		},
+		Vaults: []config.VaultConfig{vc},
+		Tiers:  []config.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -376,6 +401,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	}
 
 	vaultID := uuid.Must(uuid.NewV7())
+	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -390,9 +416,8 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	}
 
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: vaultID, Type: "memory", Params: map[string]string{}},
-		},
+		Vaults: []config.VaultConfig{vc},
+		Tiers:  []config.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -421,7 +446,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "test", Enabled: true, Params: map[string]string{}},
+			{ID: uuid.Must(uuid.NewV7()), Enabled: true},
 		},
 	}
 
@@ -470,7 +495,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 }
 
 func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
-	orch, err := New(Config{})
+	orch, err := New(Config{LocalNodeID: "node-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -480,24 +505,33 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"test": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
+			"file": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				cmReceivedParams = params
 				return &fakeChunkManager{}, nil
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"test": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
+			"file": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				imReceivedParams = params
 				return &fakeIndexManager{}, nil
 			},
 		},
 	}
 
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	areaID := uuid.Must(uuid.NewV7())
+
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "test", Params: map[string]string{
-				"dir":      "/data/chunks",
-				"kvBudget": "500",
+			{ID: vaultID, Enabled: true, TierIDs: []uuid.UUID{tierID}},
+		},
+		Tiers: []config.TierConfig{
+			{ID: tierID, Name: "local", Type: config.TierTypeLocal, StorageClass: 1},
+		},
+		NodeStorageConfigs: []config.NodeStorageConfig{
+			{NodeID: "node-1", Areas: []config.StorageArea{
+				{ID: areaID, StorageClass: 1, Label: "fast", Path: "/data/chunks"},
 			}},
 		},
 	}
@@ -507,20 +541,12 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify params passed to chunk manager factory.
+	// Verify dir param derived from NodeStorageConfig was passed to factories.
 	if cmReceivedParams["dir"] != "/data/chunks" {
 		t.Errorf("chunk manager: expected dir=/data/chunks, got %s", cmReceivedParams["dir"])
 	}
-	if cmReceivedParams["kvBudget"] != "500" {
-		t.Errorf("chunk manager: expected kvBudget=500, got %s", cmReceivedParams["kvBudget"])
-	}
-
-	// Verify params passed to index manager factory.
 	if imReceivedParams["dir"] != "/data/chunks" {
 		t.Errorf("index manager: expected dir=/data/chunks, got %s", imReceivedParams["dir"])
-	}
-	if imReceivedParams["kvBudget"] != "500" {
-		t.Errorf("index manager: expected kvBudget=500, got %s", imReceivedParams["kvBudget"])
 	}
 }
 
@@ -535,22 +561,23 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
-			"test": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
+			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
 				return expectedCM, nil
 			},
 		},
 		IndexManagers: map[string]index.ManagerFactory{
-			"test": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
+			"memory": func(params map[string]string, cm chunk.ChunkManager, logger *slog.Logger) (index.IndexManager, error) {
 				receivedCM = cm
 				return &fakeIndexManager{}, nil
 			},
 		},
 	}
 
+	vaultID := uuid.Must(uuid.NewV7())
+	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
 	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "test", Params: map[string]string{}},
-		},
+		Vaults: []config.VaultConfig{vc},
+		Tiers:  []config.TierConfig{tc},
 	}
 
 	err = orch.ApplyConfig(cfg, factories)

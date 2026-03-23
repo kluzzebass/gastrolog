@@ -93,6 +93,19 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store
 	}
 }
 
+// ensureMemoryTier creates a memory tier in the config store and returns its ID
+// as a string, suitable for use in proto VaultConfig.TierIds.
+func ensureMemoryTier(t *testing.T, cfgStore config.Store) string {
+	t.Helper()
+	tierID := uuid.Must(uuid.NewV7())
+	if err := cfgStore.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: config.TierTypeMemory,
+	}); err != nil {
+		t.Fatalf("ensureMemoryTier: %v", err)
+	}
+	return tierID.String()
+}
+
 // newConfigTestSetup creates an orchestrator, config vault, and Connect client
 // for testing config RPCs.
 func newConfigTestSetup(t *testing.T) (gastrologv1connect.ConfigServiceClient, config.Store, *orchestrator.Orchestrator) {
@@ -134,6 +147,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
+	tierID := ensureMemoryTier(t, cfgStore)
 
 	// Create a filter first, then a vault that uses it.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
@@ -145,9 +159,10 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:   vaultID.String(),
-			Name: "test-vault",
-			Type: "memory",
+			Id:      vaultID.String(),
+			Name:    "test-vault",
+			Enabled: true,
+			TierIds: []string{tierID},
 		},
 	}))
 	if err != nil {
@@ -216,121 +231,16 @@ func TestDeleteVaultNotFound(t *testing.T) {
 	}
 }
 
-func TestPutVaultNestedDirPrevention(t *testing.T) {
-	client, cfgStore, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	baseDir := t.TempDir()
-
-	vault1ID := uuid.Must(uuid.NewV7())
-	nestedChildID := uuid.Must(uuid.NewV7())
-	nestedParentID := uuid.Must(uuid.NewV7())
-	siblingID := uuid.Must(uuid.NewV7())
-	memVaultID := uuid.Must(uuid.NewV7())
-	duplicateDirID := uuid.Must(uuid.NewV7())
-
-	// Seed a file vault at baseDir/vault1 directly in config (not via RPC,
-	// to avoid actually creating the directory and orchestrator entry).
-	err := cfgStore.PutVault(ctx, config.VaultConfig{
-		ID:     vault1ID,
-		Type:   "file",
-		Params: map[string]string{"dir": baseDir + "/vault1"},
-	})
-	if err != nil {
-		t.Fatalf("seed vault1: %v", err)
-	}
-
-	// Attempt to create a file vault nested inside vault1.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Id:     nestedChildID.String(),
-			Name:   "nested-child",
-			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/vault1/archive"},
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected error for nested child directory")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("expected InvalidArgument, got %v: %v", connect.CodeOf(err), err)
-	}
-
-	// Attempt to create a file vault that is a parent of vault1.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Id:     nestedParentID.String(),
-			Name:   "nested-parent",
-			Type:   "file",
-			Params: map[string]string{"dir": baseDir},
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected error for parent directory")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Fatalf("expected InvalidArgument, got %v: %v", connect.CodeOf(err), err)
-	}
-
-	// Sibling directory should be OK.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Id:     siblingID.String(),
-			Name:   "sibling",
-			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/vault2"},
-		},
-	}))
-	if err != nil {
-		t.Fatalf("sibling directory should be allowed: %v", err)
-	}
-
-	// Memory vaults should not be checked.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Id:   memVaultID.String(),
-			Name: "mem-vault",
-			Type: "memory",
-		},
-	}))
-	if err != nil {
-		t.Fatalf("memory vault should always be allowed: %v", err)
-	}
-
-	// Updating a file vault's own dir to itself should be OK
-	// (seeded directly to avoid orchestrator conflicts).
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Id:     vault1ID.String(),
-			Name:   "vault1-self-update",
-			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/vault1"},
-		},
-	}))
-	if err != nil {
-		t.Fatalf("updating self should be allowed: %v", err)
-	}
-
-	// Same exact dir as another vault should fail.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Id:     duplicateDirID.String(),
-			Name:   "duplicate-dir",
-			Type:   "file",
-			Params: map[string]string{"dir": baseDir + "/vault1"},
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected error for duplicate directory")
-	}
-}
+// TestPutVaultNestedDirPrevention was removed: directory overlap validation
+// has moved from VaultConfig to TierConfig (tiered storage refactor).
 
 func TestPauseResumeVaultRPC(t *testing.T) {
-	client, _, orch := newConfigTestSetup(t)
+	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
+	tierID := ensureMemoryTier(t, cfgStore)
 
 	// Create a filter and a vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
@@ -342,9 +252,10 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:   vaultID.String(),
-			Name: "pause-vault",
-			Type: "memory",
+			Id:      vaultID.String(),
+			Name:    "pause-vault",
+			Enabled: true,
+			TierIds: []string{tierID},
 		},
 	}))
 	if err != nil {
@@ -447,6 +358,7 @@ func TestResumeVaultNotFoundRPC(t *testing.T) {
 func TestPauseVaultPersistsToConfig(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
+	tierID := ensureMemoryTier(t, cfgStore)
 
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -461,9 +373,10 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:   vaultID.String(),
-			Name: "persist-vault",
-			Type: "memory",
+			Id:      vaultID.String(),
+			Name:    "persist-vault",
+			Enabled: true,
+			TierIds: []string{tierID},
 		},
 	}))
 	if err != nil {
@@ -565,13 +478,13 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("vault", func(t *testing.T) {
 		_, err := client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: "memory"},
+			Config: &gastrologv1.VaultConfig{Name: "my-vault"},
 		}))
 		if err != nil {
 			t.Fatalf("first PutVault: %v", err)
 		}
 		_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-			Config: &gastrologv1.VaultConfig{Name: "my-vault", Type: "memory"},
+			Config: &gastrologv1.VaultConfig{Name: "my-vault"},
 		}))
 		if err == nil {
 			t.Fatal("expected error for duplicate vault name")
@@ -638,13 +551,13 @@ func TestDuplicateEntityNames(t *testing.T) {
 	t.Run("ingester", func(t *testing.T) {
 		// Ingesters use disabled=true to skip factory validation.
 		_, err := client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
-			Config: &gastrologv1.IngesterConfig{Name: "my-ingester", Type: "syslog"},
+			Config: &gastrologv1.IngesterConfig{Name: "my-ingester", Type: "chatterbox"},
 		}))
 		if err != nil {
 			t.Fatalf("first PutIngester: %v", err)
 		}
 		_, err = client.PutIngester(ctx, connect.NewRequest(&gastrologv1.PutIngesterRequest{
-			Config: &gastrologv1.IngesterConfig{Name: "my-ingester", Type: "syslog"},
+			Config: &gastrologv1.IngesterConfig{Name: "my-ingester", Type: "chatterbox"},
 		}))
 		if err == nil {
 			t.Fatal("expected error for duplicate ingester name")
@@ -806,7 +719,7 @@ func TestListIngestersRemoteRunning(t *testing.T) {
 
 	remoteIngID := uuid.Must(uuid.NewV7())
 	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
-		ID: remoteIngID, Name: "remote-syslog", Type: "syslog", NodeID: "node-B", Enabled: true,
+		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
 
 	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
@@ -854,7 +767,7 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 
 	remoteIngID := uuid.Must(uuid.NewV7())
 	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
-		ID: remoteIngID, Name: "remote-syslog", Type: "syslog", NodeID: "node-B", Enabled: true,
+		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
 
 	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
@@ -903,7 +816,7 @@ func TestGetIngesterStatusLocal(t *testing.T) {
 
 	ingID := uuid.Must(uuid.NewV7())
 	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
-		ID: ingID, Name: "local-syslog", Type: "syslog", NodeID: "node-A", Enabled: true,
+		ID: ingID, Name: "local-syslog", Enabled: true,
 	})
 
 	// Register in orchestrator so GetIngesterStats returns non-nil.
@@ -950,7 +863,7 @@ func TestListIngestersNoPeerStats(t *testing.T) {
 
 	remoteIngID := uuid.Must(uuid.NewV7())
 	_ = cfgStore.PutIngester(ctx, config.IngesterConfig{
-		ID: remoteIngID, Name: "remote-syslog", Type: "syslog", NodeID: "node-B", Enabled: true,
+		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
 
 	// No PeerIngesterStats provided (single-node mode).
@@ -1153,9 +1066,9 @@ func TestGetRouteStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, nil, nil))
 
-	_ = cfgStore.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "test-vault", Type: "memory", Enabled: true})
+	_ = cfgStore.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "test-vault", Enabled: true})
 	_ = cfgStore.PutFilter(ctx, config.FilterConfig{ID: filterID, Expression: "*"})
 	_ = cfgStore.PutRoute(ctx, config.RouteConfig{
 		ID: routeID, FilterID: &filterID,
@@ -1233,231 +1146,11 @@ func TestPutRouteEjectOnly(t *testing.T) {
 	}
 }
 
-func TestPutVaultEjectRetentionRule(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
+// TestPutVaultEjectRetentionRule, TestPutVaultEjectRuleRequiresEjectOnlyRoute,
+// TestPutVaultEjectRuleMissingRouteIDs, TestDeleteRouteReferencedByEjectVault,
+// and TestPutVaultEjectRuleNonexistentRoute were removed: retention rules
+// (including eject rules) have moved from VaultConfig to TierConfig as part of
+// the tiered storage refactor. These validations will be tested when the
+// PutTier RPC is implemented.
 
-	// Create a retention policy.
-	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
-		Config: &gastrologv1.RetentionPolicyConfig{Name: "eject-retention", MaxChunks: 5},
-	}))
-	if err != nil {
-		t.Fatalf("PutRetentionPolicy: %v", err)
-	}
-	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
-
-	// Create an eject-only route.
-	routeResp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
-		Config: &gastrologv1.RouteConfig{
-			Name:      "eject-target",
-			EjectOnly: true,
-			Enabled:   true,
-		},
-	}))
-	if err != nil {
-		t.Fatalf("PutRoute: %v", err)
-	}
-	var routeID string
-	for _, r := range routeResp.Msg.Config.Routes {
-		if r.Name == "eject-target" {
-			routeID = r.Id
-		}
-	}
-	if routeID == "" {
-		t.Fatal("eject route not found in config")
-	}
-
-	// Create vault with eject retention rule.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Name: "eject-vault",
-			Type: "memory",
-			RetentionRules: []*gastrologv1.RetentionRule{
-				{
-					RetentionPolicyId: rpID,
-					Action:            "eject",
-					EjectRouteIds:     []string{routeID},
-				},
-			},
-		},
-	}))
-	if err != nil {
-		t.Fatalf("PutVault with eject rule: %v", err)
-	}
-}
-
-func TestPutVaultEjectRuleRequiresEjectOnlyRoute(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	// Create retention policy.
-	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
-		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-eject-only", MaxChunks: 5},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
-
-	// Create a normal route (NOT eject-only).
-	routeResp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
-		Config: &gastrologv1.RouteConfig{
-			Name:    "normal-route",
-			Enabled: true,
-		},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var routeID string
-	for _, r := range routeResp.Msg.Config.Routes {
-		if r.Name == "normal-route" {
-			routeID = r.Id
-		}
-	}
-
-	// Vault with eject rule referencing a non-eject-only route → error.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Name: "bad-eject-vault",
-			Type: "memory",
-			RetentionRules: []*gastrologv1.RetentionRule{
-				{
-					RetentionPolicyId: rpID,
-					Action:            "eject",
-					EjectRouteIds:     []string{routeID},
-				},
-			},
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected error for eject rule referencing non-eject-only route")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
-	}
-}
-
-func TestPutVaultEjectRuleMissingRouteIDs(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
-		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-missing", MaxChunks: 5},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
-
-	// Eject rule with no route IDs → error.
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Name: "missing-routes-vault",
-			Type: "memory",
-			RetentionRules: []*gastrologv1.RetentionRule{
-				{
-					RetentionPolicyId: rpID,
-					Action:            "eject",
-					EjectRouteIds:     []string{},
-				},
-			},
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected error for eject rule with no route IDs")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
-	}
-}
-
-func TestDeleteRouteReferencedByEjectVault(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	// Create retention policy + eject-only route + vault referencing it.
-	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
-		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-ref-integrity", MaxChunks: 5},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
-
-	routeResp, err := client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
-		Config: &gastrologv1.RouteConfig{Name: "eject-route-ref", EjectOnly: true, Enabled: true},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var routeID string
-	for _, r := range routeResp.Msg.Config.Routes {
-		if r.Name == "eject-route-ref" {
-			routeID = r.Id
-		}
-	}
-
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Name: "vault-with-eject",
-			Type: "memory",
-			RetentionRules: []*gastrologv1.RetentionRule{
-				{
-					RetentionPolicyId: rpID,
-					Action:            "eject",
-					EjectRouteIds:     []string{routeID},
-				},
-			},
-		},
-	}))
-	if err != nil {
-		t.Fatalf("PutVault: %v", err)
-	}
-
-	// Try to delete the route → should fail with FailedPrecondition.
-	_, err = client.DeleteRoute(ctx, connect.NewRequest(&gastrologv1.DeleteRouteRequest{
-		Id: routeID,
-	}))
-	if err == nil {
-		t.Fatal("expected error deleting route referenced by eject vault")
-	}
-	if connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Errorf("expected FailedPrecondition, got %v", connect.CodeOf(err))
-	}
-}
-
-func TestPutVaultEjectRuleNonexistentRoute(t *testing.T) {
-	client, _, _ := newConfigTestSetup(t)
-	ctx := context.Background()
-
-	rpResp, err := client.PutRetentionPolicy(ctx, connect.NewRequest(&gastrologv1.PutRetentionPolicyRequest{
-		Config: &gastrologv1.RetentionPolicyConfig{Name: "rp-noexist", MaxChunks: 5},
-	}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	rpID := rpResp.Msg.Config.RetentionPolicies[0].Id
-
-	// Reference a route that doesn't exist.
-	fakeRouteID := uuid.Must(uuid.NewV7()).String()
-	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
-		Config: &gastrologv1.VaultConfig{
-			Name: "vault-no-route",
-			Type: "memory",
-			RetentionRules: []*gastrologv1.RetentionRule{
-				{
-					RetentionPolicyId: rpID,
-					Action:            "eject",
-					EjectRouteIds:     []string{fakeRouteID},
-				},
-			},
-		},
-	}))
-	if err == nil {
-		t.Fatal("expected error for eject rule referencing non-existent route")
-	}
-	if connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("expected InvalidArgument, got %v", connect.CodeOf(err))
-	}
-}
+// Remaining eject tests removed — see comment above.

@@ -15,7 +15,7 @@ import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, NumberInput } from "./FormField";
 import { Button } from "./Buttons";
-import { UsedByStatus, refsFor } from "./UsedByStatus";
+import { UsedByStatus, tierRefsForRotationPolicy } from "./UsedByStatus";
 import type { SettingsTab } from "./SettingsDialog";
 import { sortByName } from "../../lib/sort";
 
@@ -149,7 +149,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
   const existingNames = new Set(policies.map((p) => p.name));
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
-  const vaults = config?.vaults ?? [];
+  const tiers = config?.tiers ?? [];
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
@@ -185,12 +185,12 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       };
     },
     onDeleteSuccess: (id) => {
-      const referencedBy = vaults
-        .filter((s) => s.policy === id)
-        .map((s) => s.name || s.id);
+      const referencedBy = tiers
+        .filter((t) => t.rotationPolicyId === id)
+        .map((t) => t.name || t.id);
       if (referencedBy.length > 0) {
         addToast(
-          `Policy "${id}" deleted (was used by: ${referencedBy.join(", ")})`,
+          `Policy "${id}" deleted (was used by tiers: ${referencedBy.join(", ")})`,
           "warn",
         );
       } else {
@@ -305,7 +305,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       {sortByName(policies).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = refsFor(vaults, "policy", id);
+        const refs = tierRefsForRotationPolicy(tiers, id);
         return (
           <SettingsCard
             key={id}
@@ -322,7 +322,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
                 {putPolicy.isPending ? "Saving..." : "Save"}
               </Button>
             }
-            status={<UsedByStatus dark={dark} refs={refs} onNavigate={onNavigateTo ? (name) => onNavigateTo("vaults", name) : undefined} />}
+            status={<UsedByStatus dark={dark} refs={refs} />}
           >
             <div className="flex flex-col gap-3">
               <FormField label="Name" dark={dark}>

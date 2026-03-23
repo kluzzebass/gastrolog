@@ -24,7 +24,7 @@ func (o *Orchestrator) Search(ctx context.Context, key uuid.UUID, q query.Query,
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := vault.Query.Search(ctx, q, resume)
+	seq, nextToken := vault.QueryEngine().Search(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -41,7 +41,7 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key uuid.UUID, q qu
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := vault.Query.SearchThenFollow(ctx, q, resume)
+	seq, nextToken := vault.QueryEngine().SearchThenFollow(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -58,7 +58,7 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key uuid.UUID, q q
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := vault.Query.SearchWithContext(ctx, q)
+	seq, nextToken := vault.QueryEngine().SearchWithContext(ctx, q)
 	return seq, nextToken, nil
 }
 
@@ -75,5 +75,5 @@ func (o *Orchestrator) Explain(ctx context.Context, key uuid.UUID, q query.Query
 		return nil, ErrUnknownRegistry
 	}
 
-	return vault.Query.Explain(ctx, q)
+	return vault.QueryEngine().Explain(ctx, q)
 }

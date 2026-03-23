@@ -207,27 +207,15 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 // ---------------------------------------------------------------------------
 
 func putVaultCmd(cfg config.VaultConfig) *gastrologv1.PutVaultCommand {
-	rules := make([]*gastrologv1.VaultRetentionRule, len(cfg.RetentionRules))
-	for i, r := range cfg.RetentionRules {
-		ejectIDs := make([]string, len(r.EjectRouteIDs))
-		for j, eid := range r.EjectRouteIDs {
-			ejectIDs[j] = eid.String()
-		}
-		rules[i] = &gastrologv1.VaultRetentionRule{
-			RetentionPolicyId: r.RetentionPolicyID.String(),
-			Action:            string(r.Action),
-			EjectRouteIds:     ejectIDs,
-		}
+	tierIDs := make([]string, len(cfg.TierIDs))
+	for i, tid := range cfg.TierIDs {
+		tierIDs[i] = tid.String()
 	}
 	return &gastrologv1.PutVaultCommand{
-		Id:             cfg.ID.String(),
-		Name:           cfg.Name,
-		Type:           cfg.Type,
-		Policy:         uuidPtrToString(cfg.Policy),
-		RetentionRules: rules,
-		Enabled:        cfg.Enabled,
-		Params:         cfg.Params,
-		NodeId:         cfg.NodeID,
+		Id:      cfg.ID.String(),
+		Name:    cfg.Name,
+		Enabled: cfg.Enabled,
+		TierIds: tierIDs,
 	}
 }
 
@@ -253,41 +241,21 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (config.VaultConfig, erro
 	if err != nil {
 		return config.VaultConfig{}, fmt.Errorf("parse vault id: %w", err)
 	}
-	policy, err := parseOptionalUUID(cmd.GetPolicy())
-	if err != nil {
-		return config.VaultConfig{}, fmt.Errorf("parse vault policy: %w", err)
-	}
 
-	var rules []config.RetentionRule
-	for _, r := range cmd.GetRetentionRules() {
-		rpID, err := uuid.Parse(r.GetRetentionPolicyId())
+	var tierIDs []uuid.UUID
+	for _, tid := range cmd.GetTierIds() {
+		tierID, err := uuid.Parse(tid)
 		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("parse retention rule policy id: %w", err)
+			return config.VaultConfig{}, fmt.Errorf("parse tier id: %w", err)
 		}
-		var ejectRouteIDs []uuid.UUID
-		for _, eid := range r.GetEjectRouteIds() {
-			eID, err := uuid.Parse(eid)
-			if err != nil {
-				return config.VaultConfig{}, fmt.Errorf("parse eject route id: %w", err)
-			}
-			ejectRouteIDs = append(ejectRouteIDs, eID)
-		}
-		rules = append(rules, config.RetentionRule{
-			RetentionPolicyID: rpID,
-			Action:            config.RetentionAction(r.GetAction()),
-			EjectRouteIDs:     ejectRouteIDs,
-		})
+		tierIDs = append(tierIDs, tierID)
 	}
 
 	return config.VaultConfig{
-		ID:             id,
-		Name:           cmd.GetName(),
-		Type:           cmd.GetType(),
-		Policy:         policy,
-		RetentionRules: rules,
-		Enabled:        cmd.GetEnabled(),
-		Params:         nilIfEmpty(cmd.GetParams()),
-		NodeID:         cmd.GetNodeId(),
+		ID:      id,
+		Name:    cmd.GetName(),
+		Enabled: cmd.GetEnabled(),
+		TierIDs: tierIDs,
 	}, nil
 }
 

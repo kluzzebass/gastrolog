@@ -133,21 +133,14 @@ func TestPutRetentionPolicyNilOptionals(t *testing.T) {
 
 func TestPutVault(t *testing.T) {
 	t.Parallel()
-	policyID := uuid.Must(uuid.NewV7())
-	retPolicyID := uuid.Must(uuid.NewV7())
-	destID := uuid.Must(uuid.NewV7())
+	tierID1 := uuid.Must(uuid.NewV7())
+	tierID2 := uuid.Must(uuid.NewV7())
 
 	want := config.VaultConfig{
-		ID:     uuid.Must(uuid.NewV7()),
-		Name:   "production",
-		Type:   "file",
-		Policy: &policyID,
-		RetentionRules: []config.RetentionRule{
-			{RetentionPolicyID: retPolicyID, Action: config.RetentionActionExpire},
-			{RetentionPolicyID: retPolicyID, Action: config.RetentionActionEject, EjectRouteIDs: []uuid.UUID{destID}},
-		},
+		ID:      uuid.Must(uuid.NewV7()),
+		Name:    "production",
 		Enabled: true,
-		Params:  map[string]string{"path": "/data/vault"},
+		TierIDs: []uuid.UUID{tierID1, tierID2},
 	}
 	got := roundTripCommand(t, NewPutVault(want), func(cmd *gastrologv1.ConfigCommand) (config.VaultConfig, error) {
 		return ExtractPutVault(cmd.GetPutVault())
@@ -162,7 +155,6 @@ func TestPutVaultNilOptionals(t *testing.T) {
 	want := config.VaultConfig{
 		ID:   uuid.Must(uuid.NewV7()),
 		Name: "bare",
-		Type: "memory",
 	}
 	got := roundTripCommand(t, NewPutVault(want), func(cmd *gastrologv1.ConfigCommand) (config.VaultConfig, error) {
 		return ExtractPutVault(cmd.GetPutVault())
@@ -468,8 +460,6 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	policyID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
-	destVaultID := uuid.Must(uuid.NewV7())
-
 	cfg := &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: filterID, Name: "all", Expression: "*"},
@@ -482,19 +472,13 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		},
 		Vaults: []config.VaultConfig{
 			{
-				ID:     uuid.Must(uuid.NewV7()),
-				Name:   "main",
-				Type:   "file",
-				Policy: &policyID,
-				RetentionRules: []config.RetentionRule{
-					{RetentionPolicyID: retPolicyID, Action: config.RetentionActionEject, EjectRouteIDs: []uuid.UUID{destVaultID}},
-				},
+				ID:      uuid.Must(uuid.NewV7()),
+				Name:    "main",
 				Enabled: true,
-				Params:  map[string]string{"path": "/data"},
 			},
 		},
 		Ingesters: []config.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Name: "syslog", Type: "syslog-udp", Enabled: true, Params: map[string]string{"addr": ":514"}},
+			{ID: uuid.Must(uuid.NewV7()), Name: "syslog", Enabled: true},
 		},
 		Auth: config.AuthConfig{JWTSecret: "test"},
 		Certs: []config.CertPEM{

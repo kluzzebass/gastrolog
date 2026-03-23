@@ -13,7 +13,6 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/config"
 	"gastrolog/internal/orchestrator"
 )
@@ -144,30 +143,12 @@ func (s *VaultServer) MigrateVault(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
 	}
 
-	// Resolve destination type: explicit or same as source.
-	dstType := req.Msg.DestinationType
-	if dstType == "" {
-		dstType = srcCfg.Type
-	}
-
-	dstParams := req.Msg.DestinationParams
-	if dstParams == nil {
-		dstParams = make(map[string]string)
-	}
-	// File vaults require an explicit dir — no auto-derive.
-	if dstType == "file" && dstParams[chunkfile.ParamDir] == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination_params.dir required for file vaults"))
-	}
-
-	// Phase 1: Create destination vault with inherited policy.
+	// Phase 1: Create destination vault with inherited tiers.
 	dstCfg := config.VaultConfig{
-		ID:        uuid.Must(uuid.NewV7()),
-		Name:      req.Msg.Destination,
-		Type:      dstType,
-		Policy:    srcCfg.Policy,
-		RetentionRules: srcCfg.RetentionRules,
-		Enabled:   true,
-		Params:    dstParams,
+		ID:      uuid.Must(uuid.NewV7()),
+		Name:    req.Msg.Destination,
+		Enabled: true,
+		TierIDs: srcCfg.TierIDs,
 	}
 
 	if err := s.createVault(ctx, dstCfg); err != nil {
@@ -194,17 +175,11 @@ func (s *VaultServer) MigrateVault(
 	dstID := dstCfg.ID
 	srcName := s.vaultName(ctx, srcID)
 
-	// Capture file dir before the job runs (source config will be deleted).
-	var srcFileDir string
-	if srcCfg.Type == "file" {
-		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
-	}
-
 	jobID := s.orch.MigrateVault(ctx, orchestrator.TransferParams{
 		SrcID:       srcID,
 		DstID:       dstID,
 		Description: fmt.Sprintf("Migrate '%s' to '%s'", srcName, s.vaultName(ctx, dstID)),
-		CleanupSrc:  s.makeCleanupFunc(srcID, srcFileDir),
+		CleanupSrc:  s.makeCleanupFunc(srcID, ""),
 	})
 
 	return connect.NewResponse(&apiv1.MigrateVaultResponse{JobId: jobID}), nil
@@ -250,17 +225,11 @@ func (s *VaultServer) MergeVaults(
 		}
 	}
 
-	// Capture source file dir before job runs (source config will be deleted).
-	var srcFileDir string
-	if srcCfg, err := s.getFullVaultConfig(ctx, srcID); err == nil && srcCfg.Type == "file" {
-		srcFileDir = srcCfg.Params[chunkfile.ParamDir]
-	}
-
 	jobID := s.orch.MergeVaults(ctx, orchestrator.TransferParams{
 		SrcID:       srcID,
 		DstID:       dstID,
 		Description: fmt.Sprintf("Merge '%s' into '%s'", s.vaultName(ctx, srcID), s.vaultName(ctx, dstID)),
-		CleanupSrc:  s.makeCleanupFunc(srcID, srcFileDir),
+		CleanupSrc:  s.makeCleanupFunc(srcID, ""),
 	})
 
 	return connect.NewResponse(&apiv1.MergeVaultsResponse{JobId: jobID}), nil

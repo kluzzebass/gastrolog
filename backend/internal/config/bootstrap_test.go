@@ -28,8 +28,16 @@ func TestDefaultConfig(t *testing.T) {
 	if len(cfg.Vaults) != 1 {
 		t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))
 	}
-	if cfg.Vaults[0].Type != "memory" {
-		t.Errorf("expected vault type 'memory', got %q", cfg.Vaults[0].Type)
+	// Vault should reference the tier created during bootstrap.
+	if len(cfg.Vaults[0].TierIDs) != 1 {
+		t.Errorf("expected 1 tier ID, got %d", len(cfg.Vaults[0].TierIDs))
+	}
+	// The tier should be of type "memory".
+	if len(cfg.Tiers) != 1 {
+		t.Fatalf("expected 1 tier, got %d", len(cfg.Tiers))
+	}
+	if cfg.Tiers[0].Type != config.TierTypeMemory {
+		t.Errorf("expected tier type 'memory', got %q", cfg.Tiers[0].Type)
 	}
 	if len(cfg.Ingesters) != 1 {
 		t.Errorf("expected 1 ingester, got %d", len(cfg.Ingesters))

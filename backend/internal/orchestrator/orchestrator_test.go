@@ -59,7 +59,7 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
@@ -481,7 +481,7 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Set up a catch-all route so records are delivered to the vault.
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
@@ -687,7 +687,7 @@ func TestIngesterSealOnChunkFull(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
 		{VaultID: defaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
 	}))
@@ -959,7 +959,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(defaultID, s.CM, tracker, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, tracker, nil))
 
 	// RebuildMissingIndexes should find the sealed chunk and build indexes.
 	if err := orch.RebuildMissingIndexes(context.Background()); err != nil {
@@ -1026,7 +1026,7 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 		})
 		vaults.cms[id] = s.CM
 
-		orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
+		orch.RegisterVault(orchestrator.NewVaultFromComponents(id, s.CM, s.IM, s.QE))
 	}
 
 	return orch, vaults
@@ -1056,7 +1056,7 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*or
 		})
 		vaults.cms[id] = s.CM
 
-		orch.RegisterVault(orchestrator.NewVault(id, s.CM, s.IM, s.QE))
+		orch.RegisterVault(orchestrator.NewVaultFromComponents(id, s.CM, s.IM, s.QE))
 	}
 
 	return orch, vaults
@@ -1486,7 +1486,7 @@ func TestPipelineOverlap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(vaultID, slowCM, s.IM, s.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, slowCM, s.IM, s.QE))
 	orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
 		{VaultID: vaultID, Kind: orchestrator.FilterCatchAll, Expr: "*"},
 	}))

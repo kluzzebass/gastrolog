@@ -12,23 +12,18 @@ const sampleConfig = {
     {
       id: "v1",
       name: "vault-alpha",
-      type: "file",
-      policy: "p1",
-      retentionRules: [{ retentionPolicyId: "rp1", action: "delete", destinationId: "" }],
+      tierIds: ["t1"],
       enabled: true,
-      params: { dir: "/data/alpha" },
-      nodeId: "n1",
     },
     {
       id: "v2",
       name: "vault-beta",
-      type: "memory",
-      policy: "",
-      retentionRules: [],
+      tierIds: [],
       enabled: false,
-      params: {},
-      nodeId: "",
     },
+  ],
+  tiers: [
+    { id: "t1", name: "local-tier", type: 2 /* LOCAL */, rotationPolicyId: "p1", retentionRules: [{ retentionPolicyId: "rp1" }] },
   ],
   rotationPolicies: [{ id: "p1", name: "daily" }],
   retentionPolicies: [{ id: "rp1", name: "30-day" }],
@@ -69,8 +64,8 @@ describe("VaultsSettings", () => {
 
     expect(getByText("vault-alpha")).toBeTruthy();
     expect(getByText("vault-beta")).toBeTruthy();
-    expect(getByText("file")).toBeTruthy();
-    expect(getByText("memory")).toBeTruthy();
+    // vault-alpha has a local tier
+    expect(getByText("local")).toBeTruthy();
   });
 
   test("shows disabled badge for disabled vaults", () => {
@@ -85,7 +80,7 @@ describe("VaultsSettings", () => {
     expect(getByText("disabled")).toBeTruthy();
   });
 
-  test("warns about missing rotation and retention policies", () => {
+  test("warns about missing tiers", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["config"], sampleConfig);
 
@@ -93,9 +88,8 @@ describe("VaultsSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    // vault-beta has no policy and no retention rules
-    expect(getByText(/no rotation policy/)).toBeTruthy();
-    expect(getByText(/no retention policy/)).toBeTruthy();
+    // vault-beta has no tiers
+    expect(getByText(/no tiers configured/)).toBeTruthy();
   });
 
   test("expand vault shows edit form and action buttons", () => {
@@ -110,7 +104,7 @@ describe("VaultsSettings", () => {
     // Form fields
     expect(getByText("Name")).toBeTruthy();
     expect(getByText("Enabled")).toBeTruthy();
-    expect(getByText("Rotation Policy")).toBeTruthy();
+    expect(getByText("Tiers")).toBeTruthy();
     expect(getByDisplayValue("vault-alpha")).toBeTruthy();
     // Action buttons
     expect(getByText("Rotate")).toBeTruthy();
@@ -217,7 +211,7 @@ describe("VaultsSettings", () => {
     });
   });
 
-  test("opens add form via dropdown selection", async () => {
+  test("opens add form via button click", async () => {
     m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     const qc = createTestQueryClient();
     qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
@@ -226,15 +220,11 @@ describe("VaultsSettings", () => {
       wrapper: settingsWrapper(qc),
     });
 
-    // Open dropdown
     fireEvent.click(getByText("Add Vault"));
-    // Select type
-    fireEvent.click(getByText("memory"));
 
     await waitFor(() => {
       expect(getByText("Create")).toBeTruthy();
       expect(getByText("Name")).toBeTruthy();
-      expect(getByText("Rotation Policy")).toBeTruthy();
     });
   });
 
@@ -249,7 +239,6 @@ describe("VaultsSettings", () => {
     });
 
     fireEvent.click(getByText("Add Vault"));
-    fireEvent.click(getByText("memory"));
 
     await waitFor(() => expect(getByText("Create")).toBeTruthy());
     fireEvent.click(getByText("Create"));

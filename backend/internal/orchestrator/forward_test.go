@@ -64,11 +64,8 @@ func TestIngestForwardsToRemoteVault(t *testing.T) {
 	o.SetRecordForwarder(fwd)
 
 	// Register a local vault with a simple mock chunk manager.
-	localVault := &Vault{
-		ID:      localVaultID,
-		Enabled: true,
-		Chunks:  &noopChunkManager{},
-	}
+	localVault := NewVaultFromComponents(localVaultID, &noopChunkManager{}, nil, nil)
+	localVault.Enabled = true
 	o.vaults[localVaultID] = localVault
 
 	// Build filter set with local + remote targets, both catch-all.
@@ -110,11 +107,8 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	}
 	// No forwarder set (single-node mode).
 
-	localVault := &Vault{
-		ID:      localVaultID,
-		Enabled: true,
-		Chunks:  &noopChunkManager{},
-	}
+	localVault := NewVaultFromComponents(localVaultID, &noopChunkManager{}, nil, nil)
+	localVault.Enabled = true
 	o.vaults[localVaultID] = localVault
 
 	// Filter set with local + remote.
@@ -136,8 +130,8 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 			},
 		},
 		Vaults: []config.VaultConfig{
-			{ID: localVaultID, NodeID: "node-A"},
-			{ID: remoteVaultID, NodeID: "node-B"},
+			{ID: localVaultID},
+			{ID: remoteVaultID},
 		},
 	}}
 
@@ -157,109 +151,10 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	}
 }
 
-func TestReloadFiltersIncludesRemoteWhenForwarderSet(t *testing.T) {
-	localVaultID := uuid.Must(uuid.NewV7())
-	remoteVaultID := uuid.Must(uuid.NewV7())
-
-	fwd := &mockForwarder{}
-	o, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	o.SetRecordForwarder(fwd)
-
-	localVault := &Vault{
-		ID:      localVaultID,
-		Enabled: true,
-		Chunks:  &noopChunkManager{},
-	}
-	o.vaults[localVaultID] = localVault
-
-	cfg := &config.Config{
-		Routes: []config.RouteConfig{
-			{
-				ID:           uuid.Must(uuid.NewV7()),
-				Enabled:      true,
-				Destinations: []uuid.UUID{localVaultID, remoteVaultID},
-			},
-		},
-		Vaults: []config.VaultConfig{
-			{ID: localVaultID, NodeID: "node-A"},
-			{ID: remoteVaultID, NodeID: "node-B"},
-		},
-	}
-
-	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
-		t.Fatalf("reloadFiltersFromRoutes failed: %v", err)
-	}
-
-	if o.filterSet == nil {
-		t.Fatal("filterSet should not be nil")
-	}
-	if len(o.filterSet.filters) != 2 {
-		t.Fatalf("expected 2 filters, got %d", len(o.filterSet.filters))
-	}
-
-	// Verify one is local and one is remote.
-	var localFound, remoteFound bool
-	for _, f := range o.filterSet.filters {
-		if f.VaultID == localVaultID && f.NodeID == "" {
-			localFound = true
-		}
-		if f.VaultID == remoteVaultID && f.NodeID == "node-B" {
-			remoteFound = true
-		}
-	}
-	if !localFound {
-		t.Error("local vault filter not found")
-	}
-	if !remoteFound {
-		t.Error("remote vault filter not found")
-	}
-}
-
-func TestRebuildFilterSetPreservesRemoteFilters(t *testing.T) {
-	localVaultID := uuid.Must(uuid.NewV7())
-	remoteVaultID := uuid.Must(uuid.NewV7())
-	goneVaultID := uuid.Must(uuid.NewV7())
-
-	o, err := New(Config{LocalNodeID: "node-A"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	localVault := &Vault{ID: localVaultID, Enabled: true, Chunks: &noopChunkManager{}}
-	o.vaults[localVaultID] = localVault
-
-	localFilter, _ := CompileFilter(localVaultID, "*")
-	remoteFilter, _ := CompileFilter(remoteVaultID, "*")
-	remoteFilter.NodeID = "node-B"
-	goneFilter, _ := CompileFilter(goneVaultID, "*")
-	// goneFilter has no NodeID — local vault that was removed.
-
-	o.filterSet = NewFilterSet([]*CompiledFilter{localFilter, remoteFilter, goneFilter})
-
-	o.rebuildFilterSetLocked()
-
-	// Remote filter should be preserved. Gone local filter should be removed.
-	if o.filterSet == nil {
-		t.Fatal("filterSet should not be nil")
-	}
-	for _, f := range o.filterSet.filters {
-		if f.VaultID == goneVaultID {
-			t.Error("removed local vault filter should be excluded")
-		}
-	}
-	var remoteFound bool
-	for _, f := range o.filterSet.filters {
-		if f.VaultID == remoteVaultID && f.NodeID == "node-B" {
-			remoteFound = true
-		}
-	}
-	if !remoteFound {
-		t.Error("remote vault filter should be preserved")
-	}
-}
+// TestReloadFiltersIncludesRemoteWhenForwarderSet and
+// TestRebuildFilterSetPreservesRemoteFilters were removed: they tested the
+// concept of NodeID-based remote vault filters which no longer exists.
+// Remote vault routing will be reintroduced via tier primary election.
 
 // noopChunkManager satisfies the ChunkManager interface for tests
 // that only need the ingest path (no actual storage).

@@ -121,17 +121,17 @@ func (s *ConfigServer) DeleteRoute(
 		return nil, connErr
 	}
 
-	// Referential integrity: reject if any vault references this route as an eject target.
-	vaults, err := s.cfgStore.ListVaults(ctx)
+	// Referential integrity: reject if any tier references this route as an eject target.
+	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	for _, v := range vaults {
-		for _, rule := range v.RetentionRules {
+	for _, t := range tiers {
+		for _, rule := range t.RetentionRules {
 			if rule.Action == config.RetentionActionEject {
 				if slices.Contains(rule.EjectRouteIDs, id) {
 					return nil, connect.NewError(connect.CodeFailedPrecondition,
-						fmt.Errorf("route %q is referenced as eject target by vault %q", req.Msg.Id, v.ID))
+						fmt.Errorf("route %q is referenced as eject target by tier %q", req.Msg.Id, t.ID))
 				}
 			}
 		}

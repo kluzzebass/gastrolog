@@ -525,28 +525,14 @@ type VaultConfig struct {
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
 
-	// Type identifies the vault implementation (e.g., "file", "memory").
-	Type string `json:"type"`
-
-	// Policy references a rotation policy by UUID.
-	// Nil means no policy (type-specific default).
-	Policy *uuid.UUID `json:"policy,omitempty"`
-
-	// RetentionRules pairs retention policies with actions (expire or eject).
-	RetentionRules []RetentionRule `json:"retentionRules,omitempty"`
-
 	// Enabled indicates whether ingestion is enabled for this vault.
 	// When false, the vault will not receive new records from the ingest pipeline.
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Params contains type-specific configuration as opaque string key-value pairs.
-	// Parsing and validation are the responsibility of the factory that consumes
-	// the params. There is no schema enforcement at the ConfigVault level.
-	Params map[string]string `json:"params,omitempty"`
-
-	// NodeID is the raft server ID of the node that owns this vault.
-	// Empty means unscoped (legacy/migration compatibility).
-	NodeID string `json:"nodeId,omitempty"`
+	// TierIDs references TierConfig entries by UUID, in priority order.
+	// The first tier is the active (hot) tier; subsequent tiers hold progressively
+	// colder data. An empty list means the vault has no storage.
+	TierIDs []uuid.UUID `json:"tierIds,omitempty"`
 }
 
 // RouteConfig defines a named routing rule that connects a filter to one or more
@@ -678,6 +664,7 @@ type TierConfig struct {
 	CloudServiceID    *uuid.UUID      `json:"cloudServiceId,omitempty"`
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
+	NodeID            string          `json:"nodeId,omitempty"` // temporary: explicit node assignment until tier election
 }
 
 // ClusterTLS holds mTLS material for the cluster gRPC port.

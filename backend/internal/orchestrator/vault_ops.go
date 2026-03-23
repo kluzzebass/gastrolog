@@ -34,7 +34,7 @@ func (o *Orchestrator) vaultManagers(vaultID uuid.UUID) (chunk.ChunkManager, ind
 	if s == nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return s.Chunks, s.Indexes, nil
+	return s.ChunkManager(), s.IndexManager(), nil
 }
 
 // chunkManager looks up the chunk manager for a vault under RLock.
@@ -45,7 +45,7 @@ func (o *Orchestrator) chunkManager(vaultID uuid.UUID) (chunk.ChunkManager, erro
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return s.Chunks, nil
+	return s.ChunkManager(), nil
 }
 
 // indexManager looks up the index manager for a vault under RLock.
@@ -56,7 +56,7 @@ func (o *Orchestrator) indexManager(vaultID uuid.UUID) (index.IndexManager, erro
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return s.Indexes, nil
+	return s.IndexManager(), nil
 }
 
 // --- Chunk read ---
@@ -101,7 +101,7 @@ func (o *Orchestrator) VaultType(vaultID uuid.UUID) string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if v := o.vaults[vaultID]; v != nil {
-		return v.Type
+		return v.Type()
 	}
 	return ""
 }
@@ -131,14 +131,14 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		return chunk.ChunkID{}, 0, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 
-	activeBefore := vault.Chunks.Active()
-	cid, pos, err := vault.Chunks.Append(rec)
+	activeBefore := vault.ChunkManager().Active()
+	cid, pos, err := vault.ChunkManager().Append(rec)
 	if err != nil {
 		return cid, pos, err
 	}
 
 	// Detect seal: if Active() changed, the previous chunk was sealed.
-	activeAfter := vault.Chunks.Active()
+	activeAfter := vault.ChunkManager().Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
 		o.schedulePostSeal(vaultID, activeBefore.ID)
 	}
@@ -180,13 +180,13 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	active := vault.Chunks.Active()
+	active := vault.ChunkManager().Active()
 	if active == nil || active.RecordCount == 0 {
 		return nil
 	}
 	chunkID := active.ID
 
-	if err := vault.Chunks.Seal(); err != nil {
+	if err := vault.ChunkManager().Seal(); err != nil {
 		return err
 	}
 
@@ -341,7 +341,7 @@ func (o *Orchestrator) SupportsChunkMove(srcID, dstID uuid.UUID) bool {
 	if srcVault == nil || dstVault == nil {
 		return false
 	}
-	_, srcOK := srcVault.Chunks.(chunk.ChunkMover)
-	_, dstOK := dstVault.Chunks.(chunk.ChunkMover)
+	_, srcOK := srcVault.ChunkManager().(chunk.ChunkMover)
+	_, dstOK := dstVault.ChunkManager().(chunk.ChunkMover)
 	return srcOK && dstOK
 }

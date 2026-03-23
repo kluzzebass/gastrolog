@@ -1,6 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { vaultClient, configClient } from "../client";
-import type { RetentionRule } from "../gen/gastrolog/v1/config_pb";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useConfigMutation } from "./useConfig";
@@ -158,23 +157,15 @@ export function usePutVault() {
     async (args: {
       id: string;
       name: string;
-      type: string;
-      policy: string;
-      retentionRules: Partial<RetentionRule>[];
-      params: Record<string, string>;
+      tierIds: string[];
       enabled?: boolean;
-      nodeId?: string;
     }) => {
       return configClient.putVault({
         config: {
           id: args.id,
           name: args.name,
-          type: args.type,
-          policy: args.policy,
-          retentionRules: args.retentionRules,
-          params: args.params,
+          tierIds: args.tierIds,
           enabled: args.enabled ?? true,
-          nodeId: args.nodeId ?? "",
         },
       });
     },

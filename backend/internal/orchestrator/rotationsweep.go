@@ -25,8 +25,8 @@ func (o *Orchestrator) rotationSweep() {
 
 	o.mu.RLock()
 	for id, vault := range o.vaults {
-		activeBefore := vault.Chunks.Active()
-		if trigger := vault.Chunks.CheckRotation(); trigger != nil {
+		activeBefore := vault.ChunkManager().Active()
+		if trigger := vault.ChunkManager().CheckRotation(); trigger != nil {
 			o.logger.Info("background rotation triggered",
 				"vault", id,
 				"name", vault.Name,

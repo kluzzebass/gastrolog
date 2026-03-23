@@ -150,156 +150,10 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUI
 	return metas[0].ID
 }
 
-func TestMoveChunkRemote(t *testing.T) {
-	t.Parallel()
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
-	remoteNodeID := "node-B"
-
-	srcCM, srcIM := newFileVault(t)
-
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: dstID, NodeID: remoteNodeID},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
-		LocalNodeID:  "node-A",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVault(srcID, srcCM, srcIM, nil))
-
-	chunkID := seedAndSeal(t, orch, srcID, 5)
-
-	// Wire mock transferrer.
-	mock := &mockTransferrer{}
-	orch.SetRemoteTransferrer(mock)
-
-	// MoveChunk to remote destination.
-	if err := orch.MoveChunk(context.Background(), chunkID, srcID, dstID); err != nil {
-		t.Fatalf("MoveChunk: %v", err)
-	}
-
-	// Verify TransferRecords was called with correct target.
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 TransferRecords call, got %d", len(mock.calls))
-	}
-	call := mock.calls[0]
-	if call.NodeID != remoteNodeID {
-		t.Errorf("nodeID = %q, want %q", call.NodeID, remoteNodeID)
-	}
-	if call.VaultID != dstID {
-		t.Errorf("vaultID = %s, want %s", call.VaultID, dstID)
-	}
-	// Verify records were included with preserved WriteTS.
-	if len(call.Records) != 5 {
-		t.Fatalf("expected 5 records, got %d", len(call.Records))
-	}
-	for i, rec := range call.Records {
-		if rec.WriteTS.IsZero() {
-			t.Errorf("record %d has zero WriteTS", i)
-		}
-		if len(rec.Raw) == 0 {
-			t.Errorf("record %d has empty Raw", i)
-		}
-	}
-
-	// Verify source chunk was deleted.
-	remainingMetas, err := orch.ListChunkMetas(srcID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(remainingMetas) != 0 {
-		t.Errorf("source vault still has %d chunks, expected 0", len(remainingMetas))
-	}
-}
-
-func TestMoveChunkRemoteMemoryVault(t *testing.T) {
-	t.Parallel()
-	// Verify remote transfer works with memory vaults (no ChunkMover).
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
-	remoteNodeID := "node-B"
-
-	srcCM := newMemVault(t)
-
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: dstID, NodeID: remoteNodeID},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
-		LocalNodeID:  "node-A",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVault(srcID, srcCM, nil, nil))
-
-	chunkID := seedAndSeal(t, orch, srcID, 3)
-
-	mock := &mockTransferrer{}
-	orch.SetRemoteTransferrer(mock)
-
-	if err := orch.MoveChunk(context.Background(), chunkID, srcID, dstID); err != nil {
-		t.Fatalf("MoveChunk with memory vault: %v", err)
-	}
-
-	if len(mock.calls) != 1 {
-		t.Fatalf("expected 1 call, got %d", len(mock.calls))
-	}
-	if len(mock.calls[0].Records) != 3 {
-		t.Errorf("expected 3 records, got %d", len(mock.calls[0].Records))
-	}
-}
-
-func TestMoveChunkRemoteTransferError(t *testing.T) {
-	t.Parallel()
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
-	remoteNodeID := "node-B"
-
-	srcCM, srcIM := newFileVault(t)
-
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
-			{ID: dstID, NodeID: remoteNodeID},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
-		LocalNodeID:  "node-A",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	orch.RegisterVault(orchestrator.NewVault(srcID, srcCM, srcIM, nil))
-
-	chunkID := seedAndSeal(t, orch, srcID, 1)
-
-	// Wire mock that fails.
-	mock := &mockTransferrer{failErr: errors.New("connection refused")}
-	orch.SetRemoteTransferrer(mock)
-
-	// MoveChunk should fail.
-	err = orch.MoveChunk(context.Background(), chunkID, srcID, dstID)
-	if err == nil {
-		t.Fatal("expected error from failing transferrer")
-	}
-
-	// Source chunk must NOT be deleted on failure.
-	remainingMetas, _ := orch.ListChunkMetas(srcID)
-	if len(remainingMetas) != 1 {
-		t.Errorf("source vault has %d chunks, expected 1 (not deleted after error)", len(remainingMetas))
-	}
-}
+// TestMoveChunkRemote, TestMoveChunkRemoteMemoryVault, and
+// TestMoveChunkRemoteTransferError were removed: they tested the concept of
+// NodeID-based remote vault assignment which no longer exists. Remote vault
+// transfer will be reintroduced via tier primary election in a future issue.
 
 func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 	t.Parallel()
@@ -310,7 +164,7 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 
 	loader := &staticConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: dstID, NodeID: "node-B"},
+			{ID: dstID},
 		},
 	}}
 
@@ -321,7 +175,7 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(srcID, srcCM, srcIM, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(srcID, srcCM, srcIM, nil))
 
 	chunkID := seedAndSeal(t, orch, srcID, 1)
 
@@ -346,8 +200,8 @@ func TestMoveChunkLocalImportFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orch.RegisterVault(orchestrator.NewVault(srcID, srcCM, nil, nil))
-	orch.RegisterVault(orchestrator.NewVault(dstID, dstCM, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(srcID, srcCM, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(dstID, dstCM, nil, nil))
 
 	chunkID := seedAndSeal(t, orch, srcID, 5)
 
@@ -536,7 +390,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 
 	loader := &staticConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, NodeID: "node-A"},
+			{ID: vaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -559,7 +413,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 	mock := &mockTransferrer{}
 	orch.SetRemoteTransferrer(mock)
 
-	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, nil, nil))
 
 	// Build initial filters from routes.
 	if err := orch.ReloadFilters(context.Background()); err != nil {
@@ -642,7 +496,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 
 	loader := &staticConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, NodeID: "node-A"},
+			{ID: vaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -666,7 +520,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 	blockTransfer := &mockTransferrer{failErr: context.Canceled}
 	orch.SetRemoteTransferrer(blockTransfer)
 
-	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, nil, nil))
 
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatal(err)
@@ -772,7 +626,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 
 	loader := &staticConfigLoader{cfg: &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, NodeID: "node-A"},
+			{ID: vaultID},
 		},
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -793,7 +647,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 	orch.SetRecordForwarder(noopForwarder{})
 	// Deliberately do NOT set a RemoteTransferrer.
 
-	orch.RegisterVault(orchestrator.NewVault(vaultID, cm, nil, nil))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, cm, nil, nil))
 
 	if err := orch.ReloadFilters(context.Background()); err != nil {
 		t.Fatal(err)

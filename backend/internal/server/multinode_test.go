@@ -126,8 +126,17 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			nodes[id] = setupMNNodeNoVault(t, id)
 		} else {
 			node := setupMNNode(t, id)
+			// Create a tier assigned to this node (temporary: explicit node assignment until tier election).
+			tierID := uuid.Must(uuid.NewV7())
+			_ = cfgStore.PutTier(ctx, config.TierConfig{
+				ID:     tierID,
+				Name:   "tier-" + id,
+				Type:   config.TierTypeMemory,
+				NodeID: id, // temporary: explicit node assignment until tier election
+			})
 			_ = cfgStore.PutVault(ctx, config.VaultConfig{
-				ID: node.vaultID, Name: "vault-" + id, Type: "memory", NodeID: id,
+				ID: node.vaultID, Name: "vault-" + id,
+				TierIDs: []uuid.UUID{tierID},
 			})
 			nodes[id] = node
 		}
@@ -213,7 +222,7 @@ func setupMNNode(t *testing.T, nodeID string) multinodeTestNode {
 	})
 
 	vaultID := uuid.Must(uuid.NewV7())
-	orch.RegisterVault(orchestrator.NewVault(vaultID, v.CM, v.IM, v.QE))
+	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, v.CM, v.IM, v.QE))
 
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
 }

@@ -249,23 +249,6 @@ export class VaultConfig extends Message<VaultConfig> {
   id = "";
 
   /**
-   * @generated from field: string type = 2;
-   */
-  type = "";
-
-  /**
-   * @generated from field: string policy = 4;
-   */
-  policy = "";
-
-  /**
-   * @generated from field: map<string, string> params = 5;
-   */
-  params: { [key: string]: string } = {};
-
-  /**
-   * field 6 was 'retention' (single UUID) — removed
-   *
    * @generated from field: bool enabled = 7;
    */
   enabled = false;
@@ -276,14 +259,9 @@ export class VaultConfig extends Message<VaultConfig> {
   name = "";
 
   /**
-   * @generated from field: repeated gastrolog.v1.RetentionRule retention_rules = 9;
+   * @generated from field: repeated string tier_ids = 11;
    */
-  retentionRules: RetentionRule[] = [];
-
-  /**
-   * @generated from field: string node_id = 10;
-   */
-  nodeId = "";
+  tierIds: string[] = [];
 
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
@@ -294,13 +272,9 @@ export class VaultConfig extends Message<VaultConfig> {
   static readonly typeName = "gastrolog.v1.VaultConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "policy", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 9, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
-    { no: 10, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 11, name: "tier_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {

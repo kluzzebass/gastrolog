@@ -17,7 +17,7 @@ beforeEach(() => {
 describe("useConfig", () => {
   test("fetches config and returns data", async () => {
     const fakeConfig = new GetConfigResponse({
-      vaults: [{ id: "v1", name: "default", type: "file", enabled: true }],
+      vaults: [{ id: "v1", name: "default", enabled: true }],
     });
     m(mocks.configClient, "getConfig").mockResolvedValueOnce(fakeConfig);
 
