@@ -181,7 +181,7 @@ type Orchestrator struct {
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[uuid.UUID]*drainState
 
-	// Retention runners (keyed by vault ID, invoked by the shared scheduler).
+	// Retention runners (keyed by tier ID, invoked by the shared scheduler).
 	retention map[uuid.UUID]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).

@@ -130,24 +130,21 @@ func (o *Orchestrator) forwardRemote(t MatchResult, rec chunk.Record) {
 // postSealWork schedules the post-seal pipeline for a newly sealed chunk.
 // Safe to call from any context (cron rotation, background sweep, etc.) —
 // acquires the orchestrator lock internally.
-func (o *Orchestrator) postSealWork(storeID uuid.UUID, chunkID chunk.ChunkID) {
+func (o *Orchestrator) postSealWork(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	o.schedulePostSeal(storeID, chunkID)
+	o.schedulePostSeal(vaultID, cm, chunkID)
 }
 
 // schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
-func (o *Orchestrator) schedulePostSeal(registryKey uuid.UUID, chunkID chunk.ChunkID) {
-	vault := o.vaults[registryKey]
-	if vault == nil {
-		return
-	}
-
-	processor, ok := vault.ChunkManager().(chunk.ChunkPostSealProcessor)
+// The caller provides the specific chunk manager (which may be from any tier, not
+// just the active tier).
+func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
+	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
-		name := fmt.Sprintf("post-seal:%s:%s", registryKey, chunkID)
+		name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
 		if err := o.scheduler.RunOnce(name, processor.PostSealProcess, context.Background(), chunkID); err != nil {
 			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
 		}
@@ -156,11 +153,11 @@ func (o *Orchestrator) schedulePostSeal(registryKey uuid.UUID, chunkID chunk.Chu
 	}
 
 	// Fallback for non-file managers (e.g. memory) — compress only.
-	compressor, ok := vault.ChunkManager().(chunk.ChunkCompressor)
+	compressor, ok := cm.(chunk.ChunkCompressor)
 	if !ok {
 		return
 	}
-	name := fmt.Sprintf("compress:%s:%s", registryKey, chunkID)
+	name := fmt.Sprintf("compress:%s:%s", vaultID, chunkID)
 	if err := o.scheduler.RunOnce(name, compressor.CompressChunk, chunkID); err != nil {
 		o.logger.Warn("failed to schedule compression", "name", name, "error", err)
 	}

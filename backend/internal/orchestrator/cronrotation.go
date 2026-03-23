@@ -9,9 +9,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// cronJobName returns the scheduler job name for a vault's cron rotation.
-func cronJobName(vaultID uuid.UUID) string {
-	return fmt.Sprintf("cron-rotate:%s", vaultID)
+// cronJobName returns the scheduler job name for a tier's cron rotation.
+func cronJobName(vaultID, tierID uuid.UUID) string {
+	return fmt.Sprintf("cron-rotate:%s:%s", vaultID, tierID)
 }
 
 // cronRotationManager manages cron-based chunk rotation jobs on the shared scheduler.
@@ -19,7 +19,7 @@ func cronJobName(vaultID uuid.UUID) string {
 // shared Scheduler so all scheduled tasks are centrally visible.
 type cronRotationManager struct {
 	scheduler *Scheduler
-	onSeal    func(storeID uuid.UUID, chunkID chunk.ChunkID) // called after sealing to trigger compression + indexing
+	onSeal    func(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) // called after sealing to trigger compression + indexing
 	logger    *slog.Logger
 }
 
@@ -30,9 +30,9 @@ func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRota
 	}
 }
 
-// addJob registers a cron rotation job for a vault.
-func (m *cronRotationManager) addJob(vaultID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) error {
-	name := cronJobName(vaultID)
+// addJob registers a cron rotation job for a tier.
+func (m *cronRotationManager) addJob(vaultID, tierID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) error {
+	name := cronJobName(vaultID, tierID)
 	if err := m.scheduler.AddJob(name, cronExpr, m.rotateVault, vaultID, vaultName, cm); err != nil {
 		return err
 	}
@@ -40,14 +40,19 @@ func (m *cronRotationManager) addJob(vaultID uuid.UUID, vaultName, cronExpr stri
 	return nil
 }
 
-// removeJob stops and removes the cron rotation job for a vault.
-func (m *cronRotationManager) removeJob(vaultID uuid.UUID) {
-	m.scheduler.RemoveJob(cronJobName(vaultID))
+// removeJob stops and removes the cron rotation job for a tier.
+func (m *cronRotationManager) removeJob(vaultID, tierID uuid.UUID) {
+	m.scheduler.RemoveJob(cronJobName(vaultID, tierID))
 }
 
-// updateJob replaces the cron rotation job for a vault with a new schedule.
-func (m *cronRotationManager) updateJob(vaultID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) error {
-	name := cronJobName(vaultID)
+// removeAllForVault stops and removes all cron rotation jobs for a vault's tiers.
+func (m *cronRotationManager) removeAllForVault(vaultID uuid.UUID) {
+	m.scheduler.RemoveJobsByPrefix(fmt.Sprintf("cron-rotate:%s:", vaultID))
+}
+
+// updateJob replaces the cron rotation job for a tier with a new schedule.
+func (m *cronRotationManager) updateJob(vaultID, tierID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) error {
+	name := cronJobName(vaultID, tierID)
 	if err := m.scheduler.UpdateJob(name, cronExpr, m.rotateVault, vaultID, vaultName, cm); err != nil {
 		return err
 	}
@@ -55,9 +60,9 @@ func (m *cronRotationManager) updateJob(vaultID uuid.UUID, vaultName, cronExpr s
 	return nil
 }
 
-// hasJob returns true if a cron rotation job exists for a vault.
-func (m *cronRotationManager) hasJob(vaultID uuid.UUID) bool {
-	return m.scheduler.HasJob(cronJobName(vaultID))
+// hasJob returns true if a cron rotation job exists for a tier.
+func (m *cronRotationManager) hasJob(vaultID, tierID uuid.UUID) bool {
+	return m.scheduler.HasJob(cronJobName(vaultID, tierID))
 }
 
 // rotateVault seals the active chunk for a vault if it has records.
@@ -86,6 +91,6 @@ func (m *cronRotationManager) rotateVault(vaultID uuid.UUID, vaultName string, c
 	)
 
 	if m.onSeal != nil {
-		m.onSeal(vaultID, sealedID)
+		m.onSeal(vaultID, cm, sealedID)
 	}
 }

@@ -121,28 +121,29 @@ func TestAddAndRemoveJob(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, "vault-a", "* * * * *", cm); err != nil {
+	tierA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, tierA, "vault-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if !m.hasJob(vaultA) {
+	if !m.hasJob(vaultA, tierA) {
 		t.Error("expected job to be registered")
 	}
 
-	// Adding the same vault again should fail.
-	if err := m.addJob(vaultA, "vault-a", "0 * * * *", cm); err == nil {
+	// Adding the same vault+tier again should fail.
+	if err := m.addJob(vaultA, tierA, "vault-a", "0 * * * *", cm); err == nil {
 		t.Error("expected error when adding duplicate job")
 	}
 
-	m.removeJob(vaultA)
+	m.removeJob(vaultA, tierA)
 
-	if m.hasJob(vaultA) {
+	if m.hasJob(vaultA, tierA) {
 		t.Error("expected job to be removed")
 	}
 
 	// Removing a non-existent job should be a no-op.
 	nonexistent := uuid.Must(uuid.NewV7())
-	m.removeJob(nonexistent)
+	m.removeJob(nonexistent, nonexistent)
 }
 
 func TestUpdateJob(t *testing.T) {
@@ -150,15 +151,16 @@ func TestUpdateJob(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, "vault-a", "* * * * *", cm); err != nil {
+	tierA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, tierA, "vault-a", "* * * * *", cm); err != nil {
 		t.Fatalf("addJob failed: %v", err)
 	}
 
-	if err := m.updateJob(vaultA, "vault-a", "0 * * * *", cm); err != nil {
+	if err := m.updateJob(vaultA, tierA, "vault-a", "0 * * * *", cm); err != nil {
 		t.Fatalf("updateJob failed: %v", err)
 	}
 
-	if !m.hasJob(vaultA) {
+	if !m.hasJob(vaultA, tierA) {
 		t.Error("expected job to still exist after update")
 	}
 }
@@ -168,11 +170,12 @@ func TestAddJobRejectsInvalidCron(t *testing.T) {
 	m := newTestCronManager(t)
 
 	vaultA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, "vault-a", "not a cron", cm); err == nil {
+	tierA := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, tierA, "vault-a", "not a cron", cm); err == nil {
 		t.Error("expected error for invalid cron expression")
 	}
 
-	if m.hasJob(vaultA) {
+	if m.hasJob(vaultA, tierA) {
 		t.Error("expected no job to be registered for invalid cron")
 	}
 }
@@ -183,10 +186,12 @@ func TestSchedulerListJobs(t *testing.T) {
 
 	vaultA := uuid.Must(uuid.NewV7())
 	vaultB := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, "vault-a", "* * * * *", cm); err != nil {
+	tierA := uuid.Must(uuid.NewV7())
+	tierB := uuid.Must(uuid.NewV7())
+	if err := m.addJob(vaultA, tierA, "vault-a", "* * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
-	if err := m.addJob(vaultB, "vault-b", "0 * * * *", cm); err != nil {
+	if err := m.addJob(vaultB, tierB, "vault-b", "0 * * * *", cm); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,10 +208,10 @@ func TestSchedulerListJobs(t *testing.T) {
 		}
 	}
 
-	if !names[cronJobName(vaultA)] {
+	if !names[cronJobName(vaultA, tierA)] {
 		t.Error("expected job for vault-a")
 	}
-	if !names[cronJobName(vaultB)] {
+	if !names[cronJobName(vaultB, tierB)] {
 		t.Error("expected job for vault-b")
 	}
 }

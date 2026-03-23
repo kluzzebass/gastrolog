@@ -11,29 +11,33 @@ const (
 	rotationSweepSchedule = "*/15 * * * * *" // every 15 seconds
 )
 
-// rotationSweep checks all vaults for active chunks that need rotation
-// based on their current rotation policy (e.g., age exceeded).
+// rotationSweep checks all tiers in all vaults for active chunks that need
+// rotation based on their current rotation policy (e.g., age exceeded).
 // This runs as a scheduled job so time-based policies trigger even when
 // no records are being appended to a vault.
 func (o *Orchestrator) rotationSweep() {
 	// Collect seals under the read lock.
 	type sealEvent struct {
 		vaultID uuid.UUID
+		cm      chunk.ChunkManager
 		chunkID chunk.ChunkID
 	}
 	var seals []sealEvent
 
 	o.mu.RLock()
 	for id, vault := range o.vaults {
-		activeBefore := vault.ChunkManager().Active()
-		if trigger := vault.ChunkManager().CheckRotation(); trigger != nil {
-			o.logger.Info("background rotation triggered",
-				"vault", id,
-				"name", vault.Name,
-				"trigger", *trigger,
-			)
-			if activeBefore != nil {
-				seals = append(seals, sealEvent{vaultID: id, chunkID: activeBefore.ID})
+		for _, tier := range vault.Tiers {
+			activeBefore := tier.Chunks.Active()
+			if trigger := tier.Chunks.CheckRotation(); trigger != nil {
+				o.logger.Info("background rotation triggered",
+					"vault", id,
+					"name", vault.Name,
+					"tier", tier.TierID,
+					"trigger", *trigger,
+				)
+				if activeBefore != nil {
+					seals = append(seals, sealEvent{vaultID: id, cm: tier.Chunks, chunkID: activeBefore.ID})
+				}
 			}
 		}
 	}
@@ -42,6 +46,6 @@ func (o *Orchestrator) rotationSweep() {
 	// Schedule compression + index builds outside the outer lock.
 	// postSealWork acquires its own lock internally.
 	for _, s := range seals {
-		o.postSealWork(s.vaultID, s.chunkID)
+		o.postSealWork(s.vaultID, s.cm, s.chunkID)
 	}
 }

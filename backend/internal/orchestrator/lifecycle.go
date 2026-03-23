@@ -282,48 +282,47 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 		if vault == nil {
 			continue
 		}
-
-		// Skip vaults where the post-seal pipeline handles indexes.
-		// Cloud-backed vaults have no index builders — building indexes
-		// for chunks that will be uploaded and deleted is wasted work,
-		// and races with the upload (creating orphaned index files).
-		if proc, ok := vault.ChunkManager().(chunk.ChunkPostSealProcessor); ok {
-			if !proc.HasIndexBuilders() {
-				continue
-			}
-		}
-
-		cm := vault.ChunkManager()
-		im := vault.IndexManager()
-
-		metas, err := cm.List()
-		if err != nil {
-			return err
-		}
-
-		for _, meta := range metas {
-			if !meta.Sealed {
-				continue
-			}
-
-			complete, err := im.IndexesComplete(meta.ID)
-			if err != nil {
+		for _, tier := range vault.Tiers {
+			if err := o.rebuildTierIndexes(ctx, vaultID, tier); err != nil {
 				return err
-			}
-
-			if !complete {
-				o.logger.Info("rebuilding missing indexes",
-					"vault", vaultID,
-					"chunk", meta.ID.String())
-
-				name := fmt.Sprintf("index-rebuild:%s:%s", vaultID, meta.ID)
-				if err := o.scheduler.RunOnce(name, vault.IndexManager().BuildIndexes, context.Background(), meta.ID); err != nil {
-					o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
-				}
-				o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 			}
 		}
 	}
 
+	return nil
+}
+
+// rebuildTierIndexes checks a single tier for sealed chunks with incomplete indexes.
+func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID uuid.UUID, tier *TierInstance) error {
+	// Skip tiers where the post-seal pipeline handles indexes.
+	if proc, ok := tier.Chunks.(chunk.ChunkPostSealProcessor); ok {
+		if !proc.HasIndexBuilders() {
+			return nil
+		}
+	}
+
+	metas, err := tier.Chunks.List()
+	if err != nil {
+		return err
+	}
+
+	for _, meta := range metas {
+		if !meta.Sealed {
+			continue
+		}
+		complete, err := tier.Indexes.IndexesComplete(meta.ID)
+		if err != nil {
+			return err
+		}
+		if !complete {
+			o.logger.Info("rebuilding missing indexes",
+				"vault", vaultID, "tier", tier.TierID, "chunk", meta.ID.String())
+			name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, tier.TierID, meta.ID)
+			if err := o.scheduler.RunOnce(name, tier.Indexes.BuildIndexes, ctx, meta.ID); err != nil {
+				o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
+			}
+			o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
+		}
+	}
 	return nil
 }

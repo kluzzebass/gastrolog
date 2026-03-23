@@ -15,9 +15,9 @@ import (
 
 const defaultRetentionSchedule = "* * * * *" // every minute
 
-// retentionJobName returns the scheduler job name for a vault's retention sweep.
-func retentionJobName(vaultID uuid.UUID) string {
-	return fmt.Sprintf("retention:%s", vaultID)
+// retentionJobName returns the scheduler job name for a tier's retention sweep.
+func retentionJobName(tierID uuid.UUID) string {
+	return fmt.Sprintf("retention:%s", tierID)
 }
 
 // retentionRule is a resolved rule: a compiled policy paired with an action.
@@ -27,11 +27,12 @@ type retentionRule struct {
 	ejectRouteIDs []uuid.UUID // target route IDs, only for eject
 }
 
-// retentionRunner manages the retention sweep for a single vault.
+// retentionRunner manages the retention sweep for a single tier.
 // It is invoked by the shared scheduler on a cron schedule.
 type retentionRunner struct {
 	mu       sync.Mutex
 	vaultID  uuid.UUID
+	tierID   uuid.UUID
 	cm       chunk.ChunkManager
 	im       index.IndexManager
 	rules    []retentionRule

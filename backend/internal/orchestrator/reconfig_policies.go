@@ -50,54 +50,55 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 	for _, vaultCfg := range cfg.Vaults {
 		vault, ok := o.vaults[vaultCfg.ID]
 		if !ok {
-			continue // Vault not registered in orchestrator.
-		}
-		cm := vault.ChunkManager()
-
-		// Resolve rotation policy from the first tier's config.
-		if len(vaultCfg.TierIDs) == 0 {
 			continue
 		}
-		tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
-		if tierCfg == nil || tierCfg.RotationPolicyID == nil {
-			continue
-		}
-
-		policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
-		if policyCfg == nil {
-			// Policy was deleted — nothing to do; vault keeps its current policy.
-			o.logger.Warn("tier references unknown policy", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *tierCfg.RotationPolicyID)
-			continue
-		}
-
-		policy, err := policyCfg.ToRotationPolicy()
-		if err != nil {
-			return fmt.Errorf("invalid policy %s for vault %s: %w", *tierCfg.RotationPolicyID, vaultCfg.ID, err)
-		}
-		if policy != nil {
-			vault.ChunkManager().SetRotationPolicy(policy)
-			o.logger.Info("vault rotation policy updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "policy", *tierCfg.RotationPolicyID)
-		}
-
-		// Update cron rotation job.
-		hasCronJob := o.cronRotation.hasJob(vaultCfg.ID)
-		hasCronConfig := policyCfg.Cron != nil && *policyCfg.Cron != ""
-
-		switch {
-		case hasCronConfig && hasCronJob:
-			// Schedule may have changed — update.
-			if err := o.cronRotation.updateJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, cm); err != nil {
-				o.logger.Error("failed to update cron rotation", "vault", vaultCfg.ID, "error", err)
+		for _, tier := range vault.Tiers {
+			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+			if err := o.reloadTierRotation(cfg, vaultCfg, tier, tierCfg); err != nil {
+				return err
 			}
-		case hasCronConfig && !hasCronJob:
-			// New cron schedule — add.
-			if err := o.cronRotation.addJob(vaultCfg.ID, vaultCfg.Name, *policyCfg.Cron, cm); err != nil {
-				o.logger.Error("failed to add cron rotation", "vault", vaultCfg.ID, "error", err)
-			}
-		case !hasCronConfig && hasCronJob:
-			// Cron removed — stop.
-			o.cronRotation.removeJob(vaultCfg.ID)
 		}
+	}
+
+	return nil
+}
+
+// reloadTierRotation reconciles the rotation policy and cron job for a single tier.
+func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) error {
+	if tierCfg == nil || tierCfg.RotationPolicyID == nil {
+		return nil
+	}
+
+	policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
+	if policyCfg == nil {
+		o.logger.Warn("tier references unknown policy", "vault", vaultCfg.ID, "tier", tier.TierID, "policy", *tierCfg.RotationPolicyID)
+		return nil
+	}
+
+	policy, err := policyCfg.ToRotationPolicy()
+	if err != nil {
+		return fmt.Errorf("invalid policy %s for tier %s: %w", *tierCfg.RotationPolicyID, tier.TierID, err)
+	}
+	if policy != nil {
+		tier.Chunks.SetRotationPolicy(policy)
+		o.logger.Info("tier rotation policy updated", "vault", vaultCfg.ID, "tier", tier.TierID, "policy", *tierCfg.RotationPolicyID)
+	}
+
+	// Update cron rotation job.
+	hasCronJob := o.cronRotation.hasJob(vaultCfg.ID, tier.TierID)
+	hasCronConfig := policyCfg.Cron != nil && *policyCfg.Cron != ""
+
+	switch {
+	case hasCronConfig && hasCronJob:
+		if err := o.cronRotation.updateJob(vaultCfg.ID, tier.TierID, vaultCfg.Name, *policyCfg.Cron, tier.Chunks); err != nil {
+			o.logger.Error("failed to update cron rotation", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+		}
+	case hasCronConfig && !hasCronJob:
+		if err := o.cronRotation.addJob(vaultCfg.ID, tier.TierID, vaultCfg.Name, *policyCfg.Cron, tier.Chunks); err != nil {
+			o.logger.Error("failed to add cron rotation", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+		}
+	case !hasCronConfig && hasCronJob:
+		o.cronRotation.removeJob(vaultCfg.ID, tier.TierID)
 	}
 
 	return nil
@@ -129,64 +130,67 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 			continue // Vault not registered locally.
 		}
 
-		// Resolve retention rules from the first tier.
-		var tierRetentionRules []config.RetentionRule
-		if len(vaultCfg.TierIDs) > 0 {
-			tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
-			if tierCfg != nil {
-				tierRetentionRules = tierCfg.RetentionRules
-			}
-		}
-
-		runner, hasRunner := o.retention[vaultCfg.ID]
-		hasRules := len(tierRetentionRules) > 0
-
-		switch {
-		case hasRules && hasRunner:
-			// Update existing runner's rules.
-			tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
-			rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
-			if err != nil {
-				o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
-				continue
-			}
-			runner.setRules(rules)
-			o.logger.Info("vault retention rules updated", "vault", vaultCfg.ID, "name", vaultCfg.Name, "rules", len(rules))
-
-		case hasRules && !hasRunner:
-			// Create new runner for vault that gained retention rules.
-			tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
-			rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
-			if err != nil {
-				o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
-				continue
-			}
-			if len(rules) == 0 {
-				continue
-			}
-			newRunner := &retentionRunner{
-				vaultID: vaultCfg.ID,
-				cm:      vault.ChunkManager(),
-				im:      vault.IndexManager(),
-				rules:   rules,
-				orch:    o,
-				now:     o.now,
-				logger:  o.logger,
-			}
-			o.retention[vaultCfg.ID] = newRunner
-			if err := o.scheduler.AddJob(retentionJobName(vaultCfg.ID), defaultRetentionSchedule, newRunner.sweep); err != nil {
-				o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "error", err)
-			}
-			o.scheduler.Describe(retentionJobName(vaultCfg.ID), fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
-			o.logger.Info("vault retention runner created", "vault", vaultCfg.ID, "name", vaultCfg.Name, "rules", len(rules))
-
-		case !hasRules && hasRunner:
-			// Rules removed — tear down the runner.
-			o.scheduler.RemoveJob(retentionJobName(vaultCfg.ID))
-			delete(o.retention, vaultCfg.ID)
-			o.logger.Info("vault retention runner removed", "vault", vaultCfg.ID, "name", vaultCfg.Name)
+		for _, tier := range vault.Tiers {
+			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+			o.reloadTierRetention(cfg, vaultCfg, tier, tierCfg)
 		}
 	}
 
 	return nil
+}
+
+// reloadTierRetention reconciles the retention runner for a single tier.
+func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
+	key := tier.TierID
+	jobName := retentionJobName(tier.TierID)
+
+	var tierRetentionRules []config.RetentionRule
+	if tierCfg != nil {
+		tierRetentionRules = tierCfg.RetentionRules
+	}
+
+	runner, hasRunner := o.retention[key]
+	hasRules := len(tierRetentionRules) > 0
+
+	switch {
+	case hasRules && hasRunner:
+		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+		if err != nil {
+			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+			return
+		}
+		runner.setRules(rules)
+		o.logger.Info("tier retention rules updated", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules))
+
+	case hasRules && !hasRunner:
+		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+		if err != nil {
+			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+			return
+		}
+		if len(rules) == 0 {
+			return
+		}
+		newRunner := &retentionRunner{
+			vaultID: vaultCfg.ID,
+			tierID:  tier.TierID,
+			cm:      tier.Chunks,
+			im:      tier.Indexes,
+			rules:   rules,
+			orch:    o,
+			now:     o.now,
+			logger:  o.logger,
+		}
+		o.retention[key] = newRunner
+		if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, newRunner.sweep); err != nil {
+			o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+		}
+		o.scheduler.Describe(jobName, fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
+		o.logger.Info("tier retention runner created", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules))
+
+	case !hasRules && hasRunner:
+		o.scheduler.RemoveJob(jobName)
+		delete(o.retention, key)
+		o.logger.Info("tier retention runner removed", "vault", vaultCfg.ID, "tier", tier.TierID)
+	}
 }

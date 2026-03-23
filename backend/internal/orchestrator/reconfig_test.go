@@ -1071,7 +1071,7 @@ func TestReloadRetentionCreatesRunner(t *testing.T) {
 
 	// No retention job should exist yet.
 	sched := orch.Scheduler()
-	jobName := "retention:" + vaultID.String()
+	jobName := "retention:" + tierID.String()
 	if sched.HasJob(jobName) {
 		t.Fatal("retention job should not exist before rules are added")
 	}
@@ -1138,7 +1138,7 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 	}
 
 	sched := orch.Scheduler()
-	jobName := "retention:" + vaultID.String()
+	jobName := "retention:" + tierID.String()
 	if !sched.HasJob(jobName) {
 		t.Fatal("retention job should exist after AddVault with rules")
 	}

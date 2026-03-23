@@ -170,45 +170,46 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 	return nil
 }
 
-// applyRetention sets up retention jobs for vaults whose first tier has retention rules.
+// applyRetention sets up retention jobs for all tiers that have retention rules.
 func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 	for _, vaultCfg := range cfg.Vaults {
-		if len(vaultCfg.TierIDs) == 0 {
-			continue
-		}
-
-		tierCfg := findTierConfig(cfg.Tiers, vaultCfg.TierIDs[0])
-		if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
-			continue
-		}
-
 		vault := o.vaults[vaultCfg.ID]
 		if vault == nil {
 			continue
 		}
 
-		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
-		if err != nil {
-			return err
-		}
-		if len(rules) == 0 {
-			continue
-		}
+		for _, tier := range vault.Tiers {
+			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+			if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
+				continue
+			}
 
-		runner := &retentionRunner{
-			vaultID: vaultCfg.ID,
-			cm:      vault.ChunkManager(),
-			im:      vault.IndexManager(),
-			rules:   rules,
-			orch:    o,
-			now:     o.now,
-			logger:  o.logger,
+			rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+			if err != nil {
+				return err
+			}
+			if len(rules) == 0 {
+				continue
+			}
+
+			key := tier.TierID
+			runner := &retentionRunner{
+				vaultID: vaultCfg.ID,
+				tierID:  tier.TierID,
+				cm:      tier.Chunks,
+				im:      tier.Indexes,
+				rules:   rules,
+				orch:    o,
+				now:     o.now,
+				logger:  o.logger,
+			}
+			o.retention[key] = runner
+			jobName := retentionJobName(tier.TierID)
+			if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, runner.sweep); err != nil {
+				return fmt.Errorf("retention job for vault %s tier %s: %w", vaultCfg.ID, tier.TierID, err)
+			}
+			o.scheduler.Describe(jobName, fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
 		}
-		o.retention[vaultCfg.ID] = runner
-		if err := o.scheduler.AddJob(retentionJobName(vaultCfg.ID), defaultRetentionSchedule, runner.sweep); err != nil {
-			return fmt.Errorf("retention job for vault %s: %w", vaultCfg.ID, err)
-		}
-		o.scheduler.Describe(retentionJobName(vaultCfg.ID), fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
 	}
 
 	return nil

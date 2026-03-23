@@ -131,16 +131,17 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		return chunk.ChunkID{}, 0, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 
-	activeBefore := vault.ChunkManager().Active()
-	cid, pos, err := vault.ChunkManager().Append(rec)
+	cm := vault.ChunkManager()
+	activeBefore := cm.Active()
+	cid, pos, err := cm.Append(rec)
 	if err != nil {
 		return cid, pos, err
 	}
 
 	// Detect seal: if Active() changed, the previous chunk was sealed.
-	activeAfter := vault.ChunkManager().Active()
+	activeAfter := cm.Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-		o.schedulePostSeal(vaultID, activeBefore.ID)
+		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 
 	return cid, pos, nil
@@ -163,7 +164,7 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID uuid.UUID
 
 	if meta.ID != (chunk.ChunkID{}) {
 		o.mu.RLock()
-		o.schedulePostSeal(vaultID, meta.ID)
+		o.schedulePostSeal(vaultID, cm, meta.ID)
 		o.mu.RUnlock()
 	}
 
@@ -180,19 +181,20 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	active := vault.ChunkManager().Active()
+	cm := vault.ChunkManager()
+	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
 		return nil
 	}
 	chunkID := active.ID
 
-	if err := vault.ChunkManager().Seal(); err != nil {
+	if err := cm.Seal(); err != nil {
 		return err
 	}
 
 	// Schedule post-seal pipeline (same as ingest onSeal callback).
 	o.mu.RLock()
-	o.schedulePostSeal(vaultID, chunkID)
+	o.schedulePostSeal(vaultID, cm, chunkID)
 	o.mu.RUnlock()
 
 	return nil

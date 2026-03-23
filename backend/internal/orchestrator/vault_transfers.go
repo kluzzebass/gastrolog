@@ -217,10 +217,10 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, target
 		return fmt.Errorf("reload filters for drain: %w", err)
 	}
 
-	// Remove retention and rotation jobs (no longer needed locally).
-	o.scheduler.RemoveJob(retentionJobName(vaultID))
-	delete(o.retention, vaultID)
-	o.cronRotation.removeJob(vaultID)
+	// Remove per-tier retention and rotation jobs (no longer needed locally).
+	if vault := o.vaults[vaultID]; vault != nil {
+		o.removeVaultTierJobs(vaultID, vault)
+	}
 
 	o.mu.Unlock()
 
