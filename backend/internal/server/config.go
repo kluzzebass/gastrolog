@@ -338,7 +338,6 @@ func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 				StorageClass:      a.StorageClass,
 				Label:             a.Label,
 				Path:              a.Path,
-				CapacityBytes:     a.CapacityBytes,
 				MemoryBudgetBytes: a.MemoryBudgetBytes,
 			}
 		}

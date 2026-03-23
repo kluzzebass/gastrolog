@@ -76,6 +76,7 @@ func main() {
 		Use:   "server",
 		Short: "Start the gastrolog service",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			storageFlags, _ := cmd.Flags().GetStringArray("storage")
 			cfg := app.RunConfig{
 				HomeFlag:    mustString(cmd, "home"),
 				VaultsFlag:  mustString(cmd, "vaults"),
@@ -90,6 +91,7 @@ func main() {
 				Voteless:    mustBool(cmd, "voteless"),
 				NodeName:    mustString(cmd, "name"),
 				PprofAddr:   mustString(cmd, "pprof"),
+				StorageFlags:       storageFlags,
 				SlogCapture:        slogCaptureCh,
 				SlogCaptureHandler: captureHandler,
 			}
@@ -112,6 +114,7 @@ func main() {
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
 	serverCmd.Flags().Bool("voteless", false, "join cluster as a nonvoter")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")
+	serverCmd.Flags().StringArray("storage", nil, `declare local storage area (repeatable). Format: path:class=N[:label=Name]`)
 
 	versionCmd := &cobra.Command{
 		Use:   "version",

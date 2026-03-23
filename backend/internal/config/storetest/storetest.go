@@ -1811,7 +1811,6 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 					StorageClass:      1,
 					Label:             "fast",
 					Path:              "/data/fast",
-					CapacityBytes:     1024 * 1024 * 1024,
 					MemoryBudgetBytes: 256 * 1024 * 1024,
 				},
 			},

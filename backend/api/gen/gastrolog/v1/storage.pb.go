@@ -30,7 +30,6 @@ type StorageArea struct {
 	StorageClass      uint32                 `protobuf:"varint,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	Label             string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
 	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
-	CapacityBytes     uint64                 `protobuf:"varint,5,opt,name=capacity_bytes,json=capacityBytes,proto3" json:"capacity_bytes,omitempty"`
 	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -92,13 +91,6 @@ func (x *StorageArea) GetPath() string {
 		return x.Path
 	}
 	return ""
-}
-
-func (x *StorageArea) GetCapacityBytes() uint64 {
-	if x != nil {
-		return x.CapacityBytes
-	}
-	return 0
 }
 
 func (x *StorageArea) GetMemoryBudgetBytes() uint64 {
@@ -316,14 +308,13 @@ var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xc3\x01\n" +
+	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xa2\x01\n" +
 	"\vStorageArea\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x14\n" +
 	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
-	"\x04path\x18\x04 \x01(\tR\x04path\x12%\n" +
-	"\x0ecapacity_bytes\x18\x05 \x01(\x04R\rcapacityBytes\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\"]\n" +
+	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"]\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12/\n" +
 	"\x05areas\x18\x02 \x03(\v2\x19.gastrolog.v1.StorageAreaR\x05areas\"\xc2\x03\n" +

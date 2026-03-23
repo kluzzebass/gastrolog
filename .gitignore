@@ -53,3 +53,4 @@ testfiles/
 *.csv
 logs/
 temp/
+node_modules

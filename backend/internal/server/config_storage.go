@@ -286,7 +286,6 @@ func protoToNodeStorageConfig(p *apiv1.NodeStorageConfig) config.NodeStorageConf
 			StorageClass:      a.StorageClass,
 			Label:             a.Label,
 			Path:              a.Path,
-			CapacityBytes:     a.CapacityBytes,
 			MemoryBudgetBytes: a.MemoryBudgetBytes,
 		}
 		if a.Id != "" {

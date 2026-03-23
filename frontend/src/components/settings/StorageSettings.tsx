@@ -1,4 +1,4 @@
-import { useReducer } from "react";
+import { useReducer, useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import {
   useConfig,
@@ -11,11 +11,12 @@ import { useToast } from "../Toast";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput } from "./FormField";
+import { FormField, TextInput, SelectInput, NumberInput } from "./FormField";
 import { sortByName } from "../../lib/sort";
 import { CloudServiceCard } from "./CloudServiceCard";
 import { CloudServiceFields } from "./CloudServiceFields";
 import { Badge } from "../Badge";
+import { Button } from "./Buttons";
 
 // ─── Cloud Service Add Form ──────────────────────────────────
 
@@ -74,15 +75,6 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
 }
 
 // ─── Helpers ─────────────────────────────────────────────────
-
-function formatBytes(bytes: bigint): string {
-  const n = Number(bytes);
-  if (n === 0) return "0 B";
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  const i = Math.min(Math.floor(Math.log(n) / Math.log(1024)), units.length - 1);
-  const value = n / Math.pow(1024, i);
-  return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
 
 // ─── Component ───────────────────────────────────────────────
 
@@ -158,13 +150,60 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           storageClass: a.storageClass,
           label: a.label,
           path: a.path,
-          capacityBytes: a.capacityBytes,
           memoryBudgetBytes: a.memoryBudgetBytes,
         })),
       });
       addToast("Storage area removed", "info");
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to remove storage area", "error");
+    }
+  };
+
+  // ─── Storage area add form ──────────────────────────────────
+
+  const [addingArea, setAddingArea] = useState(false);
+  const [areaPath, setAreaPath] = useState("");
+  const [areaClass, setAreaClass] = useState("");
+  const [areaLabel, setAreaLabel] = useState("");
+  const resetAreaForm = () => {
+    setAddingArea(false);
+    setAreaPath("");
+    setAreaClass("");
+    setAreaLabel("");
+  };
+
+  const handleCreateArea = async () => {
+    const path = areaPath.trim();
+    const cls = parseInt(areaClass, 10);
+    if (!path || isNaN(cls)) return;
+
+    const label = areaLabel.trim() || path.split("/").pop() || path;
+
+    const newArea = {
+      id: crypto.randomUUID(),
+      storageClass: cls,
+      label,
+      path,
+      memoryBudgetBytes: BigInt(0),
+    };
+
+    const updated = [...localAreas.map((a) => ({
+      id: a.id,
+      storageClass: a.storageClass,
+      label: a.label,
+      path: a.path,
+      memoryBudgetBytes: a.memoryBudgetBytes,
+    })), newArea];
+
+    try {
+      await setNodeStorage.mutateAsync({
+        nodeId: localNodeId,
+        areas: updated,
+      });
+      addToast(`Storage area "${label}" created`, "info");
+      resetAreaForm();
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to create storage area", "error");
     }
   };
 
@@ -251,14 +290,65 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           Locally-attached storage resources declared per node. Storage class ranks speed: lower = faster.
         </p>
 
+        {/* Add Storage Area button */}
+        {!isLoading && localNodeId && (
+          <div className="flex items-center justify-end mb-5">
+            {addingArea ? (
+              <Button onClick={resetAreaForm}>Cancel</Button>
+            ) : (
+              <Button onClick={() => setAddingArea(true)}>Add Storage Area</Button>
+            )}
+          </div>
+        )}
+
+        {/* Add Storage Area form */}
+        {addingArea && (
+          <div className="mb-4">
+            <AddFormCard
+              dark={dark}
+              onCancel={resetAreaForm}
+              onCreate={handleCreateArea}
+              isPending={setNodeStorage.isPending}
+              createDisabled={!areaPath.trim() || !areaClass.trim() || isNaN(parseInt(areaClass, 10))}
+            >
+              <FormField label="Path" dark={dark} description="Relative to the node's home directory, or absolute if starting with /.">
+                <TextInput
+                  value={areaPath}
+                  onChange={setAreaPath}
+                  placeholder=""
+                  dark={dark}
+                  mono
+                />
+              </FormField>
+              <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
+                <NumberInput
+                  value={areaClass}
+                  onChange={setAreaClass}
+                  placeholder=""
+                  dark={dark}
+                  min={0}
+                />
+              </FormField>
+              <FormField label="Label" dark={dark} description="Human-readable name. Defaults to the directory basename if empty.">
+                <TextInput
+                  value={areaLabel}
+                  onChange={setAreaLabel}
+                  placeholder={areaPath ? areaPath.split("/").pop() || "" : ""}
+                  dark={dark}
+                />
+              </FormField>
+            </AddFormCard>
+          </div>
+        )}
+
         {isLoading && (
           <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
             Loading...
           </div>
         )}
-        {!isLoading && sortedNodeConfigs.length === 0 && (
+        {!isLoading && sortedNodeConfigs.length === 0 && !addingArea && (
           <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            No node storage configurations found.
+            No node storage configurations found. Click &quot;Add Storage Area&quot; to create one.
           </div>
         )}
         {!isLoading && sortedNodeConfigs.length > 0 && (
@@ -305,11 +395,6 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                           <span className={`text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
                             {area.path}
                           </span>
-                          {area.capacityBytes > 0n && (
-                            <span className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                              {formatBytes(area.capacityBytes)}
-                            </span>
-                          )}
                           <span className="flex-1" />
                           {isLocal && (
                             <button

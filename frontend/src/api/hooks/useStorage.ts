@@ -63,7 +63,6 @@ export function useSetNodeStorageConfig() {
         storageClass: number;
         label: string;
         path: string;
-        capacityBytes: bigint;
         memoryBudgetBytes: bigint;
       }[];
     }) => {

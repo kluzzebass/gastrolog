@@ -307,7 +307,7 @@ message StorageAreaCommand {
   uint32 storage_class = 2;
   string label = 3;
   string path = 4;
-  uint64 capacity_bytes = 5;
+  reserved 5;
   uint64 memory_budget_bytes = 6;
 }
 

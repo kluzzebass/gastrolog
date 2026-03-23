@@ -615,7 +615,6 @@ type StorageArea struct {
 	StorageClass      uint32    `json:"storageClass"`
 	Label             string    `json:"label"`
 	Path              string    `json:"path,omitempty"`
-	CapacityBytes     uint64    `json:"capacityBytes,omitempty"`
 	MemoryBudgetBytes uint64    `json:"memoryBudgetBytes,omitempty"`
 }
 

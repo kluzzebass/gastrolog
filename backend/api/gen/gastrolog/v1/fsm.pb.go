@@ -2791,7 +2791,6 @@ type StorageAreaCommand struct {
 	StorageClass      uint32                 `protobuf:"varint,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	Label             string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
 	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
-	CapacityBytes     uint64                 `protobuf:"varint,5,opt,name=capacity_bytes,json=capacityBytes,proto3" json:"capacity_bytes,omitempty"`
 	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -2853,13 +2852,6 @@ func (x *StorageAreaCommand) GetPath() string {
 		return x.Path
 	}
 	return ""
-}
-
-func (x *StorageAreaCommand) GetCapacityBytes() uint64 {
-	if x != nil {
-		return x.CapacityBytes
-	}
-	return 0
 }
 
 func (x *StorageAreaCommand) GetMemoryBudgetBytes() uint64 {
@@ -3430,14 +3422,13 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"n\n" +
 	"\x1bSetNodeStorageConfigCommand\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x126\n" +
-	"\x05areas\x18\x02 \x03(\v2 .gastrolog.v1.StorageAreaCommandR\x05areas\"\xca\x01\n" +
+	"\x05areas\x18\x02 \x03(\v2 .gastrolog.v1.StorageAreaCommandR\x05areas\"\xa9\x01\n" +
 	"\x12StorageAreaCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x14\n" +
 	"\x05label\x18\x03 \x01(\tR\x05label\x12\x12\n" +
-	"\x04path\x18\x04 \x01(\tR\x04path\x12%\n" +
-	"\x0ecapacity_bytes\x18\x05 \x01(\x04R\rcapacityBytes\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\"\xa8\x03\n" +
+	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\xa8\x03\n" +
 	"\x0ePutTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +

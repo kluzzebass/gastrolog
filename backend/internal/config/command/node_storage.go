@@ -17,7 +17,6 @@ func setNodeStorageConfigCmd(cfg config.NodeStorageConfig) *gastrologv1.SetNodeS
 			StorageClass:      a.StorageClass,
 			Label:             a.Label,
 			Path:              a.Path,
-			CapacityBytes:     a.CapacityBytes,
 			MemoryBudgetBytes: a.MemoryBudgetBytes,
 		}
 	}
@@ -49,7 +48,6 @@ func ExtractSetNodeStorageConfig(cmd *gastrologv1.SetNodeStorageConfigCommand) (
 			StorageClass:      a.GetStorageClass(),
 			Label:             a.GetLabel(),
 			Path:              a.GetPath(),
-			CapacityBytes:     a.GetCapacityBytes(),
 			MemoryBudgetBytes: a.GetMemoryBudgetBytes(),
 		})
 	}

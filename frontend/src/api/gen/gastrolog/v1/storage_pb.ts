@@ -35,11 +35,6 @@ export class StorageArea extends Message<StorageArea> {
   path = "";
 
   /**
-   * @generated from field: uint64 capacity_bytes = 5;
-   */
-  capacityBytes = protoInt64.zero;
-
-  /**
    * @generated from field: uint64 memory_budget_bytes = 6;
    */
   memoryBudgetBytes = protoInt64.zero;
@@ -56,7 +51,6 @@ export class StorageArea extends Message<StorageArea> {
     { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 3, name: "label", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "capacity_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 

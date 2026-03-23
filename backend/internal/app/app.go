@@ -83,6 +83,10 @@ type RunConfig struct {
 	// SlogCaptureHandler is the CaptureHandler that tees slog records.
 	// Passed to the self ingester factory so it can apply the min_level param.
 	SlogCaptureHandler *logging.CaptureHandler
+
+	// Storage declares locally-attached storage areas.
+	// Format per entry: "path:class=N[:label=Name]"
+	StorageFlags []string
 }
 
 // Run starts the gastrolog server. It wires all components, starts the
@@ -142,6 +146,20 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, cfg.NodeName, asyncNodeConfig, hd)
 	if err != nil {
 		return err
+	}
+
+	// Register locally-attached storage areas declared via --storage flags.
+	// This overwrites the node's storage config on every startup so the
+	// persisted state always matches the current CLI invocation.
+	if len(cfg.StorageFlags) > 0 {
+		areas, err := parseStorageFlags(cfg.StorageFlags)
+		if err != nil {
+			return fmt.Errorf("parse --storage: %w", err)
+		}
+		if err := registerNodeStorage(ctx, cfgStore, nodeID, areas); err != nil {
+			return fmt.Errorf("register node storage: %w", err)
+		}
+		logger.Info("registered node storage", "areas", len(areas))
 	}
 
 	alertCollector := alert.New()
