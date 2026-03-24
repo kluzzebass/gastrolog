@@ -9,7 +9,6 @@ import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
-import { NodeBadge } from "../settings/NodeBadge";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 
 interface VaultCardProps {
@@ -18,7 +17,6 @@ interface VaultCardProps {
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
-  showNodeBadge?: boolean;
   onOpenSettings?: () => void;
 }
 
@@ -28,7 +26,6 @@ export function VaultCard({
   dark,
   expanded,
   onToggle,
-  showNodeBadge = true,
   onOpenSettings,
 }: Readonly<VaultCardProps>) {
   return (
@@ -42,7 +39,6 @@ export function VaultCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          {showNodeBadge && <NodeBadge nodeId={vault.nodeId} dark={dark} />}
           {!vault.enabled && (
             <Badge variant="warn" dark={dark}>disabled</Badge>
           )}
@@ -142,56 +138,82 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     );
   }
 
-  // Sort by start time (prefer ingest_ts), newest first.
-  const sorted = [...chunks].sort((a, b) => {
-    const aTs = a.ingestStart ?? a.writeStart;
-    const bTs = b.ingestStart ?? b.writeStart;
-    const aTime = aTs ? instantToMs(protoToInstant(aTs)) : 0;
-    const bTime = bTs ? instantToMs(protoToInstant(bTs)) : 0;
-    return bTime - aTime;
-  });
+  // Group chunks by tier, then sort within each tier by time (newest first).
+  const tierGroups = new Map<string, { tierType: string; chunks: ChunkMeta[] }>();
+  for (const chunk of chunks) {
+    const key = chunk.tierId || "unknown";
+    const existing = tierGroups.get(key);
+    if (existing) {
+      existing.chunks.push(chunk);
+    } else {
+      tierGroups.set(key, { tierType: chunk.tierType || "unknown", chunks: [chunk] });
+    }
+  }
+
+  const sortChunks = (arr: ChunkMeta[]) =>
+    arr.toSorted((a, b) => {
+      const aTs = a.ingestStart ?? a.writeStart;
+      const bTs = b.ingestStart ?? b.writeStart;
+      const aTime = aTs ? instantToMs(protoToInstant(aTs)) : 0;
+      const bTime = bTs ? instantToMs(protoToInstant(bTs)) : 0;
+      return bTime - aTime;
+    });
 
   return (
     <div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr
-            className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
-              "text-text-ghost border-ink-border-subtle",
-              "text-light-text-ghost border-light-border-subtle",
+      {[...tierGroups.entries()].map(([tierId, group]) => (
+        <div key={tierId}>
+          <div
+            className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
+              "text-text-ghost border-ink-border-subtle bg-ink-base/30",
+              "text-light-text-ghost border-light-border-subtle bg-light-base/30",
             )}`}
           >
-            <th className="px-4 py-2 font-medium">Chunk ID</th>
-            <th className="px-2 py-2 font-medium">Time Range</th>
-            <th className="px-2 py-2 font-medium">Status</th>
-            <th className="px-2 py-2 font-medium text-right">Records</th>
-            <th className="px-4 py-2 font-medium text-right">Size</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((chunk) => {
-            const startTs = chunk.ingestStart ?? chunk.writeStart;
-            const endTs = chunk.ingestEnd ?? chunk.writeEnd;
-            const start = startTs ? instantToDate(protoToInstant(startTs)) : undefined;
-            const end = endTs ? instantToDate(protoToInstant(endTs)) : undefined;
-            const isExpanded = expandedChunk === chunk.id;
+            <Badge variant="copper" dark={dark}>{group.tierType}</Badge>
+            <span>{`${String(group.chunks.length)} chunk(s)`}</span>
+            <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
+          </div>
+          <table className="w-full border-collapse">
+            <thead>
+              <tr
+                className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
+                  "text-text-ghost border-ink-border-subtle",
+                  "text-light-text-ghost border-light-border-subtle",
+                )}`}
+              >
+                <th className="px-4 py-2 font-medium">Chunk ID</th>
+                <th className="px-2 py-2 font-medium">Time Range</th>
+                <th className="px-2 py-2 font-medium">Status</th>
+                <th className="px-2 py-2 font-medium text-right">Records</th>
+                <th className="px-4 py-2 font-medium text-right">Size</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortChunks(group.chunks).map((chunk) => {
+                const startTs = chunk.ingestStart ?? chunk.writeStart;
+                const endTs = chunk.ingestEnd ?? chunk.writeEnd;
+                const start = startTs ? instantToDate(protoToInstant(startTs)) : undefined;
+                const end = endTs ? instantToDate(protoToInstant(endTs)) : undefined;
+                const isExpanded = expandedChunk === chunk.id;
 
-            return (
-              <ChunkRow
-                key={chunk.id}
-                chunk={chunk}
-                vaultId={vaultId}
-                start={start}
-                end={end}
-                isExpanded={isExpanded}
-                onToggle={() => setExpandedChunk(isExpanded ? null : chunk.id)}
-                dark={dark}
-                c={c}
-              />
-            );
-          })}
-        </tbody>
-      </table>
+                return (
+                  <ChunkRow
+                    key={chunk.id}
+                    chunk={chunk}
+                    vaultId={vaultId}
+                    start={start}
+                    end={end}
+                    isExpanded={isExpanded}
+                    onToggle={() => setExpandedChunk(isExpanded ? null : chunk.id)}
+                    dark={dark}
+                    c={c}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ))}
     </div>
   );
 }
@@ -240,6 +262,13 @@ function ChunkRow({
               {chunk.id}
             </span>
           </span>
+        </td>
+        <td className="px-2 py-2">
+          {chunk.tierType && (
+            <Badge variant="copper" dark={dark}>
+              {chunk.tierType}
+            </Badge>
+          )}
         </td>
         <td className="px-2 py-2">
           <span

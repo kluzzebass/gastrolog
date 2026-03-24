@@ -13,6 +13,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/sysmetrics"
 )
@@ -333,9 +334,6 @@ func (s *VaultServer) vaultInfoFromConfig(cfg config.VaultConfig, localSet map[u
 
 	// Local vault — get live stats from orchestrator.
 	info.Enabled = s.orch.IsVaultEnabled(cfg.ID)
-	if info.NodeId == "" {
-		info.NodeId = s.localNodeID
-	}
 	s.enrichLocalVaultInfo(info, cfg.ID)
 
 	return info
@@ -369,7 +367,6 @@ func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id uuid.UUID)
 func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id uuid.UUID) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
 		Id:      id.String(),
-		NodeId:  s.localNodeID,
 		Enabled: s.orch.IsVaultEnabled(id),
 	}
 
@@ -408,6 +405,14 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	if !meta.IngestEnd.IsZero() {
 		pb.IngestEnd = timestamppb.New(meta.IngestEnd)
 	}
+	return pb
+}
+
+// TieredChunkMetaToProto converts a TieredChunkMeta to a proto ChunkMeta with tier info.
+func TieredChunkMetaToProto(meta orchestrator.TieredChunkMeta) *apiv1.ChunkMeta {
+	pb := ChunkMetaToProto(meta.ChunkMeta)
+	pb.TierId = meta.TierID.String()
+	pb.TierType = meta.TierType
 	return pb
 }
 

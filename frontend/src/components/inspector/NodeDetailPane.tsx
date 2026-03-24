@@ -84,7 +84,6 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
                   dark={dark}
                   expanded={!!expandedVaults[vault.id]}
                   onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vault.id]: !prev[vault.id] }))}
-                  showNodeBadge={false}
                   onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vault.id) : undefined}
                 />
               ))}

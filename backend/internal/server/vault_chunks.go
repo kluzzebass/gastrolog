@@ -14,8 +14,8 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// ListChunks returns all chunks in a vault.
-// Routing: RouteTargeted — the interceptor forwards to the vault-owning node.
+// ListChunks returns all chunks in a vault from all local tiers.
+// Routing: RouteLocal — returns chunks from this node's tiers only.
 func (s *VaultServer) ListChunks(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListChunksRequest],
@@ -28,8 +28,12 @@ func (s *VaultServer) ListChunks(
 		return nil, connErr
 	}
 
-	metas, err := s.orch.ListChunkMetas(vaultID)
+	metas, err := s.orch.ListAllChunkMetas(vaultID)
 	if err != nil {
+		// Vault not registered locally (no local tiers) — return empty.
+		if errors.Is(err, orchestrator.ErrVaultNotFound) {
+			return connect.NewResponse(&apiv1.ListChunksResponse{}), nil
+		}
 		return nil, mapVaultError(err)
 	}
 
@@ -38,7 +42,7 @@ func (s *VaultServer) ListChunks(
 	}
 
 	for _, meta := range metas {
-		resp.Chunks = append(resp.Chunks, ChunkMetaToProto(meta))
+		resp.Chunks = append(resp.Chunks, TieredChunkMetaToProto(meta))
 	}
 
 	return connect.NewResponse(resp), nil

@@ -388,6 +388,20 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   numFrames = 0;
 
+  /**
+   * which tier this chunk belongs to
+   *
+   * @generated from field: string tier_id = 14;
+   */
+  tierId = "";
+
+  /**
+   * tier type: "memory", "local", "cloud"
+   *
+   * @generated from field: string tier_type = 15;
+   */
+  tierType = "";
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -409,6 +423,8 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 13, name: "num_frames", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 14, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

@@ -61,13 +61,48 @@ func (o *Orchestrator) indexManager(vaultID uuid.UUID) (index.IndexManager, erro
 
 // --- Chunk read ---
 
-// ListChunkMetas returns all chunk metadata for a vault.
+// TieredChunkMeta pairs a chunk with the tier it belongs to.
+type TieredChunkMeta struct {
+	chunk.ChunkMeta
+	TierID   uuid.UUID
+	TierType string
+}
+
+// ListChunkMetas returns all chunk metadata for a vault (active tier only).
+// Use ListAllChunkMetas for a multi-tier view.
 func (o *Orchestrator) ListChunkMetas(vaultID uuid.UUID) ([]chunk.ChunkMeta, error) {
 	cm, err := o.chunkManager(vaultID)
 	if err != nil {
 		return nil, err
 	}
 	return cm.List()
+}
+
+// ListAllChunkMetas returns chunk metadata from ALL local tiers of a vault,
+// each tagged with its tier ID and type.
+func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+
+	var result []TieredChunkMeta
+	for _, tier := range vault.Tiers {
+		metas, err := tier.Chunks.List()
+		if err != nil {
+			return nil, fmt.Errorf("list chunks for tier %s: %w", tier.TierID, err)
+		}
+		for _, m := range metas {
+			result = append(result, TieredChunkMeta{
+				ChunkMeta: m,
+				TierID:    tier.TierID,
+				TierType:  tier.Type,
+			})
+		}
+	}
+	return result, nil
 }
 
 // GetChunkMeta returns metadata for a specific chunk.

@@ -401,6 +401,8 @@ type ChunkMeta struct {
 	CloudBacked   bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"` // true = chunk lives in cloud storage (S3/Azure/GCS)
 	Archived      bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                          // true = chunk is in offline storage tier (Glacier, etc.)
 	NumFrames     int32                  `protobuf:"varint,13,opt,name=num_frames,json=numFrames,proto3" json:"num_frames,omitempty"`       // seekable zstd frame count (cloud chunks, 0 = unknown)
+	TierId        string                 `protobuf:"bytes,14,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                 // which tier this chunk belongs to
+	TierType      string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`           // tier type: "memory", "local", "cloud"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -524,6 +526,20 @@ func (x *ChunkMeta) GetNumFrames() int32 {
 		return x.NumFrames
 	}
 	return 0
+}
+
+func (x *ChunkMeta) GetTierId() string {
+	if x != nil {
+		return x.TierId
+	}
+	return ""
+}
+
+func (x *ChunkMeta) GetTierType() string {
+	if x != nil {
+		return x.TierType
+	}
+	return ""
 }
 
 type GetChunkRequest struct {
@@ -2330,7 +2346,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xf9\x03\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xaf\x04\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2351,7 +2367,9 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\fcloud_backed\x18\v \x01(\bR\vcloudBacked\x12\x1a\n" +
 	"\barchived\x18\f \x01(\bR\barchived\x12\x1d\n" +
 	"\n" +
-	"num_frames\x18\r \x01(\x05R\tnumFrames\"B\n" +
+	"num_frames\x18\r \x01(\x05R\tnumFrames\x12\x17\n" +
+	"\atier_id\x18\x0e \x01(\tR\x06tierId\x12\x1b\n" +
+	"\ttier_type\x18\x0f \x01(\tR\btierType\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +
