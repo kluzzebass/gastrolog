@@ -12,10 +12,11 @@ import (
 // The active tier (Tiers[0]) provides the chunk manager, index manager, and
 // query engine used by the orchestrator for ingest and search.
 type Vault struct {
-	ID      uuid.UUID
-	Name    string
-	Enabled bool
-	Tiers   []*TierInstance
+	ID             uuid.UUID
+	Name           string
+	Enabled        bool
+	Tiers          []*TierInstance
+	multiTierQuery *query.Engine // lazy; created on first QueryEngine() call for multi-tier vaults
 }
 
 // NewVault creates a Vault with the given tier instances.
@@ -36,8 +37,18 @@ func (v *Vault) ChunkManager() chunk.ChunkManager { return v.Tiers[0].Chunks }
 // IndexManager returns the index manager from the active tier.
 func (v *Vault) IndexManager() index.IndexManager { return v.Tiers[0].Indexes }
 
-// QueryEngine returns the query engine from the active tier.
-func (v *Vault) QueryEngine() *query.Engine { return v.Tiers[0].Query }
+// QueryEngine returns a query engine that searches ALL local tiers.
+// For single-tier vaults, this is the tier's own engine.
+// For multi-tier vaults, this uses a tier registry to fan out.
+func (v *Vault) QueryEngine() *query.Engine {
+	if len(v.Tiers) == 1 {
+		return v.Tiers[0].Query
+	}
+	if v.multiTierQuery == nil {
+		v.multiTierQuery = query.NewWithRegistry(&tierRegistry{tiers: v.Tiers}, nil)
+	}
+	return v.multiTierQuery
+}
 
 // Type returns the storage type of the active tier.
 func (v *Vault) Type() string { return v.Tiers[0].Type }
@@ -53,6 +64,38 @@ func NewVaultFromComponents(id uuid.UUID, cm chunk.ChunkManager, im index.IndexM
 		Indexes: im,
 		Query:   qe,
 	})
+}
+
+// tierRegistry adapts a vault's tiers to the query.VaultRegistry interface,
+// allowing the query engine to fan out across all tiers as if they were vaults.
+type tierRegistry struct {
+	tiers []*TierInstance
+}
+
+func (r *tierRegistry) ListVaults() []uuid.UUID {
+	ids := make([]uuid.UUID, len(r.tiers))
+	for i, t := range r.tiers {
+		ids[i] = t.TierID
+	}
+	return ids
+}
+
+func (r *tierRegistry) ChunkManager(id uuid.UUID) chunk.ChunkManager {
+	for _, t := range r.tiers {
+		if t.TierID == id {
+			return t.Chunks
+		}
+	}
+	return nil
+}
+
+func (r *tierRegistry) IndexManager(id uuid.UUID) index.IndexManager {
+	for _, t := range r.tiers {
+		if t.TierID == id {
+			return t.Indexes
+		}
+	}
+	return nil
 }
 
 // Close closes all tier instances.

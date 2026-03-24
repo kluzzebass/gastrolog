@@ -1100,21 +1100,21 @@ func TestMultiNode_AvgAcrossTwoRemoteNodes(t *testing.T) {
 // Tests — Vault admin RPC forwarding to remote nodes
 // ---------------------------------------------------------------------------
 
-func TestMultiNode_ListChunksRemote(t *testing.T) {
+func TestMultiNode_ListChunksLocal(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"coord", "data-1"}, WithoutVault("coord"))
 
 	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
 
-	remoteVaultID := h.Node(t, "data-1").vaultID.String()
-	resp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
-		Vault: remoteVaultID,
-	}))
+	// ListChunks is RouteLocal — must call from the node that has the tier.
+	dataNode := h.Node(t, "data-1")
+	vaultID := dataNode.vaultID.String()
+	metas, err := dataNode.orch.ListAllChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunks on remote vault: %v", err)
+		t.Fatalf("ListAllChunkMetas: %v", err)
 	}
-	if len(resp.Msg.Chunks) == 0 {
-		t.Error("expected at least 1 chunk from remote vault, got 0")
+	if len(metas) == 0 {
+		t.Fatalf("expected at least 1 chunk on data-1 for vault %s", vaultID)
 	}
 }
 
@@ -1124,19 +1124,18 @@ func TestMultiNode_GetChunkRemote(t *testing.T) {
 
 	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
 
-	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	dataNode := h.Node(t, "data-1")
+	remoteVaultID := dataNode.vaultID.String()
 
-	// First list chunks to get a chunk ID.
-	listResp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
-		Vault: remoteVaultID,
-	}))
+	// Get chunk ID from the data node's orchestrator (ListChunks is RouteLocal).
+	metas, err := dataNode.orch.ListChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunks: %v", err)
+		t.Fatalf("ListChunkMetas: %v", err)
 	}
-	if len(listResp.Msg.Chunks) == 0 {
+	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetChunk with")
 	}
-	chunkID := listResp.Msg.Chunks[0].Id
+	chunkID := metas[0].ID.String()
 
 	resp, err := h.vaultClient.GetChunk(context.Background(), connect.NewRequest(&gastrologv1.GetChunkRequest{
 		Vault:   remoteVaultID,
@@ -1189,16 +1188,15 @@ func TestMultiNode_SealVaultRemote(t *testing.T) {
 		t.Fatalf("SealVault on remote vault: %v", err)
 	}
 
-	// Verify the chunk is now sealed by listing chunks.
-	listResp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
-		Vault: remoteVaultID,
-	}))
+	// Verify the chunk is now sealed (query the data node directly since ListChunks is RouteLocal).
+	dataNode := h.Node(t, "data-1")
+	metas, err := dataNode.orch.ListChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunks after seal: %v", err)
+		t.Fatalf("ListChunkMetas after seal: %v", err)
 	}
 	sealedCount := 0
-	for _, c := range listResp.Msg.Chunks {
-		if c.Sealed {
+	for _, m := range metas {
+		if m.Sealed {
 			sealedCount++
 		}
 	}
@@ -1650,19 +1648,18 @@ func TestMultiNode_GetIndexesRemote(t *testing.T) {
 
 	addMNRecords(t, h.Node(t, "data-1"), "D1", 3, nil)
 
-	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	dataNode := h.Node(t, "data-1")
+	remoteVaultID := dataNode.vaultID.String()
 
-	// List chunks first to get a chunk ID.
-	listResp, err := h.vaultClient.ListChunks(context.Background(), connect.NewRequest(&gastrologv1.ListChunksRequest{
-		Vault: remoteVaultID,
-	}))
+	// Get chunk ID from the data node directly (ListChunks is RouteLocal).
+	metas, err := dataNode.orch.ListChunkMetas(dataNode.vaultID)
 	if err != nil {
-		t.Fatalf("ListChunks: %v", err)
+		t.Fatalf("ListChunkMetas: %v", err)
 	}
-	if len(listResp.Msg.Chunks) == 0 {
+	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetIndexes with")
 	}
-	chunkID := listResp.Msg.Chunks[0].Id
+	chunkID := metas[0].ID.String()
 
 	resp, err := h.vaultClient.GetIndexes(context.Background(), connect.NewRequest(&gastrologv1.GetIndexesRequest{
 		Vault:   remoteVaultID,
