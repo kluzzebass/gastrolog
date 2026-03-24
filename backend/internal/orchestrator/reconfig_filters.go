@@ -94,18 +94,24 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 		}
 
 		for _, destID := range route.Destinations {
+			// Determine which node owns the vault's hot tier (first tier).
+			// Ingestion always targets the hot tier — even if this node has
+			// a non-hot tier for the same vault.
+			hotTierNode := resolveVaultNodeID(cfg, destID)
+
 			nodeID := ""
-			if _, ok := o.vaults[destID]; ok {
-				// Draining vaults are treated as remote — route to target node.
-				if ds, draining := o.draining[destID]; draining {
-					nodeID = ds.TargetNodeID
+			switch {
+			case o.draining[destID] != nil:
+				nodeID = o.draining[destID].TargetNodeID
+			case hotTierNode == "" || hotTierNode == o.localNodeID:
+				// Hot tier is local (or unassigned) — append locally if registered.
+				if _, ok := o.vaults[destID]; !ok {
+					continue // not registered locally
 				}
-			} else if o.forwarder != nil {
-				nodeID = resolveVaultNodeID(cfg, destID)
-				if nodeID == "" || nodeID == o.localNodeID {
-					continue // unassigned or our node but not registered
-				}
-			} else {
+			case o.forwarder != nil:
+				// Hot tier is on a remote node — forward.
+				nodeID = hotTierNode
+			default:
 				continue // single-node mode, skip remote
 			}
 			var err error
