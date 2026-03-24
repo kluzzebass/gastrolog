@@ -17,7 +17,7 @@ import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
-import { FormField, TextInput } from "./FormField";
+import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button, DropdownButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { PulseIcon } from "../icons";
@@ -62,6 +62,7 @@ interface VaultSettingsCardProps {
   nodeStorageConfigs: NodeStorageConfig[];
   storageClassOptions: { value: string; label: string }[];
   cloudServiceOptions: { value: string; label: string }[];
+  rotationPolicyOptions: { value: string; label: string }[];
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -77,6 +78,7 @@ export function VaultSettingsCard({
   nodeStorageConfigs: _nodeStorageConfigs,
   storageClassOptions,
   cloudServiceOptions,
+  rotationPolicyOptions,
   dark,
   expanded,
   onToggle,
@@ -96,6 +98,7 @@ export function VaultSettingsCard({
   const [newTier, setNewTier] = useState<TierEntry | null>(null);
   const [creatingTier, setCreatingTier] = useState(false);
 
+
   // Per-vault state — previously Record maps in the parent.
   const [deleteData, setDeleteData] = useState(false);
   const [migrateTarget, setMigrateTarget] = useState<{ name: string; type: string; dir: string } | null>(null);
@@ -109,6 +112,19 @@ export function VaultSettingsCard({
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
   const edit = getEdit(vault.id);
+
+  // Per-tier rotation policy edits — staged locally, saved with the vault.
+  const [tierRotationEdits, setTierRotationEdits] = useState<Record<string, string>>({});
+  const getTierRotationPolicy = (tierId: string, original: string): string =>
+    tierId in tierRotationEdits ? (tierRotationEdits[tierId] ?? original) : original;
+  const setTierRotationPolicy = (tierId: string, value: string) =>
+    setTierRotationEdits((prev) => ({ ...prev, [tierId]: value }));
+  const tierRotationDirty = Object.keys(tierRotationEdits).some(
+    (id) => {
+      const tier = tiers.find((t) => t.id === id);
+      return tier && tierRotationEdits[id] !== tier.rotationPolicyId;
+    },
+  );
 
   // Tier IDs managed separately — useEditState discards edits on config push,
   // which breaks reordering because the placement manager writes PutTier.
@@ -242,21 +258,38 @@ export function VaultSettingsCard({
           >
             {mergeTarget !== null ? "Cancel Merge" : "Merge Into..."}
           </Button>
-          {(isDirty(vault.id) || tierIdsDirty) && (
+          {(isDirty(vault.id) || tierIdsDirty || tierRotationDirty) && (
             <Button
               variant="ghost"
               bordered
               dark={dark}
-              onClick={() => { clearEdit(vault.id); setLocalTierIds([...vault.tierIds]); setNewTier(null); }}
+              onClick={() => { clearEdit(vault.id); setLocalTierIds([...vault.tierIds]); setTierRotationEdits({}); setNewTier(null); }}
             >
               Cancel
             </Button>
           )}
           <Button
-            onClick={() => saveVault(vault.id, { ...edit, tierIds: localTierIds })}
-            disabled={putVault.isPending || (!isDirty(vault.id) && !tierIdsDirty)}
+            onClick={async () => {
+              // Save modified tier rotation policies.
+              for (const [tierId, rpId] of Object.entries(tierRotationEdits)) {
+                const tier = tiers.find((t) => t.id === tierId);
+                if (tier && rpId !== tier.rotationPolicyId) {
+                  const updated = tier.clone();
+                  updated.rotationPolicyId = rpId;
+                  await putTier.mutateAsync({ config: updated });
+                }
+              }
+              // Don't clear tierRotationEdits here — the config query cache
+              // hasn't updated yet. The edits persist harmlessly until the
+              // config catches up (dirty check compares against live config).
+              // Only save vault config if vault-level fields changed.
+              if (isDirty(vault.id) || tierIdsDirty) {
+                saveVault(vault.id, { ...edit, tierIds: localTierIds });
+              }
+            }}
+            disabled={putVault.isPending || putTier.isPending || (!isDirty(vault.id) && !tierIdsDirty && !tierRotationDirty)}
           >
-            {putVault.isPending ? "Saving..." : "Save"}
+            {putVault.isPending || putTier.isPending ? "Saving..." : "Save"}
           </Button>
         </>
       }
@@ -388,6 +421,21 @@ export function VaultSettingsCard({
                         <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
                       )}
                     </div>
+                    {rotationPolicyOptions.length > 0 && (
+                      <div className="pl-6">
+                        <FormField label="Rotation Policy" dark={dark}>
+                          <SelectInput
+                            value={getTierRotationPolicy(tier.id, tier.rotationPolicyId)}
+                            onChange={(v) => setTierRotationPolicy(tier.id, v)}
+                            options={[
+                              { value: "", label: "None" },
+                              ...rotationPolicyOptions,
+                            ]}
+                            dark={dark}
+                          />
+                        </FormField>
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -401,6 +449,7 @@ export function VaultSettingsCard({
                 dark={dark}
                 storageClassOptions={storageClassOptions}
                 cloudServiceOptions={cloudServiceOptions}
+                rotationPolicyOptions={rotationPolicyOptions}
                 onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
                 onRemove={() => setNewTier(null)}
               />
@@ -419,6 +468,7 @@ export function VaultSettingsCard({
                       activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
                       cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
                       memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
+                      rotationPolicyId: newTier.rotationPolicyId,
                     });
                     setCreatingTier(true);
                     try {

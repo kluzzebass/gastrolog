@@ -311,12 +311,21 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 // handleTierPut adjusts vault registration when a tier's NodeID changes.
 // Runs on ALL nodes — each node independently decides whether it gained or lost
 // ownership based on the tier's new NodeID vs localNodeID.
+// handleTierPut adjusts vault registration when a tier's NodeID changes.
+// Only reacts to placement changes (NodeID), not config-only updates like
+// rotation policy — those are handled by the vault's existing policy reload.
 func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) {
 	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
 	if err != nil || tierCfg == nil {
 		d.logger.Error("dispatch: read tier config", "tier", tierID, "error", err)
 		return
 	}
+
+	// Only react to placement changes. If the tier belongs here and the vault
+	// is already registered, or if the tier doesn't belong here and the vault
+	// isn't registered, there's nothing to do. The key question is: did this
+	// tier JUST arrive or JUST leave this node?
+	tierBelongsHere := tierCfg.NodeID == "" || tierCfg.NodeID == d.localNodeID
 
 	vaults, err := d.cfgStore.ListVaults(ctx)
 	if err != nil {
@@ -330,23 +339,19 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		}
 
 		isLocalVault := slices.Contains(d.orch.ListVaults(), v.ID)
-		tierBelongsHere := tierCfg.NodeID == "" || tierCfg.NodeID == d.localNodeID
 
-		switch {
-		case tierBelongsHere && !isLocalVault:
+		if tierBelongsHere && !isLocalVault {
 			// Gained a tier — register the vault locally.
 			if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
 				d.logger.Error("dispatch: add vault for gained tier",
 					"vault", v.ID, "tier", tierID, "error", err)
 			}
-		case !tierBelongsHere && isLocalVault:
-			// Lost a tier — unregister the vault locally.
-			if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-				d.logger.Error("dispatch: unregister vault for lost tier",
-					"vault", v.ID, "tier", tierID, "error", err)
-			}
-			// tierBelongsHere && isLocalVault: no action needed — vault already registered.
 		}
+		// Note: we do NOT unregister on !tierBelongsHere && isLocalVault
+		// because this vault may have OTHER tiers that DO belong here.
+		// Vault unregistration only happens when the placement manager
+		// moves ALL of a vault's tiers off this node — handled by the
+		// vault-level reconfig path, not per-tier.
 	}
 }
 

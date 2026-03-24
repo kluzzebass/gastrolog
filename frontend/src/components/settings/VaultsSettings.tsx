@@ -31,6 +31,7 @@ export interface TierEntry {
   activeChunkClass: string;
   cacheClass: string;
   memoryBudget: string;
+  rotationPolicyId: string;
 }
 
 export function emptyTierEntry(type: TierTypeLabel): TierEntry {
@@ -42,6 +43,7 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     activeChunkClass: "",
     cacheClass: "",
     memoryBudget: "",
+    rotationPolicyId: "",
   };
 }
 
@@ -186,6 +188,7 @@ export function TierEntryCard({
   dark,
   storageClassOptions,
   cloudServiceOptions,
+  rotationPolicyOptions,
   onUpdate,
   onRemove,
 }: Readonly<{
@@ -194,6 +197,7 @@ export function TierEntryCard({
   dark: boolean;
   storageClassOptions: { value: string; label: string }[];
   cloudServiceOptions: { value: string; label: string }[];
+  rotationPolicyOptions: { value: string; label: string }[];
   onUpdate: (patch: Partial<TierEntry>) => void;
   onRemove: () => void;
 }>) {
@@ -322,6 +326,20 @@ export function TierEntryCard({
           </div>
         </>
       )}
+
+      {rotationPolicyOptions.length > 0 && (
+        <FormField label="Rotation Policy" dark={dark}>
+          <SelectInput
+            value={tier.rotationPolicyId}
+            onChange={(v) => onUpdate({ rotationPolicyId: v })}
+            options={[
+              { value: "", label: "None" },
+              ...rotationPolicyOptions,
+            ]}
+            dark={dark}
+          />
+        </FormField>
+      )}
     </div>
   );
 }
@@ -382,6 +400,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
     .map((cs) => ({ value: cs.id, label: cs.name || cs.id }));
 
+  // Derive rotation policy options
+  const rotationPolicyOptions = (config?.rotationPolicies ?? [])
+    .slice()
+    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+    .map((rp) => ({ value: rp.id, label: rp.name || rp.id }));
+
   // Validation: at least one tier, all tiers complete, no name conflict
   const allTiersComplete = addForm.tiers.length > 0 && addForm.tiers.every((t) => isTierComplete(t, cloudServiceOptions.length > 0));
   const createDisabled = nameConflict || !allTiersComplete;
@@ -415,6 +439,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
           cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
           memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
+          rotationPolicyId: tier.rotationPolicyId,
         }),
       };
     });
@@ -508,6 +533,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                   dark={dark}
                   storageClassOptions={storageClassOptions}
                   cloudServiceOptions={cloudServiceOptions}
+                  rotationPolicyOptions={rotationPolicyOptions}
                   onUpdate={(patch) =>
                     dispatchAdd({ type: "updateTier", key: tier.key, patch })
                   }
@@ -530,6 +556,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           nodeStorageConfigs={config?.nodeStorageConfigs ?? []}
           storageClassOptions={storageClassOptions}
           cloudServiceOptions={cloudServiceOptions}
+          rotationPolicyOptions={rotationPolicyOptions}
           dark={dark}
           expanded={isExpanded(vault.id)}
           onToggle={() => toggleCard(vault.id)}
