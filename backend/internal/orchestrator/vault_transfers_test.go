@@ -73,6 +73,10 @@ func (m *mockTransferrer) TransferRecords(_ context.Context, nodeID string, vaul
 	return nil
 }
 
+func (m *mockTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+
 func (m *mockTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
 	if m.failErr != nil {
 		return m.failErr

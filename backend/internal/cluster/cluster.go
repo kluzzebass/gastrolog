@@ -97,6 +97,10 @@ type Server struct {
 	// Set after the orchestrator is created, before forwarding starts.
 	recordAppender RecordAppender
 
+	// recordTierAppender writes forwarded records into a specific tier.
+	// Used for inter-tier transition when tier_id is set on ForwardRecordsRequest.
+	recordTierAppender RecordTierAppender
+
 	// recordImporter imports records as a sealed chunk in a local vault.
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter

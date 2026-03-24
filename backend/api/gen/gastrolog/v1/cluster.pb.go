@@ -1016,6 +1016,7 @@ type ForwardRecordsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
+	TierId        string                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"` // optional: target specific tier for inter-tier transition; empty = active tier
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1062,6 +1063,13 @@ func (x *ForwardRecordsRequest) GetRecords() []*ExportRecord {
 		return x.Records
 	}
 	return nil
+}
+
+func (x *ForwardRecordsRequest) GetTierId() string {
+	if x != nil {
+		return x.TierId
+	}
+	return ""
 }
 
 type ForwardRecordsResponse struct {
@@ -3027,10 +3035,11 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
 	"\x06errors\x18\x04 \x01(\x04R\x06errors\x12\x18\n" +
 	"\arunning\x18\x05 \x01(\bR\arunning\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"h\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x81\x01\n" +
 	"\x15ForwardRecordsRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x124\n" +
-	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"A\n" +
+	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12\x17\n" +
+	"\atier_id\x18\x03 \x01(\tR\x06tierId\"A\n" +
 	"\x16ForwardRecordsResponse\x12'\n" +
 	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWritten\"j\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +

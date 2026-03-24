@@ -113,6 +113,38 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 	return nil
 }
 
+// ForwardTierAppend sends records to a specific tier on a remote node.
+// Same as ForwardAppend but sets TierId so the receiver targets that tier
+// instead of the vault's active tier. Used by inter-tier transition.
+func (ct *ChunkTransferrer) ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+	conn, err := ct.peers.Conn(nodeID)
+	if err != nil {
+		return fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+
+	exportRecs := make([]*gastrologv1.ExportRecord, len(records))
+	for i, rec := range records {
+		er := chunkRecordToExport(rec)
+		er.IngestSeq = rec.EventID.IngestSeq
+		if rec.EventID.IngesterID != ([16]byte{}) {
+			er.IngesterId = rec.EventID.IngesterID[:]
+		}
+		exportRecs[i] = er
+	}
+
+	req := &gastrologv1.ForwardRecordsRequest{
+		VaultId: vaultID.String(),
+		TierId:  tierID.String(),
+		Records: exportRecs,
+	}
+	resp := &gastrologv1.ForwardRecordsResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRecords", req, resp); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("forward tier append to %s: %w", nodeID, err)
+	}
+	return nil
+}
+
 // WaitVaultReady polls the target node until the vault is registered and
 // accepting records, or ctx expires. Uses ForwardListChunks as a lightweight
 // existence probe — it returns an error if the vault doesn't exist.

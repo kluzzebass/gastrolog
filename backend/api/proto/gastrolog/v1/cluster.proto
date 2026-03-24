@@ -147,6 +147,7 @@ message IngesterNodeStats {
 message ForwardRecordsRequest {
   string vault_id = 1;
   repeated ExportRecord records = 2;
+  string tier_id = 3;  // optional: target specific tier for inter-tier transition; empty = active tier
 }
 
 message ForwardRecordsResponse {

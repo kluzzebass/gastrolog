@@ -141,6 +141,53 @@ func (o *Orchestrator) VaultType(vaultID uuid.UUID) string {
 	return ""
 }
 
+// findLocalTier returns the TierInstance for a specific tier in a vault,
+// or nil if the tier is not local.
+func (o *Orchestrator) findLocalTier(vaultID, tierID uuid.UUID) *TierInstance {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return nil
+	}
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID {
+			return t
+		}
+	}
+	return nil
+}
+
+// AppendToTier appends a record to a specific tier's chunk manager.
+// Used by inter-tier transition to target a downstream tier directly,
+// bypassing the vault's active tier. Includes seal detection.
+func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record) error {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+
+	for _, tier := range vault.Tiers {
+		if tier.TierID != tierID {
+			continue
+		}
+		cm := tier.Chunks
+		activeBefore := cm.Active()
+		if _, _, err := cm.Append(rec); err != nil {
+			return err
+		}
+		activeAfter := cm.Active()
+		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
+			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+		}
+		return nil
+	}
+	return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+}
+
 // --- Chunk write ---
 
 // Append appends a record to the vault's active chunk.

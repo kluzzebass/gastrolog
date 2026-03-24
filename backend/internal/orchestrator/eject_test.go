@@ -81,6 +81,10 @@ func (m *ejectFakeTransferrer) ForwardAppend(_ context.Context, nodeID string, v
 	return nil
 }
 
+func (m *ejectFakeTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+
 func (m *ejectFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }

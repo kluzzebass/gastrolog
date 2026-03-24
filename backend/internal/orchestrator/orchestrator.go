@@ -100,6 +100,10 @@ type RemoteTransferrer interface {
 	// destination's normal rotation lifecycle.
 	ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 
+	// ForwardTierAppend sends records to a specific tier on a remote node.
+	// Used by inter-tier transition when the next tier is on a different node.
+	ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
+
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
 	// synchronize with the target node's AddVault before unregistering

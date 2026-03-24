@@ -116,6 +116,8 @@ func (r *retentionRunner) sweep() {
 					r.expireChunk(id)
 				case config.RetentionActionEject:
 					r.ejectChunk(id, b.ejectRouteIDs)
+				case config.RetentionActionTransition:
+					r.transitionChunk(id)
 				default:
 					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
 				}

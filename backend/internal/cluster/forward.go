@@ -22,6 +22,10 @@ import (
 // Used by the ForwardRecords handler to write received records.
 type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error
 
+// RecordTierAppender appends a single record to a specific tier in a local vault.
+// Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
+type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, rec chunk.Record) error
+
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
 // streams them as they arrive). For pipeline queries (stats, timechart),
@@ -85,6 +89,11 @@ type ManagedFileIDsLister func() []string
 // Must be called before the cluster server receives ForwardRecords RPCs.
 func (s *Server) SetRecordAppender(fn RecordAppender) {
 	s.recordAppender = fn
+}
+
+// SetRecordTierAppender injects the callback for tier-targeted forwarding.
+func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
+	s.recordTierAppender = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.
@@ -174,13 +183,31 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
 
+	// Tier-targeted append for inter-tier transition.
+	var tierID uuid.UUID
+	if req.GetTierId() != "" {
+		tierID, err = uuid.Parse(req.GetTierId())
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+		}
+		if s.recordTierAppender == nil {
+			return nil, status.Error(codes.Unavailable, "tier appender not configured")
+		}
+	}
+
 	var written int64
 	for _, exportRec := range req.GetRecords() {
 		rec := exportRecordToChunk(exportRec)
-		if err := s.recordAppender(ctx, vaultID, rec); err != nil {
+		var appendErr error
+		if tierID != uuid.Nil {
+			appendErr = s.recordTierAppender(ctx, vaultID, tierID, rec)
+		} else {
+			appendErr = s.recordAppender(ctx, vaultID, rec)
+		}
+		if appendErr != nil {
 			s.cfg.Logger.Warn("forward: append failed",
-				"vault", vaultID, "error", err)
-			return nil, status.Errorf(codes.Internal, "append record: %v", err)
+				"vault", vaultID, "error", appendErr)
+			return nil, status.Errorf(codes.Internal, "append record: %v", appendErr)
 		}
 		written++
 	}

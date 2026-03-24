@@ -508,6 +508,8 @@ const (
 	RetentionActionExpire RetentionAction = "expire"
 	// RetentionActionEject streams matching chunks' records through named routes.
 	RetentionActionEject RetentionAction = "eject"
+	// RetentionActionTransition streams matching chunks' records to the next tier in the vault's chain.
+	RetentionActionTransition RetentionAction = "transition"
 )
 
 // RetentionRule pairs a retention policy with an action.
