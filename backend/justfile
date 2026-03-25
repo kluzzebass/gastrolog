@@ -177,6 +177,7 @@ run-node4:
 # Runs all 4 cluster nodes in one terminal with colored output.
 cluster-run:
   go run ./cmd/multirun \
+    --no-fail-fast \
     --name node1,node2,node3,node4 \
     "go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566" \
     "go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576" \
@@ -186,6 +187,7 @@ cluster-run:
 # Runs all 4 cluster nodes with pprof enabled on each (node1=6060, node2=6061, etc).
 cluster-run-pprof:
   go run ./cmd/multirun \
+    --no-fail-fast \
     --name node1,node2,node3,node4 \
     "go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566 --pprof localhost:6060" \
     "go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576 --pprof localhost:6061" \
