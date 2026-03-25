@@ -311,9 +311,8 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 // handleTierPut adjusts vault registration when a tier's NodeID changes.
 // Runs on ALL nodes — each node independently decides whether it gained or lost
 // ownership based on the tier's new NodeID vs localNodeID.
-// handleTierPut adjusts vault registration when a tier's NodeID changes.
-// Only reacts to placement changes (NodeID), not config-only updates like
-// rotation policy — those are handled by the vault's existing policy reload.
+// handleTierPut adjusts vault registration when a tier's NodeID changes,
+// and reloads rotation/retention policies when tier config changes.
 func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) {
 	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
 	if err != nil || tierCfg == nil {
@@ -353,6 +352,11 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		// moves ALL of a vault's tiers off this node — handled by the
 		// vault-level reconfig path, not per-tier.
 	}
+
+	// Reload rotation and retention policies — tier config may have changed
+	// policy references (rotation_policy_id, retention_rules).
+	d.reloadRotationPolicies(ctx)
+	d.reloadRetentionPolicies(ctx)
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.

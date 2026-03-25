@@ -2,7 +2,7 @@ import { useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import type { VaultConfig, RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/config_pb";
 import type { NodeStorageConfig } from "../../api/gen/gastrolog/v1/storage_pb";
-import { TierConfig, TierType } from "../../api/gen/gastrolog/v1/config_pb";
+import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/config_pb";
 import {
   usePutVault,
   useDeleteVault,
@@ -13,7 +13,6 @@ import {
   usePutTier,
 } from "../../api/hooks";
 import { useToast } from "../Toast";
-import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
@@ -51,6 +50,7 @@ import {
   isTierComplete,
   type TierEntry,
   type TierTypeLabel,
+  retentionActionForPosition,
 } from "./VaultsSettings";
 
 interface VaultSettingsCardProps {
@@ -63,6 +63,7 @@ interface VaultSettingsCardProps {
   storageClassOptions: { value: string; label: string }[];
   cloudServiceOptions: { value: string; label: string }[];
   rotationPolicyOptions: { value: string; label: string }[];
+  retentionPolicyOptions: { value: string; label: string }[];
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -79,6 +80,7 @@ export function VaultSettingsCard({
   storageClassOptions,
   cloudServiceOptions,
   rotationPolicyOptions,
+  retentionPolicyOptions,
   dark,
   expanded,
   onToggle,
@@ -105,31 +107,44 @@ export function VaultSettingsCard({
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<{ jobId: string; label: string } | null>(null);
 
-  const defaults = (_id: string) => ({
+  // All vault+tier edits in one place. Initialized from props, reset on cancel/save.
+  interface VaultEdit {
+    name: string;
+    enabled: boolean;
+    tierIds: string[];
+    tierRotation: Record<string, string>;    // tierId → rotationPolicyId
+    tierRetention: Record<string, string>;   // tierId → retentionPolicyId
+  }
+
+  const buildInitialEdit = (): VaultEdit => ({
     name: vault.name,
     enabled: vault.enabled,
+    tierIds: [...vault.tierIds],
+    tierRotation: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.rotationPolicyId]),
+    ),
+    tierRetention: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
+    ),
   });
 
-  const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
-  const edit = getEdit(vault.id);
+  const [edit, setEditState] = useState<VaultEdit>(buildInitialEdit);
+  const resetEdit = () => setEditState(buildInitialEdit());
 
-  // Per-tier rotation policy edits — staged locally, saved with the vault.
-  const [tierRotationEdits, setTierRotationEdits] = useState<Record<string, string>>({});
-  const getTierRotationPolicy = (tierId: string, original: string): string =>
-    tierId in tierRotationEdits ? (tierRotationEdits[tierId] ?? original) : original;
+  const setEdit = (patch: Partial<VaultEdit>) => setEditState((prev) => ({ ...prev, ...patch }));
   const setTierRotationPolicy = (tierId: string, value: string) =>
-    setTierRotationEdits((prev) => ({ ...prev, [tierId]: value }));
-  const tierRotationDirty = Object.keys(tierRotationEdits).some(
-    (id) => {
-      const tier = tiers.find((t) => t.id === id);
-      return tier && tierRotationEdits[id] !== tier.rotationPolicyId;
-    },
-  );
+    setEditState((prev) => ({ ...prev, tierRotation: { ...prev.tierRotation, [tierId]: value } }));
+  const setTierRetentionPolicyId = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierRetention: { ...prev.tierRetention, [tierId]: value } }));
 
-  // Tier IDs managed separately — useEditState discards edits on config push,
-  // which breaks reordering because the placement manager writes PutTier.
-  const [localTierIds, setLocalTierIds] = useState<string[]>([...vault.tierIds]);
-  const tierIdsDirty = JSON.stringify(localTierIds) !== JSON.stringify([...vault.tierIds]);
+  const initial = buildInitialEdit();
+  const anyDirty = JSON.stringify(edit) !== JSON.stringify(initial);
+
+  // Aliases for backward compat with the rest of the component.
+  const localTierIds = edit.tierIds;
+  const setLocalTierIds = (ids: string[]) => setEdit({ tierIds: ids });
+  const getTierRotationPolicy = (tierId: string): string => edit.tierRotation[tierId] ?? "";
+  const getTierRetentionPolicyId = (tierId: string): string => edit.tierRetention[tierId] ?? "";
 
   // Resolve vault's tiers from local state (reflects unsaved reorder/remove).
   const tierMap = new Map(tiers.map((t) => [t.id, t]));
@@ -157,7 +172,7 @@ export function VaultSettingsCard({
       enabled: e.enabled,
     }),
     onDeleteTransform: (id) => ({ id, force: true, deleteData }),
-    clearEdit,
+    clearEdit: () => resetEdit(),
   });
 
   const warnings: string[] = [];
@@ -258,36 +273,57 @@ export function VaultSettingsCard({
           >
             {mergeTarget !== null ? "Cancel Merge" : "Merge Into..."}
           </Button>
-          {(isDirty(vault.id) || tierIdsDirty || tierRotationDirty) && (
+          {(anyDirty) && (
             <Button
               variant="ghost"
               bordered
               dark={dark}
-              onClick={() => { clearEdit(vault.id); setLocalTierIds([...vault.tierIds]); setTierRotationEdits({}); setNewTier(null); }}
+              onClick={() => { resetEdit(); setNewTier(null); }}
             >
               Cancel
             </Button>
           )}
           <Button
             onClick={async () => {
-              // Save modified tier rotation policies.
-              for (const [tierId, rpId] of Object.entries(tierRotationEdits)) {
+              // Save tier-level changes (rotation + retention) via PutTier.
+              for (const [tierId, rpId] of Object.entries(edit.tierRotation)) {
                 const tier = tiers.find((t) => t.id === tierId);
-                if (tier && rpId !== tier.rotationPolicyId) {
-                  const updated = tier.clone();
-                  updated.rotationPolicyId = rpId;
-                  await putTier.mutateAsync({ config: updated });
-                }
+                if (!tier || rpId === tier.rotationPolicyId) continue;
+                const updated = tier.clone();
+                updated.rotationPolicyId = rpId;
+                // Also apply retention for this tier in the same PutTier call.
+                const retPolicyId = edit.tierRetention[tierId] ?? "";
+                const tierIndex = edit.tierIds.indexOf(tierId);
+                updated.retentionRules = retPolicyId
+                  ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: retentionActionForPosition(tierIndex, edit.tierIds.length) })]
+                  : [];
+                await putTier.mutateAsync({ config: updated });
               }
-              // Don't clear tierRotationEdits here — the config query cache
-              // hasn't updated yet. The edits persist harmlessly until the
-              // config catches up (dirty check compares against live config).
-              // Only save vault config if vault-level fields changed.
-              if (isDirty(vault.id) || tierIdsDirty) {
-                saveVault(vault.id, { ...edit, tierIds: localTierIds });
+              // Save retention-only changes (tiers whose rotation didn't change).
+              for (const [tierId, retPolicyId] of Object.entries(edit.tierRetention)) {
+                if (tierId in edit.tierRotation) {
+                  const tier = tiers.find((t) => t.id === tierId);
+                  if (tier && edit.tierRotation[tierId] !== tier.rotationPolicyId) continue; // already saved above
+                }
+                const tier = tiers.find((t) => t.id === tierId);
+                if (!tier) continue;
+                const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
+                if (retPolicyId === currentRetId) continue;
+                const tierIndex = edit.tierIds.indexOf(tierId);
+                const updated = tier.clone();
+                updated.retentionRules = retPolicyId
+                  ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: retentionActionForPosition(tierIndex, edit.tierIds.length) })]
+                  : [];
+                await putTier.mutateAsync({ config: updated });
+              }
+              // Save vault-level changes (name, enabled, tier order).
+              const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
+                JSON.stringify(edit.tierIds) !== JSON.stringify([...vault.tierIds]);
+              if (vaultChanged) {
+                saveVault(vault.id, { name: edit.name, tierIds: edit.tierIds, enabled: edit.enabled });
               }
             }}
-            disabled={putVault.isPending || putTier.isPending || (!isDirty(vault.id) && !tierIdsDirty && !tierRotationDirty)}
+            disabled={putVault.isPending || putTier.isPending || !anyDirty}
           >
             {putVault.isPending || putTier.isPending ? "Saving..." : "Save"}
           </Button>
@@ -315,13 +351,13 @@ export function VaultSettingsCard({
         <FormField label="Name" dark={dark}>
           <TextInput
             value={edit.name}
-            onChange={(v) => setEdit(vault.id, { name: v })}
+            onChange={(v) => setEdit({ name: v })}
             dark={dark}
           />
         </FormField>
         <Checkbox
           checked={edit.enabled}
-          onChange={(v) => setEdit(vault.id, { enabled: v })}
+          onChange={(v) => setEdit({ enabled: v })}
           label="Enabled"
           dark={dark}
         />
@@ -421,11 +457,11 @@ export function VaultSettingsCard({
                         <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
                       )}
                     </div>
-                    {rotationPolicyOptions.length > 0 && (
-                      <div className="pl-6">
+                    <div className="pl-6 flex flex-col gap-2">
+                      {rotationPolicyOptions.length > 0 && (
                         <FormField label="Rotation Policy" dark={dark}>
                           <SelectInput
-                            value={getTierRotationPolicy(tier.id, tier.rotationPolicyId)}
+                            value={getTierRotationPolicy(tier.id)}
                             onChange={(v) => setTierRotationPolicy(tier.id, v)}
                             options={[
                               { value: "", label: "None" },
@@ -434,8 +470,23 @@ export function VaultSettingsCard({
                             dark={dark}
                           />
                         </FormField>
-                      </div>
-                    )}
+                      )}
+                      {retentionPolicyOptions.length > 0 && (
+                        <>
+                          <FormField label="Retention Policy" dark={dark}>
+                            <SelectInput
+                              value={getTierRetentionPolicyId(tier.id)}
+                              onChange={(v) => setTierRetentionPolicyId(tier.id, v)}
+                              options={[
+                                { value: "", label: "None" },
+                                ...retentionPolicyOptions,
+                              ]}
+                              dark={dark}
+                            />
+                          </FormField>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -450,6 +501,7 @@ export function VaultSettingsCard({
                 storageClassOptions={storageClassOptions}
                 cloudServiceOptions={cloudServiceOptions}
                 rotationPolicyOptions={rotationPolicyOptions}
+                retentionPolicyOptions={retentionPolicyOptions}
                 onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
                 onRemove={() => setNewTier(null)}
               />
@@ -469,6 +521,12 @@ export function VaultSettingsCard({
                       cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
                       memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
                       rotationPolicyId: newTier.rotationPolicyId,
+                      retentionRules: newTier.retentionPolicyId
+                        ? [new RetentionRule({
+                            retentionPolicyId: newTier.retentionPolicyId,
+                            action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
+                          })]
+                        : [],
                     });
                     setCreatingTier(true);
                     try {

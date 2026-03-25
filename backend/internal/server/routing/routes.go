@@ -119,7 +119,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.VaultServiceGetStatsProcedure:   {Strategy: RouteLocal},
 		// Targeted — must execute on the node that owns the vault.
 		// WrapResponse enables the interceptor to deserialize forwarded responses.
-		gastrologv1connect.VaultServiceListChunksProcedure:    {Strategy: RouteLocal},
+		gastrologv1connect.VaultServiceListChunksProcedure:    {Strategy: RouteFanOut},
 		gastrologv1connect.VaultServiceGetChunkProcedure:      {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.GetChunkResponse]()},
 		gastrologv1connect.VaultServiceGetIndexesProcedure:    {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.GetIndexesResponse]()},
 		gastrologv1connect.VaultServiceAnalyzeChunkProcedure:  {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.AnalyzeChunkResponse]()},

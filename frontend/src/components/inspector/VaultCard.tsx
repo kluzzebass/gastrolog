@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
-import { useChunks, useIndexes, useValidateVault } from "../../api/hooks";
+import { useChunks, useIndexes, useValidateVault, useConfig } from "../../api/hooks";
 import { useToast } from "../Toast";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
@@ -116,7 +116,17 @@ function VaultActions({
 function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean }>) {
   const c = useThemeClass(dark);
   const { data: chunks, isLoading } = useChunks(vaultId);
+  const { data: config } = useConfig();
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
+
+  // Build tier position map from vault config for labeling.
+  const vaultCfg = config?.vaults?.find((v) => v.id === vaultId);
+  const tierPositions = new Map<string, number>();
+  if (vaultCfg) {
+    for (const [i, tid] of vaultCfg.tierIds.entries()) {
+      tierPositions.set(tid, i + 1);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -150,6 +160,27 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     }
   }
 
+  // Identify remote tiers (in vault config but no local chunks).
+  const remoteTierInfo = (() => {
+    if (!vaultCfg || !config?.tiers) return [];
+    const localTierIds = new Set(tierGroups.keys());
+    const nodeNameMap = new Map((config.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
+    const tierTypeMap: Record<number, string> = { 1: "memory", 2: "local", 3: "cloud" };
+    return vaultCfg.tierIds
+      .filter((tid) => !localTierIds.has(tid))
+      .map((tid) => {
+        const tc = config.tiers.find((t) => t.id === tid);
+        if (!tc) return null;
+        return {
+          id: tid,
+          pos: tierPositions.get(tid) ?? 0,
+          type: tierTypeMap[tc.type] ?? "unknown",
+          nodeName: tc.nodeId ? (nodeNameMap.get(tc.nodeId) ?? tc.nodeId) : "",
+        };
+      })
+      .filter((t): t is NonNullable<typeof t> => t !== null);
+  })();
+
   const sortChunks = (arr: ChunkMeta[]) =>
     arr.toSorted((a, b) => {
       const aTs = a.ingestStart ?? a.writeStart;
@@ -161,7 +192,32 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
   return (
     <div>
-      {[...tierGroups.entries()].map(([tierId, group]) => (
+      {/* Build a unified tier list: local tiers with chunks + remote tiers without */}
+      {(vaultCfg?.tierIds ?? []).map((tierId) => {
+        const pos = tierPositions.get(tierId) ?? 0;
+        const group = tierGroups.get(tierId);
+        const remote = remoteTierInfo.find((rt) => rt.id === tierId);
+
+        // Remote tier with no local chunks — show as a placeholder.
+        if (!group && remote) {
+          return (
+            <div
+              key={tierId}
+              className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
+                "text-text-ghost border-ink-border-subtle bg-ink-base/30",
+                "text-light-text-ghost border-light-border-subtle bg-light-base/30",
+              )}`}
+            >
+              <Badge variant="muted" dark={dark}>{`Tier ${String(pos)}: ${remote.type}`}</Badge>
+              <span>{remote.nodeName ? `on ${remote.nodeName}` : "unplaced"}</span>
+            </div>
+          );
+        }
+
+        if (!group) return null;
+
+        const label = `Tier ${String(pos)}: ${group.tierType}`;
+        return (
         <div key={tierId}>
           <div
             className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
@@ -169,8 +225,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               "text-light-text-ghost border-light-border-subtle bg-light-base/30",
             )}`}
           >
-            <Badge variant="copper" dark={dark}>{group.tierType}</Badge>
-            <span>{`${String(group.chunks.length)} chunk(s)`}</span>
+            <Badge variant="copper" dark={dark}>{label}</Badge>
+            <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
             <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
           </div>
           <table className="w-full border-collapse">
@@ -213,7 +269,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
             </tbody>
           </table>
         </div>
-      ))}
+        ); })}
     </div>
   );
 }
@@ -262,13 +318,6 @@ function ChunkRow({
               {chunk.id}
             </span>
           </span>
-        </td>
-        <td className="px-2 py-2">
-          {chunk.tierType && (
-            <Badge variant="copper" dark={dark}>
-              {chunk.tierType}
-            </Badge>
-          )}
         </td>
         <td className="px-2 py-2">
           <span

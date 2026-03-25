@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -22,29 +23,34 @@ type PeerVaultStatsProvider interface {
 	FindVaultStats(vaultID string) *apiv1.VaultStats
 }
 
+// RemoteChunkLister lists chunks from a remote node's vault.
+type RemoteChunkLister interface {
+	ListChunks(ctx context.Context, nodeID string, req *apiv1.ForwardListChunksRequest) (*apiv1.ForwardListChunksResponse, error)
+}
+
 // VaultServer implements the VaultService.
-// RouteTargeted RPCs (ListChunks, GetChunk, GetIndexes, etc.) are auto-routed
-// by the routing interceptor — the handlers always execute on the vault-owning node.
 type VaultServer struct {
-	orch        *orchestrator.Orchestrator
-	cfgStore    config.Store
-	factories   orchestrator.Factories
-	peerStats   PeerVaultStatsProvider
-	localNodeID string
-	logger      *slog.Logger
+	orch              *orchestrator.Orchestrator
+	cfgStore          config.Store
+	factories         orchestrator.Factories
+	peerStats         PeerVaultStatsProvider
+	remoteChunkLister RemoteChunkLister
+	localNodeID       string
+	logger            *slog.Logger
 }
 
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
-		orch:        orch,
-		cfgStore:    cfgStore,
-		factories:   factories,
-		peerStats:   peerStats,
-		localNodeID: localNodeID,
-		logger:      logging.Default(logger).With("component", "vault-server"),
+		orch:              orch,
+		cfgStore:          cfgStore,
+		factories:         factories,
+		peerStats:         peerStats,
+		remoteChunkLister: remoteChunkLister,
+		localNodeID:       localNodeID,
+		logger:            logging.Default(logger).With("component", "vault-server"),
 	}
 }
 

@@ -14,8 +14,8 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-// ListChunks returns all chunks in a vault from all local tiers.
-// Routing: RouteLocal — returns chunks from this node's tiers only.
+// ListChunks returns all chunks in a vault from all tiers across all nodes.
+// Routing: RouteFanOut — collects local chunks + remote chunks from all nodes.
 func (s *VaultServer) ListChunks(
 	ctx context.Context,
 	req *connect.Request[apiv1.ListChunksRequest],
@@ -28,24 +28,58 @@ func (s *VaultServer) ListChunks(
 		return nil, connErr
 	}
 
+	// Collect local chunks.
+	var allChunks []*apiv1.ChunkMeta
 	metas, err := s.orch.ListAllChunkMetas(vaultID)
-	if err != nil {
-		// Vault not registered locally (no local tiers) — return empty.
-		if errors.Is(err, orchestrator.ErrVaultNotFound) {
-			return connect.NewResponse(&apiv1.ListChunksResponse{}), nil
-		}
+	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return nil, mapVaultError(err)
 	}
-
-	resp := &apiv1.ListChunksResponse{
-		Chunks: make([]*apiv1.ChunkMeta, 0, len(metas)),
-	}
-
 	for _, meta := range metas {
-		resp.Chunks = append(resp.Chunks, TieredChunkMetaToProto(meta))
+		allChunks = append(allChunks, TieredChunkMetaToProto(meta))
 	}
 
-	return connect.NewResponse(resp), nil
+	// Collect remote chunks from nodes that own other tiers.
+	if s.remoteChunkLister != nil {
+		remoteNodes := s.remoteTierNodes(ctx, vaultID)
+		for _, nodeID := range remoteNodes {
+			remote, err := s.remoteChunkLister.ListChunks(ctx, nodeID, &apiv1.ForwardListChunksRequest{
+				VaultId: vaultID.String(),
+			})
+			if err != nil {
+				s.logger.Warn("ListChunks: remote node failed", "node", nodeID, "vault", vaultID, "error", err)
+				continue // best effort — show what we can
+			}
+			allChunks = append(allChunks, remote.Chunks...)
+		}
+	}
+
+	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: allChunks}), nil
+}
+
+// remoteTierNodes returns node IDs of remote nodes that own tiers for a vault.
+func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []string {
+	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
+	if err != nil || vaultCfg == nil {
+		return nil
+	}
+	tiers, err := s.cfgStore.ListTiers(ctx)
+	if err != nil {
+		return nil
+	}
+	tierMap := make(map[uuid.UUID]string, len(tiers))
+	for _, t := range tiers {
+		tierMap[t.ID] = t.NodeID
+	}
+	seen := make(map[string]bool)
+	var nodes []string
+	for _, tid := range vaultCfg.TierIDs {
+		nodeID := tierMap[tid]
+		if nodeID != "" && nodeID != s.localNodeID && !seen[nodeID] {
+			seen[nodeID] = true
+			nodes = append(nodes, nodeID)
+		}
+	}
+	return nodes
 }
 
 // GetChunk returns details for a specific chunk.

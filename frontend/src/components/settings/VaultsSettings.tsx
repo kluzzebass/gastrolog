@@ -8,7 +8,7 @@ import {
   usePutTier,
   useGenerateName,
 } from "../../api/hooks";
-import { TierConfig, TierType } from "../../api/gen/gastrolog/v1/config_pb";
+import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/config_pb";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
@@ -32,6 +32,7 @@ export interface TierEntry {
   cacheClass: string;
   memoryBudget: string;
   rotationPolicyId: string;
+  retentionPolicyId: string;
 }
 
 export function emptyTierEntry(type: TierTypeLabel): TierEntry {
@@ -44,7 +45,13 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     cacheClass: "",
     memoryBudget: "",
     rotationPolicyId: "",
+    retentionPolicyId: "",
   };
+}
+
+// Retention action is determined by position: last tier = expire, others = transition.
+export function retentionActionForPosition(index: number, totalTiers: number): string {
+  return index === totalTiers - 1 ? "expire" : "transition";
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +196,7 @@ export function TierEntryCard({
   storageClassOptions,
   cloudServiceOptions,
   rotationPolicyOptions,
+  retentionPolicyOptions,
   onUpdate,
   onRemove,
 }: Readonly<{
@@ -198,6 +206,7 @@ export function TierEntryCard({
   storageClassOptions: { value: string; label: string }[];
   cloudServiceOptions: { value: string; label: string }[];
   rotationPolicyOptions: { value: string; label: string }[];
+  retentionPolicyOptions: { value: string; label: string }[];
   onUpdate: (patch: Partial<TierEntry>) => void;
   onRemove: () => void;
 }>) {
@@ -340,6 +349,20 @@ export function TierEntryCard({
           />
         </FormField>
       )}
+
+      {retentionPolicyOptions.length > 0 && (
+        <FormField label="Retention Policy" dark={dark}>
+          <SelectInput
+            value={tier.retentionPolicyId}
+            onChange={(v) => onUpdate({ retentionPolicyId: v })}
+            options={[
+              { value: "", label: "None" },
+              ...retentionPolicyOptions,
+            ]}
+            dark={dark}
+          />
+        </FormField>
+      )}
     </div>
   );
 }
@@ -406,6 +429,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
     .map((rp) => ({ value: rp.id, label: rp.name || rp.id }));
 
+  // Derive retention policy options
+  const retentionPolicyOptions = (config?.retentionPolicies ?? [])
+    .slice()
+    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+    .map((rp) => ({ value: rp.id, label: rp.name || rp.id }));
+
   // Validation: at least one tier, all tiers complete, no name conflict
   const allTiersComplete = addForm.tiers.length > 0 && addForm.tiers.every((t) => isTierComplete(t, cloudServiceOptions.length > 0));
   const createDisabled = nameConflict || !allTiersComplete;
@@ -426,7 +455,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
 
     // Build tier configs outside try/catch (React Compiler can't optimize
     // conditional expressions inside try/catch).
-    const tierConfigs = addForm.tiers.map((tier) => {
+    const tierConfigs = addForm.tiers.map((tier, i) => {
       const tierId = crypto.randomUUID();
       return {
         tierId,
@@ -440,6 +469,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
           memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
           rotationPolicyId: tier.rotationPolicyId,
+          retentionRules: tier.retentionPolicyId
+            ? [new RetentionRule({ retentionPolicyId: tier.retentionPolicyId, action: retentionActionForPosition(i, addForm.tiers.length) })]
+            : [],
         }),
       };
     });
@@ -534,6 +566,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                   storageClassOptions={storageClassOptions}
                   cloudServiceOptions={cloudServiceOptions}
                   rotationPolicyOptions={rotationPolicyOptions}
+                  retentionPolicyOptions={retentionPolicyOptions}
                   onUpdate={(patch) =>
                     dispatchAdd({ type: "updateTier", key: tier.key, patch })
                   }
@@ -557,6 +590,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           storageClassOptions={storageClassOptions}
           cloudServiceOptions={cloudServiceOptions}
           rotationPolicyOptions={rotationPolicyOptions}
+          retentionPolicyOptions={retentionPolicyOptions}
           dark={dark}
           expanded={isExpanded(vault.id)}
           onToggle={() => toggleCard(vault.id)}

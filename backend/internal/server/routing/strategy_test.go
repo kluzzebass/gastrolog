@@ -133,10 +133,10 @@ func TestStrategyDistribution(t *testing.T) {
 	}
 
 	want := map[routing.Strategy]int{
-		routing.RouteLocal:    40,
+		routing.RouteLocal:    39,
 		routing.RouteLeader:   35,
 		routing.RouteTargeted: 10,
-		routing.RouteFanOut:   6,
+		routing.RouteFanOut:   7,
 	}
 
 	for strategy, expected := range want {

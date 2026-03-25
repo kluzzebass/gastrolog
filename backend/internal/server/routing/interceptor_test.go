@@ -341,8 +341,8 @@ func TestRegistryLookup(t *testing.T) {
 		if !ok {
 			t.Fatal("expected to find ListChunks")
 		}
-		if route.Strategy != routing.RouteLocal {
-			t.Errorf("expected RouteLocal, got %v", route.Strategy)
+		if route.Strategy != routing.RouteFanOut {
+			t.Errorf("expected RouteFanOut, got %v", route.Strategy)
 		}
 	})
 

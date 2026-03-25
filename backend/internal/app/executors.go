@@ -302,13 +302,13 @@ func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 
 func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecutor {
 	return func(ctx context.Context, vaultID uuid.UUID) ([]*gastrologv1.ChunkMeta, error) {
-		metas, err := o.ListChunkMetas(vaultID)
+		metas, err := o.ListAllChunkMetas(vaultID)
 		if err != nil {
 			return nil, err
 		}
 		out := make([]*gastrologv1.ChunkMeta, 0, len(metas))
 		for _, m := range metas {
-			out = append(out, server.ChunkMetaToProto(m))
+			out = append(out, server.TieredChunkMetaToProto(m))
 		}
 		return out, nil
 	}

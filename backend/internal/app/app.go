@@ -774,7 +774,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			Cluster: deps.ClusterSrv, PeerStats: deps.PeerState,
 			PeerVaultStats: deps.PeerState, PeerIngesterStats: deps.PeerState, PeerRouteStats: deps.PeerState,
 			PeerJobs: deps.PeerJobState,
-			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder,
+			LocalStats: deps.LocalStats, RemoteSearcher: deps.SearchForwarder, RemoteChunkLister: deps.SearchForwarder,
 			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
