@@ -187,6 +187,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
+	disp.catchupScheduler = func(tierID uuid.UUID, secondaryNodeIDs []string) {
+		orch.ScheduleCatchupForTier(tierID, secondaryNodeIDs)
+	}
 
 	if err := startOrchestrator(ctx, logger, orch, appCfg, factories); err != nil {
 		return err
@@ -344,6 +347,9 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
+	clusterSrv.SetSealTierExecutor(func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+		return orch.SealActiveTier(vaultID, tierID, chunkID)
+	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
 	clusterSrv.SetExplainExecutor(newExplainExecutor(orch, nodeID))
 	clusterSrv.SetFollowExecutor(newFollowExecutor(orch))

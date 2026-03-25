@@ -684,3 +684,66 @@ func TestNodeHasStorageClass(t *testing.T) {
 		}
 	}
 }
+
+// ---------- Replication / secondary placement ----------
+
+func TestPlacementRF2AssignsSecondary(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+
+	tierID := uuid.Must(uuid.NewV7())
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, ReplicationFactor: 2})
+	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
+
+	pm.reconcile(ctx)
+
+	tier, _ := store.GetTier(ctx, tierID)
+	if tier.NodeID == "" {
+		t.Fatal("expected primary assigned")
+	}
+	if len(tier.SecondaryNodeIDs) != 1 {
+		t.Fatalf("expected 1 secondary, got %d", len(tier.SecondaryNodeIDs))
+	}
+	if tier.SecondaryNodeIDs[0] == tier.NodeID {
+		t.Error("secondary should not be the same as primary")
+	}
+}
+
+func TestPlacementRF1NoSecondaries(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+
+	tierID := uuid.Must(uuid.NewV7())
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, ReplicationFactor: 1})
+	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
+
+	pm.reconcile(ctx)
+
+	tier, _ := store.GetTier(ctx, tierID)
+	if len(tier.SecondaryNodeIDs) != 0 {
+		t.Errorf("expected 0 secondaries for RF=1, got %d", len(tier.SecondaryNodeIDs))
+	}
+}
+
+func TestPlacementRF3InsufficientNodes(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, alerts := newTestPlacement(t, "node-1", []string{"node-2"})
+
+	tierID := uuid.Must(uuid.NewV7())
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, ReplicationFactor: 3})
+	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
+
+	pm.reconcile(ctx)
+
+	tier, _ := store.GetTier(ctx, tierID)
+	// RF=3 needs 2 secondaries, but only 1 other node available.
+	if len(tier.SecondaryNodeIDs) != 1 {
+		t.Errorf("expected 1 secondary (max available), got %d", len(tier.SecondaryNodeIDs))
+	}
+	if !hasAlert(alerts, "tier-underreplicated:") {
+		t.Error("expected underreplicated alert")
+	}
+}

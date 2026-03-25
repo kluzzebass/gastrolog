@@ -891,6 +891,92 @@ export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
 }
 
 /**
+ * ForwardSealTierRequest commands a secondary to seal its active chunk
+ * at the same boundary as the primary. Used for seal synchronization
+ * during record-level replication.
+ *
+ * @generated from message gastrolog.v1.ForwardSealTierRequest
+ */
+export class ForwardSealTierRequest extends Message<ForwardSealTierRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: string tier_id = 2;
+   */
+  tierId = "";
+
+  /**
+   * expected active chunk ID (for validation)
+   *
+   * @generated from field: string chunk_id = 3;
+   */
+  chunkId = "";
+
+  constructor(data?: PartialMessage<ForwardSealTierRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSealTierRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealTierRequest {
+    return new ForwardSealTierRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealTierRequest {
+    return new ForwardSealTierRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealTierRequest {
+    return new ForwardSealTierRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSealTierRequest | PlainMessage<ForwardSealTierRequest> | undefined, b: ForwardSealTierRequest | PlainMessage<ForwardSealTierRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardSealTierRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardSealTierResponse
+ */
+export class ForwardSealTierResponse extends Message<ForwardSealTierResponse> {
+  constructor(data?: PartialMessage<ForwardSealTierResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardSealTierResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealTierResponse {
+    return new ForwardSealTierResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealTierResponse {
+    return new ForwardSealTierResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealTierResponse {
+    return new ForwardSealTierResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardSealTierResponse | PlainMessage<ForwardSealTierResponse> | undefined, b: ForwardSealTierResponse | PlainMessage<ForwardSealTierResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardSealTierResponse, a, b);
+  }
+}
+
+/**
  * ForwardSearchRequest is sent to the node that owns a remote vault,
  * asking it to execute a search locally and return matching records.
  *

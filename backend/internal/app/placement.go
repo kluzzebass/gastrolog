@@ -101,10 +101,16 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	}
 
 	// Count current tier assignments per node (for load balancing).
+	// Counts both primaries and secondaries.
 	tierCount := make(map[string]int)
 	for _, t := range tiers {
 		if t.NodeID != "" && alive[t.NodeID] {
 			tierCount[t.NodeID]++
+		}
+		for _, sid := range t.SecondaryNodeIDs {
+			if alive[sid] {
+				tierCount[sid]++
+			}
 		}
 	}
 
@@ -120,11 +126,12 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
 	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
 
-	// Current assignment still valid — nothing to do.
+	// Current primary assignment still valid — check secondaries too.
 	if tier.NodeID != "" && alive[tier.NodeID] && pm.nodeEligible(tier, tier.NodeID, nscs) {
 		if pm.alerts != nil {
 			pm.alerts.Clear(alertKey)
 		}
+		pm.placeSecondaries(ctx, &tier, alive, nscs, tierCount)
 		return
 	}
 
@@ -161,6 +168,122 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 	} else {
 		pm.logger.Info("placement: tier reassigned", "tier", tier.ID, "name", tier.Name, "from", old, "to", best)
 	}
+
+	// Place secondaries if replication is configured.
+	pm.placeSecondaries(ctx, &tier, alive, nscs, tierCount)
+}
+
+// placeSecondaries assigns secondary nodes for a tier based on its ReplicationFactor.
+func (pm *placementManager) placeSecondaries(ctx context.Context, tier *config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+	desired := int(tier.ReplicationFactor) - 1
+	if desired <= 0 {
+		// RF=0 or RF=1 means no secondaries. Clear any stale ones.
+		if len(tier.SecondaryNodeIDs) > 0 {
+			for _, sid := range tier.SecondaryNodeIDs {
+				tierCount[sid]--
+			}
+			tier.SecondaryNodeIDs = nil
+			if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
+				pm.logger.Error("placement: clear stale secondaries", "tier", tier.ID, "error", err)
+			}
+		}
+		return
+	}
+
+	candidates := pm.secondaryCandidates(*tier, alive, nscs)
+	kept := pm.reconcileSecondaries(tier.SecondaryNodeIDs, candidates, desired, tierCount)
+
+	// Update if changed.
+	if !slicesEqual(kept, tier.SecondaryNodeIDs) {
+		tier.SecondaryNodeIDs = kept
+		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
+			pm.logger.Error("placement: assign secondaries", "tier", tier.ID, "error", err)
+			return
+		}
+		pm.logger.Info("placement: secondaries updated", "tier", tier.ID, "name", tier.Name, "secondaries", kept)
+	}
+
+	// Alert if insufficient nodes.
+	alertKey := fmt.Sprintf("tier-underreplicated:%s", tier.ID)
+	if len(kept) < desired {
+		if pm.alerts != nil {
+			pm.alerts.Set(alertKey, alert.Warning, "placement",
+				fmt.Sprintf("Tier %q: only %d of %d desired secondaries (insufficient eligible nodes)", tier.Name, len(kept), desired))
+		}
+	} else if pm.alerts != nil {
+		pm.alerts.Clear(alertKey)
+	}
+}
+
+// secondaryCandidates returns eligible nodes for secondary placement, excluding the primary.
+func (pm *placementManager) secondaryCandidates(tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig) []string {
+	eligible := pm.eligibleNodes(tier, alive, nscs)
+	var candidates []string
+	for _, n := range eligible {
+		if n != tier.NodeID {
+			candidates = append(candidates, n)
+		}
+	}
+	return candidates
+}
+
+// reconcileSecondaries validates existing secondaries, fills to desired count, and trims excess.
+func (pm *placementManager) reconcileSecondaries(current []string, candidates []string, desired int, tierCount map[string]int) []string {
+	candidateSet := make(map[string]bool, len(candidates))
+	for _, c := range candidates {
+		candidateSet[c] = true
+	}
+
+	// Keep alive + eligible existing secondaries.
+	var kept []string
+	for _, sid := range current {
+		if candidateSet[sid] {
+			kept = append(kept, sid)
+		} else {
+			tierCount[sid]--
+		}
+	}
+
+	// Fill to desired count.
+	keptSet := make(map[string]bool, len(kept))
+	for _, k := range kept {
+		keptSet[k] = true
+	}
+	for len(kept) < desired {
+		var available []string
+		for _, c := range candidates {
+			if !keptSet[c] {
+				available = append(available, c)
+			}
+		}
+		if len(available) == 0 {
+			break
+		}
+		pick := pm.selectNode(available, tierCount)
+		kept = append(kept, pick)
+		keptSet[pick] = true
+		tierCount[pick]++
+	}
+
+	// Trim excess.
+	for len(kept) > desired {
+		removed := kept[len(kept)-1]
+		tierCount[removed]--
+		kept = kept[:len(kept)-1]
+	}
+	return kept
+}
+
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // handleUnplaceable clears a tier's assignment when no eligible node exists.

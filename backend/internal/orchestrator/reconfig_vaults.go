@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"strconv"
 
 	"gastrolog/internal/chunk"
@@ -432,8 +433,10 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			return nil, fmt.Errorf("tier %s not found in config", tierID)
 		}
 
-		// Skip tiers assigned to another node (placement manager assigns NodeID).
-		if tierCfg.NodeID != "" && tierCfg.NodeID != o.localNodeID {
+		// Determine if this node hosts this tier (as primary or secondary).
+		isPrimary := tierCfg.NodeID == "" || tierCfg.NodeID == o.localNodeID
+		isSecondary := slices.Contains(tierCfg.SecondaryNodeIDs, o.localNodeID)
+		if !isPrimary && !isSecondary {
 			continue
 		}
 
@@ -444,6 +447,13 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				_ = t.Chunks.Close()
 			}
 			return nil, fmt.Errorf("build tier %s: %w", tierID, err)
+		}
+		ti.IsSecondary = isSecondary
+		if isSecondary {
+			ti.PrimaryNodeID = tierCfg.NodeID
+		}
+		if isPrimary {
+			ti.SecondaryNodeIDs = tierCfg.SecondaryNodeIDs
 		}
 		tiers = append(tiers, ti)
 	}

@@ -101,6 +101,10 @@ type Server struct {
 	// Used for inter-tier transition when tier_id is set on ForwardRecordsRequest.
 	recordTierAppender RecordTierAppender
 
+	// sealTierExecutor seals a specific tier's active chunk on this node.
+	// Used for seal synchronization during replication.
+	sealTierExecutor SealTierExecutor
+
 	// recordImporter imports records as a sealed chunk in a local vault.
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter

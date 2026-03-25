@@ -33,6 +33,7 @@ export interface TierEntry {
   memoryBudget: string;
   rotationPolicyId: string;
   retentionPolicyId: string;
+  replicationFactor: string;
 }
 
 export function emptyTierEntry(type: TierTypeLabel): TierEntry {
@@ -46,6 +47,7 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     memoryBudget: "",
     rotationPolicyId: "",
     retentionPolicyId: "",
+    replicationFactor: "1",
   };
 }
 
@@ -363,6 +365,16 @@ export function TierEntryCard({
           />
         </FormField>
       )}
+
+      <FormField label="Replication Factor" dark={dark}>
+        <NumberInput
+          value={tier.replicationFactor}
+          onChange={(v) => onUpdate({ replicationFactor: v })}
+          placeholder="1"
+          dark={dark}
+          min={1}
+        />
+      </FormField>
     </div>
   );
 }
@@ -472,6 +484,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           retentionRules: tier.retentionPolicyId
             ? [new RetentionRule({ retentionPolicyId: tier.retentionPolicyId, action: retentionActionForPosition(i, addForm.tiers.length) })]
             : [],
+          replicationFactor: parseInt(tier.replicationFactor, 10) || 1,
         }),
       };
     });

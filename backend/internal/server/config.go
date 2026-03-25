@@ -292,6 +292,8 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 			ActiveChunkClass:  tier.ActiveChunkClass,
 			CacheClass:        tier.CacheClass,
 			NodeId:            tier.NodeID,
+			ReplicationFactor: tier.ReplicationFactor,
+			SecondaryNodeIds:  tier.SecondaryNodeIDs,
 		}
 		if tier.RotationPolicyID != nil {
 			tc.RotationPolicyId = tier.RotationPolicyID.String()

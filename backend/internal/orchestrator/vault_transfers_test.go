@@ -686,3 +686,9 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 		t.Error("vault should remain registered when drain fails")
 	}
 }
+
+func (m *mockTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+
+func (noopForwarder) ForwardToTier(context.Context, string, uuid.UUID, uuid.UUID, []chunk.Record) error { return nil }

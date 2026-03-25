@@ -37,6 +37,7 @@ type orchActions interface {
 	AddIngester(id uuid.UUID, name, ingType string, r orchestrator.Ingester) error
 	RemoveIngester(id uuid.UUID) error
 	UpdateMaxConcurrentJobs(n int) error
+	FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrator.TierInstance
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -62,6 +63,7 @@ type configDispatcher struct {
 	tlsFilePath       string              // path to persist cluster TLS on rotation
 	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler   // nil for single-node or before wiring
+	catchupScheduler   func(tierID uuid.UUID, secondaryNodeIDs []string) // nil until orch is wired
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -324,7 +326,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	// is already registered, or if the tier doesn't belong here and the vault
 	// isn't registered, there's nothing to do. The key question is: did this
 	// tier JUST arrive or JUST leave this node?
-	tierBelongsHere := tierCfg.NodeID == "" || tierCfg.NodeID == d.localNodeID
+	tierBelongsHere := tierCfg.NodeID == "" || tierCfg.NodeID == d.localNodeID || slices.Contains(tierCfg.SecondaryNodeIDs, d.localNodeID)
 
 	vaults, err := d.cfgStore.ListVaults(ctx)
 	if err != nil {
@@ -339,24 +341,46 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 
 		isLocalVault := slices.Contains(d.orch.ListVaults(), v.ID)
 
-		if tierBelongsHere && !isLocalVault {
-			// Gained a tier — register the vault locally.
-			if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
-				d.logger.Error("dispatch: add vault for gained tier",
-					"vault", v.ID, "tier", tierID, "error", err)
-			}
+		switch {
+		case tierBelongsHere && !isLocalVault:
+			d.registerVault(ctx, v, tierID)
+		case tierBelongsHere && isLocalVault:
+			d.rebuildVaultIfTierMissing(ctx, v, tierID)
 		}
 		// Note: we do NOT unregister on !tierBelongsHere && isLocalVault
 		// because this vault may have OTHER tiers that DO belong here.
-		// Vault unregistration only happens when the placement manager
-		// moves ALL of a vault's tiers off this node — handled by the
-		// vault-level reconfig path, not per-tier.
 	}
 
 	// Reload rotation and retention policies — tier config may have changed
 	// policy references (rotation_policy_id, retention_rules).
 	d.reloadRotationPolicies(ctx)
 	d.reloadRetentionPolicies(ctx)
+
+	// If this node is the primary and has secondaries, schedule catchup.
+	if tierCfg.NodeID == d.localNodeID && len(tierCfg.SecondaryNodeIDs) > 0 && d.catchupScheduler != nil {
+		d.catchupScheduler(tierID, tierCfg.SecondaryNodeIDs)
+	}
+}
+
+func (d *configDispatcher) registerVault(ctx context.Context, v config.VaultConfig, tierID uuid.UUID) {
+	if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
+		d.logger.Error("dispatch: add vault for gained tier",
+			"vault", v.ID, "tier", tierID, "error", err)
+	}
+}
+
+func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v config.VaultConfig, tierID uuid.UUID) {
+	if d.orch.FindLocalTierExported(v.ID, tierID) != nil {
+		return // tier already in the local vault
+	}
+	if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+		d.logger.Error("dispatch: unregister vault for new tier",
+			"vault", v.ID, "tier", tierID, "error", err)
+	}
+	if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
+		d.logger.Error("dispatch: re-add vault with new tier",
+			"vault", v.ID, "tier", tierID, "error", err)
+	}
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.

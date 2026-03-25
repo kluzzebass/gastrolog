@@ -16,7 +16,7 @@ import { useToast } from "../Toast";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
-import { FormField, TextInput, SelectInput } from "./FormField";
+import { FormField, TextInput, SelectInput, NumberInput } from "./FormField";
 import { Button, DropdownButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { PulseIcon } from "../icons";
@@ -114,6 +114,7 @@ export function VaultSettingsCard({
     tierIds: string[];
     tierRotation: Record<string, string>;    // tierId → rotationPolicyId
     tierRetention: Record<string, string>;   // tierId → retentionPolicyId
+    tierRF: Record<string, number>;          // tierId → replicationFactor
   }
 
   const buildInitialEdit = (): VaultEdit => ({
@@ -126,6 +127,9 @@ export function VaultSettingsCard({
     tierRetention: Object.fromEntries(
       tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
     ),
+    tierRF: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.replicationFactor || 1]),
+    ),
   });
 
   const [edit, setEditState] = useState<VaultEdit>(buildInitialEdit);
@@ -136,6 +140,8 @@ export function VaultSettingsCard({
     setEditState((prev) => ({ ...prev, tierRotation: { ...prev.tierRotation, [tierId]: value } }));
   const setTierRetentionPolicyId = (tierId: string, value: string) =>
     setEditState((prev) => ({ ...prev, tierRetention: { ...prev.tierRetention, [tierId]: value } }));
+  const setTierRF = (tierId: string, value: number) =>
+    setEditState((prev) => ({ ...prev, tierRF: { ...prev.tierRF, [tierId]: value } }));
 
   const initial = buildInitialEdit();
   const anyDirty = JSON.stringify(edit) !== JSON.stringify(initial);
@@ -316,6 +322,14 @@ export function VaultSettingsCard({
                   : [];
                 await putTier.mutateAsync({ config: updated });
               }
+              // Save RF changes.
+              for (const [tierId, rf] of Object.entries(edit.tierRF)) {
+                const tier = tiers.find((t) => t.id === tierId);
+                if (!tier || rf === (tier.replicationFactor || 1)) continue;
+                const updated = tier.clone();
+                updated.replicationFactor = rf;
+                await putTier.mutateAsync({ config: updated });
+              }
               // Save vault-level changes (name, enabled, tier order).
               const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
                 JSON.stringify(edit.tierIds) !== JSON.stringify([...vault.tierIds]);
@@ -456,6 +470,10 @@ export function VaultSettingsCard({
                       {tier.type === TierType.CLOUD && tier.activeChunkClass > 0 && (
                         <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
                       )}
+                      <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
+                      {tier.secondaryNodeIds.length > 0 && (
+                        <span>{tier.secondaryNodeIds.map((id) => resolveNodeName(id)).join(", ")}</span>
+                      )}
                     </div>
                     <div className="pl-6 flex flex-col gap-2">
                       {rotationPolicyOptions.length > 0 && (
@@ -486,6 +504,15 @@ export function VaultSettingsCard({
                           </FormField>
                         </>
                       )}
+                      <FormField label="Replication Factor" dark={dark}>
+                        <NumberInput
+                          value={String(edit.tierRF[tier.id] ?? tier.replicationFactor ?? 1)}
+                          onChange={(v) => setTierRF(tier.id, parseInt(v, 10) || 1)}
+                          placeholder="1"
+                          dark={dark}
+                          min={1}
+                        />
+                      </FormField>
                     </div>
                   </div>
                 );
@@ -527,11 +554,12 @@ export function VaultSettingsCard({
                             action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
                           })]
                         : [],
+                      replicationFactor: parseInt(newTier.replicationFactor, 10) || 1,
                     });
                     setCreatingTier(true);
                     try {
                       await putTier.mutateAsync({ config: tierCfg });
-                      setLocalTierIds([...localTierIds, tierId]);
+                      setEdit({ tierIds: [...edit.tierIds, tierId] });
                       setNewTier(null);
                       setCreatingTier(false);
                       addToast("Tier created — save to apply", "info");

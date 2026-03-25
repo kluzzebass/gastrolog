@@ -699,3 +699,7 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 	}
 	return ids
 }
+
+func (m *transitionFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}

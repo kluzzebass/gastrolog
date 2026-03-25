@@ -180,3 +180,7 @@ func (n *noopChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time
 	return nil
 }
 func (n *noopChunkManager) Close() error { return nil }
+
+func (m *mockForwarder) ForwardToTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}

@@ -194,12 +194,14 @@ func (s *ConfigServer) PutTier(
 	}
 	cfg.ID = id
 
-	// NodeID is system-managed by the placement manager. Preserve the
-	// existing assignment on updates; leave empty on create so the
-	// placement manager assigns it.
+	// NodeID and SecondaryNodeIDs are system-managed by the placement manager.
+	// Preserve existing assignments on updates; leave empty on create.
+	// ReplicationFactor is user-settable.
 	cfg.NodeID = ""
+	cfg.SecondaryNodeIDs = nil
 	if existing, _ := s.cfgStore.GetTier(ctx, id); existing != nil {
 		cfg.NodeID = existing.NodeID
+		cfg.SecondaryNodeIDs = existing.SecondaryNodeIDs
 	}
 
 	if err := s.cfgStore.PutTier(ctx, cfg); err != nil {
@@ -314,6 +316,7 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		StorageClass:      p.StorageClass,
 		ActiveChunkClass:  p.ActiveChunkClass,
 		CacheClass:        p.CacheClass,
+		ReplicationFactor: p.ReplicationFactor,
 	}
 
 	if p.RotationPolicyId != "" {

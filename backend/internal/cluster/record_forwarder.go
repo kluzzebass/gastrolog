@@ -34,6 +34,7 @@ const (
 // forwardEntry is a single record queued for forwarding.
 type forwardEntry struct {
 	vaultID uuid.UUID
+	tierID  uuid.UUID // zero = active tier; non-zero = specific tier (replication)
 	record  chunk.Record
 }
 
@@ -125,6 +126,33 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 						fmt.Sprintf("Forward buffer full for node %s, dropping records", nodeID[:8]),
 					)
 				}
+			}
+		}
+	}
+	return nil
+}
+
+// ForwardToTier enqueues records for delivery to a specific tier on the given node.
+// Used for record-level replication from primary to secondaries.
+func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+	rf.mu.Lock()
+	if rf.closed {
+		rf.mu.Unlock()
+		return errors.New("forwarder closed")
+	}
+	nf, ok := rf.nodes[nodeID]
+	if !ok {
+		nf = rf.startNode(nodeID)
+	}
+	rf.mu.Unlock()
+
+	for _, rec := range records {
+		select {
+		case nf.ch <- forwardEntry{vaultID: vaultID, tierID: tierID, record: rec}:
+		default:
+			if !rf.stopping() {
+				rf.logger.Info("replication buffer full, dropping record",
+					"node", nodeID, "vault", vaultID, "tier", tierID)
 			}
 		}
 	}
@@ -246,17 +274,36 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 
 // sendBurst groups entries by vault and sends one ForwardRecordsRequest per
 // vault on the stream. Returns nil on success.
+// forwardGroupKey groups entries by vault + tier for batching.
+type forwardGroupKey struct {
+	vaultID uuid.UUID
+	tierID  uuid.UUID
+}
+
 func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream grpc.ClientStream, entries []forwardEntry) error {
-	// Group by vault.
-	byVault := make(map[uuid.UUID][]*gastrologv1.ExportRecord, 2)
+	// Group by vault + tier.
+	type groupData struct {
+		key     forwardGroupKey
+		records []*gastrologv1.ExportRecord
+	}
+	groups := make(map[forwardGroupKey]*groupData, 2)
 	for _, e := range entries {
-		byVault[e.vaultID] = append(byVault[e.vaultID], forwardEntryToProto(e))
+		k := forwardGroupKey{vaultID: e.vaultID, tierID: e.tierID}
+		g, ok := groups[k]
+		if !ok {
+			g = &groupData{key: k}
+			groups[k] = g
+		}
+		g.records = append(g.records, forwardEntryToProto(e))
 	}
 
-	for vaultID, records := range byVault {
+	for _, g := range groups {
 		msg := &gastrologv1.ForwardRecordsRequest{
-			VaultId: vaultID.String(),
-			Records: records,
+			VaultId: g.key.vaultID.String(),
+			Records: g.records,
+		}
+		if g.key.tierID != (uuid.UUID{}) {
+			msg.TierId = g.key.tierID.String()
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			if !rf.stopping() {

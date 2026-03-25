@@ -2173,11 +2173,21 @@ export class PutTierCommand extends Message<PutTierCommand> {
   cacheClass = 0;
 
   /**
-   * temporary: explicit node assignment until tier election
+   * system-managed: primary node
    *
    * @generated from field: string node_id = 11;
    */
   nodeId = "";
+
+  /**
+   * @generated from field: uint32 replication_factor = 12;
+   */
+  replicationFactor = 0;
+
+  /**
+   * @generated from field: repeated string secondary_node_ids = 13;
+   */
+  secondaryNodeIds: string[] = [];
 
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
@@ -2198,6 +2208,8 @@ export class PutTierCommand extends Message<PutTierCommand> {
     { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 11, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 13, name: "secondary_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {

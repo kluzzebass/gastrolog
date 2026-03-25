@@ -12,9 +12,12 @@ import (
 // TierConfig (in Raft config) is the logical definition.
 // TierInstance is the physical runtime: chunk manager + index manager + query engine.
 type TierInstance struct {
-	TierID  uuid.UUID
-	Type    string
-	Chunks  chunk.ChunkManager
-	Indexes index.IndexManager
-	Query   *query.Engine
+	TierID           uuid.UUID
+	Type             string
+	Chunks           chunk.ChunkManager
+	Indexes          index.IndexManager
+	Query            *query.Engine
+	IsSecondary      bool     // true if this node is a secondary for this tier
+	PrimaryNodeID    string   // the primary node's ID (empty if this IS the primary)
+	SecondaryNodeIDs []string // secondary nodes (populated on primary, empty on secondaries)
 }

@@ -154,6 +154,17 @@ message ForwardRecordsResponse {
   int64 records_written = 1;
 }
 
+// ForwardSealTierRequest commands a secondary to seal its active chunk
+// at the same boundary as the primary. Used for seal synchronization
+// during record-level replication.
+message ForwardSealTierRequest {
+  string vault_id = 1;
+  string tier_id = 2;
+  string chunk_id = 3;  // expected active chunk ID (for validation)
+}
+
+message ForwardSealTierResponse {}
+
 // ForwardSearchRequest is sent to the node that owns a remote vault,
 // asking it to execute a search locally and return matching records.
 message ForwardSearchRequest {

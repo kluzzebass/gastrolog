@@ -33,6 +33,7 @@ export function useWatchConfig() {
           qc.invalidateQueries({ queryKey: ["settings"] });
           qc.invalidateQueries({ queryKey: ["vaults"] });
           qc.invalidateQueries({ queryKey: ["stats"] });
+          qc.invalidateQueries({ queryKey: ["chunks"] });
           nextBackoff = 0; // reset backoff on successful message
         }
       } catch (err) {

@@ -791,3 +791,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 		}
 	})
 }
+
+func (m *mockOrch) FindLocalTierExported(_ uuid.UUID, _ uuid.UUID) *orchestrator.TierInstance {
+	return nil
+}

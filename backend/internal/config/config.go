@@ -665,7 +665,9 @@ type TierConfig struct {
 	CloudServiceID    *uuid.UUID      `json:"cloudServiceId,omitempty"`
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
-	NodeID            string          `json:"nodeId,omitempty"` // system-managed: assigned by the placement manager
+	NodeID            string          `json:"nodeId,omitempty"`            // system-managed: primary node
+	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
+	SecondaryNodeIDs  []string        `json:"secondaryNodeIds,omitempty"`  // system-managed: secondary nodes
 }
 
 // ClusterTLS holds mTLS material for the cluster gRPC port.

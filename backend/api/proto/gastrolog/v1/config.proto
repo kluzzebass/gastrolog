@@ -728,7 +728,9 @@ message TierConfig {
   string cloud_service_id = 8;
   uint32 active_chunk_class = 9;
   uint32 cache_class = 10;
-  string node_id = 11;  // temporary: explicit node assignment until tier election
+  string node_id = 11;              // system-managed: primary node assigned by placement manager
+  uint32 replication_factor = 12;   // desired RF (1 = no replication, default)
+  repeated string secondary_node_ids = 13; // system-managed: secondary nodes assigned by placement manager
 }
 
 message PutNodeConfigRequest {

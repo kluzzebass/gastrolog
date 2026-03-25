@@ -614,6 +614,38 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 	return &gastrologv1.ForwardSealVaultResponse{}, nil
 }
 
+// SealTierExecutor seals a specific tier's active chunk on this node.
+type SealTierExecutor func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+
+// SetSealTierExecutor injects the callback for handling ForwardSealTier RPCs.
+func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
+	s.sealTierExecutor = fn
+}
+
+// forwardSealTier handles the ForwardSealTier RPC. Seals the active chunk
+// of a specific tier on a secondary node at the same boundary as the primary.
+func (s *Server) forwardSealTier(ctx context.Context, req *gastrologv1.ForwardSealTierRequest) (*gastrologv1.ForwardSealTierResponse, error) {
+	if s.sealTierExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "seal tier executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	tierID, err := uuid.Parse(req.GetTierId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+	}
+	if err := s.sealTierExecutor(ctx, vaultID, tierID, chunkID); err != nil {
+		return nil, status.Errorf(codes.Internal, "seal tier: %v", err)
+	}
+	return &gastrologv1.ForwardSealTierResponse{}, nil
+}
+
 // forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
 // for a local vault.
 func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
@@ -843,6 +875,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardSealVault",
 			Handler:    forwardSealVaultHandler,
+		},
+		{
+			MethodName: "ForwardSealTier",
+			Handler:    forwardSealTierHandler,
 		},
 		{
 			MethodName: "ForwardReindexVault",
@@ -1138,6 +1174,25 @@ func forwardSealVaultHandler(srv any, ctx context.Context, dec func(any) error, 
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardSealVault(ctx, req.(*gastrologv1.ForwardSealVaultRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardSealTierHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardSealTierRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardSealTier(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardSealTier",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardSealTier(ctx, req.(*gastrologv1.ForwardSealTierRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

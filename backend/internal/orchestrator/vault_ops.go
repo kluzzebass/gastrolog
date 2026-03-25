@@ -141,6 +141,11 @@ func (o *Orchestrator) VaultType(vaultID uuid.UUID) string {
 	return ""
 }
 
+// FindLocalTierExported is a public accessor for findLocalTier, used by tests.
+func (o *Orchestrator) FindLocalTierExported(vaultID, tierID uuid.UUID) *TierInstance {
+	return o.findLocalTier(vaultID, tierID)
+}
+
 // findLocalTier returns the TierInstance for a specific tier in a vault,
 // or nil if the tier is not local.
 func (o *Orchestrator) findLocalTier(vaultID, tierID uuid.UUID) *TierInstance {
@@ -179,9 +184,18 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record)
 		if _, _, err := cm.Append(rec); err != nil {
 			return err
 		}
+
+		// Replicate to secondaries (async, non-blocking).
+		if !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+			o.replicateRecord(vaultID, tier.TierID, tier.SecondaryNodeIDs, rec)
+		}
+
 		activeAfter := cm.Active()
 		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
 			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+			if !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 {
+				o.sealSecondaries(vaultID, tier.TierID, activeBefore.ID, tier.SecondaryNodeIDs)
+			}
 		}
 		return nil
 	}
@@ -220,10 +234,20 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		return cid, pos, err
 	}
 
+	// Replicate to secondaries (async, non-blocking).
+	activeTier := vault.ActiveTier()
+	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+		o.replicateRecord(vaultID, activeTier.TierID, activeTier.SecondaryNodeIDs, rec)
+	}
+
 	// Detect seal: if Active() changed, the previous chunk was sealed.
 	activeAfter := cm.Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+		// Notify secondaries to seal at the same boundary (sync).
+		if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 {
+			o.sealSecondaries(vaultID, activeTier.TierID, activeBefore.ID, activeTier.SecondaryNodeIDs)
+		}
 	}
 
 	return cid, pos, nil
@@ -278,6 +302,12 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 	o.mu.RLock()
 	o.schedulePostSeal(vaultID, cm, chunkID)
 	o.mu.RUnlock()
+
+	// Notify secondaries to seal at the same boundary.
+	activeTier := vault.ActiveTier()
+	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 {
+		o.sealSecondaries(vaultID, activeTier.TierID, chunkID, activeTier.SecondaryNodeIDs)
+	}
 
 	return nil
 }

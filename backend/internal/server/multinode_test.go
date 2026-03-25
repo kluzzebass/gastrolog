@@ -18,6 +18,8 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
+	"gastrolog/internal/index"
+	indexmem "gastrolog/internal/index/memory"
 	cfgmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
@@ -1824,5 +1826,352 @@ func TestMultiNode_HistogramMatchesRecordCount(t *testing.T) {
 	}
 	if histogramTotal != int64(len(records)) {
 		t.Errorf("histogram total %d != record count %d", histogramTotal, len(records))
+	}
+}
+
+// directTierForwarder implements orchestrator.RecordForwarder by directly calling
+// AppendToTier on the target node's orchestrator. Used for replication tests.
+type directTierForwarder struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *directTierForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+
+func (d *directTierForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("node %s not found", nodeID)
+	}
+	for _, rec := range records {
+		if err := orch.AppendToTier(vaultID, tierID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// directSealForwarder implements the seal part of RemoteTransferrer for tests.
+type directSealForwarder struct {
+	nodes map[string]*orchestrator.Orchestrator
+}
+
+func (d *directSealForwarder) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (d *directSealForwarder) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+func (d *directSealForwarder) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+func (d *directSealForwarder) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+	return nil
+}
+func (d *directSealForwarder) ForwardSealTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("node %s not found", nodeID)
+	}
+	return orch.SealActiveTier(vaultID, tierID, chunkID)
+}
+
+func TestMultiNode_ReplicationRecordsAppearOnSecondary(t *testing.T) {
+	t.Parallel()
+
+	// Create two nodes with a shared vault. data-1 is primary, data-2 is secondary.
+	primaryID := "data-1"
+	secondaryID := "data-2"
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+
+	primaryNode := setupMNNode(t, primaryID)
+	secondaryNode := setupMNNode(t, secondaryID)
+
+	cfgStore := cfgmem.NewStore()
+	ctx := context.Background()
+
+	_ = cfgStore.PutTier(ctx, config.TierConfig{
+		ID:                tierID,
+		Name:              "shared-tier",
+		Type:              config.TierTypeMemory,
+		NodeID:            primaryID,
+		ReplicationFactor: 2,
+		SecondaryNodeIDs:  []string{secondaryID},
+	})
+	_ = cfgStore.PutVault(ctx, config.VaultConfig{
+		ID: vaultID, Name: "replicated-vault", TierIDs: []uuid.UUID{tierID}, Enabled: true,
+	})
+
+	// Apply config to both nodes.
+	appCfg, _ := cfgStore.Load(ctx)
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+	}
+	if err := primaryNode.orch.ApplyConfig(appCfg, factories); err != nil {
+		t.Fatal(err)
+	}
+	if err := secondaryNode.orch.ApplyConfig(appCfg, factories); err != nil {
+		t.Fatal(err)
+	}
+
+	// Wire direct forwarder: primary → secondary.
+	fwd := &directTierForwarder{nodes: map[string]*orchestrator.Orchestrator{
+		secondaryID: secondaryNode.orch,
+	}}
+	primaryNode.orch.SetRecordForwarder(fwd)
+
+	// Wire seal forwarder.
+	sealFwd := &directSealForwarder{nodes: map[string]*orchestrator.Orchestrator{
+		secondaryID: secondaryNode.orch,
+	}}
+	primaryNode.orch.SetRemoteTransferrer(sealFwd)
+
+	t.Cleanup(func() {
+		primaryNode.orch.Stop()
+		secondaryNode.orch.Stop()
+	})
+
+	// Ingest 10 records on the primary.
+	for i := 0; i < 10; i++ {
+		rec := chunk.Record{
+			Raw:      []byte(fmt.Sprintf("replicated-%d", i)),
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{"idx": fmt.Sprintf("%d", i)},
+		}
+		if _, _, err := primaryNode.orch.Append(vaultID, rec); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Verify primary has 10 records.
+	primaryMetas, err := primaryNode.orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryTotal := int64(0)
+	for _, m := range primaryMetas {
+		primaryTotal += m.RecordCount
+	}
+	if primaryTotal != 10 {
+		t.Errorf("primary: expected 10 records, got %d", primaryTotal)
+	}
+
+	// Verify secondary has 10 records (replicated via directTierForwarder).
+	secondaryMetas, err := secondaryNode.orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondaryTotal := int64(0)
+	for _, m := range secondaryMetas {
+		secondaryTotal += m.RecordCount
+	}
+	if secondaryTotal != 10 {
+		t.Errorf("secondary: expected 10 records, got %d", secondaryTotal)
+	}
+}
+
+func TestMultiNode_ReplicationSealSynchronization(t *testing.T) {
+	t.Parallel()
+
+	primaryID := "data-1"
+	secondaryID := "data-2"
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+
+	primaryNode := setupMNNode(t, primaryID)
+	secondaryNode := setupMNNode(t, secondaryID)
+
+	cfgStore := cfgmem.NewStore()
+	ctx := context.Background()
+
+	_ = cfgStore.PutTier(ctx, config.TierConfig{
+		ID:                tierID,
+		Name:              "seal-tier",
+		Type:              config.TierTypeMemory,
+		NodeID:            primaryID,
+		ReplicationFactor: 2,
+		SecondaryNodeIDs:  []string{secondaryID},
+	})
+	_ = cfgStore.PutVault(ctx, config.VaultConfig{
+		ID: vaultID, Name: "seal-vault", TierIDs: []uuid.UUID{tierID}, Enabled: true,
+	})
+
+	appCfg, _ := cfgStore.Load(ctx)
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+	}
+	if err := primaryNode.orch.ApplyConfig(appCfg, factories); err != nil {
+		t.Fatal(err)
+	}
+	if err := secondaryNode.orch.ApplyConfig(appCfg, factories); err != nil {
+		t.Fatal(err)
+	}
+
+	fwd := &directTierForwarder{nodes: map[string]*orchestrator.Orchestrator{
+		secondaryID: secondaryNode.orch,
+	}}
+	primaryNode.orch.SetRecordForwarder(fwd)
+
+	sealFwd := &directSealForwarder{nodes: map[string]*orchestrator.Orchestrator{
+		secondaryID: secondaryNode.orch,
+	}}
+	primaryNode.orch.SetRemoteTransferrer(sealFwd)
+
+	t.Cleanup(func() {
+		primaryNode.orch.Stop()
+		secondaryNode.orch.Stop()
+	})
+
+	// Ingest records.
+	for i := 0; i < 5; i++ {
+		rec := chunk.Record{
+			Raw:      []byte(fmt.Sprintf("seal-%d", i)),
+			IngestTS: time.Now(),
+			Attrs:    chunk.Attributes{"idx": fmt.Sprintf("%d", i)},
+		}
+		if _, _, err := primaryNode.orch.Append(vaultID, rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Explicitly seal on the primary.
+	if err := primaryNode.orch.SealActive(vaultID); err != nil {
+		t.Fatal(err)
+	}
+
+	// The SealActive calls sealSecondaries which uses the directSealForwarder
+	// to call SealActiveTier on the secondary. Verify both have sealed chunks.
+	primaryMetas, _ := primaryNode.orch.ListAllChunkMetas(vaultID)
+	primarySealed := 0
+	for _, m := range primaryMetas {
+		if m.Sealed {
+			primarySealed++
+		}
+	}
+	if primarySealed == 0 {
+		t.Error("primary: expected at least 1 sealed chunk")
+	}
+
+	secondaryMetas, _ := secondaryNode.orch.ListAllChunkMetas(vaultID)
+	secondarySealed := 0
+	for _, m := range secondaryMetas {
+		if m.Sealed {
+			secondarySealed++
+		}
+	}
+	if secondarySealed == 0 {
+		t.Error("secondary: expected at least 1 sealed chunk after seal sync")
+	}
+
+	// Verify record counts match.
+	primaryTotal := int64(0)
+	for _, m := range primaryMetas {
+		primaryTotal += m.RecordCount
+	}
+	secondaryTotal := int64(0)
+	for _, m := range secondaryMetas {
+		secondaryTotal += m.RecordCount
+	}
+	if primaryTotal != secondaryTotal {
+		t.Errorf("record count mismatch: primary=%d secondary=%d", primaryTotal, secondaryTotal)
+	}
+}
+
+func TestMultiNode_ReplicationRecordIntegrity(t *testing.T) {
+	t.Parallel()
+
+	primaryID := "data-1"
+	secondaryID := "data-2"
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+
+	primaryNode := setupMNNode(t, primaryID)
+	secondaryNode := setupMNNode(t, secondaryID)
+
+	cfgStore := cfgmem.NewStore()
+	ctx := context.Background()
+
+	_ = cfgStore.PutTier(ctx, config.TierConfig{
+		ID:                tierID,
+		Name:              "integrity-tier",
+		Type:              config.TierTypeMemory,
+		NodeID:            primaryID,
+		ReplicationFactor: 2,
+		SecondaryNodeIDs:  []string{secondaryID},
+	})
+	_ = cfgStore.PutVault(ctx, config.VaultConfig{
+		ID: vaultID, Name: "integrity-vault", TierIDs: []uuid.UUID{tierID}, Enabled: true,
+	})
+
+	appCfg, _ := cfgStore.Load(ctx)
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
+		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
+	}
+	if err := primaryNode.orch.ApplyConfig(appCfg, factories); err != nil {
+		t.Fatal(err)
+	}
+	if err := secondaryNode.orch.ApplyConfig(appCfg, factories); err != nil {
+		t.Fatal(err)
+	}
+
+	fwd := &directTierForwarder{nodes: map[string]*orchestrator.Orchestrator{
+		secondaryID: secondaryNode.orch,
+	}}
+	primaryNode.orch.SetRecordForwarder(fwd)
+
+	t.Cleanup(func() {
+		primaryNode.orch.Stop()
+		secondaryNode.orch.Stop()
+	})
+
+	// Ingest a record with specific content.
+	original := chunk.Record{
+		SourceTS: time.Date(2026, 3, 25, 12, 0, 0, 0, time.UTC),
+		IngestTS: time.Date(2026, 3, 25, 12, 0, 1, 0, time.UTC),
+		Raw:      []byte(`{"level":"error","msg":"disk full","host":"web-3"}`),
+		Attrs:    chunk.Attributes{"env": "prod", "region": "eu-west-1"},
+	}
+	if _, _, err := primaryNode.orch.Append(vaultID, original); err != nil {
+		t.Fatal(err)
+	}
+
+	// Read back from the secondary.
+	secondaryMetas, _ := secondaryNode.orch.ListAllChunkMetas(vaultID)
+	if len(secondaryMetas) == 0 {
+		t.Fatal("secondary: no chunks")
+	}
+
+	// Find the tier instance on the secondary to open a cursor.
+	secondaryTier := secondaryNode.orch.FindLocalTierExported(vaultID, tierID)
+	if secondaryTier == nil {
+		t.Fatal("secondary: tier not found")
+	}
+
+	active := secondaryTier.Chunks.Active()
+	if active == nil || active.RecordCount != 1 {
+		t.Fatal("secondary: expected 1 record in active chunk")
+	}
+
+	cursor, err := secondaryTier.Chunks.OpenCursor(active.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	rec, _, err := cursor.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if string(rec.Raw) != string(original.Raw) {
+		t.Errorf("Raw mismatch:\n  primary:   %s\n  secondary: %s", original.Raw, rec.Raw)
+	}
+	if rec.Attrs["env"] != "prod" || rec.Attrs["region"] != "eu-west-1" {
+		t.Errorf("Attrs mismatch: %v", rec.Attrs)
 	}
 }

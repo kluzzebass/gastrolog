@@ -50,9 +50,13 @@ export function useConfigMutation<TArgs, TResult>(
         setConfigVersion(cfg.configVersion);
         qc.cancelQueries({ queryKey: ["config"] });
         qc.setQueryData(["config"], cfg);
-      } else {
-        qc.invalidateQueries({ queryKey: ["config"] });
       }
+      // Invalidate all data-dependent caches. Any mutation can affect
+      // config, vault stats, chunk lists, and settings.
+      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["vaults"] });
+      qc.invalidateQueries({ queryKey: ["stats"] });
+      qc.invalidateQueries({ queryKey: ["chunks"] });
       for (const key of extraInvalidateKeys) {
         qc.invalidateQueries({ queryKey: key });
       }

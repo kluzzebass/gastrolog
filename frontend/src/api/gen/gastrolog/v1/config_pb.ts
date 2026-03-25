@@ -4774,11 +4774,25 @@ export class TierConfig extends Message<TierConfig> {
   cacheClass = 0;
 
   /**
-   * temporary: explicit node assignment until tier election
+   * system-managed: primary node assigned by placement manager
    *
    * @generated from field: string node_id = 11;
    */
   nodeId = "";
+
+  /**
+   * desired RF (1 = no replication, default)
+   *
+   * @generated from field: uint32 replication_factor = 12;
+   */
+  replicationFactor = 0;
+
+  /**
+   * system-managed: secondary nodes assigned by placement manager
+   *
+   * @generated from field: repeated string secondary_node_ids = 13;
+   */
+  secondaryNodeIds: string[] = [];
 
   constructor(data?: PartialMessage<TierConfig>) {
     super();
@@ -4799,6 +4813,8 @@ export class TierConfig extends Message<TierConfig> {
     { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 11, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 13, name: "secondary_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {

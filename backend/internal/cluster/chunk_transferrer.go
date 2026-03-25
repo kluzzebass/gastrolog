@@ -145,6 +145,27 @@ func (ct *ChunkTransferrer) ForwardTierAppend(ctx context.Context, nodeID string
 	return nil
 }
 
+// ForwardSealTier commands a secondary to seal its active chunk at the same
+// boundary as the primary. Used for seal synchronization during replication.
+func (ct *ChunkTransferrer) ForwardSealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	conn, err := ct.peers.Conn(nodeID)
+	if err != nil {
+		return fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+
+	req := &gastrologv1.ForwardSealTierRequest{
+		VaultId: vaultID.String(),
+		TierId:  tierID.String(),
+		ChunkId: chunkID.String(),
+	}
+	resp := &gastrologv1.ForwardSealTierResponse{}
+	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSealTier", req, resp); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("forward seal tier to %s: %w", nodeID, err)
+	}
+	return nil
+}
+
 // WaitVaultReady polls the target node until the vault is registered and
 // accepting records, or ctx expires. Uses ForwardListChunks as a lightweight
 // existence probe — it returns an error if the vault doesn't exist.
