@@ -21,7 +21,7 @@ import { VaultSettingsCard } from "./VaultSettingsCard";
 // Tier entry types
 // ---------------------------------------------------------------------------
 
-export type TierTypeLabel = "memory" | "local" | "cloud";
+export type TierTypeLabel = "memory" | "file" | "cloud";
 
 export interface TierEntry {
   key: string;
@@ -85,8 +85,8 @@ export function tierTypeEnum(t: TierTypeLabel): TierType {
   switch (t) {
     case "memory":
       return TierType.MEMORY;
-    case "local":
-      return TierType.LOCAL;
+    case "file":
+      return TierType.FILE;
     case "cloud":
       return TierType.CLOUD;
   }
@@ -118,7 +118,7 @@ export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): bool
   switch (tier.type) {
     case "memory":
       return true;
-    case "local":
+    case "file":
       return tier.storageClass !== "";
     case "cloud":
       return tier.cloudServiceId !== "" || !hasCloudServices;
@@ -181,7 +181,7 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
 
 const tierTypeLabels: Record<TierTypeLabel, string> = {
   memory: "Memory",
-  local: "Local",
+  file: "File",
   cloud: "Cloud",
 };
 
@@ -266,7 +266,7 @@ export function TierEntryCard({
         </FormField>
       )}
 
-      {tier.type === "local" && (
+      {tier.type === "file" && (
         <FormField label="Storage Class" dark={dark}>
           {storageClassOptions.length > 0 ? (
             <SelectInput
@@ -463,7 +463,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           id: tierId,
           name: tier.type,
           type: tierTypeEnum(tier.type),
-          storageClass: tier.type === "local" ? parseInt(tier.storageClass, 10) || 0 : 0,
+          storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
           cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
           activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
           cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
@@ -540,7 +540,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                 label="+ Add Tier"
                 items={[
                   { value: "memory", label: "Memory" },
-                  { value: "local", label: "Local" },
+                  { value: "file", label: "File" },
                   { value: "cloud", label: "Cloud" },
                 ]}
                 onSelect={(v) => dispatchAdd({ type: "addTier", tierType: v as TierTypeLabel })}

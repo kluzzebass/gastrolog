@@ -396,7 +396,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   tierId = "";
 
   /**
-   * tier type: "memory", "local", "cloud"
+   * tier type: "memory", "file", "cloud"
    *
    * @generated from field: string tier_type = 15;
    */

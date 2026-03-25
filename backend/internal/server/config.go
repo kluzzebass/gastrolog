@@ -317,8 +317,8 @@ func tierTypeToProto(t config.TierType) apiv1.TierType {
 	switch t {
 	case config.TierTypeMemory:
 		return apiv1.TierType_TIER_TYPE_MEMORY
-	case config.TierTypeLocal:
-		return apiv1.TierType_TIER_TYPE_LOCAL
+	case config.TierTypeFile:
+		return apiv1.TierType_TIER_TYPE_FILE
 	case config.TierTypeCloud:
 		return apiv1.TierType_TIER_TYPE_CLOUD
 	default:

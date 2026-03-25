@@ -66,7 +66,7 @@ describe("VaultsSettings", () => {
     expect(getByText("vault-alpha")).toBeTruthy();
     expect(getByText("vault-beta")).toBeTruthy();
     // vault-alpha has a local tier
-    expect(getByText("local")).toBeTruthy();
+    expect(getByText("file")).toBeTruthy();
   });
 
   test("shows disabled badge for disabled vaults", () => {

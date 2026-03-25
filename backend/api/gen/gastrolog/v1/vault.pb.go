@@ -402,7 +402,7 @@ type ChunkMeta struct {
 	Archived      bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                          // true = chunk is in offline storage tier (Glacier, etc.)
 	NumFrames     int32                  `protobuf:"varint,13,opt,name=num_frames,json=numFrames,proto3" json:"num_frames,omitempty"`       // seekable zstd frame count (cloud chunks, 0 = unknown)
 	TierId        string                 `protobuf:"bytes,14,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                 // which tier this chunk belongs to
-	TierType      string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`           // tier type: "memory", "local", "cloud"
+	TierType      string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`           // tier type: "memory", "file", "cloud"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }

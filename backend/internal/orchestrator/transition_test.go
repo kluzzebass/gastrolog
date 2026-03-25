@@ -482,7 +482,7 @@ func TestTransitionCrossNode(t *testing.T) {
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, NodeID: localNode,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeLocal, NodeID: remoteNode,
+		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, NodeID: remoteNode,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -554,7 +554,7 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, NodeID: localNode,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeLocal, NodeID: remoteNode,
+		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, NodeID: remoteNode,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -609,7 +609,7 @@ func TestTransitionNoTransferrer(t *testing.T) {
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, NodeID: localNode,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeLocal, NodeID: remoteNode,
+		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, NodeID: remoteNode,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 

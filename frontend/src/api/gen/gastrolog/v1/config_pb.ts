@@ -24,9 +24,9 @@ export enum TierType {
   MEMORY = 1,
 
   /**
-   * @generated from enum value: TIER_TYPE_LOCAL = 2;
+   * @generated from enum value: TIER_TYPE_FILE = 2;
    */
-  LOCAL = 2,
+  FILE = 2,
 
   /**
    * @generated from enum value: TIER_TYPE_CLOUD = 3;
@@ -37,7 +37,7 @@ export enum TierType {
 proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
   { no: 0, name: "TIER_TYPE_UNSPECIFIED" },
   { no: 1, name: "TIER_TYPE_MEMORY" },
-  { no: 2, name: "TIER_TYPE_LOCAL" },
+  { no: 2, name: "TIER_TYPE_FILE" },
   { no: 3, name: "TIER_TYPE_CLOUD" },
 ]);
 

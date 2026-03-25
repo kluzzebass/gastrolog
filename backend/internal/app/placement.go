@@ -186,7 +186,7 @@ func (pm *placementManager) nodeEligible(tier config.TierConfig, nodeID string, 
 	switch tier.Type {
 	case config.TierTypeMemory:
 		return true // any node can serve memory tiers
-	case config.TierTypeLocal:
+	case config.TierTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
 	case config.TierTypeCloud:
 		return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)

@@ -532,7 +532,7 @@ func mapTierTypeToFactory(t config.TierType) string {
 	switch t {
 	case config.TierTypeMemory:
 		return "memory"
-	case config.TierTypeLocal:
+	case config.TierTypeFile:
 		return "file"
 	case config.TierTypeCloud:
 		return "file"
@@ -558,7 +558,7 @@ func buildTierParams(cfg *config.Config, _ config.VaultConfig, tierCfg config.Ti
 			params["maxRecords"] = "10000"
 		}
 
-	case config.TierTypeLocal:
+	case config.TierTypeFile:
 		// Find a StorageArea matching this tier's StorageClass on the local node.
 		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.StorageClass); area != nil {
 			params["dir"] = area.Path

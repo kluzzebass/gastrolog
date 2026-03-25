@@ -512,7 +512,7 @@ func TestApplyPutTier(t *testing.T) {
 	rpID := newID()
 	csID := newID()
 	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{
-		ID: id, Name: "hot-tier", Type: config.TierTypeLocal,
+		ID: id, Name: "hot-tier", Type: config.TierTypeFile,
 		RotationPolicyID:  &rpID,
 		MemoryBudgetBytes: 512 * 1024 * 1024,
 		StorageClass:      1,
@@ -525,7 +525,7 @@ func TestApplyPutTier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "hot-tier" || got.Type != config.TierTypeLocal {
+	if got == nil || got.Name != "hot-tier" || got.Type != config.TierTypeFile {
 		t.Fatalf("unexpected tier: %+v", got)
 	}
 	if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {

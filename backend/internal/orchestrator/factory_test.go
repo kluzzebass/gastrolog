@@ -527,7 +527,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 			{ID: vaultID, Enabled: true, TierIDs: []uuid.UUID{tierID}},
 		},
 		Tiers: []config.TierConfig{
-			{ID: tierID, Name: "local", Type: config.TierTypeLocal, StorageClass: 1},
+			{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1},
 		},
 		NodeStorageConfigs: []config.NodeStorageConfig{
 			{NodeID: "node-1", Areas: []config.StorageArea{

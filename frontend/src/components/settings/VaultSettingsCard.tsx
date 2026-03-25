@@ -36,7 +36,7 @@ function formatBytes(b: bigint | number): string {
 function tierTypeLabel(type: TierType): string {
   switch (type) {
     case TierType.MEMORY: return "memory";
-    case TierType.LOCAL: return "local";
+    case TierType.FILE: return "file";
     case TierType.CLOUD: return "cloud";
     default: return "unknown";
   }
@@ -188,7 +188,7 @@ export function VaultSettingsCard({
       onToggle={onToggle}
       onDelete={() => handleDelete(vault.id)}
       deleteLabel="Delete"
-      deleteConfirmExtra={vaultTiers.some((t) => t.type === TierType.LOCAL) ? (
+      deleteConfirmExtra={vaultTiers.some((t) => t.type === TierType.FILE) ? (
         <label className="flex items-center gap-1.5 text-[0.8em] opacity-70">
           <input
             type="checkbox"
@@ -446,7 +446,7 @@ export function VaultSettingsCard({
                     <div className={`flex items-center gap-3 pl-6 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                       {nodeName && <span>{"node: " + nodeName}</span>}
                       {!nodeName && <span className={c("text-text-ghost", "text-light-text-ghost")}>unplaced</span>}
-                      {tier.type === TierType.LOCAL && tier.storageClass > 0 && (
+                      {tier.type === TierType.FILE && tier.storageClass > 0 && (
                         <span className="font-mono">{`class ${String(tier.storageClass)}`}</span>
                       )}
                       {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
@@ -515,7 +515,7 @@ export function VaultSettingsCard({
                       id: tierId,
                       name: newTier.type,
                       type: tierTypeEnum(newTier.type),
-                      storageClass: newTier.type === "local" ? parseInt(newTier.storageClass, 10) || 0 : 0,
+                      storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
                       cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
                       activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
                       cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
@@ -552,7 +552,7 @@ export function VaultSettingsCard({
               label="+ Add Tier"
               items={[
                 { value: "memory", label: "Memory" },
-                { value: "local", label: "Local" },
+                { value: "file", label: "File" },
                 { value: "cloud", label: "Cloud" },
               ]}
               onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}

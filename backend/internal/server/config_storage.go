@@ -297,8 +297,8 @@ func protoToTierType(t apiv1.TierType) config.TierType {
 	switch t { //nolint:exhaustive // UNSPECIFIED handled by default
 	case apiv1.TierType_TIER_TYPE_MEMORY:
 		return config.TierTypeMemory
-	case apiv1.TierType_TIER_TYPE_LOCAL:
-		return config.TierTypeLocal
+	case apiv1.TierType_TIER_TYPE_FILE:
+		return config.TierTypeFile
 	case apiv1.TierType_TIER_TYPE_CLOUD:
 		return config.TierTypeCloud
 	default:

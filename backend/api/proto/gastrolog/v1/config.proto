@@ -707,7 +707,7 @@ message NodeConfig {
 enum TierType {
   TIER_TYPE_UNSPECIFIED = 0;
   TIER_TYPE_MEMORY = 1;
-  TIER_TYPE_LOCAL = 2;
+  TIER_TYPE_FILE = 2;
   TIER_TYPE_CLOUD = 3;
 }
 

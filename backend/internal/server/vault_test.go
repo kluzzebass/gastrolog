@@ -813,7 +813,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		// Create a local tier + node storage config for the vault directory.
 		fileTierID := uuid.Must(uuid.NewV7())
 		if err := cfgStore.PutTier(ctx, config.TierConfig{
-			ID: fileTierID, Name: v.name + "-tier", Type: config.TierTypeLocal, StorageClass: 1,
+			ID: fileTierID, Name: v.name + "-tier", Type: config.TierTypeFile, StorageClass: 1,
 		}); err != nil {
 			t.Fatal(err)
 		}

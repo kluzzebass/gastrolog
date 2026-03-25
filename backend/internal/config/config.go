@@ -649,7 +649,7 @@ type TierType string
 
 const (
 	TierTypeMemory TierType = "memory"
-	TierTypeLocal  TierType = "local"
+	TierTypeFile   TierType = "file"
 	TierTypeCloud  TierType = "cloud"
 )
 

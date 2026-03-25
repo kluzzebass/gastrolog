@@ -27,7 +27,7 @@ type TierType int32
 const (
 	TierType_TIER_TYPE_UNSPECIFIED TierType = 0
 	TierType_TIER_TYPE_MEMORY      TierType = 1
-	TierType_TIER_TYPE_LOCAL       TierType = 2
+	TierType_TIER_TYPE_FILE        TierType = 2
 	TierType_TIER_TYPE_CLOUD       TierType = 3
 )
 
@@ -36,13 +36,13 @@ var (
 	TierType_name = map[int32]string{
 		0: "TIER_TYPE_UNSPECIFIED",
 		1: "TIER_TYPE_MEMORY",
-		2: "TIER_TYPE_LOCAL",
+		2: "TIER_TYPE_FILE",
 		3: "TIER_TYPE_CLOUD",
 	}
 	TierType_value = map[string]int32{
 		"TIER_TYPE_UNSPECIFIED": 0,
 		"TIER_TYPE_MEMORY":      1,
-		"TIER_TYPE_LOCAL":       2,
+		"TIER_TYPE_FILE":        2,
 		"TIER_TYPE_CLOUD":       3,
 	}
 )
@@ -7806,11 +7806,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x11DeleteTierRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"M\n" +
 	"\x12DeleteTierResponse\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config*e\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config*d\n" +
 	"\bTierType\x12\x19\n" +
 	"\x15TIER_TYPE_UNSPECIFIED\x10\x00\x12\x14\n" +
-	"\x10TIER_TYPE_MEMORY\x10\x01\x12\x13\n" +
-	"\x0fTIER_TYPE_LOCAL\x10\x02\x12\x13\n" +
+	"\x10TIER_TYPE_MEMORY\x10\x01\x12\x12\n" +
+	"\x0eTIER_TYPE_FILE\x10\x02\x12\x13\n" +
 	"\x0fTIER_TYPE_CLOUD\x10\x032\xa0!\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12X\n" +

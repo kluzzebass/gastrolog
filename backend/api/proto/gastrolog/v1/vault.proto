@@ -102,7 +102,7 @@ message ChunkMeta {
   bool archived = 12;     // true = chunk is in offline storage tier (Glacier, etc.)
   int32 num_frames = 13;  // seekable zstd frame count (cloud chunks, 0 = unknown)
   string tier_id = 14;    // which tier this chunk belongs to
-  string tier_type = 15;  // tier type: "memory", "local", "cloud"
+  string tier_type = 15;  // tier type: "memory", "file", "cloud"
 }
 
 message GetChunkRequest {

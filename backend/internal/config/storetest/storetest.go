@@ -1662,7 +1662,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		tier := config.TierConfig{
 			ID:                id,
 			Name:              "hot",
-			Type:              config.TierTypeLocal,
+			Type:              config.TierTypeFile,
 			RotationPolicyID:  &rpID,
 			MemoryBudgetBytes: 256 * 1024 * 1024,
 			StorageClass:      1,
@@ -1684,8 +1684,8 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if got.Name != "hot" {
 			t.Errorf("Name: expected %q, got %q", "hot", got.Name)
 		}
-		if got.Type != config.TierTypeLocal {
-			t.Errorf("Type: expected %q, got %q", config.TierTypeLocal, got.Type)
+		if got.Type != config.TierTypeFile {
+			t.Errorf("Type: expected %q, got %q", config.TierTypeFile, got.Type)
 		}
 		if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
 			t.Errorf("RotationPolicyID: expected %s, got %v", rpID, got.RotationPolicyID)
@@ -1718,7 +1718,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err := s.PutTier(ctx, config.TierConfig{ID: idA, Name: "alpha", Type: config.TierTypeMemory}); err != nil {
 			t.Fatalf("Put a: %v", err)
 		}
-		if err := s.PutTier(ctx, config.TierConfig{ID: idB, Name: "beta", Type: config.TierTypeLocal}); err != nil {
+		if err := s.PutTier(ctx, config.TierConfig{ID: idB, Name: "beta", Type: config.TierTypeFile}); err != nil {
 			t.Fatalf("Put b: %v", err)
 		}
 
@@ -1744,7 +1744,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		if err := s.PutTier(ctx, config.TierConfig{ID: id, Name: "tier", Type: config.TierTypeLocal}); err != nil {
+		if err := s.PutTier(ctx, config.TierConfig{ID: id, Name: "tier", Type: config.TierTypeFile}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
