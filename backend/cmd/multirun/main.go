@@ -75,6 +75,7 @@ is still available.`,
 
 	rootCmd.Flags().String("name", "", "comma-separated process names (default: 1,2,3,...)")
 	rootCmd.Flags().Duration("grace", 60*time.Second, "grace period before SIGKILL after SIGTERM")
+	rootCmd.Flags().Bool("no-fail-fast", false, "keep running when a process exits or dies")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -84,6 +85,7 @@ is still available.`,
 func runMulti(cmd *cobra.Command, args []string) error {
 	nameFlag, _ := cmd.Flags().GetString("name")
 	grace, _ := cmd.Flags().GetDuration("grace")
+	noFailFast, _ := cmd.Flags().GetBool("no-fail-fast")
 
 	var names []string
 	if nameFlag != "" {
@@ -107,13 +109,13 @@ func runMulti(cmd *cobra.Command, args []string) error {
 		exitMu   sync.Mutex
 	)
 
-	failFast := func(code int) {
+	onExit := func(code int) {
 		exitMu.Lock()
 		if code != 0 && exitCode == 0 {
 			exitCode = code
 		}
 		exitMu.Unlock()
-		if code != 0 {
+		if code != 0 && !noFailFast {
 			stop()
 		}
 	}
@@ -129,7 +131,7 @@ func runMulti(cmd *cobra.Command, args []string) error {
 		go func(cp *childProc) {
 			defer wg.Done()
 			<-cp.done
-			failFast(cp.exitCode)
+			onExit(cp.exitCode)
 		}(cp)
 	}
 
