@@ -454,7 +454,7 @@ func TestImportToTierIdempotent(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, true, nil)
+	tier := newMemTier(t, tierID, false, nil)
 	vault := NewVault(vaultID, tier)
 	vault.Name = "idempotent"
 	orch.RegisterVault(vault)
@@ -467,21 +467,20 @@ func TestImportToTierIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Second import with same chunk ID — on secondary, replaces (canonical
-	// version overwrites forwarded version). On primary, would skip.
+	// Second import with same chunk ID — idempotent skip (chunk already exists).
 	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(3)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify only one chunk exists with that ID, with 3 records (second/canonical import).
+	// Verify only one chunk exists with that ID, with 5 records (first import kept).
 	metas, _ := tier.Chunks.List()
 	count := 0
 	for _, m := range metas {
 		if m.ID == chunkID {
 			count++
-			if m.RecordCount != 3 {
-				t.Errorf("expected 3 records from canonical import, got %d", m.RecordCount)
+			if m.RecordCount != 5 {
+				t.Errorf("expected 5 records from first import, got %d", m.RecordCount)
 			}
 		}
 	}
@@ -490,175 +489,3 @@ func TestImportToTierIdempotent(t *testing.T) {
 	}
 }
 
-// ================================================================
-// ACTIVE RECORD FORWARDING TESTS
-// ================================================================
-
-// recordingForwarder captures ForwardToTier calls for verification.
-type recordingForwarder struct {
-	mu      sync.Mutex
-	entries []forwardedRecord
-}
-
-type forwardedRecord struct {
-	nodeID  string
-	vaultID uuid.UUID
-	tierID  uuid.UUID
-	record  chunk.Record
-}
-
-func (f *recordingForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-
-func (f *recordingForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	for _, rec := range records {
-		f.entries = append(f.entries, forwardedRecord{
-			nodeID: nodeID, vaultID: vaultID, tierID: tierID, record: rec.Copy(),
-		})
-	}
-	return nil
-}
-
-func (f *recordingForwarder) getEntries() []forwardedRecord {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]forwardedRecord(nil), f.entries...)
-}
-
-func TestActiveRecordForwardingOnAppend(t *testing.T) {
-	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fwd := &recordingForwarder{}
-	orch.SetRecordForwarder(fwd)
-
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2", "node-3"})
-	vault := NewVault(vaultID, tier)
-	vault.Name = "active-fwd"
-	vault.Enabled = true
-	orch.RegisterVault(vault)
-
-	if _, _, err := orch.Append(vaultID, testRecord("hello")); err != nil {
-		t.Fatal(err)
-	}
-
-	entries := fwd.getEntries()
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 forwards (one per secondary), got %d", len(entries))
-	}
-
-	nodes := map[string]bool{}
-	for _, e := range entries {
-		nodes[e.nodeID] = true
-		if e.vaultID != vaultID {
-			t.Errorf("expected vault %s, got %s", vaultID, e.vaultID)
-		}
-		if e.tierID != tierID {
-			t.Errorf("expected tier %s, got %s", tierID, e.tierID)
-		}
-		if string(e.record.Raw) != "hello" {
-			t.Errorf("expected 'hello', got %q", string(e.record.Raw))
-		}
-	}
-	if !nodes["node-2"] || !nodes["node-3"] {
-		t.Errorf("expected forwards to node-2 and node-3, got %v", nodes)
-	}
-}
-
-func TestActiveRecordForwardingOnAppendToTier(t *testing.T) {
-	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fwd := &recordingForwarder{}
-	orch.SetRecordForwarder(fwd)
-
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2"})
-	vault := NewVault(vaultID, tier)
-	vault.Name = "active-fwd-tier"
-	orch.RegisterVault(vault)
-
-	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, testRecord("tier-rec")); err != nil {
-		t.Fatal(err)
-	}
-
-	entries := fwd.getEntries()
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 forward, got %d", len(entries))
-	}
-	if entries[0].nodeID != "node-2" {
-		t.Errorf("expected node-2, got %s", entries[0].nodeID)
-	}
-	if entries[0].tierID != tierID {
-		t.Errorf("expected tier %s, got %s", tierID, entries[0].tierID)
-	}
-}
-
-func TestActiveRecordForwardingSkipsSecondary(t *testing.T) {
-	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fwd := &recordingForwarder{}
-	orch.SetRecordForwarder(fwd)
-
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	// This node is a secondary — should NOT forward.
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
-	vault.Name = "no-fwd-secondary"
-	orch.RegisterVault(vault)
-
-	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, testRecord("sec-rec")); err != nil {
-		t.Fatal(err)
-	}
-
-	entries := fwd.getEntries()
-	if len(entries) != 0 {
-		t.Errorf("expected 0 forwards from secondary, got %d", len(entries))
-	}
-}
-
-func TestActiveRecordForwardingSkipsNoSecondaries(t *testing.T) {
-	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	fwd := &recordingForwarder{}
-	orch.SetRecordForwarder(fwd)
-
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	// Primary but RF=1 — no secondaries.
-	tier := newMemTier(t, tierID, false, nil)
-	vault := NewVault(vaultID, tier)
-	vault.Name = "rf1-no-fwd"
-	vault.Enabled = true
-	orch.RegisterVault(vault)
-
-	if _, _, err := orch.Append(vaultID, testRecord("rf1")); err != nil {
-		t.Fatal(err)
-	}
-
-	entries := fwd.getEntries()
-	if len(entries) != 0 {
-		t.Errorf("expected 0 forwards for RF=1, got %d", len(entries))
-	}
-}

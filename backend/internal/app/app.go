@@ -319,11 +319,15 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		_, _, err := orch.Append(vaultID, rec)
 		return err
 	})
-	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID uuid.UUID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
-		return orch.AppendToTier(vaultID, tierID, primaryChunkID, rec)
+		return orch.AppendToTier(vaultID, tierID, rec)
+	})
+
+	clusterSrv.SetDurabilityBufferer(func(vaultID, tierID uuid.UUID, rec chunk.Record) error {
+		return orch.BufferForTier(vaultID, tierID, rec)
 	})
 
 	// Wire cross-node chunk migration and replication.

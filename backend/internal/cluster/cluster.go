@@ -113,6 +113,9 @@ type Server struct {
 	// preserving the original chunk ID. Used for sealed-chunk replication.
 	tierRecordImporter TierRecordImporter
 
+	// durabilityBufferer adds records to a secondary's durability buffer.
+	durabilityBufferer DurabilityBufferer
+
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.
 	searchExecutor SearchExecutor

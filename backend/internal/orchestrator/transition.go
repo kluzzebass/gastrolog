@@ -109,7 +109,7 @@ func (r *retentionRunner) transitionLocal(id chunk.ChunkID, cursor chunk.RecordC
 		if err != nil {
 			break // cursor exhausted
 		}
-		if err := r.orch.AppendToTier(r.vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
+		if err := r.orch.AppendToTier(r.vaultID, nextTierID, rec); err != nil {
 			r.logger.Error("transition: local append failed",
 				"vault", r.vaultID, "chunk", id.String(),
 				"next_tier", nextTierID, "error", err)

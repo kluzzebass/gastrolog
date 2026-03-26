@@ -170,13 +170,17 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   }
 
   // Deduplicate replicas: when RF > 1, the same chunk ID appears from
-  // multiple nodes. Keep only the first occurrence (primary's response).
-  const seen = new Set<string>();
-  const dedupedChunks = chunks.filter((c) => {
-    if (seen.has(c.id)) return false;
-    seen.add(c.id);
-    return true;
-  });
+  // multiple nodes. Keep the primary's version — it's compressed and
+  // indexed. Secondaries may briefly have uncompressed forwarded copies
+  // before ImportToTier replaces them with the canonical version.
+  const bestChunk = new Map<string, ChunkMeta>();
+  for (const ch of chunks) {
+    const existing = bestChunk.get(ch.id);
+    if (!existing || (!existing.compressed && ch.compressed) || (!existing.sealed && ch.sealed)) {
+      bestChunk.set(ch.id, ch);
+    }
+  }
+  const dedupedChunks = [...bestChunk.values()];
 
   // Group chunks by tier, then sort within each tier by time (newest first).
   const tierGroups = new Map<string, { tierType: string; chunks: ChunkMeta[] }>();

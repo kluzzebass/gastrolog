@@ -23,9 +23,12 @@ import (
 type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error
 
 // RecordTierAppender appends a single record to a specific tier in a local vault.
-// Used by the ForwardRecords handler when tier_id is set (inter-tier transition
-// and active-chunk replication). primaryChunkID enables chunk ID sync on secondaries.
-type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
+// Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
+type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, rec chunk.Record) error
+
+// DurabilityBufferer adds a record to a secondary's durability buffer.
+// Used by the streaming handler when tier_id is set for buffer-mode forwarding.
+type DurabilityBufferer func(vaultID, tierID uuid.UUID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -99,6 +102,11 @@ func (s *Server) SetRecordAppender(fn RecordAppender) {
 // SetRecordTierAppender injects the callback for tier-targeted forwarding.
 func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
 	s.recordTierAppender = fn
+}
+
+// SetDurabilityBufferer injects the callback for durability buffering.
+func (s *Server) SetDurabilityBufferer(fn DurabilityBufferer) {
+	s.durabilityBufferer = fn
 }
 
 // SetRecordImporter injects the callback for importing transferred records.
@@ -195,7 +203,6 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 
 	// Tier-targeted append for inter-tier transition.
 	var tierID uuid.UUID
-	var primaryChunkID chunk.ChunkID
 	if req.GetTierId() != "" {
 		tierID, err = uuid.Parse(req.GetTierId())
 		if err != nil {
@@ -205,20 +212,13 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 			return nil, status.Error(codes.Unavailable, "tier appender not configured")
 		}
 	}
-	if req.GetChunkId() != "" {
-		parsed, parseErr := chunk.ParseChunkID(req.GetChunkId())
-		if parseErr != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", parseErr)
-		}
-		primaryChunkID = parsed
-	}
 
 	var written int64
 	for _, exportRec := range req.GetRecords() {
 		rec := exportRecordToChunk(exportRec)
 		var appendErr error
 		if tierID != uuid.Nil {
-			appendErr = s.recordTierAppender(ctx, vaultID, tierID, primaryChunkID, rec)
+			appendErr = s.recordTierAppender(ctx, vaultID, tierID, rec)
 		} else {
 			appendErr = s.recordAppender(ctx, vaultID, rec)
 		}
@@ -261,27 +261,20 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			continue
 		}
 
-		// Tier-targeted append for active-chunk replication.
+		// Route: if tier_id is set, this is a durability buffer request.
+		// Otherwise, it's a regular vault append.
 		var tierID uuid.UUID
-		var primaryChunkID chunk.ChunkID
 		if msg.GetTierId() != "" {
 			tierID, err = uuid.Parse(msg.GetTierId())
 			if err != nil {
 				return status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
 			}
 		}
-		if msg.GetChunkId() != "" {
-			parsed, parseErr := chunk.ParseChunkID(msg.GetChunkId())
-			if parseErr == nil {
-				primaryChunkID = parsed
-			}
-		}
-
 		for _, exportRec := range msg.GetRecords() {
 			rec := exportRecordToChunk(exportRec)
 			var appendErr error
-			if tierID != uuid.Nil && s.recordTierAppender != nil {
-				appendErr = s.recordTierAppender(stream.Context(), vaultID, tierID, primaryChunkID, rec)
+			if tierID != uuid.Nil && s.durabilityBufferer != nil {
+				appendErr = s.durabilityBufferer(vaultID, tierID, rec)
 			} else {
 				appendErr = s.recordAppender(stream.Context(), vaultID, rec)
 			}
