@@ -370,8 +370,18 @@ func (d *configDispatcher) registerVault(ctx context.Context, v config.VaultConf
 }
 
 func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v config.VaultConfig, tierID uuid.UUID) {
-	if d.orch.FindLocalTierExported(v.ID, tierID) != nil {
-		return // tier already in the local vault
+	existing := d.orch.FindLocalTierExported(v.ID, tierID)
+	if existing != nil {
+		// Tier exists — check if its role changed (primary ↔ secondary).
+		tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
+		if err != nil || tierCfg == nil {
+			return
+		}
+		shouldBeSecondary := slices.Contains(tierCfg.SecondaryNodeIDs, d.localNodeID)
+		if existing.IsSecondary == shouldBeSecondary {
+			return // role unchanged, nothing to do
+		}
+		// Role changed — fall through to rebuild.
 	}
 	if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		d.logger.Error("dispatch: unregister vault for new tier",

@@ -325,16 +325,18 @@ func (s *VaultServer) vaultInfoFromConfig(cfg config.VaultConfig, localSet map[u
 		Enabled: cfg.Enabled,
 	}
 
-	_, local := localSet[cfg.ID]
-	if !local {
-		info.Remote = true
-		s.enrichRemoteVaultInfo(info, cfg.ID)
-		return info
+	// Enrich from both local tiers and remote peer stats.
+	// A vault may span multiple nodes — local data alone is incomplete.
+	_, registered := localSet[cfg.ID]
+	if registered {
+		info.Enabled = s.orch.IsVaultEnabled(cfg.ID)
+		s.enrichLocalVaultInfo(info, cfg.ID)
 	}
-
-	// Local vault — get live stats from orchestrator.
-	info.Enabled = s.orch.IsVaultEnabled(cfg.ID)
-	s.enrichLocalVaultInfo(info, cfg.ID)
+	// Always add remote stats — other nodes may have tiers we don't.
+	s.enrichRemoteVaultInfo(info, cfg.ID)
+	if !registered {
+		info.Remote = true
+	}
 
 	return info
 }

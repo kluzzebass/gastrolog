@@ -28,6 +28,21 @@ export function VaultCard({
   onToggle,
   onOpenSettings,
 }: Readonly<VaultCardProps>) {
+  // Use ListChunks data (fans out to all nodes) for accurate counts.
+  // ListVaults stats rely on periodic peer broadcasts and flicker.
+  const { data: chunks } = useChunks(vault.id);
+  const dedupedChunks = (() => {
+    if (!chunks) return [];
+    const seen = new Set<string>();
+    return chunks.filter((c) => {
+      if (seen.has(c.id)) return false;
+      seen.add(c.id);
+      return true;
+    });
+  })();
+  const chunkCount = dedupedChunks.length;
+  const recordCount = dedupedChunks.reduce((sum, c) => sum + Number(c.recordCount), 0);
+
   return (
     <ExpandableCard
       key={vault.id}
@@ -43,10 +58,10 @@ export function VaultCard({
             <Badge variant="warn" dark={dark}>disabled</Badge>
           )}
           <Badge variant="muted" dark={dark}>
-            {Number(vault.chunkCount).toLocaleString()} chunks
+            {chunkCount.toLocaleString()} chunks
           </Badge>
           <Badge variant="muted" dark={dark}>
-            {vault.recordCount.toLocaleString()} records
+            {recordCount.toLocaleString()} records
           </Badge>
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>

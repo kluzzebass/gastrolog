@@ -128,17 +128,21 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
-		scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, queryExpr)
-
-		q, pipeline, err := server.ParseExpression(scopedExpr)
+		// Don't add vault_id= scope — the engine is already scoped to this
+		// vault's primary tiers. Adding vault_id= would fail because the
+		// engine uses tier IDs, not vault IDs.
+		q, pipeline, err := server.ParseExpression(queryExpr)
 		if err != nil {
 			return nil, nil, nil, nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng := o.MultiVaultQueryEngine()
+		eng := o.PrimaryTierQueryEngineForVault(vaultID)
+		if eng == nil {
+			return nil, nil, nil, nil, nil // no primary tiers for this vault
+		}
 
-		// Compute volume histogram for this vault.
-		histogram := histogramBucketsToProto(eng.ComputeHistogramForVaults(ctx, q, 50, []uuid.UUID{vaultID}))
+		// Compute volume histogram across all primary tiers in this vault.
+		histogram := histogramBucketsToProto(eng.ComputeHistogram(ctx, q, 50))
 
 		// Pipeline query: run aggregation locally and return table result.
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
@@ -213,7 +217,7 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 				return nil, 0, fmt.Errorf("parse query for vault %s: %w", vid, err)
 			}
 
-			eng := o.MultiVaultQueryEngine()
+			eng := o.PrimaryTierQueryEngine()
 			plan, err := eng.Explain(ctx, q)
 			if err != nil {
 				return nil, 0, fmt.Errorf("explain vault %s: %w", vid, err)
@@ -280,14 +284,14 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 			return nil, fmt.Errorf("parse query: %w", err)
 		}
 
-		eng := o.MultiVaultQueryEngine()
+		eng := o.PrimaryTierQueryEngine()
 		return eng.Follow(ctx, q), nil
 	}
 }
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 	return func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
-		eng := o.MultiVaultQueryEngine()
+		eng := o.PrimaryTierQueryEngine()
 		result, err := eng.GetContext(ctx, query.ContextRef{
 			VaultID: vaultID,
 			ChunkID: chunkID,

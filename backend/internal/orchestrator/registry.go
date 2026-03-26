@@ -116,6 +116,24 @@ func (o *Orchestrator) ListVaults() []uuid.UUID {
 	return keys
 }
 
+// LocalPrimaryTierIDs returns the set of tier IDs where this node is the
+// primary. Used by search fan-out: secondary tiers are NOT included because
+// they may be incomplete (missing active chunk, replication lag). The search
+// always fans out to the primary for authoritative results.
+func (o *Orchestrator) LocalPrimaryTierIDs() map[uuid.UUID]bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	ids := make(map[uuid.UUID]bool)
+	for _, v := range o.vaults {
+		for _, t := range v.Tiers {
+			if !t.IsSecondary {
+				ids[t.TierID] = true
+			}
+		}
+	}
+	return ids
+}
+
 // HasLocalQueryEngine returns true if the vault has at least one tier with
 // a query engine on this node (i.e., actual searchable data, not just a
 // routing entry). Used by search fan-out to decide local vs. remote.
@@ -156,4 +174,81 @@ func (o *Orchestrator) QueryEngine(key uuid.UUID) *query.Engine {
 // Vault predicates in queries (e.g., "vault_id=<uuid>") filter which vaults are searched.
 func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(o, o.logger)
+}
+
+// PrimaryTierQueryEngine returns a query engine that only searches primary
+// tiers (not secondary replicas). Used by ForwardSearch handlers to avoid
+// double-counting when the requesting node already searches its own secondaries.
+func (o *Orchestrator) PrimaryTierQueryEngine() *query.Engine {
+	return query.NewWithRegistry(&primaryTierRegistry{o: o}, o.logger)
+}
+
+// primaryTierRegistry provides a flat view of all primary tiers across all
+// vaults. Each tier is a searchable unit keyed by its tier ID.
+type primaryTierRegistry struct {
+	o *Orchestrator
+}
+
+func (r *primaryTierRegistry) ListVaults() []uuid.UUID {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	var ids []uuid.UUID
+	for _, v := range r.o.vaults {
+		for _, t := range v.Tiers {
+			if !t.IsSecondary {
+				ids = append(ids, t.TierID)
+			}
+		}
+	}
+	return ids
+}
+
+func (r *primaryTierRegistry) ChunkManager(key uuid.UUID) chunk.ChunkManager {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		for _, t := range v.Tiers {
+			if t.TierID == key && !t.IsSecondary {
+				return t.Chunks
+			}
+		}
+	}
+	return nil
+}
+
+func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
+	r.o.mu.RLock()
+	defer r.o.mu.RUnlock()
+	for _, v := range r.o.vaults {
+		for _, t := range v.Tiers {
+			if t.TierID == key && !t.IsSecondary {
+				return t.Indexes
+			}
+		}
+	}
+	return nil
+}
+
+func (r *primaryTierRegistry) QueryEngine(_ uuid.UUID) *query.Engine { return nil }
+
+// PrimaryTierQueryEngineForVault returns a query engine scoped to primary
+// tiers of a single vault. Used by ForwardSearch — the vault is already
+// selected, no vault_id= filtering needed.
+func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID uuid.UUID) *query.Engine {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	v := o.vaults[vaultID]
+	if v == nil {
+		return nil
+	}
+	var primary []*TierInstance
+	for _, t := range v.Tiers {
+		if !t.IsSecondary {
+			primary = append(primary, t)
+		}
+	}
+	if len(primary) == 0 {
+		return nil
+	}
+	return query.NewWithRegistry(&tierRegistry{tiers: primary}, o.logger)
 }

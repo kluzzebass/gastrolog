@@ -85,7 +85,7 @@ func (s *QueryServer) Search(
 		defer cancel()
 	}
 
-	eng := s.orch.MultiVaultQueryEngine()
+	eng := s.orch.PrimaryTierQueryEngine()
 	if s.lookupResolver != nil {
 		eng.SetLookupResolver(s.lookupResolver)
 	}
@@ -365,9 +365,11 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		selected[id] = true
 	}
 
-	// No local-vault skip — a vault may have some tiers local and others
-	// remote. Both need to be searched. The ForwardSearch handler on the
-	// remote node only searches its LOCAL tiers, so no double-counting.
+	// For each vault, fan out to remote primaries for tiers this node
+	// doesn't have locally. Tiers that exist locally (as primary or
+	// secondary) are searched by the local query engine — don't
+	// double-query their primary remotely.
+	localTierIDs := s.orch.LocalPrimaryTierIDs()
 
 	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
 	for i := range tiers {
@@ -379,10 +381,11 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		// Find ALL remote nodes that own tiers for this vault.
-		// A vault may span multiple nodes; each must be queried.
 		seen := make(map[string]bool)
 		for _, tierID := range v.TierIDs {
+			if localTierIDs[tierID] {
+				continue // searched locally, skip remote
+			}
 			tc := tierMap[tierID]
 			if tc == nil || tc.NodeID == "" || tc.NodeID == s.localNodeID {
 				continue
@@ -987,7 +990,7 @@ func (s *QueryServer) Follow(
 		defer cancel()
 	}
 
-	eng := s.orch.MultiVaultQueryEngine()
+	eng := s.orch.PrimaryTierQueryEngine()
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
@@ -1214,7 +1217,7 @@ func (s *QueryServer) Explain(
 	ctx context.Context,
 	req *connect.Request[apiv1.ExplainRequest],
 ) (*connect.Response[apiv1.ExplainResponse], error) {
-	eng := s.orch.MultiVaultQueryEngine()
+	eng := s.orch.PrimaryTierQueryEngine()
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
@@ -1598,7 +1601,7 @@ func (s *QueryServer) readAnchor(ctx context.Context, vaultID uuid.UUID, chunkID
 		return exportToRecord(resp.Anchor), nil
 	}
 
-	eng := s.orch.MultiVaultQueryEngine()
+	eng := s.orch.PrimaryTierQueryEngine()
 	anchor, err := eng.ReadRecord(ctx, vaultID, chunkID, pos)
 	if err != nil {
 		return nil, fmt.Errorf("read anchor vault=%s chunk=%s pos=%d: %w", vaultID, chunkID, pos, err)
@@ -1614,7 +1617,7 @@ func (s *QueryServer) searchContext(
 	n int,
 	isAnchor func(*apiv1.Record) bool,
 ) ([]*apiv1.Record, error) {
-	eng := s.orch.MultiVaultQueryEngine()
+	eng := s.orch.PrimaryTierQueryEngine()
 	localIter, _ := eng.Search(ctx, q, nil)
 	remoteIter, _, _ := s.collectRemote(ctx, q, nil)
 
