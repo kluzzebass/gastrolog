@@ -703,3 +703,6 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 func (m *transitionFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
+func (m *transitionFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	return nil
+}

@@ -95,6 +95,11 @@ type ChunkManager interface {
 	// This avoids loading message bodies, enabling lightweight metadata iteration.
 	ScanAttrs(id ChunkID, startPos uint64, fn func(writeTS time.Time, attrs Attributes) bool) error
 
+	// SetNextChunkID sets the ID for the next active chunk created by openLocked.
+	// Used by secondaries to match the primary's chunk ID during replication.
+	// Consumed on next open — subsequent opens revert to NewChunkID().
+	SetNextChunkID(id ChunkID)
+
 	// Close releases resources held by the manager (file locks, mmap regions, etc).
 	// After Close, the manager must not be used.
 	Close() error

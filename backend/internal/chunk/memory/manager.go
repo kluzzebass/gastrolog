@@ -38,6 +38,7 @@ type Manager struct {
 	active        *chunkState
 	chunks        []*chunkState
 	indexBuilders []chunk.ChunkIndexBuilder
+	nextChunkID   *chunk.ChunkID // if set, used instead of NewChunkID() on next open
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="memory" at construction time.
@@ -193,8 +194,20 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	return newRecordReader(state.records, id), nil
 }
 
+func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
+	m.mu.Lock()
+	m.nextChunkID = &id
+	m.mu.Unlock()
+}
+
 func (m *Manager) openLocked() error {
-	id := chunk.NewChunkID()
+	var id chunk.ChunkID
+	if m.nextChunkID != nil {
+		id = *m.nextChunkID
+		m.nextChunkID = nil
+	} else {
+		id = chunk.NewChunkID()
+	}
 	meta := chunk.ChunkMeta{ID: id}
 	if err := m.cfg.MetaStore.Save(meta); err != nil {
 		return err
@@ -454,7 +467,13 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	id := chunk.NewChunkID()
+	var id chunk.ChunkID
+	if m.nextChunkID != nil {
+		id = *m.nextChunkID
+		m.nextChunkID = nil
+	} else {
+		id = chunk.NewChunkID()
+	}
 	state := &chunkState{
 		meta: chunk.ChunkMeta{
 			ID:     id,

@@ -59,11 +59,20 @@ func (o *Orchestrator) catchupSecondary(ctx context.Context, vaultID, tierID uui
 		return fmt.Errorf("list chunks: %w", err)
 	}
 
+	// Only replicate chunks where post-seal is complete. For file tiers,
+	// this means compressed — uncompressed sealed chunks are still in the
+	// post-seal pipeline (compress → index → replicate), which will handle
+	// replication itself. For memory tiers, all sealed chunks are ready.
 	var sealed []chunk.ChunkMeta
+	isFileTier := tier.Type == "file"
 	for _, m := range metas {
-		if m.Sealed {
-			sealed = append(sealed, m)
+		if !m.Sealed {
+			continue
 		}
+		if isFileTier && !m.Compressed {
+			continue // post-seal pipeline will replicate after compression
+		}
+		sealed = append(sealed, m)
 	}
 
 	if len(sealed) == 0 {
@@ -76,22 +85,11 @@ func (o *Orchestrator) catchupSecondary(ctx context.Context, vaultID, tierID uui
 		"vault", vaultID, "tier", tierID, "secondary", nodeID, "chunks", len(sealed))
 
 	for _, meta := range sealed {
-		cursor, err := tier.Chunks.OpenCursor(meta.ID)
-		if err != nil {
-			o.logger.Warn("replication catchup: open cursor failed",
-				"chunk", meta.ID.String(), "error", err)
-			continue
-		}
-
-		iter := chunk.CursorIterator(cursor)
-		if err := o.transferrer.TransferRecords(ctx, nodeID, vaultID, iter); err != nil {
-			_ = cursor.Close()
+		if err := o.replicateToSecondary(ctx, vaultID, tierID, meta.ID, tier.Chunks, nodeID); err != nil {
 			o.logger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "secondary", nodeID, "error", err)
 			continue
 		}
-		_ = cursor.Close()
-
 		o.logger.Info("replication catchup: chunk transferred",
 			"vault", vaultID, "tier", tierID, "chunk", meta.ID.String(), "secondary", nodeID,
 			"records", meta.RecordCount)

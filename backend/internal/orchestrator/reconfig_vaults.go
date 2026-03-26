@@ -136,14 +136,15 @@ func (o *Orchestrator) applyTierRetention(cfg *config.Config, vaultCfg config.Va
 	}
 	key := tier.TierID
 	runner := &retentionRunner{
-		vaultID: vaultCfg.ID,
-		tierID:  tier.TierID,
-		cm:      tier.Chunks,
-		im:      tier.Indexes,
-		rules:   rules,
-		orch:    o,
-		now:     o.now,
-		logger:  o.logger,
+		vaultID:     vaultCfg.ID,
+		tierID:      tier.TierID,
+		cm:          tier.Chunks,
+		im:          tier.Indexes,
+		rules:       rules,
+		orch:        o,
+		isSecondary: tier.IsSecondary,
+		now:         o.now,
+		logger:      o.logger,
 	}
 	o.retention[key] = runner
 	jobName := retentionJobName(tier.TierID)

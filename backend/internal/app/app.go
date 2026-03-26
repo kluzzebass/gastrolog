@@ -326,7 +326,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		return orch.AppendToTier(vaultID, tierID, rec)
 	})
 
-	// Wire cross-node chunk migration (retention migrate to remote vaults).
+	// Wire cross-node chunk migration and replication.
 	chunkTransferrer := cluster.NewChunkTransferrer(peerConns)
 	orch.SetRemoteTransferrer(chunkTransferrer)
 
@@ -336,6 +336,12 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 			return err
 		}
 		return orch.ImportChunkRecords(ctx, vaultID, next)
+	})
+	clusterSrv.SetTierRecordImporter(func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+		if err := waitForOrch(ctx); err != nil {
+			return err
+		}
+		return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
 	})
 
 	searchForwarder := cluster.NewSearchForwarder(peerConns)

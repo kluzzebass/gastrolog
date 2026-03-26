@@ -109,6 +109,10 @@ type Server struct {
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter
 
+	// tierRecordImporter imports records as a sealed chunk in a specific tier,
+	// preserving the original chunk ID. Used for sealed-chunk replication.
+	tierRecordImporter TierRecordImporter
+
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.
 	searchExecutor SearchExecutor
@@ -240,6 +244,13 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 // Returns nil if SetRaft has not been called.
 func (s *Server) PeerConns() *PeerConns {
 	return s.peerConns
+}
+
+// NewPeerConnsPool creates an independent connection pool using the same
+// Raft discovery and TLS config. Use for bulk traffic (replication, migration)
+// that shouldn't compete for HTTP/2 flow control with queries and config RPCs.
+func (s *Server) NewPeerConnsPool() *PeerConns {
+	return NewPeerConns(s.raft, s.cfg.TLS, s.cfg.NodeID)
 }
 
 // AddVoter adds a new node to the Raft cluster as a voter.

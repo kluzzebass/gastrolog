@@ -97,6 +97,7 @@ type Manager struct {
 	cloudIdx      *cloudIndex              // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
 	cloudListCache []chunk.ChunkMeta        // cached List() result for cloud chunks; nil = stale
+	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
 
 	postSealWg sync.WaitGroup // tracks in-flight PostSealProcess calls
 
@@ -1079,8 +1080,20 @@ func computeSourceBounds(meta *chunkMeta, first, last IdxEntry) {
 	meta.sourceEnd = maxSrc
 }
 
+func (m *Manager) SetNextChunkID(id chunk.ChunkID) {
+	m.mu.Lock()
+	m.nextChunkID = &id
+	m.mu.Unlock()
+}
+
 func (m *Manager) openLocked() error {
-	id := chunk.NewChunkID()
+	var id chunk.ChunkID
+	if m.nextChunkID != nil {
+		id = *m.nextChunkID
+		m.nextChunkID = nil
+	} else {
+		id = chunk.NewChunkID()
+	}
 	chunkDir := m.chunkDir(id)
 	if err := os.MkdirAll(chunkDir, 0o750); err != nil {
 		return err
@@ -1485,7 +1498,13 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		return chunk.ChunkMeta{}, ErrManagerClosed
 	}
 
-	id := chunk.NewChunkID()
+	var id chunk.ChunkID
+	if m.nextChunkID != nil {
+		id = *m.nextChunkID
+		m.nextChunkID = nil
+	} else {
+		id = chunk.NewChunkID()
+	}
 	files, err := m.openImportFiles(id, m.cfg.Now())
 	if err != nil {
 		return chunk.ChunkMeta{}, err

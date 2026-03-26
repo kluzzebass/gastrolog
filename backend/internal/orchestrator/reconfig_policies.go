@@ -140,6 +140,9 @@ func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
 }
 
 // reloadTierRetention reconciles the retention runner for a single tier.
+// reloadTierRetention reconciles the retention runner for a single tier.
+// Secondaries run retention too (to clean up expired replicas), but all
+// actions resolve to expire — the primary handles transition/eject.
 func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
 	key := tier.TierID
 	jobName := retentionJobName(tier.TierID)
@@ -172,12 +175,13 @@ func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.V
 			return
 		}
 		newRunner := &retentionRunner{
-			vaultID: vaultCfg.ID,
-			tierID:  tier.TierID,
-			cm:      tier.Chunks,
-			im:      tier.Indexes,
-			rules:   rules,
-			orch:    o,
+			vaultID:     vaultCfg.ID,
+			tierID:      tier.TierID,
+			cm:          tier.Chunks,
+			im:          tier.Indexes,
+			rules:       rules,
+			orch:        o,
+			isSecondary: tier.IsSecondary,
 			now:     o.now,
 			logger:  o.logger,
 		}

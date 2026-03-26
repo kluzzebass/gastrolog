@@ -139,26 +139,63 @@ func (o *Orchestrator) postSealWork(vaultID uuid.UUID, cm chunk.ChunkManager, ch
 // schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
-// The caller provides the specific chunk manager (which may be from any tier, not
-// just the active tier).
+// After the pipeline completes, sealed-chunk replication is triggered for primary tiers.
 func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
+	// Resolve tier info for post-pipeline replication.
+	tierID, secondaryNodeIDs := o.tierReplicationInfo(vaultID, cm)
+
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
 		name := fmt.Sprintf("post-seal:%s:%s", vaultID, chunkID)
-		if err := o.scheduler.RunOnce(name, processor.PostSealProcess, context.Background(), chunkID); err != nil {
+		wrappedFn := func(ctx context.Context, id chunk.ChunkID) error {
+			if err := processor.PostSealProcess(ctx, id); err != nil {
+				return err
+			}
+			// Schedule replication as a separate job — never blocks the
+			// post-seal scheduler slot.
+			o.scheduleReplication(vaultID, tierID, id, secondaryNodeIDs)
+			return nil
+		}
+		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
 			o.logger.Warn("failed to schedule post-seal", "name", name, "error", err)
 		}
 		o.scheduler.Describe(name, fmt.Sprintf("Post-seal pipeline for chunk %s", chunkID))
 		return
 	}
 
-	// Fallback for non-file managers (e.g. memory) — compress only.
+	// Fallback for non-file managers (e.g. memory) — compress only, then replicate.
 	compressor, ok := cm.(chunk.ChunkCompressor)
-	if !ok {
+	if ok {
+		name := fmt.Sprintf("compress:%s:%s", vaultID, chunkID)
+		wrappedFn := func(id chunk.ChunkID) error {
+			if err := compressor.CompressChunk(id); err != nil {
+				return err
+			}
+			o.scheduleReplication(vaultID, tierID, id, secondaryNodeIDs)
+			return nil
+		}
+		if err := o.scheduler.RunOnce(name, wrappedFn, chunkID); err != nil {
+			o.logger.Warn("failed to schedule compression", "name", name, "error", err)
+		}
 		return
 	}
-	name := fmt.Sprintf("compress:%s:%s", vaultID, chunkID)
-	if err := o.scheduler.RunOnce(name, compressor.CompressChunk, chunkID); err != nil {
-		o.logger.Warn("failed to schedule compression", "name", name, "error", err)
+
+	// No post-processing — schedule replication directly.
+	o.scheduleReplication(vaultID, tierID, chunkID, secondaryNodeIDs)
+}
+
+// tierReplicationInfo returns the tier ID and secondary node IDs for the tier
+// that owns the given ChunkManager. Returns zero values if not found or if the
+// tier is a secondary (secondaries don't replicate further).
+func (o *Orchestrator) tierReplicationInfo(vaultID uuid.UUID, cm chunk.ChunkManager) (uuid.UUID, []string) {
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return uuid.UUID{}, nil
 	}
+	for _, tier := range vault.Tiers {
+		if tier.Chunks == cm && !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 {
+			return tier.TierID, tier.SecondaryNodeIDs
+		}
+	}
+	return uuid.UUID{}, nil
 }

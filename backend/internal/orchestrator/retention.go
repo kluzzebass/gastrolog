@@ -30,16 +30,17 @@ type retentionRule struct {
 // retentionRunner manages the retention sweep for a single tier.
 // It is invoked by the shared scheduler on a cron schedule.
 type retentionRunner struct {
-	mu       sync.Mutex
-	vaultID  uuid.UUID
-	tierID   uuid.UUID
-	cm       chunk.ChunkManager
-	im       index.IndexManager
-	rules    []retentionRule
-	inflight map[chunk.ChunkID]bool // chunks currently being processed
-	orch     *Orchestrator          // for eject action (loadConfig, Append, transferrer)
-	now      func() time.Time
-	logger   *slog.Logger
+	mu          sync.Mutex
+	vaultID     uuid.UUID
+	tierID      uuid.UUID
+	cm          chunk.ChunkManager
+	im          index.IndexManager
+	rules       []retentionRule
+	inflight    map[chunk.ChunkID]bool // chunks currently being processed
+	orch        *Orchestrator          // for eject action (loadConfig, Append, transferrer)
+	isSecondary bool                   // secondaries expire only — primary handles transition/eject
+	now         func() time.Time
+	logger      *slog.Logger
 }
 
 // setRules hot-swaps the retention rules.
@@ -111,7 +112,14 @@ func (r *retentionRunner) sweep() {
 
 			func() {
 				defer r.clearInflight(id)
-				switch b.action {
+				// Secondaries always expire — the primary already handled
+				// transition/eject for the data. The secondary just cleans up
+				// its local copy to match the primary's lifecycle.
+				action := b.action
+				if r.isSecondary {
+					action = config.RetentionActionExpire
+				}
+				switch action {
 				case config.RetentionActionExpire:
 					r.expireChunk(id)
 				case config.RetentionActionEject:
@@ -119,7 +127,7 @@ func (r *retentionRunner) sweep() {
 				case config.RetentionActionTransition:
 					r.transitionChunk(id)
 				default:
-					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
+					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", action)
 				}
 			}()
 		}

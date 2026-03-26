@@ -21,8 +21,8 @@ import (
 )
 
 const (
-	// forwardChanCap is the per-node channel capacity. When full, new
-	// records are dropped to bound memory and prevent backpressure.
+	// forwardChanCap is the per-node channel capacity for ingestion forwarding.
+	// When full, new records are dropped (best-effort delivery).
 	forwardChanCap = 1000
 
 	// streamBurstSize is the max records drained per burst on the stream.
@@ -34,13 +34,12 @@ const (
 // forwardEntry is a single record queued for forwarding.
 type forwardEntry struct {
 	vaultID uuid.UUID
-	tierID  uuid.UUID // zero = active tier; non-zero = specific tier (replication)
 	record  chunk.Record
 }
 
 // nodeForwarder manages a per-node channel and stream goroutine.
 type nodeForwarder struct {
-	ch   chan forwardEntry
+	ch   chan forwardEntry // ingestion forwarding (best-effort, drops on full)
 	done chan struct{}
 
 	// Backoff state — only accessed from the streamLoop goroutine.
@@ -132,33 +131,6 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 	return nil
 }
 
-// ForwardToTier enqueues records for delivery to a specific tier on the given node.
-// Used for record-level replication from primary to secondaries.
-func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
-	rf.mu.Lock()
-	if rf.closed {
-		rf.mu.Unlock()
-		return errors.New("forwarder closed")
-	}
-	nf, ok := rf.nodes[nodeID]
-	if !ok {
-		nf = rf.startNode(nodeID)
-	}
-	rf.mu.Unlock()
-
-	for _, rec := range records {
-		select {
-		case nf.ch <- forwardEntry{vaultID: vaultID, tierID: tierID, record: rec}:
-		default:
-			if !rf.stopping() {
-				rf.logger.Info("replication buffer full, dropping record",
-					"node", nodeID, "vault", vaultID, "tier", tierID)
-			}
-		}
-	}
-	return nil
-}
-
 // startNode creates and starts a per-node forwarder goroutine.
 // Must be called with rf.mu held.
 func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
@@ -230,18 +202,12 @@ func (rf *RecordForwarder) openStream(nodeID string) (grpc.ClientStream, error) 
 }
 
 // drainToStream reads from the channel and sends records on the stream in bursts.
-// One blocking read, then up to streamBurstSize-1 non-blocking reads, then send all.
-// Returns true if the channel was closed (shutdown), false on stream error.
+// Returns true if shutdown was requested, false on stream error.
 func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, stream grpc.ClientStream) bool {
 	for {
-		// Blocking read for the first entry.
 		var first forwardEntry
-		var ok bool
 		select {
-		case first, ok = <-nf.ch:
-			if !ok {
-				return true // channel closed — shutdown
-			}
+		case first = <-nf.ch:
 		case <-rf.stop:
 			return true
 		}
@@ -251,14 +217,7 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 		burst[0] = first
 		for len(burst) < streamBurstSize {
 			select {
-			case entry, chOk := <-nf.ch:
-				if !chOk {
-					// Channel closed mid-burst — send what we have, then exit.
-					if err := rf.sendBurst(nodeID, nf, stream, burst); err != nil {
-						return true
-					}
-					return true
-				}
+			case entry := <-nf.ch:
 				burst = append(burst, entry)
 			default:
 				goto send
@@ -272,38 +231,36 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 	}
 }
 
-// sendBurst groups entries by vault and sends one ForwardRecordsRequest per
-// vault on the stream. Returns nil on success.
-// forwardGroupKey groups entries by vault + tier for batching.
+// forwardGroupKey groups entries by vault for batching.
 type forwardGroupKey struct {
 	vaultID uuid.UUID
-	tierID  uuid.UUID
 }
 
+// sendBurst groups entries by vault and sends one ForwardRecordsRequest per
+// vault on the stream. Returns nil on success.
 func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream grpc.ClientStream, entries []forwardEntry) error {
-	// Group by vault + tier.
+	// Group by vault, preserving FIFO order within each group.
 	type groupData struct {
 		key     forwardGroupKey
 		records []*gastrologv1.ExportRecord
 	}
-	groups := make(map[forwardGroupKey]*groupData, 2)
+	var groups []groupData
+	groupIdx := make(map[forwardGroupKey]int, 2)
 	for _, e := range entries {
-		k := forwardGroupKey{vaultID: e.vaultID, tierID: e.tierID}
-		g, ok := groups[k]
+		k := forwardGroupKey{vaultID: e.vaultID}
+		idx, ok := groupIdx[k]
 		if !ok {
-			g = &groupData{key: k}
-			groups[k] = g
+			idx = len(groups)
+			groupIdx[k] = idx
+			groups = append(groups, groupData{key: k})
 		}
-		g.records = append(g.records, forwardEntryToProto(e))
+		groups[idx].records = append(groups[idx].records, forwardEntryToProto(e))
 	}
 
 	for _, g := range groups {
 		msg := &gastrologv1.ForwardRecordsRequest{
 			VaultId: g.key.vaultID.String(),
 			Records: g.records,
-		}
-		if g.key.tierID != (uuid.UUID{}) {
-			msg.TierId = g.key.tierID.String()
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			if !rf.stopping() {

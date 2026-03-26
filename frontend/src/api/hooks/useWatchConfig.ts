@@ -24,7 +24,9 @@ export function useWatchConfig() {
           // what we already hold from a mutation response or prior fetch.
           // This replaces the old timer-based suppression — zero races.
           if (streamVersion > getConfigVersion()) {
-            setConfigVersion(streamVersion);
+            // Don't advance the global version here — only mutation responses
+            // should do that. The queryFn compares against the cached data's
+            // version, so a refetch that returns the new version will be accepted.
             qc.invalidateQueries({ queryKey: ["config"] });
           }
 

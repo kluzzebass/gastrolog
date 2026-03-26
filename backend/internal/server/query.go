@@ -307,15 +307,14 @@ func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.Resume
 		return nil, nil
 	}
 
-	localVaults := make(map[uuid.UUID]struct{})
-	for _, id := range s.orch.ListVaults() {
-		localVaults[id] = struct{}{}
-	}
+	// No local-vault skip — a vault may have some tiers local and others
+	// remote. Both need to be searched. The ForwardSearch handler on the
+	// remote node only searches its LOCAL tiers, so no double-counting.
 
 	remoteTokens := make(map[uuid.UUID][]byte)
 	var localPositions []query.MultiVaultPosition
 	for vid, tokenData := range resume.VaultTokens {
-		if _, isLocal := localVaults[vid]; isLocal {
+		if s.orch.HasLocalQueryEngine(vid) {
 			positions, err := VaultTokenToPositions(tokenData)
 			if err != nil {
 				continue
@@ -366,10 +365,9 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		selected[id] = true
 	}
 
-	localVaults := make(map[uuid.UUID]struct{})
-	for _, id := range s.orch.ListVaults() {
-		localVaults[id] = struct{}{}
-	}
+	// No local-vault skip — a vault may have some tiers local and others
+	// remote. Both need to be searched. The ForwardSearch handler on the
+	// remote node only searches its LOCAL tiers, so no double-counting.
 
 	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
 	for i := range tiers {
@@ -381,19 +379,17 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
 		}
-		// Skip vaults already local to this node.
-		if _, isLocal := localVaults[v.ID]; isLocal {
-			continue
-		}
-		// Find the tier's NodeID (set by placement manager) to determine the owning node.
+		// Find ALL remote nodes that own tiers for this vault.
+		// A vault may span multiple nodes; each must be queried.
+		seen := make(map[string]bool)
 		for _, tierID := range v.TierIDs {
 			tc := tierMap[tierID]
-			if tc == nil {
+			if tc == nil || tc.NodeID == "" || tc.NodeID == s.localNodeID {
 				continue
 			}
-			if tc.NodeID != "" && tc.NodeID != s.localNodeID {
+			if !seen[tc.NodeID] {
+				seen[tc.NodeID] = true
 				byNode[tc.NodeID] = append(byNode[tc.NodeID], v.ID)
-				break // one node per vault for now
 			}
 		}
 	}

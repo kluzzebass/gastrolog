@@ -2,41 +2,17 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"time"
 
 	"gastrolog/internal/chunk"
 
 	"github.com/google/uuid"
 )
 
-// replicateRecord sends a record to all secondary nodes for a tier.
-// Async and non-blocking — uses the RecordForwarder's per-node buffered channels.
-// Only called on the primary; gated by !tier.IsSecondary in the caller.
-func (o *Orchestrator) replicateRecord(vaultID, tierID uuid.UUID, secondaryNodeIDs []string, rec chunk.Record) {
-	for _, nodeID := range secondaryNodeIDs {
-		if err := o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, tierID, []chunk.Record{rec}); err != nil {
-			o.logger.Warn("replication: forward failed", "node", nodeID, "vault", vaultID, "tier", tierID, "error", err)
-		}
-	}
-}
-
-// sealSecondaries sends a seal command to all secondary nodes for a tier.
-// Synchronous — seals are infrequent and boundary correctness is critical.
-// Only called on the primary after detecting a seal in appendRecord/AppendToTier.
-func (o *Orchestrator) sealSecondaries(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {
-	if o.transferrer == nil {
-		return
-	}
-	for _, nodeID := range secondaryNodeIDs {
-		if err := o.transferrer.ForwardSealTier(context.Background(), nodeID, vaultID, tierID, chunkID); err != nil {
-			o.logger.Warn("replication: seal forward failed",
-				"node", nodeID, "vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "error", err)
-		}
-	}
-}
-
 // SealActiveTier seals the active chunk for a specific tier.
-// Used by the ForwardSealTier handler on secondary nodes to seal at the
-// same boundary as the primary.
+// Used by the ForwardSealTier handler on secondary nodes.
 func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
@@ -47,10 +23,10 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 		return nil // nothing to seal
 	}
 	if active.ID != expectedChunkID {
-		o.logger.Warn("replication: seal chunk ID mismatch",
+		o.logger.Debug("replication: seal skipped — chunk already rotated",
 			"vault", vaultID, "tier", tierID,
-			"expected", expectedChunkID.String(), "actual", active.ID.String())
-		// Seal anyway to stay in sync — divergence is worse than a mismatched boundary.
+			"expected", expectedChunkID.String(), "active", active.ID.String())
+		return nil
 	}
 	chunkID := active.ID
 	if err := tier.Chunks.Seal(); err != nil {
@@ -58,4 +34,80 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 	}
 	o.postSealWork(vaultID, tier.Chunks, chunkID)
 	return nil
+}
+
+// scheduleReplication schedules a separate job to replicate a sealed chunk.
+// Decoupled from the post-seal pipeline — never blocks compression or indexing.
+func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {
+	if len(secondaryNodeIDs) == 0 {
+		return
+	}
+	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
+	// 10s network deadline per chunk — enough for any healthy transfer,
+	// short enough to release the gRPC connection when a secondary is down.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if err := o.scheduler.RunOnce(name, func() {
+		defer cancel()
+		o.replicateSealedChunk(ctx, vaultID, tierID, chunkID, secondaryNodeIDs)
+	}); err != nil {
+		cancel()
+		o.logger.Warn("failed to schedule replication", "name", name, "error", err)
+	}
+	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d secondaries", chunkID, len(secondaryNodeIDs)))
+}
+
+// replicateSealedChunk copies a sealed chunk from the primary to all secondaries.
+// Runs as its own scheduler job — decoupled from post-seal.
+// Each secondary receives the chunk via ForwardImportRecords with the original
+// chunk ID preserved — no ID mismatch, no ordering issues, no races.
+func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {
+	if o.transferrer == nil || len(secondaryNodeIDs) == 0 {
+		return
+	}
+
+	tier := o.findLocalTier(vaultID, tierID)
+	if tier == nil {
+		o.logger.Warn("replication: tier not found for sealed chunk",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		return
+	}
+
+	for _, nodeID := range secondaryNodeIDs {
+		if err := o.replicateToSecondary(ctx, vaultID, tierID, chunkID, tier.Chunks, nodeID); err != nil {
+			o.logger.Warn("replication: sealed chunk failed",
+				"node", nodeID, "vault", vaultID, "tier", tierID,
+				"chunk", chunkID.String(), "error", err)
+		} else {
+			o.logger.Info("replication: sealed chunk sent",
+				"node", nodeID, "vault", vaultID, "tier", tierID,
+				"chunk", chunkID.String())
+		}
+	}
+}
+
+// replicateToSecondary streams a single sealed chunk to one secondary node.
+// Validates that the chunk is readable before opening the network stream —
+// corrupted chunks fail fast without touching the wire.
+func (o *Orchestrator) replicateToSecondary(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
+	// Pre-flight: open and read the first record to confirm the chunk is intact.
+	// Corrupted compressed data fails here instantly — no network round-trip.
+	probe, err := cm.OpenCursor(chunkID)
+	if err != nil {
+		return fmt.Errorf("open cursor: %w", err)
+	}
+	_, _, probeErr := probe.Next()
+	_ = probe.Close()
+	if probeErr != nil && !errors.Is(probeErr, chunk.ErrNoMoreRecords) {
+		return fmt.Errorf("chunk unreadable: %w", probeErr)
+	}
+
+	// Chunk is readable — open a fresh cursor for the actual transfer.
+	cursor, err := cm.OpenCursor(chunkID)
+	if err != nil {
+		return fmt.Errorf("open cursor: %w", err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	iter := chunk.CursorIterator(cursor)
+	return o.transferrer.ReplicateSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, iter)
 }

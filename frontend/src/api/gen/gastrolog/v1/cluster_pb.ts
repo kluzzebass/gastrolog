@@ -823,6 +823,13 @@ export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
    */
   tierId = "";
 
+  /**
+   * optional: primary's active chunk ID for replica ID synchronization
+   *
+   * @generated from field: string chunk_id = 4;
+   */
+  chunkId = "";
+
   constructor(data?: PartialMessage<ForwardRecordsRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -834,6 +841,7 @@ export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
     { no: 3, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRecordsRequest {
@@ -2281,6 +2289,20 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
    */
   record?: ExportRecord;
 
+  /**
+   * optional: target specific tier (sealed-chunk replication)
+   *
+   * @generated from field: string tier_id = 3;
+   */
+  tierId = "";
+
+  /**
+   * optional: preserve primary's chunk ID on import
+   *
+   * @generated from field: string chunk_id = 4;
+   */
+  chunkId = "";
+
   constructor(data?: PartialMessage<ImportRecordMessage>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2291,6 +2313,8 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "record", kind: "message", T: ExportRecord },
+    { no: 3, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordMessage {

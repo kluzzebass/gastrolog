@@ -148,9 +148,24 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     );
   }
 
+  // Count replicas before dedup: how many nodes returned each chunk ID.
+  const replicaCount = new Map<string, number>();
+  for (const ch of chunks) {
+    replicaCount.set(ch.id, (replicaCount.get(ch.id) ?? 0) + 1);
+  }
+
+  // Deduplicate replicas: when RF > 1, the same chunk ID appears from
+  // multiple nodes. Keep only the first occurrence (primary's response).
+  const seen = new Set<string>();
+  const dedupedChunks = chunks.filter((c) => {
+    if (seen.has(c.id)) return false;
+    seen.add(c.id);
+    return true;
+  });
+
   // Group chunks by tier, then sort within each tier by time (newest first).
   const tierGroups = new Map<string, { tierType: string; chunks: ChunkMeta[] }>();
-  for (const chunk of chunks) {
+  for (const chunk of dedupedChunks) {
     const key = chunk.tierId || "unknown";
     const existing = tierGroups.get(key);
     if (existing) {
@@ -160,11 +175,13 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     }
   }
 
+  // Node name resolution — used by both local and remote tier headers.
+  const nodeNameMap = new Map((config?.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
+
   // Identify remote tiers (in vault config but no local chunks).
   const remoteTierInfo = (() => {
     if (!vaultCfg || !config?.tiers) return [];
     const localTierIds = new Set(tierGroups.keys());
-    const nodeNameMap = new Map((config.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
     const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud" };
     return vaultCfg.tierIds
       .filter((tid) => !localTierIds.has(tid))
@@ -176,6 +193,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
           pos: tierPositions.get(tid) ?? 0,
           type: tierTypeMap[tc.type] ?? "unknown",
           nodeName: tc.nodeId ? (nodeNameMap.get(tc.nodeId) ?? tc.nodeId) : "",
+          rf: tc.replicationFactor || 1,
+          secondaryNodeIds: [...tc.secondaryNodeIds],
+          storageClass: tc.storageClass,
         };
       })
       .filter((t): t is NonNullable<typeof t> => t !== null);
@@ -210,6 +230,32 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
             >
               <Badge variant="muted" dark={dark}>{`Tier ${String(pos)}: ${remote.type}`}</Badge>
               <span>{remote.nodeName ? `on ${remote.nodeName}` : "unplaced"}</span>
+              {remote.rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(remote.rf)}`}</Badge>}
+              {remote.secondaryNodeIds.length > 0 && (
+                <span>
+                  {"\u2192 "}
+                  {remote.secondaryNodeIds.map((id, si) => {
+                    const name = nodeNameMap.get(id) ?? id;
+                    let fallbackClass = 0;
+                    if (remote.storageClass > 0) {
+                      const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
+                      const hasExact = nsc?.areas.some((a) => a.storageClass === remote.storageClass);
+                      if (!hasExact && nsc && nsc.areas.length > 0) {
+                        fallbackClass = nsc.areas[0]!.storageClass;
+                      }
+                    }
+                    return (
+                      <span key={id}>
+                        {si > 0 && ", "}
+                        {name}
+                        {fallbackClass > 0 && (
+                          <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
+                        )}
+                      </span>
+                    );
+                  })}
+                </span>
+              )}
             </div>
           );
         }
@@ -217,6 +263,10 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         if (!group) return null;
 
         const label = `Tier ${String(pos)}: ${group.tierType}`;
+        const tierCfg = config?.tiers?.find((t) => t.id === tierId);
+        const rf = tierCfg?.replicationFactor || 1;
+        const secondaries = tierCfg?.secondaryNodeIds ?? [];
+        const nodeName = tierCfg?.nodeId ? (nodeNameMap.get(tierCfg.nodeId) ?? tierCfg.nodeId) : "";
         return (
         <div key={tierId}>
           <div
@@ -226,8 +276,36 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
             )}`}
           >
             <Badge variant="copper" dark={dark}>{label}</Badge>
+            {nodeName && <span>{`on ${nodeName}`}</span>}
             <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
             <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
+            {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}
+            {secondaries.length > 0 && (
+              <span>
+                {"\u2192 "}
+                {secondaries.map((id, si) => {
+                  const name = nodeNameMap.get(id) ?? id;
+                  const requiredClass = tierCfg?.storageClass ?? 0;
+                  let fallbackClass = 0;
+                  if (requiredClass > 0) {
+                    const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
+                    const hasExact = nsc?.areas.some((a) => a.storageClass === requiredClass);
+                    if (!hasExact && nsc && nsc.areas.length > 0) {
+                      fallbackClass = nsc.areas[0]!.storageClass;
+                    }
+                  }
+                  return (
+                    <span key={id}>
+                      {si > 0 && ", "}
+                      {name}
+                      {fallbackClass > 0 && (
+                        <span className="text-severity-warn">{` (class ${String(fallbackClass)})`}</span>
+                      )}
+                    </span>
+                  );
+                })}
+              </span>
+            )}
           </div>
           <table className="w-full border-collapse">
             <thead>
@@ -252,6 +330,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 const end = endTs ? instantToDate(protoToInstant(endTs)) : undefined;
                 const isExpanded = expandedChunk === chunk.id;
 
+                const replicas = replicaCount.get(chunk.id) ?? 1;
                 return (
                   <ChunkRow
                     key={chunk.id}
@@ -263,6 +342,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     onToggle={() => setExpandedChunk(isExpanded ? null : chunk.id)}
                     dark={dark}
                     c={c}
+                    replicas={replicas}
+                    rf={rf}
+                    replicaNodes={tierCfg ? [tierCfg.nodeId, ...tierCfg.secondaryNodeIds].filter(Boolean).map((id) => nodeNameMap.get(id) ?? id) : []}
                   />
                 );
               })}
@@ -283,6 +365,9 @@ function ChunkRow({
   onToggle,
   dark,
   c,
+  replicas,
+  rf,
+  replicaNodes,
 }: Readonly<{
   chunk: ChunkMeta;
   vaultId: string;
@@ -292,6 +377,9 @@ function ChunkRow({
   onToggle: () => void;
   dark: boolean;
   c: (darkCls: string, lightCls: string) => string;
+  replicas: number;
+  rf: number;
+  replicaNodes: string[];
 }>) {
   return (
     <>
@@ -346,6 +434,18 @@ function ChunkRow({
             {chunk.archived && (
               <Badge variant="warn" dark={dark}>archived</Badge>
             )}
+            {rf > 1 && (
+              <span title={replicas >= rf
+                ? `${String(replicas)} replicas (fully replicated)`
+                : replicaNodes.length < rf
+                  ? `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage`
+                  : `${String(replicas)}/${String(rf)} replicas — replication in progress`
+              }>
+                <Badge variant={replicas >= rf ? "info" : replicaNodes.length < rf ? "error" : "warn"} dark={dark}>
+                  {String(replicas)}
+                </Badge>
+              </span>
+            )}
           </span>
         </td>
         <td className={`px-2 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -365,7 +465,7 @@ function ChunkRow({
       {isExpanded && (
         <tr>
           <td colSpan={5} className="p-0">
-            <ChunkDetail vaultId={vaultId} chunk={chunk} dark={dark} />
+            <ChunkDetail vaultId={vaultId} chunk={chunk} dark={dark} replicas={replicas} rf={rf} replicaNodes={replicaNodes} />
           </td>
         </tr>
       )}
@@ -377,10 +477,16 @@ function ChunkDetail({
   vaultId,
   chunk,
   dark,
+  replicas,
+  rf,
+  replicaNodes,
 }: Readonly<{
   vaultId: string;
   chunk: ChunkMeta;
   dark: boolean;
+  replicas: number;
+  rf: number;
+  replicaNodes: string[];
 }>) {
   const c = useThemeClass(dark);
   // Skip index fetch for cloud-backed chunks — they don't have local indexes.
@@ -408,6 +514,37 @@ function ChunkDetail({
           {chunk.id}
         </div>
       </div>
+
+      {/* Replication info — only shown when RF > 1 */}
+      {rf > 1 && (
+        <div className="mb-3">
+          <div
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          >
+            Replicas
+          </div>
+          <div className={`flex flex-col gap-1`}>
+            <div className={`flex items-center gap-3 text-[0.85em]`}>
+              <span className={`font-mono ${replicas >= rf
+                ? c("text-text-muted", "text-light-text-muted")
+                : replicaNodes.length < rf ? "text-severity-error" : "text-severity-warn"
+              }`}>
+                {`${String(replicas)}/${String(rf)}`}
+              </span>
+              {replicaNodes.length > 0 && (
+                <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                  {replicaNodes.join(", ")}
+                </span>
+              )}
+            </div>
+            {replicaNodes.length < rf && (
+              <span className="text-[0.8em] text-severity-error">
+                Not enough nodes with the required storage class to satisfy RF={String(rf)}
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Compression / storage info */}
       {showCompression && (

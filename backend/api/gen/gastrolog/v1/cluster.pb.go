@@ -1016,7 +1016,8 @@ type ForwardRecordsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
-	TierId        string                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"` // optional: target specific tier for inter-tier transition; empty = active tier
+	TierId        string                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`    // optional: target specific tier for inter-tier transition; empty = active tier
+	ChunkId       string                 `protobuf:"bytes,4,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // optional: primary's active chunk ID for replica ID synchronization
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1068,6 +1069,13 @@ func (x *ForwardRecordsRequest) GetRecords() []*ExportRecord {
 func (x *ForwardRecordsRequest) GetTierId() string {
 	if x != nil {
 		return x.TierId
+	}
+	return ""
+}
+
+func (x *ForwardRecordsRequest) GetChunkId() string {
+	if x != nil {
+		return x.ChunkId
 	}
 	return ""
 }
@@ -2725,6 +2733,8 @@ type ImportRecordMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Record        *ExportRecord          `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
+	TierId        string                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`    // optional: target specific tier (sealed-chunk replication)
+	ChunkId       string                 `protobuf:"bytes,4,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // optional: preserve primary's chunk ID on import
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2771,6 +2781,20 @@ func (x *ImportRecordMessage) GetRecord() *ExportRecord {
 		return x.Record
 	}
 	return nil
+}
+
+func (x *ImportRecordMessage) GetTierId() string {
+	if x != nil {
+		return x.TierId
+	}
+	return ""
+}
+
+func (x *ImportRecordMessage) GetChunkId() string {
+	if x != nil {
+		return x.ChunkId
+	}
+	return ""
 }
 
 // PullManagedFileRequest asks a peer to stream a managed file's contents.
@@ -3134,11 +3158,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
 	"\x06errors\x18\x04 \x01(\x04R\x06errors\x12\x18\n" +
 	"\arunning\x18\x05 \x01(\bR\arunning\x12\x12\n" +
-	"\x04name\x18\x06 \x01(\tR\x04name\"\x81\x01\n" +
+	"\x04name\x18\x06 \x01(\tR\x04name\"\x9c\x01\n" +
 	"\x15ForwardRecordsRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12\x17\n" +
-	"\atier_id\x18\x03 \x01(\tR\x06tierId\"A\n" +
+	"\atier_id\x18\x03 \x01(\tR\x06tierId\x12\x19\n" +
+	"\bchunk_id\x18\x04 \x01(\tR\achunkId\"A\n" +
 	"\x16ForwardRecordsResponse\x12'\n" +
 	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWritten\"g\n" +
 	"\x16ForwardSealTierRequest\x12\x19\n" +
@@ -3226,10 +3251,12 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\tvault_ids\x18\x01 \x03(\tR\bvaultIds\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\"M\n" +
 	"\x15ForwardFollowResponse\x124\n" +
-	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"d\n" +
+	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"\x98\x01\n" +
 	"\x13ImportRecordMessage\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x122\n" +
-	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\"1\n" +
+	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\x12\x17\n" +
+	"\atier_id\x18\x03 \x01(\tR\x06tierId\x12\x19\n" +
+	"\bchunk_id\x18\x04 \x01(\tR\achunkId\"1\n" +
 	"\x16PullManagedFileRequest\x12\x17\n" +
 	"\afile_id\x18\x01 \x01(\tR\x06fileId\"V\n" +
 	"\x14PullManagedFileChunk\x12\x12\n" +

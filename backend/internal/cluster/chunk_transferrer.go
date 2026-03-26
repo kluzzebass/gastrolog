@@ -113,6 +113,60 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 	return nil
 }
 
+// ReplicateSealedChunk streams a sealed chunk's records to a secondary node's
+// specific tier, preserving the original chunk ID. Used for sealed-chunk replication.
+func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	conn, err := ct.peers.Conn(nodeID)
+	if err != nil {
+		return fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+
+	streamDesc := &grpc.StreamDesc{
+		StreamName:    "ForwardImportRecords",
+		ClientStreams: true,
+	}
+	stream, err := conn.NewStream(ctx, streamDesc, "/gastrolog.v1.ClusterService/ForwardImportRecords")
+	if err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("open replication stream to %s: %w", nodeID, err)
+	}
+
+	vid := vaultID.String()
+	tid := tierID.String()
+	cid := chunkID.String()
+	for {
+		rec, iterErr := next()
+		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if iterErr != nil {
+			return fmt.Errorf("read records for replication: %w", iterErr)
+		}
+		msg := &gastrologv1.ImportRecordMessage{
+			VaultId: vid,
+			TierId:  tid,
+			ChunkId: cid,
+			Record:  chunkRecordToExport(rec),
+		}
+		if err := stream.SendMsg(msg); err != nil {
+			ct.peers.Invalidate(nodeID)
+			return fmt.Errorf("send record to %s: %w", nodeID, err)
+		}
+	}
+
+	if err := stream.CloseSend(); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("close send to %s: %w", nodeID, err)
+	}
+
+	resp := &gastrologv1.ForwardRecordsResponse{}
+	if err := stream.RecvMsg(resp); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("receive response from %s: %w", nodeID, err)
+	}
+	return nil
+}
+
 // ForwardTierAppend sends records to a specific tier on a remote node.
 // Same as ForwardAppend but sets TierId so the receiver targets that tier
 // instead of the vault's active tier. Used by inter-tier transition.

@@ -81,8 +81,6 @@ type drainState struct {
 // enqueue) so they're safe to call under the orchestrator mutex.
 type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
-	// ForwardToTier sends records targeting a specific tier. Used for replication.
-	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk
@@ -109,6 +107,10 @@ type RemoteTransferrer interface {
 	// ForwardSealTier commands a secondary to seal its active chunk at the
 	// same boundary as the primary. Used for seal synchronization during replication.
 	ForwardSealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+
+	// ReplicateSealedChunk streams a sealed chunk to a secondary node's specific
+	// tier, preserving the original chunk ID. Used for sealed-chunk replication.
+	ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to

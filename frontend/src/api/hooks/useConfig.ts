@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, QueryClient } from "@tanstack/react-query";
 import { configClient } from "../client";
 import { GetConfigResponse } from "../gen/gastrolog/v1/config_pb";
 import { protoSharing } from "./protoSharing";
@@ -50,10 +50,14 @@ export function useConfigMutation<TArgs, TResult>(
         setConfigVersion(cfg.configVersion);
         qc.cancelQueries({ queryKey: ["config"] });
         qc.setQueryData(["config"], cfg);
+      } else {
+        // Only invalidate config when the response didn't carry the full
+        // config — otherwise the refetch can hit a stale Raft follower and
+        // overwrite the correct setQueryData with old data.
+        qc.invalidateQueries({ queryKey: ["config"] });
       }
       // Invalidate all data-dependent caches. Any mutation can affect
-      // config, vault stats, chunk lists, and settings.
-      qc.invalidateQueries({ queryKey: ["config"] });
+      // vault stats, chunk lists, and settings.
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["chunks"] });
@@ -65,10 +69,18 @@ export function useConfigMutation<TArgs, TResult>(
 }
 
 export function useConfig() {
+  const qc = useQueryClient();
   return useQuery({
     queryKey: ["config"],
     queryFn: async () => {
       const response = await configClient.getConfig({});
+      // Reject stale refetches: if a Raft follower returns an older version
+      // than what's already in the cache (from a mutation or earlier fetch),
+      // keep the cached data instead of regressing.
+      const cached = qc.getQueryData<GetConfigResponse>(["config"]);
+      if (cached && response.configVersion < cached.configVersion) {
+        return cached;
+      }
       setConfigVersion(response.configVersion);
       return response;
     },

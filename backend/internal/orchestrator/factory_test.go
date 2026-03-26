@@ -46,7 +46,8 @@ func (f *fakeChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta,
 func (f *fakeChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
 	return nil
 }
-func (f *fakeChunkManager) Close() error { return nil }
+func (f *fakeChunkManager) SetNextChunkID(_ chunk.ChunkID) {}
+func (f *fakeChunkManager) Close() error                   { return nil }
 
 // fakeIndexManager implements index.IndexManager for testing.
 type fakeIndexManager struct{}

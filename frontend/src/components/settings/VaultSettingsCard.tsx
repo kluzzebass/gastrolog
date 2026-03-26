@@ -76,7 +76,7 @@ export function VaultSettingsCard({
   tiers,
   routes: _routes,
   nodeConfigs,
-  nodeStorageConfigs: _nodeStorageConfigs,
+  nodeStorageConfigs,
   storageClassOptions,
   cloudServiceOptions,
   rotationPolicyOptions,
@@ -98,9 +98,6 @@ export function VaultSettingsCard({
 
   // Inline tier creation state.
   const [newTier, setNewTier] = useState<TierEntry | null>(null);
-  const [creatingTier, setCreatingTier] = useState(false);
-
-
   // Per-vault state — previously Record maps in the parent.
   const [deleteData, setDeleteData] = useState(false);
   const [migrateTarget, setMigrateTarget] = useState<{ name: string; type: string; dir: string } | null>(null);
@@ -114,7 +111,8 @@ export function VaultSettingsCard({
     tierIds: string[];
     tierRotation: Record<string, string>;    // tierId → rotationPolicyId
     tierRetention: Record<string, string>;   // tierId → retentionPolicyId
-    tierRF: Record<string, number>;          // tierId → replicationFactor
+    tierRF: Record<string, string>;          // tierId → replicationFactor (string during editing)
+    tierStorageClass: Record<string, string>; // tierId → storageClass (string during editing)
   }
 
   const buildInitialEdit = (): VaultEdit => ({
@@ -128,23 +126,41 @@ export function VaultSettingsCard({
       tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
     ),
     tierRF: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.replicationFactor || 1]),
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.replicationFactor || 1)]),
+    ),
+    tierStorageClass: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.storageClass || 0)]),
     ),
   });
 
   const [edit, setEditState] = useState<VaultEdit>(buildInitialEdit);
   const resetEdit = () => setEditState(buildInitialEdit());
 
+  // Sync edit state with props after save. When `pendingReset` is true,
+  // the next props change unconditionally resets the edit state.
+  const initial = buildInitialEdit();
+  const initialJson = JSON.stringify(initial);
+  const [pendingReset, setPendingReset] = useState(false);
+  const [lastInitialJson, setLastInitialJson] = useState(initialJson);
+  if (initialJson !== lastInitialJson) {
+    setLastInitialJson(initialJson);
+    if (pendingReset) {
+      setEditState(initial);
+      setPendingReset(false);
+    }
+  }
+
   const setEdit = (patch: Partial<VaultEdit>) => setEditState((prev) => ({ ...prev, ...patch }));
   const setTierRotationPolicy = (tierId: string, value: string) =>
     setEditState((prev) => ({ ...prev, tierRotation: { ...prev.tierRotation, [tierId]: value } }));
   const setTierRetentionPolicyId = (tierId: string, value: string) =>
     setEditState((prev) => ({ ...prev, tierRetention: { ...prev.tierRetention, [tierId]: value } }));
-  const setTierRF = (tierId: string, value: number) =>
+  const setTierRF = (tierId: string, value: string) =>
     setEditState((prev) => ({ ...prev, tierRF: { ...prev.tierRF, [tierId]: value } }));
+  const setTierStorageClass = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierStorageClass: { ...prev.tierStorageClass, [tierId]: value } }));
 
-  const initial = buildInitialEdit();
-  const anyDirty = JSON.stringify(edit) !== JSON.stringify(initial);
+  const anyDirty = JSON.stringify(edit) !== initialJson || newTier !== null;
 
   // Aliases for backward compat with the rest of the component.
   const localTierIds = edit.tierIds;
@@ -159,6 +175,15 @@ export function VaultSettingsCard({
   // Node name resolution for tier placement display.
   const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
   const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
+
+  // Check if a node has a specific storage class; returns the fallback class if not.
+  const nodeStorageClass = (nodeId: string, requiredClass: number): { exact: boolean; actualClass: number } => {
+    const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
+    if (!nsc) return { exact: false, actualClass: 0 };
+    if (nsc.areas.some((a) => a.storageClass === requiredClass)) return { exact: true, actualClass: requiredClass };
+    const first = nsc.areas[0];
+    return { exact: false, actualClass: first?.storageClass ?? 0 };
+  };
 
   const { handleSave: saveVault, handleDelete } = useCrudHandlers({
     mutation: putVault,
@@ -178,7 +203,9 @@ export function VaultSettingsCard({
       enabled: e.enabled,
     }),
     onDeleteTransform: (id) => ({ id, force: true, deleteData }),
-    clearEdit: () => resetEdit(),
+    // Don't reset edit state eagerly — props are stale inside the async
+    // handler. The edit state stays as-is; anyDirty becomes false naturally
+    // when the parent re-renders with updated config from setQueryData.
   });
 
   const warnings: string[] = [];
@@ -291,6 +318,39 @@ export function VaultSettingsCard({
           )}
           <Button
             onClick={async () => {
+              // Create staged new tier first, then include its ID in the vault save.
+              let newTierIds = [...edit.tierIds];
+              if (newTier && isTierComplete(newTier, cloudServiceOptions.length > 0)) {
+                const tierId = crypto.randomUUID();
+                const tierCfg = new TierConfig({
+                  id: tierId,
+                  name: newTier.type,
+                  type: tierTypeEnum(newTier.type),
+                  storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
+                  cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
+                  activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
+                  cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
+                  memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
+                  rotationPolicyId: newTier.rotationPolicyId,
+                  retentionRules: newTier.retentionPolicyId
+                    ? [new RetentionRule({
+                        retentionPolicyId: newTier.retentionPolicyId,
+                        action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
+                      })]
+                    : [],
+                  replicationFactor: parseInt(newTier.replicationFactor, 10) || 1,
+                });
+                try {
+                  await putTier.mutateAsync({ config: tierCfg });
+                  newTierIds = [...newTierIds, tierId];
+                  setEdit({ tierIds: newTierIds });
+                  setNewTier(null);
+                } catch (err: unknown) {
+                  addToast(err instanceof Error ? err.message : "Failed to create tier", "error");
+                  return; // Don't save vault if tier creation failed.
+                }
+              }
+
               // Save tier-level changes (rotation + retention) via PutTier.
               for (const [tierId, rpId] of Object.entries(edit.tierRotation)) {
                 const tier = tiers.find((t) => t.id === tierId);
@@ -322,20 +382,32 @@ export function VaultSettingsCard({
                   : [];
                 await putTier.mutateAsync({ config: updated });
               }
-              // Save RF changes.
-              for (const [tierId, rf] of Object.entries(edit.tierRF)) {
+              // Save RF changes (parse string → number, empty/invalid defaults to 1).
+              for (const [tierId, rfStr] of Object.entries(edit.tierRF)) {
                 const tier = tiers.find((t) => t.id === tierId);
+                const rf = parseInt(rfStr, 10) || 1;
                 if (!tier || rf === (tier.replicationFactor || 1)) continue;
                 const updated = tier.clone();
                 updated.replicationFactor = rf;
                 await putTier.mutateAsync({ config: updated });
               }
+              // Save storage class changes.
+              for (const [tierId, scStr] of Object.entries(edit.tierStorageClass)) {
+                const tier = tiers.find((t) => t.id === tierId);
+                const sc = parseInt(scStr, 10) || 0;
+                if (!tier || sc === (tier.storageClass || 0)) continue;
+                const updated = tier.clone();
+                updated.storageClass = sc;
+                await putTier.mutateAsync({ config: updated });
+              }
               // Save vault-level changes (name, enabled, tier order).
               const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
-                JSON.stringify(edit.tierIds) !== JSON.stringify([...vault.tierIds]);
+                JSON.stringify(newTierIds) !== JSON.stringify([...vault.tierIds]);
               if (vaultChanged) {
-                saveVault(vault.id, { name: edit.name, tierIds: edit.tierIds, enabled: edit.enabled });
+                saveVault(vault.id, { name: edit.name, tierIds: newTierIds, enabled: edit.enabled });
               }
+              // Mark for reset — the next props update will sync edit state.
+              setPendingReset(true);
             }}
             disabled={putVault.isPending || putTier.isPending || !anyDirty}
           >
@@ -471,8 +543,28 @@ export function VaultSettingsCard({
                         <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
                       )}
                       <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
-                      {tier.secondaryNodeIds.length > 0 && (
-                        <span>{tier.secondaryNodeIds.map((id) => resolveNodeName(id)).join(", ")}</span>
+                      {(tier.secondaryNodeIds?.length ?? 0) > 0 && (
+                        <span>
+                          {tier.secondaryNodeIds.map((id, si) => {
+                            const name = resolveNodeName(id);
+                            const sc = tier.storageClass > 0 ? nodeStorageClass(id, tier.storageClass) : null;
+                            const fallback = sc && !sc.exact && sc.actualClass > 0;
+                            return (
+                              <span key={id}>
+                                {si > 0 && ", "}
+                                {name}
+                                {fallback && (
+                                  <span className="text-severity-warn">{` (class ${String(sc.actualClass)})`}</span>
+                                )}
+                              </span>
+                            );
+                          })}
+                        </span>
+                      )}
+                      {(tier.replicationFactor || 1) > 1 && (tier.secondaryNodeIds?.length ?? 0) + 1 < (tier.replicationFactor || 1) && (
+                        <span className="text-severity-error">
+                          {`insufficient nodes for RF=${String(tier.replicationFactor)}`}
+                        </span>
                       )}
                     </div>
                     <div className="pl-6 flex flex-col gap-2">
@@ -504,10 +596,20 @@ export function VaultSettingsCard({
                           </FormField>
                         </>
                       )}
+                      {tier.type === TierType.FILE && storageClassOptions.length > 0 && (
+                        <FormField label="Storage Class" dark={dark}>
+                          <SelectInput
+                            value={edit.tierStorageClass[tier.id] ?? String(tier.storageClass || 0)}
+                            onChange={(v) => setTierStorageClass(tier.id, v)}
+                            options={storageClassOptions}
+                            dark={dark}
+                          />
+                        </FormField>
+                      )}
                       <FormField label="Replication Factor" dark={dark}>
                         <NumberInput
-                          value={String(edit.tierRF[tier.id] ?? tier.replicationFactor ?? 1)}
-                          onChange={(v) => setTierRF(tier.id, parseInt(v, 10) || 1)}
+                          value={edit.tierRF[tier.id] ?? String(tier.replicationFactor ?? 1)}
+                          onChange={(v) => setTierRF(tier.id, v)}
                           placeholder="1"
                           dark={dark}
                           min={1}
@@ -520,72 +622,31 @@ export function VaultSettingsCard({
             </div>
           )}
           {newTier ? (
-            <div className="flex flex-col gap-2">
-              <TierEntryCard
-                tier={newTier}
-                index={vaultTiers.length}
-                dark={dark}
-                storageClassOptions={storageClassOptions}
-                cloudServiceOptions={cloudServiceOptions}
-                rotationPolicyOptions={rotationPolicyOptions}
-                retentionPolicyOptions={retentionPolicyOptions}
-                onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
-                onRemove={() => setNewTier(null)}
-              />
-              <div className="flex justify-end gap-2">
-                <Button onClick={() => setNewTier(null)}>Cancel</Button>
-                <Button
-                  onClick={async () => {
-                    if (!isTierComplete(newTier, cloudServiceOptions.length > 0)) return;
-                    const tierId = crypto.randomUUID();
-                    const tierCfg = new TierConfig({
-                      id: tierId,
-                      name: newTier.type,
-                      type: tierTypeEnum(newTier.type),
-                      storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
-                      cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
-                      activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
-                      cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
-                      memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
-                      rotationPolicyId: newTier.rotationPolicyId,
-                      retentionRules: newTier.retentionPolicyId
-                        ? [new RetentionRule({
-                            retentionPolicyId: newTier.retentionPolicyId,
-                            action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
-                          })]
-                        : [],
-                      replicationFactor: parseInt(newTier.replicationFactor, 10) || 1,
-                    });
-                    setCreatingTier(true);
-                    try {
-                      await putTier.mutateAsync({ config: tierCfg });
-                      setEdit({ tierIds: [...edit.tierIds, tierId] });
-                      setNewTier(null);
-                      setCreatingTier(false);
-                      addToast("Tier created — save to apply", "info");
-                    } catch (err: unknown) {
-                      setCreatingTier(false);
-                      const msg = err instanceof Error ? err.message : "Failed to add tier";
-                      addToast(msg, "error");
-                    }
-                  }}
-                  disabled={creatingTier || !isTierComplete(newTier, cloudServiceOptions.length > 0)}
-                >
-                  {creatingTier ? "Creating..." : "Create Tier"}
-                </Button>
-              </div>
-            </div>
-          ) : (
-            <DropdownButton
-              label="+ Add Tier"
-              items={[
-                { value: "memory", label: "Memory" },
-                { value: "file", label: "File" },
-                { value: "cloud", label: "Cloud" },
-              ]}
-              onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}
+            <TierEntryCard
+              tier={newTier}
+              index={vaultTiers.length}
               dark={dark}
+              storageClassOptions={storageClassOptions}
+              cloudServiceOptions={cloudServiceOptions}
+              rotationPolicyOptions={rotationPolicyOptions}
+              retentionPolicyOptions={retentionPolicyOptions}
+              onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
+              onRemove={() => setNewTier(null)}
             />
+          ) : (
+            <div className="flex justify-end">
+              <DropdownButton
+                label="+ Add Tier"
+                items={[
+                  { value: "memory", label: "Memory" },
+                  { value: "file", label: "File" },
+                  { value: "cloud", label: "Cloud" },
+                ]}
+                onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}
+                dark={dark}
+                dropUp
+              />
+            </div>
           )}
         </div>
         {migrateTarget && (

@@ -56,7 +56,8 @@ func (f *retentionFakeChunkManager) ImportRecords(chunk.RecordIterator) (chunk.C
 func (f *retentionFakeChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
 	return nil
 }
-func (f *retentionFakeChunkManager) Close() error { return nil }
+func (f *retentionFakeChunkManager) SetNextChunkID(_ chunk.ChunkID) {}
+func (f *retentionFakeChunkManager) Close() error                   { return nil }
 
 // ---------- fake index manager ----------
 

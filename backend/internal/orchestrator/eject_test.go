@@ -730,3 +730,6 @@ var errTest = errors.New("test error")
 func (m *ejectFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
+func (m *ejectFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	return nil
+}

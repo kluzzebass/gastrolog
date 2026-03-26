@@ -78,6 +78,10 @@ type ExportToVaultExecutor func(ctx context.Context, expression string, targetVa
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
 type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
 
+// TierRecordImporter imports records as a sealed chunk in a specific tier,
+// preserving the original chunk ID. Used for sealed-chunk replication.
+type TierRecordImporter func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
+
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
 type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
@@ -100,6 +104,11 @@ func (s *Server) SetRecordTierAppender(fn RecordTierAppender) {
 // Must be called before ForwardImportRecords RPCs.
 func (s *Server) SetRecordImporter(fn RecordImporter) {
 	s.recordImporter = fn
+}
+
+// SetTierRecordImporter injects the callback for tier-targeted sealed-chunk imports.
+func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
+	s.tierRecordImporter = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -245,8 +254,8 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 
 		for _, exportRec := range msg.GetRecords() {
 			rec := exportRecordToChunk(exportRec)
-			if err := s.recordAppender(stream.Context(), vaultID, rec); err != nil {
-				return status.Errorf(codes.Internal, "append: %v", err)
+			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
+				return status.Errorf(codes.Internal, "append: %v", appendErr)
 			}
 			written++
 		}
@@ -287,7 +296,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return status.Error(codes.Unavailable, "record importer not configured")
 	}
 
-	// Read first message to get vault_id.
+	// Read first message to get vault_id and optional tier_id/chunk_id.
 	first := &gastrologv1.ImportRecordMessage{}
 	if err := stream.RecvMsg(first); err != nil {
 		if errors.Is(err, io.EOF) {
@@ -299,6 +308,22 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	vaultID, err := uuid.Parse(first.GetVaultId())
 	if err != nil {
 		return status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+
+	// Tier-targeted import for sealed-chunk replication.
+	var tierID uuid.UUID
+	var replicaChunkID chunk.ChunkID
+	if first.GetTierId() != "" {
+		tierID, err = uuid.Parse(first.GetTierId())
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+		}
+	}
+	if first.GetChunkId() != "" {
+		replicaChunkID, err = chunk.ParseChunkID(first.GetChunkId())
+		if err != nil {
+			return status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+		}
 	}
 
 	// Build iterator: yields first record, then reads from stream.
@@ -322,8 +347,15 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return exportRecordToChunk(msg.GetRecord()), nil
 	})
 
-	if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
-		return status.Errorf(codes.Internal, "import records: %v", err)
+	// Route to tier-targeted importer (replication) or vault importer (migration).
+	if tierID != uuid.Nil && replicaChunkID != (chunk.ChunkID{}) && s.tierRecordImporter != nil {
+		if err := s.tierRecordImporter(stream.Context(), vaultID, tierID, replicaChunkID, next); err != nil {
+			return status.Errorf(codes.Internal, "tier import records: %v", err)
+		}
+	} else {
+		if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
+			return status.Errorf(codes.Internal, "import records: %v", err)
+		}
 	}
 
 	return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{RecordsWritten: count})

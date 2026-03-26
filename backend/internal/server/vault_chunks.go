@@ -56,7 +56,9 @@ func (s *VaultServer) ListChunks(
 	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: allChunks}), nil
 }
 
-// remoteTierNodes returns node IDs of remote nodes that own tiers for a vault.
+// remoteTierNodes returns node IDs of ALL remote nodes that host tiers for a
+// vault — both primaries and secondaries. This ensures ListChunks collects
+// replica chunks for accurate replica counting.
 func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []string {
 	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || vaultCfg == nil {
@@ -66,17 +68,27 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 	if err != nil {
 		return nil
 	}
-	tierMap := make(map[uuid.UUID]string, len(tiers))
-	for _, t := range tiers {
-		tierMap[t.ID] = t.NodeID
+	tierIDs := make(map[uuid.UUID]bool, len(vaultCfg.TierIDs))
+	for _, tid := range vaultCfg.TierIDs {
+		tierIDs[tid] = true
 	}
 	seen := make(map[string]bool)
 	var nodes []string
-	for _, tid := range vaultCfg.TierIDs {
-		nodeID := tierMap[tid]
-		if nodeID != "" && nodeID != s.localNodeID && !seen[nodeID] {
-			seen[nodeID] = true
-			nodes = append(nodes, nodeID)
+	for _, t := range tiers {
+		if !tierIDs[t.ID] {
+			continue
+		}
+		// Primary node.
+		if t.NodeID != "" && t.NodeID != s.localNodeID && !seen[t.NodeID] {
+			seen[t.NodeID] = true
+			nodes = append(nodes, t.NodeID)
+		}
+		// Secondary nodes.
+		for _, sid := range t.SecondaryNodeIDs {
+			if sid != s.localNodeID && !seen[sid] {
+				seen[sid] = true
+				nodes = append(nodes, sid)
+			}
 		}
 	}
 	return nodes

@@ -116,6 +116,19 @@ func (o *Orchestrator) ListVaults() []uuid.UUID {
 	return keys
 }
 
+// HasLocalQueryEngine returns true if the vault has at least one tier with
+// a query engine on this node (i.e., actual searchable data, not just a
+// routing entry). Used by search fan-out to decide local vs. remote.
+func (o *Orchestrator) HasLocalQueryEngine(vaultID uuid.UUID) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	v := o.vaults[vaultID]
+	if v == nil {
+		return false
+	}
+	return len(v.Tiers) > 0
+}
+
 // ListIngesters returns all registered ingester IDs in deterministic order.
 func (o *Orchestrator) ListIngesters() []uuid.UUID {
 	o.mu.RLock()

@@ -52,7 +52,8 @@ func (f *cronFakeChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkM
 func (f *cronFakeChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
 	return nil
 }
-func (f *cronFakeChunkManager) Close() error { return nil }
+func (f *cronFakeChunkManager) SetNextChunkID(_ chunk.ChunkID) {}
+func (f *cronFakeChunkManager) Close() error                   { return nil }
 
 // ---------- helpers ----------
 

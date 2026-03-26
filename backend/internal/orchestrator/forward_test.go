@@ -179,8 +179,6 @@ func (n *noopChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta,
 func (n *noopChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
 	return nil
 }
-func (n *noopChunkManager) Close() error { return nil }
+func (n *noopChunkManager) SetNextChunkID(_ chunk.ChunkID) {}
+func (n *noopChunkManager) Close() error                   { return nil }
 
-func (m *mockForwarder) ForwardToTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}

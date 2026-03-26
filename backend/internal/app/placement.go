@@ -216,7 +216,10 @@ func (pm *placementManager) placeSecondaries(ctx context.Context, tier *config.T
 }
 
 // secondaryCandidates returns eligible nodes for secondary placement, excluding the primary.
+// For file/cloud tiers, prefers nodes with the exact storage class, but falls back to any
+// node with ANY storage area — replicas degrade gracefully rather than being unplaceable.
 func (pm *placementManager) secondaryCandidates(tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig) []string {
+	// First pass: exact storage class match.
 	eligible := pm.eligibleNodes(tier, alive, nscs)
 	var candidates []string
 	for _, n := range eligible {
@@ -224,7 +227,29 @@ func (pm *placementManager) secondaryCandidates(tier config.TierConfig, alive ma
 			candidates = append(candidates, n)
 		}
 	}
+	if len(candidates) > 0 {
+		return candidates
+	}
+
+	// Fallback: any alive node with ANY storage area (for file/cloud tiers).
+	// Replicas on a different storage class are better than no replicas.
+	if tier.Type == config.TierTypeFile || tier.Type == config.TierTypeCloud {
+		for nodeID := range alive {
+			if nodeID == tier.NodeID {
+				continue
+			}
+			if nodeHasAnyStorage(nscs, nodeID) {
+				candidates = append(candidates, nodeID)
+			}
+		}
+	}
 	return candidates
+}
+
+// nodeHasAnyStorage checks if a node has at least one configured storage area.
+func nodeHasAnyStorage(nscs []config.NodeStorageConfig, nodeID string) bool {
+	idx := slices.IndexFunc(nscs, func(n config.NodeStorageConfig) bool { return n.NodeID == nodeID })
+	return idx >= 0 && len(nscs[idx].Areas) > 0
 }
 
 // reconcileSecondaries validates existing secondaries, fills to desired count, and trims excess.

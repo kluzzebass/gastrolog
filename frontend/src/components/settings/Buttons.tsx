@@ -69,6 +69,7 @@ interface DropdownButtonProps {
   items: DropdownItem[];
   onSelect: (value: string) => void;
   dark?: boolean;
+  dropUp?: boolean;
 }
 
 export function DropdownButton({
@@ -76,6 +77,7 @@ export function DropdownButton({
   items,
   onSelect,
   dark = true,
+  dropUp = false,
 }: Readonly<DropdownButtonProps>) {
   const c = useThemeClass(dark);
   const [open, setOpen] = useState(false);
@@ -89,7 +91,7 @@ export function DropdownButton({
       </Button>
       {open && (
         <div
-          className={`absolute left-0 bottom-full mb-1 min-w-[10rem] rounded border shadow-lg z-50 py-1 ${c(
+          className={`absolute right-0 min-w-[10rem] rounded border shadow-lg z-50 py-1 ${dropUp ? "bottom-full mb-1" : "top-full mt-1"} ${c(
             "bg-ink-surface border-ink-border",
             "bg-light-surface border-light-border",
           )}`}
