@@ -339,12 +339,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 			continue
 		}
 
-		isLocalVault := slices.Contains(d.orch.ListVaults(), v.ID)
-
-		switch {
-		case tierBelongsHere && !isLocalVault:
-			d.registerVault(ctx, v, tierID)
-		case tierBelongsHere && isLocalVault:
+		if tierBelongsHere {
 			d.rebuildVaultIfTierMissing(ctx, v, tierID)
 		}
 		// Note: we do NOT unregister on !tierBelongsHere && isLocalVault
