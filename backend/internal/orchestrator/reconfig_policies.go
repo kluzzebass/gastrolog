@@ -157,7 +157,7 @@ func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.V
 
 	switch {
 	case hasRules && hasRunner:
-		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+		rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
 		if err != nil {
 			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
 			return
@@ -166,7 +166,7 @@ func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.V
 		o.logger.Info("tier retention rules updated", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules))
 
 	case hasRules && !hasRunner:
-		rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+		rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
 		if err != nil {
 			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
 			return

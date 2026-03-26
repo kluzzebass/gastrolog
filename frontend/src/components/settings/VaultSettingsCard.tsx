@@ -351,53 +351,39 @@ export function VaultSettingsCard({
                 }
               }
 
-              // Save tier-level changes (rotation + retention) via PutTier.
-              for (const [tierId, rpId] of Object.entries(edit.tierRotation)) {
-                const tier = tiers.find((t) => t.id === tierId);
-                if (!tier || rpId === tier.rotationPolicyId) continue;
-                const updated = tier.clone();
-                updated.rotationPolicyId = rpId;
-                // Also apply retention for this tier in the same PutTier call.
-                const retPolicyId = edit.tierRetention[tierId] ?? "";
-                const tierIndex = edit.tierIds.indexOf(tierId);
-                updated.retentionRules = retPolicyId
-                  ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: retentionActionForPosition(tierIndex, edit.tierIds.length) })]
-                  : [];
-                await putTier.mutateAsync({ config: updated });
-              }
-              // Save retention-only changes (tiers whose rotation didn't change).
-              for (const [tierId, retPolicyId] of Object.entries(edit.tierRetention)) {
-                if (tierId in edit.tierRotation) {
-                  const tier = tiers.find((t) => t.id === tierId);
-                  if (tier && edit.tierRotation[tierId] !== tier.rotationPolicyId) continue; // already saved above
-                }
+              // Save all tier-level changes in one pass per tier.
+              // Always recalculates retention actions — they depend on position,
+              // which changes when tiers are added/removed/reordered.
+              for (const tierId of newTierIds) {
                 const tier = tiers.find((t) => t.id === tierId);
                 if (!tier) continue;
-                const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
-                if (retPolicyId === currentRetId) continue;
-                const tierIndex = edit.tierIds.indexOf(tierId);
-                const updated = tier.clone();
-                updated.retentionRules = retPolicyId
-                  ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: retentionActionForPosition(tierIndex, edit.tierIds.length) })]
-                  : [];
-                await putTier.mutateAsync({ config: updated });
-              }
-              // Save RF changes (parse string → number, empty/invalid defaults to 1).
-              for (const [tierId, rfStr] of Object.entries(edit.tierRF)) {
-                const tier = tiers.find((t) => t.id === tierId);
+
+                const rpId = edit.tierRotation[tierId] ?? tier.rotationPolicyId;
+                const retPolicyId = edit.tierRetention[tierId] ?? (tier.retentionRules[0]?.retentionPolicyId ?? "");
+                const rfStr = edit.tierRF[tierId] ?? String(tier.replicationFactor || 1);
                 const rf = parseInt(rfStr, 10) || 1;
-                if (!tier || rf === (tier.replicationFactor || 1)) continue;
-                const updated = tier.clone();
-                updated.replicationFactor = rf;
-                await putTier.mutateAsync({ config: updated });
-              }
-              // Save storage class changes.
-              for (const [tierId, scStr] of Object.entries(edit.tierStorageClass)) {
-                const tier = tiers.find((t) => t.id === tierId);
+                const scStr = edit.tierStorageClass[tierId] ?? String(tier.storageClass || 0);
                 const sc = parseInt(scStr, 10) || 0;
-                if (!tier || sc === (tier.storageClass || 0)) continue;
+
+                const tierIndex = newTierIds.indexOf(tierId);
+                const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
+                const currentAction = tier.retentionRules[0]?.action;
+                const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
+
+                const rotChanged = rpId !== tier.rotationPolicyId;
+                const retChanged = retPolicyId !== currentRetId || (retPolicyId && currentAction !== expectedAction);
+                const rfChanged = rf !== (tier.replicationFactor || 1);
+                const scChanged = sc !== (tier.storageClass || 0);
+
+                if (!rotChanged && !retChanged && !rfChanged && !scChanged) continue;
+
                 const updated = tier.clone();
-                updated.storageClass = sc;
+                if (rotChanged) updated.rotationPolicyId = rpId;
+                if (rfChanged) updated.replicationFactor = rf;
+                if (scChanged) updated.storageClass = sc;
+                updated.retentionRules = retPolicyId
+                  ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: expectedAction })]
+                  : [];
                 await putTier.mutateAsync({ config: updated });
               }
               // Save vault-level changes (name, enabled, tier order).

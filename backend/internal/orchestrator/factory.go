@@ -184,7 +184,7 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 				continue
 			}
 
-			rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+			rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
 			if err != nil {
 				return err
 			}

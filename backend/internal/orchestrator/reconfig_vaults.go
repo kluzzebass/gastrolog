@@ -126,7 +126,7 @@ func (o *Orchestrator) applyTierRetention(cfg *config.Config, vaultCfg config.Va
 	if len(tierCfg.RetentionRules) == 0 {
 		return
 	}
-	rules, err := resolveRetentionRulesFromTier(cfg, tierCfg)
+	rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
 	if err != nil {
 		o.logger.Warn("invalid retention rules for tier", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
 		return
@@ -165,7 +165,13 @@ func findTierConfig(tiers []config.TierConfig, id uuid.UUID) *config.TierConfig 
 }
 
 // resolveRetentionRulesFromTier converts tier retention rules to resolved retentionRule objects.
-func resolveRetentionRulesFromTier(cfg *config.Config, tierCfg *config.TierConfig) ([]retentionRule, error) {
+func resolveRetentionRulesFromTier(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig) ([]retentionRule, error) {
+	// Derive the retention action from the tier's position in the vault chain.
+	// The stored action on the tier config is ignored — position is the source
+	// of truth. This prevents stale actions when tiers are added/removed.
+	tierIndex := slices.Index(vaultCfg.TierIDs, tierCfg.ID)
+	isLastTier := tierIndex < 0 || tierIndex == len(vaultCfg.TierIDs)-1
+
 	var rules []retentionRule
 	for _, b := range tierCfg.RetentionRules {
 		retCfg := findRetentionPolicy(cfg.RetentionPolicies, b.RetentionPolicyID)
@@ -179,9 +185,21 @@ func resolveRetentionRulesFromTier(cfg *config.Config, tierCfg *config.TierConfi
 		if policy == nil {
 			continue
 		}
+
+		// Eject uses the stored action (explicit route targets).
+		// Otherwise: transition if there's a next tier, expire if last.
+		action := b.Action
+		if action != config.RetentionActionEject {
+			if isLastTier {
+				action = config.RetentionActionExpire
+			} else {
+				action = config.RetentionActionTransition
+			}
+		}
+
 		rules = append(rules, retentionRule{
 			policy:        policy,
-			action:        b.Action,
+			action:        action,
 			ejectRouteIDs: b.EjectRouteIDs,
 		})
 	}
