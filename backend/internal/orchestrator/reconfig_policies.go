@@ -163,7 +163,8 @@ func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.V
 			return
 		}
 		runner.setRules(rules)
-		o.logger.Info("tier retention rules updated", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules))
+		runner.isSecondary = tier.IsSecondary
+		o.logger.Info("tier retention rules updated", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules), "secondary", tier.IsSecondary)
 
 	case hasRules && !hasRunner:
 		rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
