@@ -132,7 +132,7 @@ func (s *QueryServer) runExportJob(
 	pipeline *querylang.Pipeline,
 	targetVaultID uuid.UUID,
 ) {
-	eng := s.orch.MultiVaultQueryEngine()
+	eng := s.orch.PrimaryTierQueryEngine()
 	if s.lookupResolver != nil {
 		eng.SetLookupResolver(s.lookupResolver)
 	}

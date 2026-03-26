@@ -297,6 +297,14 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	tierMu.Lock()
 	defer tierMu.Unlock()
 
+	// Idempotency: if this chunk already exists (e.g., catchup re-sent a chunk
+	// that post-seal replication already delivered), skip the import.
+	if _, err := cm.Meta(chunkID); err == nil {
+		o.logger.Info("replication: chunk already exists, skipping import",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		return nil
+	}
+
 	cm.SetNextChunkID(chunkID)
 	meta, err := cm.ImportRecords(next)
 	if err != nil {

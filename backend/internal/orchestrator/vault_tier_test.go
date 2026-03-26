@@ -442,3 +442,49 @@ func TestTransitionChunkGuardsSecondary(t *testing.T) {
 		t.Errorf("expected chunk deleted by guard fallback, got %d chunks", len(metasAfter))
 	}
 }
+
+// --- Import idempotency ---
+
+func TestImportToTierIdempotent(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "idempotent"
+	orch.RegisterVault(vault)
+
+	chunkID := chunk.NewChunkID()
+
+	// First import — should succeed.
+	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second import with same chunk ID — should be a no-op.
+	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(3)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify only one chunk exists with that ID, and it has 5 records (first import).
+	metas, _ := tier.Chunks.List()
+	count := 0
+	for _, m := range metas {
+		if m.ID == chunkID {
+			count++
+			if m.RecordCount != 5 {
+				t.Errorf("expected 5 records from first import, got %d", m.RecordCount)
+			}
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 chunk with ID %s, got %d", chunkID, count)
+	}
+}
