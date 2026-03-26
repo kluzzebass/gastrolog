@@ -65,6 +65,14 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 
 // reloadTierRotation reconciles the rotation policy and cron job for a single tier.
 func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) error {
+	if tier.IsSecondary {
+		// Remove any existing cron job if this tier became a secondary.
+		if o.cronRotation.hasJob(vaultCfg.ID, tier.TierID) {
+			o.cronRotation.removeJob(vaultCfg.ID, tier.TierID)
+		}
+		return nil
+	}
+
 	if tierCfg == nil || tierCfg.RotationPolicyID == nil {
 		return nil
 	}
@@ -163,7 +171,7 @@ func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.V
 			return
 		}
 		runner.setRules(rules)
-		runner.isSecondary = tier.IsSecondary
+		runner.isSecondary.Store(tier.IsSecondary)
 		o.logger.Info("tier retention rules updated", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules), "secondary", tier.IsSecondary)
 
 	case hasRules && !hasRunner:
@@ -176,16 +184,16 @@ func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.V
 			return
 		}
 		newRunner := &retentionRunner{
-			vaultID:     vaultCfg.ID,
-			tierID:      tier.TierID,
-			cm:          tier.Chunks,
-			im:          tier.Indexes,
-			rules:       rules,
-			orch:        o,
-			isSecondary: tier.IsSecondary,
+			vaultID: vaultCfg.ID,
+			tierID:  tier.TierID,
+			cm:      tier.Chunks,
+			im:      tier.Indexes,
+			rules:   rules,
+			orch:    o,
 			now:     o.now,
 			logger:  o.logger,
 		}
+		newRunner.isSecondary.Store(tier.IsSecondary)
 		o.retention[key] = newRunner
 		if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, newRunner.sweep); err != nil {
 			o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)

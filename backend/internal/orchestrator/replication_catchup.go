@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gastrolog/internal/chunk"
 
@@ -32,7 +33,14 @@ func (o *Orchestrator) scheduleCatchup(vaultID, tierID uuid.UUID, newSecondaries
 	for _, nodeID := range newSecondaries {
 		name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
 		node := nodeID // capture for closure
-		if err := o.scheduler.RunOnce(name, o.catchupSecondary, context.Background(), vaultID, tierID, node); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		if err := o.scheduler.RunOnce(name, func() {
+			defer cancel()
+			if err := o.catchupSecondary(ctx, vaultID, tierID, node); err != nil {
+				o.logger.Warn("catchup failed", "vault", vaultID, "tier", tierID, "node", node, "error", err)
+			}
+		}); err != nil {
+			cancel()
 			o.logger.Warn("failed to schedule replication catchup", "name", name, "error", err)
 		}
 		o.scheduler.Describe(name, "Replicate sealed chunks to secondary "+nodeID[:8])

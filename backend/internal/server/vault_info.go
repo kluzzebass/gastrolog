@@ -360,8 +360,8 @@ func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id uuid.UUID)
 	if vs == nil {
 		return
 	}
-	info.RecordCount = vs.RecordCount
-	info.ChunkCount = vs.ChunkCount
+	info.RecordCount += vs.RecordCount
+	info.ChunkCount += vs.ChunkCount
 }
 
 // vaultInfoFromLocal builds a VaultInfo purely from the local orchestrator.

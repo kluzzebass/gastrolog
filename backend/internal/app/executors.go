@@ -210,14 +210,18 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 		var allChunks []*gastrologv1.ChunkPlan
 		var totalChunks int32
 
-		for _, vid := range vaultIDs {
-			scopedExpr := fmt.Sprintf("vault_id=%s %s", vid, queryExpr)
-			q, _, err := server.ParseExpression(scopedExpr)
-			if err != nil {
-				return nil, 0, fmt.Errorf("parse query for vault %s: %w", vid, err)
-			}
+		// Parse the query once — don't add vault_id= scope because the
+		// engine is already scoped to the vault's primary tiers.
+		q, _, err := server.ParseExpression(queryExpr)
+		if err != nil {
+			return nil, 0, fmt.Errorf("parse query: %w", err)
+		}
 
-			eng := o.PrimaryTierQueryEngine()
+		for _, vid := range vaultIDs {
+			eng := o.PrimaryTierQueryEngineForVault(vid)
+			if eng == nil {
+				continue // no primary tiers for this vault
+			}
 			plan, err := eng.Explain(ctx, q)
 			if err != nil {
 				return nil, 0, fmt.Errorf("explain vault %s: %w", vid, err)
@@ -291,7 +295,10 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 	return func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
-		eng := o.PrimaryTierQueryEngine()
+		eng := o.PrimaryTierQueryEngineForVault(vaultID)
+		if eng == nil {
+			return nil, chunk.Record{}, nil, fmt.Errorf("no primary tiers for vault %s", vaultID)
+		}
 		result, err := eng.GetContext(ctx, query.ContextRef{
 			VaultID: vaultID,
 			ChunkID: chunkID,

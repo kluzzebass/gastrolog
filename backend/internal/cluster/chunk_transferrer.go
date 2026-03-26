@@ -131,6 +131,14 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 		return fmt.Errorf("open replication stream to %s: %w", nodeID, err)
 	}
 
+	// Ensure the stream is closed even if we return early on iteration error.
+	streamClosed := false
+	defer func() {
+		if !streamClosed {
+			_ = stream.CloseSend()
+		}
+	}()
+
 	vid := vaultID.String()
 	tid := tierID.String()
 	cid := chunkID.String()
@@ -154,6 +162,7 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 		}
 	}
 
+	streamClosed = true
 	if err := stream.CloseSend(); err != nil {
 		ct.peers.Invalidate(nodeID)
 		return fmt.Errorf("close send to %s: %w", nodeID, err)

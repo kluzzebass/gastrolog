@@ -43,14 +43,15 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 		return
 	}
 	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
-	// 10s network deadline per chunk — enough for any healthy transfer,
-	// short enough to release the gRPC connection when a secondary is down.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if err := o.scheduler.RunOnce(name, func() {
+		// 10s network deadline per chunk — enough for any healthy transfer,
+		// short enough to release the gRPC connection when a secondary is down.
+		// Created inside the closure so the timeout starts when the job executes,
+		// not when it's scheduled.
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		o.replicateSealedChunk(ctx, vaultID, tierID, chunkID, secondaryNodeIDs)
 	}); err != nil {
-		cancel()
 		o.logger.Warn("failed to schedule replication", "name", name, "error", err)
 	}
 	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d secondaries", chunkID, len(secondaryNodeIDs)))

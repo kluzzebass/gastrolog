@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -38,7 +39,7 @@ type retentionRunner struct {
 	rules       []retentionRule
 	inflight    map[chunk.ChunkID]bool // chunks currently being processed
 	orch        *Orchestrator          // for eject action (loadConfig, Append, transferrer)
-	isSecondary bool                   // secondaries expire only — primary handles transition/eject
+	isSecondary atomic.Bool            // secondaries expire only — primary handles transition/eject
 	now         func() time.Time
 	logger      *slog.Logger
 }
@@ -116,7 +117,7 @@ func (r *retentionRunner) sweep() {
 				// transition/eject for the data. The secondary just cleans up
 				// its local copy to match the primary's lifecycle.
 				action := b.action
-				if r.isSecondary {
+				if r.isSecondary.Load() {
 					action = config.RetentionActionExpire
 				}
 				switch action {

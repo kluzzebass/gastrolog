@@ -27,6 +27,9 @@ func (o *Orchestrator) rotationSweep() {
 	o.mu.RLock()
 	for id, vault := range o.vaults {
 		for _, tier := range vault.Tiers {
+			if tier.IsSecondary {
+				continue
+			}
 			activeBefore := tier.Chunks.Active()
 			if trigger := tier.Chunks.CheckRotation(); trigger != nil {
 				o.logger.Info("background rotation triggered",

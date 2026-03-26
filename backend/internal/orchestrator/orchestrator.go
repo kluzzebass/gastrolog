@@ -190,6 +190,9 @@ type Orchestrator struct {
 	digestWg   sync.WaitGroup // tracks digest goroutine
 	writeWg    sync.WaitGroup // tracks write goroutine
 
+	// Per-tier import mutex for serializing SetNextChunkID + ImportRecords.
+	importMu sync.Map // tierID → *sync.Mutex
+
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[uuid.UUID]*drainState
 

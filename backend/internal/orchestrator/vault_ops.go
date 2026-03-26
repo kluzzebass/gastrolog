@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -287,6 +288,14 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	if cm == nil {
 		return fmt.Errorf("%w: tier %s in vault %s", ErrVaultNotFound, tierID, vaultID)
 	}
+
+	// Serialize SetNextChunkID + ImportRecords per tier to prevent concurrent
+	// replication messages from interleaving the two calls (race: Thread A sets
+	// chunkA, Thread B sets chunkB, Thread A imports with chunkB's ID).
+	muVal, _ := o.importMu.LoadOrStore(tierID, &sync.Mutex{})
+	tierMu := muVal.(*sync.Mutex)
+	tierMu.Lock()
+	defer tierMu.Unlock()
 
 	cm.SetNextChunkID(chunkID)
 	meta, err := cm.ImportRecords(next)

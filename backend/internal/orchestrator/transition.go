@@ -15,6 +15,13 @@ import (
 // inter-tier data movement mechanism: records flow from hotter to colder
 // tiers, each tier independently chunking and sealing.
 func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
+	if r.isSecondary.Load() {
+		r.logger.Error("transitionChunk called on secondary — this is a bug",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
+		r.expireChunk(id)
+		return
+	}
+
 	ctx := context.Background()
 
 	cfg, err := r.orch.loadConfig(ctx)

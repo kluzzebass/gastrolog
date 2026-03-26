@@ -99,6 +99,9 @@ func (o *Orchestrator) applyTierPolicies(cfg *config.Config, vaultCfg config.Vau
 
 // applyTierRotation applies a rotation policy from a tier config to its chunk manager.
 func (o *Orchestrator) applyTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
+	if tier.IsSecondary {
+		return
+	}
 	if tierCfg.RotationPolicyID == nil {
 		return
 	}
@@ -136,16 +139,16 @@ func (o *Orchestrator) applyTierRetention(cfg *config.Config, vaultCfg config.Va
 	}
 	key := tier.TierID
 	runner := &retentionRunner{
-		vaultID:     vaultCfg.ID,
-		tierID:      tier.TierID,
-		cm:          tier.Chunks,
-		im:          tier.Indexes,
-		rules:       rules,
-		orch:        o,
-		isSecondary: tier.IsSecondary,
-		now:         o.now,
-		logger:      o.logger,
+		vaultID: vaultCfg.ID,
+		tierID:  tier.TierID,
+		cm:      tier.Chunks,
+		im:      tier.Indexes,
+		rules:   rules,
+		orch:    o,
+		now:     o.now,
+		logger:  o.logger,
 	}
+	runner.isSecondary.Store(tier.IsSecondary)
 	o.retention[key] = runner
 	jobName := retentionJobName(tier.TierID)
 	if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, runner.sweep); err != nil {
@@ -217,20 +220,20 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	cm := vault.ChunkManager()
-
-	// Check if vault has any data.
-	metas, err := cm.List()
-	if err != nil {
-		return fmt.Errorf("list chunks for vault %s: %w", id, err)
-	}
-	if len(metas) > 0 {
-		return fmt.Errorf("%w: vault %s has %d chunk(s)", ErrVaultNotEmpty, id, len(metas))
-	}
-
-	// Also check if there's an active chunk with records.
-	if active := cm.Active(); active != nil {
-		return fmt.Errorf("%w: vault %s has active chunk", ErrVaultNotEmpty, id)
+	// Check ALL tiers for data before allowing removal.
+	for _, tier := range vault.Tiers {
+		metas, err := tier.Chunks.List()
+		if err != nil {
+			return fmt.Errorf("list chunks for tier %s: %w", tier.TierID, err)
+		}
+		for _, m := range metas {
+			if m.RecordCount > 0 || !m.Sealed {
+				return fmt.Errorf("%w: tier %s has data", ErrVaultNotEmpty, tier.TierID)
+			}
+		}
+		if active := tier.Chunks.Active(); active != nil {
+			return fmt.Errorf("%w: tier %s has active chunk", ErrVaultNotEmpty, tier.TierID)
+		}
 	}
 
 	// Remove per-tier retention and rotation jobs.
@@ -311,31 +314,34 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	if !exists {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
-	cm := vault.ChunkManager()
-	im := vault.IndexManager()
+	// Seal active chunks and delete all data across ALL tiers.
+	for _, tier := range vault.Tiers {
+		cm := tier.Chunks
+		im := tier.Indexes
 
-	// Seal active chunk if present.
-	if active := cm.Active(); active != nil {
-		if err := cm.Seal(); err != nil {
-			return fmt.Errorf("seal active chunk for vault %s: %w", id, err)
-		}
-	}
-
-	// Delete all indexes and chunks.
-	metas, err := cm.List()
-	if err != nil {
-		return fmt.Errorf("list chunks for vault %s: %w", id, err)
-	}
-	for _, meta := range metas {
-		if im != nil {
-			// Best-effort index deletion; log and continue on error.
-			if err := im.DeleteIndexes(meta.ID); err != nil {
-				o.logger.Warn("failed to delete indexes during force remove",
-					"vault", id, "chunk", meta.ID.String(), "error", err)
+		// Seal active chunk if present.
+		if active := cm.Active(); active != nil {
+			if err := cm.Seal(); err != nil {
+				return fmt.Errorf("seal active chunk for tier %s in vault %s: %w", tier.TierID, id, err)
 			}
 		}
-		if err := cm.Delete(meta.ID); err != nil {
-			return fmt.Errorf("delete chunk %s in vault %s: %w", meta.ID.String(), id, err)
+
+		// Delete all indexes and chunks.
+		metas, err := cm.List()
+		if err != nil {
+			return fmt.Errorf("list chunks for tier %s in vault %s: %w", tier.TierID, id, err)
+		}
+		for _, meta := range metas {
+			if im != nil {
+				// Best-effort index deletion; log and continue on error.
+				if err := im.DeleteIndexes(meta.ID); err != nil {
+					o.logger.Warn("failed to delete indexes during force remove",
+						"vault", id, "tier", tier.TierID, "chunk", meta.ID.String(), "error", err)
+				}
+			}
+			if err := cm.Delete(meta.ID); err != nil {
+				return fmt.Errorf("delete chunk %s in tier %s vault %s: %w", meta.ID.String(), tier.TierID, id, err)
+			}
 		}
 	}
 
