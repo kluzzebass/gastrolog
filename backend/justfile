@@ -206,6 +206,7 @@ cluster-init:
 
   # Start node 1 in the background. Extract join token from its log output.
   go run ./cmd/gastrolog server \
+    --name node-1 \
     --home data/node1 \
     --listen :4564 \
     --cluster-addr :4566 2>&1 | while IFS= read -r line; do
@@ -235,6 +236,7 @@ cluster-init:
 
   # Start nodes 2-4 with --join flags. They enroll, then persist their state.
   go run ./cmd/gastrolog server \
+    --name node-2 \
     --home data/node2 \
     --listen :4574 \
     --cluster-addr :4576 \
@@ -243,6 +245,7 @@ cluster-init:
   NODE2_PID=$!
 
   go run ./cmd/gastrolog server \
+    --name node-3 \
     --home data/node3 \
     --listen :4584 \
     --cluster-addr :4586 \
@@ -251,6 +254,7 @@ cluster-init:
   NODE3_PID=$!
 
   go run ./cmd/gastrolog server \
+    --name node-4 \
     --home data/node4 \
     --listen :4594 \
     --cluster-addr :4596 \

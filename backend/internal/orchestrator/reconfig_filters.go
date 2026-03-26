@@ -94,9 +94,6 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 		}
 
 		for _, destID := range route.Destinations {
-			// Determine which node owns the vault's hot tier (first tier).
-			// Ingestion always targets the hot tier — even if this node has
-			// a non-hot tier for the same vault.
 			hotTierNode := resolveVaultNodeID(cfg, destID)
 
 			nodeID := ""

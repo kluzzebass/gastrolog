@@ -183,9 +183,10 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   const handleCreateArea = async () => {
     const targetNodeId = areaNodeId || localNodeId;
-    const path = areaPath.trim();
+    const effectiveName = areaName.trim() || areaNamePlaceholder || "storage-area";
+    const path = areaPath.trim() || effectiveName;
     const cls = parseInt(areaClass, 10);
-    if (!targetNodeId || !path || isNaN(cls)) return;
+    if (!targetNodeId || isNaN(cls)) return;
 
     const name = areaName.trim() || areaNamePlaceholder || "storage-area";
 
@@ -303,13 +304,9 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         </p>
 
         {/* Add Storage Area button */}
-        {!isLoading && (
+        {!isLoading && !addingArea && (
           <div className="flex items-center justify-end mb-5">
-            {addingArea ? (
-              <Button onClick={resetAreaForm}>Cancel</Button>
-            ) : (
-              <Button onClick={openAreaForm}>Add Storage Area</Button>
-            )}
+            <Button onClick={openAreaForm}>Add Storage Area</Button>
           </div>
         )}
 
@@ -321,7 +318,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               onCancel={resetAreaForm}
               onCreate={handleCreateArea}
               isPending={setNodeStorage.isPending}
-              createDisabled={!areaPath.trim() || !areaClass.trim() || isNaN(parseInt(areaClass, 10))}
+              createDisabled={!areaClass.trim() || isNaN(parseInt(areaClass, 10))}
             >
               <NodeSelect value={areaNodeId} onChange={setAreaNodeId} dark={dark} />
               <FormField label="Name" dark={dark}>
@@ -336,7 +333,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                 <TextInput
                   value={areaPath}
                   onChange={setAreaPath}
-                  placeholder=""
+                  placeholder={areaName.trim() || areaNamePlaceholder || ""}
                   dark={dark}
                   mono
                 />
