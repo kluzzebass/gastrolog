@@ -436,6 +436,11 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		})
 	}
 
+	// No results (vault has no primary tiers on this node).
+	if searchIter == nil {
+		return stream.SendMsg(&gastrologv1.ForwardSearchResponse{Histogram: histogram})
+	}
+
 	// Record path: iterate and batch 200 records per message.
 	const batchSize = 200
 	batch := make([]*gastrologv1.ExportRecord, 0, batchSize)
