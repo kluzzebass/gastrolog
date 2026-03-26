@@ -543,11 +543,13 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	}
 
 	// Verify dir param derived from NodeStorageConfig was passed to factories.
-	if cmReceivedParams["dir"] != "/data/chunks" {
-		t.Errorf("chunk manager: expected dir=/data/chunks, got %s", cmReceivedParams["dir"])
+	// The path is scoped per tier: <area-path>/<tier-id>
+	expectedDir := "/data/chunks/" + tierID.String()
+	if cmReceivedParams["dir"] != expectedDir {
+		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
 	}
-	if imReceivedParams["dir"] != "/data/chunks" {
-		t.Errorf("index manager: expected dir=/data/chunks, got %s", imReceivedParams["dir"])
+	if imReceivedParams["dir"] != expectedDir {
+		t.Errorf("index manager: expected dir=%s, got %s", expectedDir, imReceivedParams["dir"])
 	}
 }
 

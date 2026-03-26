@@ -467,20 +467,21 @@ func TestImportToTierIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Second import with same chunk ID — should be a no-op.
+	// Second import with same chunk ID — on secondary, replaces (canonical
+	// version overwrites forwarded version). On primary, would skip.
 	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(3)))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// Verify only one chunk exists with that ID, and it has 5 records (first import).
+	// Verify only one chunk exists with that ID, with 3 records (second/canonical import).
 	metas, _ := tier.Chunks.List()
 	count := 0
 	for _, m := range metas {
 		if m.ID == chunkID {
 			count++
-			if m.RecordCount != 5 {
-				t.Errorf("expected 5 records from first import, got %d", m.RecordCount)
+			if m.RecordCount != 3 {
+				t.Errorf("expected 3 records from canonical import, got %d", m.RecordCount)
 			}
 		}
 	}
@@ -510,7 +511,7 @@ func (f *recordingForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _
 	return nil
 }
 
-func (f *recordingForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+func (f *recordingForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, rec := range records {
@@ -589,7 +590,7 @@ func TestActiveRecordForwardingOnAppendToTier(t *testing.T) {
 	vault.Name = "active-fwd-tier"
 	orch.RegisterVault(vault)
 
-	if err := orch.AppendToTier(vaultID, tierID, testRecord("tier-rec")); err != nil {
+	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, testRecord("tier-rec")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -623,7 +624,7 @@ func TestActiveRecordForwardingSkipsSecondary(t *testing.T) {
 	vault.Name = "no-fwd-secondary"
 	orch.RegisterVault(vault)
 
-	if err := orch.AppendToTier(vaultID, tierID, testRecord("sec-rec")); err != nil {
+	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, testRecord("sec-rec")); err != nil {
 		t.Fatal(err)
 	}
 

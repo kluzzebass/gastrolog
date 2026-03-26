@@ -34,7 +34,8 @@ const (
 // forwardEntry is a single record queued for forwarding.
 type forwardEntry struct {
 	vaultID uuid.UUID
-	tierID  uuid.UUID // zero = active tier; non-zero = specific tier (active-chunk replication)
+	tierID  uuid.UUID      // zero = active tier; non-zero = specific tier
+	chunkID chunk.ChunkID  // primary's chunk ID for replica ID sync; zero = not set
 	record  chunk.Record
 }
 
@@ -135,7 +136,7 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 // ForwardToTier enqueues records targeting a specific tier on a remote node.
 // Used for active-chunk replication from primary to secondaries.
 // Same best-effort semantics as Forward — drops on full buffer.
-func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	rf.mu.Lock()
 	if rf.closed {
 		rf.mu.Unlock()
@@ -149,7 +150,7 @@ func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vault
 
 	for _, rec := range records {
 		select {
-		case nf.ch <- forwardEntry{vaultID: vaultID, tierID: tierID, record: rec}:
+		case nf.ch <- forwardEntry{vaultID: vaultID, tierID: tierID, chunkID: chunkID, record: rec}:
 		default:
 			if !rf.stopping() {
 				rf.logger.Info("active replication buffer full, dropping record",
@@ -264,6 +265,7 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 type forwardGroupKey struct {
 	vaultID uuid.UUID
 	tierID  uuid.UUID
+	chunkID chunk.ChunkID
 }
 
 // sendBurst groups entries by vault and sends one ForwardRecordsRequest per
@@ -277,7 +279,7 @@ func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream gr
 	var groups []groupData
 	groupIdx := make(map[forwardGroupKey]int, 2)
 	for _, e := range entries {
-		k := forwardGroupKey{vaultID: e.vaultID, tierID: e.tierID}
+		k := forwardGroupKey{vaultID: e.vaultID, tierID: e.tierID, chunkID: e.chunkID}
 		idx, ok := groupIdx[k]
 		if !ok {
 			idx = len(groups)
@@ -294,6 +296,9 @@ func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream gr
 		}
 		if g.key.tierID != (uuid.UUID{}) {
 			msg.TierId = g.key.tierID.String()
+		}
+		if g.key.chunkID != (chunk.ChunkID{}) {
+			msg.ChunkId = g.key.chunkID.String()
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			if !rf.stopping() {

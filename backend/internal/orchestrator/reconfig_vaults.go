@@ -370,6 +370,38 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 	return nil
 }
 
+// DeleteTierData deletes all chunks and indexes for a tier, then removes the
+// data directory. Called when a tier is deleted with delete_data=true.
+func (o *Orchestrator) DeleteTierData(tierID uuid.UUID) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	for _, vault := range o.vaults {
+		for _, tier := range vault.Tiers {
+			if tier.TierID != tierID {
+				continue
+			}
+			// Seal active chunk so we can delete it.
+			if active := tier.Chunks.Active(); active != nil {
+				_ = tier.Chunks.Seal()
+			}
+			metas, err := tier.Chunks.List()
+			if err != nil {
+				o.logger.Warn("delete tier data: list failed", "tier", tierID, "error", err)
+				return
+			}
+			for _, m := range metas {
+				if tier.Indexes != nil {
+					_ = tier.Indexes.DeleteIndexes(m.ID)
+				}
+				_ = tier.Chunks.Delete(m.ID)
+			}
+			o.logger.Info("tier data deleted", "tier", tierID, "chunks", len(metas))
+			return
+		}
+	}
+}
+
 // UnregisterVault removes a vault from the orchestrator without deleting any
 // data. The chunk manager is closed (releasing connections/locks) but chunks
 // and indexes are left intact in storage. This is the correct operation for

@@ -23,8 +23,9 @@ import (
 type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error
 
 // RecordTierAppender appends a single record to a specific tier in a local vault.
-// Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, rec chunk.Record) error
+// Used by the ForwardRecords handler when tier_id is set (inter-tier transition
+// and active-chunk replication). primaryChunkID enables chunk ID sync on secondaries.
+type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
 
 // SearchExecutor runs a search on a local vault and returns results.
 // For regular searches, it returns an iterator over records (the caller
@@ -194,6 +195,7 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 
 	// Tier-targeted append for inter-tier transition.
 	var tierID uuid.UUID
+	var primaryChunkID chunk.ChunkID
 	if req.GetTierId() != "" {
 		tierID, err = uuid.Parse(req.GetTierId())
 		if err != nil {
@@ -203,13 +205,20 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 			return nil, status.Error(codes.Unavailable, "tier appender not configured")
 		}
 	}
+	if req.GetChunkId() != "" {
+		parsed, parseErr := chunk.ParseChunkID(req.GetChunkId())
+		if parseErr != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", parseErr)
+		}
+		primaryChunkID = parsed
+	}
 
 	var written int64
 	for _, exportRec := range req.GetRecords() {
 		rec := exportRecordToChunk(exportRec)
 		var appendErr error
 		if tierID != uuid.Nil {
-			appendErr = s.recordTierAppender(ctx, vaultID, tierID, rec)
+			appendErr = s.recordTierAppender(ctx, vaultID, tierID, primaryChunkID, rec)
 		} else {
 			appendErr = s.recordAppender(ctx, vaultID, rec)
 		}
@@ -254,10 +263,17 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 
 		// Tier-targeted append for active-chunk replication.
 		var tierID uuid.UUID
+		var primaryChunkID chunk.ChunkID
 		if msg.GetTierId() != "" {
 			tierID, err = uuid.Parse(msg.GetTierId())
 			if err != nil {
 				return status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+			}
+		}
+		if msg.GetChunkId() != "" {
+			parsed, parseErr := chunk.ParseChunkID(msg.GetChunkId())
+			if parseErr == nil {
+				primaryChunkID = parsed
 			}
 		}
 
@@ -265,7 +281,7 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			rec := exportRecordToChunk(exportRec)
 			var appendErr error
 			if tierID != uuid.Nil && s.recordTierAppender != nil {
-				appendErr = s.recordTierAppender(stream.Context(), vaultID, tierID, rec)
+				appendErr = s.recordTierAppender(stream.Context(), vaultID, tierID, primaryChunkID, rec)
 			} else {
 				appendErr = s.recordAppender(stream.Context(), vaultID, rec)
 			}
@@ -462,6 +478,12 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 	first := true
 	for rec, iterErr := range searchIter {
 		if iterErr != nil {
+			// EOF can occur when a chunk is deleted mid-read (e.g., ImportToTier
+			// replacing a forwarded-record chunk on a secondary). Treat as
+			// end-of-results — the data is still available via retry.
+			if errors.Is(iterErr, io.EOF) {
+				break
+			}
 			return status.Errorf(codes.Internal, "search record: %v", iterErr)
 		}
 		batch = append(batch, RecordToExportRecord(rec))

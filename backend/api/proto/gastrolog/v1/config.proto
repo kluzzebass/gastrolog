@@ -882,6 +882,7 @@ message PutTierResponse {
 
 message DeleteTierRequest {
   string id = 1;
+  bool delete_data = 2; // When true, the tier's data directory is deleted from disk.
 }
 
 message DeleteTierResponse {

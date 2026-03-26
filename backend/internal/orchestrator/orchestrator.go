@@ -83,8 +83,9 @@ type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 	// ForwardToTier sends a record to a specific tier on a remote node.
 	// Fire-and-forget: used for active-chunk replication to secondaries.
+	// chunkID is the primary's active chunk ID for replica ID sync.
 	// Non-blocking — drops on full buffer (same as Forward).
-	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
+	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk

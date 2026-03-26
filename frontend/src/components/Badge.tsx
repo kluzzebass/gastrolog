@@ -14,6 +14,7 @@ interface BadgeProps {
   dark: boolean;
   children: React.ReactNode;
   className?: string;
+  title?: string;
 }
 
 const variantClasses: Record<BadgeVariant, string | ((c: ReturnType<typeof useThemeClass>) => string)> = {
@@ -32,7 +33,7 @@ const variantClasses: Record<BadgeVariant, string | ((c: ReturnType<typeof useTh
  * All badges use: px-1.5 py-0.5 text-[0.75em] font-mono rounded.
  * The variant controls color only.
  */
-export function Badge({ variant, dark, children, className }: Readonly<BadgeProps>) {
+export function Badge({ variant, dark, children, className, title }: Readonly<BadgeProps>) {
   const c = useThemeClass(dark);
   const colorCls =
     typeof variantClasses[variant] === "function"
@@ -42,6 +43,7 @@ export function Badge({ variant, dark, children, className }: Readonly<BadgeProp
   return (
     <span
       className={`px-1.5 py-0.5 text-[0.75em] font-mono rounded whitespace-nowrap ${colorCls}${className ? " " + className : ""}`}
+      title={title}
     >
       {children}
     </span>

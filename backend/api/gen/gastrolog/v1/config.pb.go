@@ -7213,6 +7213,7 @@ func (x *PutTierResponse) GetConfig() *GetConfigResponse {
 type DeleteTierRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	DeleteData    bool                   `protobuf:"varint,2,opt,name=delete_data,json=deleteData,proto3" json:"delete_data,omitempty"` // When true, the tier's data directory is deleted from disk.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7252,6 +7253,13 @@ func (x *DeleteTierRequest) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *DeleteTierRequest) GetDeleteData() bool {
+	if x != nil {
+		return x.DeleteData
+	}
+	return false
 }
 
 type DeleteTierResponse struct {
@@ -7820,9 +7828,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0ePutTierRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.TierConfigR\x06config\"J\n" +
 	"\x0fPutTierResponse\x127\n" +
-	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config\"#\n" +
+	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config\"D\n" +
 	"\x11DeleteTierRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"M\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\vdelete_data\x18\x02 \x01(\bR\n" +
+	"deleteData\"M\n" +
 	"\x12DeleteTierResponse\x127\n" +
 	"\x06config\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetConfigResponseR\x06config*d\n" +
 	"\bTierType\x12\x19\n" +

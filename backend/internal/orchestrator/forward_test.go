@@ -35,7 +35,7 @@ func (m *mockForwarder) Forward(_ context.Context, nodeID string, vaultID uuid.U
 	return nil
 }
 
-func (m *mockForwarder) ForwardToTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+func (m *mockForwarder) ForwardToTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 

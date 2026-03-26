@@ -361,7 +361,7 @@ func TestImportRecordsEmpty(t *testing.T) {
 type noopForwarder struct{}
 
 func (noopForwarder) Forward(context.Context, string, uuid.UUID, []chunk.Record) error { return nil }
-func (noopForwarder) ForwardToTier(context.Context, string, uuid.UUID, uuid.UUID, []chunk.Record) error {
+func (noopForwarder) ForwardToTier(context.Context, string, uuid.UUID, uuid.UUID, chunk.ChunkID, []chunk.Record) error {
 	return nil
 }
 

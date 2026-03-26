@@ -167,7 +167,10 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID uuid.UUID) *TierInstance {
 // AppendToTier appends a record to a specific tier's chunk manager.
 // Used by inter-tier transition to target a downstream tier directly,
 // bypassing the vault's active tier. Includes seal detection.
-func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record) error {
+// AppendToTier appends a record to a specific tier. primaryChunkID, when
+// non-zero, tells secondaries to create matching chunk IDs (same pattern
+// as sealed-chunk replication's SetNextChunkID).
+func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -182,6 +185,12 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record)
 		}
 		cm := tier.Chunks
 
+		// On secondaries, sync chunk ID with the primary so chunks dedup
+		// naturally — same pattern as sealed-chunk replication.
+		if tier.IsSecondary && primaryChunkID != (chunk.ChunkID{}) {
+			cm.SetNextChunkID(primaryChunkID)
+		}
+
 		activeBefore := cm.Active()
 		if _, _, err := cm.Append(rec); err != nil {
 			return err
@@ -189,12 +198,22 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record)
 
 		// Fire-and-forget to secondaries for active-chunk durability.
 		if !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
-			o.replicateActiveRecord(vaultID, tier.TierID, tier.SecondaryNodeIDs, rec)
+			activeNow := cm.Active()
+			var activeChunkID chunk.ChunkID
+			if activeNow != nil {
+				activeChunkID = activeNow.ID
+			}
+			o.replicateActiveRecord(vaultID, tier.TierID, activeChunkID, tier.SecondaryNodeIDs, rec)
 		}
 
 		activeAfter := cm.Active()
 		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+			// Skip post-seal on secondaries — their sealed chunks from forwarding
+			// are transient garbage that will be replaced by ImportToTier.
+			// Scheduling compression on them races with deletion (WaitGroup panic).
+			if !tier.IsSecondary {
+				o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+			}
 		}
 		return nil
 	}
@@ -234,9 +253,15 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	}
 
 	// Fire-and-forget to secondaries for active-chunk durability.
+	// Pass the active chunk ID so secondaries create matching chunks.
 	activeTier := vault.ActiveTier()
 	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
-		o.replicateActiveRecord(vaultID, activeTier.TierID, activeTier.SecondaryNodeIDs, rec)
+		activeNow := cm.Active()
+		var activeChunkID chunk.ChunkID
+		if activeNow != nil {
+			activeChunkID = activeNow.ID
+		}
+		o.replicateActiveRecord(vaultID, activeTier.TierID, activeChunkID, activeTier.SecondaryNodeIDs, rec)
 	}
 
 	// Detect seal: if Active() changed, the previous chunk was sealed.
@@ -282,19 +307,22 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	// ImportRecords reads from a network stream and can block — holding
 	// RLock during a network read starves writers (FSM dispatcher) and
 	// deadlocks the entire orchestrator.
-	cm := func() chunk.ChunkManager {
+	var cm chunk.ChunkManager
+	var tier *TierInstance
+	func() {
 		o.mu.RLock()
 		defer o.mu.RUnlock()
 		vault := o.vaults[vaultID]
 		if vault == nil {
-			return nil
+			return
 		}
-		for _, tier := range vault.Tiers {
-			if tier.TierID == tierID {
-				return tier.Chunks
+		for _, t := range vault.Tiers {
+			if t.TierID == tierID {
+				cm = t.Chunks
+				tier = t
+				return
 			}
 		}
-		return nil
 	}()
 	if cm == nil {
 		return fmt.Errorf("%w: tier %s in vault %s", ErrVaultNotFound, tierID, vaultID)
@@ -308,12 +336,31 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	tierMu.Lock()
 	defer tierMu.Unlock()
 
-	// Idempotency: if this chunk already exists (e.g., catchup re-sent a chunk
-	// that post-seal replication already delivered), skip the import.
+	// On secondaries, seal the active chunk (from fire-and-forget forwarding)
+	// so it doesn't grow while we import the canonical sealed chunk.
+	if tier.IsSecondary {
+		active := cm.Active()
+		if active != nil && active.RecordCount > 0 {
+			if err := cm.Seal(); err != nil {
+				o.logger.Warn("replication: failed to seal secondary active chunk",
+					"vault", vaultID, "tier", tierID, "error", err)
+			}
+		}
+	}
+
+	// If a chunk with this ID already exists:
+	// - On secondaries: delete and replace. The existing chunk is from
+	//   fire-and-forget forwarding (uncompressed, possibly incomplete).
+	//   The incoming canonical version is authoritative.
+	// - On primaries: true idempotency skip (catchup re-sent a chunk
+	//   that post-seal replication already delivered).
 	if _, err := cm.Meta(chunkID); err == nil {
-		o.logger.Info("replication: chunk already exists, skipping import",
-			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
-		return nil
+		if !tier.IsSecondary {
+			o.logger.Info("replication: chunk already exists, skipping import",
+				"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+			return nil
+		}
+		_ = cm.Delete(chunkID)
 	}
 
 	cm.SetNextChunkID(chunkID)
@@ -324,6 +371,7 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	o.logger.Info("replication: sealed chunk imported",
 		"vault", vaultID, "tier", tierID,
 		"chunk", meta.ID.String(), "records", meta.RecordCount)
+
 
 	if meta.ID != (chunk.ChunkID{}) {
 		o.postSealWork(vaultID, cm, meta.ID)

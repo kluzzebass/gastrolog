@@ -246,6 +246,12 @@ func (s *ConfigServer) DeleteTier(
 		}
 	}
 
+	// Delete data files if requested (before removing from config, so we can
+	// still resolve the storage area path).
+	if req.Msg.GetDeleteData() && s.orch != nil {
+		s.orch.DeleteTierData(id)
+	}
+
 	if err := s.cfgStore.DeleteTier(ctx, id); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}

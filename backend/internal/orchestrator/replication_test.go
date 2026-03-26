@@ -22,7 +22,7 @@ type replicationFakeForwarder struct{}
 func (f *replicationFakeForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
 	return nil
 }
-func (f *replicationFakeForwarder) ForwardToTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+func (f *replicationFakeForwarder) ForwardToTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 

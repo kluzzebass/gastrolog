@@ -450,16 +450,17 @@ function ChunkRow({
               <Badge variant="warn" dark={dark}>archived</Badge>
             )}
             {rf > 1 && (
-              <span title={replicas >= rf
-                ? `${String(replicas)} replicas (fully replicated)`
-                : replicaNodes.length < rf
-                  ? `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage`
-                  : `${String(replicas)}/${String(rf)} replicas — replication in progress`
-              }>
-                <Badge variant={replicas >= rf ? "info" : replicaNodes.length < rf ? "error" : "warn"} dark={dark}>
-                  {String(replicas)}
-                </Badge>
-              </span>
+              <Badge
+                variant={replicas >= rf ? "info" : replicaNodes.length < rf ? "error" : "warn"}
+                dark={dark}
+                title={replicas >= rf
+                  ? `${String(replicas)} replicas (fully replicated)`
+                  : replicaNodes.length < rf
+                    ? `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage`
+                    : `${String(replicas)}/${String(rf)} replicas — replication in progress`}
+              >
+                {String(replicas)}
+              </Badge>
             )}
           </span>
         </td>
