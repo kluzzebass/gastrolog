@@ -187,6 +187,11 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record)
 			return err
 		}
 
+		// Fire-and-forget to secondaries for active-chunk durability.
+		if !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+			o.replicateActiveRecord(vaultID, tier.TierID, tier.SecondaryNodeIDs, rec)
+		}
+
 		activeAfter := cm.Active()
 		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
 			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
@@ -226,6 +231,12 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
 		return cid, pos, err
+	}
+
+	// Fire-and-forget to secondaries for active-chunk durability.
+	activeTier := vault.ActiveTier()
+	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+		o.replicateActiveRecord(vaultID, activeTier.TierID, activeTier.SecondaryNodeIDs, rec)
 	}
 
 	// Detect seal: if Active() changed, the previous chunk was sealed.

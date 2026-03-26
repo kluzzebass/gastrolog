@@ -103,7 +103,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
   const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
 
-  // Sort local storage configs: local node first, then alphabetical by node name.
+  // Sort file storage configs: local node first, then alphabetical by node name.
   const sortedNodeConfigs = [...nodeStorageConfigs].sort((a, b) => {
     if (a.nodeId === localNodeId) return -1;
     if (b.nodeId === localNodeId) return 1;
@@ -293,13 +293,13 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         </SettingsSection>
       </div>
 
-      {/* ── Section 2: Local Storage ─────────────────────────── */}
+      {/* ── Section 2: File Storage ─────────────────────────── */}
       <div>
         <h3 className={`font-display text-[1.1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}>
-          Local Storage
+          File Storage
         </h3>
         <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
-          Locally-attached storage resources declared per node. Storage class ranks speed: lower = faster.
+          File storage areas declared per node. Storage class ranks speed: lower = faster.
         </p>
 
         {/* Add Storage Area button */}
@@ -361,7 +361,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         )}
         {!isLoading && sortedNodeConfigs.length === 0 && !addingArea && (
           <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            No local storage configured. Click &quot;Add Storage Area&quot; to create one.
+            No file storage configured. Click &quot;Add Storage Area&quot; to create one.
           </div>
         )}
         {!isLoading && sortedNodeConfigs.length > 0 && (

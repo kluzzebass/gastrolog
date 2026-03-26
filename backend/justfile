@@ -194,6 +194,80 @@ cluster-run-pprof:
     "go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586 --pprof localhost:6062" \
     "go run ./cmd/gastrolog server --home data/node4 --listen :4594 --cluster-addr :4596 --pprof localhost:6063"
 
+# Bootstraps a fresh 4-node cluster from scratch.
+# Cleans data, starts all nodes, enrolls nodes 2-4 with node 1's join token.
+# Runs in the foreground — Ctrl-C stops everything.
+cluster-init:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  just cluster-clean
+  mkdir -p data
+  rm -f data/cluster-token
+
+  # Start node 1 in the background. Extract join token from its log output.
+  go run ./cmd/gastrolog server \
+    --home data/node1 \
+    --listen :4564 \
+    --cluster-addr :4566 2>&1 | while IFS= read -r line; do
+      echo "[node1] $line"
+      if [[ "$line" == *"cluster join token"*"token="* ]]; then
+        token="${line##*token=}"
+        token="${token%% *}"
+        if [[ -n "$token" ]]; then
+          echo "$token" > data/cluster-token
+        fi
+      fi
+    done &
+  NODE1_PID=$!
+
+  # Wait for the join token (up to 30 seconds).
+  for i in $(seq 1 60); do
+    [[ -f data/cluster-token ]] && break
+    sleep 0.5
+  done
+  if [[ ! -f data/cluster-token ]]; then
+    echo ">>> error: timed out waiting for join token" >&2
+    kill $NODE1_PID 2>/dev/null || true
+    exit 1
+  fi
+  TOKEN=$(cat data/cluster-token)
+  echo ">>> Join token acquired. Starting nodes 2-4..."
+
+  # Start nodes 2-4 with --join flags. They enroll, then persist their state.
+  go run ./cmd/gastrolog server \
+    --home data/node2 \
+    --listen :4574 \
+    --cluster-addr :4576 \
+    --join-addr localhost:4566 \
+    --join-token "$TOKEN" 2>&1 | sed 's/^/[node2] /' &
+  NODE2_PID=$!
+
+  go run ./cmd/gastrolog server \
+    --home data/node3 \
+    --listen :4584 \
+    --cluster-addr :4586 \
+    --join-addr localhost:4566 \
+    --join-token "$TOKEN" 2>&1 | sed 's/^/[node3] /' &
+  NODE3_PID=$!
+
+  go run ./cmd/gastrolog server \
+    --home data/node4 \
+    --listen :4594 \
+    --cluster-addr :4596 \
+    --join-addr localhost:4566 \
+    --join-token "$TOKEN" \
+    --voteless 2>&1 | sed 's/^/[node4] /' &
+  NODE4_PID=$!
+
+  shutdown() {
+    echo ""
+    echo ">>> Shutting down cluster..."
+    kill -INT $NODE1_PID $NODE2_PID $NODE3_PID $NODE4_PID 2>/dev/null
+    wait
+  }
+  trap shutdown INT TERM
+  wait
+
 # Dumps heap profile for a node and shows top allocators. Usage: just heap-profile 1
 heap-profile node="1":
   #!/usr/bin/env bash

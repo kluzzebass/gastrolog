@@ -252,9 +252,24 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			continue
 		}
 
+		// Tier-targeted append for active-chunk replication.
+		var tierID uuid.UUID
+		if msg.GetTierId() != "" {
+			tierID, err = uuid.Parse(msg.GetTierId())
+			if err != nil {
+				return status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+			}
+		}
+
 		for _, exportRec := range msg.GetRecords() {
 			rec := exportRecordToChunk(exportRec)
-			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
+			var appendErr error
+			if tierID != uuid.Nil && s.recordTierAppender != nil {
+				appendErr = s.recordTierAppender(stream.Context(), vaultID, tierID, rec)
+			} else {
+				appendErr = s.recordAppender(stream.Context(), vaultID, rec)
+			}
+			if appendErr != nil {
 				return status.Errorf(codes.Internal, "append: %v", appendErr)
 			}
 			written++

@@ -36,6 +36,19 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 	return nil
 }
 
+// replicateActiveRecord forwards a record to all secondary nodes for a tier.
+// Fire-and-forget: if the buffer is full, the record is dropped (best-effort).
+// Secondaries create their own independent chunks from these records.
+// Sealed-chunk replication delivers the canonical version later.
+func (o *Orchestrator) replicateActiveRecord(vaultID, tierID uuid.UUID, secondaryNodeIDs []string, rec chunk.Record) {
+	for _, nodeID := range secondaryNodeIDs {
+		if err := o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, tierID, []chunk.Record{rec}); err != nil {
+			o.logger.Warn("active replication: forward failed",
+				"node", nodeID, "vault", vaultID, "tier", tierID, "error", err)
+		}
+	}
+}
+
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
 func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {

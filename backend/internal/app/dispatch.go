@@ -373,11 +373,26 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v conf
 			return
 		}
 		shouldBeSecondary := slices.Contains(tierCfg.SecondaryNodeIDs, d.localNodeID)
-		if existing.IsSecondary == shouldBeSecondary {
-			return // role unchanged, nothing to do
+		if existing.IsSecondary == shouldBeSecondary &&
+			slices.Equal(existing.SecondaryNodeIDs, tierCfg.SecondaryNodeIDs) {
+			return // role and secondaries unchanged
 		}
-		// Role changed — fall through to rebuild.
+		// Update role and secondary list in place — no vault rebuild needed.
+		// Avoids file lock release/reacquire races with file tiers.
+		existing.IsSecondary = shouldBeSecondary
+		existing.SecondaryNodeIDs = tierCfg.SecondaryNodeIDs
+		if shouldBeSecondary {
+			existing.PrimaryNodeID = tierCfg.NodeID
+		} else {
+			existing.PrimaryNodeID = ""
+		}
+		d.logger.Info("dispatch: tier role updated in place",
+			"vault", v.ID, "tier", tierID,
+			"isSecondary", shouldBeSecondary,
+			"secondaries", tierCfg.SecondaryNodeIDs)
+		return
 	}
+	// Tier doesn't exist locally yet — full vault rebuild.
 	if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		d.logger.Error("dispatch: unregister vault for new tier",
 			"vault", v.ID, "tier", tierID, "error", err)
