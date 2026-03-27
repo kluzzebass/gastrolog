@@ -343,7 +343,7 @@ export function TierEntryCard({
         </>
       )}
 
-      {rotationPolicyOptions.length > 0 && (
+      {tier.type !== "jsonl" && rotationPolicyOptions.length > 0 && (
         <FormField label="Rotation Policy" dark={dark}>
           <SelectInput
             value={tier.rotationPolicyId}
@@ -357,7 +357,7 @@ export function TierEntryCard({
         </FormField>
       )}
 
-      {retentionPolicyOptions.length > 0 && (
+      {tier.type !== "jsonl" && retentionPolicyOptions.length > 0 && (
         <FormField label="Retention Policy" dark={dark}>
           <SelectInput
             value={tier.retentionPolicyId}
@@ -371,15 +371,17 @@ export function TierEntryCard({
         </FormField>
       )}
 
-      <FormField label="Replication Factor" dark={dark}>
-        <NumberInput
-          value={tier.replicationFactor}
-          onChange={(v) => onUpdate({ replicationFactor: v })}
-          placeholder="1"
-          dark={dark}
-          min={1}
-        />
-      </FormField>
+      {tier.type !== "jsonl" && (
+        <FormField label="Replication Factor" dark={dark}>
+          <NumberInput
+            value={tier.replicationFactor}
+            onChange={(v) => onUpdate({ replicationFactor: v })}
+            placeholder="1"
+            dark={dark}
+            min={1}
+          />
+        </FormField>
+      )}
     </div>
   );
 }

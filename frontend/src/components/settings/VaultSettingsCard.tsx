@@ -555,7 +555,7 @@ export function VaultSettingsCard({
                       )}
                     </div>
                     <div className="pl-6 flex flex-col gap-2">
-                      {rotationPolicyOptions.length > 0 && (
+                      {tier.type !== TierType.JSONL && rotationPolicyOptions.length > 0 && (
                         <FormField label="Rotation Policy" dark={dark}>
                           <SelectInput
                             value={getTierRotationPolicy(tier.id)}
@@ -568,7 +568,7 @@ export function VaultSettingsCard({
                           />
                         </FormField>
                       )}
-                      {retentionPolicyOptions.length > 0 && (
+                      {tier.type !== TierType.JSONL && retentionPolicyOptions.length > 0 && (
                         <>
                           <FormField label="Retention Policy" dark={dark}>
                             <SelectInput
@@ -593,15 +593,17 @@ export function VaultSettingsCard({
                           />
                         </FormField>
                       )}
-                      <FormField label="Replication Factor" dark={dark}>
-                        <NumberInput
-                          value={edit.tierRF[tier.id] ?? String(tier.replicationFactor ?? 1)}
-                          onChange={(v) => setTierRF(tier.id, v)}
-                          placeholder="1"
-                          dark={dark}
-                          min={1}
-                        />
-                      </FormField>
+                      {tier.type !== TierType.JSONL && (
+                        <FormField label="Replication Factor" dark={dark}>
+                          <NumberInput
+                            value={edit.tierRF[tier.id] ?? String(tier.replicationFactor ?? 1)}
+                            onChange={(v) => setTierRF(tier.id, v)}
+                            placeholder="1"
+                            dark={dark}
+                            min={1}
+                          />
+                        </FormField>
+                      )}
                     </div>
                   </div>
                 );
