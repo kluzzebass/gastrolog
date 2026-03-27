@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
+	cfgmem "gastrolog/internal/config/memory"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
@@ -1201,6 +1202,360 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for ack")
+	}
+}
+
+// ================================================================
+// HIGH-VOLUME STRESS TESTS
+// ================================================================
+
+// TestImportToTierReplacesIncompleteForwardedChunk verifies that ImportToTier
+// replaces a forwarded chunk that has fewer records (simulating fire-and-forget
+// drops) with the canonical version containing all records.
+func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, true, nil) // secondary receives forwarded + canonical
+	vault := NewVault(vaultID, tier)
+	vault.Name = "incomplete-forward"
+	orch.RegisterVault(vault)
+
+	chunkID := chunk.NewChunkID()
+
+	// Simulate fire-and-forget forwarding: only 70 of 100 records arrive.
+	tier.Chunks.SetNextChunkID(chunkID)
+	for i := 0; i < 70; i++ {
+		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Seal the incomplete forwarded chunk.
+	if err := tier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := tier.Chunks.Meta(chunkID)
+	if err != nil {
+		t.Fatalf("expected forwarded chunk to exist: %v", err)
+	}
+	if meta.RecordCount != 70 {
+		t.Fatalf("expected 70 forwarded records, got %d", meta.RecordCount)
+	}
+
+	// ImportToTier with canonical version: all 100 records.
+	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(100)))
+	if err != nil {
+		t.Fatalf("ImportToTier: %v", err)
+	}
+
+	// Verify: chunk now has 100 records (canonical replaced incomplete).
+	meta, err = tier.Chunks.Meta(chunkID)
+	if err != nil {
+		t.Fatalf("expected canonical chunk to exist: %v", err)
+	}
+	if meta.RecordCount != 100 {
+		t.Errorf("expected 100 records after canonical import, got %d", meta.RecordCount)
+	}
+	if !meta.Sealed {
+		t.Error("expected canonical chunk to be sealed")
+	}
+
+	// Verify exactly one chunk with this ID.
+	metas, _ := tier.Chunks.List()
+	count := 0
+	for _, m := range metas {
+		if m.ID == chunkID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 chunk with ID %s, got %d", chunkID, count)
+	}
+}
+
+// TestTransitionLocalPreservesAllRecords verifies zero record loss when
+// transitioning a large sealed chunk from tier 0 to tier 1. The 5000 records
+// may span multiple chunks in the destination tier due to rotation policy.
+func TestTransitionLocalPreservesAllRecords(t *testing.T) {
+	t.Parallel()
+	const totalRecords = 5000
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	// tier 0: large rotation policy so all 5000 fit in one chunk.
+	tier0cm, err := chunkmem.NewManager(chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(totalRecords + 1),
+		Now:            time.Now,
+		MetaStore:      chunkmem.NewMetaStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier0im, _ := indexmem.NewFactory()(nil, tier0cm, nil)
+	tier0 := &TierInstance{
+		TierID:  tier0ID,
+		Type:    "memory",
+		Chunks:  tier0cm,
+		Indexes: tier0im,
+		Query:   query.New(tier0cm, tier0im, nil),
+	}
+
+	// tier 1: small rotation policy (500 records) — forces multiple chunks.
+	tier1cm, err := chunkmem.NewManager(chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(500),
+		Now:            time.Now,
+		MetaStore:      chunkmem.NewMetaStore(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tier1im, _ := indexmem.NewFactory()(nil, tier1cm, nil)
+	tier1 := &TierInstance{
+		TierID:  tier1ID,
+		Type:    "memory",
+		Chunks:  tier1cm,
+		Indexes: tier1im,
+		Query:   query.New(tier1cm, tier1im, nil),
+	}
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, tier0, tier1)
+	vault.Name = "stress-transition"
+	orch.RegisterVault(vault)
+
+	// Set up config loader.
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "stress-transition", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, NodeID: nodeID,
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, NodeID: nodeID,
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Append 5000 records to tier 0.
+	for i := 0; i < totalRecords; i++ {
+		if _, _, err := tier0cm.Append(testRecord("bulk")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier0cm.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, _ := tier0cm.List()
+	if len(metas) == 0 {
+		t.Fatal("expected sealed chunk in tier 0")
+	}
+	chunkID := metas[0].ID
+
+	// Run transition.
+	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0cm, tier0im)
+	runner.transitionChunk(chunkID)
+
+	// Verify: source chunk deleted.
+	metasAfter, _ := tier0cm.List()
+	for _, m := range metasAfter {
+		if m.ID == chunkID {
+			t.Error("expected source chunk to be deleted from tier 0")
+		}
+	}
+
+	// Count ALL records in tier 1 (may span multiple chunks due to rotation).
+	tier1Metas, _ := tier1cm.List()
+	var total int64
+	for _, m := range tier1Metas {
+		total += m.RecordCount
+	}
+	// Also check active chunk if not in the list.
+	active := tier1cm.Active()
+	if active != nil {
+		listed := false
+		for _, m := range tier1Metas {
+			if m.ID == active.ID {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			total += active.RecordCount
+		}
+	}
+	if total != totalRecords {
+		t.Errorf("expected %d records in tier 1, got %d (zero-loss requirement violated)", totalRecords, total)
+	}
+}
+
+// errorCursor is a RecordCursor that returns N records, then returns a
+// configurable error (not ErrNoMoreRecords) to simulate mid-read failures.
+type errorCursor struct {
+	records []chunk.Record
+	pos     int
+	err     error // returned after records are exhausted
+}
+
+func (c *errorCursor) Next() (chunk.Record, chunk.RecordRef, error) {
+	if c.pos < len(c.records) {
+		rec := c.records[c.pos]
+		c.pos++
+		return rec, chunk.RecordRef{Pos: uint64(c.pos)}, nil
+	}
+	return chunk.Record{}, chunk.RecordRef{}, c.err
+}
+
+func (c *errorCursor) Prev() (chunk.Record, chunk.RecordRef, error) {
+	return chunk.Record{}, chunk.RecordRef{}, errors.New("not implemented")
+}
+
+func (c *errorCursor) Seek(_ chunk.RecordRef) error {
+	return errors.New("not implemented")
+}
+
+func (c *errorCursor) Close() error { return nil }
+
+// TestTransitionLocalCursorErrorRetainsSource verifies that when a cursor
+// returns an unexpected error (not ErrNoMoreRecords), streamLocal propagates
+// it so transitionChunk does NOT call expireChunk — the source chunk is retained.
+func TestTransitionLocalCursorErrorRetainsSource(t *testing.T) {
+	t.Parallel()
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	tier0 := newMemTier(t, tier0ID, false, nil)
+	tier1 := newMemTier(t, tier1ID, false, nil)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	vault := NewVault(vaultID, tier0, tier1)
+	vault.Name = "cursor-error"
+	orch.RegisterVault(vault)
+
+	// Build 50 test records for the cursor.
+	recs := make([]chunk.Record, 50)
+	for i := range recs {
+		recs[i] = testRecord("cursor-rec")
+	}
+
+	readErr := errors.New("simulated disk I/O error")
+	cursor := &errorCursor{
+		records: recs,
+		err:     readErr,
+	}
+
+	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
+	streamErr := runner.streamLocal(cursor, tier1ID)
+
+	if streamErr == nil {
+		t.Fatal("expected streamLocal to return an error for non-ErrNoMoreRecords cursor failure")
+	}
+	if !errors.Is(streamErr, readErr) {
+		t.Errorf("expected error to wrap %q, got %q", readErr, streamErr)
+	}
+
+	// Verify the 50 records that were read successfully made it to tier 1.
+	active := tier1.Chunks.Active()
+	if active == nil {
+		t.Fatal("expected records in tier 1 from partial read")
+	}
+	if active.RecordCount != 50 {
+		t.Errorf("expected 50 records in tier 1 from partial read, got %d", active.RecordCount)
+	}
+}
+
+// failingForwarder is a RecordForwarder that records calls and returns
+// configurable errors. Used to verify fire-and-forget error handling.
+type failingForwarder struct {
+	mu        sync.Mutex
+	calls     int
+	returnErr error
+}
+
+func (f *failingForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+
+func (f *failingForwarder) ForwardToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls++
+	return f.returnErr
+}
+
+func (f *failingForwarder) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// TestAppendToTierForwardingDoesNotBlockOnFullChannel verifies fire-and-forget
+// semantics: AppendToTier commits the record locally and succeeds even when
+// the forwarder returns errors. The local append must not be rolled back, and
+// high-volume ingestion (exceeding typical queue capacity) must complete
+// without error regardless of forwarder failures.
+func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
+	t.Parallel()
+
+	fwd := &failingForwarder{
+		returnErr: errors.New("simulated network partition"),
+	}
+
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2", "node-3"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "non-blocking"
+	orch.RegisterVault(vault)
+
+	// Append 200 records — well above typical queue capacity.
+	// Every forwarder call fails, but AppendToTier must still succeed.
+	const total = 200
+	for i := 0; i < total; i++ {
+		if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, testRecord("burst")); err != nil {
+			t.Fatalf("AppendToTier %d: %v", i, err)
+		}
+	}
+
+	// Verify all records committed locally despite forwarder failures.
+	active := tier.Chunks.Active()
+	if active == nil {
+		t.Fatal("expected active chunk after appends")
+	}
+	if active.RecordCount != total {
+		t.Errorf("expected %d records in active chunk, got %d", total, active.RecordCount)
+	}
+
+	// Verify the forwarder was called for each record to each secondary.
+	// 200 records * 2 secondaries = 400 calls.
+	expectedCalls := total * 2
+	if got := fwd.callCount(); got != expectedCalls {
+		t.Errorf("expected %d ForwardToTier calls (records * secondaries), got %d", expectedCalls, got)
 	}
 }
 

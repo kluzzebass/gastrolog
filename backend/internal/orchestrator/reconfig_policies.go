@@ -67,9 +67,6 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 // reloadTierRotation reconciles the rotation policy and cron job for a single tier.
 func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) error {
 	if tier.IsSecondary {
-		// Secondaries don't self-rotate — the primary controls seal timing
-		// via ForwardSealTier. Disable inline rotation so the ChunkManager
-		// doesn't auto-seal during Append.
 		tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 		if o.cronRotation.hasJob(vaultCfg.ID, tier.TierID) {
 			o.cronRotation.removeJob(vaultCfg.ID, tier.TierID)
@@ -83,7 +80,8 @@ func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.Va
 
 	policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
 	if policyCfg == nil {
-		o.logger.Warn("tier references unknown policy", "vault", vaultCfg.ID, "tier", tier.TierID, "policy", *tierCfg.RotationPolicyID)
+		o.logger.Warn("tier references unknown rotation policy",
+			"vault", vaultCfg.ID, "tier", tier.TierID, "policy", *tierCfg.RotationPolicyID)
 		return nil
 	}
 
@@ -93,7 +91,8 @@ func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.Va
 	}
 	if policy != nil {
 		tier.Chunks.SetRotationPolicy(policy)
-		o.logger.Info("tier rotation policy updated", "vault", vaultCfg.ID, "tier", tier.TierID, "policy", *tierCfg.RotationPolicyID)
+		o.logger.Info("tier rotation policy updated",
+			"vault", vaultCfg.ID, "tier", tier.TierID, "policy", *tierCfg.RotationPolicyID)
 	}
 
 	// Update cron rotation job.
