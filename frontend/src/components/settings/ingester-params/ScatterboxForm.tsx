@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { FormField, TextInput, NumberInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { configClient } from "../../../api/client";
@@ -21,6 +22,7 @@ export function ScatterboxForm({
   const get = (key: string) => params[key] ?? "";
 
   const isOneShot = get("interval") === "0s" || get("interval") === "0ms" || get("interval") === "0";
+  const [triggerState, setTriggerState] = useState<"idle" | "sent" | "error">("idle");
 
   const handleTrigger = async () => {
     if (!ingesterId) return;
@@ -29,9 +31,11 @@ export function ScatterboxForm({
         { id: ingesterId },
         ingesterNodeId ? { headers: { "X-Target-Node": ingesterNodeId } } : {},
       );
+      setTriggerState("sent");
     } catch {
-      // Silently ignore — alert system will surface persistent issues.
+      setTriggerState("error");
     }
+    setTimeout(() => setTriggerState("idle"), 1200);
   };
 
   return (
@@ -71,12 +75,23 @@ export function ScatterboxForm({
         <button
           type="button"
           onClick={handleTrigger}
-          className={`self-start px-3 py-1.5 text-[0.8em] font-medium rounded transition-colors ${c(
-            "bg-copper/15 text-copper hover:bg-copper/25",
-            "bg-copper/10 text-copper hover:bg-copper/20",
-          )}`}
+          disabled={triggerState !== "idle"}
+          className={`self-start px-3 py-1.5 text-[0.8em] font-medium rounded transition-colors ${
+            triggerState === "sent"
+              ? "bg-green-600/20 text-green-400"
+              : triggerState === "error"
+                ? "bg-severity-error/20 text-severity-error"
+                : c(
+                    "bg-copper/15 text-copper hover:bg-copper/25",
+                    "bg-copper/10 text-copper hover:bg-copper/20",
+                  )
+          }`}
         >
-          {isOneShot ? "Emit Burst" : "Trigger Extra Burst"}
+          {triggerState === "sent"
+            ? "Burst Sent"
+            : triggerState === "error"
+              ? "Failed"
+              : isOneShot ? "Emit Burst" : "Trigger Extra Burst"}
         </button>
       )}
     </div>
