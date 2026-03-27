@@ -650,7 +650,7 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 
 	case config.TierTypeJSONL:
 		if tierCfg.Path != "" {
-			params["dir"] = tierCfg.Path
+			params["path"] = tierCfg.Path
 		} else {
 			// Default: jsonl/<vault-name>/sink_<tier-number>.jsonl
 			tierNum := 1
@@ -664,7 +664,7 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 			if vaultName == "" {
 				vaultName = vaultCfg.ID.String()
 			}
-			params["dir"] = filepath.Join("jsonl", vaultName, fmt.Sprintf("sink_%d", tierNum))
+			params["path"] = filepath.Join("jsonl", vaultName, fmt.Sprintf("sink_%d.jsonl", tierNum))
 		}
 
 	case config.TierTypeCloud:

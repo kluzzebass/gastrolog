@@ -20,7 +20,7 @@ import (
 
 // Config holds the parameters for a JSONL manager.
 type Config struct {
-	Dir string // directory for the sink file
+	Path string // full file path for the sink
 }
 
 // Manager writes every appended record as a JSON line to a single file.
@@ -45,13 +45,12 @@ type record struct {
 	Raw      string             `json:"raw"`
 }
 
-// NewManager creates a JSONL sink manager. The file is created at dir/sink.jsonl.
+// NewManager creates a JSONL sink manager at the given file path.
 func NewManager(cfg Config) (*Manager, error) {
-	if err := os.MkdirAll(cfg.Dir, 0o750); err != nil {
-		return nil, fmt.Errorf("create jsonl dir: %w", err)
+	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o750); err != nil {
+		return nil, fmt.Errorf("create jsonl parent dir: %w", err)
 	}
-	path := filepath.Join(cfg.Dir, "sink.jsonl")
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600) //nolint:gosec // G304: path is constructed from tier config, not user input
+	f, err := os.OpenFile(cfg.Path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, fmt.Errorf("open jsonl sink: %w", err)
 	}
@@ -65,11 +64,11 @@ func NewManager(cfg Config) (*Manager, error) {
 // NewFactory returns a chunk.ManagerFactory for JSONL sinks.
 func NewFactory() chunk.ManagerFactory {
 	return func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
-		dir := params["dir"]
-		if dir == "" {
-			return nil, errors.New("jsonl tier requires 'dir' parameter")
+		path := params["path"]
+		if path == "" {
+			return nil, errors.New("jsonl tier requires 'path' parameter")
 		}
-		return NewManager(Config{Dir: dir})
+		return NewManager(Config{Path: path})
 	}
 }
 
@@ -112,18 +111,29 @@ func (m *Manager) Append(rec chunk.Record) (chunk.ChunkID, uint64, error) {
 
 func (m *Manager) Seal() error { return nil }
 
+func (m *Manager) meta() chunk.ChunkMeta {
+	var size int64
+	if info, err := m.file.Stat(); err == nil {
+		size = info.Size()
+	}
+	return chunk.ChunkMeta{
+		ID:          m.id,
+		RecordCount: m.count,
+		Bytes:       size,
+		DiskBytes:   size,
+		WriteStart:  m.earliest,
+		WriteEnd:    m.latest,
+	}
+}
+
 func (m *Manager) Active() *chunk.ChunkMeta {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || m.count == 0 {
 		return nil
 	}
-	return &chunk.ChunkMeta{
-		ID:          m.id,
-		RecordCount: m.count,
-		WriteStart:  m.earliest,
-		WriteEnd:    m.latest,
-	}
+	meta := m.meta()
+	return &meta
 }
 
 func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
@@ -132,12 +142,7 @@ func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	if id != m.id {
 		return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 	}
-	return chunk.ChunkMeta{
-		ID:          m.id,
-		RecordCount: m.count,
-		WriteStart:  m.earliest,
-		WriteEnd:    m.latest,
-	}, nil
+	return m.meta(), nil
 }
 
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
@@ -146,12 +151,7 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	if m.count == 0 {
 		return nil, nil
 	}
-	return []chunk.ChunkMeta{{
-		ID:          m.id,
-		RecordCount: m.count,
-		WriteStart:  m.earliest,
-		WriteEnd:    m.latest,
-	}}, nil
+	return []chunk.ChunkMeta{m.meta()}, nil
 }
 
 func (m *Manager) Delete(chunk.ChunkID) error                                         { return nil }
