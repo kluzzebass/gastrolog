@@ -649,8 +649,8 @@ func buildTierParams(cfg *config.Config, _ config.VaultConfig, tierCfg config.Ti
 		}
 
 	case config.TierTypeJSONL:
-		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.StorageClass); area != nil {
-			params["dir"] = filepath.Join(area.Path, tierCfg.ID.String())
+		if tierCfg.Path != "" {
+			params["dir"] = tierCfg.Path
 		}
 
 	case config.TierTypeCloud:

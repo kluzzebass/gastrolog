@@ -34,6 +34,8 @@ export interface TierEntry {
   rotationPolicyId: string;
   retentionPolicyId: string;
   replicationFactor: string;
+  path: string;
+  nodeId: string;
 }
 
 export function emptyTierEntry(type: TierTypeLabel): TierEntry {
@@ -48,6 +50,8 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     rotationPolicyId: "",
     retentionPolicyId: "",
     replicationFactor: "1",
+    path: "",
+    nodeId: "",
   };
 }
 
@@ -127,7 +131,7 @@ export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): bool
     case "cloud":
       return tier.cloudServiceId !== "" || !hasCloudServices;
     case "jsonl":
-      return tier.storageClass !== "";
+      return tier.path !== "" && tier.nodeId !== "";
   }
 }
 
@@ -204,6 +208,7 @@ export function TierEntryCard({
   cloudServiceOptions,
   rotationPolicyOptions,
   retentionPolicyOptions,
+  nodeOptions,
   onUpdate,
   onRemove,
 }: Readonly<{
@@ -214,6 +219,7 @@ export function TierEntryCard({
   cloudServiceOptions: { value: string; label: string }[];
   rotationPolicyOptions: { value: string; label: string }[];
   retentionPolicyOptions: { value: string; label: string }[];
+  nodeOptions: { value: string; label: string }[];
   onUpdate: (patch: Partial<TierEntry>) => void;
   onRemove: () => void;
 }>) {
@@ -340,6 +346,31 @@ export function TierEntryCard({
               />
             </FormField>
           </div>
+        </>
+      )}
+
+      {tier.type === "jsonl" && (
+        <>
+          <FormField label="Node" dark={dark}>
+            <SelectInput
+              value={tier.nodeId}
+              onChange={(v) => onUpdate({ nodeId: v })}
+              options={[
+                { value: "", label: "Select node..." },
+                ...nodeOptions,
+              ]}
+              dark={dark}
+            />
+          </FormField>
+          <FormField label="Path" dark={dark}>
+            <TextInput
+              value={tier.path}
+              onChange={(v) => onUpdate({ path: v })}
+              placeholder="/var/log/gastrolog/sink.jsonl"
+              dark={dark}
+              mono
+            />
+          </FormField>
         </>
       )}
 
@@ -587,6 +618,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                   cloudServiceOptions={cloudServiceOptions}
                   rotationPolicyOptions={rotationPolicyOptions}
                   retentionPolicyOptions={retentionPolicyOptions}
+                  nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
                   onUpdate={(patch) =>
                     dispatchAdd({ type: "updateTier", key: tier.key, patch })
                   }

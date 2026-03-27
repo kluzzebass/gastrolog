@@ -5646,6 +5646,7 @@ type TierConfig struct {
 	NodeId            string                 `protobuf:"bytes,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`                                   // system-managed: primary node assigned by placement manager
 	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
 	SecondaryNodeIds  []string               `protobuf:"bytes,13,rep,name=secondary_node_ids,json=secondaryNodeIds,proto3" json:"secondary_node_ids,omitempty"`   // system-managed: secondary nodes assigned by placement manager
+	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -5769,6 +5770,13 @@ func (x *TierConfig) GetSecondaryNodeIds() []string {
 		return x.SecondaryNodeIds
 	}
 	return nil
+}
+
+func (x *TierConfig) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
 }
 
 type PutNodeConfigRequest struct {
@@ -7724,7 +7732,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\x94\x04\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xa8\x04\n" +
 	"\n" +
 	"TierConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -7741,7 +7749,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"cacheClass\x12\x17\n" +
 	"\anode_id\x18\v \x01(\tR\x06nodeId\x12-\n" +
 	"\x12replication_factor\x18\f \x01(\rR\x11replicationFactor\x12,\n" +
-	"\x12secondary_node_ids\x18\r \x03(\tR\x10secondaryNodeIds\"H\n" +
+	"\x12secondary_node_ids\x18\r \x03(\tR\x10secondaryNodeIds\x12\x12\n" +
+	"\x04path\x18\x0e \x01(\tR\x04path\"H\n" +
 	"\x14PutNodeConfigRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.NodeConfigR\x06config\"P\n" +
 	"\x15PutNodeConfigResponse\x127\n" +

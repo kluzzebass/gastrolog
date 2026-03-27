@@ -2189,6 +2189,11 @@ export class PutTierCommand extends Message<PutTierCommand> {
    */
   secondaryNodeIds: string[] = [];
 
+  /**
+   * @generated from field: string path = 14;
+   */
+  path = "";
+
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2210,6 +2215,7 @@ export class PutTierCommand extends Message<PutTierCommand> {
     { no: 11, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 13, name: "secondary_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {

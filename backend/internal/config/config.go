@@ -666,6 +666,7 @@ type TierConfig struct {
 	CloudServiceID    *uuid.UUID      `json:"cloudServiceId,omitempty"`
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
+	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
 	NodeID            string          `json:"nodeId,omitempty"`            // system-managed: primary node
 	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
 	SecondaryNodeIDs  []string        `json:"secondaryNodeIds,omitempty"`  // system-managed: secondary nodes

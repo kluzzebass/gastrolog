@@ -327,6 +327,7 @@ message PutTierCommand {
   string node_id = 11;              // system-managed: primary node
   uint32 replication_factor = 12;
   repeated string secondary_node_ids = 13;
+  string path = 14;
 }
 
 message DeleteTierCommand {

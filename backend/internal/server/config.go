@@ -294,6 +294,7 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 			NodeId:            tier.NodeID,
 			ReplicationFactor: tier.ReplicationFactor,
 			SecondaryNodeIds:  tier.SecondaryNodeIDs,
+			Path:              tier.Path,
 		}
 		if tier.RotationPolicyID != nil {
 			tc.RotationPolicyId = tier.RotationPolicyID.String()

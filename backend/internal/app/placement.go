@@ -339,7 +339,7 @@ func (pm *placementManager) nodeEligible(tier config.TierConfig, nodeID string, 
 	case config.TierTypeCloud:
 		return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)
 	case config.TierTypeJSONL:
-		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
+		return tier.NodeID == nodeID // JSONL tiers have explicit node assignment via Path
 	default:
 		return false
 	}

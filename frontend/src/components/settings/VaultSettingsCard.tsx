@@ -339,7 +339,9 @@ export function VaultSettingsCard({
                         action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
                       })]
                     : [],
-                  replicationFactor: parseInt(newTier.replicationFactor, 10) || 1,
+                  replicationFactor: newTier.type === "jsonl" ? 1 : parseInt(newTier.replicationFactor, 10) || 1,
+                  path: newTier.type === "jsonl" ? newTier.path : "",
+                  nodeId: newTier.type === "jsonl" ? newTier.nodeId : "",
                 });
                 try {
                   await putTier.mutateAsync({ config: tierCfg });
@@ -519,8 +521,11 @@ export function VaultSettingsCard({
                     <div className={`flex items-center gap-3 pl-6 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                       {nodeName && <span>{"node: " + nodeName}</span>}
                       {!nodeName && <span className={c("text-text-ghost", "text-light-text-ghost")}>unplaced</span>}
-                      {(tier.type === TierType.FILE || tier.type === TierType.JSONL) && tier.storageClass > 0 && (
+                      {tier.type === TierType.FILE && tier.storageClass > 0 && (
                         <span className="font-mono">{`class ${String(tier.storageClass)}`}</span>
+                      )}
+                      {tier.type === TierType.JSONL && tier.path && (
+                        <span className="font-mono">{tier.path}</span>
                       )}
                       {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
                         <span className="font-mono">{formatBytes(tier.memoryBudgetBytes)}</span>
@@ -583,7 +588,7 @@ export function VaultSettingsCard({
                           </FormField>
                         </>
                       )}
-                      {(tier.type === TierType.FILE || tier.type === TierType.JSONL) && storageClassOptions.length > 0 && (
+                      {tier.type === TierType.FILE && storageClassOptions.length > 0 && (
                         <FormField label="Storage Class" dark={dark}>
                           <SelectInput
                             value={edit.tierStorageClass[tier.id] ?? String(tier.storageClass || 0)}
@@ -619,6 +624,7 @@ export function VaultSettingsCard({
               cloudServiceOptions={cloudServiceOptions}
               rotationPolicyOptions={rotationPolicyOptions}
               retentionPolicyOptions={retentionPolicyOptions}
+              nodeOptions={nodeConfigs.map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
               onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
               onRemove={() => setNewTier(null)}
             />

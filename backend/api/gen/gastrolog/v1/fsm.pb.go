@@ -2876,6 +2876,7 @@ type PutTierCommand struct {
 	NodeId            string                 `protobuf:"bytes,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // system-managed: primary node
 	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"`
 	SecondaryNodeIds  []string               `protobuf:"bytes,13,rep,name=secondary_node_ids,json=secondaryNodeIds,proto3" json:"secondary_node_ids,omitempty"`
+	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -2999,6 +3000,13 @@ func (x *PutTierCommand) GetSecondaryNodeIds() []string {
 		return x.SecondaryNodeIds
 	}
 	return nil
+}
+
+func (x *PutTierCommand) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
 }
 
 type DeleteTierCommand struct {
@@ -3444,7 +3452,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\x85\x04\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\x99\x04\n" +
 	"\x0ePutTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -3460,7 +3468,8 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"cacheClass\x12\x17\n" +
 	"\anode_id\x18\v \x01(\tR\x06nodeId\x12-\n" +
 	"\x12replication_factor\x18\f \x01(\rR\x11replicationFactor\x12,\n" +
-	"\x12secondary_node_ids\x18\r \x03(\tR\x10secondaryNodeIds\"#\n" +
+	"\x12secondary_node_ids\x18\r \x03(\tR\x10secondaryNodeIds\x12\x12\n" +
+	"\x04path\x18\x0e \x01(\tR\x04path\"#\n" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\xae\t\n" +
 	"\x0eConfigSnapshot\x128\n" +

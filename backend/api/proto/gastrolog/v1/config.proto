@@ -732,6 +732,7 @@ message TierConfig {
   string node_id = 11;              // system-managed: primary node assigned by placement manager
   uint32 replication_factor = 12;   // desired RF (1 = no replication, default)
   repeated string secondary_node_ids = 13; // system-managed: secondary nodes assigned by placement manager
+  string path = 14;                       // direct path for JSONL sinks
 }
 
 message PutNodeConfigRequest {

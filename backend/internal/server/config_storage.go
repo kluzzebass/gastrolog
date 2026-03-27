@@ -150,7 +150,7 @@ func (s *ConfigServer) PutTier(
 	// Validate tier type.
 	tierType := protoToTierType(req.Msg.Config.Type)
 	if tierType == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, local, or cloud"))
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, file, cloud, or jsonl"))
 	}
 
 	// For cloud tiers, validate the referenced cloud service exists.
@@ -325,6 +325,7 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		ActiveChunkClass:  p.ActiveChunkClass,
 		CacheClass:        p.CacheClass,
 		ReplicationFactor: p.ReplicationFactor,
+		Path:              p.Path,
 	}
 
 	if p.RotationPolicyId != "" {
