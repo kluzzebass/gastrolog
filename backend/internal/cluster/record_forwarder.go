@@ -23,7 +23,7 @@ import (
 const (
 	// forwardChanCap is the per-node channel capacity for ingestion forwarding.
 	// When full, new records are dropped (best-effort delivery).
-	forwardChanCap = 1000
+	forwardChanCap = 16384
 
 	// streamBurstSize is the max records drained per burst on the stream.
 	// After one blocking read, up to streamBurstSize-1 more are drained
