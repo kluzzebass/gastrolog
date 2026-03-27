@@ -330,22 +330,40 @@ export function TierEntryCard({
           </FormField>
           <div className="grid grid-cols-2 gap-2">
             <FormField label="Active Chunk Class" dark={dark}>
-              <NumberInput
-                value={tier.activeChunkClass}
-                onChange={(v) => onUpdate({ activeChunkClass: v })}
-                placeholder="0"
-                dark={dark}
-                min={0}
-              />
+              {storageClassOptions.length > 0 ? (
+                <SelectInput
+                  value={tier.activeChunkClass}
+                  onChange={(v) => onUpdate({ activeChunkClass: v })}
+                  options={[{ value: "", label: "Select..." }, ...storageClassOptions]}
+                  dark={dark}
+                />
+              ) : (
+                <NumberInput
+                  value={tier.activeChunkClass}
+                  onChange={(v) => onUpdate({ activeChunkClass: v })}
+                  placeholder="0"
+                  dark={dark}
+                  min={0}
+                />
+              )}
             </FormField>
             <FormField label="Cache Class" dark={dark}>
-              <NumberInput
-                value={tier.cacheClass}
-                onChange={(v) => onUpdate({ cacheClass: v })}
-                placeholder="0"
-                dark={dark}
-                min={0}
-              />
+              {storageClassOptions.length > 0 ? (
+                <SelectInput
+                  value={tier.cacheClass}
+                  onChange={(v) => onUpdate({ cacheClass: v })}
+                  options={[{ value: "", label: "Select..." }, ...storageClassOptions]}
+                  dark={dark}
+                />
+              ) : (
+                <NumberInput
+                  value={tier.cacheClass}
+                  onChange={(v) => onUpdate({ cacheClass: v })}
+                  placeholder="0"
+                  dark={dark}
+                  min={0}
+                />
+              )}
             </FormField>
           </div>
         </>

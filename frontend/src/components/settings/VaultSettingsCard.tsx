@@ -114,6 +114,8 @@ export function VaultSettingsCard({
     tierRetention: Record<string, string>;   // tierId → retentionPolicyId
     tierRF: Record<string, string>;          // tierId → replicationFactor (string during editing)
     tierStorageClass: Record<string, string>; // tierId → storageClass (string during editing)
+    tierActiveChunkClass: Record<string, string>;
+    tierCacheClass: Record<string, string>;
   }
 
   const buildInitialEdit = (): VaultEdit => ({
@@ -131,6 +133,12 @@ export function VaultSettingsCard({
     ),
     tierStorageClass: Object.fromEntries(
       tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.storageClass || 0)]),
+    ),
+    tierActiveChunkClass: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.activeChunkClass || 0)]),
+    ),
+    tierCacheClass: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.cacheClass || 0)]),
     ),
   });
 
@@ -160,6 +168,10 @@ export function VaultSettingsCard({
     setEditState((prev) => ({ ...prev, tierRF: { ...prev.tierRF, [tierId]: value } }));
   const setTierStorageClass = (tierId: string, value: string) =>
     setEditState((prev) => ({ ...prev, tierStorageClass: { ...prev.tierStorageClass, [tierId]: value } }));
+  const setTierActiveChunkClass = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierActiveChunkClass: { ...prev.tierActiveChunkClass, [tierId]: value } }));
+  const setTierCacheClass = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierCacheClass: { ...prev.tierCacheClass, [tierId]: value } }));
 
   const anyDirty = JSON.stringify(edit) !== initialJson || newTier !== null;
 
@@ -367,6 +379,10 @@ export function VaultSettingsCard({
                 const rf = parseInt(rfStr, 10) || 1;
                 const scStr = edit.tierStorageClass[tierId] ?? String(tier.storageClass || 0);
                 const sc = parseInt(scStr, 10) || 0;
+                const accStr = edit.tierActiveChunkClass[tierId] ?? String(tier.activeChunkClass || 0);
+                const acc = parseInt(accStr, 10) || 0;
+                const ccStr = edit.tierCacheClass[tierId] ?? String(tier.cacheClass || 0);
+                const cc = parseInt(ccStr, 10) || 0;
 
                 const tierIndex = newTierIds.indexOf(tierId);
                 const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
@@ -377,13 +393,17 @@ export function VaultSettingsCard({
                 const retChanged = retPolicyId !== currentRetId || (retPolicyId && currentAction !== expectedAction);
                 const rfChanged = rf !== (tier.replicationFactor || 1);
                 const scChanged = sc !== (tier.storageClass || 0);
+                const accChanged = acc !== (tier.activeChunkClass || 0);
+                const ccChanged = cc !== (tier.cacheClass || 0);
 
-                if (!rotChanged && !retChanged && !rfChanged && !scChanged) continue;
+                if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged) continue;
 
                 const updated = tier.clone();
                 if (rotChanged) updated.rotationPolicyId = rpId;
                 if (rfChanged) updated.replicationFactor = rf;
                 if (scChanged) updated.storageClass = sc;
+                if (accChanged) updated.activeChunkClass = acc;
+                if (ccChanged) updated.cacheClass = cc;
                 updated.retentionRules = retPolicyId
                   ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: expectedAction })]
                   : [];
@@ -601,6 +621,26 @@ export function VaultSettingsCard({
                             dark={dark}
                           />
                         </FormField>
+                      )}
+                      {tier.type === TierType.CLOUD && storageClassOptions.length > 0 && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <FormField label="Active Chunk Class" dark={dark}>
+                            <SelectInput
+                              value={edit.tierActiveChunkClass[tier.id] ?? String(tier.activeChunkClass || 0)}
+                              onChange={(v) => setTierActiveChunkClass(tier.id, v)}
+                              options={[{ value: "0", label: "None" }, ...storageClassOptions]}
+                              dark={dark}
+                            />
+                          </FormField>
+                          <FormField label="Cache Class" dark={dark}>
+                            <SelectInput
+                              value={edit.tierCacheClass[tier.id] ?? String(tier.cacheClass || 0)}
+                              onChange={(v) => setTierCacheClass(tier.id, v)}
+                              options={[{ value: "0", label: "None" }, ...storageClassOptions]}
+                              dark={dark}
+                            />
+                          </FormField>
+                        </div>
                       )}
                       {tier.type !== TierType.JSONL && (
                         <FormField label="Replication Factor" dark={dark}>
