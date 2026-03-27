@@ -95,14 +95,14 @@ interface VaultRef {
   tierIds: string[];
 }
 
-function tierLabel(tierId: string, vaults: VaultRef[]): string {
+function tierLabel(tierId: string, vaults: VaultRef[]): string | null {
   for (const v of vaults) {
     const pos = v.tierIds.indexOf(tierId);
     if (pos >= 0) {
-      return `${v.name}/tier ${String(pos + 1)}`;
+      return `${v.name || v.tierIds[0] || tierId}/tier ${String(pos + 1)}`;
     }
   }
-  return tierId;
+  return null;
 }
 
 export function tierRefsForRotationPolicy(
@@ -112,7 +112,8 @@ export function tierRefsForRotationPolicy(
 ): string[] {
   return tiers
     .filter((t) => t.rotationPolicyId === rotationPolicyId)
-    .map((t) => tierLabel(t.id, vaults));
+    .map((t) => tierLabel(t.id, vaults))
+    .filter((label): label is string => label !== null);
 }
 
 export function tierRuleRefsFor(
@@ -126,5 +127,6 @@ export function tierRuleRefsFor(
         (r) => r.retentionPolicyId === retentionPolicyId,
       ),
     )
-    .map((t) => tierLabel(t.id, vaults));
+    .map((t) => tierLabel(t.id, vaults))
+    .filter((label): label is string => label !== null);
 }
