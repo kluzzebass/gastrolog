@@ -50,7 +50,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.ConfigServiceWatchConfigProcedure:          {Strategy: RouteLocal, IsStreaming: true},
 		// Node-local operations — run on whichever node received the request.
 		gastrologv1connect.ConfigServiceTestIngesterProcedure:         {Strategy: RouteLocal},
-		gastrologv1connect.ConfigServiceTriggerIngesterProcedure:      {Strategy: RouteLocal},
+		gastrologv1connect.ConfigServiceTriggerIngesterProcedure:      {Strategy: RouteLocal, WrapResponse: NewRespWrapper[apiv1.TriggerIngesterResponse]()},
 		gastrologv1connect.ConfigServiceTestVaultProcedure:            {Strategy: RouteLocal},
 		gastrologv1connect.ConfigServiceTestHTTPLookupProcedure:       {Strategy: RouteLocal},
 		gastrologv1connect.ConfigServicePreviewCSVLookupProcedure:     {Strategy: RouteLocal},
