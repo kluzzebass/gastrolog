@@ -144,7 +144,12 @@ func (o *Orchestrator) HasLocalQueryEngine(vaultID uuid.UUID) bool {
 	if v == nil {
 		return false
 	}
-	return len(v.Tiers) > 0
+	for _, t := range v.Tiers {
+		if t.Query != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // ListIngesters returns all registered ingester IDs in deterministic order.
@@ -195,7 +200,7 @@ func (r *primaryTierRegistry) ListVaults() []uuid.UUID {
 	var ids []uuid.UUID
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if !t.IsSecondary {
+			if !t.IsSecondary && t.Query != nil {
 				ids = append(ids, t.TierID)
 			}
 		}
@@ -208,7 +213,7 @@ func (r *primaryTierRegistry) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsSecondary {
+			if t.TierID == key && !t.IsSecondary && t.Query != nil {
 				return t.Chunks
 			}
 		}
@@ -221,7 +226,7 @@ func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsSecondary {
+			if t.TierID == key && !t.IsSecondary && t.Query != nil {
 				return t.Indexes
 			}
 		}
@@ -243,7 +248,7 @@ func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID uuid.UUID) *query.
 	}
 	var primary []*TierInstance
 	for _, t := range v.Tiers {
-		if !t.IsSecondary {
+		if !t.IsSecondary && t.Query != nil {
 			primary = append(primary, t)
 		}
 	}
