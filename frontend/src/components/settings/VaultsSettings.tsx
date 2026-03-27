@@ -193,7 +193,7 @@ const tierTypeLabels: Record<TierTypeLabel, string> = {
   memory: "Memory",
   file: "File",
   cloud: "Cloud",
-  jsonl: "JSONL Sink",
+  jsonl: "jsonl",
 };
 
 // ---------------------------------------------------------------------------
@@ -366,7 +366,7 @@ export function TierEntryCard({
             <TextInput
               value={tier.path}
               onChange={(v) => onUpdate({ path: v })}
-              placeholder="/var/log/gastrolog/sink.jsonl"
+              placeholder=""
               dark={dark}
               mono
             />

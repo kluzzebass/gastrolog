@@ -636,7 +636,7 @@ export function VaultSettingsCard({
                   { value: "memory", label: "Memory" },
                   { value: "file", label: "File" },
                   { value: "cloud", label: "Cloud" },
-                  { value: "jsonl", label: "JSONL Sink" },
+                  { value: "jsonl", label: "JSONL" },
                 ]}
                 onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}
                 dark={dark}
