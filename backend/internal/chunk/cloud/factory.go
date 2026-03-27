@@ -30,10 +30,12 @@ var (
 
 // NewConnectionTester returns a function that validates cloud storage connectivity
 // by creating a temporary store and listing objects.
+// NewConnectionTester returns a function that validates cloud storage connectivity
+// by exercising the same operations the vault will use at runtime:
+// EnsureBucket, Upload, Download, List, Delete.
 func NewConnectionTester() func(ctx context.Context, params map[string]string) (string, error) {
 	return func(ctx context.Context, params map[string]string) (string, error) {
 		provider := params[ParamProvider]
-		// Also check sealed_backing for file vaults with cloud backing.
 		if provider == "" {
 			provider = params["sealed_backing"]
 		}
@@ -44,10 +46,37 @@ func NewConnectionTester() func(ctx context.Context, params map[string]string) (
 		if err != nil {
 			return "", err
 		}
+
+		// 1. Ensure bucket exists.
 		if err := store.EnsureBucket(ctx); err != nil {
-			return "", fmt.Errorf("failed to ensure bucket: %w", err)
+			return "", fmt.Errorf("ensure bucket: %w", err)
 		}
-		return fmt.Sprintf("Connected to %s successfully", provider), nil
+
+		// 2. Upload a probe object.
+		probeKey := ".gastrolog-connection-test"
+		probeData := strings.NewReader("ok")
+		if err := store.Upload(ctx, probeKey, probeData, nil); err != nil {
+			return "", fmt.Errorf("upload probe: %w", err)
+		}
+
+		// 3. Download it back.
+		rc, err := store.Download(ctx, probeKey)
+		if err != nil {
+			return "", fmt.Errorf("download probe: %w", err)
+		}
+		_ = rc.Close()
+
+		// 4. List to verify iteration works.
+		if err := store.List(ctx, probeKey, func(_ blobstore.BlobInfo) error {
+			return blobstore.ErrStopIteration
+		}); err != nil {
+			return "", fmt.Errorf("list: %w", err)
+		}
+
+		// 5. Clean up.
+		_ = store.Delete(ctx, probeKey)
+
+		return fmt.Sprintf("Connected to %s: bucket ok, read/write ok", provider), nil
 	}
 }
 
