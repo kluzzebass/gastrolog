@@ -638,15 +638,7 @@ export function VaultSettingsCard({
                   { value: "cloud", label: "Cloud" },
                   { value: "jsonl", label: "JSONL" },
                 ]}
-                onSelect={(v) => {
-                  const entry = emptyTierEntry(v as TierTypeLabel);
-                  if (v === "jsonl") {
-                    const vName = vault?.name || "vault";
-                    const tierNum = vaultTiers.length + 1;
-                    entry.path = `jsonl/${vName}/sink_${String(tierNum)}.jsonl`;
-                  }
-                  setNewTier(entry);
-                }}
+                onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}
                 dark={dark}
                 dropUp
               />

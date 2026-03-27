@@ -624,7 +624,7 @@ func mapTierTypeToFactory(t config.TierType) string {
 }
 
 // buildTierParams builds a params map from a TierConfig suitable for factory consumption.
-func buildTierParams(cfg *config.Config, _ config.VaultConfig, tierCfg config.TierConfig, localNodeID string) map[string]string { //nolint:gocognit // flat type-switch mapping
+func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, localNodeID string) map[string]string { //nolint:gocognit // flat type-switch mapping
 	params := make(map[string]string)
 
 	switch tierCfg.Type {
@@ -651,6 +651,20 @@ func buildTierParams(cfg *config.Config, _ config.VaultConfig, tierCfg config.Ti
 	case config.TierTypeJSONL:
 		if tierCfg.Path != "" {
 			params["dir"] = tierCfg.Path
+		} else {
+			// Default: jsonl/<vault-name>/sink_<tier-number>.jsonl
+			tierNum := 1
+			for i, tid := range vaultCfg.TierIDs {
+				if tid == tierCfg.ID {
+					tierNum = i + 1
+					break
+				}
+			}
+			vaultName := vaultCfg.Name
+			if vaultName == "" {
+				vaultName = vaultCfg.ID.String()
+			}
+			params["dir"] = filepath.Join("jsonl", vaultName, fmt.Sprintf("sink_%d", tierNum))
 		}
 
 	case config.TierTypeCloud:

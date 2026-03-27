@@ -131,7 +131,7 @@ export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): bool
     case "cloud":
       return tier.cloudServiceId !== "" || !hasCloudServices;
     case "jsonl":
-      return tier.path !== "" && tier.nodeId !== "";
+      return tier.nodeId !== "";
   }
 }
 
