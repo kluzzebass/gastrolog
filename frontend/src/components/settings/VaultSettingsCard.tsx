@@ -534,7 +534,9 @@ export function VaultSettingsCard({
                       {tier.type === TierType.CLOUD && tier.activeChunkClass > 0 && (
                         <span className="font-mono">{`chunk class ${String(tier.activeChunkClass)}`}</span>
                       )}
-                      <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
+                      {tier.type !== TierType.JSONL && (
+                        <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
+                      )}
                       {(tier.secondaryNodeIds?.length ?? 0) > 0 && (
                         <span>
                           {tier.secondaryNodeIds.map((id, si) => {

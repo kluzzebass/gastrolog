@@ -194,13 +194,17 @@ func (s *ConfigServer) PutTier(
 	}
 	cfg.ID = id
 
-	// NodeID and SecondaryNodeIDs are system-managed by the placement manager.
+	// NodeID and SecondaryNodeIDs are system-managed by the placement manager
+	// for most tier types. JSONL sinks use explicit user-provided NodeID.
 	// Preserve existing assignments on updates; leave empty on create.
-	// ReplicationFactor is user-settable.
-	cfg.NodeID = ""
+	if cfg.Type != config.TierTypeJSONL {
+		cfg.NodeID = ""
+	}
 	cfg.SecondaryNodeIDs = nil
 	if existing, _ := s.cfgStore.GetTier(ctx, id); existing != nil {
-		cfg.NodeID = existing.NodeID
+		if cfg.Type != config.TierTypeJSONL {
+			cfg.NodeID = existing.NodeID
+		}
 		cfg.SecondaryNodeIDs = existing.SecondaryNodeIDs
 	}
 
