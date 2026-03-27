@@ -18,6 +18,7 @@ import { CloudServiceFields } from "./CloudServiceFields";
 import { Badge } from "../Badge";
 import { Button } from "./Buttons";
 import { NodeSelect } from "./NodeSelect";
+import { useTestCloudService } from "../../api/hooks/useVaults";
 
 // ─── Cloud Storage Add Form ──────────────────────────────────
 
@@ -279,6 +280,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                 onChange={(patch) => dispatchAdd({ type: "set", patch })}
                 dark={dark}
               />
+              <TestCloudButton provider={addForm.provider} values={addForm} dark={dark} />
             </AddFormCard>
           )}
 
@@ -426,6 +428,69 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function TestCloudButton({
+  provider,
+  values,
+  dark,
+}: Readonly<{
+  provider: string;
+  values: { bucket: string; region: string; endpoint: string; accessKey: string; secretKey: string; container: string; connectionString: string; credentialsJson: string };
+  dark: boolean;
+}>) {
+  const c = useThemeClass(dark);
+  const testCloud = useTestCloudService();
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const hasRequired =
+    provider !== "" &&
+    ((provider === "s3" && values.bucket !== "") ||
+      (provider === "azure" && values.container !== "" && values.connectionString !== "") ||
+      (provider === "gcs" && values.bucket !== ""));
+
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        disabled={testCloud.isPending || !hasRequired}
+        onClick={() => {
+          setResult(null);
+          testCloud.mutate(
+            {
+              type: "file",
+              params: {
+                sealed_backing: provider,
+                bucket: values.bucket,
+                region: values.region,
+                endpoint: values.endpoint,
+                access_key: values.accessKey,
+                secret_key: values.secretKey,
+                container: values.container,
+                connection_string: values.connectionString,
+                credentials_json: values.credentialsJson,
+              },
+            },
+            {
+              onSuccess: (resp) => setResult({ success: resp.success, message: resp.message }),
+              onError: (err) => setResult({ success: false, message: err instanceof Error ? err.message : String(err) }),
+            },
+          );
+        }}
+        className={`px-3 py-1.5 text-[0.8em] font-medium rounded border transition-colors ${c(
+          "bg-ink-surface border-ink-border text-text-bright hover:border-copper-dim disabled:opacity-50",
+          "bg-light-surface border-light-border text-light-text-bright hover:border-copper disabled:opacity-50",
+        )}`}
+      >
+        {testCloud.isPending ? "Testing..." : "Test Connection"}
+      </button>
+      {result && (
+        <span className={`text-[0.8em] ${result.success ? "text-green-400" : "text-severity-error"}`}>
+          {result.message}
+        </span>
+      )}
     </div>
   );
 }
