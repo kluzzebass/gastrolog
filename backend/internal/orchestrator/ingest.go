@@ -26,12 +26,16 @@ import (
 // and CM B fails, the record is persisted in A but not B, and the error
 // from B is returned. There is no rollback.
 func (o *Orchestrator) Ingest(rec chunk.Record) error {
-	return o.ingest(rec)
+	_, err := o.ingest(rec)
+	return err
 }
 
 // ingest is the internal ingest implementation, called by processMessage.
 // Extracted from Ingest to allow both direct and channel-based ingestion.
-func (o *Orchestrator) ingest(rec chunk.Record) error {
+//
+// Returns replication tasks for ack-gated records that need sync forwarding
+// to secondaries AFTER the lock is released.
+func (o *Orchestrator) ingest(rec chunk.Record) ([]replicationTask, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -39,22 +43,23 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 
 	if len(o.vaults) == 0 && o.forwarder == nil {
 		o.routeStats.Dropped.Add(1)
-		return ErrNoChunkManagers
+		return nil, ErrNoChunkManagers
 	}
 
 	if o.filterSet == nil {
 		o.routeStats.Dropped.Add(1)
-		return nil // No routes configured — drop the record.
+		return nil, nil // No routes configured — drop the record.
 	}
 
 	matches := o.filterSet.MatchWithNode(rec.Attrs)
 	if len(matches) == 0 {
 		o.routeStats.Dropped.Add(1)
-		return nil
+		return nil, nil
 	}
 
 	// Write records first, then update stats only on success.
 	routed := false
+	var tasks []replicationTask
 	for _, t := range matches {
 		if t.NodeID != "" {
 			o.forwardRemote(t, rec)
@@ -69,11 +74,15 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 			routed = true
 			continue
 		}
-		if err := o.appendLocal(t.VaultID, rec); err != nil {
+		task, err := o.appendLocal(t.VaultID, rec)
+		if err != nil {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
 			}
-			return err
+			return tasks, err
+		}
+		if task != nil {
+			tasks = append(tasks, *task)
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
@@ -86,7 +95,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) error {
 	if routed {
 		o.routeStats.Routed.Add(1)
 	}
-	return nil
+	return tasks, nil
 }
 
 // getOrCreateVaultRouteStats returns the per-vault route stats, creating if needed.
@@ -108,12 +117,13 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID uuid.UUID) *PerRouteStat
 }
 
 // appendLocal appends a record to a local vault.
-func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) error {
-	_, _, err := o.appendRecord(vaultID, rec)
+// Returns a replicationTask when the record needs sync forwarding (ack-gated).
+func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) (*replicationTask, error) {
+	_, _, task, err := o.appendRecord(vaultID, rec)
 	if err != nil {
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
 	}
-	return err
+	return task, err
 }
 
 // forwardRemote ships a record to the node that owns the target vault.

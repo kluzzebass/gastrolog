@@ -83,6 +83,11 @@ type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.Reco
 // preserving the original chunk ID. Used for sealed-chunk replication.
 type TierRecordImporter func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
+// TierStreamAppender appends streamed records to a tier's active chunk.
+// Used for tier transitions — records flow into the destination tier like
+// normal ingestion. The tier's rotation policy handles sealing.
+type TierStreamAppender func(ctx context.Context, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error
+
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
 type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha256hex string, err error)
@@ -111,6 +116,11 @@ func (s *Server) SetRecordImporter(fn RecordImporter) {
 // SetTierRecordImporter injects the callback for tier-targeted sealed-chunk imports.
 func (s *Server) SetTierRecordImporter(fn TierRecordImporter) {
 	s.tierRecordImporter = fn
+}
+
+// SetTierStreamAppender injects the callback for streaming records to a tier's active chunk.
+func (s *Server) SetTierStreamAppender(fn TierStreamAppender) {
+	s.tierStreamAppender = fn
 }
 
 // SetSearchExecutor injects the callback for handling remote search requests.
@@ -376,12 +386,20 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return exportRecordToChunk(msg.GetRecord()), nil
 	})
 
-	// Route to tier-targeted importer (replication) or vault importer (migration).
-	if tierID != uuid.Nil && replicaChunkID != (chunk.ChunkID{}) && s.tierRecordImporter != nil {
+	// Route based on tier_id and chunk_id:
+	// - tier_id + chunk_id → sealed-chunk replication (ImportToTier)
+	// - tier_id only       → tier transition stream (AppendToTier)
+	// - neither            → vault migration (ImportRecords)
+	switch {
+	case tierID != uuid.Nil && replicaChunkID != (chunk.ChunkID{}) && s.tierRecordImporter != nil:
 		if err := s.tierRecordImporter(stream.Context(), vaultID, tierID, replicaChunkID, next); err != nil {
 			return status.Errorf(codes.Internal, "tier import records: %v", err)
 		}
-	} else {
+	case tierID != uuid.Nil && s.tierStreamAppender != nil:
+		if err := s.tierStreamAppender(stream.Context(), vaultID, tierID, next); err != nil {
+			return status.Errorf(codes.Internal, "tier stream append: %v", err)
+		}
+	default:
 		if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
 			return status.Errorf(codes.Internal, "import records: %v", err)
 		}

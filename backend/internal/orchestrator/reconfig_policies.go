@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 
 	"github.com/google/uuid"
@@ -66,7 +67,10 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 // reloadTierRotation reconciles the rotation policy and cron job for a single tier.
 func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) error {
 	if tier.IsSecondary {
-		// Remove any existing cron job if this tier became a secondary.
+		// Secondaries don't self-rotate — the primary controls seal timing
+		// via ForwardSealTier. Disable inline rotation so the ChunkManager
+		// doesn't auto-seal during Append.
+		tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 		if o.cronRotation.hasJob(vaultCfg.ID, tier.TierID) {
 			o.cronRotation.removeJob(vaultCfg.ID, tier.TierID)
 		}

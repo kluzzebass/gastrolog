@@ -232,39 +232,68 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 func (o *Orchestrator) Append(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	return o.appendRecord(vaultID, rec)
+	cid, pos, _, err := o.appendRecord(vaultID, rec)
+	return cid, pos, err
+}
+
+// replicationTask describes a pending sync forward for ack-gated ingestion.
+// Returned by appendRecord when rec.WaitForReplica is true, consumed by
+// ackAfterReplication outside the orchestrator lock.
+type replicationTask struct {
+	vaultID     uuid.UUID
+	tierID      uuid.UUID
+	chunkID     chunk.ChunkID
+	secondaries []string
 }
 
 // appendRecord is the unified append-with-seal-detection path.
 // Caller MUST hold o.mu.
-func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
+//
+// Returns a replicationTask when the record has WaitForReplica set and
+// the tier has secondaries. The caller is responsible for doing the sync
+// forward AFTER releasing the lock.
+func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, error) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return chunk.ChunkID{}, 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if !vault.Enabled {
-		return chunk.ChunkID{}, 0, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
+		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 
 	cm := vault.ChunkManager()
 	activeBefore := cm.Active()
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
-		return cid, pos, err
+		return cid, pos, nil, err
 	}
 
 	// Forward record to secondaries for active-chunk durability.
 	// Secondaries append to their ChunkManager — real, queryable chunks
 	// that allow immediate promotion if the primary dies.
+	//
+	// When WaitForReplica is set, skip fire-and-forget — the caller does
+	// sync forwarding outside the lock via ackAfterReplication.
 	activeTier := vault.ActiveTier()
-	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+	var task *replicationTask
+	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 {
 		activeNow := cm.Active()
 		var activeChunkID chunk.ChunkID
 		if activeNow != nil {
 			activeChunkID = activeNow.ID
 		}
-		for _, nodeID := range activeTier.SecondaryNodeIDs {
-			_ = o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, activeTier.TierID, activeChunkID, []chunk.Record{rec})
+
+		if rec.WaitForReplica {
+			task = &replicationTask{
+				vaultID:     vaultID,
+				tierID:      activeTier.TierID,
+				chunkID:     activeChunkID,
+				secondaries: activeTier.SecondaryNodeIDs,
+			}
+		} else if o.forwarder != nil {
+			for _, nodeID := range activeTier.SecondaryNodeIDs {
+				_ = o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, activeTier.TierID, activeChunkID, []chunk.Record{rec})
+			}
 		}
 	}
 
@@ -274,7 +303,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 
-	return cid, pos, nil
+	return cid, pos, task, nil
 }
 
 // ImportChunkRecords creates a new sealed chunk from the given records in the
@@ -349,31 +378,31 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 		activeIsChunk = true
 	}
 
-	if metaErr == nil || activeIsChunk {
-		if !ref.isSecondary {
-			// Primary: idempotent skip — canonical version is already here.
-			o.logger.Info("replication: chunk already exists, skipping import",
-				"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
-			drainIterator(next)
-			return nil
-		}
-		// Secondary: the existing chunk was built by active record forwarding.
-		// Seal it if still active, then run post-seal (compression + indexing)
-		// locally. No delete-and-replace — avoids a window where the chunk
-		// doesn't exist, which causes transient replica count drops.
+	chunkExists := metaErr == nil || activeIsChunk
+
+	// Primary: idempotent skip — canonical version is already here.
+	if chunkExists && !ref.isSecondary {
+		o.logger.Info("replication: chunk already exists, skipping import",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		drainIterator(next)
+		return nil
+	}
+
+	// Secondary: replace the forwarded version (may be incomplete due to
+	// fire-and-forget drops) with the canonical sealed chunk.
+	if chunkExists {
 		if activeIsChunk {
 			if err := cm.Seal(); err != nil {
-				o.logger.Error("replication: failed to seal forwarded active chunk",
-					"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "error", err)
 				drainIterator(next)
 				return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
 			}
 		}
-		o.logger.Info("replication: forwarded chunk exists, running post-seal locally",
+		if err := cm.Delete(chunkID); err != nil {
+			drainIterator(next)
+			return fmt.Errorf("delete forwarded chunk %s: %w", chunkID, err)
+		}
+		o.logger.Info("replication: replacing forwarded chunk with canonical version",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
-		drainIterator(next)
-		o.postSealWork(vaultID, cm, chunkID)
-		return nil
 	}
 
 	cm.SetNextChunkID(chunkID)
@@ -389,6 +418,20 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 		o.postSealWork(vaultID, cm, meta.ID)
 	}
 	return nil
+}
+
+// StreamAppendToTier appends records from an iterator to a tier's active chunk.
+// The tier's rotation policy handles sealing. Used for remote tier transitions.
+func (o *Orchestrator) StreamAppendToTier(ctx context.Context, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+	for {
+		rec, iterErr := next()
+		if iterErr != nil {
+			return nil //nolint:nilerr // ErrNoMoreRecords signals normal end of iterator
+		}
+		if err := o.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+			return err
+		}
+	}
 }
 
 // drainIterator reads and discards all remaining records from an iterator.

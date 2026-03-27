@@ -106,8 +106,13 @@ type RemoteTransferrer interface {
 	ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 
 	// ForwardTierAppend sends records to a specific tier on a remote node.
-	// Used by inter-tier transition when the next tier is on a different node.
+	// Used by ack-gated ingestion for sync secondary confirmation.
 	ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
+
+	// StreamToTier opens a single streaming connection and pipes all records
+	// to a remote tier's active chunk. Used for tier transitions — one stream,
+	// no per-batch round trips.
+	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error
 
 	// ForwardSealTier commands a secondary to seal its active chunk at the
 	// same boundary as the primary. Used for seal synchronization during replication.

@@ -133,6 +133,7 @@ func (r *retentionRunner) sweep() {
 			}()
 		}
 	}
+
 }
 
 // clearInflight removes a chunk from the in-flight set.

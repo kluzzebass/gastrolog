@@ -176,6 +176,68 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 	return nil
 }
 
+// StreamToTier opens a single gRPC stream and pipes all records from the
+// iterator to a remote tier's active chunk. The stream close is the ack.
+// Used for remote tier transitions — same streaming as ReplicateSealedChunk
+// but without chunk ID (destination handles its own chunking).
+func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+	conn, err := ct.peers.Conn(nodeID)
+	if err != nil {
+		return fmt.Errorf("dial node %s: %w", nodeID, err)
+	}
+
+	streamDesc := &grpc.StreamDesc{
+		StreamName:    "ForwardImportRecords",
+		ClientStreams: true,
+	}
+	stream, err := conn.NewStream(ctx, streamDesc, "/gastrolog.v1.ClusterService/ForwardImportRecords")
+	if err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("open transition stream to %s: %w", nodeID, err)
+	}
+
+	streamClosed := false
+	defer func() {
+		if !streamClosed {
+			_ = stream.CloseSend()
+		}
+	}()
+
+	vid := vaultID.String()
+	tid := tierID.String()
+	for {
+		rec, iterErr := next()
+		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
+			break
+		}
+		if iterErr != nil {
+			return fmt.Errorf("read records for transition: %w", iterErr)
+		}
+		msg := &gastrologv1.ImportRecordMessage{
+			VaultId: vid,
+			TierId:  tid,
+			Record:  chunkRecordToExport(rec),
+		}
+		if err := stream.SendMsg(msg); err != nil {
+			ct.peers.Invalidate(nodeID)
+			return fmt.Errorf("send record to %s: %w", nodeID, err)
+		}
+	}
+
+	streamClosed = true
+	if err := stream.CloseSend(); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("close send to %s: %w", nodeID, err)
+	}
+
+	resp := &gastrologv1.ForwardRecordsResponse{}
+	if err := stream.RecvMsg(resp); err != nil {
+		ct.peers.Invalidate(nodeID)
+		return fmt.Errorf("receive response from %s: %w", nodeID, err)
+	}
+	return nil
+}
+
 // ForwardTierAppend sends records to a specific tier on a remote node.
 // Same as ForwardAppend but sets TierId so the receiver targets that tier
 // instead of the vault's active tier. Used by inter-tier transition.

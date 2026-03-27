@@ -36,6 +36,26 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 	return nil
 }
 
+// ackAfterReplication does sync forwarding to secondaries for ack-gated records,
+// then sends the ack. Runs in a goroutine — doesn't block the writeLoop.
+func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replicationTask, rec chunk.Record) {
+	if o.transferrer == nil {
+		ack <- nil
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	for _, t := range tasks {
+		for _, nodeID := range t.secondaries {
+			if err := o.transferrer.ForwardTierAppend(ctx, nodeID, t.vaultID, t.tierID, []chunk.Record{rec}); err != nil {
+				ack <- fmt.Errorf("ack-gated replication to %s: %w", nodeID, err)
+				return
+			}
+		}
+	}
+	ack <- nil
+}
+
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
 func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {

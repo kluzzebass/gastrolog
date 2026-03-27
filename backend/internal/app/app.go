@@ -343,6 +343,12 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 		return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
 	})
+	clusterSrv.SetTierStreamAppender(func(ctx context.Context, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+		if err := waitForOrch(ctx); err != nil {
+			return err
+		}
+		return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
+	})
 
 	searchForwarder := cluster.NewSearchForwarder(peerConns)
 	clusterSrv.SetSearchExecutor(newSearchExecutor(orch))

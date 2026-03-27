@@ -696,4 +696,7 @@ func (m *mockTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UU
 func (m *mockTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
+func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}
 

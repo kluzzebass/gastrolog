@@ -100,6 +100,7 @@ func (o *Orchestrator) applyTierPolicies(cfg *config.Config, vaultCfg config.Vau
 // applyTierRotation applies a rotation policy from a tier config to its chunk manager.
 func (o *Orchestrator) applyTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
 	if tier.IsSecondary {
+		tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 		return
 	}
 	if tierCfg.RotationPolicyID == nil {
@@ -508,6 +509,9 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		ti.IsSecondary = isSecondary
 		if isSecondary {
 			ti.PrimaryNodeID = tierCfg.NodeID
+			// Secondaries don't self-rotate — the primary controls seal
+			// timing via ForwardSealTier.
+			ti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 		}
 		if isPrimary {
 			ti.SecondaryNodeIDs = tierCfg.SecondaryNodeIDs

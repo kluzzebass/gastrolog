@@ -418,8 +418,9 @@ func TestTransitionSourceChunkDeleted(t *testing.T) {
 // ---------- cross-node tests (mock transferrer) ----------
 
 type transitionFakeTransferrer struct {
-	calls   []transitionTransferCall
-	failErr error
+	calls       []transitionTransferCall
+	streamCalls []transitionStreamCall
+	failErr     error
 }
 
 type transitionTransferCall struct {
@@ -427,6 +428,13 @@ type transitionTransferCall struct {
 	vaultID uuid.UUID
 	tierID  uuid.UUID
 	records []chunk.Record
+}
+
+type transitionStreamCall struct {
+	nodeID  string
+	vaultID uuid.UUID
+	tierID  uuid.UUID
+	count   int
 }
 
 func (m *transitionFakeTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
@@ -500,22 +508,22 @@ func TestTransitionCrossNode(t *testing.T) {
 	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
 	runner.transitionChunk(metas[0].ID)
 
-	// Verify ForwardTierAppend was called.
-	totalRecords := 0
-	for _, call := range mock.calls {
-		if call.nodeID != remoteNode {
-			t.Errorf("expected nodeID %q, got %q", remoteNode, call.nodeID)
-		}
-		if call.vaultID != vaultID {
-			t.Errorf("expected vaultID %s, got %s", vaultID, call.vaultID)
-		}
-		if call.tierID != tier1ID {
-			t.Errorf("expected tierID %s, got %s", tier1ID, call.tierID)
-		}
-		totalRecords += len(call.records)
+	// Verify StreamToTier was called.
+	if len(mock.streamCalls) != 1 {
+		t.Fatalf("expected 1 StreamToTier call, got %d", len(mock.streamCalls))
 	}
-	if totalRecords != 3 {
-		t.Errorf("expected 3 records forwarded, got %d", totalRecords)
+	sc := mock.streamCalls[0]
+	if sc.nodeID != remoteNode {
+		t.Errorf("expected nodeID %q, got %q", remoteNode, sc.nodeID)
+	}
+	if sc.vaultID != vaultID {
+		t.Errorf("expected vaultID %s, got %s", vaultID, sc.vaultID)
+	}
+	if sc.tierID != tier1ID {
+		t.Errorf("expected tierID %s, got %s", tier1ID, sc.tierID)
+	}
+	if sc.count != 3 {
+		t.Errorf("expected 3 records streamed, got %d", sc.count)
 	}
 
 	// Source chunk should be deleted.
@@ -704,5 +712,21 @@ func (m *transitionFakeTransferrer) ForwardSealTier(_ context.Context, _ string,
 	return nil
 }
 func (m *transitionFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+	if m.failErr != nil {
+		return m.failErr
+	}
+	var count int
+	for {
+		if _, err := next(); err != nil {
+			break
+		}
+		count++
+	}
+	m.streamCalls = append(m.streamCalls, transitionStreamCall{
+		nodeID: nodeID, vaultID: vaultID, tierID: tierID, count: count,
+	})
 	return nil
 }

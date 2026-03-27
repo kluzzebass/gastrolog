@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 
 	"gastrolog/internal/chunk"
@@ -14,6 +16,10 @@ import (
 // in the vault's tier chain, then deletes the source chunk. This is the
 // inter-tier data movement mechanism: records flow from hotter to colder
 // tiers, each tier independently chunking and sealing.
+//
+// Both local and remote transitions use the same model: stream an iterator
+// to the destination tier's ImportRecords (one pass, one sealed chunk).
+// The destination tier handles its own secondary replication.
 func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	if r.isSecondary.Load() {
 		r.logger.Error("transitionChunk called on secondary — this is a bug",
@@ -44,23 +50,30 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	}
 	defer func() { _ = cursor.Close() }()
 
-	sameNode := nextTierCfg.NodeID == "" || nextTierCfg.NodeID == r.orch.localNodeID
-	var recordCount int64
-	var ok bool
+	remote := nextTierCfg.NodeID != "" && nextTierCfg.NodeID != r.orch.localNodeID
 
-	if sameNode {
-		recordCount, ok = r.transitionLocal(id, cursor, nextTierID)
+	var streamErr error
+	if remote {
+		if r.orch.transferrer == nil {
+			r.logger.Error("transition: no remote transferrer configured",
+				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
+			return
+		}
+		streamErr = r.orch.transferrer.StreamToTier(ctx, nextTierCfg.NodeID, r.vaultID, nextTierID, chunk.CursorIterator(cursor))
 	} else {
-		recordCount, ok = r.transitionRemote(ctx, id, cursor, nextTierCfg.NodeID, nextTierID)
+		streamErr = r.streamLocal(cursor, nextTierID)
 	}
-	if !ok {
-		return // error logged inside; chunk retained for retry
+	if streamErr != nil {
+		r.logger.Error("transition: stream failed",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+			"next_tier", nextTierID, "remote", remote, "error", streamErr)
+		return
 	}
 
 	r.expireChunk(id)
 	r.logger.Info("transition: completed",
 		"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
-		"records", recordCount, "next_tier", nextTierID, "remote", !sameNode)
+		"next_tier", nextTierID, "remote", remote)
 }
 
 // resolveNextTier finds the next tier in the vault's chain after this runner's tier.
@@ -101,65 +114,21 @@ func (r *retentionRunner) resolveNextTier(cfg *config.Config) (uuid.UUID, *confi
 	return nextTierID, nextTierCfg
 }
 
-// transitionLocal streams records to a tier on the same node.
-func (r *retentionRunner) transitionLocal(id chunk.ChunkID, cursor chunk.RecordCursor, nextTierID uuid.UUID) (int64, bool) {
-	var count int64
+// streamLocal appends records from a cursor to a local tier via AppendToTier.
+func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID uuid.UUID) error {
 	for {
 		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return nil
+		}
 		if err != nil {
-			break // cursor exhausted
+			return fmt.Errorf("read source chunk: %w", err)
 		}
 		if err := r.orch.AppendToTier(r.vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
-			r.logger.Error("transition: local append failed",
-				"vault", r.vaultID, "chunk", id.String(),
-				"next_tier", nextTierID, "error", err)
-			return count, false
+			return err
 		}
-		count++
 	}
-	return count, true
 }
 
-// transitionRemote buffers and sends records to a tier on a different node.
-func (r *retentionRunner) transitionRemote(ctx context.Context, id chunk.ChunkID, cursor chunk.RecordCursor, nodeID string, nextTierID uuid.UUID) (int64, bool) {
-	if r.orch.transferrer == nil {
-		r.logger.Error("transition: no remote transferrer configured",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
-		return 0, false
-	}
 
-	const batchSize = 1000
-	var batch []chunk.Record
-	var total int64
 
-	for {
-		rec, _, err := cursor.Next()
-		if err != nil {
-			break // cursor exhausted
-		}
-		batch = append(batch, rec)
-		total++
-
-		if len(batch) >= batchSize {
-			if err := r.orch.transferrer.ForwardTierAppend(ctx, nodeID, r.vaultID, nextTierID, batch); err != nil {
-				r.logger.Error("transition: remote append failed",
-					"vault", r.vaultID, "chunk", id.String(),
-					"node", nodeID, "next_tier", nextTierID, "error", err)
-				return total, false
-			}
-			batch = batch[:0]
-		}
-	}
-
-	// Flush remaining.
-	if len(batch) > 0 {
-		if err := r.orch.transferrer.ForwardTierAppend(ctx, nodeID, r.vaultID, nextTierID, batch); err != nil {
-			r.logger.Error("transition: remote append failed (final batch)",
-				"vault", r.vaultID, "chunk", id.String(),
-				"node", nodeID, "next_tier", nextTierID, "error", err)
-			return total, false
-		}
-	}
-
-	return total, true
-}

@@ -722,21 +722,16 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 		t.Fatalf("ImportToTier: %v", err)
 	}
 
-	// Chunk should be sealed with the forwarded records (3, not 5).
+	// Forwarded version was replaced by canonical (5 records).
 	meta, err := tier.Chunks.Meta(chunkID)
 	if err != nil {
-		t.Fatalf("expected chunk to exist: %v", err)
+		t.Fatalf("expected canonical chunk to exist: %v", err)
 	}
 	if !meta.Sealed {
-		t.Error("chunk should be sealed")
+		t.Error("canonical chunk should be sealed")
 	}
-	if meta.RecordCount != 3 {
-		t.Errorf("forwarded chunk should keep its 3 records, got %d", meta.RecordCount)
-	}
-
-	// Active slot should now be empty (sealed away).
-	if tier.Chunks.Active() != nil {
-		t.Error("active chunk should be nil after seal")
+	if meta.RecordCount != 5 {
+		t.Errorf("canonical chunk should have 5 records, got %d", meta.RecordCount)
 	}
 }
 
@@ -768,20 +763,19 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// ImportToTier should keep the existing sealed chunk and drain
-	// the canonical stream (no delete, no replace).
+	// ImportToTier should replace the forwarded version with canonical.
 	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatalf("ImportToTier: %v", err)
 	}
 
-	// Chunk keeps its original 3 records.
+	// Canonical version replaces forwarded (5 records, not 3).
 	meta, err := tier.Chunks.Meta(chunkID)
 	if err != nil {
-		t.Fatalf("expected chunk to exist: %v", err)
+		t.Fatalf("expected canonical chunk to exist: %v", err)
 	}
-	if meta.RecordCount != 3 {
-		t.Errorf("forwarded chunk should keep 3 records, got %d", meta.RecordCount)
+	if meta.RecordCount != 5 {
+		t.Errorf("canonical should have 5 records, got %d", meta.RecordCount)
 	}
 
 	// Only one chunk with this ID.
@@ -979,6 +973,234 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 	}
 	if active.RecordCount != 3 {
 		t.Errorf("expected 3 records in active chunk, got %d", active.RecordCount)
+	}
+}
+
+// ================================================================
+// ACK-GATED INGESTION TESTS
+// ================================================================
+
+// ackTestTransferrer records ForwardTierAppend calls and returns a configurable error.
+type ackTestTransferrer struct {
+	tierAppendCalls int
+	tierAppendErr   error
+}
+
+func (m *ackTestTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (m *ackTestTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+func (m *ackTestTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+	m.tierAppendCalls++
+	return m.tierAppendErr
+}
+func (m *ackTestTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+	return nil
+}
+func (m *ackTestTransferrer) ForwardSealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+func (m *ackTestTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (m *ackTestTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}
+
+func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
+	t.Parallel()
+	fwd := &tierTestForwarder{}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "ack-gated"
+	orch.RegisterVault(vault)
+
+	rec := testRecord("ack-me")
+	rec.WaitForReplica = true
+
+	orch.mu.RLock()
+	_, _, task, err := orch.appendRecord(vaultID, rec)
+	orch.mu.RUnlock()
+
+	if err != nil {
+		t.Fatalf("appendRecord: %v", err)
+	}
+	if task == nil {
+		t.Fatal("expected non-nil replicationTask for WaitForReplica=true")
+	}
+	if task.vaultID != vaultID {
+		t.Errorf("task.vaultID = %s, want %s", task.vaultID, vaultID)
+	}
+	if task.tierID != tierID {
+		t.Errorf("task.tierID = %s, want %s", task.tierID, tierID)
+	}
+	if len(task.secondaries) != 1 || task.secondaries[0] != "node-2" {
+		t.Errorf("task.secondaries = %v, want [node-2]", task.secondaries)
+	}
+
+	// Fire-and-forget must NOT have been called.
+	calls := fwd.getCalls()
+	if len(calls) != 0 {
+		t.Errorf("expected 0 fire-and-forget forward calls, got %d", len(calls))
+	}
+}
+
+func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
+	t.Parallel()
+	fwd := &tierTestForwarder{}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "no-ack"
+	orch.RegisterVault(vault)
+
+	rec := testRecord("fire-and-forget")
+	rec.WaitForReplica = false
+
+	orch.mu.RLock()
+	_, _, task, err := orch.appendRecord(vaultID, rec)
+	orch.mu.RUnlock()
+
+	if err != nil {
+		t.Fatalf("appendRecord: %v", err)
+	}
+	if task != nil {
+		t.Error("expected nil replicationTask for WaitForReplica=false")
+	}
+
+	// Fire-and-forget MUST have been called.
+	calls := fwd.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 fire-and-forget forward call, got %d", len(calls))
+	}
+	if calls[0].NodeID != "node-2" {
+		t.Errorf("forward call nodeID = %s, want node-2", calls[0].NodeID)
+	}
+}
+
+func TestIngestReturnsReplicationTasks(t *testing.T) {
+	t.Parallel()
+	fwd := &tierTestForwarder{}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "ingest-ack"
+	orch.RegisterVault(vault)
+
+	// Set up a filter that routes everything to our vault.
+	filter, err := CompileFilter(vaultID, "*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetFilterSet(NewFilterSet([]*CompiledFilter{filter}))
+
+	rec := testRecord("ingest-me")
+	rec.WaitForReplica = true
+
+	tasks, err := orch.ingest(rec)
+	if err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	if len(tasks) == 0 {
+		t.Fatal("expected non-empty replication tasks for WaitForReplica=true")
+	}
+	if tasks[0].vaultID != vaultID {
+		t.Errorf("task[0].vaultID = %s, want %s", tasks[0].vaultID, vaultID)
+	}
+}
+
+func TestAckAfterReplicationSuccess(t *testing.T) {
+	t.Parallel()
+	mock := &ackTestTransferrer{}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.transferrer = mock
+
+	tasks := []replicationTask{
+		{
+			vaultID:     uuid.Must(uuid.NewV7()),
+			tierID:      uuid.Must(uuid.NewV7()),
+			chunkID:     chunk.NewChunkID(),
+			secondaries: []string{"node-2"},
+		},
+	}
+
+	ack := make(chan error, 1)
+	orch.ackAfterReplication(ack, tasks, testRecord("ack-ok"))
+
+	select {
+	case err := <-ack:
+		if err != nil {
+			t.Fatalf("expected nil ack error, got %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for ack")
+	}
+
+	if mock.tierAppendCalls != 1 {
+		t.Errorf("expected 1 ForwardTierAppend call, got %d", mock.tierAppendCalls)
+	}
+}
+
+func TestAckAfterReplicationFailure(t *testing.T) {
+	t.Parallel()
+	mock := &ackTestTransferrer{
+		tierAppendErr: errors.New("replication failed"),
+	}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.transferrer = mock
+
+	tasks := []replicationTask{
+		{
+			vaultID:     uuid.Must(uuid.NewV7()),
+			tierID:      uuid.Must(uuid.NewV7()),
+			chunkID:     chunk.NewChunkID(),
+			secondaries: []string{"node-2"},
+		},
+	}
+
+	ack := make(chan error, 1)
+	orch.ackAfterReplication(ack, tasks, testRecord("ack-fail"))
+
+	select {
+	case err := <-ack:
+		if err == nil {
+			t.Fatal("expected non-nil ack error")
+		}
+		if !strings.Contains(err.Error(), "replication failed") {
+			t.Errorf("expected error to contain 'replication failed', got %q", err.Error())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for ack")
 	}
 }
 

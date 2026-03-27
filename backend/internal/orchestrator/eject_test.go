@@ -733,3 +733,6 @@ func (m *ejectFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uu
 func (m *ejectFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
+func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}

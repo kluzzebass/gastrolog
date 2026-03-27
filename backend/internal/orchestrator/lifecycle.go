@@ -197,10 +197,11 @@ func (o *Orchestrator) digestAndForward(msg IngestMessage) {
 	// WriteTS is set by ChunkManager on append.
 	// Attrs may have been enriched by digesters.
 	rec := chunk.Record{
-		SourceTS: msg.SourceTS,
-		IngestTS: msg.IngestTS,
-		Attrs:    msg.Attrs,
-		Raw:      msg.Raw,
+		SourceTS:       msg.SourceTS,
+		IngestTS:       msg.IngestTS,
+		Attrs:          msg.Attrs,
+		Raw:            msg.Raw,
+		WaitForReplica: msg.Ack != nil,
 	}
 
 	// Assign EventID when ingester identity is available.
@@ -232,7 +233,7 @@ func (o *Orchestrator) writeLoop() {
 
 	for dr := range o.digestedCh {
 		// Filter to chunk managers (reuses existing Ingest logic).
-		err := o.ingest(dr.rec)
+		tasks, err := o.ingest(dr.rec)
 		if err != nil {
 			o.logger.Error("write failed", "error", err, "ingester", dr.ingesterID)
 		}
@@ -242,7 +243,14 @@ func (o *Orchestrator) writeLoop() {
 
 		// Send ack if requested.
 		if dr.ack != nil {
-			dr.ack <- err
+			if err != nil || len(tasks) == 0 {
+				// Write failed or no secondaries — ack immediately.
+				dr.ack <- err
+			} else {
+				// Ack-gated: sync forward to secondaries in a goroutine
+				// so the writeLoop isn't blocked by network round-trips.
+				go o.ackAfterReplication(dr.ack, tasks, dr.rec)
+			}
 		}
 	}
 }

@@ -113,6 +113,10 @@ type Server struct {
 	// preserving the original chunk ID. Used for sealed-chunk replication.
 	tierRecordImporter TierRecordImporter
 
+	// tierStreamAppender appends streamed records to a tier's active chunk.
+	// Used for tier transitions (records flow like normal ingestion).
+	tierStreamAppender TierStreamAppender
+
 	// searchExecutor runs a search on a local vault for remote search requests.
 	// Set after the orchestrator is created, before search forwarding starts.
 	searchExecutor SearchExecutor

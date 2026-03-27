@@ -187,6 +187,12 @@ type Record struct {
 	Raw      []byte
 	Ref      RecordRef
 	VaultID  uuid.UUID
+
+	// WaitForReplica signals that the caller wants confirmation that
+	// secondaries received this record before acking. Set by ack-gated
+	// ingesters (RELP, HTTP X-Wait-Ack). When true, appendRecord skips
+	// fire-and-forget forwarding — the caller does sync forwarding instead.
+	WaitForReplica bool
 }
 
 // Copy returns a deep copy of the record with its own Raw slice and Attrs map.
