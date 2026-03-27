@@ -296,6 +296,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
           >
             <Badge variant="copper" dark={dark}>{label}</Badge>
             {nodeName && <span>{`on ${nodeName}`}</span>}
+            {group.tierType === "jsonl" && tierCfg?.path && (
+              <span className="font-mono">{tierCfg.path}</span>
+            )}
             <span>{`${String(group.chunks.length)} ${group.chunks.length === 1 ? "chunk" : "chunks"}`}</span>
             <span>{`${group.chunks.reduce((sum, ch) => sum + Number(ch.recordCount), 0).toLocaleString()} records`}</span>
             {rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(rf)}`}</Badge>}

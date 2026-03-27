@@ -524,8 +524,10 @@ export function VaultSettingsCard({
                       {tier.type === TierType.FILE && tier.storageClass > 0 && (
                         <span className="font-mono">{`class ${String(tier.storageClass)}`}</span>
                       )}
-                      {tier.type === TierType.JSONL && tier.path && (
-                        <span className="font-mono">{tier.path}</span>
+                      {tier.type === TierType.JSONL && (
+                        <span className="font-mono">
+                          {tier.path || `jsonl/${vault?.name || "vault"}/sink_${String(i + 1)}.jsonl`}
+                        </span>
                       )}
                       {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
                         <span className="font-mono">{formatBytes(tier.memoryBudgetBytes)}</span>
