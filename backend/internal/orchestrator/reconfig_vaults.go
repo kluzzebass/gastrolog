@@ -34,10 +34,6 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultName string) map[
 		out = make(map[string]string)
 	}
 	out["dir"] = dir
-	// Also resolve "path" (used by JSONL sinks) relative to vaultsDir.
-	if p := out["path"]; p != "" && !filepath.IsAbs(p) && vaultsDir != "" {
-		out["path"] = filepath.Join(vaultsDir, p)
-	}
 	return out
 }
 
@@ -546,6 +542,11 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.Name)
 	cmParams["_expect_existing"] = "true"
 	cmParams["_vault_id"] = vaultCfg.ID.String()
+
+	// Resolve JSONL path relative to HomeDir (not VaultsDir).
+	if p := cmParams["path"]; p != "" && !filepath.IsAbs(p) && factories.HomeDir != "" {
+		cmParams["path"] = filepath.Join(factories.HomeDir, p)
+	}
 
 	cm, err := cmFactory(cmParams, cmLogger)
 	if err != nil {
