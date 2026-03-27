@@ -209,6 +209,7 @@ export function TierEntryCard({
   rotationPolicyOptions,
   retentionPolicyOptions,
   nodeOptions,
+  vaultName,
   onUpdate,
   onRemove,
 }: Readonly<{
@@ -220,6 +221,7 @@ export function TierEntryCard({
   rotationPolicyOptions: { value: string; label: string }[];
   retentionPolicyOptions: { value: string; label: string }[];
   nodeOptions: { value: string; label: string }[];
+  vaultName: string;
   onUpdate: (patch: Partial<TierEntry>) => void;
   onRemove: () => void;
 }>) {
@@ -362,11 +364,11 @@ export function TierEntryCard({
               dark={dark}
             />
           </FormField>
-          <FormField label="Path" dark={dark}>
+          <FormField label="Path" dark={dark} description="Relative to node home">
             <TextInput
               value={tier.path}
               onChange={(v) => onUpdate({ path: v })}
-              placeholder=""
+              placeholder={`jsonl/${vaultName || "vault"}/sink_${String(index + 1)}.jsonl`}
               dark={dark}
               mono
             />
@@ -619,6 +621,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                   rotationPolicyOptions={rotationPolicyOptions}
                   retentionPolicyOptions={retentionPolicyOptions}
                   nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
+                  vaultName={addForm.name || addForm.namePlaceholder || ""}
                   onUpdate={(patch) =>
                     dispatchAdd({ type: "updateTier", key: tier.key, patch })
                   }

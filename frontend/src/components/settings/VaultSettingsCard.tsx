@@ -625,6 +625,7 @@ export function VaultSettingsCard({
               rotationPolicyOptions={rotationPolicyOptions}
               retentionPolicyOptions={retentionPolicyOptions}
               nodeOptions={nodeConfigs.map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
+              vaultName={vault?.name || ""}
               onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
               onRemove={() => setNewTier(null)}
             />
