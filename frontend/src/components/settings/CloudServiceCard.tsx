@@ -1,8 +1,10 @@
 import type { CloudService } from "../../api/gen/gastrolog/v1/storage_pb";
+import { useState } from "react";
 import {
   usePutCloudService,
   useDeleteCloudService,
 } from "../../api/hooks";
+import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useEditState } from "../../hooks/useEditState";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { SettingsCard } from "./SettingsCard";
@@ -56,6 +58,8 @@ export function CloudServiceCard({
 }: Readonly<CloudServiceCardProps>) {
   const putCloudService = usePutCloudService();
   const deleteCloudService = useDeleteCloudService();
+  const testCloud = useTestCloudService();
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const defaults = (_id: string): CloudServiceEdit => ({
     name: service.name,
@@ -110,12 +114,47 @@ export function CloudServiceCard({
       onDelete={() => handleDelete(service.id)}
       deleteLabel="Delete"
       footer={
-        <Button
-          onClick={() => handleSave(service.id, edit)}
-          disabled={putCloudService.isPending || !isDirty(service.id)}
-        >
-          {putCloudService.isPending ? "Saving..." : "Save"}
-        </Button>
+        <div className="flex items-center gap-3">
+          <Button
+            onClick={() => {
+              setTestResult(null);
+              testCloud.mutate(
+                {
+                  type: "file",
+                  params: {
+                    sealed_backing: edit.provider,
+                    bucket: edit.bucket,
+                    region: edit.region,
+                    endpoint: edit.endpoint,
+                    access_key: edit.accessKey,
+                    secret_key: edit.secretKey,
+                    container: edit.container,
+                    connection_string: edit.connectionString,
+                    credentials_json: edit.credentialsJson,
+                  },
+                },
+                {
+                  onSuccess: (resp) => setTestResult({ success: resp.success, message: resp.message }),
+                  onError: (err) => setTestResult({ success: false, message: err instanceof Error ? err.message : String(err) }),
+                },
+              );
+            }}
+            disabled={testCloud.isPending || !edit.provider}
+          >
+            {testCloud.isPending ? "Testing..." : "Test Connection"}
+          </Button>
+          {testResult && (
+            <span className={`text-[0.8em] ${testResult.success ? "text-green-400" : "text-severity-error"}`}>
+              {testResult.message}
+            </span>
+          )}
+          <Button
+            onClick={() => handleSave(service.id, edit)}
+            disabled={putCloudService.isPending || !isDirty(service.id)}
+          >
+            {putCloudService.isPending ? "Saving..." : "Save"}
+          </Button>
+        </div>
       }
     >
       <div className="flex flex-col gap-3">
