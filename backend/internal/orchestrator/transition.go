@@ -44,8 +44,9 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 
 	cursor, err := r.cm.OpenCursor(id)
 	if err != nil {
-		r.logger.Error("transition: failed to open cursor",
+		r.logger.Error("transition: failed to open cursor — skipping corrupt chunk",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
+		r.expireChunk(id)
 		return
 	}
 	defer func() { _ = cursor.Close() }()
@@ -64,9 +65,10 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		streamErr = r.streamLocal(cursor, nextTierID)
 	}
 	if streamErr != nil {
-		r.logger.Error("transition: stream failed",
+		r.logger.Error("transition: stream failed — skipping corrupt chunk",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID, "remote", remote, "error", streamErr)
+		r.expireChunk(id)
 		return
 	}
 
