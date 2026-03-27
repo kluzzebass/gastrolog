@@ -294,7 +294,9 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 				appendErr = s.recordAppender(stream.Context(), vaultID, rec)
 			}
 			if appendErr != nil {
-				return status.Errorf(codes.Internal, "append: %v", appendErr)
+				s.logger.Warn("stream forward: append failed",
+					"vault", vaultID, "tier", tierID, "error", appendErr)
+				continue
 			}
 			written++
 		}
