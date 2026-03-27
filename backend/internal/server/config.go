@@ -51,7 +51,7 @@ type ConfigServerConfig struct {
 	ResolveManagedFile func(ctx context.Context, fileID string) string
 	OnTLSConfigChange  func()
 	OnLookupConfigChange func(config.LookupConfig, config.MaxMindConfig)
-	VaultTesters       map[string]VaultConnectionTester
+	CloudTesters       map[string]CloudServiceTester
 	Tokens             *auth.TokenService
 }
 
@@ -69,7 +69,7 @@ type ConfigServer struct {
 	afterConfigApply      func(raftfsm.Notification)
 	configSignal          *notify.Signal
 	resolveManagedFile    func(ctx context.Context, fileID string) string
-	vaultTesters          map[string]VaultConnectionTester
+	cloudTesters          map[string]CloudServiceTester
 	tokens                *auth.TokenService
 }
 
@@ -90,7 +90,7 @@ func NewConfigServer(cfg ConfigServerConfig) *ConfigServer {
 		resolveManagedFile:   cfg.ResolveManagedFile,
 		onTLSConfigChange:    cfg.OnTLSConfigChange,
 		onLookupConfigChange: cfg.OnLookupConfigChange,
-		vaultTesters:         cfg.VaultTesters,
+		cloudTesters:         cfg.CloudTesters,
 		tokens:               cfg.Tokens,
 	}
 }

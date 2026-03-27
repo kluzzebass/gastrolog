@@ -124,8 +124,8 @@ service ConfigService {
   // DeleteManagedFile removes an managed file.
   rpc DeleteManagedFile(DeleteManagedFileRequest) returns (DeleteManagedFileResponse);
 
-  // TestVault tests connectivity for a vault configuration without saving it.
-  rpc TestVault(TestVaultRequest) returns (TestVaultResponse);
+  // TestCloudService tests connectivity for a cloud storage configuration without saving it.
+  rpc TestCloudService(TestCloudServiceRequest) returns (TestCloudServiceResponse);
 
   // TestHTTPLookup tests an HTTP lookup configuration with a sample value.
   rpc TestHTTPLookup(TestHTTPLookupRequest) returns (TestHTTPLookupResponse);
@@ -678,12 +678,12 @@ message TriggerIngesterRequest {
 
 message TriggerIngesterResponse {}
 
-message TestVaultRequest {
+message TestCloudServiceRequest {
   string type = 1;
   map<string, string> params = 2;
 }
 
-message TestVaultResponse {
+message TestCloudServiceResponse {
   bool success = 1;
   string message = 2;
 }

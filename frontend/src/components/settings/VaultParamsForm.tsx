@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { FormField, TextInput, TextArea, SelectInput } from "./FormField";
-import { useTestVault } from "../../api/hooks/useVaults";
+import { useTestCloudService } from "../../api/hooks/useVaults";
 import { useThemeClass } from "../../hooks/useThemeClass";
 
 interface VaultParamsFormProps {
@@ -154,7 +154,7 @@ export function VaultParamsForm({
           </FormField>
         )}
         {backing && backing !== "" && (
-          <TestVaultButton type="file" params={params} dark={dark} />
+          <TestCloudServiceButton type="file" params={params} dark={dark} />
         )}
       </div>
     );
@@ -167,7 +167,7 @@ export function VaultParamsForm({
   return null;
 }
 
-function TestVaultButton({
+function TestCloudServiceButton({
   type,
   params,
   dark,
@@ -177,7 +177,7 @@ function TestVaultButton({
   dark: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const testVault = useTestVault();
+  const testCloud = useTestCloudService();
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
@@ -196,10 +196,10 @@ function TestVaultButton({
     <div className="flex items-center gap-3">
       <button
         type="button"
-        disabled={testVault.isPending || !hasRequired}
+        disabled={testCloud.isPending || !hasRequired}
         onClick={() => {
           setTestResult(null);
-          testVault.mutate(
+          testCloud.mutate(
             { type, params },
             {
               onSuccess: (resp) => {
@@ -222,7 +222,7 @@ function TestVaultButton({
           "bg-light-surface border-light-border text-light-text-bright hover:border-copper disabled:opacity-50",
         )}`}
       >
-        {testVault.isPending ? "Testing..." : "Test Connection"}
+        {testCloud.isPending ? "Testing..." : "Test Connection"}
       </button>
       {testResult && (
         <span

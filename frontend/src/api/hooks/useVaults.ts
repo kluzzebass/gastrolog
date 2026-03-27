@@ -183,10 +183,10 @@ function stripEmptyParams(params: Record<string, string>): Record<string, string
   return out;
 }
 
-export function useTestVault() {
+export function useTestCloudService() {
   return useMutation({
     mutationFn: async (args: { type: string; params: Record<string, string> }) => {
-      const response = await configClient.testVault({
+      const response = await configClient.testCloudService({
         type: args.type,
         params: stripEmptyParams(args.params),
       });

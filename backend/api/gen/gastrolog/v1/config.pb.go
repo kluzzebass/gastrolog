@@ -5345,7 +5345,7 @@ func (*TriggerIngesterResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{94}
 }
 
-type TestVaultRequest struct {
+type TestCloudServiceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
 	Params        map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
@@ -5353,20 +5353,20 @@ type TestVaultRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TestVaultRequest) Reset() {
-	*x = TestVaultRequest{}
+func (x *TestCloudServiceRequest) Reset() {
+	*x = TestCloudServiceRequest{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[95]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TestVaultRequest) String() string {
+func (x *TestCloudServiceRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TestVaultRequest) ProtoMessage() {}
+func (*TestCloudServiceRequest) ProtoMessage() {}
 
-func (x *TestVaultRequest) ProtoReflect() protoreflect.Message {
+func (x *TestCloudServiceRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[95]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5378,26 +5378,26 @@ func (x *TestVaultRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestVaultRequest.ProtoReflect.Descriptor instead.
-func (*TestVaultRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use TestCloudServiceRequest.ProtoReflect.Descriptor instead.
+func (*TestCloudServiceRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{95}
 }
 
-func (x *TestVaultRequest) GetType() string {
+func (x *TestCloudServiceRequest) GetType() string {
 	if x != nil {
 		return x.Type
 	}
 	return ""
 }
 
-func (x *TestVaultRequest) GetParams() map[string]string {
+func (x *TestCloudServiceRequest) GetParams() map[string]string {
 	if x != nil {
 		return x.Params
 	}
 	return nil
 }
 
-type TestVaultResponse struct {
+type TestCloudServiceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
@@ -5405,20 +5405,20 @@ type TestVaultResponse struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *TestVaultResponse) Reset() {
-	*x = TestVaultResponse{}
+func (x *TestCloudServiceResponse) Reset() {
+	*x = TestCloudServiceResponse{}
 	mi := &file_gastrolog_v1_config_proto_msgTypes[96]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *TestVaultResponse) String() string {
+func (x *TestCloudServiceResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*TestVaultResponse) ProtoMessage() {}
+func (*TestCloudServiceResponse) ProtoMessage() {}
 
-func (x *TestVaultResponse) ProtoReflect() protoreflect.Message {
+func (x *TestCloudServiceResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_config_proto_msgTypes[96]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -5430,19 +5430,19 @@ func (x *TestVaultResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use TestVaultResponse.ProtoReflect.Descriptor instead.
-func (*TestVaultResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use TestCloudServiceResponse.ProtoReflect.Descriptor instead.
+func (*TestCloudServiceResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_config_proto_rawDescGZIP(), []int{96}
 }
 
-func (x *TestVaultResponse) GetSuccess() bool {
+func (x *TestCloudServiceResponse) GetSuccess() bool {
 	if x != nil {
 		return x.Success
 	}
 	return false
 }
 
-func (x *TestVaultResponse) GetMessage() string {
+func (x *TestCloudServiceResponse) GetMessage() string {
 	if x != nil {
 		return x.Message
 	}
@@ -7707,14 +7707,14 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"(\n" +
 	"\x16TriggerIngesterRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"\x19\n" +
-	"\x17TriggerIngesterResponse\"\xa5\x01\n" +
-	"\x10TestVaultRequest\x12\x12\n" +
-	"\x04type\x18\x01 \x01(\tR\x04type\x12B\n" +
-	"\x06params\x18\x02 \x03(\v2*.gastrolog.v1.TestVaultRequest.ParamsEntryR\x06params\x1a9\n" +
+	"\x17TriggerIngesterResponse\"\xb3\x01\n" +
+	"\x17TestCloudServiceRequest\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12I\n" +
+	"\x06params\x18\x02 \x03(\v21.gastrolog.v1.TestCloudServiceRequest.ParamsEntryR\x06params\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"G\n" +
-	"\x11TestVaultResponse\x12\x18\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"N\n" +
+	"\x18TestCloudServiceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x1c\n" +
 	"\x1aGetIngesterDefaultsRequest\"\x99\x01\n" +
@@ -7852,7 +7852,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x10TIER_TYPE_MEMORY\x10\x01\x12\x12\n" +
 	"\x0eTIER_TYPE_FILE\x10\x02\x12\x13\n" +
 	"\x0fTIER_TYPE_CLOUD\x10\x03\x12\x13\n" +
-	"\x0fTIER_TYPE_JSONL\x10\x042\xa0!\n" +
+	"\x0fTIER_TYPE_JSONL\x10\x042\xb5!\n" +
 	"\rConfigService\x12L\n" +
 	"\tGetConfig\x12\x1e.gastrolog.v1.GetConfigRequest\x1a\x1f.gastrolog.v1.GetConfigResponse\x12X\n" +
 	"\rListIngesters\x12\".gastrolog.v1.ListIngestersRequest\x1a#.gastrolog.v1.ListIngestersResponse\x12d\n" +
@@ -7892,8 +7892,8 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\vWatchConfig\x12 .gastrolog.v1.WatchConfigRequest\x1a!.gastrolog.v1.WatchConfigResponse0\x01\x12X\n" +
 	"\rGetRouteStats\x12\".gastrolog.v1.GetRouteStatsRequest\x1a#.gastrolog.v1.GetRouteStatsResponse\x12a\n" +
 	"\x10ListManagedFiles\x12%.gastrolog.v1.ListManagedFilesRequest\x1a&.gastrolog.v1.ListManagedFilesResponse\x12d\n" +
-	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponse\x12L\n" +
-	"\tTestVault\x12\x1e.gastrolog.v1.TestVaultRequest\x1a\x1f.gastrolog.v1.TestVaultResponse\x12[\n" +
+	"\x11DeleteManagedFile\x12&.gastrolog.v1.DeleteManagedFileRequest\x1a'.gastrolog.v1.DeleteManagedFileResponse\x12a\n" +
+	"\x10TestCloudService\x12%.gastrolog.v1.TestCloudServiceRequest\x1a&.gastrolog.v1.TestCloudServiceResponse\x12[\n" +
 	"\x0eTestHTTPLookup\x12#.gastrolog.v1.TestHTTPLookupRequest\x1a$.gastrolog.v1.TestHTTPLookupResponse\x12a\n" +
 	"\x10PreviewCSVLookup\x12%.gastrolog.v1.PreviewCSVLookupRequest\x1a&.gastrolog.v1.PreviewCSVLookupResponse\x12^\n" +
 	"\x0fPutCloudService\x12$.gastrolog.v1.PutCloudServiceRequest\x1a%.gastrolog.v1.PutCloudServiceResponse\x12g\n" +
@@ -8014,8 +8014,8 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	(*TestIngesterResponse)(nil),          // 93: gastrolog.v1.TestIngesterResponse
 	(*TriggerIngesterRequest)(nil),        // 94: gastrolog.v1.TriggerIngesterRequest
 	(*TriggerIngesterResponse)(nil),       // 95: gastrolog.v1.TriggerIngesterResponse
-	(*TestVaultRequest)(nil),              // 96: gastrolog.v1.TestVaultRequest
-	(*TestVaultResponse)(nil),             // 97: gastrolog.v1.TestVaultResponse
+	(*TestCloudServiceRequest)(nil),       // 96: gastrolog.v1.TestCloudServiceRequest
+	(*TestCloudServiceResponse)(nil),      // 97: gastrolog.v1.TestCloudServiceResponse
 	(*GetIngesterDefaultsRequest)(nil),    // 98: gastrolog.v1.GetIngesterDefaultsRequest
 	(*IngesterTypeDefaults)(nil),          // 99: gastrolog.v1.IngesterTypeDefaults
 	(*GetIngesterDefaultsResponse)(nil),   // 100: gastrolog.v1.GetIngesterDefaultsResponse
@@ -8055,7 +8055,7 @@ var file_gastrolog_v1_config_proto_goTypes = []any{
 	nil,                                   // 134: gastrolog.v1.IngesterConfig.ParamsEntry
 	nil,                                   // 135: gastrolog.v1.HTTPLookupEntry.HeadersEntry
 	nil,                                   // 136: gastrolog.v1.TestIngesterRequest.ParamsEntry
-	nil,                                   // 137: gastrolog.v1.TestVaultRequest.ParamsEntry
+	nil,                                   // 137: gastrolog.v1.TestCloudServiceRequest.ParamsEntry
 	nil,                                   // 138: gastrolog.v1.IngesterTypeDefaults.ParamsEntry
 	nil,                                   // 139: gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
 	nil,                                   // 140: gastrolog.v1.TestHTTPLookupRequest.ValuesEntry
@@ -8133,7 +8133,7 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	2,   // 66: gastrolog.v1.PauseVaultResponse.config:type_name -> gastrolog.v1.GetConfigResponse
 	2,   // 67: gastrolog.v1.ResumeVaultResponse.config:type_name -> gastrolog.v1.GetConfigResponse
 	136, // 68: gastrolog.v1.TestIngesterRequest.params:type_name -> gastrolog.v1.TestIngesterRequest.ParamsEntry
-	137, // 69: gastrolog.v1.TestVaultRequest.params:type_name -> gastrolog.v1.TestVaultRequest.ParamsEntry
+	137, // 69: gastrolog.v1.TestCloudServiceRequest.params:type_name -> gastrolog.v1.TestCloudServiceRequest.ParamsEntry
 	138, // 70: gastrolog.v1.IngesterTypeDefaults.params:type_name -> gastrolog.v1.IngesterTypeDefaults.ParamsEntry
 	139, // 71: gastrolog.v1.GetIngesterDefaultsResponse.types:type_name -> gastrolog.v1.GetIngesterDefaultsResponse.TypesEntry
 	0,   // 72: gastrolog.v1.TierConfig.type:type_name -> gastrolog.v1.TierType
@@ -8195,7 +8195,7 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	109, // 128: gastrolog.v1.ConfigService.GetRouteStats:input_type -> gastrolog.v1.GetRouteStatsRequest
 	114, // 129: gastrolog.v1.ConfigService.ListManagedFiles:input_type -> gastrolog.v1.ListManagedFilesRequest
 	116, // 130: gastrolog.v1.ConfigService.DeleteManagedFile:input_type -> gastrolog.v1.DeleteManagedFileRequest
-	96,  // 131: gastrolog.v1.ConfigService.TestVault:input_type -> gastrolog.v1.TestVaultRequest
+	96,  // 131: gastrolog.v1.ConfigService.TestCloudService:input_type -> gastrolog.v1.TestCloudServiceRequest
 	118, // 132: gastrolog.v1.ConfigService.TestHTTPLookup:input_type -> gastrolog.v1.TestHTTPLookupRequest
 	121, // 133: gastrolog.v1.ConfigService.PreviewCSVLookup:input_type -> gastrolog.v1.PreviewCSVLookupRequest
 	124, // 134: gastrolog.v1.ConfigService.PutCloudService:input_type -> gastrolog.v1.PutCloudServiceRequest
@@ -8241,7 +8241,7 @@ var file_gastrolog_v1_config_proto_depIdxs = []int32{
 	110, // 174: gastrolog.v1.ConfigService.GetRouteStats:output_type -> gastrolog.v1.GetRouteStatsResponse
 	115, // 175: gastrolog.v1.ConfigService.ListManagedFiles:output_type -> gastrolog.v1.ListManagedFilesResponse
 	117, // 176: gastrolog.v1.ConfigService.DeleteManagedFile:output_type -> gastrolog.v1.DeleteManagedFileResponse
-	97,  // 177: gastrolog.v1.ConfigService.TestVault:output_type -> gastrolog.v1.TestVaultResponse
+	97,  // 177: gastrolog.v1.ConfigService.TestCloudService:output_type -> gastrolog.v1.TestCloudServiceResponse
 	119, // 178: gastrolog.v1.ConfigService.TestHTTPLookup:output_type -> gastrolog.v1.TestHTTPLookupResponse
 	122, // 179: gastrolog.v1.ConfigService.PreviewCSVLookup:output_type -> gastrolog.v1.PreviewCSVLookupResponse
 	125, // 180: gastrolog.v1.ConfigService.PutCloudService:output_type -> gastrolog.v1.PutCloudServiceResponse

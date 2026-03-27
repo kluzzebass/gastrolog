@@ -127,9 +127,8 @@ type Config struct {
 	// demote a node. Handles leader-forwarding internally. Nil disables.
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 
-	// VaultTesters maps vault types to connection test functions.
-	// Used by the TestVault RPC for cloud vaults.
-	VaultTesters map[string]VaultConnectionTester
+	// CloudTesters maps cloud service types to connection test functions.
+	CloudTesters map[string]CloudServiceTester
 
 	// RoutingForwarder forwards requests to remote nodes via ForwardRPC.
 	// Nil in single-node mode. Satisfies routing.UnaryForwarder.
@@ -173,7 +172,7 @@ type Server struct {
 	afterConfigApply func(raftfsm.Notification) // non-raft dispatch hook
 	configSignal     *notify.Signal             // broadcasts config changes to WatchConfig streams
 	statsSignal      *notify.Signal             // broadcasts stats updates to WatchSystemStatus streams
-	vaultTesters      map[string]VaultConnectionTester
+	cloudTesters      map[string]CloudServiceTester
 	repairManagedFile  func(fileID string) bool   // on-demand pull from peer; set by app wiring
 	queryServer        *QueryServer              // stored for ExportToVault executor wiring
 	routingForwarder   routing.UnaryForwarder     // forwards requests to remote nodes; nil in single-node
@@ -230,7 +229,7 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		startTime:        time.Now(),
 		homeDir:          cfg.HomeDir,
 		unixSocketConfig: cfg.UnixSocket,
-		vaultTesters:      cfg.VaultTesters,
+		cloudTesters:      cfg.CloudTesters,
 		afterConfigApply:  cfg.AfterConfigApply,
 		configSignal:      cfg.ConfigSignal,
 		statsSignal:       cfg.StatsSignal,
@@ -431,7 +430,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		AfterConfigApply:   s.afterConfigApply,
 		ConfigSignal:       s.configSignal,
 		ResolveManagedFile: s.ResolveManagedFileByID,
-		VaultTesters:       s.vaultTesters,
+		CloudTesters:       s.cloudTesters,
 		Tokens:             s.tokens,
 		OnTLSConfigChange:  s.reconfigureTLS,
 		OnLookupConfigChange: func(cfg config.LookupConfig, mm config.MaxMindConfig) {

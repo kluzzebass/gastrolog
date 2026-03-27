@@ -797,7 +797,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			RoutingForwarder: deps.RoutingForwarder, ClusterAddress: deps.ClusterAddr,
 			JoinClusterFunc: deps.JoinClusterFunc, RemoveNodeFunc: deps.RemoveNodeFunc,
 			SetNodeSuffrageFunc: deps.SetNodeSuffrageFunc,
-			VaultTesters: map[string]server.VaultConnectionTester{
+			CloudTesters: map[string]server.CloudServiceTester{
 				"file": chunkcloud.NewConnectionTester(),
 			},
 		})

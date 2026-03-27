@@ -224,30 +224,30 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 	return cfg, nil
 }
 
-// VaultConnectionTester validates connectivity for a vault configuration.
-type VaultConnectionTester func(ctx context.Context, params map[string]string) (string, error)
+// CloudServiceTester validates connectivity for a cloud storage configuration.
+type CloudServiceTester func(ctx context.Context, params map[string]string) (string, error)
 
-// TestVault tests connectivity for a vault configuration without saving it.
-func (s *ConfigServer) TestVault(
+// TestCloudService tests connectivity for a cloud storage configuration without saving it.
+func (s *ConfigServer) TestCloudService(
 	ctx context.Context,
-	req *connect.Request[apiv1.TestVaultRequest],
-) (*connect.Response[apiv1.TestVaultResponse], error) {
-	tester := s.vaultTesters[req.Msg.Type]
+	req *connect.Request[apiv1.TestCloudServiceRequest],
+) (*connect.Response[apiv1.TestCloudServiceResponse], error) {
+	tester := s.cloudTesters[req.Msg.Type]
 	if tester == nil {
-		return connect.NewResponse(&apiv1.TestVaultResponse{
+		return connect.NewResponse(&apiv1.TestCloudServiceResponse{
 			Success: false,
-			Message: fmt.Sprintf("connection test not supported for vault type %q", req.Msg.Type),
+			Message: fmt.Sprintf("connection test not supported for cloud service type %q", req.Msg.Type),
 		}), nil
 	}
 
 	msg, err := tester(ctx, req.Msg.Params)
 	if err != nil {
-		return connect.NewResponse(&apiv1.TestVaultResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
+		return connect.NewResponse(&apiv1.TestCloudServiceResponse{ //nolint:nilerr // test failure is reported in the response body, not as an RPC error
 			Success: false,
 			Message: err.Error(),
 		}), nil
 	}
-	return connect.NewResponse(&apiv1.TestVaultResponse{
+	return connect.NewResponse(&apiv1.TestCloudServiceResponse{
 		Success: true,
 		Message: msg,
 	}), nil
