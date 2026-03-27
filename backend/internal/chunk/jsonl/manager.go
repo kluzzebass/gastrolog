@@ -141,17 +141,9 @@ func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 }
 
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.count == 0 {
-		return nil, nil
-	}
-	return []chunk.ChunkMeta{{
-		ID:          m.id,
-		RecordCount: m.count,
-		WriteStart:  m.earliest,
-		WriteEnd:    m.latest,
-	}}, nil
+	// Return empty — JSONL sinks are write-only and should not appear
+	// in search, retention, or inspector chunk listings.
+	return nil, nil
 }
 
 func (m *Manager) Delete(chunk.ChunkID) error                                         { return nil }
