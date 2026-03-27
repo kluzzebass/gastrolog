@@ -323,6 +323,8 @@ func tierTypeToProto(t config.TierType) apiv1.TierType {
 		return apiv1.TierType_TIER_TYPE_FILE
 	case config.TierTypeCloud:
 		return apiv1.TierType_TIER_TYPE_CLOUD
+	case config.TierTypeJSONL:
+		return apiv1.TierType_TIER_TYPE_JSONL
 	default:
 		return apiv1.TierType_TIER_TYPE_UNSPECIFIED
 	}

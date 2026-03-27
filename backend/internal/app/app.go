@@ -22,6 +22,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkcloud "gastrolog/internal/chunk/cloud"
 	chunkfile "gastrolog/internal/chunk/file"
+	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
@@ -896,6 +897,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"file":   chunkfile.NewFactory(),
 			"memory": chunkmem.NewFactory(),
+			"jsonl":  chunkjsonl.NewFactory(),
 		},
 		IndexManagers: map[string]index.ManagerFactory{
 			"file":   indexfile.NewFactory(),

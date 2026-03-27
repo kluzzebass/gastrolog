@@ -201,7 +201,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const remoteTierInfo = (() => {
     if (!vaultCfg || !config?.tiers) return [];
     const localTierIds = new Set(tierGroups.keys());
-    const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud" };
+    const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud", 4: "jsonl" };
     return vaultCfg.tierIds
       .filter((tid) => !localTierIds.has(tid))
       .map((tid) => {

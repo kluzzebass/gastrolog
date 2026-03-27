@@ -21,7 +21,7 @@ import { VaultSettingsCard } from "./VaultSettingsCard";
 // Tier entry types
 // ---------------------------------------------------------------------------
 
-export type TierTypeLabel = "memory" | "file" | "cloud";
+export type TierTypeLabel = "memory" | "file" | "cloud" | "jsonl";
 
 export interface TierEntry {
   key: string;
@@ -91,6 +91,8 @@ export function tierTypeEnum(t: TierTypeLabel): TierType {
       return TierType.FILE;
     case "cloud":
       return TierType.CLOUD;
+    case "jsonl":
+      return TierType.JSONL;
   }
 }
 
@@ -124,6 +126,8 @@ export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): bool
       return tier.storageClass !== "";
     case "cloud":
       return tier.cloudServiceId !== "" || !hasCloudServices;
+    case "jsonl":
+      return tier.storageClass !== "";
   }
 }
 
@@ -185,6 +189,7 @@ const tierTypeLabels: Record<TierTypeLabel, string> = {
   memory: "Memory",
   file: "File",
   cloud: "Cloud",
+  jsonl: "JSONL Sink",
 };
 
 // ---------------------------------------------------------------------------

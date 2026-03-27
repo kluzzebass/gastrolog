@@ -651,6 +651,7 @@ const (
 	TierTypeMemory TierType = "memory"
 	TierTypeFile   TierType = "file"
 	TierTypeCloud  TierType = "cloud"
+	TierTypeJSONL  TierType = "jsonl"
 )
 
 // TierConfig defines a storage tier within the tiered storage system.

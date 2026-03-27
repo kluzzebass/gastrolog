@@ -607,6 +607,8 @@ func mapTierTypeToFactory(t config.TierType) string {
 		return "file"
 	case config.TierTypeCloud:
 		return "file"
+	case config.TierTypeJSONL:
+		return "jsonl"
 	default:
 		return string(t)
 	}
@@ -633,6 +635,11 @@ func buildTierParams(cfg *config.Config, _ config.VaultConfig, tierCfg config.Ti
 		// Find a StorageArea matching this tier's StorageClass on the local node.
 		// Scope the directory per tier to prevent lock conflicts when multiple
 		// file tiers share the same storage class.
+		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.StorageClass); area != nil {
+			params["dir"] = filepath.Join(area.Path, tierCfg.ID.String())
+		}
+
+	case config.TierTypeJSONL:
 		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.StorageClass); area != nil {
 			params["dir"] = filepath.Join(area.Path, tierCfg.ID.String())
 		}

@@ -32,6 +32,11 @@ export enum TierType {
    * @generated from enum value: TIER_TYPE_CLOUD = 3;
    */
   CLOUD = 3,
+
+  /**
+   * @generated from enum value: TIER_TYPE_JSONL = 4;
+   */
+  JSONL = 4,
 }
 // Retrieve enum metadata with: proto3.getEnumType(TierType)
 proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
@@ -39,6 +44,7 @@ proto3.util.setEnumType(TierType, "gastrolog.v1.TierType", [
   { no: 1, name: "TIER_TYPE_MEMORY" },
   { no: 2, name: "TIER_TYPE_FILE" },
   { no: 3, name: "TIER_TYPE_CLOUD" },
+  { no: 4, name: "TIER_TYPE_JSONL" },
 ]);
 
 /**

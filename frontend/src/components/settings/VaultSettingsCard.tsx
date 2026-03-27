@@ -38,6 +38,7 @@ function tierTypeLabel(type: TierType): string {
     case TierType.MEMORY: return "memory";
     case TierType.FILE: return "file";
     case TierType.CLOUD: return "cloud";
+    case TierType.JSONL: return "jsonl";
     default: return "unknown";
   }
 }
@@ -518,7 +519,7 @@ export function VaultSettingsCard({
                     <div className={`flex items-center gap-3 pl-6 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                       {nodeName && <span>{"node: " + nodeName}</span>}
                       {!nodeName && <span className={c("text-text-ghost", "text-light-text-ghost")}>unplaced</span>}
-                      {tier.type === TierType.FILE && tier.storageClass > 0 && (
+                      {(tier.type === TierType.FILE || tier.type === TierType.JSONL) && tier.storageClass > 0 && (
                         <span className="font-mono">{`class ${String(tier.storageClass)}`}</span>
                       )}
                       {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
@@ -582,7 +583,7 @@ export function VaultSettingsCard({
                           </FormField>
                         </>
                       )}
-                      {tier.type === TierType.FILE && storageClassOptions.length > 0 && (
+                      {(tier.type === TierType.FILE || tier.type === TierType.JSONL) && storageClassOptions.length > 0 && (
                         <FormField label="Storage Class" dark={dark}>
                           <SelectInput
                             value={edit.tierStorageClass[tier.id] ?? String(tier.storageClass || 0)}
@@ -627,6 +628,7 @@ export function VaultSettingsCard({
                   { value: "memory", label: "Memory" },
                   { value: "file", label: "File" },
                   { value: "cloud", label: "Cloud" },
+                  { value: "jsonl", label: "JSONL Sink" },
                 ]}
                 onSelect={(v) => setNewTier(emptyTierEntry(v as TierTypeLabel))}
                 dark={dark}

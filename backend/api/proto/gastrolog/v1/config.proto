@@ -709,6 +709,7 @@ enum TierType {
   TIER_TYPE_MEMORY = 1;
   TIER_TYPE_FILE = 2;
   TIER_TYPE_CLOUD = 3;
+  TIER_TYPE_JSONL = 4;
 }
 
 // TierConfig defines a storage tier. A vault contains an ordered list

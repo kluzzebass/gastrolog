@@ -309,6 +309,8 @@ func protoToTierType(t apiv1.TierType) config.TierType {
 		return config.TierTypeFile
 	case apiv1.TierType_TIER_TYPE_CLOUD:
 		return config.TierTypeCloud
+	case apiv1.TierType_TIER_TYPE_JSONL:
+		return config.TierTypeJSONL
 	default:
 		return ""
 	}
