@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
@@ -38,6 +39,7 @@ type retentionRunner struct {
 	im          index.IndexManager
 	rules       []retentionRule
 	inflight    map[chunk.ChunkID]bool // chunks currently being processed
+	unreadable  map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
 	orch        *Orchestrator          // for eject action (loadConfig, Append, transferrer)
 	isSecondary atomic.Bool            // secondaries expire only — primary handles transition/eject
 	now         func() time.Time
@@ -70,10 +72,13 @@ func (r *retentionRunner) sweep() {
 		return
 	}
 
-	// Filter to sealed chunks only (sorted by WriteStart from List).
+	// Filter to sealed chunks only, skipping unreadable ones.
+	r.mu.Lock()
+	unreadable := r.unreadable
+	r.mu.Unlock()
 	var sealed []chunk.ChunkMeta
 	for _, meta := range metas {
-		if meta.Sealed {
+		if meta.Sealed && !unreadable[meta.ID] {
 			sealed = append(sealed, meta)
 		}
 	}
@@ -141,6 +146,24 @@ func (r *retentionRunner) clearInflight(id chunk.ChunkID) {
 	r.mu.Lock()
 	delete(r.inflight, id)
 	r.mu.Unlock()
+}
+
+// markUnreadable flags a chunk as unreadable so retention skips it on future
+// sweeps. The chunk remains on disk for manual investigation. Cleared on restart.
+func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.unreadable == nil {
+		r.unreadable = make(map[chunk.ChunkID]bool)
+	}
+	r.unreadable[id] = true
+	if r.orch.alerts != nil {
+		r.orch.alerts.Set(
+			fmt.Sprintf("chunk-unreadable:%s", id),
+			alert.Error, "retention",
+			fmt.Sprintf("Chunk %s unreadable: %v", id, reason),
+		)
+	}
 }
 
 // expireChunk deletes a chunk's indexes then data.
