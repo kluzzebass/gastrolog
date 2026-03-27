@@ -90,18 +90,35 @@ interface Tier {
   retentionRules: { retentionPolicyId: string }[];
 }
 
+interface VaultRef {
+  name: string;
+  tierIds: string[];
+}
+
+function tierLabel(tierId: string, vaults: VaultRef[]): string {
+  for (const v of vaults) {
+    const pos = v.tierIds.indexOf(tierId);
+    if (pos >= 0) {
+      return `${v.name}/tier ${String(pos + 1)}`;
+    }
+  }
+  return tierId;
+}
+
 export function tierRefsForRotationPolicy(
   tiers: Tier[],
   rotationPolicyId: string,
+  vaults: VaultRef[] = [],
 ): string[] {
   return tiers
     .filter((t) => t.rotationPolicyId === rotationPolicyId)
-    .map((t) => t.name || t.id);
+    .map((t) => tierLabel(t.id, vaults));
 }
 
 export function tierRuleRefsFor(
   tiers: Tier[],
   retentionPolicyId: string,
+  vaults: VaultRef[] = [],
 ): string[] {
   return tiers
     .filter((t) =>
@@ -109,5 +126,5 @@ export function tierRuleRefsFor(
         (r) => r.retentionPolicyId === retentionPolicyId,
       ),
     )
-    .map((t) => t.name || t.id);
+    .map((t) => tierLabel(t.id, vaults));
 }

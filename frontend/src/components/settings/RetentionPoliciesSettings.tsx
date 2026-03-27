@@ -98,6 +98,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const tiers = config?.tiers ?? [];
+  const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
@@ -238,7 +239,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dar
       {sortByName(policies).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = tierRuleRefsFor(tiers, id);
+        const refs = tierRuleRefsFor(tiers, id, vaults);
         return (
           <SettingsCard
             key={id}

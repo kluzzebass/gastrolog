@@ -150,6 +150,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
   const effectiveName = newName.trim() || namePlaceholder || "default";
   const nameConflict = existingNames.has(effectiveName);
   const tiers = config?.tiers ?? [];
+  const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
     const pol = policies.find((p) => p.id === id);
@@ -305,7 +306,7 @@ export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolea
       {sortByName(policies).map((pol) => {
         const id = pol.id;
         const edit = getEdit(id);
-        const refs = tierRefsForRotationPolicy(tiers, id);
+        const refs = tierRefsForRotationPolicy(tiers, id, vaults);
         return (
           <SettingsCard
             key={id}
