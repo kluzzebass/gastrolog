@@ -330,6 +330,7 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		CacheClass:        p.CacheClass,
 		ReplicationFactor: p.ReplicationFactor,
 		Path:              p.Path,
+		NodeID:            p.NodeId,
 	}
 
 	if p.RotationPolicyId != "" {

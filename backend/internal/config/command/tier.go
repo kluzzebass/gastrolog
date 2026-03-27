@@ -36,6 +36,7 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 		NodeId:            tier.NodeID,
 		ReplicationFactor: tier.ReplicationFactor,
 		SecondaryNodeIds:  tier.SecondaryNodeIDs,
+		Path:              tier.Path,
 	}
 }
 
@@ -105,6 +106,7 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 		NodeID:            cmd.GetNodeId(),
 		ReplicationFactor: cmd.GetReplicationFactor(),
 		SecondaryNodeIDs:  cmd.GetSecondaryNodeIds(),
+		Path:              cmd.GetPath(),
 	}, nil
 }
 
