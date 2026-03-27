@@ -25,6 +25,7 @@ const FORM_MAP: Record<
     dark: boolean;
     defaults: Record<string, string>;
     ingesterId?: string;
+    ingesterNodeId?: string;
   }>
 > = {
   chatterbox: ChatterboxForm,
@@ -48,6 +49,7 @@ export function IngesterParamsForm({
   onChange,
   dark,
   ingesterId,
+  ingesterNodeId,
 }: Readonly<IngesterParamsFormProps>) {
   const { data: allDefaults } = useIngesterDefaults();
   const defaults = allDefaults?.[ingesterType] ?? {};
@@ -56,6 +58,6 @@ export function IngesterParamsForm({
   if (!Form) return null;
 
   return (
-    <Form params={params} onChange={onChange} dark={dark} defaults={defaults} ingesterId={ingesterId} />
+    <Form params={params} onChange={onChange} dark={dark} defaults={defaults} ingesterId={ingesterId} ingesterNodeId={ingesterNodeId} />
   );
 }

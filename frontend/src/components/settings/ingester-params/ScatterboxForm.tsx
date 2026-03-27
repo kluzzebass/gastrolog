@@ -13,6 +13,7 @@ export function ScatterboxForm({
   dark,
   defaults: d,
   ingesterId,
+  ingesterNodeId,
 }: Readonly<ScatterboxFormProps>) {
   const c = useThemeClass(dark);
   const set = (key: string, value: string) =>
@@ -24,7 +25,10 @@ export function ScatterboxForm({
   const handleTrigger = async () => {
     if (!ingesterId) return;
     try {
-      await configClient.triggerIngester({ id: ingesterId });
+      await configClient.triggerIngester(
+        { id: ingesterId },
+        ingesterNodeId ? { headers: { "X-Target-Node": ingesterNodeId } } : {},
+      );
     } catch {
       // Silently ignore — alert system will surface persistent issues.
     }
