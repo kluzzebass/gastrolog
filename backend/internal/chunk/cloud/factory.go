@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gastrolog/internal/blobstore"
 )
@@ -56,13 +57,25 @@ func CreateStore(provider string, params map[string]string) (blobstore.Store, er
 	return createStore(provider, params)
 }
 
+// normalizeEndpoint ensures a custom endpoint has a scheme.
+// The AWS SDK rejects bare host:port like "localhost:9000".
+func normalizeEndpoint(ep string) string {
+	if ep == "" {
+		return ""
+	}
+	if !strings.Contains(ep, "://") {
+		return "http://" + ep
+	}
+	return ep
+}
+
 func createStore(provider string, params map[string]string) (blobstore.Store, error) {
 	switch provider {
 	case "s3":
 		cfg := blobstore.S3Config{
 			Bucket:    params[ParamBucket],
 			Region:    params[ParamRegion],
-			Endpoint:  params[ParamEndpoint],
+			Endpoint:  normalizeEndpoint(params[ParamEndpoint]),
 			AccessKey: params[ParamAccessKey],
 			SecretKey: params[ParamSecretKey],
 		}
@@ -90,7 +103,7 @@ func createStore(provider string, params map[string]string) (blobstore.Store, er
 	case "gcs":
 		cfg := blobstore.GCSConfig{
 			Bucket:          params[ParamBucket],
-			Endpoint:        params[ParamEndpoint],
+			Endpoint:        normalizeEndpoint(params[ParamEndpoint]),
 			CredentialsJSON: params[ParamCredentialsJSON],
 		}
 		if cfg.Bucket == "" {
