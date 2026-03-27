@@ -167,7 +167,10 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID uuid.UUID) *TierInstance {
 // AppendToTier appends a record to a specific tier's chunk manager.
 // Used by inter-tier transition to target a downstream tier directly,
 // bypassing the vault's active tier. Includes seal detection.
-func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record) error {
+// AppendToTier appends a record to a specific tier. primaryChunkID, when
+// non-zero on secondaries, syncs the chunk ID with the primary so the
+// secondary has real, queryable, promotable chunks.
+func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -182,14 +185,36 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, rec chunk.Record)
 		}
 		cm := tier.Chunks
 
+		// On secondaries, sync chunk ID with the primary.
+		if tier.IsSecondary && primaryChunkID != (chunk.ChunkID{}) {
+			cm.SetNextChunkID(primaryChunkID)
+		}
+
 		activeBefore := cm.Active()
 		if _, _, err := cm.Append(rec); err != nil {
 			return err
 		}
 
+		// Primary: forward to secondaries for active-chunk durability.
+		if !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+			activeNow := cm.Active()
+			var activeChunkID chunk.ChunkID
+			if activeNow != nil {
+				activeChunkID = activeNow.ID
+			}
+			for _, nodeID := range tier.SecondaryNodeIDs {
+				_ = o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, tierID, activeChunkID, []chunk.Record{rec})
+			}
+		}
+
 		activeAfter := cm.Active()
 		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+			// Skip post-seal on secondaries — their sealed chunks are from
+			// forwarding and will be replaced by ImportToTier's canonical version.
+			// Scheduling compression races with the delete-and-replace in ImportToTier.
+			if !tier.IsSecondary {
+				o.schedulePostSeal(vaultID, cm, activeBefore.ID)
+			}
 		}
 		return nil
 	}
@@ -228,13 +253,18 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		return cid, pos, err
 	}
 
-	// Buffer record on secondaries for active-chunk durability.
-	// Calls BufferForTier (durability buffer) — invisible to search, inspector,
-	// and retention. The record exists on RF nodes for recovery if the primary dies.
+	// Forward record to secondaries for active-chunk durability.
+	// Secondaries append to their ChunkManager — real, queryable chunks
+	// that allow immediate promotion if the primary dies.
 	activeTier := vault.ActiveTier()
 	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+		activeNow := cm.Active()
+		var activeChunkID chunk.ChunkID
+		if activeNow != nil {
+			activeChunkID = activeNow.ID
+		}
 		for _, nodeID := range activeTier.SecondaryNodeIDs {
-			_ = o.forwarder.ForwardToBuffer(context.Background(), nodeID, vaultID, activeTier.TierID, []chunk.Record{rec})
+			_ = o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, activeTier.TierID, activeChunkID, []chunk.Record{rec})
 		}
 	}
 
@@ -281,7 +311,11 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	// ImportRecords reads from a network stream and can block — holding
 	// RLock during a network read starves writers (FSM dispatcher) and
 	// deadlocks the entire orchestrator.
-	cm := func() chunk.ChunkManager {
+	type tierRef struct {
+		cm          chunk.ChunkManager
+		isSecondary bool
+	}
+	ref := func() *tierRef {
 		o.mu.RLock()
 		defer o.mu.RUnlock()
 		vault := o.vaults[vaultID]
@@ -290,14 +324,15 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 		}
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID {
-				return t.Chunks
+				return &tierRef{cm: t.Chunks, isSecondary: t.IsSecondary}
 			}
 		}
 		return nil
 	}()
-	if cm == nil {
+	if ref == nil {
 		return fmt.Errorf("%w: tier %s in vault %s", ErrVaultNotFound, tierID, vaultID)
 	}
+	cm := ref.cm
 
 	// Serialize SetNextChunkID + ImportRecords per tier to prevent concurrent
 	// replication messages from interleaving the two calls (race: Thread A sets
@@ -307,10 +342,37 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	tierMu.Lock()
 	defer tierMu.Unlock()
 
-	// Idempotency: skip if this chunk already exists.
-	if _, err := cm.Meta(chunkID); err == nil {
-		o.logger.Info("replication: chunk already exists, skipping import",
+	// Check if this chunk already exists (sealed or active).
+	_, metaErr := cm.Meta(chunkID)
+	activeIsChunk := false
+	if active := cm.Active(); active != nil && active.ID == chunkID {
+		activeIsChunk = true
+	}
+
+	if metaErr == nil || activeIsChunk {
+		if !ref.isSecondary {
+			// Primary: idempotent skip — canonical version is already here.
+			o.logger.Info("replication: chunk already exists, skipping import",
+				"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+			drainIterator(next)
+			return nil
+		}
+		// Secondary: the existing chunk was built by active record forwarding.
+		// Seal it if still active, then run post-seal (compression + indexing)
+		// locally. No delete-and-replace — avoids a window where the chunk
+		// doesn't exist, which causes transient replica count drops.
+		if activeIsChunk {
+			if err := cm.Seal(); err != nil {
+				o.logger.Error("replication: failed to seal forwarded active chunk",
+					"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "error", err)
+				drainIterator(next)
+				return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
+			}
+		}
+		o.logger.Info("replication: forwarded chunk exists, running post-seal locally",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		drainIterator(next)
+		o.postSealWork(vaultID, cm, chunkID)
 		return nil
 	}
 
@@ -323,14 +385,21 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 		"vault", vaultID, "tier", tierID,
 		"chunk", meta.ID.String(), "records", meta.RecordCount)
 
-	// Clear the durability buffer — the canonical sealed chunk supersedes
-	// any buffered forwarded records.
-	o.clearDurabilityBuffer(vaultID, tierID)
-
 	if meta.ID != (chunk.ChunkID{}) {
 		o.postSealWork(vaultID, cm, meta.ID)
 	}
 	return nil
+}
+
+// drainIterator reads and discards all remaining records from an iterator.
+// Used when skipping an import but the caller (network stream) still needs
+// its data consumed.
+func drainIterator(next chunk.RecordIterator) {
+	for {
+		if _, err := next(); err != nil {
+			return
+		}
+	}
 }
 
 // SealActive seals the active chunk if it has records. No-op if empty or no active chunk.

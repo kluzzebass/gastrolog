@@ -36,43 +36,6 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 	return nil
 }
 
-// BufferForTier appends a record to a secondary tier's durability buffer.
-// The buffer is invisible to queries and the inspector. It exists purely
-// for active-chunk durability — if the primary dies, the buffer holds the
-// records. Cleared when sealed-chunk replication delivers the canonical version.
-func (o *Orchestrator) BufferForTier(vaultID, tierID uuid.UUID, rec chunk.Record) error {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return nil // not registered locally — ignore silently
-	}
-	for _, tier := range vault.Tiers {
-		if tier.TierID == tierID && tier.IsSecondary {
-			tier.BufferRecord(rec)
-			return nil
-		}
-	}
-	return nil // not a secondary for this tier — ignore
-}
-
-// clearDurabilityBuffer clears the durability buffer for a tier.
-func (o *Orchestrator) clearDurabilityBuffer(vaultID, tierID uuid.UUID) {
-	o.mu.RLock()
-	defer o.mu.RUnlock()
-	vault := o.vaults[vaultID]
-	if vault == nil {
-		return
-	}
-	for _, tier := range vault.Tiers {
-		if tier.TierID == tierID {
-			tier.ClearDurabilityBuffer()
-			return
-		}
-	}
-}
-
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
 func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {

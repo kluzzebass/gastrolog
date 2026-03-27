@@ -81,10 +81,11 @@ type drainState struct {
 // enqueue) so they're safe to call under the orchestrator mutex.
 type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
-	// ForwardToBuffer sends a record to a secondary's durability buffer.
-	// Fire-and-forget — drops on full buffer. The record is buffered (not
-	// appended to ChunkManager) and cleared when sealed-chunk replication delivers.
-	ForwardToBuffer(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
+	// ForwardToTier sends records to a specific tier on a secondary for
+	// active-chunk durability. Records are appended to the secondary's
+	// ChunkManager (real, queryable chunks). chunkID syncs the chunk ID.
+	// Fire-and-forget.
+	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk

@@ -1665,3 +1665,91 @@ func TestBTreeCleanedUpOnSeal(t *testing.T) {
 		}
 	}
 }
+
+// TestDeleteDuringPostSealOtherChunk verifies that Delete on chunk A does not
+// panic when PostSealProcess is running concurrently on a different chunk B.
+//
+// The old code called a global postSealWg.Wait() inside Delete, which panicked
+// with "sync: WaitGroup is reused before previous Wait has returned" when
+// another goroutine's PostSealProcess called postSealWg.Add(1) concurrently.
+// The fix uses a per-chunk channel (postSealActive sync.Map) so Delete only
+// waits for the specific chunk being deleted.
+func TestDeleteDuringPostSealOtherChunk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	manager, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	defer manager.Close()
+
+	attrs := chunk.Attributes{"src": "test"}
+
+	// Create and seal chunk A.
+	recA := chunk.Record{IngestTS: time.UnixMicro(100), Attrs: attrs, Raw: []byte("chunk-a")}
+	chunkA, _, err := manager.Append(recA)
+	if err != nil {
+		t.Fatalf("append chunk A: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal chunk A: %v", err)
+	}
+
+	// Create and seal chunk B.
+	recB := chunk.Record{IngestTS: time.UnixMicro(200), Attrs: attrs, Raw: []byte("chunk-b")}
+	chunkB, _, err := manager.Append(recB)
+	if err != nil {
+		t.Fatalf("append chunk B: %v", err)
+	}
+	if err := manager.Seal(); err != nil {
+		t.Fatalf("seal chunk B: %v", err)
+	}
+
+	// Start PostSealProcess for chunk B in a background goroutine.
+	// This will run compression (and index builds if any) which takes
+	// non-trivial time, keeping the postSealActive entry alive.
+	ctx := context.Background()
+	postSealErr := make(chan error, 1)
+	go func() {
+		postSealErr <- manager.PostSealProcess(ctx, chunkB)
+	}()
+
+	// Concurrently delete chunk A. With the old global WaitGroup approach,
+	// this would panic because PostSealProcess on chunk B calls wg.Add(1)
+	// while Delete calls wg.Wait(). The per-chunk channel approach must
+	// allow Delete(A) to proceed immediately since no post-seal work is
+	// active for chunk A.
+	if err := manager.Delete(chunkA); err != nil {
+		t.Fatalf("delete chunk A: %v", err)
+	}
+
+	// Wait for PostSealProcess on chunk B to finish.
+	if err := <-postSealErr; err != nil {
+		t.Fatalf("post-seal chunk B: %v", err)
+	}
+
+	// Verify chunk A is gone.
+	if _, err := manager.Meta(chunkA); err != chunk.ErrChunkNotFound {
+		t.Fatalf("chunk A should be deleted, got err: %v", err)
+	}
+	chunkADir := filepath.Join(dir, chunkA.String())
+	if _, err := os.Stat(chunkADir); !os.IsNotExist(err) {
+		t.Fatalf("chunk A directory should not exist, stat err: %v", err)
+	}
+
+	// Verify chunk B still exists and is accessible.
+	metaB, err := manager.Meta(chunkB)
+	if err != nil {
+		t.Fatalf("chunk B meta: %v", err)
+	}
+	if !metaB.Sealed {
+		t.Fatal("chunk B should be sealed")
+	}
+	if !metaB.Compressed {
+		t.Fatal("chunk B should be compressed after PostSealProcess")
+	}
+	chunkBDir := filepath.Join(dir, chunkB.String())
+	if _, err := os.Stat(chunkBDir); err != nil {
+		t.Fatalf("chunk B directory should exist: %v", err)
+	}
+}

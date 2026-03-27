@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -486,6 +488,497 @@ func TestImportToTierIdempotent(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("expected exactly 1 chunk with ID %s, got %d", chunkID, count)
+	}
+}
+
+// --- AppendToTier ---
+
+// tierTestForwarder records ForwardToTier calls.
+type tierTestForwarder struct {
+	mu    sync.Mutex
+	calls []tierForwardCall
+}
+
+type tierForwardCall struct {
+	NodeID  string
+	VaultID uuid.UUID
+	TierID  uuid.UUID
+	ChunkID chunk.ChunkID
+	Records []chunk.Record
+}
+
+func (f *tierTestForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+	return nil
+}
+
+func (f *tierTestForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, tierForwardCall{
+		NodeID: nodeID, VaultID: vaultID, TierID: tierID,
+		ChunkID: chunkID, Records: records,
+	})
+	return nil
+}
+
+func (f *tierTestForwarder) getCalls() []tierForwardCall {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]tierForwardCall(nil), f.calls...)
+}
+
+func TestAppendToTierPrimaryForwardsToSecondaries(t *testing.T) {
+	t.Parallel()
+	fwd := &tierTestForwarder{}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2", "node-3"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "fwd-test"
+	orch.RegisterVault(vault)
+
+	rec := testRecord("hello")
+	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	calls := fwd.getCalls()
+	if len(calls) != 2 {
+		t.Fatalf("expected 2 ForwardToTier calls (one per secondary), got %d", len(calls))
+	}
+	nodes := map[string]bool{}
+	for _, c := range calls {
+		nodes[c.NodeID] = true
+		if c.VaultID != vaultID {
+			t.Errorf("call.VaultID = %s, want %s", c.VaultID, vaultID)
+		}
+		if c.TierID != tierID {
+			t.Errorf("call.TierID = %s, want %s", c.TierID, tierID)
+		}
+		if c.ChunkID == (chunk.ChunkID{}) {
+			t.Error("call.ChunkID should be non-zero (active chunk ID)")
+		}
+		if len(c.Records) != 1 {
+			t.Errorf("expected 1 record per call, got %d", len(c.Records))
+		}
+	}
+	if !nodes["node-2"] || !nodes["node-3"] {
+		t.Errorf("expected forwards to node-2 and node-3, got %v", nodes)
+	}
+}
+
+func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
+	t.Parallel()
+	fwd := &tierTestForwarder{}
+	orch, err := New(Config{LocalNodeID: "node-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	// Secondary tier — should NOT re-forward.
+	tier := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "no-reforward"
+	orch.RegisterVault(vault)
+
+	primaryChunkID := chunk.NewChunkID()
+	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("data")); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(fwd.getCalls()) != 0 {
+		t.Error("secondary should NOT forward to other nodes (prevents loops)")
+	}
+}
+
+func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "id-sync"
+	orch.RegisterVault(vault)
+
+	primaryChunkID := chunk.NewChunkID()
+	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("data")); err != nil {
+		t.Fatal(err)
+	}
+
+	// The secondary's active chunk should have the primary's chunk ID.
+	active := tier.Chunks.Active()
+	if active == nil {
+		t.Fatal("expected active chunk on secondary")
+	}
+	if active.ID != primaryChunkID {
+		t.Errorf("secondary chunk ID = %s, want primary's %s", active.ID, primaryChunkID)
+	}
+}
+
+func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	// Small rotation policy to trigger seal.
+	cm, cErr := chunkmem.NewManager(chunkmem.Config{
+		RotationPolicy: chunk.NewRecordCountPolicy(1),
+		Now:            time.Now,
+		MetaStore:      chunkmem.NewMetaStore(),
+	})
+	if cErr != nil {
+		t.Fatal(cErr)
+	}
+	im, _ := indexmem.NewFactory()(nil, cm, nil)
+	tier := &TierInstance{
+		TierID:      tierID,
+		Type:        "memory",
+		Chunks:      cm,
+		Indexes:     im,
+		Query:       query.New(cm, im, nil),
+		IsSecondary: true,
+	}
+	vault := NewVault(vaultID, tier)
+	vault.Name = "skip-postseal"
+	orch.RegisterVault(vault)
+
+	primaryChunkID := chunk.NewChunkID()
+	// First record fills the chunk (policy = 1 record), triggering seal on the second.
+	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("rec-1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := orch.AppendToTier(vaultID, tierID, primaryChunkID, testRecord("rec-2")); err != nil {
+		t.Fatal(err)
+	}
+
+	// If post-seal were scheduled on a secondary, it would queue compression
+	// work that races with ImportToTier's delete-and-replace. The test just
+	// verifies no panic occurred and the seal happened cleanly.
+	metas, _ := cm.List()
+	sealed := 0
+	for _, m := range metas {
+		if m.Sealed {
+			sealed++
+		}
+	}
+	if sealed == 0 {
+		t.Error("expected at least one sealed chunk after 2 appends with policy=1")
+	}
+}
+
+// --- Import keeps forwarded version on secondary (no delete-and-replace) ---
+
+func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "seal-and-keep"
+	orch.RegisterVault(vault)
+
+	chunkID := chunk.NewChunkID()
+
+	// Simulate active record forwarding: secondary has an active chunk
+	// with the primary's ID, still receiving records.
+	tier.Chunks.SetNextChunkID(chunkID)
+	for range 3 {
+		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	active := tier.Chunks.Active()
+	if active == nil || active.ID != chunkID {
+		t.Fatal("expected active chunk with primary's ID")
+	}
+
+	// Primary seals and sends canonical version. ImportToTier should
+	// seal the active chunk and keep it (no delete-and-replace).
+	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	if err != nil {
+		t.Fatalf("ImportToTier: %v", err)
+	}
+
+	// Chunk should be sealed with the forwarded records (3, not 5).
+	meta, err := tier.Chunks.Meta(chunkID)
+	if err != nil {
+		t.Fatalf("expected chunk to exist: %v", err)
+	}
+	if !meta.Sealed {
+		t.Error("chunk should be sealed")
+	}
+	if meta.RecordCount != 3 {
+		t.Errorf("forwarded chunk should keep its 3 records, got %d", meta.RecordCount)
+	}
+
+	// Active slot should now be empty (sealed away).
+	if tier.Chunks.Active() != nil {
+		t.Error("active chunk should be nil after seal")
+	}
+}
+
+func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "keep-sealed"
+	orch.RegisterVault(vault)
+
+	chunkID := chunk.NewChunkID()
+
+	// Simulate: forwarded version is already sealed (e.g., secondary
+	// received SealActiveTier before the canonical import arrives).
+	tier.Chunks.SetNextChunkID(chunkID)
+	for range 3 {
+		if _, _, err := tier.Chunks.Append(testRecord("forwarded")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// ImportToTier should keep the existing sealed chunk and drain
+	// the canonical stream (no delete, no replace).
+	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	if err != nil {
+		t.Fatalf("ImportToTier: %v", err)
+	}
+
+	// Chunk keeps its original 3 records.
+	meta, err := tier.Chunks.Meta(chunkID)
+	if err != nil {
+		t.Fatalf("expected chunk to exist: %v", err)
+	}
+	if meta.RecordCount != 3 {
+		t.Errorf("forwarded chunk should keep 3 records, got %d", meta.RecordCount)
+	}
+
+	// Only one chunk with this ID.
+	metas, _ := tier.Chunks.List()
+	count := 0
+	for _, m := range metas {
+		if m.ID == chunkID {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected exactly 1 chunk, got %d", count)
+	}
+}
+
+// --- Active record forwarding ---
+
+func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// No forwarder set — single-node mode.
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "no-forwarder"
+	orch.RegisterVault(vault)
+
+	rec := testRecord("single-node")
+	if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record should be appended locally.
+	active := tier.Chunks.Active()
+	if active == nil {
+		t.Fatal("expected active chunk after append")
+	}
+	if active.RecordCount != 1 {
+		t.Errorf("expected 1 record, got %d", active.RecordCount)
+	}
+}
+
+func TestAppendToTierVaultNotFound(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	bogusVaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+
+	err = orch.AppendToTier(bogusVaultID, tierID, chunk.ChunkID{}, testRecord("data"))
+	if err == nil {
+		t.Fatal("expected error for non-existent vault")
+	}
+	if !errors.Is(err, ErrVaultNotFound) {
+		t.Errorf("expected ErrVaultNotFound, got %v", err)
+	}
+}
+
+func TestAppendToTierTierNotFound(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "tier-not-found"
+	orch.RegisterVault(vault)
+
+	bogusTierID := uuid.Must(uuid.NewV7())
+	err = orch.AppendToTier(vaultID, bogusTierID, chunk.ChunkID{}, testRecord("data"))
+	if err == nil {
+		t.Fatal("expected error for non-existent tier")
+	}
+	if !strings.Contains(err.Error(), "not found") {
+		t.Errorf("expected error containing 'not found', got %v", err)
+	}
+}
+
+func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
+	t.Parallel()
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, true, nil)
+	vault := NewVault(vaultID, tier)
+	vault.Name = "drain-on-skip"
+	orch.RegisterVault(vault)
+
+	chunkID := chunk.NewChunkID()
+
+	// Pre-populate a sealed chunk with this ID so ImportToTier will skip.
+	tier.Chunks.SetNextChunkID(chunkID)
+	if _, _, err := tier.Chunks.Append(testRecord("existing")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Build a tracking iterator that counts consumed records.
+	const totalRecords = 7
+	consumed := 0
+	trackingIter := func() (chunk.Record, error) {
+		if consumed >= totalRecords {
+			return chunk.Record{}, chunk.ErrNoMoreRecords
+		}
+		consumed++
+		return chunk.Record{
+			Raw:      []byte("drain-me"),
+			SourceTS: time.Now(),
+			IngestTS: time.Now(),
+		}, nil
+	}
+
+	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, trackingIter)
+	if err != nil {
+		t.Fatalf("ImportToTier: %v", err)
+	}
+
+	if consumed != totalRecords {
+		t.Errorf("expected all %d records consumed (drained), got %d", totalRecords, consumed)
+	}
+}
+
+func TestAppendToTierForwardLifecycle(t *testing.T) {
+	t.Parallel()
+	fwd := &tierTestForwarder{}
+	orch, err := New(Config{LocalNodeID: "node-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	orch.SetRecordForwarder(fwd)
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	vault := NewVault(vaultID, tier)
+	vault.Name = "forward-lifecycle"
+	orch.RegisterVault(vault)
+
+	// Append 3 records.
+	for i := range 3 {
+		rec := testRecord("rec-" + string(rune('a'+i)))
+		if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Verify 3 ForwardToTier calls.
+	calls := fwd.getCalls()
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 ForwardToTier calls, got %d", len(calls))
+	}
+
+	// All calls should target the same vault, tier, and chunk ID.
+	firstChunkID := calls[0].ChunkID
+	if firstChunkID == (chunk.ChunkID{}) {
+		t.Fatal("expected non-zero chunk ID in forward calls")
+	}
+	for i, c := range calls {
+		if c.VaultID != vaultID {
+			t.Errorf("call %d: VaultID = %s, want %s", i, c.VaultID, vaultID)
+		}
+		if c.TierID != tierID {
+			t.Errorf("call %d: TierID = %s, want %s", i, c.TierID, tierID)
+		}
+		if c.ChunkID != firstChunkID {
+			t.Errorf("call %d: ChunkID = %s, want consistent %s", i, c.ChunkID, firstChunkID)
+		}
+		if c.NodeID != "node-2" {
+			t.Errorf("call %d: NodeID = %s, want node-2", i, c.NodeID)
+		}
+	}
+
+	// Verify local tier has 3 records in active chunk.
+	active := tier.Chunks.Active()
+	if active == nil {
+		t.Fatal("expected active chunk")
+	}
+	if active.RecordCount != 3 {
+		t.Errorf("expected 3 records in active chunk, got %d", active.RecordCount)
 	}
 }
 

@@ -99,7 +99,8 @@ type Manager struct {
 	cloudListCache []chunk.ChunkMeta        // cached List() result for cloud chunks; nil = stale
 	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
 
-	postSealWg sync.WaitGroup // tracks in-flight PostSealProcess calls
+	postSealActive sync.Map // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
+	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
 
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
@@ -2148,10 +2149,12 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		m.removeFromCloudIndex(id)
 	} else {
 		dir := m.chunkDir(id)
-		// Wait for in-flight post-seal work to finish — it may be writing
+		// Wait for this chunk's post-seal work to finish — it may be writing
 		// temporary files into this chunk's directory.
 		m.mu.Unlock()
-		m.postSealWg.Wait()
+		if ch, ok := m.postSealActive.Load(id); ok {
+			<-ch.(chan struct{})
+		}
 		m.mu.Lock()
 		if err := os.RemoveAll(dir); err != nil {
 			m.mu.Unlock()
@@ -2218,10 +2221,16 @@ func (m *Manager) HasIndexBuilders() bool {
 
 // PostSealProcess runs the full post-seal pipeline for a sealed chunk:
 // compress → build indexes → refresh sizes → upload to cloud.
-// Safe to call concurrently — tracked by postSealWg for clean shutdown.
+// Safe to call concurrently — tracked per-chunk for Delete, globally for Close.
 func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
+	done := make(chan struct{})
+	m.postSealActive.Store(id, done)
 	m.postSealWg.Add(1)
-	defer m.postSealWg.Done()
+	defer func() {
+		close(done)
+		m.postSealActive.Delete(id)
+		m.postSealWg.Done()
+	}()
 
 	// 1. Compress data files.
 	if err := m.CompressChunk(id); err != nil {
