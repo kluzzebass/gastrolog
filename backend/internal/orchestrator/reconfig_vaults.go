@@ -34,6 +34,10 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultName string) map[
 		out = make(map[string]string)
 	}
 	out["dir"] = dir
+	// Also resolve "path" (used by JSONL sinks) relative to vaultsDir.
+	if p := out["path"]; p != "" && !filepath.IsAbs(p) && vaultsDir != "" {
+		out["path"] = filepath.Join(vaultsDir, p)
+	}
 	return out
 }
 
