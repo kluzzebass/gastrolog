@@ -578,6 +578,15 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		return nil, fmt.Errorf("create index manager: %w", err)
 	}
 
+	// JSONL sinks are write-only — no query engine, no indexes.
+	if tierCfg.Type == config.TierTypeJSONL {
+		return &TierInstance{
+			TierID: tierCfg.ID,
+			Type:   string(tierCfg.Type),
+			Chunks: cm,
+		}, nil
+	}
+
 	var qeLogger = factories.Logger
 	if qeLogger != nil {
 		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
