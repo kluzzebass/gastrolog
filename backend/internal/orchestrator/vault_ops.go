@@ -185,8 +185,13 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		}
 		cm := tier.Chunks
 
-		// On secondaries, sync chunk ID with the primary.
+		// On secondaries, sync chunk ID with the primary. If the active
+		// chunk has a different ID (left over from a previous primary cycle),
+		// seal it so the next append opens a new chunk with the synced ID.
 		if tier.IsSecondary && primaryChunkID != (chunk.ChunkID{}) {
+			if active := cm.Active(); active != nil && active.ID != primaryChunkID {
+				_ = cm.Seal()
+			}
 			cm.SetNextChunkID(primaryChunkID)
 		}
 
