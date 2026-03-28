@@ -6,11 +6,14 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
 	cfgmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/index"
+	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
@@ -693,6 +696,267 @@ func TestTransitionSweepDispatch(t *testing.T) {
 	}
 }
 
+// TestTransitionCloudTierTTLSweep verifies that the retention sweep with a TTL
+// policy correctly transitions cloud-backed sealed chunks to the next tier.
+// Reproduces gastrolog-9umo2: 3m TTL on cloud tier, chunks sit for 10+ minutes.
+func TestTransitionCloudTierTTLSweep(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nextTierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	nextTier := newMemoryTierInstance(t, nextTierID)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, cloudTier, nextTier)
+	vault.Name = "ttl-cloud"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "ttl-cloud", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, NodeID: nodeID,
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: nextTierID, Name: "local", Type: config.TierTypeFile, NodeID: nodeID,
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest, seal, and upload to cloud.
+	const recordCount = 10
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := cloudTier.Chunks.Append(makeRecord("ttl-cloud")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cloudTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, _ := cloudTier.Chunks.List()
+	if len(metas) == 0 {
+		t.Fatal("expected sealed chunk")
+	}
+	chunkID := metas[0].ID
+
+	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess failed: %v", err)
+	}
+
+	// Create retention runner with a TTL policy (3 minutes) and a frozen
+	// clock set 5 minutes in the future — the chunk should match.
+	frozenNow := time.Now().Add(5 * time.Minute)
+
+	runner := &retentionRunner{
+		vaultID: vaultID,
+		tierID:  cloudTierID,
+		cm:      cloudTier.Chunks,
+		im:      cloudTier.Indexes,
+		rules: []retentionRule{{
+			policy: chunk.NewTTLRetentionPolicy(3 * time.Minute),
+			action: config.RetentionActionTransition,
+		}},
+		orch:   orch,
+		now:    func() time.Time { return frozenNow },
+		logger: slog.Default(),
+	}
+
+	runner.sweep()
+
+	// Verify: cloud chunk deleted from source tier.
+	metasFinal, _ := cloudTier.Chunks.List()
+	for _, m := range metasFinal {
+		if m.ID == chunkID {
+			t.Error("expected cloud chunk to be deleted after TTL sweep transition")
+		}
+	}
+
+	// Verify: records in next tier.
+	nextTierMetas, _ := nextTier.Chunks.List()
+	var totalRecords int64
+	for _, m := range nextTierMetas {
+		totalRecords += m.RecordCount
+	}
+	active := nextTier.Chunks.Active()
+	if active != nil {
+		listed := false
+		for _, m := range nextTierMetas {
+			if m.ID == active.ID {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			totalRecords += active.RecordCount
+		}
+	}
+	if totalRecords != recordCount {
+		t.Errorf("expected %d records in next tier after TTL sweep, got %d", recordCount, totalRecords)
+	}
+}
+
+// TestTransitionCloudTierSecondaryDoesNotOverwriteBlob verifies that the
+// secondary's PostSealProcess does NOT upload to cloud storage, preventing
+// it from overwriting the primary's blob with a different-sized version.
+// This was the root cause of gastrolog-9umo2: the secondary's upload changed
+// the blob size, corrupting the primary's stored diskBytes and breaking all
+// future cloud cursor reads (S3 416 Range Not Satisfiable).
+func TestTransitionCloudTierSecondaryDoesNotOverwriteBlob(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nextTierID := uuid.Must(uuid.NewV7())
+	primaryNode := "primary-node"
+	secondaryNode := "secondary-node"
+
+	cloudStore := blobstore.NewMemory()
+
+	// Create primary cloud tier (has cloud backing).
+	primaryTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+
+	// Create secondary cloud tier — should NOT have cloud backing.
+	secondaryDir := t.TempDir()
+	secondaryCM, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            secondaryDir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+		// NOTE: No CloudStore — this is the fix. Before the fix, the
+		// secondary would also get CloudStore configured.
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextTier := newMemoryTierInstance(t, nextTierID)
+
+	// Primary orchestrator.
+	primaryOrch, err := New(Config{LocalNodeID: primaryNode})
+	if err != nil {
+		t.Fatal(err)
+	}
+	primaryVault := NewVault(vaultID, primaryTier, nextTier)
+	primaryVault.Name = "overwrite-test"
+	primaryOrch.RegisterVault(primaryVault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "overwrite-test", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, NodeID: primaryNode,
+		SecondaryNodeIDs: []string{secondaryNode},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: nextTierID, Name: "local", Type: config.TierTypeFile, NodeID: primaryNode,
+	})
+	primaryOrch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest records on primary, seal, and upload to cloud.
+	const recordCount = 20
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := primaryTier.Chunks.Append(makeRecord("primary-rec")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := primaryTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, _ := primaryTier.Chunks.List()
+	chunkID := metas[0].ID
+
+	processor := primaryTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("primary PostSealProcess failed: %v", err)
+	}
+
+	// Verify primary's blob is in cloud.
+	primaryMetas, _ := primaryTier.Chunks.List()
+	var primaryDiskBytes int64
+	for _, m := range primaryMetas {
+		if m.ID == chunkID {
+			primaryDiskBytes = m.DiskBytes
+		}
+	}
+	if primaryDiskBytes == 0 {
+		t.Fatal("expected non-zero diskBytes after cloud upload")
+	}
+
+	// Simulate secondary receiving the same records via replication.
+	// Import the records to the secondary's chunk manager.
+	recs := make([]chunk.Record, recordCount)
+	for i := range recs {
+		recs[i] = makeRecord("primary-rec")
+	}
+	secondaryCM.SetNextChunkID(chunkID)
+	_, importErr := secondaryCM.ImportRecords(testIterFromRecords(recs))
+	if importErr != nil {
+		t.Fatalf("secondary import failed: %v", importErr)
+	}
+
+	// Run PostSealProcess on secondary — should NOT upload to cloud
+	// because CloudStore is nil (the fix).
+	if err := secondaryCM.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("secondary PostSealProcess failed: %v", err)
+	}
+
+	// Verify: secondary chunk is NOT cloud-backed (local only).
+	secMetas, _ := secondaryCM.List()
+	for _, m := range secMetas {
+		if m.ID == chunkID && m.CloudBacked {
+			t.Error("secondary chunk should NOT be cloud-backed")
+		}
+	}
+
+	// Verify: primary can still transition from cloud (blob wasn't overwritten).
+	runner := newTestRetentionRunner(primaryOrch, vaultID, cloudTierID, primaryTier.Chunks, primaryTier.Indexes)
+	runner.transitionChunk(chunkID)
+
+	// Verify: records arrived in next tier.
+	nextTierMetas, _ := nextTier.Chunks.List()
+	var totalRecords int64
+	for _, m := range nextTierMetas {
+		totalRecords += m.RecordCount
+	}
+	active := nextTier.Chunks.Active()
+	if active != nil {
+		listed := false
+		for _, m := range nextTierMetas {
+			if m.ID == active.ID {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			totalRecords += active.RecordCount
+		}
+	}
+	if totalRecords != recordCount {
+		t.Errorf("expected %d records in next tier, got %d", recordCount, totalRecords)
+	}
+}
+
+func testIterFromRecords(recs []chunk.Record) chunk.RecordIterator {
+	i := 0
+	return func() (chunk.Record, error) {
+		if i >= len(recs) {
+			return chunk.Record{}, chunk.ErrNoMoreRecords
+		}
+		r := recs[i]
+		i++
+		return r, nil
+	}
+}
+
 // keepNPolicy is a test-only retention policy that matches all sealed chunks
 // beyond the first N.
 type keepNPolicy struct{ n int }
@@ -729,4 +993,263 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 		nodeID: nodeID, vaultID: vaultID, tierID: tierID, count: count,
 	})
 	return nil
+}
+
+// ---------- cloud tier transition test ----------
+
+// newCloudFileTier creates a file-backed TierInstance with cloud storage.
+// Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
+// matching production cloud tier behavior.
+func newCloudFileTier(t *testing.T, tierID uuid.UUID, vaultID uuid.UUID, store blobstore.Store) *TierInstance {
+	t.Helper()
+	dir := t.TempDir()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+		CloudStore:     store,
+		VaultID:        vaultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	im := indexfile.NewManager(dir, nil, nil)
+	return &TierInstance{
+		TierID:  tierID,
+		Type:    "cloud",
+		Chunks:  cm,
+		Indexes: im,
+		Query:   query.New(cm, im, nil),
+	}
+}
+
+// TestTransitionCloudTierToNextTier verifies that sealed cloud-backed chunks
+// are read back from object storage and streamed to the next tier. This is
+// the exact scenario from gastrolog-9umo2: FILE → FILE → CLOUD → FILE chain
+// where the cloud tier's sealed chunks never transition to tier 4.
+func TestTransitionCloudTierToNextTier(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nextTierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	nextTier := newMemoryTierInstance(t, nextTierID)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, cloudTier, nextTier)
+	vault.Name = "cloud-transition"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "cloud-transition", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, NodeID: nodeID,
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: nextTierID, Name: "local", Type: config.TierTypeFile, NodeID: nodeID,
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest records into the cloud tier.
+	const recordCount = 10
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := cloudTier.Chunks.Append(makeRecord("cloud-rec")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Seal the chunk.
+	if err := cloudTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run PostSealProcess — this compresses, indexes, and uploads to cloud,
+	// then deletes local files. The chunk moves to the cloud B+ tree index.
+	metas, _ := cloudTier.Chunks.List()
+	if len(metas) == 0 {
+		t.Fatal("expected sealed chunk in cloud tier")
+	}
+	chunkID := metas[0].ID
+
+	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess failed: %v", err)
+	}
+
+	// Verify the chunk is now cloud-backed.
+	metasAfterUpload, _ := cloudTier.Chunks.List()
+	found := false
+	for _, m := range metasAfterUpload {
+		if m.ID == chunkID {
+			found = true
+			if !m.CloudBacked {
+				t.Fatal("expected chunk to be cloud-backed after PostSealProcess")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("cloud-backed chunk disappeared from List() after upload")
+	}
+
+	// Now run the transition — this should open a cloud cursor (range requests),
+	// read records from the blobstore, and stream them to the next tier.
+	runner := newTestRetentionRunner(orch, vaultID, cloudTierID, cloudTier.Chunks, cloudTier.Indexes)
+	runner.transitionChunk(chunkID)
+
+	// Verify: source chunk deleted from cloud tier.
+	metasAfterTransition, _ := cloudTier.Chunks.List()
+	for _, m := range metasAfterTransition {
+		if m.ID == chunkID {
+			t.Error("expected cloud chunk to be deleted after transition")
+		}
+	}
+
+	// Verify: records appear in the next tier.
+	nextTierMetas, _ := nextTier.Chunks.List()
+	var totalRecords int64
+	for _, m := range nextTierMetas {
+		totalRecords += m.RecordCount
+	}
+	active := nextTier.Chunks.Active()
+	if active != nil {
+		listed := false
+		for _, m := range nextTierMetas {
+			if m.ID == active.ID {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			totalRecords += active.RecordCount
+		}
+	}
+	if totalRecords != recordCount {
+		t.Errorf("expected %d records in next tier, got %d", recordCount, totalRecords)
+	}
+}
+
+// TestTransitionCloudTierSweepDispatch verifies that the retention sweep
+// correctly picks up cloud-backed sealed chunks and transitions them.
+// This tests the full sweep() path rather than calling transitionChunk directly.
+func TestTransitionCloudTierSweepDispatch(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nextTierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	nextTier := newMemoryTierInstance(t, nextTierID)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, cloudTier, nextTier)
+	vault.Name = "cloud-sweep"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "cloud-sweep", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, NodeID: nodeID,
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: nextTierID, Name: "local", Type: config.TierTypeFile, NodeID: nodeID,
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest, seal, and upload to cloud.
+	const recordCount = 10
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := cloudTier.Chunks.Append(makeRecord("sweep-cloud")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cloudTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, _ := cloudTier.Chunks.List()
+	if len(metas) == 0 {
+		t.Fatal("expected sealed chunk")
+	}
+	chunkID := metas[0].ID
+
+	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess failed: %v", err)
+	}
+
+	// Verify chunk is cloud-backed.
+	metasAfter, _ := cloudTier.Chunks.List()
+	for _, m := range metasAfter {
+		if m.ID == chunkID && !m.CloudBacked {
+			t.Fatal("expected cloud-backed chunk")
+		}
+	}
+
+	// Create a retention runner with a "match all sealed" policy and
+	// transition action. This simulates what the production retention sweep does.
+	runner := &retentionRunner{
+		vaultID: vaultID,
+		tierID:  cloudTierID,
+		cm:      cloudTier.Chunks,
+		im:      cloudTier.Indexes,
+		rules: []retentionRule{{
+			policy: &keepNPolicy{n: 0}, // matches all sealed chunks
+			action: config.RetentionActionTransition,
+		}},
+		orch:   orch,
+		now:    time.Now,
+		logger: slog.Default(),
+	}
+
+	// Run the sweep — this should find the cloud-backed chunk, open a cloud
+	// cursor, stream records to the next tier, and delete the source.
+	runner.sweep()
+
+	// Verify: cloud chunk deleted.
+	metasFinal, _ := cloudTier.Chunks.List()
+	for _, m := range metasFinal {
+		if m.ID == chunkID {
+			t.Error("expected cloud chunk to be deleted after sweep transition")
+		}
+	}
+
+	// Verify: records in next tier.
+	nextTierMetas, _ := nextTier.Chunks.List()
+	var totalRecords int64
+	for _, m := range nextTierMetas {
+		totalRecords += m.RecordCount
+	}
+	active := nextTier.Chunks.Active()
+	if active != nil {
+		listed := false
+		for _, m := range nextTierMetas {
+			if m.ID == active.ID {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			totalRecords += active.RecordCount
+		}
+	}
+	if totalRecords != recordCount {
+		t.Errorf("expected %d records in next tier after sweep, got %d", recordCount, totalRecords)
+	}
 }

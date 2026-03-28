@@ -498,7 +498,7 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			continue
 		}
 
-		ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories)
+		ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, isSecondary)
 		if err != nil {
 			// Close already-created tiers on error.
 			for _, t := range tiers {
@@ -522,12 +522,23 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 }
 
 // buildTierInstance creates a single TierInstance from a TierConfig.
-func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories) (*TierInstance, error) {
+// When isSecondary is true, cloud backing params are stripped so the secondary's
+// PostSealProcess only runs compress + index without uploading to cloud storage.
+// Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the secondary
+// also uploads, it overwrites the primary's blob with a different-sized version,
+// corrupting the primary's stored diskBytes and breaking all future cloud reads.
+func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, isSecondary bool) (*TierInstance, error) {
 	// Map TierConfig.Type to factory name.
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 
 	// Build params from tier config.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
+
+	// Secondaries must NOT upload to cloud storage. The primary owns the
+	// cloud blob; the secondary keeps a local compressed copy for queries.
+	if isSecondary {
+		delete(params, "sealed_backing")
+	}
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
 	if !ok {
