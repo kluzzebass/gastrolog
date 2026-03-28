@@ -1,0 +1,122 @@
+syntax = "proto3";
+package gastrolog.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
+
+// MultiRaftTransport multiplexes multiple Raft groups over a single gRPC
+// service. Each RPC carries a group_id that routes to the correct Raft
+// instance on the server. Replaces the single-instance raft-grpc-transport.
+//
+// The service is registered manually via grpc.ServiceDesc (see multiraft/service.go)
+// rather than using generated stubs. This keeps it on the cluster gRPC port
+// and out of the Connect-based API routing layer.
+
+// ---------- Raft wire types (mirrors hashicorp/raft + raft-grpc-transport) ----------
+
+message RPCHeader {
+  int64 protocol_version = 1;
+  bytes id = 2;
+  bytes addr = 3;
+}
+
+message Log {
+  enum LogType {
+    LOG_COMMAND = 0;
+    LOG_NOOP = 1;
+    LOG_ADD_PEER_DEPRECATED = 2;
+    LOG_REMOVE_PEER_DEPRECATED = 3;
+    LOG_BARRIER = 4;
+    LOG_CONFIGURATION = 5;
+  }
+
+  uint64 index = 1;
+  uint64 term = 2;
+  LogType type = 3;
+  bytes data = 4;
+  bytes extensions = 5;
+  google.protobuf.Timestamp appended_at = 6;
+}
+
+// ---------- Group-prefixed request/response wrappers ----------
+
+message MultiRaftAppendEntriesRequest {
+  bytes group_id = 1;
+  RPCHeader rpc_header = 2;
+  uint64 term = 3;
+  reserved 4; // leader — redundant with rpc_header.addr
+  uint64 prev_log_entry = 5;
+  uint64 prev_log_term = 6;
+  repeated Log entries = 7;
+  uint64 leader_commit_index = 8;
+}
+
+message MultiRaftAppendEntriesResponse {
+  RPCHeader rpc_header = 1;
+  uint64 term = 2;
+  uint64 last_log = 3;
+  bool success = 4;
+  bool no_retry_backoff = 5;
+}
+
+message MultiRaftRequestVoteRequest {
+  bytes group_id = 1;
+  RPCHeader rpc_header = 2;
+  uint64 term = 3;
+  reserved 4; // candidate — redundant with rpc_header.addr
+  uint64 last_log_index = 5;
+  uint64 last_log_term = 6;
+  bool leadership_transfer = 7;
+}
+
+message MultiRaftRequestVoteResponse {
+  RPCHeader rpc_header = 1;
+  uint64 term = 2;
+  bytes peers = 3;
+  bool granted = 4;
+}
+
+message MultiRaftRequestPreVoteRequest {
+  bytes group_id = 1;
+  RPCHeader rpc_header = 2;
+  uint64 term = 3;
+  uint64 last_log_index = 4;
+  uint64 last_log_term = 5;
+}
+
+message MultiRaftRequestPreVoteResponse {
+  RPCHeader rpc_header = 1;
+  uint64 term = 2;
+  bool granted = 3;
+}
+
+message MultiRaftTimeoutNowRequest {
+  bytes group_id = 1;
+  RPCHeader rpc_header = 2;
+}
+
+message MultiRaftTimeoutNowResponse {
+  RPCHeader rpc_header = 1;
+}
+
+message MultiRaftInstallSnapshotRequest {
+  bytes group_id = 1;
+  RPCHeader rpc_header = 2;
+  int64 snapshot_version = 3;
+  uint64 term = 4;
+  reserved 5; // leader — redundant with rpc_header.addr
+  uint64 last_log_index = 6;
+  uint64 last_log_term = 7;
+  bytes peers = 8;
+  bytes configuration = 9;
+  uint64 configuration_index = 10;
+  int64 size = 11;
+  bytes data = 12;
+}
+
+message MultiRaftInstallSnapshotResponse {
+  RPCHeader rpc_header = 1;
+  uint64 term = 2;
+  bool success = 3;
+}

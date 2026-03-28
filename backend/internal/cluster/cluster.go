@@ -23,8 +23,8 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
+	"gastrolog/internal/multiraft"
 
-	transport "github.com/Jille/raft-grpc-transport"
 	"github.com/Jille/raft-grpc-leader-rpc/leaderhealth"
 	"github.com/Jille/raftadmin"
 	hraft "github.com/hashicorp/raft"
@@ -65,7 +65,7 @@ type Config struct {
 type Server struct {
 	cfg       Config
 	grpcSrv   *grpc.Server
-	tm        *transport.Manager
+	tm        *multiraft.Transport[string]
 	listener  net.Listener
 	localAddr string // advertised address (may differ from listen addr)
 	logger    *slog.Logger
@@ -203,8 +203,11 @@ func New(cfg Config) (*Server, error) {
 	}, nil
 }
 
-// Transport creates the raft-grpc-transport Manager and returns a
-// raft.Transport suitable for passing to raft.NewRaft().
+// ConfigGroupID is the well-known group ID for the cluster config Raft group.
+const ConfigGroupID = "config"
+
+// Transport creates the multi-raft transport and returns a raft.Transport
+// scoped to the config group, suitable for passing to raft.NewRaft().
 // Must be called before Start().
 func (s *Server) Transport() hraft.Transport {
 	var creds credentials.TransportCredentials
@@ -214,7 +217,7 @@ func (s *Server) Transport() hraft.Transport {
 		creds = insecure.NewCredentials()
 	}
 
-	s.tm = transport.New(
+	s.tm = multiraft.New[string](
 		hraft.ServerAddress(s.localAddr),
 		[]grpc.DialOption{
 			grpc.WithTransportCredentials(creds),
@@ -227,8 +230,16 @@ func (s *Server) Transport() hraft.Transport {
 				},
 			}),
 		},
+		func(s string) []byte { return []byte(s) },
+		func(b []byte) string { return string(b) },
 	)
-	return s.tm.Transport()
+	return s.tm.GroupTransport(ConfigGroupID)
+}
+
+// MultiRaftTransport returns the underlying multi-raft transport for creating
+// additional group transports (e.g., tier Raft groups).
+func (s *Server) MultiRaftTransport() *multiraft.Transport[string] {
+	return s.tm
 }
 
 // SetRaft provides the Raft instance after it is created.
@@ -352,7 +363,8 @@ func (s *Server) Start() error {
 
 	s.grpcSrv = grpc.NewServer(opts...)
 
-	// Raft transport (AppendEntries, RequestVote, InstallSnapshot, etc.).
+	// Multi-raft transport (AppendEntries, RequestVote, InstallSnapshot, etc.).
+	// Multiplexes all Raft groups (config + future tier groups) over one gRPC service.
 	s.tm.Register(s.grpcSrv)
 
 	// Membership management (AddVoter, RemoveServer, GetConfiguration, etc.).
