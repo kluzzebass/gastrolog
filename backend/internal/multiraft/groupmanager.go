@@ -174,20 +174,22 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 	delete(m.groups, groupID)
 	m.mu.Unlock()
 
-	m.transport.RemoveGroup(groupID)
-
-	// Take a snapshot before shutting down for fast recovery.
+	// Shut down Raft BEFORE removing the transport group — Raft needs the
+	// transport channel for its shutdown sequence.
 	if f := g.Raft.Snapshot(); f.Error() != nil {
-		m.logger.Warn("snapshot before shutdown failed",
-			"group", groupID, "error", f.Error())
+		if !errors.Is(f.Error(), hraft.ErrNothingNewToSnapshot) {
+			m.logger.Warn("snapshot before shutdown failed",
+				"group", groupID, "error", f.Error())
+		}
 	}
-
 	if err := g.Raft.Shutdown().Error(); err != nil {
 		m.logger.Error("raft shutdown failed", "group", groupID, "error", err)
 	}
 	if err := g.boltDB.Close(); err != nil {
 		m.logger.Error("boltdb close failed", "group", groupID, "error", err)
 	}
+
+	m.transport.RemoveGroup(groupID)
 
 	m.logger.Info("raft group destroyed", "group", groupID)
 	return nil

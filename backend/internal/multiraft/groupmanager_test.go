@@ -133,7 +133,7 @@ func waitForLeader(t *testing.T, g *Group, timeout time.Duration) {
 }
 
 func TestCreateGroupSingleNode(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}
@@ -159,7 +159,7 @@ func TestCreateGroupSingleNode(t *testing.T) {
 }
 
 func TestCreateGroupThreeNode(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
 	members := make([]hraft.Server, len(nodes))
@@ -228,7 +228,7 @@ func TestCreateGroupThreeNode(t *testing.T) {
 }
 
 func TestMultipleGroupsSameNode(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsmA := &counterFSM{}
@@ -268,7 +268,7 @@ func TestMultipleGroupsSameNode(t *testing.T) {
 }
 
 func TestDestroyGroup(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}
@@ -294,7 +294,7 @@ func TestDestroyGroup(t *testing.T) {
 }
 
 func TestDuplicateGroupReturnsError(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	_, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "dup", FSM: &counterFSM{}, Bootstrap: true})
@@ -309,7 +309,7 @@ func TestDuplicateGroupReturnsError(t *testing.T) {
 }
 
 func TestVoterNonvoterAutoEnforcement(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
 	// Bootstrap single-node group on node-1.
@@ -357,19 +357,26 @@ func TestVoterNonvoterAutoEnforcement(t *testing.T) {
 }
 
 func TestGroupRecoveryAfterRestart(t *testing.T) {
-	t.Parallel()
+	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 
 	// Use a persistent temp dir for the group so we can restart.
 	groupDir := t.TempDir()
 
+	// Use a stable address so the Raft log's server address matches after restart.
+	const stableAddr = "recovery-node"
+
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
 	tp := New[string](
-		hraft.ServerAddress(lis.Addr().String()),
+		hraft.ServerAddress(stableAddr),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
 		func(b []byte) string { return string(b) },
 	)
+	tp.SetDialOptions([]grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) { return lis.Dial() }),
+	})
 	tp.Register(srv)
 	go func() { _ = srv.Serve(lis) }()
 
@@ -401,15 +408,19 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	srv.Stop()
 	_ = tp.Close()
 
-	// Restart with fresh transport + server but same baseDir.
+	// Restart with fresh transport + server but same baseDir and stableAddr.
 	lis2 := bufconn.Listen(bufSize)
 	srv2 := grpc.NewServer()
 	tp2 := New[string](
-		hraft.ServerAddress(lis2.Addr().String()),
+		hraft.ServerAddress(stableAddr),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
 		func(b []byte) string { return string(b) },
 	)
+	tp2.SetDialOptions([]grpc.DialOption{
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithContextDialer(func(_ context.Context, _ string) (net.Conn, error) { return lis2.Dial() }),
+	})
 	tp2.Register(srv2)
 	go func() { _ = srv2.Serve(lis2) }()
 

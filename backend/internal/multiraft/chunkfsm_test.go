@@ -26,7 +26,7 @@ func applyCmd(t *testing.T, fsm *ChunkFSM, data []byte) {
 }
 
 func TestChunkFSMCreateAndGet(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	id := testChunkID(1)
@@ -52,7 +52,7 @@ func TestChunkFSMCreateAndGet(t *testing.T) {
 }
 
 func TestChunkFSMSeal(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	id := testChunkID(2)
@@ -78,7 +78,7 @@ func TestChunkFSMSeal(t *testing.T) {
 }
 
 func TestChunkFSMCompress(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	id := testChunkID(3)
@@ -98,7 +98,7 @@ func TestChunkFSMCompress(t *testing.T) {
 }
 
 func TestChunkFSMUpload(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	id := testChunkID(4)
@@ -134,7 +134,7 @@ func TestChunkFSMUpload(t *testing.T) {
 }
 
 func TestChunkFSMDelete(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	id := testChunkID(5)
@@ -155,7 +155,7 @@ func TestChunkFSMDelete(t *testing.T) {
 }
 
 func TestChunkFSMSnapshotRestore(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	now := time.Now().Truncate(time.Nanosecond)
@@ -218,7 +218,7 @@ func TestChunkFSMSnapshotRestore(t *testing.T) {
 }
 
 func TestChunkFSMToChunkMeta(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	id := testChunkID(99)
@@ -242,7 +242,7 @@ func TestChunkFSMToChunkMeta(t *testing.T) {
 }
 
 func TestChunkFSMListReturnsAll(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	now := time.Now().Truncate(time.Nanosecond)
@@ -257,7 +257,7 @@ func TestChunkFSMListReturnsAll(t *testing.T) {
 }
 
 func TestChunkFSMSealNonexistentReturnsError(t *testing.T) {
-	t.Parallel()
+	// Not parallel — consistent with other multiraft tests.
 	fsm := NewChunkFSM()
 
 	now := time.Now()

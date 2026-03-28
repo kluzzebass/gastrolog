@@ -81,7 +81,7 @@ func makeTestCluster(t *testing.T, n int) []*testNode {
 // ---------- Tests ----------
 
 func TestAppendEntriesRoundTrip(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	group := "test-group"
@@ -129,7 +129,7 @@ func TestAppendEntriesRoundTrip(t *testing.T) {
 }
 
 func TestRequestVoteRoundTrip(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	group := "vote-group"
@@ -164,7 +164,7 @@ func TestRequestVoteRoundTrip(t *testing.T) {
 }
 
 func TestInstallSnapshotRoundTrip(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	group := "snap-group"
@@ -214,7 +214,7 @@ func TestInstallSnapshotRoundTrip(t *testing.T) {
 }
 
 func TestMultipleGroupsIsolated(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	// Create two groups on both nodes.
@@ -289,7 +289,7 @@ func TestMultipleGroupsIsolated(t *testing.T) {
 }
 
 func TestUnknownGroupReturnsError(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	// Only register group on node 0 (sender), not on node 1 (receiver).
@@ -305,7 +305,7 @@ func TestUnknownGroupReturnsError(t *testing.T) {
 }
 
 func TestRemoveGroupClosesConsumer(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 1)
 
 	tp := nodes[0].transport.GroupTransport("ephemeral")
@@ -325,7 +325,7 @@ func TestRemoveGroupClosesConsumer(t *testing.T) {
 }
 
 func TestHeartbeatFastPath(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	group := "heartbeat-group"
@@ -364,7 +364,7 @@ func TestHeartbeatFastPath(t *testing.T) {
 }
 
 func TestPipelineAppendEntries(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 2)
 
 	group := "pipeline-group"
@@ -419,7 +419,7 @@ func TestPipelineAppendEntries(t *testing.T) {
 }
 
 func TestThreeNodeThreeGroupsIndependentLeaders(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 	nodes := makeTestCluster(t, 3)
 	groups := []string{"config", "tier-1", "tier-2"}
 
@@ -477,7 +477,7 @@ func decodeTierID(b []byte) tierID {
 }
 
 func TestNonStringGroupID(t *testing.T) {
-	t.Parallel()
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
 
 	lis1 := bufconn.Listen(bufSize)
 	lis2 := bufconn.Listen(bufSize)

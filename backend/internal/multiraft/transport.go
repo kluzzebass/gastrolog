@@ -198,7 +198,7 @@ func (t *Transport[K]) LocalAddr() raft.ServerAddress {
 	return t.localAddress
 }
 
-// Close shuts down all connections.
+// Close shuts down all connections and closes all group consumer channels.
 func (t *Transport[K]) Close() error {
 	t.shutdownLock.Lock()
 	defer t.shutdownLock.Unlock()
@@ -207,6 +207,14 @@ func (t *Transport[K]) Close() error {
 	}
 	close(t.shutdownCh)
 	t.shutdown = true
+
+	// Close all group rpcChans so consumer goroutines exit.
+	t.mu.Lock()
+	for k, gs := range t.groups {
+		close(gs.rpcChan)
+		delete(t.groups, k)
+	}
+	t.mu.Unlock()
 
 	t.connMu.Lock()
 	defer t.connMu.Unlock()

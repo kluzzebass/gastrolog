@@ -70,6 +70,10 @@ type Config struct {
 
 	// VaultID is required when CloudStore is set (used for blob key prefix).
 	VaultID uuid.UUID
+
+	// Announcer, when non-nil, is called after each metadata state change
+	// (create, seal, compress, upload, delete) for cluster-wide visibility.
+	Announcer chunk.MetadataAnnouncer
 }
 
 // Manager manages file-based chunk storage with split raw.log and idx.log files.
@@ -1171,6 +1175,10 @@ func (m *Manager) openLocked() error {
 		createdAt:   createdAt,
 	}
 	m.metas[id] = meta
+
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceCreate(id, createdAt, createdAt, createdAt)
+	}
 	return nil
 }
 
@@ -1337,8 +1345,13 @@ func (m *Manager) sealLocked() error {
 	_ = os.Remove(m.sourceBTPath(id))
 
 	// Compute directory-level sizes now that files are closed.
-	m.active.meta.bytes = m.computeTotalLogicalBytes(id, m.active.meta.logicalDataBytes)
-	m.active.meta.diskBytes = m.computeDiskBytes(id)
+	meta := m.active.meta
+	meta.bytes = m.computeTotalLogicalBytes(id, meta.logicalDataBytes)
+	meta.diskBytes = m.computeDiskBytes(id)
+
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceSeal(id, meta.writeEnd, meta.recordCount, meta.bytes, meta.ingestEnd, meta.sourceEnd)
+	}
 
 	m.active = nil
 	return nil
@@ -2164,6 +2177,10 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 
 	delete(m.metas, id) // no-op for cloud chunks (not in metas)
 	m.mu.Unlock()
+
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceDelete(id)
+	}
 	return nil
 }
 
@@ -2203,6 +2220,9 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	if meta := m.metas[id]; meta != nil {
 		meta.compressed = true
 		meta.diskBytes = m.computeDiskBytes(id)
+		if m.cfg.Announcer != nil {
+			m.cfg.Announcer.AnnounceCompress(id, meta.diskBytes)
+		}
 	}
 	m.mu.Unlock()
 	return nil
@@ -2518,6 +2538,13 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.mu.Lock()
 		m.cloudListCache = nil // invalidate
 		m.mu.Unlock()
+	}
+
+	if m.cfg.Announcer != nil && meta != nil {
+		m.cfg.Announcer.AnnounceUpload(id, meta.diskBytes,
+			meta.ingestIdxOffset, meta.ingestIdxSize,
+			meta.sourceIdxOffset, meta.sourceIdxSize,
+			meta.numFrames)
 	}
 
 	m.logger.Info("chunk uploaded to cloud",
