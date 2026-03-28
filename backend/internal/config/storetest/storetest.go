@@ -1524,8 +1524,6 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) config.Store) {
 			Bucket:           "my-bucket",
 			Region:           "us-east-1",
 			StorageClass:     "STANDARD",
-			ActiveChunkClass: 1,
-			CacheClass:       2,
 		}
 		if err := s.PutCloudService(ctx, cs); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -1546,12 +1544,6 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 		if got.Bucket != "my-bucket" {
 			t.Errorf("Bucket: expected %q, got %q", "my-bucket", got.Bucket)
-		}
-		if got.ActiveChunkClass != 1 {
-			t.Errorf("ActiveChunkClass: expected 1, got %d", got.ActiveChunkClass)
-		}
-		if got.CacheClass != 2 {
-			t.Errorf("CacheClass: expected 2, got %d", got.CacheClass)
 		}
 	})
 

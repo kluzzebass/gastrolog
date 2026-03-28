@@ -640,8 +640,6 @@ type CloudService struct {
 	ConnectionString string    `json:"connectionString,omitempty"`
 	CredentialsJSON  string    `json:"credentialsJson,omitempty"`
 	StorageClass     string    `json:"storageClass,omitempty"`
-	ActiveChunkClass uint32    `json:"activeChunkClass"`
-	CacheClass       uint32    `json:"cacheClass"`
 }
 
 // TierType identifies the storage medium for a tier.

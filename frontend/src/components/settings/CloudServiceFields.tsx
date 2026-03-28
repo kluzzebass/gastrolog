@@ -1,4 +1,4 @@
-import { FormField, TextInput, TextArea, NumberInput } from "./FormField";
+import { FormField, TextInput, TextArea } from "./FormField";
 
 interface CloudServiceFieldValues {
   provider: string;
@@ -11,8 +11,6 @@ interface CloudServiceFieldValues {
   connectionString: string;
   credentialsJson: string;
   storageClass: string;
-  activeChunkClass: string;
-  cacheClass: string;
 }
 
 interface CloudServiceFieldsProps {
@@ -140,33 +138,6 @@ export function CloudServiceFields({
         />
       </FormField>
 
-      {/* Active Chunk Class */}
-      <FormField
-        label="Active Chunk Class"
-        dark={dark}
-        description="Local storage class for active chunks. Lower = faster storage."
-      >
-        <NumberInput
-          value={values.activeChunkClass}
-          onChange={(v) => onChange({ activeChunkClass: v })}
-          dark={dark}
-          min={0}
-        />
-      </FormField>
-
-      {/* Cache Class */}
-      <FormField
-        label="Cache Class"
-        dark={dark}
-        description="Local storage class for cached sealed chunks. Lower = faster storage."
-      >
-        <NumberInput
-          value={values.cacheClass}
-          onChange={(v) => onChange({ cacheClass: v })}
-          dark={dark}
-          min={0}
-        />
-      </FormField>
     </>
   );
 }

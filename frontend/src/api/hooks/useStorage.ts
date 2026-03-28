@@ -19,8 +19,6 @@ export function usePutCloudService() {
       connectionString: string;
       credentialsJson: string;
       storageClass: string;
-      activeChunkClass: number;
-      cacheClass: number;
     }) => {
       return configClient.putCloudService({
         config: {
@@ -36,8 +34,6 @@ export function usePutCloudService() {
           connectionString: args.connectionString,
           credentialsJson: args.credentialsJson,
           storageClass: args.storageClass,
-          activeChunkClass: args.activeChunkClass,
-          cacheClass: args.cacheClass,
         } as CloudService,
       });
     },

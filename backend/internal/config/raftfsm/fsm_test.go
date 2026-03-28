@@ -472,7 +472,7 @@ func TestApplyPutCloudService(t *testing.T) {
 	id := newID()
 	applyCmd(t, fsm, command.NewPutCloudService(config.CloudService{
 		ID: id, Name: "prod-s3", Provider: "aws", Bucket: "my-bucket",
-		Region: "us-east-1", ActiveChunkClass: 1, CacheClass: 2,
+		Region: "us-east-1",
 	}))
 
 	got, err := fsm.Store().GetCloudService(context.Background(), id)
@@ -481,9 +481,6 @@ func TestApplyPutCloudService(t *testing.T) {
 	}
 	if got == nil || got.Name != "prod-s3" || got.Provider != "aws" || got.Bucket != "my-bucket" {
 		t.Fatalf("unexpected cloud service: %+v", got)
-	}
-	if got.ActiveChunkClass != 1 || got.CacheClass != 2 {
-		t.Fatalf("unexpected classes: active=%d cache=%d", got.ActiveChunkClass, got.CacheClass)
 	}
 }
 

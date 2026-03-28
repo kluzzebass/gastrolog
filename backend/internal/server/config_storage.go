@@ -279,8 +279,6 @@ func protoToCloudService(p *apiv1.CloudService) config.CloudService {
 		ConnectionString: p.ConnectionString,
 		CredentialsJSON:  p.CredentialsJson,
 		StorageClass:     p.StorageClass,
-		ActiveChunkClass: p.ActiveChunkClass,
-		CacheClass:       p.CacheClass,
 	}
 }
 

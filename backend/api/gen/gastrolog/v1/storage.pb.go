@@ -170,8 +170,6 @@ type CloudService struct {
 	ConnectionString string                 `protobuf:"bytes,10,opt,name=connection_string,json=connectionString,proto3" json:"connection_string,omitempty"`
 	CredentialsJson  string                 `protobuf:"bytes,11,opt,name=credentials_json,json=credentialsJson,proto3" json:"credentials_json,omitempty"`
 	StorageClass     string                 `protobuf:"bytes,12,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	ActiveChunkClass uint32                 `protobuf:"varint,13,opt,name=active_chunk_class,json=activeChunkClass,proto3" json:"active_chunk_class,omitempty"`
-	CacheClass       uint32                 `protobuf:"varint,14,opt,name=cache_class,json=cacheClass,proto3" json:"cache_class,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -290,20 +288,6 @@ func (x *CloudService) GetStorageClass() string {
 	return ""
 }
 
-func (x *CloudService) GetActiveChunkClass() uint32 {
-	if x != nil {
-		return x.ActiveChunkClass
-	}
-	return 0
-}
-
-func (x *CloudService) GetCacheClass() uint32 {
-	if x != nil {
-		return x.CacheClass
-	}
-	return 0
-}
-
 var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
@@ -317,7 +301,7 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"]\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12/\n" +
-	"\x05areas\x18\x02 \x03(\v2\x19.gastrolog.v1.StorageAreaR\x05areas\"\xc2\x03\n" +
+	"\x05areas\x18\x02 \x03(\v2\x19.gastrolog.v1.StorageAreaR\x05areas\"\xff\x02\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -333,10 +317,7 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x11connection_string\x18\n" +
 	" \x01(\tR\x10connectionString\x12)\n" +
 	"\x10credentials_json\x18\v \x01(\tR\x0fcredentialsJson\x12#\n" +
-	"\rstorage_class\x18\f \x01(\tR\fstorageClass\x12,\n" +
-	"\x12active_chunk_class\x18\r \x01(\rR\x10activeChunkClass\x12\x1f\n" +
-	"\vcache_class\x18\x0e \x01(\rR\n" +
-	"cacheClassB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rstorage_class\x18\f \x01(\tR\fstorageClassJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_storage_proto_rawDescOnce sync.Once

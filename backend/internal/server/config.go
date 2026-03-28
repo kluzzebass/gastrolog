@@ -271,8 +271,6 @@ func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			ConnectionString: cs.ConnectionString,
 			CredentialsJson:  cs.CredentialsJSON,
 			StorageClass:     cs.StorageClass,
-			ActiveChunkClass: cs.ActiveChunkClass,
-			CacheClass:       cs.CacheClass,
 		})
 	}
 }

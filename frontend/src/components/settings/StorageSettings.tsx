@@ -36,8 +36,6 @@ interface AddFormState {
   connectionString: string;
   credentialsJson: string;
   storageClass: string;
-  activeChunkClass: string;
-  cacheClass: string;
 }
 
 const addFormInitial: AddFormState = {
@@ -54,8 +52,6 @@ const addFormInitial: AddFormState = {
   connectionString: "",
   credentialsJson: "",
   storageClass: "",
-  activeChunkClass: "",
-  cacheClass: "",
 };
 
 type AddFormAction =
@@ -127,8 +123,6 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         connectionString: addForm.connectionString,
         credentialsJson: addForm.credentialsJson,
         storageClass: addForm.storageClass,
-        activeChunkClass: addForm.activeChunkClass ? parseInt(addForm.activeChunkClass, 10) : 0,
-        cacheClass: addForm.cacheClass ? parseInt(addForm.cacheClass, 10) : 0,
       });
       addToast(`Cloud storage "${name}" created`, "info");
       dispatchAdd({ type: "reset" });

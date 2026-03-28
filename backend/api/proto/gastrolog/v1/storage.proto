@@ -39,6 +39,5 @@ message CloudService {
   string connection_string = 10;
   string credentials_json = 11;
   string storage_class = 12;
-  uint32 active_chunk_class = 13;
-  uint32 cache_class = 14;
+  reserved 13, 14; // active_chunk_class, cache_class — moved to TierConfig
 }

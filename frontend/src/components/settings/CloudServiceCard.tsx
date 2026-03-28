@@ -46,8 +46,6 @@ interface CloudServiceEdit {
   connectionString: string;
   credentialsJson: string;
   storageClass: string;
-  activeChunkClass: string;
-  cacheClass: string;
 }
 
 export function CloudServiceCard({
@@ -73,8 +71,6 @@ export function CloudServiceCard({
     connectionString: service.connectionString,
     credentialsJson: service.credentialsJson,
     storageClass: service.storageClass,
-    activeChunkClass: service.activeChunkClass ? String(service.activeChunkClass) : "",
-    cacheClass: service.cacheClass ? String(service.cacheClass) : "",
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -97,8 +93,6 @@ export function CloudServiceCard({
       connectionString: e.connectionString,
       credentialsJson: e.credentialsJson,
       storageClass: e.storageClass,
-      activeChunkClass: e.activeChunkClass ? parseInt(e.activeChunkClass, 10) : 0,
-      cacheClass: e.cacheClass ? parseInt(e.cacheClass, 10) : 0,
     }),
     onDeleteTransform: (id) => ({ id }),
     clearEdit,

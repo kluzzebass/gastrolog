@@ -1924,16 +1924,6 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
    */
   storageClass = "";
 
-  /**
-   * @generated from field: uint32 active_chunk_class = 13;
-   */
-  activeChunkClass = 0;
-
-  /**
-   * @generated from field: uint32 cache_class = 14;
-   */
-  cacheClass = 0;
-
   constructor(data?: PartialMessage<PutCloudServiceCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1954,8 +1944,6 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
     { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 13, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 14, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCloudServiceCommand {
