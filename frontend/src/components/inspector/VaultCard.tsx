@@ -153,19 +153,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     );
   }
 
-  if (!chunks || chunks.length === 0) {
-    return (
-      <div
-        className={`px-4 py-3 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
-      >
-        No chunks.
-      </div>
-    );
-  }
-
   // Count replicas before dedup: how many nodes returned each chunk ID.
   const replicaCount = new Map<string, number>();
-  for (const ch of chunks) {
+  for (const ch of chunks ?? []) {
     replicaCount.set(ch.id, (replicaCount.get(ch.id) ?? 0) + 1);
   }
 
@@ -174,7 +164,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   // indexed. Secondaries may briefly have uncompressed forwarded copies
   // before ImportToTier replaces them with the canonical version.
   const bestChunk = new Map<string, ChunkMeta>();
-  for (const ch of chunks) {
+  for (const ch of chunks ?? []) {
     const existing = bestChunk.get(ch.id);
     if (!existing || (!existing.compressed && ch.compressed) || (!existing.sealed && ch.sealed)) {
       bestChunk.set(ch.id, ch);
