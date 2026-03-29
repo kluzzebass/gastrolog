@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"context"
 	"fmt"
 	"log/slog"
@@ -69,6 +70,14 @@ func (pm *placementManager) Trigger() {
 	}
 }
 
+// Reconcile runs placement synchronously. Safe to call from RPC handlers
+// (not from FSM callbacks — those would deadlock Raft).
+func (pm *placementManager) Reconcile(ctx context.Context) {
+	if pm.clusterSrv != nil && pm.clusterSrv.IsLeader() {
+		pm.reconcile(ctx)
+	}
+}
+
 // reconcile evaluates all tiers and assigns them to eligible, alive nodes.
 // Only writes PutTier when the assignment actually changes.
 func (pm *placementManager) reconcile(ctx context.Context) {
@@ -118,10 +127,11 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	// Counts both primaries and secondaries.
 	tierCount := make(map[string]int)
 	for _, t := range tiers {
-		if t.NodeID != "" && alive[t.NodeID] {
-			tierCount[t.NodeID]++
+		primaryNodeID := t.PrimaryNodeID(nscs)
+		if primaryNodeID != "" && alive[primaryNodeID] {
+			tierCount[primaryNodeID]++
 		}
-		for _, sid := range t.SecondaryNodeIDs {
+		for _, sid := range t.SecondaryNodeIDs(nscs) {
 			if alive[sid] {
 				tierCount[sid]++
 			}
@@ -140,8 +150,10 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
 	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
 
+	currentPrimary := tier.PrimaryNodeID(nscs)
+
 	// Current primary assignment still valid — check secondaries too.
-	if tier.NodeID != "" && alive[tier.NodeID] && pm.nodeEligible(tier, tier.NodeID, nscs) {
+	if currentPrimary != "" && alive[currentPrimary] && pm.nodeEligible(tier, currentPrimary, nscs) {
 		if pm.alerts != nil {
 			pm.alerts.Clear(alertKey)
 		}
@@ -152,17 +164,18 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 	eligible := pm.eligibleNodes(tier, alive, nscs)
 
 	if len(eligible) == 0 {
-		pm.handleUnplaceable(ctx, tier, alertKey, tierCount)
+		pm.handleUnplaceable(ctx, tier, alertKey, nscs, tierCount)
 		return
 	}
 
 	best := pm.selectNode(eligible, tierCount)
-	if best == tier.NodeID {
+	if best == currentPrimary {
 		return
 	}
 
-	old := tier.NodeID
-	tier.NodeID = best
+	old := currentPrimary
+	// Replace the primary placement.
+	tier.Placements = replacePrimaryPlacement(tier.Placements, config.StorageIDForNode(best, tier, nscs))
 	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 		pm.logger.Error("placement: assign tier", "tier", tier.ID, "name", tier.Name, "node", best, "error", err)
 		return
@@ -187,130 +200,216 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 	pm.placeSecondaries(ctx, &tier, alive, nscs, tierCount)
 }
 
-// placeSecondaries assigns secondary nodes for a tier based on its ReplicationFactor.
+// replacePrimaryPlacement returns a new Placements slice with the primary set to storageID.
+func replacePrimaryPlacement(placements []config.TierPlacement, storageID string) []config.TierPlacement {
+	var result []config.TierPlacement
+	for _, p := range placements {
+		if !p.Primary {
+			result = append(result, p)
+		}
+	}
+	return append([]config.TierPlacement{{StorageID: storageID, Primary: true}}, result...)
+}
+
+// placeSecondaries assigns secondary file storages for a tier based on its ReplicationFactor.
+// Prefers storages on different nodes (availability), falls back to different storages on
+// the same node (redundancy). Never places two replicas on the same file storage.
 func (pm *placementManager) placeSecondaries(ctx context.Context, tier *config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
 	desired := int(tier.ReplicationFactor) - 1
 	if desired <= 0 {
-		// RF=0 or RF=1 means no secondaries. Clear any stale ones.
-		if len(tier.SecondaryNodeIDs) > 0 {
-			for _, sid := range tier.SecondaryNodeIDs {
-				tierCount[sid]--
-			}
-			tier.SecondaryNodeIDs = nil
-			if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-				pm.logger.Error("placement: clear stale secondaries", "tier", tier.ID, "error", err)
-			}
-		}
+		pm.clearStaleSecondaries(ctx, tier, nscs, tierCount)
 		return
 	}
 
-	candidates := pm.secondaryCandidates(*tier, alive, nscs)
-	kept := pm.reconcileSecondaries(tier.SecondaryNodeIDs, candidates, desired, tierCount)
+	primaryStorageID := tier.PrimaryStorageID()
+	primaryNodeID := config.NodeIDForStorage(primaryStorageID, nscs)
+	candidates := pm.secondaryCandidates(*tier, primaryStorageID, primaryNodeID, alive, nscs, tierCount)
+	kept := pm.selectSecondaries(tier, desired, primaryStorageID, primaryNodeID, candidates, nscs, alive, tierCount)
 
-	// Update if changed.
-	if !slicesEqual(kept, tier.SecondaryNodeIDs) {
-		tier.SecondaryNodeIDs = kept
+	// Build new placements.
+	newPlacements := []config.TierPlacement{{StorageID: primaryStorageID, Primary: true}}
+	newPlacements = append(newPlacements, kept...)
+
+	if !placementsEqual(tier.Placements, newPlacements) {
+		tier.Placements = newPlacements
 		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
 			pm.logger.Error("placement: assign secondaries", "tier", tier.ID, "error", err)
 			return
 		}
-		pm.logger.Info("placement: secondaries updated", "tier", tier.ID, "name", tier.Name, "secondaries", kept)
+		pm.logger.Info("placement: secondaries updated",
+			"tier", tier.ID, "name", tier.Name, "placements", len(newPlacements))
 	}
 
-	// Alert if insufficient nodes.
-	alertKey := fmt.Sprintf("tier-underreplicated:%s", tier.ID)
-	if len(kept) < desired {
-		if pm.alerts != nil {
-			pm.alerts.Set(alertKey, alert.Warning, "placement",
-				fmt.Sprintf("Tier %q: only %d of %d desired secondaries (insufficient eligible nodes)", tier.Name, len(kept), desired))
+	pm.alertReplication(tier, len(kept), desired)
+}
+
+// clearStaleSecondaries removes leftover secondary placements when RF <= 1.
+func (pm *placementManager) clearStaleSecondaries(ctx context.Context, tier *config.TierConfig, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+	currentSecondaries := tier.SecondaryStorageIDs()
+	if len(currentSecondaries) == 0 {
+		return
+	}
+	for _, sID := range currentSecondaries {
+		if nid := config.NodeIDForStorage(sID, nscs); nid != "" {
+			tierCount[nid]--
 		}
-	} else if pm.alerts != nil {
+	}
+	tier.Placements = clearSecondaryPlacements(tier.Placements)
+	if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
+		pm.logger.Error("placement: clear stale secondaries", "tier", tier.ID, "error", err)
+	}
+}
+
+// secondaryCandidates returns eligible storages excluding the primary, sorted
+// by preference: cross-node first (availability), then same-node (redundancy),
+// then least-loaded.
+func (pm *placementManager) secondaryCandidates(tier config.TierConfig, primaryStorageID, primaryNodeID string, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) []eligibleStorage {
+	all := pm.eligibleStorages(tier, alive, nscs)
+	var candidates []eligibleStorage
+	for _, ea := range all {
+		if ea.storageID != primaryStorageID {
+			candidates = append(candidates, ea)
+		}
+	}
+	slices.SortFunc(candidates, func(a, b eligibleStorage) int {
+		aRemote := a.nodeID != primaryNodeID
+		bRemote := b.nodeID != primaryNodeID
+		if aRemote != bRemote {
+			if aRemote {
+				return -1
+			}
+			return 1
+		}
+		return tierCount[a.nodeID] - tierCount[b.nodeID]
+	})
+	return candidates
+}
+
+// selectSecondaries picks secondary placements: retains existing valid ones first,
+// then fills from sorted candidates.
+func (pm *placementManager) selectSecondaries(tier *config.TierConfig, desired int, primaryStorageID, primaryNodeID string, candidates []eligibleStorage, nscs []config.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []config.TierPlacement {
+	var kept []config.TierPlacement
+	usedStorages := map[string]bool{primaryStorageID: true}
+
+	// Keep existing valid secondary placements.
+	for _, p := range tier.Placements {
+		if p.Primary || len(kept) >= desired {
+			continue
+		}
+		nid := config.NodeIDForStorage(p.StorageID, nscs)
+		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && pm.storageEligible(p.StorageID, *tier, nscs) {
+			kept = append(kept, p)
+			usedStorages[p.StorageID] = true
+		}
+	}
+
+	// Fill remaining from candidates, preferring cross-node.
+	for _, ea := range candidates {
+		if len(kept) >= desired {
+			break
+		}
+		if usedStorages[ea.storageID] {
+			continue
+		}
+		kept = append(kept, config.TierPlacement{StorageID: ea.storageID, Primary: false})
+		usedStorages[ea.storageID] = true
+		tierCount[ea.nodeID]++
+	}
+	return kept
+}
+
+// alertReplication sets or clears the under-replicated tier alert.
+func (pm *placementManager) alertReplication(tier *config.TierConfig, placed, desired int) {
+	if pm.alerts == nil {
+		return
+	}
+	alertKey := fmt.Sprintf("tier-underreplicated:%s", tier.ID)
+	if placed < desired {
+		pm.alerts.Set(alertKey, alert.Warning, "placement",
+			fmt.Sprintf("Tier %q: only %d of %d desired replicas (insufficient eligible file storages)", tier.Name, placed+1, int(tier.ReplicationFactor)))
+	} else {
 		pm.alerts.Clear(alertKey)
 	}
 }
 
-// secondaryCandidates returns eligible nodes for secondary placement, excluding the primary.
-// For file/cloud tiers, prefers nodes with the exact storage class, but falls back to any
-// node with ANY storage area — replicas degrade gracefully rather than being unplaceable.
-func (pm *placementManager) secondaryCandidates(tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig) []string {
-	// First pass: exact storage class match.
-	eligible := pm.eligibleNodes(tier, alive, nscs)
-	var candidates []string
-	for _, n := range eligible {
-		if n != tier.NodeID {
-			candidates = append(candidates, n)
-		}
-	}
-	if len(candidates) > 0 {
-		return candidates
-	}
+type eligibleStorage struct {
+	storageID string
+	nodeID string
+}
 
-	// Fallback: any alive node with ANY storage area (for file/cloud tiers).
-	// Replicas on a different storage class are better than no replicas.
-	if tier.Type == config.TierTypeFile || tier.Type == config.TierTypeCloud {
+// eligibleStorages returns all storages across all alive nodes that can host a replica.
+// For memory tiers: one synthetic storage per alive node (no file storage needed).
+// For file/cloud tiers: all file storages matching the required class.
+func (pm *placementManager) eligibleStorages(tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig) []eligibleStorage {
+	var result []eligibleStorage
+
+	if tier.Type == config.TierTypeMemory {
 		for nodeID := range alive {
-			if nodeID == tier.NodeID {
-				continue
-			}
-			if nodeHasAnyStorage(nscs, nodeID) {
-				candidates = append(candidates, nodeID)
+			result = append(result, eligibleStorage{
+				storageID: config.SyntheticStorageID(nodeID),
+				nodeID:    nodeID,
+			})
+		}
+		return result
+	}
+
+	sc := tier.StorageClass
+	if tier.Type == config.TierTypeCloud {
+		sc = tier.ActiveChunkClass
+	}
+	for _, nsc := range nscs {
+		if !alive[nsc.NodeID] {
+			continue
+		}
+		for _, fs := range nsc.FileStorages {
+			if fs.StorageClass == sc {
+				result = append(result, eligibleStorage{storageID: fs.ID.String(), nodeID: nsc.NodeID})
 			}
 		}
 	}
-	return candidates
+	return result
 }
 
-// nodeHasAnyStorage checks if a node has at least one configured storage area.
-func nodeHasAnyStorage(nscs []config.NodeStorageConfig, nodeID string) bool {
-	idx := slices.IndexFunc(nscs, func(n config.NodeStorageConfig) bool { return n.NodeID == nodeID })
-	return idx >= 0 && len(nscs[idx].Areas) > 0
-}
-
-// reconcileSecondaries validates existing secondaries, fills to desired count, and trims excess.
-func (pm *placementManager) reconcileSecondaries(current []string, candidates []string, desired int, tierCount map[string]int) []string {
-	candidateSet := make(map[string]bool, len(candidates))
-	for _, c := range candidates {
-		candidateSet[c] = true
+// storageEligible checks if a specific storage still matches the tier's requirements.
+func (pm *placementManager) storageEligible(storageID string, tier config.TierConfig, nscs []config.NodeStorageConfig) bool {
+	if tier.Type == config.TierTypeMemory {
+		return strings.HasPrefix(storageID, config.SyntheticStoragePrefix)
 	}
-
-	// Keep alive + eligible existing secondaries.
-	var kept []string
-	for _, sid := range current {
-		if candidateSet[sid] {
-			kept = append(kept, sid)
-		} else {
-			tierCount[sid]--
-		}
+	sc := tier.StorageClass
+	if tier.Type == config.TierTypeCloud {
+		sc = tier.ActiveChunkClass
 	}
-
-	// Fill to desired count.
-	keptSet := make(map[string]bool, len(kept))
-	for _, k := range kept {
-		keptSet[k] = true
-	}
-	for len(kept) < desired {
-		var available []string
-		for _, c := range candidates {
-			if !keptSet[c] {
-				available = append(available, c)
+	for _, nsc := range nscs {
+		for _, fs := range nsc.FileStorages {
+			if fs.ID.String() == storageID && fs.StorageClass == sc {
+				return true
 			}
 		}
-		if len(available) == 0 {
-			break
-		}
-		pick := pm.selectNode(available, tierCount)
-		kept = append(kept, pick)
-		keptSet[pick] = true
-		tierCount[pick]++
 	}
+	return false
+}
 
-	// Trim excess.
-	for len(kept) > desired {
-		removed := kept[len(kept)-1]
-		tierCount[removed]--
-		kept = kept[:len(kept)-1]
+// clearSecondaryPlacements removes all non-primary placements.
+func clearSecondaryPlacements(placements []config.TierPlacement) []config.TierPlacement {
+	var result []config.TierPlacement
+	for _, p := range placements {
+		if p.Primary {
+			result = append(result, p)
+		}
 	}
-	return kept
+	return result
+}
+
+func placementsEqual(a, b []config.TierPlacement) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].StorageID != b[i].StorageID || a[i].Primary != b[i].Primary {
+			return false
+		}
+	}
+	return true
 }
 
 func slicesEqual(a, b []string) bool {
@@ -326,10 +425,11 @@ func slicesEqual(a, b []string) bool {
 }
 
 // handleUnplaceable clears a tier's assignment when no eligible node exists.
-func (pm *placementManager) handleUnplaceable(ctx context.Context, tier config.TierConfig, alertKey string, tierCount map[string]int) {
-	if tier.NodeID != "" {
-		old := tier.NodeID
-		tier.NodeID = ""
+func (pm *placementManager) handleUnplaceable(ctx context.Context, tier config.TierConfig, alertKey string, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+	currentPrimary := tier.PrimaryNodeID(nscs)
+	if currentPrimary != "" {
+		old := currentPrimary
+		tier.Placements = nil
 		if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 			pm.logger.Error("placement: clear tier assignment", "tier", tier.ID, "name", tier.Name, "error", err)
 		} else {
@@ -353,7 +453,9 @@ func (pm *placementManager) nodeEligible(tier config.TierConfig, nodeID string, 
 	case config.TierTypeCloud:
 		return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)
 	case config.TierTypeJSONL:
-		return tier.NodeID == nodeID // JSONL tiers have explicit node assignment via Path
+		// JSONL tiers have explicit node assignment via Path.
+		primaryNodeID := tier.PrimaryNodeID(nscs)
+		return primaryNodeID == nodeID
 	default:
 		return false
 	}
@@ -390,7 +492,7 @@ func (pm *placementManager) selectNode(eligible []string, tierCount map[string]i
 	return candidates[rand.Intn(len(candidates))] //nolint:gosec // G404: load balancing, not security
 }
 
-// nodeHasStorageClass checks if a node has a storage area with the given class.
+// nodeHasStorageClass checks if a node has a file storage with the given class.
 func nodeHasStorageClass(nscs []config.NodeStorageConfig, nodeID string, storageClass uint32) bool {
 	if storageClass == 0 {
 		return false
@@ -399,5 +501,5 @@ func nodeHasStorageClass(nscs []config.NodeStorageConfig, nodeID string, storage
 	if idx < 0 {
 		return false
 	}
-	return slices.ContainsFunc(nscs[idx].Areas, func(a config.StorageArea) bool { return a.StorageClass == storageClass })
+	return slices.ContainsFunc(nscs[idx].FileStorages, func(a config.FileStorage) bool { return a.StorageClass == storageClass })
 }

@@ -10,9 +10,9 @@ import (
 )
 
 func setNodeStorageConfigCmd(cfg config.NodeStorageConfig) *gastrologv1.SetNodeStorageConfigCommand {
-	areas := make([]*gastrologv1.StorageAreaCommand, len(cfg.Areas))
-	for i, a := range cfg.Areas {
-		areas[i] = &gastrologv1.StorageAreaCommand{
+	storages := make([]*gastrologv1.FileStorageCommand, len(cfg.FileStorages))
+	for i, a := range cfg.FileStorages {
+		storages[i] = &gastrologv1.FileStorageCommand{
 			Id:                a.ID.String(),
 			StorageClass:      a.StorageClass,
 			Name:              a.Name,
@@ -22,7 +22,7 @@ func setNodeStorageConfigCmd(cfg config.NodeStorageConfig) *gastrologv1.SetNodeS
 	}
 	return &gastrologv1.SetNodeStorageConfigCommand{
 		NodeId: cfg.NodeID,
-		Areas:  areas,
+		FileStorages:  storages,
 	}
 }
 
@@ -37,13 +37,13 @@ func NewSetNodeStorageConfig(cfg config.NodeStorageConfig) *gastrologv1.ConfigCo
 
 // ExtractSetNodeStorageConfig converts a SetNodeStorageConfigCommand back to a NodeStorageConfig.
 func ExtractSetNodeStorageConfig(cmd *gastrologv1.SetNodeStorageConfigCommand) (config.NodeStorageConfig, error) {
-	var areas []config.StorageArea
-	for _, a := range cmd.GetAreas() {
+	var storages []config.FileStorage
+	for _, a := range cmd.GetFileStorages() {
 		id, err := uuid.Parse(a.GetId())
 		if err != nil {
-			return config.NodeStorageConfig{}, fmt.Errorf("parse storage area id: %w", err)
+			return config.NodeStorageConfig{}, fmt.Errorf("parse file storage id: %w", err)
 		}
-		areas = append(areas, config.StorageArea{
+		storages = append(storages, config.FileStorage{
 			ID:                id,
 			StorageClass:      a.GetStorageClass(),
 			Name:              a.GetName(),
@@ -53,6 +53,6 @@ func ExtractSetNodeStorageConfig(cmd *gastrologv1.SetNodeStorageConfigCommand) (
 	}
 	return config.NodeStorageConfig{
 		NodeID: cmd.GetNodeId(),
-		Areas:  areas,
+		FileStorages:  storages,
 	}, nil
 }

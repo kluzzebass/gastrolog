@@ -21,10 +21,10 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// StorageArea declares a locally-attached storage resource on a node.
+// FileStorage declares a locally-attached storage resource on a node.
 // Storage class ranks local storage by speed: lower = faster.
-// Multiple areas can share the same storage class (they form a pool).
-type StorageArea struct {
+// Multiple file storages can share the same storage class (they form a pool).
+type FileStorage struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	StorageClass      uint32                 `protobuf:"varint,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
@@ -35,20 +35,20 @@ type StorageArea struct {
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *StorageArea) Reset() {
-	*x = StorageArea{}
+func (x *FileStorage) Reset() {
+	*x = FileStorage{}
 	mi := &file_gastrolog_v1_storage_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *StorageArea) String() string {
+func (x *FileStorage) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*StorageArea) ProtoMessage() {}
+func (*FileStorage) ProtoMessage() {}
 
-func (x *StorageArea) ProtoReflect() protoreflect.Message {
+func (x *FileStorage) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_storage_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -60,40 +60,40 @@ func (x *StorageArea) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use StorageArea.ProtoReflect.Descriptor instead.
-func (*StorageArea) Descriptor() ([]byte, []int) {
+// Deprecated: Use FileStorage.ProtoReflect.Descriptor instead.
+func (*FileStorage) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *StorageArea) GetId() string {
+func (x *FileStorage) GetId() string {
 	if x != nil {
 		return x.Id
 	}
 	return ""
 }
 
-func (x *StorageArea) GetStorageClass() uint32 {
+func (x *FileStorage) GetStorageClass() uint32 {
 	if x != nil {
 		return x.StorageClass
 	}
 	return 0
 }
 
-func (x *StorageArea) GetName() string {
+func (x *FileStorage) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *StorageArea) GetPath() string {
+func (x *FileStorage) GetPath() string {
 	if x != nil {
 		return x.Path
 	}
 	return ""
 }
 
-func (x *StorageArea) GetMemoryBudgetBytes() uint64 {
+func (x *FileStorage) GetMemoryBudgetBytes() uint64 {
 	if x != nil {
 		return x.MemoryBudgetBytes
 	}
@@ -104,7 +104,7 @@ func (x *StorageArea) GetMemoryBudgetBytes() uint64 {
 type NodeStorageConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	Areas         []*StorageArea         `protobuf:"bytes,2,rep,name=areas,proto3" json:"areas,omitempty"`
+	FileStorages  []*FileStorage         `protobuf:"bytes,2,rep,name=file_storages,json=fileStorages,proto3" json:"file_storages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -146,9 +146,9 @@ func (x *NodeStorageConfig) GetNodeId() string {
 	return ""
 }
 
-func (x *NodeStorageConfig) GetAreas() []*StorageArea {
+func (x *NodeStorageConfig) GetFileStorages() []*FileStorage {
 	if x != nil {
-		return x.Areas
+		return x.FileStorages
 	}
 	return nil
 }
@@ -169,7 +169,7 @@ type CloudService struct {
 	Container        string                 `protobuf:"bytes,9,opt,name=container,proto3" json:"container,omitempty"`
 	ConnectionString string                 `protobuf:"bytes,10,opt,name=connection_string,json=connectionString,proto3" json:"connection_string,omitempty"`
 	CredentialsJson  string                 `protobuf:"bytes,11,opt,name=credentials_json,json=credentialsJson,proto3" json:"credentials_json,omitempty"`
-	StorageClass     string                 `protobuf:"bytes,12,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	StorageClass     uint32                 `protobuf:"varint,15,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -281,11 +281,11 @@ func (x *CloudService) GetCredentialsJson() string {
 	return ""
 }
 
-func (x *CloudService) GetStorageClass() string {
+func (x *CloudService) GetStorageClass() uint32 {
 	if x != nil {
 		return x.StorageClass
 	}
-	return ""
+	return 0
 }
 
 var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
@@ -293,15 +293,15 @@ var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\n" +
 	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xa0\x01\n" +
-	"\vStorageArea\x12\x0e\n" +
+	"\vFileStorage\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"]\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12/\n" +
-	"\x05areas\x18\x02 \x03(\v2\x19.gastrolog.v1.StorageAreaR\x05areas\"\xff\x02\n" +
+	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12>\n" +
+	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"\x85\x03\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -317,7 +317,7 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x11connection_string\x18\n" +
 	" \x01(\tR\x10connectionString\x12)\n" +
 	"\x10credentials_json\x18\v \x01(\tR\x0fcredentialsJson\x12#\n" +
-	"\rstorage_class\x18\f \x01(\tR\fstorageClassJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rstorage_class\x18\x0f \x01(\rR\fstorageClassJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_storage_proto_rawDescOnce sync.Once
@@ -333,12 +333,12 @@ func file_gastrolog_v1_storage_proto_rawDescGZIP() []byte {
 
 var file_gastrolog_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_gastrolog_v1_storage_proto_goTypes = []any{
-	(*StorageArea)(nil),       // 0: gastrolog.v1.StorageArea
+	(*FileStorage)(nil),       // 0: gastrolog.v1.FileStorage
 	(*NodeStorageConfig)(nil), // 1: gastrolog.v1.NodeStorageConfig
 	(*CloudService)(nil),      // 2: gastrolog.v1.CloudService
 }
 var file_gastrolog_v1_storage_proto_depIdxs = []int32{
-	0, // 0: gastrolog.v1.NodeStorageConfig.areas:type_name -> gastrolog.v1.StorageArea
+	0, // 0: gastrolog.v1.NodeStorageConfig.file_storages:type_name -> gastrolog.v1.FileStorage
 	1, // [1:1] is the sub-list for method output_type
 	1, // [1:1] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name

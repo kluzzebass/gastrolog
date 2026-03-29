@@ -480,12 +480,14 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 }
 
 // buildTierInstances creates TierInstance objects for each tier in the vault config.
-// Tiers with a NodeID that does not match the local node are skipped
-// (placement manager assigns NodeID via Raft).
+// Tiers whose primary/secondary storages don't resolve to the local node are skipped
+// (placement manager assigns storages via Raft).
 func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) ([]*TierInstance, error) {
 	if len(vaultCfg.TierIDs) == 0 {
 		return nil, fmt.Errorf("vault %s has no tier IDs", vaultCfg.ID)
 	}
+
+	nscs := cfg.NodeStorageConfigs
 
 	tiers := make([]*TierInstance, 0, len(vaultCfg.TierIDs))
 	for _, tierID := range vaultCfg.TierIDs {
@@ -495,8 +497,10 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		}
 
 		// Determine if this node hosts this tier (as primary or secondary).
-		isPrimary := tierCfg.NodeID == "" || tierCfg.NodeID == o.localNodeID
-		isSecondary := slices.Contains(tierCfg.SecondaryNodeIDs, o.localNodeID)
+		primaryNodeID := tierCfg.PrimaryNodeID(nscs)
+		secondaryNodeIDs := tierCfg.SecondaryNodeIDs(nscs)
+		isPrimary := primaryNodeID == "" || primaryNodeID == o.localNodeID
+		isSecondary := slices.Contains(secondaryNodeIDs, o.localNodeID)
 		if !isPrimary && !isSecondary {
 			continue
 		}
@@ -511,13 +515,13 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		}
 		ti.IsSecondary = isSecondary
 		if isSecondary {
-			ti.PrimaryNodeID = tierCfg.NodeID
+			ti.PrimaryNodeID = primaryNodeID
 			// Secondaries don't self-rotate — the primary controls seal
 			// timing via ForwardSealTier.
 			ti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 		}
 		if isPrimary {
-			ti.SecondaryNodeIDs = tierCfg.SecondaryNodeIDs
+			ti.SecondaryNodeIDs = secondaryNodeIDs
 		}
 		tiers = append(tiers, ti)
 	}
@@ -583,7 +587,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}
 
 	// Wire Raft-backed metadata announcer if a GroupManager is available.
-	o.wireTierRaftGroup(cm, tierCfg, factories, isSecondary)
+	o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories, isSecondary)
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
@@ -633,7 +637,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 // wireTierRaftGroup creates a tier Raft group (or reuses existing) and injects
 // a RaftAnnouncer into the chunk manager so chunk lifecycle events replicate to
 // all nodes via consensus.
-func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, factories Factories, isSecondary bool) {
+func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories, isSecondary bool) {
 	if factories.GroupManager == nil {
 		return
 	}
@@ -645,8 +649,9 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 	groupID := tierCfg.ID.String()
 	g := factories.GroupManager.GetGroup(groupID)
 	if g == nil {
-		members := o.buildTierRaftMembers(tierCfg, factories)
-		isPrimary := tierCfg.NodeID == "" || tierCfg.NodeID == o.localNodeID
+		members := o.buildTierRaftMembers(tierCfg, nscs, factories)
+		primaryNodeID := tierCfg.PrimaryNodeID(nscs)
+		isPrimary := primaryNodeID == "" || primaryNodeID == o.localNodeID
 		var err error
 		g, err = factories.GroupManager.CreateGroup(multiraft.GroupConfig{
 			GroupID:   groupID,
@@ -664,12 +669,12 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 }
 
 // buildTierRaftMembers builds the Raft member list from tier placement.
-func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, factories Factories) []hraft.Server {
+func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil {
 		return nil
 	}
 	var members []hraft.Server
-	nodeID := tierCfg.NodeID
+	nodeID := tierCfg.PrimaryNodeID(nscs)
 	if nodeID == "" {
 		nodeID = o.localNodeID
 	}
@@ -679,7 +684,7 @@ func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, factories
 			Address: hraft.ServerAddress(addr),
 		})
 	}
-	for _, secID := range tierCfg.SecondaryNodeIDs {
+	for _, secID := range tierCfg.SecondaryNodeIDs(nscs) {
 		if addr, ok := factories.NodeAddressResolver(secID); ok {
 			members = append(members, hraft.Server{
 				ID:      hraft.ServerID(secID),
@@ -723,11 +728,11 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 		}
 
 	case config.TierTypeFile:
-		// Find a StorageArea matching this tier's StorageClass on the local node.
+		// Find a FileStorage matching this tier's StorageClass on the local node.
 		// Scope the directory per tier to prevent lock conflicts when multiple
 		// file tiers share the same storage class.
-		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.StorageClass); area != nil {
-			params["dir"] = filepath.Join(area.Path, tierCfg.ID.String())
+		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.StorageClass); fs != nil {
+			params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
 		}
 
 	case config.TierTypeJSONL:
@@ -769,17 +774,17 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 				}
 			}
 		}
-		// Cloud tiers also need a local area for active chunks.
-		if area := findLocalStorageArea(cfg, localNodeID, tierCfg.ActiveChunkClass); area != nil {
-			params["dir"] = area.Path
+		// Cloud tiers also need a local file storage for active chunks.
+		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
+			params["dir"] = fs.Path
 		}
 	}
 
 	return params
 }
 
-// findLocalStorageArea finds a StorageArea on the given node with the given storage class.
-func findLocalStorageArea(cfg *config.Config, nodeID string, storageClass uint32) *config.StorageArea {
+// findLocalFileStorage finds a FileStorage on the given node with the given storage class.
+func findLocalFileStorage(cfg *config.Config, nodeID string, storageClass uint32) *config.FileStorage {
 	if storageClass == 0 {
 		return nil
 	}
@@ -787,9 +792,9 @@ func findLocalStorageArea(cfg *config.Config, nodeID string, storageClass uint32
 		if nsc.NodeID != nodeID {
 			continue
 		}
-		for i := range nsc.Areas {
-			if nsc.Areas[i].StorageClass == storageClass {
-				return &nsc.Areas[i]
+		for i := range nsc.FileStorages {
+			if nsc.FileStorages[i].StorageClass == storageClass {
+				return &nsc.FileStorages[i]
 			}
 		}
 	}

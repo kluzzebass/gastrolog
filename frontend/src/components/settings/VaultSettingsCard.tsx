@@ -24,6 +24,7 @@ import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { JobProgress } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { primaryNodeId, secondaryNodeIds } from "../../utils/tierPlacement";
 function formatBytes(b: bigint | number): string {
   const n = typeof b === "bigint" ? Number(b) : b;
   if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TB`;
@@ -71,7 +72,6 @@ interface VaultSettingsCardProps {
   onOpenInspector?: (inspectorParam: string) => void;
 }
 
-// eslint-disable-next-line sonarjs/cognitive-complexity -- vault card manages tier editing, reorder, creation, and vault-level fields in one component
 export function VaultSettingsCard({
   vault,
   vaults,
@@ -88,15 +88,11 @@ export function VaultSettingsCard({
   onToggle,
   onOpenInspector,
 }: Readonly<VaultSettingsCardProps>) {
-  // Compute max RF per storage class.
-  const classNodeCount = new Map<number, number>();
+  // Compute max RF per storage class — count areas, not nodes.
+  const classStorageCount = new Map<number, number>();
   for (const nsc of nodeStorageConfigs) {
-    const seen = new Set<number>();
-    for (const area of nsc.areas) {
-      if (!seen.has(area.storageClass)) {
-        seen.add(area.storageClass);
-        classNodeCount.set(area.storageClass, (classNodeCount.get(area.storageClass) ?? 0) + 1);
-      }
+    for (const fs of nsc.fileStorages) {
+      classStorageCount.set(fs.storageClass, (classStorageCount.get(fs.storageClass) ?? 0) + 1);
     }
   }
   const totalNodes = nodeConfigs.length || 1;
@@ -104,7 +100,8 @@ export function VaultSettingsCard({
     if (t.type === TierType.MEMORY) return totalNodes;
     if (t.type === TierType.JSONL) return 1;
     const sc = t.type === TierType.CLOUD ? t.activeChunkClass : t.storageClass;
-    return classNodeCount.get(sc) ?? totalNodes;
+    if (sc === 0) return 1; // no class selected yet
+    return classStorageCount.get(sc) ?? 1;
   };
   const c = useThemeClass(dark);
   const putVault = usePutVault();
@@ -212,8 +209,8 @@ export function VaultSettingsCard({
   const nodeStorageClass = (nodeId: string, requiredClass: number): { exact: boolean; actualClass: number } => {
     const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
     if (!nsc) return { exact: false, actualClass: 0 };
-    if (nsc.areas.some((a) => a.storageClass === requiredClass)) return { exact: true, actualClass: requiredClass };
-    const first = nsc.areas[0];
+    if (nsc.fileStorages.some((a) => a.storageClass === requiredClass)) return { exact: true, actualClass: requiredClass };
+    const first = nsc.fileStorages[0];
     return { exact: false, actualClass: first?.storageClass ?? 0 };
   };
 
@@ -264,7 +261,6 @@ export function VaultSettingsCard({
           : [],
         replicationFactor: newTier.type === "jsonl" ? 1 : parseInt(newTier.replicationFactor, 10) || 1,
         path: newTier.type === "jsonl" ? newTier.path : "",
-        nodeId: newTier.type === "jsonl" ? newTier.nodeId : "",
       });
       try {
         await putTier.mutateAsync({ config: tierCfg });
@@ -491,7 +487,8 @@ export function VaultSettingsCard({
           {vaultTiers.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {vaultTiers.map((tier, i) => {
-                const nodeName = tier.nodeId ? resolveNodeName(tier.nodeId) : null;
+                const pnId = primaryNodeId(tier, nodeStorageConfigs);
+                const nodeName = pnId ? resolveNodeName(pnId) : null;
                 const csName = tier.cloudServiceId
                   ? cloudServiceOptions.find((cs) => cs.value === tier.cloudServiceId)?.label || tier.cloudServiceId
                   : null;
@@ -581,9 +578,9 @@ export function VaultSettingsCard({
                       {tier.type !== TierType.JSONL && (
                         <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
                       )}
-                      {tier.secondaryNodeIds.length > 0 && (
+                      {secondaryNodeIds(tier, nodeStorageConfigs).length > 0 && (
                         <span>
-                          {tier.secondaryNodeIds.map((id, si) => {
+                          {secondaryNodeIds(tier, nodeStorageConfigs).map((id: string, si: number) => {
                             const name = resolveNodeName(id);
                             const sc = tier.storageClass > 0 ? nodeStorageClass(id, tier.storageClass) : null;
                             const fallback = sc && !sc.exact && sc.actualClass > 0;
@@ -599,7 +596,7 @@ export function VaultSettingsCard({
                           })}
                         </span>
                       )}
-                      {(tier.replicationFactor || 1) > 1 && tier.secondaryNodeIds.length + 1 < (tier.replicationFactor || 1) && (
+                      {(tier.replicationFactor || 1) > 1 && secondaryNodeIds(tier, nodeStorageConfigs).length + 1 < (tier.replicationFactor || 1) && (
                         <span className="text-severity-error">
                           {`insufficient nodes for RF=${String(tier.replicationFactor)}`}
                         </span>

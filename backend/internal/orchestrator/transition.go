@@ -51,7 +51,8 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	}
 	defer func() { _ = cursor.Close() }()
 
-	remote := nextTierCfg.NodeID != "" && nextTierCfg.NodeID != r.orch.localNodeID
+	nextPrimaryNodeID := nextTierCfg.PrimaryNodeID(cfg.NodeStorageConfigs)
+	remote := nextPrimaryNodeID != "" && nextPrimaryNodeID != r.orch.localNodeID
 
 	var streamErr error
 	if remote {
@@ -60,7 +61,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
 			return
 		}
-		streamErr = r.orch.transferrer.StreamToTier(ctx, nextTierCfg.NodeID, r.vaultID, nextTierID, chunk.CursorIterator(cursor))
+		streamErr = r.orch.transferrer.StreamToTier(ctx, nextPrimaryNodeID, r.vaultID, nextTierID, chunk.CursorIterator(cursor))
 	} else {
 		streamErr = r.streamLocal(cursor, nextTierID)
 	}

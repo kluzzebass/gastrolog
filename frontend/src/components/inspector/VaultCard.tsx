@@ -6,6 +6,7 @@ import { useToast } from "../Toast";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
+import { primaryNodeId, secondaryNodeIds } from "../../utils/tierPlacement";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
@@ -192,18 +193,20 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     if (!vaultCfg || !config?.tiers) return [];
     const localTierIds = new Set(tierGroups.keys());
     const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud", 4: "jsonl" };
+    const nscs = config.nodeStorageConfigs;
     return vaultCfg.tierIds
       .filter((tid) => !localTierIds.has(tid))
       .map((tid) => {
         const tc = config.tiers.find((t) => t.id === tid);
         if (!tc) return null;
+        const pnId = primaryNodeId(tc, nscs);
         return {
           id: tid,
           pos: tierPositions.get(tid) ?? 0,
           type: tierTypeMap[tc.type] ?? "unknown",
-          nodeName: tc.nodeId ? (nodeNameMap.get(tc.nodeId) ?? tc.nodeId) : "",
+          nodeName: pnId ? (nodeNameMap.get(pnId) ?? pnId) : "",
           rf: tc.replicationFactor || 1,
-          secondaryNodeIds: [...tc.secondaryNodeIds],
+          secondaryNodeIds: secondaryNodeIds(tc, nscs),
           storageClass: tc.storageClass,
         };
       })
@@ -248,9 +251,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     let fallbackClass = 0;
                     if (remote.storageClass > 0) {
                       const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
-                      const hasExact = nsc?.areas.some((a) => a.storageClass === remote.storageClass);
-                      if (!hasExact && nsc && nsc.areas.length > 0) {
-                        fallbackClass = nsc.areas[0]!.storageClass;
+                      const hasExact = nsc?.fileStorages.some((a) => a.storageClass === remote.storageClass);
+                      if (!hasExact && nsc && nsc.fileStorages.length > 0) {
+                        fallbackClass = nsc.fileStorages[0]!.storageClass;
                       }
                     }
                     return (
@@ -273,9 +276,11 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
         const label = `Tier ${String(pos)}: ${group.tierType}`;
         const tierCfg = config?.tiers.find((t) => t.id === tierId);
+        const nscs = config?.nodeStorageConfigs ?? [];
         const rf = tierCfg?.replicationFactor || 1;
-        const secondaries = tierCfg?.secondaryNodeIds ?? [];
-        const nodeName = tierCfg?.nodeId ? (nodeNameMap.get(tierCfg.nodeId) ?? tierCfg.nodeId) : "";
+        const secondaries = tierCfg ? secondaryNodeIds(tierCfg, nscs) : [];
+        const pnId = tierCfg ? primaryNodeId(tierCfg, nscs) : "";
+        const nodeName = pnId ? (nodeNameMap.get(pnId) ?? pnId) : "";
         return (
         <div key={tierId}>
           <div
@@ -301,9 +306,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                   let fallbackClass = 0;
                   if (requiredClass > 0) {
                     const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
-                    const hasExact = nsc?.areas.some((a) => a.storageClass === requiredClass);
-                    if (!hasExact && nsc && nsc.areas.length > 0) {
-                      fallbackClass = nsc.areas[0]!.storageClass;
+                    const hasExact = nsc?.fileStorages.some((a) => a.storageClass === requiredClass);
+                    if (!hasExact && nsc && nsc.fileStorages.length > 0) {
+                      fallbackClass = nsc.fileStorages[0]!.storageClass;
                     }
                   }
                   return (
@@ -356,7 +361,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     c={c}
                     replicas={replicas}
                     rf={rf}
-                    replicaNodes={tierCfg ? [tierCfg.nodeId, ...tierCfg.secondaryNodeIds].filter(Boolean).map((id) => nodeNameMap.get(id) ?? id) : []}
+                    replicaNodes={tierCfg ? [pnId, ...secondaries].filter(Boolean).map((id) => nodeNameMap.get(id) ?? id) : []}
                   />
                 );
               })}

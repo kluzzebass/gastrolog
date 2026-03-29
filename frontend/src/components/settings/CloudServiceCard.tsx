@@ -45,7 +45,6 @@ interface CloudServiceEdit {
   container: string;
   connectionString: string;
   credentialsJson: string;
-  storageClass: string;
 }
 
 export function CloudServiceCard({
@@ -70,7 +69,6 @@ export function CloudServiceCard({
     container: service.container,
     connectionString: service.connectionString,
     credentialsJson: service.credentialsJson,
-    storageClass: service.storageClass,
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -92,7 +90,6 @@ export function CloudServiceCard({
       container: e.container,
       connectionString: e.connectionString,
       credentialsJson: e.credentialsJson,
-      storageClass: e.storageClass,
     }),
     onDeleteTransform: (id) => ({ id }),
     clearEdit,

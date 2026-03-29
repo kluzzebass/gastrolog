@@ -1342,10 +1342,12 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 		ID: vaultID, Name: "stress-transition", TierIDs: []uuid.UUID{tier0ID, tier1ID},
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, NodeID: nodeID,
+		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory,
+		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}},
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, NodeID: nodeID,
+		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory,
+		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}},
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 

@@ -1920,9 +1920,9 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
   credentialsJson = "";
 
   /**
-   * @generated from field: string storage_class = 12;
+   * @generated from field: uint32 storage_class = 15;
    */
-  storageClass = "";
+  storageClass = 0;
 
   constructor(data?: PartialMessage<PutCloudServiceCommand>) {
     super();
@@ -1943,7 +1943,7 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
     { no: 9, name: "container", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 12, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCloudServiceCommand {
@@ -2010,9 +2010,9 @@ export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCom
   nodeId = "";
 
   /**
-   * @generated from field: repeated gastrolog.v1.StorageAreaCommand areas = 2;
+   * @generated from field: repeated gastrolog.v1.FileStorageCommand file_storages = 2;
    */
-  areas: StorageAreaCommand[] = [];
+  fileStorages: FileStorageCommand[] = [];
 
   constructor(data?: PartialMessage<SetNodeStorageConfigCommand>) {
     super();
@@ -2023,7 +2023,7 @@ export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCom
   static readonly typeName = "gastrolog.v1.SetNodeStorageConfigCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "areas", kind: "message", T: StorageAreaCommand, repeated: true },
+    { no: 2, name: "file_storages", kind: "message", T: FileStorageCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeStorageConfigCommand {
@@ -2044,9 +2044,9 @@ export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCom
 }
 
 /**
- * @generated from message gastrolog.v1.StorageAreaCommand
+ * @generated from message gastrolog.v1.FileStorageCommand
  */
-export class StorageAreaCommand extends Message<StorageAreaCommand> {
+export class FileStorageCommand extends Message<FileStorageCommand> {
   /**
    * @generated from field: string id = 1;
    */
@@ -2072,13 +2072,13 @@ export class StorageAreaCommand extends Message<StorageAreaCommand> {
    */
   memoryBudgetBytes = protoInt64.zero;
 
-  constructor(data?: PartialMessage<StorageAreaCommand>) {
+  constructor(data?: PartialMessage<FileStorageCommand>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.StorageAreaCommand";
+  static readonly typeName = "gastrolog.v1.FileStorageCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
@@ -2087,20 +2087,20 @@ export class StorageAreaCommand extends Message<StorageAreaCommand> {
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StorageAreaCommand {
-    return new StorageAreaCommand().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileStorageCommand {
+    return new FileStorageCommand().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StorageAreaCommand {
-    return new StorageAreaCommand().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FileStorageCommand {
+    return new FileStorageCommand().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StorageAreaCommand {
-    return new StorageAreaCommand().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FileStorageCommand {
+    return new FileStorageCommand().fromJsonString(jsonString, options);
   }
 
-  static equals(a: StorageAreaCommand | PlainMessage<StorageAreaCommand> | undefined, b: StorageAreaCommand | PlainMessage<StorageAreaCommand> | undefined): boolean {
-    return proto3.util.equals(StorageAreaCommand, a, b);
+  static equals(a: FileStorageCommand | PlainMessage<FileStorageCommand> | undefined, b: FileStorageCommand | PlainMessage<FileStorageCommand> | undefined): boolean {
+    return proto3.util.equals(FileStorageCommand, a, b);
   }
 }
 
@@ -2161,26 +2161,19 @@ export class PutTierCommand extends Message<PutTierCommand> {
   cacheClass = 0;
 
   /**
-   * system-managed: primary node
-   *
-   * @generated from field: string node_id = 11;
-   */
-  nodeId = "";
-
-  /**
    * @generated from field: uint32 replication_factor = 12;
    */
   replicationFactor = 0;
 
   /**
-   * @generated from field: repeated string secondary_node_ids = 13;
-   */
-  secondaryNodeIds: string[] = [];
-
-  /**
    * @generated from field: string path = 14;
    */
   path = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.TierPlacementEntry placements = 15;
+   */
+  placements: TierPlacementEntry[] = [];
 
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
@@ -2200,10 +2193,9 @@ export class PutTierCommand extends Message<PutTierCommand> {
     { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 11, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 13, name: "secondary_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "placements", kind: "message", T: TierPlacementEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {
@@ -2220,6 +2212,49 @@ export class PutTierCommand extends Message<PutTierCommand> {
 
   static equals(a: PutTierCommand | PlainMessage<PutTierCommand> | undefined, b: PutTierCommand | PlainMessage<PutTierCommand> | undefined): boolean {
     return proto3.util.equals(PutTierCommand, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.TierPlacementEntry
+ */
+export class TierPlacementEntry extends Message<TierPlacementEntry> {
+  /**
+   * @generated from field: string storage_id = 1;
+   */
+  storageId = "";
+
+  /**
+   * @generated from field: bool primary = 2;
+   */
+  primary = false;
+
+  constructor(data?: PartialMessage<TierPlacementEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TierPlacementEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "storage_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "primary", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierPlacementEntry {
+    return new TierPlacementEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierPlacementEntry {
+    return new TierPlacementEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierPlacementEntry {
+    return new TierPlacementEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TierPlacementEntry | PlainMessage<TierPlacementEntry> | undefined, b: TierPlacementEntry | PlainMessage<TierPlacementEntry> | undefined): boolean {
+    return proto3.util.equals(TierPlacementEntry, a, b);
   }
 }
 

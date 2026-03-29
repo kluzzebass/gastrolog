@@ -18,7 +18,6 @@ export function usePutCloudService() {
       container: string;
       connectionString: string;
       credentialsJson: string;
-      storageClass: string;
     }) => {
       return configClient.putCloudService({
         config: {
@@ -33,7 +32,6 @@ export function usePutCloudService() {
           container: args.container,
           connectionString: args.connectionString,
           credentialsJson: args.credentialsJson,
-          storageClass: args.storageClass,
         } as CloudService,
       });
     },
@@ -54,7 +52,7 @@ export function useSetNodeStorageConfig() {
   return useConfigMutation(
     async (args: {
       nodeId: string;
-      areas: {
+      fileStorages: {
         id: string;
         storageClass: number;
         name: string;
@@ -65,7 +63,7 @@ export function useSetNodeStorageConfig() {
       return configClient.setNodeStorageConfig({
         config: {
           nodeId: args.nodeId,
-          areas: args.areas,
+          fileStorages: args.fileStorages,
         } as NodeStorageConfig,
       });
     },

@@ -7,13 +7,13 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 
 /**
- * StorageArea declares a locally-attached storage resource on a node.
+ * FileStorage declares a locally-attached storage resource on a node.
  * Storage class ranks local storage by speed: lower = faster.
- * Multiple areas can share the same storage class (they form a pool).
+ * Multiple file storages can share the same storage class (they form a pool).
  *
- * @generated from message gastrolog.v1.StorageArea
+ * @generated from message gastrolog.v1.FileStorage
  */
-export class StorageArea extends Message<StorageArea> {
+export class FileStorage extends Message<FileStorage> {
   /**
    * @generated from field: string id = 1;
    */
@@ -39,13 +39,13 @@ export class StorageArea extends Message<StorageArea> {
    */
   memoryBudgetBytes = protoInt64.zero;
 
-  constructor(data?: PartialMessage<StorageArea>) {
+  constructor(data?: PartialMessage<FileStorage>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.StorageArea";
+  static readonly typeName = "gastrolog.v1.FileStorage";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
@@ -54,20 +54,20 @@ export class StorageArea extends Message<StorageArea> {
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StorageArea {
-    return new StorageArea().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileStorage {
+    return new FileStorage().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StorageArea {
-    return new StorageArea().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FileStorage {
+    return new FileStorage().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StorageArea {
-    return new StorageArea().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FileStorage {
+    return new FileStorage().fromJsonString(jsonString, options);
   }
 
-  static equals(a: StorageArea | PlainMessage<StorageArea> | undefined, b: StorageArea | PlainMessage<StorageArea> | undefined): boolean {
-    return proto3.util.equals(StorageArea, a, b);
+  static equals(a: FileStorage | PlainMessage<FileStorage> | undefined, b: FileStorage | PlainMessage<FileStorage> | undefined): boolean {
+    return proto3.util.equals(FileStorage, a, b);
   }
 }
 
@@ -83,9 +83,9 @@ export class NodeStorageConfig extends Message<NodeStorageConfig> {
   nodeId = "";
 
   /**
-   * @generated from field: repeated gastrolog.v1.StorageArea areas = 2;
+   * @generated from field: repeated gastrolog.v1.FileStorage file_storages = 2;
    */
-  areas: StorageArea[] = [];
+  fileStorages: FileStorage[] = [];
 
   constructor(data?: PartialMessage<NodeStorageConfig>) {
     super();
@@ -96,7 +96,7 @@ export class NodeStorageConfig extends Message<NodeStorageConfig> {
   static readonly typeName = "gastrolog.v1.NodeStorageConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "areas", kind: "message", T: StorageArea, repeated: true },
+    { no: 2, name: "file_storages", kind: "message", T: FileStorage, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStorageConfig {
@@ -180,9 +180,9 @@ export class CloudService extends Message<CloudService> {
   credentialsJson = "";
 
   /**
-   * @generated from field: string storage_class = 12;
+   * @generated from field: uint32 storage_class = 15;
    */
-  storageClass = "";
+  storageClass = 0;
 
   constructor(data?: PartialMessage<CloudService>) {
     super();
@@ -203,7 +203,7 @@ export class CloudService extends Message<CloudService> {
     { no: 9, name: "container", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 12, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudService {

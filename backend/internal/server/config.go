@@ -53,6 +53,7 @@ type ConfigServerConfig struct {
 	OnLookupConfigChange func(config.LookupConfig, config.MaxMindConfig)
 	CloudTesters       map[string]CloudServiceTester
 	Tokens             *auth.TokenService
+	PlacementReconcile func(ctx context.Context) // synchronous placement for RPC handlers
 }
 
 // ConfigServer implements the ConfigService.
@@ -71,6 +72,7 @@ type ConfigServer struct {
 	resolveManagedFile    func(ctx context.Context, fileID string) string
 	cloudTesters          map[string]CloudServiceTester
 	tokens                *auth.TokenService
+	placementReconcile    func(ctx context.Context) // synchronous placement, nil in non-cluster mode
 }
 
 var _ gastrologv1connect.ConfigServiceHandler = (*ConfigServer)(nil)
@@ -92,6 +94,7 @@ func NewConfigServer(cfg ConfigServerConfig) *ConfigServer {
 		onLookupConfigChange: cfg.OnLookupConfigChange,
 		cloudTesters:         cfg.CloudTesters,
 		tokens:               cfg.Tokens,
+		placementReconcile:   cfg.PlacementReconcile,
 	}
 }
 
@@ -269,8 +272,8 @@ func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			SecretKey:        cs.SecretKey,
 			Container:        cs.Container,
 			ConnectionString: cs.ConnectionString,
-			CredentialsJson:  cs.CredentialsJSON,
-			StorageClass:     cs.StorageClass,
+			CredentialsJson:      cs.CredentialsJSON,
+			StorageClass:         cs.StorageClass,
 		})
 	}
 }
@@ -281,6 +284,13 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 		return
 	}
 	for _, tier := range tiers {
+		var placements []*apiv1.TierPlacement
+		for _, p := range tier.Placements {
+			placements = append(placements, &apiv1.TierPlacement{
+				StorageId:  p.StorageID,
+				Primary: p.Primary,
+			})
+		}
 		tc := &apiv1.TierConfig{
 			Id:                tier.ID.String(),
 			Name:              tier.Name,
@@ -289,10 +299,9 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 			StorageClass:      tier.StorageClass,
 			ActiveChunkClass:  tier.ActiveChunkClass,
 			CacheClass:        tier.CacheClass,
-			NodeId:            tier.NodeID,
 			ReplicationFactor: tier.ReplicationFactor,
-			SecondaryNodeIds:  tier.SecondaryNodeIDs,
 			Path:              tier.Path,
+			Placements:        placements,
 		}
 		if tier.RotationPolicyID != nil {
 			tc.RotationPolicyId = tier.RotationPolicyID.String()
@@ -335,9 +344,9 @@ func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 		return
 	}
 	for _, nsc := range configs {
-		areas := make([]*apiv1.StorageArea, len(nsc.Areas))
-		for i, a := range nsc.Areas {
-			areas[i] = &apiv1.StorageArea{
+		storages := make([]*apiv1.FileStorage, len(nsc.FileStorages))
+		for i, a := range nsc.FileStorages {
+			storages[i] = &apiv1.FileStorage{
 				Id:                a.ID.String(),
 				StorageClass:      a.StorageClass,
 				Name:              a.Name,
@@ -347,7 +356,7 @@ func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 		}
 		resp.NodeStorageConfigs = append(resp.NodeStorageConfigs, &apiv1.NodeStorageConfig{
 			NodeId: nsc.NodeID,
-			Areas:  areas,
+			FileStorages:  storages,
 		})
 	}
 }

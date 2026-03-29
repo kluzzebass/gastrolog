@@ -264,6 +264,19 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
           </FormField>
           <div className="grid grid-cols-3 gap-3">
             <FormField
+              label="Max Age"
+              dark={dark}
+            >
+              <TextInput
+                value={newMaxAge}
+                onChange={(v) => dispatchAdd({ type: "setNewMaxAge", value: v })}
+                placeholder=""
+                dark={dark}
+                mono
+                examples={["1h", "24h", "7d"]}
+              />
+            </FormField>
+            <FormField
               label="Max Bytes"
               dark={dark}
             >
@@ -282,19 +295,6 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
                 onChange={(v) => dispatchAdd({ type: "setNewMaxRecords", value: v })}
                 placeholder=""
                 dark={dark}
-              />
-            </FormField>
-            <FormField
-              label="Max Age"
-              dark={dark}
-            >
-              <TextInput
-                value={newMaxAge}
-                onChange={(v) => dispatchAdd({ type: "setNewMaxAge", value: v })}
-                placeholder=""
-                dark={dark}
-                mono
-                examples={["1h", "24h", "7d"]}
               />
             </FormField>
           </div>
@@ -333,10 +333,17 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
                 />
               </FormField>
               <div className="grid grid-cols-3 gap-3">
-                <FormField
-                  label="Max Bytes"
-                      dark={dark}
-                >
+                <FormField label="Max Age" dark={dark}>
+                  <TextInput
+                    value={edit.maxAge}
+                    onChange={(v) => setEdit(id, { maxAge: v })}
+                    placeholder=""
+                    dark={dark}
+                    mono
+                    examples={["1h", "24h", "7d"]}
+                  />
+                </FormField>
+                <FormField label="Max Bytes" dark={dark}>
                   <TextInput
                     value={edit.maxBytes}
                     onChange={(v) => setEdit(id, { maxBytes: v })}
@@ -352,19 +359,6 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
                     onChange={(v) => setEdit(id, { maxRecords: v })}
                     placeholder=""
                     dark={dark}
-                  />
-                </FormField>
-                <FormField
-                  label="Max Age"
-                      dark={dark}
-                >
-                  <TextInput
-                    value={edit.maxAge}
-                    onChange={(v) => setEdit(id, { maxAge: v })}
-                    placeholder=""
-                    dark={dark}
-                    mono
-                    examples={["1h", "24h", "7d"]}
                   />
                 </FormField>
               </div>

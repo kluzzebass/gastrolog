@@ -34,7 +34,19 @@ func (h *HclogAdapter) toAttrs(args ...any) []slog.Attr {
 		if !ok {
 			key = fmt.Sprint(args[i])
 		}
-		attrs = append(attrs, slog.Any(key, args[i+1]))
+		val := args[i+1]
+		// hashicorp/raft uses hclog.Fmt() for lazy formatting (e.g.
+		// hclog.Fmt("%+v", servers)). hclog.Format is []interface{} —
+		// first element is the format string, rest are args. Resolve it
+		// eagerly so slog renders the formatted string.
+		if fmtSlice, ok := val.(hclog.Format); ok && len(fmtSlice) > 0 {
+			if fmtStr, ok := fmtSlice[0].(string); ok {
+				val = fmt.Sprintf(fmtStr, []any(fmtSlice[1:])...)
+			}
+		} else if s, ok := val.(fmt.Stringer); ok {
+			val = s.String()
+		}
+		attrs = append(attrs, slog.Any(key, val))
 	}
 	return attrs
 }

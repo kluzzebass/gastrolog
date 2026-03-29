@@ -22,7 +22,7 @@ func putCloudServiceCmd(cs config.CloudService) *gastrologv1.PutCloudServiceComm
 		Container:        cs.Container,
 		ConnectionString: cs.ConnectionString,
 		CredentialsJson:  cs.CredentialsJSON,
-		StorageClass:     cs.StorageClass,
+		StorageClass:        cs.StorageClass,
 	}
 }
 
@@ -59,8 +59,8 @@ func ExtractPutCloudService(cmd *gastrologv1.PutCloudServiceCommand) (config.Clo
 		SecretKey:        cmd.GetSecretKey(),
 		Container:        cmd.GetContainer(),
 		ConnectionString: cmd.GetConnectionString(),
-		CredentialsJSON:  cmd.GetCredentialsJson(),
-		StorageClass:     cmd.GetStorageClass(),
+		CredentialsJSON:      cmd.GetCredentialsJson(),
+		StorageClass:         cmd.GetStorageClass(),
 	}, nil
 }
 

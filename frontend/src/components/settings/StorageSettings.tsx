@@ -14,7 +14,7 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { sortByName } from "../../lib/sort";
 import { CloudServiceCard } from "./CloudServiceCard";
-import { StorageAreaCard } from "./StorageAreaCard";
+import { FileStorageCard } from "./FileStorageCard";
 import { CloudServiceFields } from "./CloudServiceFields";
 import { Button } from "./Buttons";
 import { NodeSelect } from "./NodeSelect";
@@ -35,7 +35,6 @@ interface AddFormState {
   container: string;
   connectionString: string;
   credentialsJson: string;
-  storageClass: string;
 }
 
 const addFormInitial: AddFormState = {
@@ -51,7 +50,6 @@ const addFormInitial: AddFormState = {
   container: "",
   connectionString: "",
   credentialsJson: "",
-  storageClass: "",
 };
 
 type AddFormAction =
@@ -115,7 +113,6 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         container: addForm.container,
         connectionString: addForm.connectionString,
         credentialsJson: addForm.credentialsJson,
-        storageClass: addForm.storageClass,
       });
       addToast(`Cloud storage "${name}" created`, "info");
       dispatchAdd({ type: "reset" });
@@ -124,16 +121,16 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   };
 
-  // ─── Add/Remove storage area on any node ────────────────────
+  // ─── Add/Remove file storage on any node ────────────────────
 
-  const handleRemoveArea = async (nodeId: string, areaId: string) => {
+  const handleRemoveStorage = async (nodeId: string, storageId: string) => {
     const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
-    const currentAreas = nsc?.areas ?? [];
-    const updated = currentAreas.filter((a) => a.id !== areaId);
+    const currentStorages = nsc?.fileStorages ?? [];
+    const updated = currentStorages.filter((a) => a.id !== storageId);
     try {
       await setNodeStorage.mutateAsync({
         nodeId,
-        areas: updated.map((a) => ({
+        fileStorages: updated.map((a) => ({
           id: a.id,
           storageClass: a.storageClass,
           name: a.name,
@@ -141,17 +138,17 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           memoryBudgetBytes: a.memoryBudgetBytes,
         })),
       });
-      addToast("Storage area removed", "info");
+      addToast("File storage removed", "info");
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to remove storage area", "error");
+      addToast(err instanceof Error ? err.message : "Failed to remove file storage", "error");
     }
   };
 
-  const handleUpdateArea = async (nodeId: string, areaId: string, edit: { name: string; path: string; storageClass: string }) => {
+  const handleUpdateStorage = async (nodeId: string, storageId: string, edit: { name: string; path: string; storageClass: string }) => {
     const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
-    const currentAreas = nsc?.areas ?? [];
-    const updated = currentAreas.map((a) => {
-      if (a.id !== areaId) return { id: a.id, storageClass: a.storageClass, name: a.name, path: a.path, memoryBudgetBytes: a.memoryBudgetBytes };
+    const currentStorages = nsc?.fileStorages ?? [];
+    const updated = currentStorages.map((a) => {
+      if (a.id !== storageId) return { id: a.id, storageClass: a.storageClass, name: a.name, path: a.path, memoryBudgetBytes: a.memoryBudgetBytes };
       return {
         id: a.id,
         storageClass: parseInt(edit.storageClass, 10) || 0,
@@ -161,27 +158,27 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
       };
     });
     try {
-      await setNodeStorage.mutateAsync({ nodeId, areas: updated });
-      addToast("Storage area updated", "info");
+      await setNodeStorage.mutateAsync({ nodeId, fileStorages: updated });
+      addToast("File storage updated", "info");
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to update storage area", "error");
+      addToast(err instanceof Error ? err.message : "Failed to update file storage", "error");
     }
   };
 
-  // ─── Storage area add form ──────────────────────────────────
+  // ─── File storage add form ──────────────────────────────────
 
-  const [addingArea, setAddingArea] = useState(false);
-  const [areaNodeId, setAreaNodeId] = useState("");
-  const [areaPath, setAreaPath] = useState("");
-  const [areaClass, setAreaClass] = useState("");
-  const [areaName, setAreaName] = useState("");
-  const [areaNamePlaceholder, setAreaNamePlaceholder] = useState("");
-  const openAreaForm = () => {
+  const [addingStorage, setAddingArea] = useState(false);
+  const [storageNodeId, setAreaNodeId] = useState("");
+  const [storagePath, setAreaPath] = useState("");
+  const [storageClass, setAreaClass] = useState("");
+  const [storageName, setAreaName] = useState("");
+  const [storageNamePlaceholder, setAreaNamePlaceholder] = useState("");
+  const openStorageForm = () => {
     setAddingArea(true);
     setAreaNodeId(localNodeId);
     generateName.mutateAsync().then(setAreaNamePlaceholder);
   };
-  const resetAreaForm = () => {
+  const resetStorageForm = () => {
     setAddingArea(false);
     setAreaNodeId("");
     setAreaPath("");
@@ -190,14 +187,14 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     setAreaNamePlaceholder("");
   };
 
-  const handleCreateArea = async () => {
-    const targetNodeId = areaNodeId || localNodeId;
-    const effectiveName = areaName.trim() || areaNamePlaceholder || "storage-area";
-    const path = areaPath.trim() || effectiveName;
-    const cls = parseInt(areaClass, 10);
+  const handleCreateStorage = async () => {
+    const targetNodeId = storageNodeId || localNodeId;
+    const effectiveName = storageName.trim() || storageNamePlaceholder || "file-storage";
+    const path = storagePath.trim() || effectiveName;
+    const cls = parseInt(storageClass, 10);
     if (!targetNodeId || isNaN(cls)) return;
 
-    const name = areaName.trim() || areaNamePlaceholder || "storage-area";
+    const name = storageName.trim() || storageNamePlaceholder || "file-storage";
 
     const newArea = {
       id: crypto.randomUUID(),
@@ -208,7 +205,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     };
 
     const nsc = nodeStorageConfigs.find((n) => n.nodeId === targetNodeId);
-    const existingAreas = nsc?.areas ?? [];
+    const existingAreas = nsc?.fileStorages ?? [];
     const updated = [...existingAreas.map((a) => ({
       id: a.id,
       storageClass: a.storageClass,
@@ -220,18 +217,121 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     try {
       await setNodeStorage.mutateAsync({
         nodeId: targetNodeId,
-        areas: updated,
+        fileStorages: updated,
       });
-      addToast(`Storage area "${name}" created`, "info");
-      resetAreaForm();
+      addToast(`File storage "${name}" created`, "info");
+      resetStorageForm();
     } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to create storage area", "error");
+      addToast(err instanceof Error ? err.message : "Failed to create file storage", "error");
     }
   };
 
   return (
     <div className="flex flex-col gap-8">
-      {/* ── Section 1: Cloud Storage ─────────────────────────── */}
+      {/* ── Section 1: File Storage ──────────────────────────── */}
+      <div>
+        <h3 className={`font-display text-[1.1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}>
+          File Storage
+        </h3>
+        <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
+          Local disk storage declared per node. Storage class ranks speed: lower = faster.
+        </p>
+
+        {/* Add File Storage button */}
+        {!isLoading && !addingStorage && (
+          <div className="flex items-center justify-end mb-5">
+            <Button onClick={openStorageForm}>Add File Storage</Button>
+          </div>
+        )}
+
+        {/* Add File Storage form */}
+        {addingStorage && (
+          <div className="mb-4">
+            <AddFormCard
+              dark={dark}
+              onCancel={resetStorageForm}
+              onCreate={handleCreateStorage}
+              isPending={setNodeStorage.isPending}
+              createDisabled={!storageClass.trim() || isNaN(parseInt(storageClass, 10))}
+            >
+              <NodeSelect value={storageNodeId} onChange={setAreaNodeId} dark={dark} />
+              <FormField label="Name" dark={dark}>
+                <TextInput
+                  value={storageName}
+                  onChange={setAreaName}
+                  placeholder={storageNamePlaceholder || "file-storage"}
+                  dark={dark}
+                />
+              </FormField>
+              <FormField label="Path" dark={dark} description="Relative to the node's home directory, or absolute if starting with /.">
+                <TextInput
+                  value={storagePath}
+                  onChange={setAreaPath}
+                  placeholder={storageName.trim() || storageNamePlaceholder || ""}
+                  dark={dark}
+                  mono
+                />
+              </FormField>
+              <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
+                <SpinnerInput
+                  value={storageClass}
+                  onChange={setAreaClass}
+                  dark={dark}
+                  min={0}
+                />
+              </FormField>
+            </AddFormCard>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            Loading...
+          </div>
+        )}
+        {(() => {
+          // Flatten all areas across all nodes into a single sorted list.
+          const allStorages = nodeStorageConfigs.flatMap((nsc) =>
+            nsc.fileStorages.map(( fs) => ({
+              fs,
+              nodeId: nsc.nodeId,
+              nodeName: resolveNodeName(nsc.nodeId),
+            })),
+          ).sort((a, b) => (a.fs.name || a.fs.id).localeCompare(b.fs.name || b.fs.id));
+
+          if (!isLoading && allStorages.length === 0 && !addingStorage) {
+            return (
+              <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                No file storage configured. Click &quot;Add File Storage&quot; to create one.
+              </div>
+            );
+          }
+
+          return (
+            <div className="flex flex-col gap-2">
+              {allStorages.map(({ fs, nodeId, nodeName }) => (
+                <FileStorageCard
+                  key={fs.id}
+                  fs={fs}
+                  nodeName={nodeName}
+                  dark={dark}
+                  expanded={isExpanded(`storage-${fs.id}`)}
+                  onToggle={() => toggleCard(`storage-${fs.id}`)}
+                  onSave={async (storageId, edit) => {
+                    await handleUpdateStorage(nodeId, storageId, edit);
+                  }}
+                  onDelete={async (storageId) => {
+                    await handleRemoveStorage(nodeId, storageId);
+                  }}
+                  saving={setNodeStorage.isPending}
+                />
+              ))}
+            </div>
+          );
+        })()}
+      </div>
+
+      {/* ── Section 2: Cloud Storage ─────────────────────────── */}
       <div>
         <h3 className={`font-display text-[1.1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}>
           Cloud Storage
@@ -302,109 +402,6 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
             />
           ))}
         </SettingsSection>
-      </div>
-
-      {/* ── Section 2: File Storage ─────────────────────────── */}
-      <div>
-        <h3 className={`font-display text-[1.1em] font-semibold mb-4 ${c("text-text-bright", "text-light-text-bright")}`}>
-          File Storage
-        </h3>
-        <p className={`text-[0.85em] mb-4 ${c("text-text-muted", "text-light-text-muted")}`}>
-          File storage areas declared per node. Storage class ranks speed: lower = faster.
-        </p>
-
-        {/* Add Storage Area button */}
-        {!isLoading && !addingArea && (
-          <div className="flex items-center justify-end mb-5">
-            <Button onClick={openAreaForm}>Add Storage Area</Button>
-          </div>
-        )}
-
-        {/* Add Storage Area form */}
-        {addingArea && (
-          <div className="mb-4">
-            <AddFormCard
-              dark={dark}
-              onCancel={resetAreaForm}
-              onCreate={handleCreateArea}
-              isPending={setNodeStorage.isPending}
-              createDisabled={!areaClass.trim() || isNaN(parseInt(areaClass, 10))}
-            >
-              <NodeSelect value={areaNodeId} onChange={setAreaNodeId} dark={dark} />
-              <FormField label="Name" dark={dark}>
-                <TextInput
-                  value={areaName}
-                  onChange={setAreaName}
-                  placeholder={areaNamePlaceholder || "storage-area"}
-                  dark={dark}
-                />
-              </FormField>
-              <FormField label="Path" dark={dark} description="Relative to the node's home directory, or absolute if starting with /.">
-                <TextInput
-                  value={areaPath}
-                  onChange={setAreaPath}
-                  placeholder={areaName.trim() || areaNamePlaceholder || ""}
-                  dark={dark}
-                  mono
-                />
-              </FormField>
-              <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
-                <SpinnerInput
-                  value={areaClass}
-                  onChange={setAreaClass}
-                  dark={dark}
-                  min={0}
-                />
-              </FormField>
-            </AddFormCard>
-          </div>
-        )}
-
-        {isLoading && (
-          <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            Loading...
-          </div>
-        )}
-        {(() => {
-          // Flatten all areas across all nodes into a single sorted list.
-          const allAreas = nodeStorageConfigs.flatMap((nsc) =>
-            nsc.areas.map((area) => ({
-              area,
-              nodeId: nsc.nodeId,
-              nodeName: resolveNodeName(nsc.nodeId),
-            })),
-          ).sort((a, b) => (a.area.name || a.area.id).localeCompare(b.area.name || b.area.id));
-
-          if (!isLoading && allAreas.length === 0 && !addingArea) {
-            return (
-              <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                No file storage configured. Click &quot;Add Storage Area&quot; to create one.
-              </div>
-            );
-          }
-
-          return (
-            <div className="flex flex-col gap-2">
-              {allAreas.map(({ area, nodeId, nodeName }) => (
-                <StorageAreaCard
-                  key={area.id}
-                  area={area}
-                  nodeName={nodeName}
-                  dark={dark}
-                  expanded={isExpanded(`area-${area.id}`)}
-                  onToggle={() => toggleCard(`area-${area.id}`)}
-                  onSave={async (areaId, edit) => {
-                    await handleUpdateArea(nodeId, areaId, edit);
-                  }}
-                  onDelete={async (areaId) => {
-                    await handleRemoveArea(nodeId, areaId);
-                  }}
-                  saving={setNodeStorage.isPending}
-                />
-              ))}
-            </div>
-          );
-        })()}
       </div>
     </div>
   );

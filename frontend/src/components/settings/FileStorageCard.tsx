@@ -1,28 +1,28 @@
-import type { StorageArea } from "../../api/gen/gastrolog/v1/storage_pb";
+import type { FileStorage } from "../../api/gen/gastrolog/v1/storage_pb";
 import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SpinnerInput } from "./FormField";
 import { Button } from "./Buttons";
 
-interface StorageAreaEdit {
+interface FileStorageEdit {
   name: string;
   path: string;
   storageClass: string;
 }
 
-interface StorageAreaCardProps {
-  area: StorageArea;
+interface FileStorageCardProps {
+  fs: FileStorage;
   nodeName: string;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
-  onSave: (areaId: string, edit: StorageAreaEdit) => Promise<void>;
-  onDelete: (areaId: string) => Promise<void>;
+  onSave: (storageId: string, edit: FileStorageEdit) => Promise<void>;
+  onDelete: (storageId: string) => Promise<void>;
   saving: boolean;
 }
 
-export function StorageAreaCard({
-  area,
+export function FileStorageCard({
+  fs,
   nodeName,
   dark,
   expanded,
@@ -30,31 +30,31 @@ export function StorageAreaCard({
   onSave,
   onDelete,
   saving,
-}: Readonly<StorageAreaCardProps>) {
-  const defaults = (): StorageAreaEdit => ({
-    name: area.name,
-    path: area.path,
-    storageClass: String(area.storageClass),
+}: Readonly<FileStorageCardProps>) {
+  const defaults = (): FileStorageEdit => ({
+    name: fs.name,
+    path: fs.path,
+    storageClass: String(fs.storageClass),
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
-  const edit = getEdit(area.id);
+  const edit = getEdit(fs.id);
 
   return (
     <SettingsCard
-      id={area.name || area.id}
-      typeBadge={`class ${area.storageClass}`}
+      id={fs.name || fs.id}
+      typeBadge={`class ${fs.storageClass}`}
       secondaryBadge={nodeName}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
-      onDelete={() => onDelete(area.id)}
+      onDelete={() => onDelete(fs.id)}
       deleteLabel="Remove"
       footer={
         <>
-          {isDirty(area.id) && (
+          {isDirty(fs.id) && (
             <Button
-              onClick={() => clearEdit(area.id)}
+              onClick={() => clearEdit(fs.id)}
               disabled={saving}
               dark={dark}
               variant="ghost"
@@ -64,10 +64,10 @@ export function StorageAreaCard({
           )}
           <Button
             onClick={async () => {
-              await onSave(area.id, edit);
-              clearEdit(area.id);
+              await onSave(fs.id, edit);
+              clearEdit(fs.id);
             }}
-            disabled={!isDirty(area.id) || saving}
+            disabled={!isDirty(fs.id) || saving}
             dark={dark}
           >
             {saving ? "Saving..." : "Save"}
@@ -79,7 +79,7 @@ export function StorageAreaCard({
         <FormField label="Name" dark={dark}>
           <TextInput
             value={edit.name}
-            onChange={(v) => setEdit(area.id, { name: v })}
+            onChange={(v) => setEdit(fs.id, { name: v })}
             dark={dark}
           />
         </FormField>
@@ -87,7 +87,7 @@ export function StorageAreaCard({
         <FormField label="Path" dark={dark}>
           <TextInput
             value={edit.path}
-            onChange={(v) => setEdit(area.id, { path: v })}
+            onChange={(v) => setEdit(fs.id, { path: v })}
             dark={dark}
             mono
           />
@@ -96,7 +96,7 @@ export function StorageAreaCard({
         <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
           <SpinnerInput
             value={edit.storageClass}
-            onChange={(v) => setEdit(area.id, { storageClass: v })}
+            onChange={(v) => setEdit(fs.id, { storageClass: v })}
             dark={dark}
             min={0}
           />

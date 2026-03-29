@@ -1523,7 +1523,7 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) config.Store) {
 			Provider:         "aws",
 			Bucket:           "my-bucket",
 			Region:           "us-east-1",
-			StorageClass:     "STANDARD",
+			StorageClass:         1,
 		}
 		if err := s.PutCloudService(ctx, cs); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -1794,12 +1794,12 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 		s := newStore(t)
 		ctx := context.Background()
 
-		areaID := newID()
+		storageID := newID()
 		nsc := config.NodeStorageConfig{
 			NodeID: "node-1",
-			Areas: []config.StorageArea{
+			FileStorages: []config.FileStorage{
 				{
-					ID:                areaID,
+					ID:                storageID,
 					StorageClass:      1,
 					Name:              "fast",
 					Path:              "/data/fast",
@@ -1821,17 +1821,17 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 		if got.NodeID != "node-1" {
 			t.Errorf("NodeID: expected %q, got %q", "node-1", got.NodeID)
 		}
-		if len(got.Areas) != 1 {
-			t.Fatalf("expected 1 area, got %d", len(got.Areas))
+		if len(got.FileStorages) != 1 {
+			t.Fatalf("expected 1 file storage, got %d", len(got.FileStorages))
 		}
-		if got.Areas[0].ID != areaID {
-			t.Errorf("Area ID: expected %s, got %s", areaID, got.Areas[0].ID)
+		if got.FileStorages[0].ID != storageID {
+			t.Errorf("FileStorage ID: expected %s, got %s", storageID, got.FileStorages[0].ID)
 		}
-		if got.Areas[0].Name != "fast" {
-			t.Errorf("Area Name: expected %q, got %q", "fast", got.Areas[0].Name)
+		if got.FileStorages[0].Name != "fast" {
+			t.Errorf("FileStorage Name: expected %q, got %q", "fast", got.FileStorages[0].Name)
 		}
-		if got.Areas[0].StorageClass != 1 {
-			t.Errorf("Area StorageClass: expected 1, got %d", got.Areas[0].StorageClass)
+		if got.FileStorages[0].StorageClass != 1 {
+			t.Errorf("FileStorage StorageClass: expected 1, got %d", got.FileStorages[0].StorageClass)
 		}
 	})
 
@@ -1873,15 +1873,15 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 
 		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 			NodeID: "node-1",
-			Areas:  []config.StorageArea{{ID: newID(), Name: "old"}},
+			FileStorages:  []config.FileStorage{{ID: newID(), Name: "old"}},
 		}); err != nil {
 			t.Fatalf("Set: %v", err)
 		}
 
-		newAreaID := newID()
+		newStorageID := newID()
 		if err := s.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 			NodeID: "node-1",
-			Areas:  []config.StorageArea{{ID: newAreaID, Name: "new"}},
+			FileStorages:  []config.FileStorage{{ID: newStorageID, Name: "new"}},
 		}); err != nil {
 			t.Fatalf("Set update: %v", err)
 		}
@@ -1890,8 +1890,8 @@ func testNodeStorageConfigs(t *testing.T, newStore func(t *testing.T) config.Sto
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if len(got.Areas) != 1 || got.Areas[0].Name != "new" {
-			t.Errorf("expected updated area name 'new', got %+v", got.Areas)
+		if len(got.FileStorages) != 1 || got.FileStorages[0].Name != "new" {
+			t.Errorf("expected updated file storage name 'new', got %+v", got.FileStorages)
 		}
 
 		all, err := s.ListNodeStorageConfigs(ctx)

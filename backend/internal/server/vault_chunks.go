@@ -68,6 +68,10 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 	if err != nil {
 		return nil
 	}
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return nil
+	}
 	tierIDs := make(map[uuid.UUID]bool, len(vaultCfg.TierIDs))
 	for _, tid := range vaultCfg.TierIDs {
 		tierIDs[tid] = true
@@ -79,12 +83,13 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 			continue
 		}
 		// Primary node.
-		if t.NodeID != "" && t.NodeID != s.localNodeID && !seen[t.NodeID] {
-			seen[t.NodeID] = true
-			nodes = append(nodes, t.NodeID)
+		primaryNodeID := t.PrimaryNodeID(nscs)
+		if primaryNodeID != "" && primaryNodeID != s.localNodeID && !seen[primaryNodeID] {
+			seen[primaryNodeID] = true
+			nodes = append(nodes, primaryNodeID)
 		}
 		// Secondary nodes.
-		for _, sid := range t.SecondaryNodeIDs {
+		for _, sid := range t.SecondaryNodeIDs(nscs) {
 			if sid != s.localNodeID && !seen[sid] {
 				seen[sid] = true
 				nodes = append(nodes, sid)

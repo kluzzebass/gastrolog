@@ -14,6 +14,11 @@ import (
 	"github.com/google/uuid"
 )
 
+// primaryPlacement creates a Placements slice with a single primary using a synthetic storage ID.
+func primaryPlacement(nodeID string) []config.TierPlacement {
+	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}}
+}
+
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *cfgmem.Store, *alert.Collector) {
 	t.Helper()
 	store := cfgmem.NewStore()
@@ -36,14 +41,19 @@ func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*pl
 
 func tierNode(t *testing.T, store *cfgmem.Store, tierID uuid.UUID) string {
 	t.Helper()
-	tier, err := store.GetTier(context.Background(), tierID)
+	ctx := context.Background()
+	tier, err := store.GetTier(ctx, tierID)
 	if err != nil {
 		t.Fatalf("GetTier(%s): %v", tierID, err)
 	}
 	if tier == nil {
 		t.Fatalf("tier %s not found", tierID)
 	}
-	return tier.NodeID
+	nscs, err := store.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		t.Fatalf("ListNodeStorageConfigs: %v", err)
+	}
+	return tier.PrimaryNodeID(nscs)
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
@@ -85,7 +95,7 @@ func TestPlacementLocalTierRequiresStorageClass(t *testing.T) {
 	// Only node-2 has storage class 1.
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-2",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "fast", Path: "/data"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "fast", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -113,7 +123,7 @@ func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
 	// Only node-2 has storage class 2.
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-2",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 2, Name: "ssd", Path: "/cache"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 2, Name: "ssd", Path: "/cache"}},
 	})
 
 	pm.reconcile(ctx)
@@ -149,7 +159,7 @@ func TestPlacementStableAssignment(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, NodeID: "node-2"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, Placements: primaryPlacement("node-2")})
 	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
 
 	pm.reconcile(ctx)
@@ -210,7 +220,7 @@ func TestPlacementReassignOnNodeDeath(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, NodeID: "node-2"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, Placements: primaryPlacement("node-2")})
 	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
 
 	pm.reconcile(ctx)
@@ -227,12 +237,12 @@ func TestPlacementReassignLocalTierOnNodeDeath(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-3"})
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, NodeID: "node-2"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-2")})
 	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
 
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-3",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -248,13 +258,13 @@ func TestPlacementNodeLosesStorageClass(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, NodeID: "node-1"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-1")})
 	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
 
-	// node-1 has no storage areas. node-2 has the right class.
+	// node-1 has no file storages. node-2 has the right class.
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-2",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -271,7 +281,7 @@ func TestPlacementNoEligibleNodeClearsAssignment(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 5, NodeID: "node-1"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 5, Placements: primaryPlacement("node-1")})
 	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
 
 	pm.reconcile(ctx)
@@ -314,7 +324,7 @@ func TestPlacementLoadBalances(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	tier1 := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tier1, Name: "t1", Type: config.TierTypeMemory, NodeID: "node-1"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tier1, Name: "t1", Type: config.TierTypeMemory, Placements: primaryPlacement("node-1")})
 
 	tier2 := uuid.Must(uuid.NewV7())
 	_ = store.PutTier(ctx, config.TierConfig{ID: tier2, Name: "t2", Type: config.TierTypeMemory})
@@ -448,7 +458,7 @@ func TestPlacementLocalTierStorageClassZero(t *testing.T) {
 
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-1",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 0, Name: "zero", Path: "/z"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 0, Name: "zero", Path: "/z"}},
 	})
 
 	pm.reconcile(ctx)
@@ -503,10 +513,10 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 		t.Fatal("expected alert after first reconcile")
 	}
 
-	// Add matching storage area → now eligible.
+	// Add matching file storage → now eligible.
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-1",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -525,7 +535,7 @@ func TestPlacementAlertClearedOnStableAssignment(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, NodeID: "node-1"})
+	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, Placements: primaryPlacement("node-1")})
 	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "v", TierIDs: []uuid.UUID{tierID}})
 
 	// Pre-set an alert manually.
@@ -579,7 +589,7 @@ func TestPlacementMultipleTiersDifferentTypes(t *testing.T) {
 	// Only node-2 has the storage class.
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-2",
-		Areas:  []config.StorageArea{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -596,7 +606,7 @@ func TestPlacementMultipleTiersDifferentTypes(t *testing.T) {
 	}
 }
 
-// ---------- Multiple storage areas on one node ----------
+// ---------- Multiple file storages on one node ----------
 
 func TestPlacementNodeWithMultipleStorageClasses(t *testing.T) {
 	t.Parallel()
@@ -614,7 +624,7 @@ func TestPlacementNodeWithMultipleStorageClasses(t *testing.T) {
 	// node-1 has both classes.
 	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
 		NodeID: "node-1",
-		Areas: []config.StorageArea{
+		FileStorages: []config.FileStorage{
 			{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "nvme", Path: "/fast"},
 			{ID: uuid.Must(uuid.NewV7()), StorageClass: 3, Name: "hdd", Path: "/slow"},
 		},
@@ -655,10 +665,10 @@ func TestPlacementNilAlerts(t *testing.T) {
 func TestNodeHasStorageClass(t *testing.T) {
 	t.Parallel()
 	nscs := []config.NodeStorageConfig{
-		{NodeID: "n1", Areas: []config.StorageArea{
+		{NodeID: "n1", FileStorages: []config.FileStorage{
 			{StorageClass: 1}, {StorageClass: 3},
 		}},
-		{NodeID: "n2", Areas: []config.StorageArea{
+		{NodeID: "n2", FileStorages: []config.FileStorage{
 			{StorageClass: 2},
 		}},
 	}
@@ -700,13 +710,15 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 	pm.reconcile(ctx)
 
 	tier, _ := store.GetTier(ctx, tierID)
-	if tier.NodeID == "" {
+	nscs, _ := store.ListNodeStorageConfigs(ctx)
+	if tier.PrimaryNodeID(nscs) == "" {
 		t.Fatal("expected primary assigned")
 	}
-	if len(tier.SecondaryNodeIDs) != 1 {
-		t.Fatalf("expected 1 secondary, got %d", len(tier.SecondaryNodeIDs))
+	secondaries := tier.SecondaryNodeIDs(nscs)
+	if len(secondaries) != 1 {
+		t.Fatalf("expected 1 secondary, got %d", len(secondaries))
 	}
-	if tier.SecondaryNodeIDs[0] == tier.NodeID {
+	if secondaries[0] == tier.PrimaryNodeID(nscs) {
 		t.Error("secondary should not be the same as primary")
 	}
 }
@@ -723,8 +735,9 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 	pm.reconcile(ctx)
 
 	tier, _ := store.GetTier(ctx, tierID)
-	if len(tier.SecondaryNodeIDs) != 0 {
-		t.Errorf("expected 0 secondaries for RF=1, got %d", len(tier.SecondaryNodeIDs))
+	nscs, _ := store.ListNodeStorageConfigs(ctx)
+	if secondaries := tier.SecondaryNodeIDs(nscs); len(secondaries) != 0 {
+		t.Errorf("expected 0 secondaries for RF=1, got %d", len(secondaries))
 	}
 }
 
@@ -740,9 +753,10 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 	pm.reconcile(ctx)
 
 	tier, _ := store.GetTier(ctx, tierID)
+	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	// RF=3 needs 2 secondaries, but only 1 other node available.
-	if len(tier.SecondaryNodeIDs) != 1 {
-		t.Errorf("expected 1 secondary (max available), got %d", len(tier.SecondaryNodeIDs))
+	if secondaries := tier.SecondaryNodeIDs(nscs); len(secondaries) != 1 {
+		t.Errorf("expected 1 secondary (max available), got %d", len(secondaries))
 	}
 	if !hasAlert(alerts, "tier-underreplicated:") {
 		t.Error("expected underreplicated alert")

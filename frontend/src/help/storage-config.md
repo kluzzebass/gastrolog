@@ -17,10 +17,10 @@ Cloud storage endpoints are cluster-wide (S3, GCS, Azure Blob Storage). They are
 
 ## Local Storage
 
-Storage areas are locally-attached storage resources declared per node. Each area has:
+File storages are locally-attached storage resources declared per node. Each file storage has:
 
-- **Name** — a human-readable name for the area.
+- **Name** — a human-readable label.
 - **Path** — relative to the node's home directory, or absolute if starting with /.
-- **Storage Class** — a numeric rank (lower = faster). Multiple areas can share the same class to form a pool.
+- **Storage Class** — a numeric rank (lower = faster). Multiple file storages can share the same class to form a pool.
 
-Storage areas on the local node can be added or removed. Remote node storage areas are displayed read-only.
+File storages on the local node can be added or removed. Remote node file storages are displayed read-only.

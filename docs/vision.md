@@ -130,10 +130,10 @@ A vault should be the **logical container** — it owns the records, the indexes
 
 Three separate concepts make up the storage model:
 
-**StorageArea** — per-node declaration of locally-attached storage. Each has a path, a **storage class** (numeric — lower is faster), and a capacity. A node can declare multiple storage areas. Two NVMe drives can both be class 1; a NAS at class 3.
+**FileStorage** — per-node declaration of locally-attached storage. Each has a path, a **storage class** (numeric — lower is faster), and a capacity. A node can declare multiple file storages. Two NVMe drives can both be class 1; a NAS at class 3.
 
 ```
-Node-1 storage areas:
+Node-1 file storages:
   class 1: label=NVMe-1, path=/data/nvme0, capacity=200GB
   class 1: label=NVMe-2, path=/data/nvme1, capacity=200GB
   class 3: label=NAS, path=/mnt/nas, capacity=10TB
@@ -150,7 +150,7 @@ Cloud services:
 **Tier** — three types, each a full chunk manager:
 
 - **Memory tier**: RAM-backed. Active + sealed chunks in memory. Budget limits how much RAM it can use.
-- **Local tier**: disk-backed. Has a storage class requirement — the system matches it to StorageAreas on nodes that declare that class. That's where its chunks live.
+- **Local tier**: disk-backed. Has a storage class requirement — the system matches it to file storages on nodes that declare that class. That's where its chunks live.
 - **Cloud tier**: references a CloudService for sealed chunk storage. Has a storage class requirement for the **active chunk** (needs local disk to write to before sealing and uploading). Has a separate storage class requirement for the **chunk cache** (local disk for caching sealed chunks fetched from the cloud during queries).
 
 A vault contains one or more tiers, ordered:
@@ -519,7 +519,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Memory chunk manager | Done | In-memory chunks with rotation/retention |
 | File chunk manager | Done | Local SSD, mmap'd reads, sealed chunk compression |
 | Cloud chunk manager | Done | S3/GCS for sealed chunks and indexes |
-| StorageArea model | Not started | Per-node local storage declarations with storage classes |
+| FileStorage model | Not started | Per-node local storage declarations with storage classes |
 | CloudService model | Not started | Cluster-wide cloud service definitions |
 | Three tier types (memory/local/cloud) | Not started | Tiers reference storage classes and cloud services |
 | Vault as logical container | Not started | Vault type is still coupled to a single backend |

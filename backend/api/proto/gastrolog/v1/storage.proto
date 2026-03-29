@@ -5,10 +5,10 @@ package gastrolog.v1;
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
 
-// StorageArea declares a locally-attached storage resource on a node.
+// FileStorage declares a locally-attached storage resource on a node.
 // Storage class ranks local storage by speed: lower = faster.
-// Multiple areas can share the same storage class (they form a pool).
-message StorageArea {
+// Multiple file storages can share the same storage class (they form a pool).
+message FileStorage {
   string id = 1;
   uint32 storage_class = 2;
   string name = 3;
@@ -20,7 +20,7 @@ message StorageArea {
 // NodeStorageConfig declares all locally-attached storage available on a node.
 message NodeStorageConfig {
   string node_id = 1;
-  repeated StorageArea areas = 2;
+  repeated FileStorage file_storages = 2;
 }
 
 // CloudService defines a cluster-wide cloud storage endpoint.
@@ -38,6 +38,7 @@ message CloudService {
   string container = 9;
   string connection_string = 10;
   string credentials_json = 11;
-  string storage_class = 12;
+  reserved 12; // was storage_class (string) — replaced by uint32 field 15
   reserved 13, 14; // active_chunk_class, cache_class — moved to TierConfig
+  uint32 storage_class = 15;
 }

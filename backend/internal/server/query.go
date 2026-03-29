@@ -359,6 +359,10 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 	if err != nil {
 		return nil
 	}
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return nil
+	}
 
 	selected := make(map[uuid.UUID]bool, len(selectedVaults))
 	for _, id := range selectedVaults {
@@ -387,12 +391,16 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 				continue // searched locally, skip remote
 			}
 			tc := tierMap[tierID]
-			if tc == nil || tc.NodeID == "" || tc.NodeID == s.localNodeID {
+			if tc == nil {
 				continue
 			}
-			if !seen[tc.NodeID] {
-				seen[tc.NodeID] = true
-				byNode[tc.NodeID] = append(byNode[tc.NodeID], v.ID)
+			primaryNodeID := tc.PrimaryNodeID(nscs)
+			if primaryNodeID == "" || primaryNodeID == s.localNodeID {
+				continue
+			}
+			if !seen[primaryNodeID] {
+				seen[primaryNodeID] = true
+				byNode[primaryNodeID] = append(byNode[primaryNodeID], v.ID)
 			}
 		}
 	}
@@ -1711,20 +1719,25 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID)
 	if err != nil {
 		return ""
 	}
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return ""
+	}
 
 	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
-	// temporary: find the tier's NodeID to determine the owning node (until tier election).
+	// temporary: find the tier's primary node to determine the owning node (until tier election).
 	for _, tierID := range vaultCfg.TierIDs {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue
 		}
-		if tc.NodeID != "" && tc.NodeID != s.localNodeID {
-			return tc.NodeID
+		primaryNodeID := tc.PrimaryNodeID(nscs)
+		if primaryNodeID != "" && primaryNodeID != s.localNodeID {
+			return primaryNodeID
 		}
 	}
 	return ""

@@ -114,10 +114,10 @@ func (s *ConfigServer) SetNodeStorageConfig(
 
 	cfg := protoToNodeStorageConfig(req.Msg.Config)
 
-	// Assign UUIDs to areas that don't have one.
-	for i := range cfg.Areas {
-		if cfg.Areas[i].ID == uuid.Nil {
-			cfg.Areas[i].ID = uuid.Must(uuid.NewV7())
+	// Assign UUIDs to file storages that don't have one.
+	for i := range cfg.FileStorages {
+		if cfg.FileStorages[i].ID == uuid.Nil {
+			cfg.FileStorages[i].ID = uuid.Must(uuid.NewV7())
 		}
 	}
 
@@ -198,24 +198,21 @@ func (s *ConfigServer) PutTier(
 	}
 	cfg.ID = id
 
-	// NodeID and SecondaryNodeIDs are system-managed by the placement manager
-	// for most tier types. JSONL sinks use explicit user-provided NodeID.
-	// Preserve existing assignments on updates; leave empty on create.
-	if cfg.Type != config.TierTypeJSONL {
-		cfg.NodeID = ""
-	}
-	cfg.SecondaryNodeIDs = nil
+	// Placements are system-managed by the placement manager.
+	// Preserve existing placements on updates; leave empty on create.
+	cfg.Placements = nil
 	if existing, _ := s.cfgStore.GetTier(ctx, id); existing != nil {
-		if cfg.Type != config.TierTypeJSONL {
-			cfg.NodeID = existing.NodeID
-		}
-		cfg.SecondaryNodeIDs = existing.SecondaryNodeIDs
+		cfg.Placements = existing.Placements
 	}
 
 	if err := s.cfgStore.PutTier(ctx, cfg); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyTierPut, ID: id})
+
+	if s.placementReconcile != nil {
+		s.placementReconcile(ctx)
+	}
 
 	return connect.NewResponse(&apiv1.PutTierResponse{Config: s.buildFullConfig(ctx)}), nil
 }
@@ -255,7 +252,7 @@ func (s *ConfigServer) DeleteTier(
 	}
 
 	// Delete data files if requested (before removing from config, so we can
-	// still resolve the storage area path).
+	// still resolve the file storage path).
 	if req.Msg.GetDeleteData() && s.orch != nil {
 		s.orch.DeleteTierData(id)
 	}
@@ -281,8 +278,8 @@ func protoToCloudService(p *apiv1.CloudService) config.CloudService {
 		SecretKey:        p.SecretKey,
 		Container:        p.Container,
 		ConnectionString: p.ConnectionString,
-		CredentialsJSON:  p.CredentialsJson,
-		StorageClass:     p.StorageClass,
+		CredentialsJSON:      p.CredentialsJson,
+		StorageClass:         p.StorageClass,
 	}
 }
 
@@ -290,8 +287,8 @@ func protoToNodeStorageConfig(p *apiv1.NodeStorageConfig) config.NodeStorageConf
 	cfg := config.NodeStorageConfig{
 		NodeID: p.NodeId,
 	}
-	for _, a := range p.Areas {
-		area := config.StorageArea{
+	for _, a := range p.FileStorages {
+		fs := config.FileStorage{
 			StorageClass:      a.StorageClass,
 			Name:              a.Name,
 			Path:              a.Path,
@@ -299,10 +296,10 @@ func protoToNodeStorageConfig(p *apiv1.NodeStorageConfig) config.NodeStorageConf
 		}
 		if a.Id != "" {
 			if id, err := uuid.Parse(a.Id); err == nil {
-				area.ID = id
+				fs.ID = id
 			}
 		}
-		cfg.Areas = append(cfg.Areas, area)
+		cfg.FileStorages = append(cfg.FileStorages, fs)
 	}
 	return cfg
 }
@@ -327,20 +324,21 @@ func (s *ConfigServer) validateReplicationFactor(ctx context.Context, tierType c
 	if p.ReplicationFactor <= 1 {
 		return nil
 	}
-	eligible, err := s.countEligibleNodes(ctx, tierType, p)
+	eligible, err := s.countEligibleStorages(ctx, tierType, p)
 	if err != nil {
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	if int(p.ReplicationFactor) > eligible {
 		return connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("replication factor %d exceeds eligible nodes (%d nodes with required storage class)", p.ReplicationFactor, eligible))
+			fmt.Errorf("replication factor %d exceeds eligible file storages (%d with required storage class)", p.ReplicationFactor, eligible))
 	}
 	return nil
 }
-
-// countEligibleNodes returns how many cluster nodes can host a tier of the
 // given type with the given storage class requirements.
-func (s *ConfigServer) countEligibleNodes(ctx context.Context, tierType config.TierType, p *apiv1.TierConfig) (int, error) {
+// countEligibleStorages returns how many file storages can host a replica of
+// this tier type. Same-node replication is valid (different file storages on the
+// same node), so this counts file storages, not nodes.
+func (s *ConfigServer) countEligibleStorages(ctx context.Context, tierType config.TierType, p *apiv1.TierConfig) (int, error) {
 	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		return 0, err
@@ -352,16 +350,15 @@ func (s *ConfigServer) countEligibleNodes(ctx context.Context, tierType config.T
 
 	switch tierType {
 	case config.TierTypeMemory:
-		return len(nodes), nil // any node can host memory tiers
+		return len(nodes), nil // memory tiers: one per node (no disk storage)
 	case config.TierTypeJSONL:
 		return 1, nil // JSONL tiers are pinned to a single node
 	case config.TierTypeFile:
 		count := 0
 		for _, nsc := range nscs {
-			for _, area := range nsc.Areas {
-				if area.StorageClass == p.StorageClass {
+			for _, fs := range nsc.FileStorages {
+				if fs.StorageClass == p.StorageClass {
 					count++
-					break
 				}
 			}
 		}
@@ -369,10 +366,9 @@ func (s *ConfigServer) countEligibleNodes(ctx context.Context, tierType config.T
 	case config.TierTypeCloud:
 		count := 0
 		for _, nsc := range nscs {
-			for _, area := range nsc.Areas {
-				if area.StorageClass == p.ActiveChunkClass {
+			for _, fs := range nsc.FileStorages {
+				if fs.StorageClass == p.ActiveChunkClass {
 					count++
-					break
 				}
 			}
 		}
@@ -392,7 +388,6 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		CacheClass:        p.CacheClass,
 		ReplicationFactor: p.ReplicationFactor,
 		Path:              p.Path,
-		NodeID:            p.NodeId,
 	}
 
 	if p.RotationPolicyId != "" {

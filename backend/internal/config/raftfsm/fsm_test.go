@@ -557,11 +557,11 @@ func TestApplyDeleteTier(t *testing.T) {
 func TestApplySetNodeStorageConfig(t *testing.T) {
 	t.Parallel()
 	fsm := New()
-	areaID := newID()
+	storageID := newID()
 	applyCmd(t, fsm, command.NewSetNodeStorageConfig(config.NodeStorageConfig{
 		NodeID: "node-1",
-		Areas: []config.StorageArea{
-			{ID: areaID, StorageClass: 1, Name: "fast", Path: "/data/fast"},
+		FileStorages: []config.FileStorage{
+			{ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/fast"},
 		},
 	}))
 
@@ -572,8 +572,8 @@ func TestApplySetNodeStorageConfig(t *testing.T) {
 	if got == nil || got.NodeID != "node-1" {
 		t.Fatalf("unexpected node storage config: %+v", got)
 	}
-	if len(got.Areas) != 1 || got.Areas[0].Name != "fast" || got.Areas[0].StorageClass != 1 {
-		t.Fatalf("unexpected areas: %+v", got.Areas)
+	if len(got.FileStorages) != 1 || got.FileStorages[0].Name != "fast" || got.FileStorages[0].StorageClass != 1 {
+		t.Fatalf("unexpected file storages: %+v", got.FileStorages)
 	}
 }
 

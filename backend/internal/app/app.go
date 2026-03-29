@@ -216,6 +216,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	broadcaster, peerState, peerJobState, localStatsFn := setupClusterStats(ctx, logger, cfgStore, clusterSrv, orch, recordForwarder, alertCollector, nodeID, cfg.ServerAddr, cfg.PprofAddr, statsSignal)
 
 	// Start tier placement manager (cluster mode only).
+	var placementReconcileFn func(ctx context.Context)
 	if clusterSrv != nil && peerState != nil {
 		pm := &placementManager{
 			cfgStore:    cfgStore,
@@ -227,6 +228,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			triggerCh:   make(chan struct{}, 1),
 		}
 		disp.placementTrigger = pm.Trigger
+		placementReconcileFn = pm.Reconcile
 		go pm.Run(ctx)
 	}
 
@@ -282,6 +284,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Dispatcher:          disp,
 		GroupMgr:            groupMgr,
 		ConfigStore:         proxy,
+		PlacementReconcile:  placementReconcileFn,
 	})
 }
 
@@ -799,6 +802,7 @@ type serverDeps struct {
 	Dispatcher          *configDispatcher
 	GroupMgr            *multiraft.GroupManager
 	ConfigStore         io.Closer // rawStore — closed before gRPC for clean Raft shutdown
+	PlacementReconcile  func(ctx context.Context)
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -819,6 +823,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 			CloudTesters: map[string]server.CloudServiceTester{
 				"file": chunkcloud.NewConnectionTester(),
 			},
+			PlacementReconcile: deps.PlacementReconcile,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
 		// NoAuthInterceptor + no routing interceptor prevents loops.

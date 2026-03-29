@@ -10,7 +10,6 @@ interface CloudServiceFieldValues {
   container: string;
   connectionString: string;
   credentialsJson: string;
-  storageClass: string;
 }
 
 interface CloudServiceFieldsProps {
@@ -124,20 +123,6 @@ export function CloudServiceFields({
           />
         </FormField>
       )}
-
-      {/* Storage class (optional) */}
-      <FormField
-        label="Storage Class"
-        dark={dark}
-        description="Cloud provider storage class (e.g. STANDARD, NEARLINE). Leave empty for default."
-      >
-        <TextInput
-          value={values.storageClass}
-          onChange={(v) => onChange({ storageClass: v })}
-          dark={dark}
-        />
-      </FormField>
-
     </>
   );
 }

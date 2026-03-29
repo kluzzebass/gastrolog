@@ -1054,9 +1054,9 @@ func copyNodeStorageConfig(nsc config.NodeStorageConfig) config.NodeStorageConfi
 	c := config.NodeStorageConfig{
 		NodeID: nsc.NodeID,
 	}
-	if len(nsc.Areas) > 0 {
-		c.Areas = make([]config.StorageArea, len(nsc.Areas))
-		copy(c.Areas, nsc.Areas)
+	if len(nsc.FileStorages) > 0 {
+		c.FileStorages = make([]config.FileStorage, len(nsc.FileStorages))
+		copy(c.FileStorages, nsc.FileStorages)
 	}
 	return c
 }

@@ -4780,13 +4780,6 @@ export class TierConfig extends Message<TierConfig> {
   cacheClass = 0;
 
   /**
-   * system-managed: primary node assigned by placement manager
-   *
-   * @generated from field: string node_id = 11;
-   */
-  nodeId = "";
-
-  /**
    * desired RF (1 = no replication, default)
    *
    * @generated from field: uint32 replication_factor = 12;
@@ -4794,18 +4787,18 @@ export class TierConfig extends Message<TierConfig> {
   replicationFactor = 0;
 
   /**
-   * system-managed: secondary nodes assigned by placement manager
-   *
-   * @generated from field: repeated string secondary_node_ids = 13;
-   */
-  secondaryNodeIds: string[] = [];
-
-  /**
    * direct path for JSONL sinks
    *
    * @generated from field: string path = 14;
    */
   path = "";
+
+  /**
+   * system-managed: file storage assignments by placement manager
+   *
+   * @generated from field: repeated gastrolog.v1.TierPlacement placements = 15;
+   */
+  placements: TierPlacement[] = [];
 
   constructor(data?: PartialMessage<TierConfig>) {
     super();
@@ -4825,10 +4818,9 @@ export class TierConfig extends Message<TierConfig> {
     { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 11, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 13, name: "secondary_node_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 15, name: "placements", kind: "message", T: TierPlacement, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {
@@ -4845,6 +4837,56 @@ export class TierConfig extends Message<TierConfig> {
 
   static equals(a: TierConfig | PlainMessage<TierConfig> | undefined, b: TierConfig | PlainMessage<TierConfig> | undefined): boolean {
     return proto3.util.equals(TierConfig, a, b);
+  }
+}
+
+/**
+ * TierPlacement assigns one replica of a tier to a specific file storage.
+ * The node is derived from the file storage's NodeStorageConfig.
+ *
+ * @generated from message gastrolog.v1.TierPlacement
+ */
+export class TierPlacement extends Message<TierPlacement> {
+  /**
+   * references FileStorage.id
+   *
+   * @generated from field: string storage_id = 1;
+   */
+  storageId = "";
+
+  /**
+   * true = this storage hosts the primary (write path)
+   *
+   * @generated from field: bool primary = 2;
+   */
+  primary = false;
+
+  constructor(data?: PartialMessage<TierPlacement>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.TierPlacement";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "storage_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "primary", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierPlacement {
+    return new TierPlacement().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierPlacement {
+    return new TierPlacement().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierPlacement {
+    return new TierPlacement().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: TierPlacement | PlainMessage<TierPlacement> | undefined, b: TierPlacement | PlainMessage<TierPlacement> | undefined): boolean {
+    return proto3.util.equals(TierPlacement, a, b);
   }
 }
 

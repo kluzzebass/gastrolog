@@ -469,14 +469,14 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     const classNodes = new Map<number, string[]>();
     for (const nsc of config?.nodeStorageConfigs ?? []) {
       const nodeName = nodeNameMap.get(nsc.nodeId) || nsc.nodeId;
-      for (const area of nsc.areas) {
-        const nodes = classNodes.get(area.storageClass);
+      for (const fs of nsc.fileStorages) {
+        const nodes = classNodes.get(fs.storageClass);
         if (nodes) {
           if (!nodes.includes(nodeName)) {
             nodes.push(nodeName);
           }
         } else {
-          classNodes.set(area.storageClass, [nodeName]);
+          classNodes.set(fs.storageClass, [nodeName]);
         }
       }
     }
@@ -488,15 +488,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       }));
   })();
 
-  // Compute eligible node count per storage class (for RF max).
-  const classNodeCount = new Map<number, number>();
+  // Compute eligible file storage count per storage class (for RF max).
+  // Same-node replication is valid — count file storages, not nodes.
+  const classStorageCount = new Map<number, number>();
   for (const nsc of config?.nodeStorageConfigs ?? []) {
-    const seen = new Set<number>();
-    for (const area of nsc.areas) {
-      if (!seen.has(area.storageClass)) {
-        seen.add(area.storageClass);
-        classNodeCount.set(area.storageClass, (classNodeCount.get(area.storageClass) ?? 0) + 1);
-      }
+    for (const fs of nsc.fileStorages) {
+      classStorageCount.set(fs.storageClass, (classStorageCount.get(fs.storageClass) ?? 0) + 1);
     }
   }
   const totalNodes = config?.nodeConfigs.length ?? 1;
@@ -504,7 +501,8 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     if (tier.type === "memory") return totalNodes;
     if (tier.type === "jsonl") return 1;
     const sc = parseInt(tier.type === "cloud" ? (tier.activeChunkClass ?? "0") : tier.storageClass, 10) || 0;
-    return classNodeCount.get(sc) ?? totalNodes;
+    if (sc === 0) return 1; // no class selected yet
+    return classStorageCount.get(sc) ?? 1;
   };
 
   // Derive cloud storage options

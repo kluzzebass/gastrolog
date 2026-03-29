@@ -133,6 +133,10 @@ type Config struct {
 	// RoutingForwarder forwards requests to remote nodes via ForwardRPC.
 	// Nil in single-node mode. Satisfies routing.UnaryForwarder.
 	RoutingForwarder routing.UnaryForwarder
+
+	// PlacementReconcile runs synchronous placement so RPC responses include
+	// tier placements. Nil in single-node or non-cluster mode.
+	PlacementReconcile func(ctx context.Context)
 }
 
 // CertManager interface for TLS certificate management.
@@ -175,7 +179,8 @@ type Server struct {
 	cloudTesters      map[string]CloudServiceTester
 	repairManagedFile  func(fileID string) bool   // on-demand pull from peer; set by app wiring
 	queryServer        *QueryServer              // stored for ExportToVault executor wiring
-	routingForwarder   routing.UnaryForwarder     // forwards requests to remote nodes; nil in single-node
+	routingForwarder      routing.UnaryForwarder     // forwards requests to remote nodes; nil in single-node
+	placementReconcile   func(ctx context.Context)  // synchronous placement; nil in non-cluster mode
 
 	mu       sync.Mutex
 	listener net.Listener
@@ -233,8 +238,9 @@ func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orche
 		afterConfigApply:  cfg.AfterConfigApply,
 		configSignal:      cfg.ConfigSignal,
 		statsSignal:       cfg.StatsSignal,
-		routingForwarder:  cfg.RoutingForwarder,
-		shutdown:          make(chan struct{}),
+		routingForwarder:      cfg.RoutingForwarder,
+		placementReconcile:   cfg.PlacementReconcile,
+		shutdown:              make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
 }
@@ -292,20 +298,25 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 	if err != nil {
 		return ""
 	}
+	nscs, err := c.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return ""
+	}
 
 	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
-	// temporary: find the tier's NodeID to determine the owning node (until tier election).
+	// temporary: find the tier's primary node to determine the owning node (until tier election).
 	for _, tierID := range vaultCfg.TierIDs {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue
 		}
-		if tc.NodeID != "" && tc.NodeID != c.localNodeID {
-			return tc.NodeID
+		primaryNodeID := tc.PrimaryNodeID(nscs)
+		if primaryNodeID != "" && primaryNodeID != c.localNodeID {
+			return primaryNodeID
 		}
 	}
 	return ""
@@ -432,6 +443,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		ResolveManagedFile: s.ResolveManagedFileByID,
 		CloudTesters:       s.cloudTesters,
 		Tokens:             s.tokens,
+		PlacementReconcile: s.placementReconcile,
 		OnTLSConfigChange:  s.reconfigureTLS,
 		OnLookupConfigChange: func(cfg config.LookupConfig, mm config.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)

@@ -58,6 +58,11 @@ func (s *ConfigServer) PutVault(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: vaultCfg.ID})
 
+	// Run placement synchronously so the response includes placements.
+	if s.placementReconcile != nil {
+		s.placementReconcile(ctx)
+	}
+
 	return connect.NewResponse(&apiv1.PutVaultResponse{Config: s.buildFullConfig(ctx)}), nil
 }
 

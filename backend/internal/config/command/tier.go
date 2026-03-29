@@ -22,6 +22,13 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 			EjectRouteIds:     ejectIDs,
 		}
 	}
+	placements := make([]*gastrologv1.TierPlacementEntry, len(tier.Placements))
+	for i, p := range tier.Placements {
+		placements[i] = &gastrologv1.TierPlacementEntry{
+			StorageId:  p.StorageID,
+			Primary: p.Primary,
+		}
+	}
 	return &gastrologv1.PutTierCommand{
 		Id:                tier.ID.String(),
 		Name:              tier.Name,
@@ -33,10 +40,9 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 		CloudServiceId:    uuidPtrToString(tier.CloudServiceID),
 		ActiveChunkClass:  tier.ActiveChunkClass,
 		CacheClass:        tier.CacheClass,
-		NodeId:            tier.NodeID,
 		ReplicationFactor: tier.ReplicationFactor,
-		SecondaryNodeIds:  tier.SecondaryNodeIDs,
 		Path:              tier.Path,
+		Placements:        placements,
 	}
 }
 
@@ -92,6 +98,14 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 		})
 	}
 
+	var placements []config.TierPlacement
+	for _, p := range cmd.GetPlacements() {
+		placements = append(placements, config.TierPlacement{
+			StorageID:  p.GetStorageId(),
+			Primary: p.GetPrimary(),
+		})
+	}
+
 	return config.TierConfig{
 		ID:                id,
 		Name:              cmd.GetName(),
@@ -103,10 +117,9 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 		CloudServiceID:    cloudServiceID,
 		ActiveChunkClass:  cmd.GetActiveChunkClass(),
 		CacheClass:        cmd.GetCacheClass(),
-		NodeID:            cmd.GetNodeId(),
 		ReplicationFactor: cmd.GetReplicationFactor(),
-		SecondaryNodeIDs:  cmd.GetSecondaryNodeIds(),
 		Path:              cmd.GetPath(),
+		Placements:        placements,
 	}, nil
 }
 

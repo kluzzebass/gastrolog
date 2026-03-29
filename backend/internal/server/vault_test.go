@@ -817,9 +817,9 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		areaID := uuid.Must(uuid.NewV7())
+		storageID := uuid.Must(uuid.NewV7())
 		if err := cfgStore.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
-			NodeID: "", Areas: []config.StorageArea{{ID: areaID, StorageClass: 1, Path: vaultDir}},
+			NodeID: "", FileStorages: []config.FileStorage{{ID: storageID, StorageClass: 1, Path: vaultDir}},
 		}); err != nil {
 			t.Fatal(err)
 		}

@@ -729,10 +729,18 @@ message TierConfig {
   string cloud_service_id = 8;
   uint32 active_chunk_class = 9;
   uint32 cache_class = 10;
-  string node_id = 11;              // system-managed: primary node assigned by placement manager
+  reserved 11;                      // was node_id — replaced by placements
   uint32 replication_factor = 12;   // desired RF (1 = no replication, default)
-  repeated string secondary_node_ids = 13; // system-managed: secondary nodes assigned by placement manager
+  reserved 13;                      // was secondary_node_ids — replaced by placements
   string path = 14;                       // direct path for JSONL sinks
+  repeated TierPlacement placements = 15; // system-managed: file storage assignments by placement manager
+}
+
+// TierPlacement assigns one replica of a tier to a specific file storage.
+// The node is derived from the file storage's NodeStorageConfig.
+message TierPlacement {
+  string storage_id = 1;   // references FileStorage.id
+  bool primary = 2;     // true = this storage hosts the primary (write path)
 }
 
 message PutNodeConfigRequest {

@@ -521,7 +521,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	areaID := uuid.Must(uuid.NewV7())
+	storageID := uuid.Must(uuid.NewV7())
 
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{
@@ -531,8 +531,8 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 			{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1},
 		},
 		NodeStorageConfigs: []config.NodeStorageConfig{
-			{NodeID: "node-1", Areas: []config.StorageArea{
-				{ID: areaID, StorageClass: 1, Name: "fast", Path: "/data/chunks"},
+			{NodeID: "node-1", FileStorages: []config.FileStorage{
+				{ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks"},
 			}},
 		},
 	}
@@ -543,7 +543,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	}
 
 	// Verify dir param derived from NodeStorageConfig was passed to factories.
-	// The path is scoped per tier: <area-path>/<tier-id>
+	// The path is scoped per tier: <storage-path>/<tier-id>
 	expectedDir := "/data/chunks/" + tierID.String()
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
