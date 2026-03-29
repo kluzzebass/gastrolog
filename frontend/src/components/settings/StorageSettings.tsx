@@ -167,24 +167,24 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   // ─── File storage add form ──────────────────────────────────
 
-  const [addingStorage, setAddingArea] = useState(false);
-  const [storageNodeId, setAreaNodeId] = useState("");
-  const [storagePath, setAreaPath] = useState("");
-  const [storageClass, setAreaClass] = useState("");
-  const [storageName, setAreaName] = useState("");
-  const [storageNamePlaceholder, setAreaNamePlaceholder] = useState("");
+  const [addingStorage, setAddingStorage] = useState(false);
+  const [storageNodeId, setStorageNodeId] = useState("");
+  const [storagePath, setStoragePath] = useState("");
+  const [storageClass, setStorageClass] = useState("");
+  const [storageName, setStorageName] = useState("");
+  const [storageNamePlaceholder, setStorageNamePlaceholder] = useState("");
   const openStorageForm = () => {
-    setAddingArea(true);
-    setAreaNodeId(localNodeId);
-    generateName.mutateAsync().then(setAreaNamePlaceholder);
+    setAddingStorage(true);
+    setStorageNodeId(localNodeId);
+    generateName.mutateAsync().then(setStorageNamePlaceholder);
   };
   const resetStorageForm = () => {
-    setAddingArea(false);
-    setAreaNodeId("");
-    setAreaPath("");
-    setAreaClass("");
-    setAreaName("");
-    setAreaNamePlaceholder("");
+    setAddingStorage(false);
+    setStorageNodeId("");
+    setStoragePath("");
+    setStorageClass("");
+    setStorageName("");
+    setStorageNamePlaceholder("");
   };
 
   const handleCreateStorage = async () => {
@@ -196,7 +196,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
     const name = storageName.trim() || storageNamePlaceholder || "file-storage";
 
-    const newArea = {
+    const newStorage = {
       id: crypto.randomUUID(),
       storageClass: cls,
       name,
@@ -205,14 +205,14 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     };
 
     const nsc = nodeStorageConfigs.find((n) => n.nodeId === targetNodeId);
-    const existingAreas = nsc?.fileStorages ?? [];
-    const updated = [...existingAreas.map((a) => ({
+    const existingStorages = nsc?.fileStorages ?? [];
+    const updated = [...existingStorages.map((a) => ({
       id: a.id,
       storageClass: a.storageClass,
       name: a.name,
       path: a.path,
       memoryBudgetBytes: a.memoryBudgetBytes,
-    })), newArea];
+    })), newStorage];
 
     try {
       await setNodeStorage.mutateAsync({
@@ -254,11 +254,11 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               isPending={setNodeStorage.isPending}
               createDisabled={!storageClass.trim() || isNaN(parseInt(storageClass, 10))}
             >
-              <NodeSelect value={storageNodeId} onChange={setAreaNodeId} dark={dark} />
+              <NodeSelect value={storageNodeId} onChange={setStorageNodeId} dark={dark} />
               <FormField label="Name" dark={dark}>
                 <TextInput
                   value={storageName}
-                  onChange={setAreaName}
+                  onChange={setStorageName}
                   placeholder={storageNamePlaceholder || "file-storage"}
                   dark={dark}
                 />
@@ -266,7 +266,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               <FormField label="Path" dark={dark} description="Relative to the node's home directory, or absolute if starting with /.">
                 <TextInput
                   value={storagePath}
-                  onChange={setAreaPath}
+                  onChange={setStoragePath}
                   placeholder={storageName.trim() || storageNamePlaceholder || ""}
                   dark={dark}
                   mono
@@ -275,7 +275,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
               <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
                 <SpinnerInput
                   value={storageClass}
-                  onChange={setAreaClass}
+                  onChange={setStorageClass}
                   dark={dark}
                   min={0}
                 />
@@ -290,7 +290,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           </div>
         )}
         {(() => {
-          // Flatten all areas across all nodes into a single sorted list.
+          // Flatten all file storages across all nodes into a single sorted list.
           const allStorages = nodeStorageConfigs.flatMap((nsc) =>
             nsc.fileStorages.map(( fs) => ({
               fs,

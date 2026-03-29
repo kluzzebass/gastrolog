@@ -88,7 +88,7 @@ export function VaultSettingsCard({
   onToggle,
   onOpenInspector,
 }: Readonly<VaultSettingsCardProps>) {
-  // Compute max RF per storage class — count areas, not nodes.
+  // Compute max RF per storage class — count file storages, not nodes.
   const classStorageCount = new Map<number, number>();
   for (const nsc of nodeStorageConfigs) {
     for (const fs of nsc.fileStorages) {
