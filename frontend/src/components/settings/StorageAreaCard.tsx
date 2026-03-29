@@ -1,9 +1,7 @@
 import type { StorageArea } from "../../api/gen/gastrolog/v1/storage_pb";
-import { useThemeClass } from "../../hooks/useThemeClass";
 import { useEditState } from "../../hooks/useEditState";
-import { ExpandableCard } from "./ExpandableCard";
+import { SettingsCard } from "./SettingsCard";
 import { FormField, TextInput, SpinnerInput } from "./FormField";
-import { Badge } from "../Badge";
 import { Button } from "./Buttons";
 
 interface StorageAreaEdit {
@@ -33,8 +31,6 @@ export function StorageAreaCard({
   onDelete,
   saving,
 }: Readonly<StorageAreaCardProps>) {
-  const c = useThemeClass(dark);
-
   const defaults = (): StorageAreaEdit => ({
     name: area.name,
     path: area.path,
@@ -45,20 +41,41 @@ export function StorageAreaCard({
   const edit = getEdit(area.id);
 
   return (
-    <ExpandableCard
+    <SettingsCard
       id={area.name || area.id}
       typeBadge={`class ${area.storageClass}`}
       secondaryBadge={nodeName}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
-      headerRight={
-        <span className={`text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-          {area.path}
-        </span>
+      onDelete={() => onDelete(area.id)}
+      deleteLabel="Remove"
+      footer={
+        <>
+          {isDirty(area.id) && (
+            <Button
+              onClick={() => clearEdit(area.id)}
+              disabled={saving}
+              dark={dark}
+              variant="ghost"
+            >
+              Discard
+            </Button>
+          )}
+          <Button
+            onClick={async () => {
+              await onSave(area.id, edit);
+              clearEdit(area.id);
+            }}
+            disabled={!isDirty(area.id) || saving}
+            dark={dark}
+          >
+            {saving ? "Saving..." : "Save"}
+          </Button>
+        </>
       }
     >
-      <div className="flex flex-col gap-3 p-4">
+      <div className="flex flex-col gap-3">
         <FormField label="Name" dark={dark}>
           <TextInput
             value={edit.name}
@@ -84,42 +101,7 @@ export function StorageAreaCard({
             min={0}
           />
         </FormField>
-
-        <div className="flex items-center gap-2 pt-1">
-          <Button
-            onClick={async () => {
-              await onSave(area.id, edit);
-              clearEdit(area.id);
-            }}
-            disabled={!isDirty(area.id) || saving}
-            dark={dark}
-            variant="primary"
-          >
-            {saving ? "Saving..." : "Save"}
-          </Button>
-          {isDirty(area.id) && (
-            <Button
-              onClick={() => clearEdit(area.id)}
-              disabled={saving}
-              dark={dark}
-              variant="ghost"
-            >
-              Discard
-            </Button>
-          )}
-          <span className="flex-1" />
-          <Button
-            onClick={async () => {
-              await onDelete(area.id);
-            }}
-            disabled={saving}
-            dark={dark}
-            variant="danger"
-          >
-            Remove
-          </Button>
-        </div>
       </div>
-    </ExpandableCard>
+    </SettingsCard>
   );
 }
