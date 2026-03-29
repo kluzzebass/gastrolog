@@ -14,8 +14,8 @@ import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput, NumberInput, SpinnerInput } from "./FormField";
 import { sortByName } from "../../lib/sort";
 import { CloudServiceCard } from "./CloudServiceCard";
+import { StorageAreaCard } from "./StorageAreaCard";
 import { CloudServiceFields } from "./CloudServiceFields";
-import { Badge } from "../Badge";
 import { Button } from "./Buttons";
 import { NodeSelect } from "./NodeSelect";
 import { useTestCloudService } from "../../api/hooks/useVaults";
@@ -100,13 +100,6 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
   const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
 
-  // Sort file storage configs: local node first, then alphabetical by node name.
-  const sortedNodeConfigs = [...nodeStorageConfigs].sort((a, b) => {
-    if (a.nodeId === localNodeId) return -1;
-    if (b.nodeId === localNodeId) return 1;
-    return resolveNodeName(a.nodeId).localeCompare(resolveNodeName(b.nodeId));
-  });
-
   const handleCreate = async () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
     try {
@@ -151,6 +144,27 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast("Storage area removed", "info");
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : "Failed to remove storage area", "error");
+    }
+  };
+
+  const handleUpdateArea = async (nodeId: string, areaId: string, edit: { name: string; path: string; storageClass: string }) => {
+    const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
+    const currentAreas = nsc?.areas ?? [];
+    const updated = currentAreas.map((a) => {
+      if (a.id !== areaId) return { id: a.id, storageClass: a.storageClass, name: a.name, path: a.path, memoryBudgetBytes: a.memoryBudgetBytes };
+      return {
+        id: a.id,
+        storageClass: parseInt(edit.storageClass, 10) || 0,
+        name: edit.name,
+        path: edit.path,
+        memoryBudgetBytes: a.memoryBudgetBytes,
+      };
+    });
+    try {
+      await setNodeStorage.mutateAsync({ nodeId, areas: updated });
+      addToast("Storage area updated", "info");
+    } catch (err: unknown) {
+      addToast(err instanceof Error ? err.message : "Failed to update storage area", "error");
     }
   };
 
@@ -351,75 +365,46 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
             Loading...
           </div>
         )}
-        {!isLoading && sortedNodeConfigs.length === 0 && !addingArea && (
-          <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            No file storage configured. Click &quot;Add Storage Area&quot; to create one.
-          </div>
-        )}
-        {!isLoading && sortedNodeConfigs.length > 0 && (
-          <div className="flex flex-col gap-4">
-            {sortedNodeConfigs.map((nsc) => {
-              const isLocal = nsc.nodeId === localNodeId;
-              const nodeName = resolveNodeName(nsc.nodeId);
-              const areas = [...nsc.areas].sort((a, b) => a.storageClass - b.storageClass || a.name.localeCompare(b.name));
-              return (
-                <div
-                  key={nsc.nodeId}
-                  className={`border rounded-lg p-4 ${c(
-                    "border-ink-border bg-ink-well",
-                    "border-light-border bg-light-well",
-                  )}`}
-                >
-                  <div className="flex items-center gap-2 mb-3">
-                    <span className={`text-[0.9em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
-                      {nodeName}
-                    </span>
-                    {isLocal && <Badge variant="copper" dark={dark}>this node</Badge>}
-                  </div>
+        {(() => {
+          // Flatten all areas across all nodes into a single sorted list.
+          const allAreas = nodeStorageConfigs.flatMap((nsc) =>
+            nsc.areas.map((area) => ({
+              area,
+              nodeId: nsc.nodeId,
+              nodeName: resolveNodeName(nsc.nodeId),
+            })),
+          ).sort((a, b) => (a.area.name || a.area.id).localeCompare(b.area.name || b.area.id));
 
-                  {areas.length === 0 ? (
-                    <div className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                      No storage areas configured.
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-2">
-                      {areas.map((area) => (
-                        <div
-                          key={area.id}
-                          className={`flex items-center gap-3 px-3 py-2 rounded border ${c(
-                            "border-ink-border bg-ink-surface",
-                            "border-light-border bg-light-surface",
-                          )}`}
-                        >
-                          <Badge variant="muted" dark={dark}>
-                            class {area.storageClass}
-                          </Badge>
-                          <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
-                            {area.name || area.id}
-                          </span>
-                          <span className={`text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
-                            {area.path}
-                          </span>
-                          <span className="flex-1" />
-                          <button
-                            onClick={() => handleRemoveArea(nsc.nodeId, area.id)}
-                            disabled={setNodeStorage.isPending}
-                            className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                              "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                              "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
-                            )} disabled:opacity-50`}
-                          >
-                            Remove
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+          if (!isLoading && allAreas.length === 0 && !addingArea) {
+            return (
+              <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                No file storage configured. Click &quot;Add Storage Area&quot; to create one.
+              </div>
+            );
+          }
+
+          return (
+            <div className="flex flex-col gap-2">
+              {allAreas.map(({ area, nodeId, nodeName }) => (
+                <StorageAreaCard
+                  key={area.id}
+                  area={area}
+                  nodeName={nodeName}
+                  dark={dark}
+                  expanded={isExpanded(`area-${area.id}`)}
+                  onToggle={() => toggleCard(`area-${area.id}`)}
+                  onSave={async (areaId, edit) => {
+                    await handleUpdateArea(nodeId, areaId, edit);
+                  }}
+                  onDelete={async (areaId) => {
+                    await handleRemoveArea(nodeId, areaId);
+                  }}
+                  saving={setNodeStorage.isPending}
+                />
+              ))}
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
