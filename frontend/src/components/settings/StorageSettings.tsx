@@ -11,7 +11,7 @@ import { useToast } from "../Toast";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput, NumberInput } from "./FormField";
+import { FormField, TextInput, SelectInput, NumberInput, SpinnerInput } from "./FormField";
 import { sortByName } from "../../lib/sort";
 import { CloudServiceCard } from "./CloudServiceCard";
 import { CloudServiceFields } from "./CloudServiceFields";
@@ -335,10 +335,9 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                 />
               </FormField>
               <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
-                <NumberInput
+                <SpinnerInput
                   value={areaClass}
                   onChange={setAreaClass}
-                  placeholder=""
                   dark={dark}
                   min={0}
                 />

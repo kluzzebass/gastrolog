@@ -294,10 +294,9 @@ export function TierEntryCard({
               dark={dark}
             />
           ) : (
-            <NumberInput
+            <SpinnerInput
               value={tier.storageClass}
               onChange={(v) => onUpdate({ storageClass: v })}
-              placeholder="0"
               dark={dark}
               min={0}
             />
