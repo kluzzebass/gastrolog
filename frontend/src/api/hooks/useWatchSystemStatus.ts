@@ -1,7 +1,26 @@
 import { useEffect } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { lifecycleClient, refreshAuth } from "../client";
+import type { WatchSystemStatusResponse } from "../gen/gastrolog/v1/lifecycle_pb";
+
+/** Apply a single WatchSystemStatus message to the query cache. */
+function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
+  if (msg.cluster) {
+    qc.setQueryData(["clusterStatus"], msg.cluster);
+  }
+  if (msg.health) {
+    qc.setQueryData(["health"], msg.health);
+  }
+  // routeStats is always present on the message proto — write unconditionally.
+  qc.setQueryData(["route-stats"], msg.routeStats);
+  if (msg.vaults.length > 0) {
+    qc.setQueryData(["vaults"], msg.vaults);
+  }
+  if (msg.stats) {
+    qc.setQueryData(["stats", "all"], msg.stats);
+  }
+}
 
 /**
  * Subscribes to the WatchSystemStatus server stream and updates query caches
@@ -25,25 +44,7 @@ export function useWatchSystemStatus() {
           {},
           { signal: abort.signal },
         )) {
-          // Write cluster status directly into cache.
-          if (msg.cluster) {
-            qc.setQueryData(["clusterStatus"], msg.cluster);
-          }
-          // Write health directly into cache.
-          if (msg.health) {
-            qc.setQueryData(["health"], msg.health);
-          }
-          // Write route stats directly into cache.
-          if (msg.routeStats) {
-            qc.setQueryData(["route-stats"], msg.routeStats);
-          }
-          // Write vault list and stats directly — no HTTP refetch needed.
-          if (msg.vaults) {
-            qc.setQueryData(["vaults"], msg.vaults);
-          }
-          if (msg.stats) {
-            qc.setQueryData(["stats", "all"], msg.stats);
-          }
+          applyStatusMessage(qc, msg);
           nextBackoff = 0;
         }
       } catch (err) {

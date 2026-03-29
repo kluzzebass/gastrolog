@@ -115,7 +115,7 @@ describe("useEditState", () => {
 
   test("isDirty returns false for stale edits", () => {
     let externalName = "original";
-    const dynamicDefaults = (id: string) => ({
+    const dynamicDefaults = (_id: string) => ({
       name: externalName,
       count: 0,
     });

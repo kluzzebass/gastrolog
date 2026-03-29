@@ -87,6 +87,23 @@ function useNodeContext() {
   return { localNodeId, multiNode, nodeNames, cluster };
 }
 
+/** Build vault ID → "cloud" map from config tiers. */
+function buildCloudProviderMap(config: { vaults: { id: string; tierIds: string[] }[]; tiers: { id: string; cloudServiceId: string }[] } | undefined): Map<string, string> {
+  const map = new Map<string, string>();
+  if (!config) return map;
+  const tierMap = new Map(config.tiers.map((t) => [t.id, t]));
+  for (const vc of config.vaults) {
+    for (const tid of vc.tierIds) {
+      const tier = tierMap.get(tid);
+      if (tier?.cloudServiceId) {
+        map.set(vc.id, "cloud");
+        break;
+      }
+    }
+  }
+  return map;
+}
+
 // ---- Vaults ----
 
 function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
@@ -94,20 +111,7 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
   const { data: config } = useConfig();
   const { expanded, toggle, add } = useToggleSet();
 
-  // Build a vault ID → cloud tier type map from config tiers.
-  const cloudProviders = new Map<string, string>();
-  if (config?.vaults && config?.tiers) {
-    const tierMap = new Map(config.tiers.map((t) => [t.id, t]));
-    for (const vc of config.vaults) {
-      for (const tid of vc.tierIds) {
-        const tier = tierMap.get(tid);
-        if (tier?.cloudServiceId) {
-          cloudProviders.set(vc.id, "cloud");
-          break;
-        }
-      }
-    }
-  }
+  const cloudProviders = buildCloudProviderMap(config);
 
   // Auto-expand a vault when deep-linked from settings.
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);

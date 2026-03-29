@@ -11,7 +11,7 @@ interface MigrateTarget {
 
 export function MigrateVaultForm({
   dark,
-  vault,
+  vault: _vault,
   target,
   isPending,
   activeJob,

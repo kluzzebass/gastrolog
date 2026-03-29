@@ -71,6 +71,7 @@ interface VaultSettingsCardProps {
   onOpenInspector?: (inspectorParam: string) => void;
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- vault card manages tier editing, reorder, creation, and vault-level fields in one component
 export function VaultSettingsCard({
   vault,
   vaults,
@@ -87,6 +88,24 @@ export function VaultSettingsCard({
   onToggle,
   onOpenInspector,
 }: Readonly<VaultSettingsCardProps>) {
+  // Compute max RF per storage class.
+  const classNodeCount = new Map<number, number>();
+  for (const nsc of nodeStorageConfigs) {
+    const seen = new Set<number>();
+    for (const area of nsc.areas) {
+      if (!seen.has(area.storageClass)) {
+        seen.add(area.storageClass);
+        classNodeCount.set(area.storageClass, (classNodeCount.get(area.storageClass) ?? 0) + 1);
+      }
+    }
+  }
+  const totalNodes = nodeConfigs.length || 1;
+  const maxRFForTier = (t: { type: TierType; storageClass: number; activeChunkClass: number }) => {
+    if (t.type === TierType.MEMORY) return totalNodes;
+    if (t.type === TierType.JSONL) return 1;
+    const sc = t.type === TierType.CLOUD ? t.activeChunkClass : t.storageClass;
+    return classNodeCount.get(sc) ?? totalNodes;
+  };
   const c = useThemeClass(dark);
   const putVault = usePutVault();
   const putTier = usePutTier();
@@ -221,6 +240,96 @@ export function VaultSettingsCard({
     // when the parent re-renders with updated config from setQueryData.
   });
 
+  // eslint-disable-next-line sonarjs/cognitive-complexity -- save handler coordinates tier creation, per-tier updates, and vault save sequentially
+  const handleSaveAll = async () => {
+    // Create staged new tier first, then include its ID in the vault save.
+    let newTierIds = [...edit.tierIds];
+    if (newTier && isTierComplete(newTier, cloudServiceOptions.length > 0)) {
+      const tierId = crypto.randomUUID();
+      const tierCfg = new TierConfig({
+        id: tierId,
+        name: newTier.type,
+        type: tierTypeEnum(newTier.type),
+        storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
+        cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
+        activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
+        cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
+        memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
+        rotationPolicyId: newTier.rotationPolicyId,
+        retentionRules: newTier.retentionPolicyId
+          ? [new RetentionRule({
+              retentionPolicyId: newTier.retentionPolicyId,
+              action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
+            })]
+          : [],
+        replicationFactor: newTier.type === "jsonl" ? 1 : parseInt(newTier.replicationFactor, 10) || 1,
+        path: newTier.type === "jsonl" ? newTier.path : "",
+        nodeId: newTier.type === "jsonl" ? newTier.nodeId : "",
+      });
+      try {
+        await putTier.mutateAsync({ config: tierCfg });
+        newTierIds = [...newTierIds, tierId];
+        setEdit({ tierIds: newTierIds });
+        setNewTier(null);
+      } catch (err: unknown) {
+        addToast(err instanceof Error ? err.message : "Failed to create tier", "error");
+        return; // Don't save vault if tier creation failed.
+      }
+    }
+
+    // Save all tier-level changes in one pass per tier.
+    // Always recalculates retention actions — they depend on position,
+    // which changes when tiers are added/removed/reordered.
+    for (const tierId of newTierIds) {
+      const tier = tiers.find((t) => t.id === tierId);
+      if (!tier) continue;
+
+      const rpId = edit.tierRotation[tierId] ?? tier.rotationPolicyId;
+      const retPolicyId = edit.tierRetention[tierId] ?? (tier.retentionRules[0]?.retentionPolicyId ?? "");
+      const rfStr = edit.tierRF[tierId] ?? String(tier.replicationFactor || 1);
+      const rf = parseInt(rfStr, 10) || 1;
+      const scStr = edit.tierStorageClass[tierId] ?? String(tier.storageClass || 0);
+      const sc = parseInt(scStr, 10) || 0;
+      const accStr = edit.tierActiveChunkClass[tierId] ?? String(tier.activeChunkClass || 0);
+      const acc = parseInt(accStr, 10) || 0;
+      const ccStr = edit.tierCacheClass[tierId] ?? String(tier.cacheClass || 0);
+      const cc = parseInt(ccStr, 10) || 0;
+
+      const tierIndex = newTierIds.indexOf(tierId);
+      const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
+      const currentAction = tier.retentionRules[0]?.action;
+      const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
+
+      const rotChanged = rpId !== tier.rotationPolicyId;
+      const retChanged = retPolicyId !== currentRetId || (retPolicyId && currentAction !== expectedAction);
+      const rfChanged = rf !== (tier.replicationFactor || 1);
+      const scChanged = sc !== (tier.storageClass || 0);
+      const accChanged = acc !== (tier.activeChunkClass || 0);
+      const ccChanged = cc !== (tier.cacheClass || 0);
+
+      if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged) continue;
+
+      const updated = tier.clone();
+      if (rotChanged) updated.rotationPolicyId = rpId;
+      if (rfChanged) updated.replicationFactor = rf;
+      if (scChanged) updated.storageClass = sc;
+      if (accChanged) updated.activeChunkClass = acc;
+      if (ccChanged) updated.cacheClass = cc;
+      updated.retentionRules = retPolicyId
+        ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: expectedAction })]
+        : [];
+      await putTier.mutateAsync({ config: updated });
+    }
+    // Save vault-level changes (name, enabled, tier order).
+    const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
+      JSON.stringify(newTierIds) !== JSON.stringify([...vault.tierIds]);
+    if (vaultChanged) {
+      saveVault(vault.id, { name: edit.name, tierIds: newTierIds, enabled: edit.enabled });
+    }
+    // Mark for reset — the next props update will sync edit state.
+    setPendingReset(true);
+  };
+
   const warnings: string[] = [];
   if (vaultTiers.length === 0) warnings.push("no tiers configured");
 
@@ -330,94 +439,7 @@ export function VaultSettingsCard({
             </Button>
           )}
           <Button
-            onClick={async () => {
-              // Create staged new tier first, then include its ID in the vault save.
-              let newTierIds = [...edit.tierIds];
-              if (newTier && isTierComplete(newTier, cloudServiceOptions.length > 0)) {
-                const tierId = crypto.randomUUID();
-                const tierCfg = new TierConfig({
-                  id: tierId,
-                  name: newTier.type,
-                  type: tierTypeEnum(newTier.type),
-                  storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
-                  cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
-                  activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
-                  cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
-                  memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
-                  rotationPolicyId: newTier.rotationPolicyId,
-                  retentionRules: newTier.retentionPolicyId
-                    ? [new RetentionRule({
-                        retentionPolicyId: newTier.retentionPolicyId,
-                        action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
-                      })]
-                    : [],
-                  replicationFactor: newTier.type === "jsonl" ? 1 : parseInt(newTier.replicationFactor, 10) || 1,
-                  path: newTier.type === "jsonl" ? newTier.path : "",
-                  nodeId: newTier.type === "jsonl" ? newTier.nodeId : "",
-                });
-                try {
-                  await putTier.mutateAsync({ config: tierCfg });
-                  newTierIds = [...newTierIds, tierId];
-                  setEdit({ tierIds: newTierIds });
-                  setNewTier(null);
-                } catch (err: unknown) {
-                  addToast(err instanceof Error ? err.message : "Failed to create tier", "error");
-                  return; // Don't save vault if tier creation failed.
-                }
-              }
-
-              // Save all tier-level changes in one pass per tier.
-              // Always recalculates retention actions — they depend on position,
-              // which changes when tiers are added/removed/reordered.
-              for (const tierId of newTierIds) {
-                const tier = tiers.find((t) => t.id === tierId);
-                if (!tier) continue;
-
-                const rpId = edit.tierRotation[tierId] ?? tier.rotationPolicyId;
-                const retPolicyId = edit.tierRetention[tierId] ?? (tier.retentionRules[0]?.retentionPolicyId ?? "");
-                const rfStr = edit.tierRF[tierId] ?? String(tier.replicationFactor || 1);
-                const rf = parseInt(rfStr, 10) || 1;
-                const scStr = edit.tierStorageClass[tierId] ?? String(tier.storageClass || 0);
-                const sc = parseInt(scStr, 10) || 0;
-                const accStr = edit.tierActiveChunkClass[tierId] ?? String(tier.activeChunkClass || 0);
-                const acc = parseInt(accStr, 10) || 0;
-                const ccStr = edit.tierCacheClass[tierId] ?? String(tier.cacheClass || 0);
-                const cc = parseInt(ccStr, 10) || 0;
-
-                const tierIndex = newTierIds.indexOf(tierId);
-                const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
-                const currentAction = tier.retentionRules[0]?.action;
-                const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
-
-                const rotChanged = rpId !== tier.rotationPolicyId;
-                const retChanged = retPolicyId !== currentRetId || (retPolicyId && currentAction !== expectedAction);
-                const rfChanged = rf !== (tier.replicationFactor || 1);
-                const scChanged = sc !== (tier.storageClass || 0);
-                const accChanged = acc !== (tier.activeChunkClass || 0);
-                const ccChanged = cc !== (tier.cacheClass || 0);
-
-                if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged) continue;
-
-                const updated = tier.clone();
-                if (rotChanged) updated.rotationPolicyId = rpId;
-                if (rfChanged) updated.replicationFactor = rf;
-                if (scChanged) updated.storageClass = sc;
-                if (accChanged) updated.activeChunkClass = acc;
-                if (ccChanged) updated.cacheClass = cc;
-                updated.retentionRules = retPolicyId
-                  ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: expectedAction })]
-                  : [];
-                await putTier.mutateAsync({ config: updated });
-              }
-              // Save vault-level changes (name, enabled, tier order).
-              const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
-                JSON.stringify(newTierIds) !== JSON.stringify([...vault.tierIds]);
-              if (vaultChanged) {
-                saveVault(vault.id, { name: edit.name, tierIds: newTierIds, enabled: edit.enabled });
-              }
-              // Mark for reset — the next props update will sync edit state.
-              setPendingReset(true);
-            }}
+            onClick={handleSaveAll}
             disabled={putVault.isPending || putTier.isPending || !anyDirty}
           >
             {putVault.isPending || putTier.isPending ? "Saving..." : "Save"}
@@ -546,7 +568,7 @@ export function VaultSettingsCard({
                       )}
                       {tier.type === TierType.JSONL && (
                         <span className="font-mono">
-                          {tier.path || `jsonl/${vault?.name || "vault"}/sink_${String(i + 1)}.jsonl`}
+                          {tier.path || `jsonl/${vault.name || "vault"}/sink_${String(i + 1)}.jsonl`}
                         </span>
                       )}
                       {tier.type === TierType.MEMORY && tier.memoryBudgetBytes > 0 && (
@@ -559,7 +581,7 @@ export function VaultSettingsCard({
                       {tier.type !== TierType.JSONL && (
                         <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
                       )}
-                      {(tier.secondaryNodeIds?.length ?? 0) > 0 && (
+                      {tier.secondaryNodeIds.length > 0 && (
                         <span>
                           {tier.secondaryNodeIds.map((id, si) => {
                             const name = resolveNodeName(id);
@@ -577,7 +599,7 @@ export function VaultSettingsCard({
                           })}
                         </span>
                       )}
-                      {(tier.replicationFactor || 1) > 1 && (tier.secondaryNodeIds?.length ?? 0) + 1 < (tier.replicationFactor || 1) && (
+                      {(tier.replicationFactor || 1) > 1 && tier.secondaryNodeIds.length + 1 < (tier.replicationFactor || 1) && (
                         <span className="text-severity-error">
                           {`insufficient nodes for RF=${String(tier.replicationFactor)}`}
                         </span>
@@ -643,13 +665,13 @@ export function VaultSettingsCard({
                         </div>
                       )}
                       {tier.type !== TierType.JSONL && (
-                        <FormField label="Replication Factor" dark={dark} description="1 = no replication, 3+ = fault tolerant">
+                        <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
                           <SpinnerInput
-                            value={edit.tierRF[tier.id] ?? String(tier.replicationFactor ?? 1)}
+                            value={edit.tierRF[tier.id] ?? String(tier.replicationFactor || 1)}
                             onChange={(v) => setTierRF(tier.id, v)}
                             dark={dark}
                             min={1}
-                            skip={[2]}
+                            max={maxRFForTier(tier)}
                           />
                         </FormField>
                       )}
@@ -669,7 +691,7 @@ export function VaultSettingsCard({
               rotationPolicyOptions={rotationPolicyOptions}
               retentionPolicyOptions={retentionPolicyOptions}
               nodeOptions={nodeConfigs.map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
-              vaultName={vault?.name || ""}
+              vaultName={vault.name || ""}
               onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
               onRemove={() => setNewTier(null)}
             />

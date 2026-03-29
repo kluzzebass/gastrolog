@@ -95,7 +95,6 @@ function CronField({
   onChange: (v: string) => void;
   dark: boolean;
 }>) {
-  const c = useThemeClass(dark);
   const trimmed = value.trim();
   const validation = trimmed ? validateCron(trimmed) : null;
   const description = validation?.valid ? describeCron(trimmed) : null;
@@ -131,7 +130,7 @@ function CronField({
   );
 }
 
-export function PoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRotationPolicy();

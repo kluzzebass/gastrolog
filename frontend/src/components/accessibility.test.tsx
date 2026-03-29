@@ -22,7 +22,7 @@ const noopFn = () => {};
 
 describe("Dialog accessibility", () => {
   test("has role=dialog and aria-modal", () => {
-    const { container } = render(
+    render(
       <Dialog onClose={noopFn} ariaLabel="Test Dialog" dark={true}>
         <p>content</p>
       </Dialog>,
@@ -46,7 +46,7 @@ describe("Dialog accessibility", () => {
   });
 
   test("close button has aria-label", () => {
-    const { container } = render(
+    render(
       <Dialog onClose={noopFn} ariaLabel="Test" dark={true}>
         <p>content</p>
       </Dialog>,
@@ -56,7 +56,7 @@ describe("Dialog accessibility", () => {
   });
 
   test("backdrop button has aria-label", () => {
-    const { container } = render(
+    render(
       <Dialog onClose={noopFn} ariaLabel="Test" dark={true}>
         <p>content</p>
       </Dialog>,
@@ -68,7 +68,7 @@ describe("Dialog accessibility", () => {
 
   test("clicking close button calls onClose", () => {
     const onClose = mock(noopFn);
-    const { container } = render(
+    render(
       <Dialog onClose={onClose} ariaLabel="Test" dark={true}>
         <p>content</p>
       </Dialog>,
@@ -83,7 +83,7 @@ describe("Dialog accessibility", () => {
 describe("Checkbox keyboard interaction", () => {
   test("Enter key toggles checkbox", () => {
     const onChange = mock(noopFn);
-    const { container } = render(
+    render(
       <Checkbox checked={false} onChange={onChange} dark={true} />,
     );
     const el = document.querySelector('[role="checkbox"]')!;
@@ -93,7 +93,7 @@ describe("Checkbox keyboard interaction", () => {
 
   test("Space key toggles checkbox", () => {
     const onChange = mock(noopFn);
-    const { container } = render(
+    render(
       <Checkbox checked={true} onChange={onChange} dark={true} />,
     );
     const el = document.querySelector('[role="checkbox"]')!;
@@ -102,7 +102,7 @@ describe("Checkbox keyboard interaction", () => {
   });
 
   test("has tabIndex for keyboard focus", () => {
-    const { container } = render(
+    render(
       <Checkbox checked={false} onChange={noopFn} dark={true} />,
     );
     const el = document.querySelector('[role="checkbox"]')!;
@@ -110,7 +110,7 @@ describe("Checkbox keyboard interaction", () => {
   });
 
   test("aria-checked reflects unchecked state", () => {
-    const { container } = render(
+    render(
       <Checkbox checked={false} onChange={noopFn} dark={true} />,
     );
     expect(document.querySelector('[aria-checked="false"]')).toBeTruthy();
@@ -121,7 +121,7 @@ describe("Checkbox keyboard interaction", () => {
 
 describe("ExpandableCard keyboard interaction", () => {
   test("header has role=button and tabIndex", () => {
-    const { container } = render(
+    render(
       <ExpandableCard id="test" dark={true} onToggle={noopFn}>
         <p>body</p>
       </ExpandableCard>,
@@ -133,7 +133,7 @@ describe("ExpandableCard keyboard interaction", () => {
 
   test("Enter key triggers onToggle", () => {
     const onToggle = mock(noopFn);
-    const { container } = render(
+    render(
       <ExpandableCard id="test" dark={true} onToggle={onToggle}>
         <p>body</p>
       </ExpandableCard>,
@@ -145,7 +145,7 @@ describe("ExpandableCard keyboard interaction", () => {
 
   test("Space key triggers onToggle", () => {
     const onToggle = mock(noopFn);
-    const { container } = render(
+    render(
       <ExpandableCard id="test" dark={true} onToggle={onToggle}>
         <p>body</p>
       </ExpandableCard>,
@@ -156,7 +156,7 @@ describe("ExpandableCard keyboard interaction", () => {
   });
 
   test("aria-expanded false when collapsed", () => {
-    const { container } = render(
+    render(
       <ExpandableCard id="test" dark={true} expanded={false}>
         <p>body</p>
       </ExpandableCard>,
@@ -166,7 +166,7 @@ describe("ExpandableCard keyboard interaction", () => {
 
   test("other keys do not trigger onToggle", () => {
     const onToggle = mock(noopFn);
-    const { container } = render(
+    render(
       <ExpandableCard id="test" dark={true} onToggle={onToggle}>
         <p>body</p>
       </ExpandableCard>,
@@ -184,7 +184,7 @@ describe("QueryAutocomplete accessibility", () => {
   const suggestions = ["level", "source", "host"];
 
   test("has role=listbox", () => {
-    const { container } = render(
+    render(
       <QueryAutocomplete
         suggestions={suggestions}
         selectedIndex={0}
@@ -197,7 +197,7 @@ describe("QueryAutocomplete accessibility", () => {
   });
 
   test("options have role=option", () => {
-    const { container } = render(
+    render(
       <QueryAutocomplete
         suggestions={suggestions}
         selectedIndex={0}
@@ -211,7 +211,7 @@ describe("QueryAutocomplete accessibility", () => {
   });
 
   test("selected option has aria-selected=true", () => {
-    const { container } = render(
+    render(
       <QueryAutocomplete
         suggestions={suggestions}
         selectedIndex={1}
@@ -228,7 +228,7 @@ describe("QueryAutocomplete accessibility", () => {
 
   test("clicking option calls onSelect with index", () => {
     const onSelect = mock(noopFn);
-    const { container } = render(
+    render(
       <QueryAutocomplete
         suggestions={suggestions}
         selectedIndex={0}
@@ -244,7 +244,7 @@ describe("QueryAutocomplete accessibility", () => {
   });
 
   test("renders nothing when suggestions is empty", () => {
-    const { container } = render(
+    render(
       <QueryAutocomplete
         suggestions={[]}
         selectedIndex={0}
@@ -324,7 +324,7 @@ function ToastTrigger({ message, level }: Readonly<{ message: string; level?: "e
 
 describe("Toast accessibility", () => {
   test("toast container has role=status and aria-live", () => {
-    const { getByText, container } = render(
+    const { getByText } = render(
       <ToastProvider dark={true}>
         <ToastTrigger message="Something happened" level="info" />
       </ToastProvider>,
@@ -336,7 +336,7 @@ describe("Toast accessibility", () => {
   });
 
   test("toast has dismiss button with aria-label", () => {
-    const { getByText, container } = render(
+    const { getByText } = render(
       <ToastProvider dark={true}>
         <ToastTrigger message="Dismissable toast" level="warn" />
       </ToastProvider>,
@@ -347,7 +347,7 @@ describe("Toast accessibility", () => {
   });
 
   test("dismiss button is clickable", () => {
-    const { getByText, container } = render(
+    const { getByText } = render(
       <ToastProvider dark={true}>
         <ToastTrigger message="Gone soon" level="info" />
       </ToastProvider>,

@@ -26,11 +26,12 @@ export function useAlerts() {
     return aTime - bTime;
   });
 
-  const maxSeverity = alerts.some((a) => a.severity === AlertSeverity.ERROR)
-    ? AlertSeverity.ERROR
-    : alerts.length > 0
-      ? AlertSeverity.WARNING
-      : null;
+  let maxSeverity: AlertSeverity | null = null;
+  if (alerts.some((a) => a.severity === AlertSeverity.ERROR)) {
+    maxSeverity = AlertSeverity.ERROR;
+  } else if (alerts.length > 0) {
+    maxSeverity = AlertSeverity.WARNING;
+  }
 
   return { alerts, maxSeverity };
 }

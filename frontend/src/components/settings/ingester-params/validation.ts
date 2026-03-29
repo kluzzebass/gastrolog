@@ -50,6 +50,18 @@ function getListenAddrs(type: string, params: Record<string, string>, defaults: 
   return extractor ? extractor(params, defaults) : [];
 }
 
+/** Returns a conflict message if any address in `wanted` overlaps with `other`. */
+function findAddrOverlap(wanted: ListenAddr[], other: ListenAddr[]): string | null {
+  for (const w of wanted) {
+    for (const o of other) {
+      if (w.network === o.network && w.address === o.address) {
+        return `${w.network} ${w.address} is already used by another ingester`;
+      }
+    }
+  }
+  return null;
+}
+
 /** Check if an ingester's listen addresses conflict with any other configured ingester on the same node. */
 export function listenAddrConflict(
   selfId: string,
@@ -68,13 +80,8 @@ export function listenAddrConflict(
     if (other.nodeId !== selfNodeId) continue;
     const otherDefaults = allDefaults[other.type] ?? {};
     const otherAddrs = getListenAddrs(other.type, other.params, otherDefaults);
-    for (const w of wanted) {
-      for (const o of otherAddrs) {
-        if (w.network === o.network && w.address === o.address) {
-          return `${w.network} ${w.address} is already used by another ingester`;
-        }
-      }
-    }
+    const conflict = findAddrOverlap(wanted, otherAddrs);
+    if (conflict) return conflict;
   }
   return null;
 }

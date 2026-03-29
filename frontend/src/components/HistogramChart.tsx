@@ -86,6 +86,12 @@ function HistogramLegend({
   );
 }
 
+/** Format elapsed time as a short human-readable string. */
+function formatElapsed(ms: number): string {
+  if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${ms}ms`;
+}
+
 /** Set grab cursor on document body for pan dragging. */
 function setGrabbingCursor() {
   document.body.style.cursor = "grabbing";
@@ -275,14 +281,19 @@ export function HistogramChart({
       name: "cloud",
       type: "bar" as const,
       stack: "total",
-      data: buckets.map((b, i) => ({
-        value: Math.max(b.cloudCount, 0),
-        itemStyle: {
-          color: copperColor,
-          opacity: b.cloudCount > 0 ? (ix.hoveredBar === i ? 0.8 : baseOpacity) : 0,
-          borderRadius: b.cloudCount > 0 ? [2, 2, 0, 0] as number | number[] : 0,
-        },
-      })),
+      data: buckets.map((b, i) => {
+        const isHovered = ix.hoveredBar === i;
+        const hoveredOpacity = isHovered ? 0.8 : baseOpacity;
+        const cloudOpacity = b.cloudCount > 0 ? hoveredOpacity : 0;
+        return {
+          value: Math.max(b.cloudCount, 0),
+          itemStyle: {
+            color: copperColor,
+            opacity: cloudOpacity,
+            borderRadius: b.cloudCount > 0 ? [2, 2, 0, 0] as number | number[] : 0,
+          },
+        };
+      }),
       emphasis: { disabled: true },
       barCategoryGap: "8%",
       cursor: "crosshair",
@@ -550,6 +561,10 @@ export function HistogramChart({
     return h > 0 ? `${sign}${d}d ${h}h` : `${sign}${d}d`;
   };
 
+  let countTitle: string | undefined;
+  if (truncated) countTitle = "Approximate — scan limit reached";
+  else if (hasCloud) countTitle = "Approximate — cloud chunk counts are interpolated";
+
   return (
     <div className="relative">
       {showHeader ? (
@@ -572,9 +587,9 @@ export function HistogramChart({
           </div>
           <span
             className={`font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
-            title={truncated ? "Approximate — scan limit reached" : hasCloud ? "Approximate — cloud chunk counts are interpolated" : undefined}
+            title={countTitle}
           >
-            {truncated ? "~" : ""}{totalCount.toLocaleString()} records{elapsedMs != null ? ` in ${elapsedMs >= 1000 ? `${(elapsedMs / 1000).toFixed(1)}s` : `${elapsedMs}ms`}` : ""}
+            {truncated ? "~" : ""}{totalCount.toLocaleString()} records{elapsedMs != null ? ` in ${formatElapsed(elapsedMs)}` : ""}
           </span>
         </div>
       ) : (

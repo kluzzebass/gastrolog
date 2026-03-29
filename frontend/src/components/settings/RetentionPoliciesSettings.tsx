@@ -79,7 +79,7 @@ function addRetentionFormReducer(state: AddRetentionFormState, action: AddRetent
   }
 }
 
-export function RetentionPoliciesSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
+export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{ dark: boolean; onNavigateTo?: NavigateTo }>) {
   const _c = useThemeClass(dark);
   const { data: config, isLoading } = useConfig();
   const putPolicy = usePutRetentionPolicy();

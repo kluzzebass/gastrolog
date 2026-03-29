@@ -135,7 +135,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
   // Build tier position map from vault config for labeling.
-  const vaultCfg = config?.vaults?.find((v) => v.id === vaultId);
+  const vaultCfg = config?.vaults.find((v) => v.id === vaultId);
   const tierPositions = new Map<string, number>();
   if (vaultCfg) {
     for (const [i, tid] of vaultCfg.tierIds.entries()) {
@@ -272,7 +272,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         if (!group) return null;
 
         const label = `Tier ${String(pos)}: ${group.tierType}`;
-        const tierCfg = config?.tiers?.find((t) => t.id === tierId);
+        const tierCfg = config?.tiers.find((t) => t.id === tierId);
         const rf = tierCfg?.replicationFactor || 1;
         const secondaries = tierCfg?.secondaryNodeIds ?? [];
         const nodeName = tierCfg?.nodeId ? (nodeNameMap.get(tierCfg.nodeId) ?? tierCfg.nodeId) : "";
@@ -446,19 +446,25 @@ function ChunkRow({
             {chunk.archived && (
               <Badge variant="warn" dark={dark}>archived</Badge>
             )}
-            {rf > 1 && (
-              <Badge
-                variant={replicas >= rf ? "info" : replicaNodes.length < rf ? "error" : "warn"}
-                dark={dark}
-                title={replicas >= rf
-                  ? `${String(replicas)} replicas (fully replicated)`
-                  : replicaNodes.length < rf
-                    ? `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage`
-                    : `${String(replicas)}/${String(rf)} replicas — replication in progress`}
-              >
-                {String(replicas)}
-              </Badge>
-            )}
+            {rf > 1 && (() => {
+              let badgeVariant: "info" | "error" | "warn";
+              let badgeTitle: string;
+              if (replicas >= rf) {
+                badgeVariant = "info";
+                badgeTitle = `${String(replicas)} replicas (fully replicated)`;
+              } else if (replicaNodes.length < rf) {
+                badgeVariant = "error";
+                badgeTitle = `${String(replicas)}/${String(rf)} replicas — insufficient nodes with required storage`;
+              } else {
+                badgeVariant = "warn";
+                badgeTitle = `${String(replicas)}/${String(rf)} replicas — replication in progress`;
+              }
+              return (
+                <Badge variant={badgeVariant} dark={dark} title={badgeTitle}>
+                  {String(replicas)}
+                </Badge>
+              );
+            })()}
           </span>
         </td>
         <td className={`px-2 py-2 text-right font-mono whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}>
@@ -538,10 +544,10 @@ function ChunkDetail({
           </div>
           <div className={`flex flex-col gap-1`}>
             <div className={`flex items-center gap-3 text-[0.85em]`}>
-              <span className={`font-mono ${replicas >= rf
-                ? c("text-text-muted", "text-light-text-muted")
-                : replicaNodes.length < rf ? "text-severity-error" : "text-severity-warn"
-              }`}>
+              <span className={`font-mono ${(() => {
+                if (replicas >= rf) return c("text-text-muted", "text-light-text-muted");
+                return replicaNodes.length < rf ? "text-severity-error" : "text-severity-warn";
+              })()}`}>
                 {`${String(replicas)}/${String(rf)}`}
               </span>
               {replicaNodes.length > 0 && (
@@ -583,13 +589,14 @@ function ChunkDetail({
       )}
 
       {/* Active chunks: no indexes yet */}
-      {!chunk.sealed ? (
+      {!chunk.sealed && (
         <div
           className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
         >
           Indexes are built when the chunk is sealed.
         </div>
-      ) : chunk.cloudBacked ? (
+      )}
+      {chunk.sealed && chunk.cloudBacked && (
         <>
           <div
             className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
@@ -615,7 +622,8 @@ function ChunkDetail({
             </div>
           </div>
         </>
-      ) : (
+      )}
+      {chunk.sealed && !chunk.cloudBacked && (
         <>
           {/* Local indexes */}
           <div

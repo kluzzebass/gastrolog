@@ -98,7 +98,7 @@ interface VaultRef {
 function tierLabel(tierId: string, vaults: VaultRef[]): string | null {
   for (const v of vaults) {
     const pos = v.tierIds.indexOf(tierId);
-    if (pos >= 0) {
+    if (pos !== -1) {
       return `${v.name || v.tierIds[0] || tierId}/tier ${String(pos + 1)}`;
     }
   }
@@ -123,7 +123,7 @@ export function tierRuleRefsFor(
 ): string[] {
   return tiers
     .filter((t) =>
-      (t.retentionRules ?? []).some(
+      t.retentionRules.some(
         (r) => r.retentionPolicyId === retentionPolicyId,
       ),
     )

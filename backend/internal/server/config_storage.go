@@ -188,11 +188,8 @@ func (s *ConfigServer) PutTier(
 		}
 	}
 
-	// Reject RF=2: no fault tolerance benefit over RF=1 (2-member Raft
-	// groups can't elect a new leader if either member dies).
-	if req.Msg.Config.ReplicationFactor == 2 {
-		return nil, connect.NewError(connect.CodeInvalidArgument,
-			errors.New("replication factor 2 is not supported; use 1 (no replication) or 3+ (fault tolerant)"))
+	if err := s.validateReplicationFactor(ctx, tierType, req.Msg.Config); err != nil {
+		return nil, err
 	}
 
 	cfg, err := protoToTierConfig(req.Msg.Config)
@@ -322,6 +319,66 @@ func protoToTierType(t apiv1.TierType) config.TierType {
 		return config.TierTypeJSONL
 	default:
 		return ""
+	}
+}
+
+// validateReplicationFactor rejects RF higher than the number of eligible nodes.
+func (s *ConfigServer) validateReplicationFactor(ctx context.Context, tierType config.TierType, p *apiv1.TierConfig) *connect.Error {
+	if p.ReplicationFactor <= 1 {
+		return nil
+	}
+	eligible, err := s.countEligibleNodes(ctx, tierType, p)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	if int(p.ReplicationFactor) > eligible {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("replication factor %d exceeds eligible nodes (%d nodes with required storage class)", p.ReplicationFactor, eligible))
+	}
+	return nil
+}
+
+// countEligibleNodes returns how many cluster nodes can host a tier of the
+// given type with the given storage class requirements.
+func (s *ConfigServer) countEligibleNodes(ctx context.Context, tierType config.TierType, p *apiv1.TierConfig) (int, error) {
+	nscs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	nodes, err := s.cfgStore.ListNodes(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	switch tierType {
+	case config.TierTypeMemory:
+		return len(nodes), nil // any node can host memory tiers
+	case config.TierTypeJSONL:
+		return 1, nil // JSONL tiers are pinned to a single node
+	case config.TierTypeFile:
+		count := 0
+		for _, nsc := range nscs {
+			for _, area := range nsc.Areas {
+				if area.StorageClass == p.StorageClass {
+					count++
+					break
+				}
+			}
+		}
+		return count, nil
+	case config.TierTypeCloud:
+		count := 0
+		for _, nsc := range nscs {
+			for _, area := range nsc.Areas {
+				if area.StorageClass == p.ActiveChunkClass {
+					count++
+					break
+				}
+			}
+		}
+		return count, nil
+	default:
+		return len(nodes), nil
 	}
 }
 

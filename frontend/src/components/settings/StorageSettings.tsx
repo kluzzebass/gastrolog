@@ -11,7 +11,7 @@ import { useToast } from "../Toast";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput, NumberInput, SpinnerInput } from "./FormField";
+import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { sortByName } from "../../lib/sort";
 import { CloudServiceCard } from "./CloudServiceCard";
 import { StorageAreaCard } from "./StorageAreaCard";

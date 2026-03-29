@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { configClient, refreshAuth } from "../client";
-import { getConfigVersion, setConfigVersion } from "./useConfig";
+import { getConfigVersion } from "./useConfig";
 
 export function useWatchConfig() {
   const qc = useQueryClient();

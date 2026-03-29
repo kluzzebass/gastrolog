@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient, QueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { configClient } from "../client";
 import { GetConfigResponse } from "../gen/gastrolog/v1/config_pb";
 import { protoSharing } from "./protoSharing";

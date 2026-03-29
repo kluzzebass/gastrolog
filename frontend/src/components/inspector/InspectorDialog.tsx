@@ -40,8 +40,8 @@ function parseParam(param: string): ParsedState {
     const rest = param.slice(9);
     // Format: "entities:<type>" or "entities:<type>:<entityName>"
     const colonIdx = rest.indexOf(":");
-    const etRaw = colonIdx >= 0 ? rest.slice(0, colonIdx) : rest;
-    const entityName = colonIdx >= 0 ? rest.slice(colonIdx + 1) : null;
+    const etRaw = colonIdx !== -1 ? rest.slice(0, colonIdx) : rest;
+    const entityName = colonIdx !== -1 ? rest.slice(colonIdx + 1) : null;
     const et = etRaw as EntityType;
     if (entityTypes.has(et)) {
       return { mode: "entities", entityType: et, expandTarget: entityName };

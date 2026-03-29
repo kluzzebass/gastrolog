@@ -288,7 +288,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                       dark={dark}
                       onClick={async () => {
                         try {
-                          await regenerateJwt.mutateAsync(undefined);
+                          await regenerateJwt.mutateAsync(undefined); // eslint-disable-line unicorn/no-useless-undefined -- required by useMutation void TArgs
                           addToast("JWT secret regenerated — all sessions invalidated", "info");
                         } catch (err: unknown) {
                           addToast(extractMessage(err, "Failed to regenerate JWT secret"), "error");

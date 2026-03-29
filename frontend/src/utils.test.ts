@@ -82,10 +82,10 @@ describe("extractKVPairs", () => {
   });
 });
 
-describe("relativeTime", () => {
-  const msToInstant = (ms: number) =>
-    Temporal.Instant.fromEpochMilliseconds(ms);
+const msToInstant = (ms: number) =>
+  Temporal.Instant.fromEpochMilliseconds(ms);
 
+describe("relativeTime", () => {
   test("seconds ago", () => {
     expect(relativeTime(msToInstant(Date.now() - 30 * 1000))).toBe("30s ago");
   });

@@ -71,29 +71,28 @@ export function ScatterboxForm({
         </FormField>
       </div>
 
-      {ingesterId && (
-        <button
-          type="button"
-          onClick={handleTrigger}
-          disabled={triggerState !== "idle"}
-          className={`self-start px-3 py-1.5 text-[0.8em] font-medium rounded transition-colors ${
-            triggerState === "sent"
-              ? "bg-green-600/20 text-green-400"
-              : triggerState === "error"
-                ? "bg-severity-error/20 text-severity-error"
-                : c(
-                    "bg-copper/15 text-copper hover:bg-copper/25",
-                    "bg-copper/10 text-copper hover:bg-copper/20",
-                  )
-          }`}
-        >
-          {triggerState === "sent"
-            ? "Burst Sent"
-            : triggerState === "error"
-              ? "Failed"
-              : isOneShot ? "Emit Burst" : "Trigger Extra Burst"}
-        </button>
-      )}
+      {ingesterId && (() => {
+        let stateClasses: string;
+        if (triggerState === "sent") stateClasses = "bg-green-600/20 text-green-400";
+        else if (triggerState === "error") stateClasses = "bg-severity-error/20 text-severity-error";
+        else stateClasses = c("bg-copper/15 text-copper hover:bg-copper/25", "bg-copper/10 text-copper hover:bg-copper/20");
+
+        let label: string;
+        if (triggerState === "sent") label = "Burst Sent";
+        else if (triggerState === "error") label = "Failed";
+        else label = isOneShot ? "Emit Burst" : "Trigger Extra Burst";
+
+        return (
+          <button
+            type="button"
+            onClick={handleTrigger}
+            disabled={triggerState !== "idle"}
+            className={`self-start px-3 py-1.5 text-[0.8em] font-medium rounded transition-colors ${stateClasses}`}
+          >
+            {label}
+          </button>
+        );
+      })()}
     </div>
   );
 }

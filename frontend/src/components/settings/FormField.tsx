@@ -213,6 +213,7 @@ interface SpinnerInputProps {
   dark: boolean;
   disabled?: boolean;
   min?: number;
+  max?: number;
   skip?: number[]; // values to skip when stepping (e.g. [2] to skip RF=2)
 }
 
@@ -222,6 +223,7 @@ export function SpinnerInput({
   dark,
   disabled,
   min = 1,
+  max,
   skip = [],
 }: Readonly<SpinnerInputProps>) {
   const id = useFormFieldId();
@@ -232,6 +234,7 @@ export function SpinnerInput({
     let next = n + dir;
     while (skip.includes(next)) next += dir;
     if (next < min) return;
+    if (max !== undefined && next > max) return;
     onChange(String(next));
   };
 
@@ -261,6 +264,7 @@ export function SpinnerInput({
           if (v === "" || /^\d+$/.test(v)) {
             const parsed = parseInt(v, 10);
             if (v !== "" && parsed < min) return;
+            if (v !== "" && max !== undefined && parsed > max) return;
             if (v !== "" && skip.includes(parsed)) return;
             onChange(v);
           }
@@ -275,7 +279,7 @@ export function SpinnerInput({
         type="button"
         className={`${btnClass} rounded-r border-l-0`}
         onClick={() => step(1)}
-        disabled={disabled}
+        disabled={disabled || (max !== undefined && n >= max)}
         aria-label="Increase"
       >
         {"\u25B6"}

@@ -52,11 +52,14 @@ export function TableView({ columns, rows, dark }: Readonly<TableViewProps>) {
       <table className="w-full font-mono text-[0.8em] border-collapse">
         <thead>
           <tr>
-            {columns.map((col, i) => (
+            {columns.map((col, i) => {
+              let ariaSort: "ascending" | "descending" | undefined;
+              if (sortCol === i) ariaSort = sortDir === "asc" ? "ascending" : "descending";
+              return (
               <th
                 key={col}
                 onClick={() => handleSort(i)}
-                aria-sort={sortCol === i ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
+                aria-sort={ariaSort}
                 className={`text-left px-3 py-2 cursor-pointer select-none border-b whitespace-nowrap ${c(
                   "border-ink-border-subtle text-text-muted hover:text-copper",
                   "border-light-border-subtle text-light-text-muted hover:text-copper",
@@ -69,7 +72,8 @@ export function TableView({ columns, rows, dark }: Readonly<TableViewProps>) {
                   </span>
                 )}
               </th>
-            ))}
+              );
+            })}
           </tr>
         </thead>
         <tbody>

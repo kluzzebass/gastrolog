@@ -210,6 +210,7 @@ export function TierEntryCard({
   retentionPolicyOptions,
   nodeOptions,
   vaultName,
+  maxRF,
   onUpdate,
   onRemove,
 }: Readonly<{
@@ -222,6 +223,7 @@ export function TierEntryCard({
   retentionPolicyOptions: { value: string; label: string }[];
   nodeOptions: { value: string; label: string }[];
   vaultName: string;
+  maxRF?: number;
   onUpdate: (patch: Partial<TierEntry>) => void;
   onRemove: () => void;
 }>) {
@@ -422,13 +424,13 @@ export function TierEntryCard({
       )}
 
       {tier.type !== "jsonl" && (
-        <FormField label="Replication Factor" dark={dark} description="1 = no replication, 3+ = fault tolerant">
+        <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
           <SpinnerInput
             value={tier.replicationFactor}
             onChange={(v) => onUpdate({ replicationFactor: v })}
             dark={dark}
             min={1}
-            skip={[2]}
+            max={maxRF}
           />
         </FormField>
       )}
@@ -485,6 +487,25 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         label: `Class ${String(sc)} — ${nodes.toSorted().join(", ")}`,
       }));
   })();
+
+  // Compute eligible node count per storage class (for RF max).
+  const classNodeCount = new Map<number, number>();
+  for (const nsc of config?.nodeStorageConfigs ?? []) {
+    const seen = new Set<number>();
+    for (const area of nsc.areas) {
+      if (!seen.has(area.storageClass)) {
+        seen.add(area.storageClass);
+        classNodeCount.set(area.storageClass, (classNodeCount.get(area.storageClass) ?? 0) + 1);
+      }
+    }
+  }
+  const totalNodes = config?.nodeConfigs.length ?? 1;
+  const maxRFForTier = (tier: { type: string; storageClass: string; activeChunkClass?: string }) => {
+    if (tier.type === "memory") return totalNodes;
+    if (tier.type === "jsonl") return 1;
+    const sc = parseInt(tier.type === "cloud" ? (tier.activeChunkClass ?? "0") : tier.storageClass, 10) || 0;
+    return classNodeCount.get(sc) ?? totalNodes;
+  };
 
   // Derive cloud storage options
   const cloudServiceOptions = (config?.cloudServices ?? [])
@@ -639,6 +660,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                   retentionPolicyOptions={retentionPolicyOptions}
                   nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
                   vaultName={addForm.name || addForm.namePlaceholder || ""}
+                  maxRF={maxRFForTier(tier)}
                   onUpdate={(patch) =>
                     dispatchAdd({ type: "updateTier", key: tier.key, patch })
                   }

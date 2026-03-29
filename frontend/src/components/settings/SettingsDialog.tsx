@@ -84,7 +84,7 @@ const allTabs: TabDef[] = [
 /** Parse tab param — may include `:entityName` for deep-linking (e.g. "vaults:myVault"). */
 function parseTabParam(raw: string): { tab: SettingsTab; expandEntity: string | null } {
   const idx = raw.indexOf(":");
-  if (idx >= 0) {
+  if (idx !== -1) {
     const t = raw.slice(0, idx) as SettingsTab;
     return { tab: allTabs.some((d) => d.id === t) ? t : "service", expandEntity: raw.slice(idx + 1) };
   }
