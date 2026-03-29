@@ -78,9 +78,13 @@ func (s *VaultServer) GetStats(
 		if _, local := localSet[vaultID]; !local {
 			continue // handled below via peer broadcasts
 		}
-		metas, err := s.orch.ListChunkMetas(vaultID)
+		tieredMetas, err := s.orch.ListAllChunkMetas(vaultID)
 		if err != nil {
 			continue
+		}
+		metas := make([]chunk.ChunkMeta, len(tieredMetas))
+		for i, tm := range tieredMetas {
+			metas[i] = tm.ChunkMeta
 		}
 		resp.TotalVaults++
 		vaultStat := s.buildVaultStats(ctx, vaultID, metas)
@@ -325,24 +329,23 @@ func (s *VaultServer) vaultInfoFromConfig(cfg config.VaultConfig, localSet map[u
 		Enabled: cfg.Enabled,
 	}
 
-	// Enrich from both local tiers and remote peer stats.
-	// A vault may span multiple nodes — local data alone is incomplete.
+	// Enrich with runtime stats. Local tiers are authoritative; peer
+	// broadcast stats are only used for purely remote vaults where we
+	// have no local data. Mixing the two double-counts shared tiers.
 	_, registered := localSet[cfg.ID]
 	if registered {
 		info.Enabled = s.orch.IsVaultEnabled(cfg.ID)
 		s.enrichLocalVaultInfo(info, cfg.ID)
-	}
-	// Always add remote stats — other nodes may have tiers we don't.
-	s.enrichRemoteVaultInfo(info, cfg.ID)
-	if !registered {
+	} else {
 		info.Remote = true
+		s.enrichRemoteVaultInfo(info, cfg.ID)
 	}
 
 	return info
 }
 
 func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id uuid.UUID) {
-	metas, err := s.orch.ListChunkMetas(id)
+	metas, err := s.orch.ListAllChunkMetas(id)
 	if err != nil {
 		return
 	}

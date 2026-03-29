@@ -389,13 +389,17 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("invalid vault_id: %w", err)
 	}
 
-	scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, req.GetQuery())
-	q, pipeline, err := server.ParseExpression(scopedExpr)
+	// Match production behavior: only search primary tiers on this node.
+	// Production ForwardSearch uses PrimaryTierQueryEngineForVault.
+	eng := orch.PrimaryTierQueryEngineForVault(vaultID)
+	if eng == nil {
+		return &gastrologv1.ForwardSearchResponse{}, nil
+	}
+
+	q, pipeline, err := server.ParseExpression(req.GetQuery())
 	if err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
-
-	eng := orch.MultiVaultQueryEngine()
 
 	// Pipeline query: run locally and return table.
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
@@ -411,7 +415,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 	}
 
 	// Compute histogram for this vault.
-	histogram := eng.ComputeHistogramForVaults(ctx, q, 50, []uuid.UUID{vaultID})
+	histogram := eng.ComputeHistogram(ctx, q, 50)
 	var histProto []*gastrologv1.HistogramBucket
 	for _, b := range histogram {
 		histProto = append(histProto, &gastrologv1.HistogramBucket{
@@ -463,16 +467,21 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
-	scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultID, req.GetQuery())
-	q, pipeline, parseErr := server.ParseExpression(scopedExpr)
+	// Match production behavior: only search primary tiers on this node.
+	eng := orch.PrimaryTierQueryEngineForVault(vaultID)
+	if eng == nil {
+		close(recCh)
+		close(errCh)
+		return recCh, nil, nil, errCh, func() []byte { return nil }
+	}
+
+	q, pipeline, parseErr := server.ParseExpression(req.GetQuery())
 	if parseErr != nil {
 		errCh <- fmt.Errorf("parse: %w", parseErr)
 		close(recCh)
 		close(errCh)
 		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
-
-	eng := orch.MultiVaultQueryEngine()
 
 	// Pipeline query: return table result synchronously.
 	if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
@@ -491,7 +500,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 	}
 
 	// Compute histogram.
-	histogram := eng.ComputeHistogramForVaults(ctx, q, 50, []uuid.UUID{vaultID})
+	histogram := eng.ComputeHistogram(ctx, q, 50)
 	var histProto []*gastrologv1.HistogramBucket
 	for _, b := range histogram {
 		histProto = append(histProto, &gastrologv1.HistogramBucket{
