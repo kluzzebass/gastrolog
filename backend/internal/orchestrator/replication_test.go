@@ -9,6 +9,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
+	"gastrolog/internal/config"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
@@ -69,7 +70,7 @@ func (m *replicationFakeTransferrer) StreamToTier(_ context.Context, _ string, _
 
 // ---------- helpers ----------
 
-func newReplicationTier(t *testing.T, tierID uuid.UUID, secondaries []string, isSecondary bool, primaryNodeID string) *TierInstance {
+func newReplicationTier(t *testing.T, tierID uuid.UUID, secondaries []config.ReplicationTarget, isSecondary bool, primaryNodeID string) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -87,7 +88,7 @@ func newReplicationTier(t *testing.T, tierID uuid.UUID, secondaries []string, is
 		Query:            query.New(cm, im, nil),
 		IsSecondary:      isSecondary,
 		PrimaryNodeID:    primaryNodeID,
-		SecondaryNodeIDs: secondaries,
+		SecondaryTargets: secondaries,
 	}
 }
 

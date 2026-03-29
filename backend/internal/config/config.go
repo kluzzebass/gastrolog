@@ -781,7 +781,9 @@ func (t TierConfig) PrimaryNodeID(nscs []NodeStorageConfig) string {
 	return NodeIDForStorage(storageID, nscs)
 }
 
-// SecondaryNodeIDs derives secondary node IDs from placements + storage configs.
+// SecondaryNodeIDs derives unique secondary node IDs from placements + storage configs.
+// Multiple same-node placements are deduplicated. Use SecondaryTargets for
+// storage-level granularity.
 func (t TierConfig) SecondaryNodeIDs(nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
@@ -793,6 +795,26 @@ func (t TierConfig) SecondaryNodeIDs(nscs []NodeStorageConfig) []string {
 		}
 	}
 	return nodeIDs
+}
+
+// ReplicationTarget identifies a specific storage on a specific node.
+type ReplicationTarget struct {
+	NodeID    string
+	StorageID string
+}
+
+// SecondaryTargets returns one target per secondary placement — NOT deduplicated
+// by node. Multiple placements on the same node produce multiple targets,
+// enabling same-node replication across different file storages.
+func (t TierConfig) SecondaryTargets(nscs []NodeStorageConfig) []ReplicationTarget {
+	var targets []ReplicationTarget
+	for _, storageID := range t.SecondaryStorageIDs() {
+		nid := NodeIDForStorage(storageID, nscs)
+		if nid != "" {
+			targets = append(targets, ReplicationTarget{NodeID: nid, StorageID: storageID})
+		}
+	}
+	return targets
 }
 
 // ClusterTLS holds mTLS material for the cluster gRPC port.

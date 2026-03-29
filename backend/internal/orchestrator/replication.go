@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 
 	"github.com/google/uuid"
 )
@@ -46,9 +47,9 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replication
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for _, t := range tasks {
-		for _, nodeID := range t.secondaries {
-			if err := o.transferrer.ForwardTierAppend(ctx, nodeID, t.vaultID, t.tierID, []chunk.Record{rec}); err != nil {
-				ack <- fmt.Errorf("ack-gated replication to %s: %w", nodeID, err)
+		for _, tgt := range t.targets {
+			if err := o.transferrer.ForwardTierAppend(ctx, tgt.NodeID, t.vaultID, t.tierID, []chunk.Record{rec}); err != nil {
+				ack <- fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
 				return
 			}
 		}
@@ -58,8 +59,8 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replication
 
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
-func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {
-	if len(secondaryNodeIDs) == 0 {
+func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []config.ReplicationTarget) {
+	if len(targets) == 0 {
 		return
 	}
 	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
@@ -70,19 +71,18 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 		// not when it's scheduled.
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		o.replicateSealedChunk(ctx, vaultID, tierID, chunkID, secondaryNodeIDs)
+		o.replicateSealedChunk(ctx, vaultID, tierID, chunkID, targets)
 	}); err != nil {
 		o.logger.Warn("failed to schedule replication", "name", name, "error", err)
 	}
-	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d secondaries", chunkID, len(secondaryNodeIDs)))
+	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d secondaries", chunkID, len(targets)))
 }
 
-// replicateSealedChunk copies a sealed chunk from the primary to all secondaries.
-// Runs as its own scheduler job — decoupled from post-seal.
-// Each secondary receives the chunk via ForwardImportRecords with the original
-// chunk ID preserved — no ID mismatch, no ordering issues, no races.
-func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, secondaryNodeIDs []string) {
-	if o.transferrer == nil || len(secondaryNodeIDs) == 0 {
+// replicateSealedChunk copies a sealed chunk from the primary to all secondary
+// targets. Each target is a (nodeID, storageID) pair — multiple targets on the
+// same node are distinct (different file storages for same-node replication).
+func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []config.ReplicationTarget) {
+	if o.transferrer == nil || len(targets) == 0 {
 		return
 	}
 
@@ -93,17 +93,49 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		return
 	}
 
-	for _, nodeID := range secondaryNodeIDs {
-		if err := o.replicateToSecondary(ctx, vaultID, tierID, chunkID, tier.Chunks, nodeID); err != nil {
-			o.logger.Warn("replication: sealed chunk failed",
-				"node", nodeID, "vault", vaultID, "tier", tierID,
+	for _, tgt := range targets {
+		o.replicateToTarget(ctx, vaultID, tierID, chunkID, tier.Chunks, tgt)
+	}
+}
+
+// replicateToTarget sends a sealed chunk to one target. Same-node targets
+// use local ImportToTierStorage; cross-node targets use gRPC.
+func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt config.ReplicationTarget) {
+	if tgt.NodeID == o.localNodeID {
+		if err := o.replicateLocally(ctx, vaultID, tierID, tgt.StorageID, chunkID, sourceCM); err != nil {
+			o.logger.Warn("replication: local copy failed",
+				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
 				"chunk", chunkID.String(), "error", err)
 		} else {
-			o.logger.Info("replication: sealed chunk sent",
-				"node", nodeID, "vault", vaultID, "tier", tierID,
+			o.logger.Info("replication: local copy done",
+				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
 				"chunk", chunkID.String())
 		}
+		return
 	}
+	if err := o.replicateToSecondary(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
+		o.logger.Warn("replication: sealed chunk failed",
+			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
+			"chunk", chunkID.String(), "error", err)
+	} else {
+		o.logger.Info("replication: sealed chunk sent",
+			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
+			"chunk", chunkID.String())
+	}
+}
+
+// replicateLocally copies a sealed chunk to a different storage-specific
+// tier instance on the same node. Opens a cursor on the source, then
+// imports into the target via ImportToTierStorage.
+func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID uuid.UUID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
+	cursor, err := sourceCM.OpenCursor(chunkID)
+	if err != nil {
+		return fmt.Errorf("open cursor: %w", err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	iter := chunk.CursorIterator(cursor)
+	return o.ImportToTierStorage(ctx, vaultID, tierID, storageID, chunkID, iter)
 }
 
 // replicateToSecondary streams a single sealed chunk to one secondary node.

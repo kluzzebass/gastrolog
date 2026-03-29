@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
 )
@@ -222,14 +223,14 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		}
 
 		// Primary: forward to secondaries for active-chunk durability.
-		if !tier.IsSecondary && len(tier.SecondaryNodeIDs) > 0 && o.forwarder != nil {
+		if !tier.IsSecondary && len(tier.SecondaryTargets) > 0 && o.forwarder != nil {
 			activeNow := cm.Active()
 			var activeChunkID chunk.ChunkID
 			if activeNow != nil {
 				activeChunkID = activeNow.ID
 			}
-			for _, nodeID := range tier.SecondaryNodeIDs {
-				_ = o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, tierID, activeChunkID, []chunk.Record{rec})
+			for _, tgt := range tier.SecondaryTargets {
+				_ = o.forwarder.ForwardToTier(context.Background(), tgt.NodeID, vaultID, tierID, activeChunkID, []chunk.Record{rec})
 			}
 		}
 
@@ -266,10 +267,10 @@ func (o *Orchestrator) Append(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkI
 // Returned by appendRecord when rec.WaitForReplica is true, consumed by
 // ackAfterReplication outside the orchestrator lock.
 type replicationTask struct {
-	vaultID     uuid.UUID
-	tierID      uuid.UUID
-	chunkID     chunk.ChunkID
-	secondaries []string
+	vaultID uuid.UUID
+	tierID  uuid.UUID
+	chunkID chunk.ChunkID
+	targets []config.ReplicationTarget
 }
 
 // appendRecord is the unified append-with-seal-detection path.
@@ -302,7 +303,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	// sync forwarding outside the lock via ackAfterReplication.
 	activeTier := vault.ActiveTier()
 	var task *replicationTask
-	if !activeTier.IsSecondary && len(activeTier.SecondaryNodeIDs) > 0 {
+	if !activeTier.IsSecondary && len(activeTier.SecondaryTargets) > 0 {
 		activeNow := cm.Active()
 		var activeChunkID chunk.ChunkID
 		if activeNow != nil {
@@ -311,14 +312,14 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 
 		if rec.WaitForReplica {
 			task = &replicationTask{
-				vaultID:     vaultID,
-				tierID:      activeTier.TierID,
-				chunkID:     activeChunkID,
-				secondaries: activeTier.SecondaryNodeIDs,
+				vaultID: vaultID,
+				tierID:  activeTier.TierID,
+				chunkID: activeChunkID,
+				targets: activeTier.SecondaryTargets,
 			}
 		} else if o.forwarder != nil {
-			for _, nodeID := range activeTier.SecondaryNodeIDs {
-				_ = o.forwarder.ForwardToTier(context.Background(), nodeID, vaultID, activeTier.TierID, activeChunkID, []chunk.Record{rec})
+			for _, tgt := range activeTier.SecondaryTargets {
+				_ = o.forwarder.ForwardToTier(context.Background(), tgt.NodeID, vaultID, activeTier.TierID, activeChunkID, []chunk.Record{rec})
 			}
 		}
 	}
@@ -362,6 +363,13 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID uuid.UUID
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
 // but won't trigger further replication (gated by !IsSecondary in tierReplicationInfo).
 func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
+}
+
+// ImportToTierStorage imports a sealed chunk to a specific storage-targeted tier
+// instance. When storageID is empty, falls back to the first matching tier (backward compat).
+// Used by same-node replication to route to specific file storage instances.
+func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID uuid.UUID, storageID string, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	// Look up the tier under lock, then release BEFORE the import.
 	// ImportRecords reads from a network stream and can block — holding
 	// RLock during a network read starves writers (FSM dispatcher) and
@@ -378,7 +386,7 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 			return nil
 		}
 		for _, t := range vault.Tiers {
-			if t.TierID == tierID {
+			if t.TierID == tierID && (storageID == "" || t.StorageID == storageID) {
 				return &tierRef{cm: t.Chunks, isSecondary: t.IsSecondary}
 			}
 		}
@@ -389,10 +397,11 @@ func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UU
 	}
 	cm := ref.cm
 
-	// Serialize SetNextChunkID + ImportRecords per tier to prevent concurrent
-	// replication messages from interleaving the two calls (race: Thread A sets
-	// chunkA, Thread B sets chunkB, Thread A imports with chunkB's ID).
-	muVal, _ := o.importMu.LoadOrStore(tierID, &sync.Mutex{})
+	// Serialize SetNextChunkID + ImportRecords per tier instance to prevent
+	// concurrent replication messages from interleaving the two calls.
+	// Key includes storageID so same-node replicas can import in parallel.
+	importKey := tierID.String() + ":" + storageID
+	muVal, _ := o.importMu.LoadOrStore(importKey, &sync.Mutex{})
 	tierMu := muVal.(*sync.Mutex)
 	tierMu.Lock()
 	defer tierMu.Unlock()

@@ -20,7 +20,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func newMemTier(t *testing.T, tierID uuid.UUID, isSecondary bool, secondaries []string) *TierInstance {
+func newMemTier(t *testing.T, tierID uuid.UUID, isSecondary bool, secondaries []config.ReplicationTarget) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -38,7 +38,7 @@ func newMemTier(t *testing.T, tierID uuid.UUID, isSecondary bool, secondaries []
 		Indexes:          im,
 		Query:            query.New(cm, im, nil),
 		IsSecondary:      isSecondary,
-		SecondaryNodeIDs: secondaries,
+		SecondaryTargets: secondaries,
 	}
 }
 
@@ -253,7 +253,7 @@ func TestTierReplicationInfoSkipsSecondaries(t *testing.T) {
 	secondaryTierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	primary := newMemTier(t, primaryTierID, false, []string{"node-2"})
+	primary := newMemTier(t, primaryTierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
 	secondary := newMemTier(t, secondaryTierID, true, nil)
 	vault := NewVault(vaultID, primary, secondary)
 	vault.Name = "repl-info"
@@ -264,7 +264,7 @@ func TestTierReplicationInfoSkipsSecondaries(t *testing.T) {
 	if tid != primaryTierID {
 		t.Errorf("expected tier %s, got %s", primaryTierID, tid)
 	}
-	if len(nodes) != 1 || nodes[0] != "node-2" {
+	if len(nodes) != 1 || nodes[0].NodeID != "node-2" {
 		t.Errorf("expected [node-2], got %v", nodes)
 	}
 
@@ -539,7 +539,7 @@ func TestAppendToTierPrimaryForwardsToSecondaries(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2", "node-3"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "fwd-test"
 	orch.RegisterVault(vault)
@@ -804,7 +804,7 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "no-forwarder"
 	orch.RegisterVault(vault)
@@ -928,7 +928,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "forward-lifecycle"
 	orch.RegisterVault(vault)
@@ -1021,7 +1021,7 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "ack-gated"
 	orch.RegisterVault(vault)
@@ -1045,8 +1045,8 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	if task.tierID != tierID {
 		t.Errorf("task.tierID = %s, want %s", task.tierID, tierID)
 	}
-	if len(task.secondaries) != 1 || task.secondaries[0] != "node-2" {
-		t.Errorf("task.secondaries = %v, want [node-2]", task.secondaries)
+	if len(task.targets) != 1 || task.targets[0].NodeID != "node-2" {
+		t.Errorf("task.targets = %v, want [node-2]", task.targets)
 	}
 
 	// Fire-and-forget must NOT have been called.
@@ -1067,7 +1067,7 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "no-ack"
 	orch.RegisterVault(vault)
@@ -1107,7 +1107,7 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "ingest-ack"
 	orch.RegisterVault(vault)
@@ -1145,10 +1145,10 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 
 	tasks := []replicationTask{
 		{
-			vaultID:     uuid.Must(uuid.NewV7()),
-			tierID:      uuid.Must(uuid.NewV7()),
-			chunkID:     chunk.NewChunkID(),
-			secondaries: []string{"node-2"},
+			vaultID: uuid.Must(uuid.NewV7()),
+			tierID:  uuid.Must(uuid.NewV7()),
+			chunkID: chunk.NewChunkID(),
+			targets: []config.ReplicationTarget{{NodeID: "node-2"}},
 		},
 	}
 
@@ -1182,10 +1182,10 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 
 	tasks := []replicationTask{
 		{
-			vaultID:     uuid.Must(uuid.NewV7()),
-			tierID:      uuid.Must(uuid.NewV7()),
-			chunkID:     chunk.NewChunkID(),
-			secondaries: []string{"node-2"},
+			vaultID: uuid.Must(uuid.NewV7()),
+			tierID:  uuid.Must(uuid.NewV7()),
+			chunkID: chunk.NewChunkID(),
+			targets: []config.ReplicationTarget{{NodeID: "node-2"}},
 		},
 	}
 
@@ -1530,7 +1530,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []string{"node-2", "node-3"})
+	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "non-blocking"
 	orch.RegisterVault(vault)

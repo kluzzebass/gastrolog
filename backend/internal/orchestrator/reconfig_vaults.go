@@ -489,6 +489,12 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 
 	nscs := cfg.NodeStorageConfigs
 
+	closeTiers := func(ts []*TierInstance) {
+		for _, t := range ts {
+			_ = t.Chunks.Close()
+		}
+	}
+
 	tiers := make([]*TierInstance, 0, len(vaultCfg.TierIDs))
 	for _, tierID := range vaultCfg.TierIDs {
 		tierCfg := findTierConfig(cfg.Tiers, tierID)
@@ -505,27 +511,79 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			continue
 		}
 
+		// Build the main tier instance (primary, or first secondary).
 		ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, isSecondary)
 		if err != nil {
-			// Close already-created tiers on error.
-			for _, t := range tiers {
-				_ = t.Chunks.Close()
-			}
+			closeTiers(tiers)
 			return nil, fmt.Errorf("build tier %s: %w", tierID, err)
 		}
 		ti.IsSecondary = isSecondary
+		ti.StorageID = tierCfg.PrimaryStorageID()
 		if isSecondary {
 			ti.PrimaryNodeID = primaryNodeID
-			// Secondaries don't self-rotate — the primary controls seal
-			// timing via ForwardSealTier.
 			ti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+			// Set the storage ID from the first local secondary placement.
+			for _, tgt := range tierCfg.SecondaryTargets(nscs) {
+				if tgt.NodeID == o.localNodeID {
+					ti.StorageID = tgt.StorageID
+					break
+				}
+			}
 		}
 		if isPrimary {
-			ti.SecondaryNodeIDs = secondaryNodeIDs
+			ti.SecondaryTargets = tierCfg.SecondaryTargets(nscs)
 		}
 		tiers = append(tiers, ti)
+
+		// Same-node replication: create additional secondary instances for
+		// each extra placement on this node beyond the first.
+		if isSecondary {
+			extraTiers, err := o.buildSameNodeReplicas(cfg, vaultCfg, tierCfg, factories, nscs, primaryNodeID, ti.StorageID)
+			if err != nil {
+				closeTiers(tiers)
+				return nil, err
+			}
+			tiers = append(tiers, extraTiers...)
+		}
 	}
 	return tiers, nil
+}
+
+// buildSameNodeReplicas creates additional secondary TierInstances for
+// same-node placements beyond the first.
+func (o *Orchestrator) buildSameNodeReplicas(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig, factories Factories, nscs []config.NodeStorageConfig, primaryNodeID, excludeStorageID string) ([]*TierInstance, error) {
+	extras := o.localSecondaryStorages(tierCfg, nscs, excludeStorageID)
+	if len(extras) == 0 {
+		return nil, nil
+	}
+	var tiers []*TierInstance
+	for _, storageID := range extras {
+		eti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID)
+		if err != nil {
+			for _, t := range tiers {
+				_ = t.Chunks.Close()
+			}
+			return nil, fmt.Errorf("build tier %s storage %s: %w", tierCfg.ID, storageID, err)
+		}
+		eti.IsSecondary = true
+		eti.PrimaryNodeID = primaryNodeID
+		eti.StorageID = storageID
+		eti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+		tiers = append(tiers, eti)
+	}
+	return tiers, nil
+}
+
+// localSecondaryStorages returns the storage IDs of same-node secondary
+// placements EXCLUDING the one already used by the main instance.
+func (o *Orchestrator) localSecondaryStorages(tierCfg *config.TierConfig, nscs []config.NodeStorageConfig, excludeStorageID string) []string {
+	var extras []string
+	for _, tgt := range tierCfg.SecondaryTargets(nscs) {
+		if tgt.NodeID == o.localNodeID && tgt.StorageID != excludeStorageID {
+			extras = append(extras, tgt.StorageID)
+		}
+	}
+	return extras
 }
 
 // buildTierInstance creates a single TierInstance from a TierConfig.
@@ -631,6 +689,88 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		Indexes: im,
 		Query:   qe,
 	}, nil
+}
+
+// buildTierInstanceForStorage creates a secondary TierInstance whose data directory
+// is resolved from a specific file storage ID rather than the default findLocalFileStorage
+// lookup. Used for same-node replication where each secondary placement targets a
+// different physical disk.
+func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, storageID string) (*TierInstance, error) {
+	fs := findFileStorageByID(cfg, storageID)
+	if fs == nil {
+		return nil, fmt.Errorf("file storage %s not found", storageID)
+	}
+
+	// Build params normally, then override the dir with this storage's path.
+	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
+	delete(params, "sealed_backing") // always secondary
+	params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
+
+	factoryName := mapTierTypeToFactory(tierCfg.Type)
+	cmFactory, ok := factories.ChunkManagers[factoryName]
+	if !ok {
+		return nil, fmt.Errorf("unknown chunk manager type: %s", factoryName)
+	}
+
+	var cmLogger = factories.Logger
+	if cmLogger != nil {
+		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+	}
+
+	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.Name)
+	cmParams["_expect_existing"] = "true"
+	cmParams["_vault_id"] = vaultCfg.ID.String()
+
+	cm, err := cmFactory(cmParams, cmLogger)
+	if err != nil {
+		return nil, fmt.Errorf("create chunk manager: %w", err)
+	}
+
+	// Secondary replicas need index builders for local queries.
+	imFactory, ok := factories.IndexManagers[factoryName]
+	if !ok {
+		_ = cm.Close()
+		return nil, fmt.Errorf("unknown index manager type: %s", factoryName)
+	}
+	var imLogger = factories.Logger
+	if imLogger != nil {
+		imLogger = imLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+	}
+	im, err := imFactory(cmParams, cm, imLogger)
+	if err != nil {
+		_ = cm.Close()
+		return nil, fmt.Errorf("create index manager: %w", err)
+	}
+
+	var qeLogger = factories.Logger
+	if qeLogger != nil {
+		qeLogger = qeLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
+	}
+	qe := query.New(cm, im, qeLogger)
+
+	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
+		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
+	}
+
+	return &TierInstance{
+		TierID:  tierCfg.ID,
+		Type:    string(tierCfg.Type),
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
+	}, nil
+}
+
+// findFileStorageByID resolves a file storage ID to its config across all nodes.
+func findFileStorageByID(cfg *config.Config, storageID string) *config.FileStorage {
+	for _, nsc := range cfg.NodeStorageConfigs {
+		for i := range nsc.FileStorages {
+			if nsc.FileStorages[i].ID.String() == storageID {
+				return &nsc.FileStorages[i]
+			}
+		}
+	}
+	return nil
 }
 
 // mapTierTypeToFactory maps a TierType to the factory name used in Factories maps.
