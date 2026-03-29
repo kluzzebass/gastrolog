@@ -15,3 +15,9 @@ type MetadataAnnouncer interface {
 	AnnounceUpload(id ChunkID, diskBytes, ingestIdxOff, ingestIdxSize, sourceIdxOff, sourceIdxSize int64, numFrames int32)
 	AnnounceDelete(id ChunkID)
 }
+
+// AnnouncerSetter is an optional interface for chunk managers that support
+// metadata announcements. Callers should type-assert to check availability.
+type AnnouncerSetter interface {
+	SetAnnouncer(MetadataAnnouncer)
+}

@@ -10,6 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
+	"gastrolog/internal/multiraft"
 
 	"github.com/google/uuid"
 )
@@ -67,6 +68,16 @@ type Factories struct {
 	// relative vault paths are resolved against this directory instead of HomeDir.
 	// Defaults to HomeDir if not set.
 	VaultsDir string
+
+	// GroupManager, when non-nil, manages tier Raft groups for chunk metadata
+	// replication. buildTierInstance creates a Raft group per tier and wires
+	// a RaftAnnouncer to the chunk manager.
+	GroupManager *multiraft.GroupManager
+
+	// NodeAddressResolver maps a node ID to its Raft server address.
+	// Used to build tier Raft group membership from tier config's node assignments.
+	// When nil, tier groups bootstrap as single-node (no cross-node replication).
+	NodeAddressResolver func(nodeID string) (string, bool)
 
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever

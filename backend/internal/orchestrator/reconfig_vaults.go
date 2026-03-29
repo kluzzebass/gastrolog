@@ -7,12 +7,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
+	"gastrolog/internal/multiraft"
 	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
+	hraft "github.com/hashicorp/raft"
 )
 
 // resolveVaultDir resolves a file vault's "dir" parameter relative to vaultsDir.
@@ -579,6 +582,9 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		}
 	}
 
+	// Wire Raft-backed metadata announcer if a GroupManager is available.
+	o.wireTierRaftGroup(cm, tierCfg, factories, isSecondary)
+
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
 		return &TierInstance{
@@ -624,6 +630,66 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 }
 
 // mapTierTypeToFactory maps a TierType to the factory name used in Factories maps.
+// wireTierRaftGroup creates a tier Raft group (or reuses existing) and injects
+// a RaftAnnouncer into the chunk manager so chunk lifecycle events replicate to
+// all nodes via consensus.
+func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, factories Factories, isSecondary bool) {
+	if factories.GroupManager == nil {
+		return
+	}
+	setter, ok := cm.(chunk.AnnouncerSetter)
+	if !ok {
+		return
+	}
+
+	groupID := tierCfg.ID.String()
+	g := factories.GroupManager.GetGroup(groupID)
+	if g == nil {
+		members := o.buildTierRaftMembers(tierCfg, factories)
+		isPrimary := tierCfg.NodeID == "" || tierCfg.NodeID == o.localNodeID
+		var err error
+		g, err = factories.GroupManager.CreateGroup(multiraft.GroupConfig{
+			GroupID:   groupID,
+			FSM:       multiraft.NewChunkFSM(),
+			Bootstrap: isPrimary,
+			Members:   members,
+		})
+		if err != nil {
+			o.logger.Warn("failed to create tier raft group",
+				"tier", tierCfg.ID, "error", err)
+			return
+		}
+	}
+	setter.SetAnnouncer(multiraft.NewRaftAnnouncer(g.Raft, 10*time.Second, o.logger))
+}
+
+// buildTierRaftMembers builds the Raft member list from tier placement.
+func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, factories Factories) []hraft.Server {
+	if factories.NodeAddressResolver == nil {
+		return nil
+	}
+	var members []hraft.Server
+	nodeID := tierCfg.NodeID
+	if nodeID == "" {
+		nodeID = o.localNodeID
+	}
+	if addr, ok := factories.NodeAddressResolver(nodeID); ok {
+		members = append(members, hraft.Server{
+			ID:      hraft.ServerID(nodeID),
+			Address: hraft.ServerAddress(addr),
+		})
+	}
+	for _, secID := range tierCfg.SecondaryNodeIDs {
+		if addr, ok := factories.NodeAddressResolver(secID); ok {
+			members = append(members, hraft.Server{
+				ID:      hraft.ServerID(secID),
+				Address: hraft.ServerAddress(addr),
+			})
+		}
+	}
+	return members
+}
+
 func mapTierTypeToFactory(t config.TierType) string {
 	switch t {
 	case config.TierTypeMemory:

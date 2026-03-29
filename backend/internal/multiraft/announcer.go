@@ -47,9 +47,17 @@ func (a *RaftAnnouncer) AnnounceDelete(id chunk.ChunkID) {
 }
 
 func (a *RaftAnnouncer) apply(op string, id chunk.ChunkID, data []byte) {
+	// Only the Raft leader can apply. Secondaries also run PostSealProcess
+	// (compress, index) but their announcements are redundant — the primary
+	// already announced. Skip silently to avoid log noise.
+	if a.raft.State() != hraft.Leader {
+		return
+	}
 	f := a.raft.Apply(data, a.timeout)
 	if err := f.Error(); err != nil {
-		a.logger.Warn("chunk metadata announce failed",
-			"op", op, "chunk", id.String(), "error", err)
+		if a.logger != nil {
+			a.logger.Warn("chunk metadata announce failed",
+				"op", op, "chunk", id.String(), "error", err)
+		}
 	}
 }

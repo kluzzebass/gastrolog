@@ -2300,6 +2300,15 @@ func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
 	m.cfg.RotationPolicy = policy
 }
 
+// SetAnnouncer injects a metadata announcer for cluster-wide visibility.
+// Must be called before any Append/Seal operations. Safe to call with nil
+// to disable announcements.
+func (m *Manager) SetAnnouncer(a chunk.MetadataAnnouncer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cfg.Announcer = a
+}
+
 func (m *Manager) CheckRotation() *string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

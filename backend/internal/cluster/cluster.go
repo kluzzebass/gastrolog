@@ -430,6 +430,17 @@ func (s *Server) Stop() {
 		return
 	}
 
+	// Close the transport FIRST — this unblocks any gRPC handlers stuck in
+	// handleRPC waiting on rpcChan (by closing shutdownCh + group channels).
+	// Without this, GracefulStop deadlocks: it waits for active RPCs to finish,
+	// but the RPCs can't finish because nothing drains their rpcChan.
+	if s.tm != nil {
+		_ = s.tm.Close()
+	}
+	if s.peerConns != nil {
+		_ = s.peerConns.Close()
+	}
+
 	done := make(chan struct{})
 	go func() {
 		s.grpcSrv.GracefulStop()
@@ -438,16 +449,9 @@ func (s *Server) Stop() {
 
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(5 * time.Second):
 		s.logger.Debug("cluster gRPC graceful stop timed out, forcing")
 		s.grpcSrv.Stop()
-	}
-
-	if s.peerConns != nil {
-		_ = s.peerConns.Close()
-	}
-	if s.tm != nil {
-		_ = s.tm.Close()
 	}
 }
 

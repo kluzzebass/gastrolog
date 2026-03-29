@@ -8,7 +8,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -49,6 +51,7 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/multiraft"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -123,14 +126,15 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Wrap in a proxy so runtime cluster join can swap the inner store.
 	// All consumers hold a reference to proxy; on join, only the inner changes.
 	proxy := config.NewStoreProxy(rawStore)
-	defer func() { _ = proxy.Close() }()
+	defer func() { _ = proxy.Close() }() // safety net for early returns
 	cfgStore := config.Store(proxy)
+	var groupMgr *multiraft.GroupManager // set later if cluster mode
 
 	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
 		return err
 	}
 	if clusterSrv != nil {
-		defer clusterSrv.Stop()
+		defer clusterSrv.Stop() // safety net for early returns
 	}
 
 	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
@@ -170,7 +174,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler)
+	groupMgr, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
+
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver)
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	// orchReady is closed after startOrchestrator completes so that forwarded
@@ -272,6 +278,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		RemoveNodeFunc:      removeNodeFn,
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
 		Dispatcher:          disp,
+		GroupMgr:            groupMgr,
+		ConfigStore:         proxy,
 	})
 }
 
@@ -513,6 +521,13 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 		ss, _ := cfgStore.LoadServerSettings(ctx)
 		if localCfg != nil && ss.Auth.JWTSecret != "" {
 			return localCfg, true, nil
+		}
+		// Settings not in local FSM — need a Raft write, which requires a leader.
+		// Wait for leader election before proceeding. On a fresh single-node
+		// bootstrap the leader is already elected; on multi-node restart the
+		// election needs time to complete.
+		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
+			return nil, false, err
 		}
 	}
 
@@ -780,6 +795,8 @@ type serverDeps struct {
 	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
+	GroupMgr            *multiraft.GroupManager
+	ConfigStore         io.Closer // rawStore — closed before gRPC for clean Raft shutdown
 }
 
 func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
@@ -856,6 +873,19 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
+	// Shutdown order: tier Raft → config Raft → gRPC server.
+	// Raft must shut down WHILE the transport is alive, otherwise the
+	// leader's replication goroutines block on dead gRPC connections.
+	if deps.GroupMgr != nil {
+		deps.Logger.Info("shutting down tier raft groups")
+		deps.GroupMgr.Shutdown()
+	}
+
+	if deps.ConfigStore != nil {
+		deps.Logger.Info("shutting down config raft")
+		_ = deps.ConfigStore.Close()
+	}
+
 	if deps.ClusterSrv != nil {
 		deps.Logger.Info("stopping cluster server")
 		deps.ClusterSrv.Stop()
@@ -865,7 +895,44 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	return nil
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler) orchestrator.Factories {
+// setupMultiRaft creates the GroupManager and node address resolver for tier
+// Raft groups. Returns (nil, nil) in single-node / non-raft mode.
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, homeDir string, logger *slog.Logger) (*multiraft.GroupManager, func(string) (string, bool)) {
+	if clusterSrv == nil {
+		return nil, nil
+	}
+	mrt := clusterSrv.MultiRaftTransport()
+	if mrt == nil {
+		return nil, nil
+	}
+
+	groupMgr := multiraft.NewGroupManager(multiraft.GroupManagerConfig{
+		Transport: mrt,
+		NodeID:    nodeID,
+		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
+		Logger:    logger,
+	})
+
+	var resolver func(string) (string, bool)
+	if rcs, ok := rawStore.(*raftConfigStore); ok {
+		resolver = func(nodeID string) (string, bool) {
+			future := rcs.raft.GetConfiguration()
+			if future.Error() != nil {
+				return "", false
+			}
+			for _, srv := range future.Configuration().Servers {
+				if string(srv.ID) == nodeID {
+					return string(srv.Address), true
+				}
+			}
+			return "", false
+		}
+	}
+
+	return groupMgr, resolver
+}
+
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *multiraft.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -903,9 +970,11 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 			"file":   indexfile.NewFactory(),
 			"memory": indexmem.NewFactory(),
 		},
-		Logger:    logger,
-		HomeDir:   homeDir,
-		VaultsDir: vaultsDir,
+		Logger:              logger,
+		HomeDir:             homeDir,
+		VaultsDir:           vaultsDir,
+		GroupManager:        groupMgr,
+		NodeAddressResolver: nodeAddrResolver,
 	}
 }
 

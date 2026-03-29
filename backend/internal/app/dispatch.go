@@ -15,6 +15,8 @@ import (
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
+
+	hraft "github.com/hashicorp/raft"
 )
 
 // orchActions is the subset of orchestrator.Orchestrator methods used by the
@@ -346,6 +348,13 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		// because this vault may have OTHER tiers that DO belong here.
 	}
 
+	// Reconcile tier Raft group membership. When secondaries are assigned
+	// (a separate PutTier after initial creation), the group needs new members.
+	// Only the primary (Raft leader) can add members.
+	if d.factories.GroupManager != nil && tierCfg.NodeID == d.localNodeID {
+		d.reconcileTierRaftGroup(tierID, tierCfg)
+	}
+
 	// Reload rotation and retention policies — tier config may have changed
 	// policy references (rotation_policy_id, retention_rules).
 	d.reloadRotationPolicies(ctx)
@@ -404,7 +413,70 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v conf
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.
+// reconcileTierRaftGroup ensures the tier's Raft group membership matches the
+// tier config's node assignments (primary + secondaries). Only called on the
+// primary node (which is the Raft leader for the group).
+func (d *configDispatcher) reconcileTierRaftGroup(tierID uuid.UUID, tierCfg *config.TierConfig) {
+	gm := d.factories.GroupManager
+	groupID := tierID.String()
+	g := gm.GetGroup(groupID)
+	if g == nil {
+		return // group doesn't exist yet — will be created in buildTierInstance
+	}
+
+	// Build the expected member set from tier config.
+	expected := make(map[string]string) // nodeID → address
+	if d.factories.NodeAddressResolver != nil {
+		primary := tierCfg.NodeID
+		if primary == "" {
+			primary = d.localNodeID
+		}
+		if addr, ok := d.factories.NodeAddressResolver(primary); ok {
+			expected[primary] = addr
+		}
+		for _, secID := range tierCfg.SecondaryNodeIDs {
+			if addr, ok := d.factories.NodeAddressResolver(secID); ok {
+				expected[secID] = addr
+			}
+		}
+	}
+	if len(expected) == 0 {
+		return
+	}
+
+	// Get current Raft group members.
+	future := g.Raft.GetConfiguration()
+	if future.Error() != nil {
+		return
+	}
+	current := make(map[string]bool)
+	for _, srv := range future.Configuration().Servers {
+		current[string(srv.ID)] = true
+	}
+
+	// Add missing members.
+	for nodeID, addr := range expected {
+		if current[nodeID] {
+			continue
+		}
+		if err := gm.AddMember(groupID, hraft.ServerID(nodeID), hraft.ServerAddress(addr)); err != nil {
+			d.logger.Warn("dispatch: failed to add member to tier raft group",
+				"tier", tierID, "node", nodeID, "error", err)
+		} else {
+			d.logger.Info("dispatch: added member to tier raft group",
+				"tier", tierID, "node", nodeID, "addr", addr)
+		}
+	}
+}
+
 func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UUID) {
+	// Destroy the tier's Raft group if one exists.
+	if d.factories.GroupManager != nil {
+		if err := d.factories.GroupManager.DestroyGroup(tierID.String()); err != nil {
+			d.logger.Debug("dispatch: destroy tier raft group (may not exist)", "tier", tierID, "error", err)
+		}
+	}
+
 	vaults, err := d.cfgStore.ListVaults(ctx)
 	if err != nil {
 		d.logger.Error("dispatch: list vaults for tier deletion", "tier", tierID, "error", err)

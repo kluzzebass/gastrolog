@@ -73,11 +73,10 @@ func (s *raftConfigStore) Close() error {
 	if s.forwarder != nil {
 		_ = s.forwarder.Close()
 	}
-	// Take a snapshot before shutting down so that the next NewRaft can
-	// restore FSM state from the snapshot without needing quorum.
-	if f := s.raft.Snapshot(); f.Error() != nil {
-		_ = f.Error()
-	}
+	// No pre-shutdown snapshot. During simultaneous cluster shutdown, the
+	// leader's snapshot noop can't replicate (followers are also shutting
+	// down), leaving Raft state dirty. Periodic snapshots (every 30s /
+	// 4 entries) provide recovery; the log replay on restart is minimal.
 	future := s.raft.Shutdown()
 	err := future.Error()
 	if cerr := s.boltDB.Close(); cerr != nil && err == nil {
