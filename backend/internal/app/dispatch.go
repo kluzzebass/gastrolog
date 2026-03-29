@@ -32,6 +32,7 @@ type orchActions interface {
 	EnableVault(id uuid.UUID) error
 	ForceRemoveVault(id uuid.UUID) error
 	UnregisterVault(id uuid.UUID) error
+	HasMissingTiers(vaultID uuid.UUID, tierIDs []uuid.UUID) bool
 	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
 	IsDraining(vaultID uuid.UUID) bool
 	CancelDrain(ctx context.Context, vaultID uuid.UUID) error
@@ -147,6 +148,20 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
 			d.logger.Error("dispatch: add vault", "id", id, "name", vaultCfg.Name, "error", err)
+		}
+		return
+	}
+
+	// Check if the vault's tier list changed (new tier added). If so,
+	// rebuild the vault to include the new tier. This handles the case
+	// where a tier (e.g. JSONL sink) is added to an existing vault after
+	// initial creation.
+	if d.orch.HasMissingTiers(id, vaultCfg.TierIDs) {
+		if err := d.orch.UnregisterVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
+			d.logger.Error("dispatch: unregister vault for tier list change", "id", id, "error", err)
+		}
+		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
+			d.logger.Error("dispatch: re-add vault with new tiers", "id", id, "error", err)
 		}
 		return
 	}

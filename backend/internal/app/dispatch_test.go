@@ -119,6 +119,7 @@ func (m *mockOrch) UnregisterVault(id uuid.UUID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr
 }
+func (m *mockOrch) HasMissingTiers(_ uuid.UUID, _ []uuid.UUID) bool { return false }
 func (m *mockOrch) DrainVault(_ context.Context, id uuid.UUID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)
 	return m.drainVaultErr

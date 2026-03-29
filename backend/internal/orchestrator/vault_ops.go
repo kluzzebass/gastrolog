@@ -143,6 +143,27 @@ func (o *Orchestrator) VaultType(vaultID uuid.UUID) string {
 }
 
 // FindLocalTierExported is a public accessor for findLocalTier, used by tests.
+// HasMissingTiers returns true if the vault's local tier list is missing any
+// of the given tier IDs that this node should host.
+func (o *Orchestrator) HasMissingTiers(vaultID uuid.UUID, tierIDs []uuid.UUID) bool {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return false
+	}
+	local := make(map[uuid.UUID]bool, len(vault.Tiers))
+	for _, t := range vault.Tiers {
+		local[t.TierID] = true
+	}
+	for _, id := range tierIDs {
+		if !local[id] {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *Orchestrator) FindLocalTierExported(vaultID, tierID uuid.UUID) *TierInstance {
 	return o.findLocalTier(vaultID, tierID)
 }
