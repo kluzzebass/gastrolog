@@ -207,6 +207,83 @@ export function NumberInput({
   );
 }
 
+interface SpinnerInputProps {
+  value: string;
+  onChange: (v: string) => void;
+  dark: boolean;
+  disabled?: boolean;
+  min?: number;
+  skip?: number[]; // values to skip when stepping (e.g. [2] to skip RF=2)
+}
+
+export function SpinnerInput({
+  value,
+  onChange,
+  dark,
+  disabled,
+  min = 1,
+  skip = [],
+}: Readonly<SpinnerInputProps>) {
+  const id = useFormFieldId();
+  const c = useThemeClass(dark);
+  const n = parseInt(value, 10) || min;
+
+  const step = (dir: 1 | -1) => {
+    let next = n + dir;
+    while (skip.includes(next)) next += dir;
+    if (next < min) return;
+    onChange(String(next));
+  };
+
+  const btnClass = `px-2 py-1 text-[0.85em] border transition-colors select-none ${c(
+    "bg-ink-surface border-ink-border text-text-muted hover:bg-ink-hover active:bg-ink-pressed",
+    "bg-light-surface border-light-border text-light-text-muted hover:bg-light-hover active:bg-light-pressed",
+  )} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`;
+
+  return (
+    <div className="flex items-center">
+      <button
+        type="button"
+        className={`${btnClass} rounded-l border-r-0`}
+        onClick={() => step(-1)}
+        disabled={disabled || n <= min}
+        aria-label="Decrease"
+      >
+        {"\u25C0"}
+      </button>
+      <input
+        id={id}
+        type="text"
+        inputMode="numeric"
+        value={value}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === "" || /^\d+$/.test(v)) {
+            const parsed = parseInt(v, 10);
+            if (v !== "" && parsed < min) return;
+            if (v !== "" && skip.includes(parsed)) return;
+            onChange(v);
+          }
+        }}
+        disabled={disabled}
+        className={`w-12 text-center px-1 py-1.5 text-[0.85em] font-mono border-y border-x-0 focus:outline-none transition-colors ${c(
+          "bg-ink-surface border-ink-border text-text-bright focus:border-copper-dim",
+          "bg-light-surface border-light-border text-light-text-bright focus:border-copper",
+        )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+      />
+      <button
+        type="button"
+        className={`${btnClass} rounded-r border-l-0`}
+        onClick={() => step(1)}
+        disabled={disabled}
+        aria-label="Increase"
+      >
+        {"\u25B6"}
+      </button>
+    </div>
+  );
+}
+
 interface TextAreaProps {
   value: string;
   onChange: (v: string) => void;

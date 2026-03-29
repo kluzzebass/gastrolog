@@ -29,6 +29,7 @@ func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*pl
 		alerts:      alerts,
 		localNodeID: localNodeID,
 		logger:      slog.Default(),
+		triggerCh:   make(chan struct{}, 1),
 	}
 	return pm, store, alerts
 }

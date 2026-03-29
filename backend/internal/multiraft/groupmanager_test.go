@@ -308,11 +308,10 @@ func TestDuplicateGroupReturnsError(t *testing.T) {
 	}
 }
 
-func TestVoterNonvoterAutoEnforcement(t *testing.T) {
+func TestAddMemberAlwaysVoter(t *testing.T) {
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
-	// Bootstrap single-node group on node-1.
 	fsm1 := &counterFSM{}
 	g1, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "voter-test", FSM: fsm1, Bootstrap: true})
 	if err != nil {
@@ -320,38 +319,23 @@ func TestVoterNonvoterAutoEnforcement(t *testing.T) {
 	}
 	waitForLeader(t, g1, 5*time.Second)
 
-	// Add node-2 — 2-member group → should be nonvoter.
-	err = nodes[0].manager.AddMember("voter-test",
-		hraft.ServerID("node-2"), nodes[1].transport.LocalAddr())
-	if err != nil {
-		t.Fatalf("AddMember node-2: %v", err)
+	// Add two members — both should be voters (RF=2 is rejected at the API
+	// layer, so we only test 3-member groups here).
+	for i, nodeID := range []string{"node-2", "node-3"} {
+		err = nodes[0].manager.AddMember("voter-test",
+			hraft.ServerID(nodeID), nodes[i+1].transport.LocalAddr())
+		if err != nil {
+			t.Fatalf("AddMember %s: %v", nodeID, err)
+		}
 	}
 
-	// Check node-2 is nonvoter.
 	future := g1.Raft.GetConfiguration()
 	if err := future.Error(); err != nil {
 		t.Fatal(err)
 	}
 	for _, srv := range future.Configuration().Servers {
-		if string(srv.ID) == "node-2" && srv.Suffrage != hraft.Nonvoter {
-			t.Errorf("node-2 should be Nonvoter in 2-member group, got %v", srv.Suffrage)
-		}
-	}
-
-	// Add node-3 — 3-member group → should be voter.
-	err = nodes[0].manager.AddMember("voter-test",
-		hraft.ServerID("node-3"), nodes[2].transport.LocalAddr())
-	if err != nil {
-		t.Fatalf("AddMember node-3: %v", err)
-	}
-
-	future = g1.Raft.GetConfiguration()
-	if err := future.Error(); err != nil {
-		t.Fatal(err)
-	}
-	for _, srv := range future.Configuration().Servers {
-		if string(srv.ID) == "node-3" && srv.Suffrage != hraft.Voter {
-			t.Errorf("node-3 should be Voter in 3-member group, got %v", srv.Suffrage)
+		if srv.Suffrage != hraft.Voter {
+			t.Errorf("node %s should be Voter, got %v", srv.ID, srv.Suffrage)
 		}
 	}
 }

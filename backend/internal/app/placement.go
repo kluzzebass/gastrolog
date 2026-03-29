@@ -28,6 +28,7 @@ type placementManager struct {
 	alerts      orchestrator.AlertCollector
 	localNodeID string
 	logger      *slog.Logger
+	triggerCh   chan struct{} // poked to run reconcile immediately
 }
 
 // Run blocks until ctx is cancelled. When this node is leader, it runs
@@ -47,11 +48,24 @@ func (pm *placementManager) Run(ctx context.Context) {
 			if pm.clusterSrv.IsLeader() {
 				pm.reconcile(ctx)
 			}
+		case <-pm.triggerCh:
+			if pm.clusterSrv.IsLeader() {
+				pm.reconcile(ctx)
+			}
 		case <-ticker.C:
 			if pm.clusterSrv.IsLeader() {
 				pm.reconcile(ctx)
 			}
 		}
+	}
+}
+
+// Trigger requests an immediate placement reconcile. Non-blocking — if a
+// reconcile is already pending, the trigger is dropped.
+func (pm *placementManager) Trigger() {
+	select {
+	case pm.triggerCh <- struct{}{}:
+	default:
 	}
 }
 

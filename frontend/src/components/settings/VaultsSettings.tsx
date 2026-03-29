@@ -12,7 +12,7 @@ import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput, SelectInput, NumberInput } from "./FormField";
+import { FormField, TextInput, SelectInput, NumberInput, SpinnerInput } from "./FormField";
 import { DropdownButton } from "./Buttons";
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
@@ -423,13 +423,13 @@ export function TierEntryCard({
       )}
 
       {tier.type !== "jsonl" && (
-        <FormField label="Replication Factor" dark={dark}>
-          <NumberInput
+        <FormField label="Replication Factor" dark={dark} description="1 = no replication, 3+ = fault tolerant">
+          <SpinnerInput
             value={tier.replicationFactor}
             onChange={(v) => onUpdate({ replicationFactor: v })}
-            placeholder="1"
             dark={dark}
             min={1}
+            skip={[2]}
           />
         </FormField>
       )}

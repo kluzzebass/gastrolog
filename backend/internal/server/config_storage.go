@@ -188,6 +188,13 @@ func (s *ConfigServer) PutTier(
 		}
 	}
 
+	// Reject RF=2: no fault tolerance benefit over RF=1 (2-member Raft
+	// groups can't elect a new leader if either member dies).
+	if req.Msg.Config.ReplicationFactor == 2 {
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errors.New("replication factor 2 is not supported; use 1 (no replication) or 3+ (fault tolerant)"))
+	}
+
 	cfg, err := protoToTierConfig(req.Msg.Config)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)

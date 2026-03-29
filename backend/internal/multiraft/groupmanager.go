@@ -197,19 +197,14 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 	return nil
 }
 
-// AddMember adds a node to a group. Automatically selects voter or nonvoter
-// based on the resulting group size: 2-member = nonvoter, 3+ = voter.
+// AddMember adds a node to a group as a voter. RF=2 is rejected at the API
+// layer, so all groups are either 1-member or 3+ — always all-voters.
 func (m *GroupManager) AddMember(groupID string, serverID hraft.ServerID, serverAddr hraft.ServerAddress) error {
 	g := m.GetGroup(groupID)
 	if g == nil {
 		return fmt.Errorf("group %q not found", groupID)
 	}
-
-	voter := m.shouldBeVoter(g, true)
-	if voter {
-		return g.Raft.AddVoter(serverID, serverAddr, 0, 10*time.Second).Error()
-	}
-	return g.Raft.AddNonvoter(serverID, serverAddr, 0, 10*time.Second).Error()
+	return g.Raft.AddVoter(serverID, serverAddr, 0, 10*time.Second).Error()
 }
 
 // RemoveMember removes a node from a group.
@@ -338,16 +333,3 @@ func (m *GroupManager) bootstrap(r *hraft.Raft, cfg GroupConfig) error {
 	return r.BootstrapCluster(boot).Error()
 }
 
-// shouldBeVoter returns whether a new member should be added as a voter.
-// Rule: 2-member groups get 1 voter + 1 nonvoter. 3+ get all voters.
-func (m *GroupManager) shouldBeVoter(g *Group, adding bool) bool {
-	future := g.Raft.GetConfiguration()
-	if future.Error() != nil {
-		return true // default to voter on error
-	}
-	count := len(future.Configuration().Servers)
-	if adding {
-		count++ // include the member being added
-	}
-	return count >= 3
-}

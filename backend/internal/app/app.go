@@ -224,7 +224,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			alerts:      alertCollector,
 			localNodeID: nodeID,
 			logger:      logger.With("component", "placement"),
+			triggerCh:   make(chan struct{}, 1),
 		}
+		disp.placementTrigger = pm.Trigger
 		go pm.Run(ctx)
 	}
 

@@ -16,7 +16,7 @@ import { useToast } from "../Toast";
 import { useCrudHandlers } from "../../hooks/useCrudHandlers";
 import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
-import { FormField, TextInput, SelectInput, NumberInput } from "./FormField";
+import { FormField, TextInput, SelectInput, SpinnerInput } from "./FormField";
 import { Button, DropdownButton } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { PulseIcon } from "../icons";
@@ -643,13 +643,13 @@ export function VaultSettingsCard({
                         </div>
                       )}
                       {tier.type !== TierType.JSONL && (
-                        <FormField label="Replication Factor" dark={dark}>
-                          <NumberInput
+                        <FormField label="Replication Factor" dark={dark} description="1 = no replication, 3+ = fault tolerant">
+                          <SpinnerInput
                             value={edit.tierRF[tier.id] ?? String(tier.replicationFactor ?? 1)}
                             onChange={(v) => setTierRF(tier.id, v)}
-                            placeholder="1"
                             dark={dark}
                             min={1}
+                            skip={[2]}
                           />
                         </FormField>
                       )}

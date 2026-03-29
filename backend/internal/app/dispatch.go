@@ -67,6 +67,7 @@ type configDispatcher struct {
 	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler   // nil for single-node or before wiring
 	catchupScheduler   func(tierID uuid.UUID, secondaryNodeIDs []string) // nil until orch is wired
+	placementTrigger   func() // triggers immediate placement reconcile; nil for single-node
 }
 
 // Handle dispatches a single FSM notification to the appropriate orchestrator
@@ -148,6 +149,9 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		if err := d.orch.AddVault(ctx, *vaultCfg, d.factories); err != nil {
 			d.logger.Error("dispatch: add vault", "id", id, "name", vaultCfg.Name, "error", err)
+		}
+		if d.placementTrigger != nil {
+			d.placementTrigger()
 		}
 		return
 	}
@@ -378,6 +382,12 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	// If this node is the primary and has secondaries, schedule catchup.
 	if tierCfg.NodeID == d.localNodeID && len(tierCfg.SecondaryNodeIDs) > 0 && d.catchupScheduler != nil {
 		d.catchupScheduler(tierID, tierCfg.SecondaryNodeIDs)
+	}
+
+	// Trigger immediate placement reconcile so secondaries are assigned
+	// without waiting for the 15-second ticker.
+	if d.placementTrigger != nil {
+		d.placementTrigger()
 	}
 }
 
