@@ -3,6 +3,7 @@ package query
 import (
 	"container/heap"
 	"context"
+	"errors"
 	"iter"
 	"math"
 	"slices"
@@ -323,9 +324,23 @@ func (e *Engine) primeHeapWithResume(
 	// No local records or unlimited query — prime cloud too.
 	for _, sc := range deferred {
 		ri, _ := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
-		if err := e.primeChunkWithResume(ctx, q, sc, ri, ms); err != nil {
-			return err
+		err := e.primeChunkWithResume(ctx, q, sc, ri, ms)
+		if err == nil {
+			continue
 		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		var cre *chunkReadError
+		if errors.As(err, &cre) {
+			if e.logger != nil {
+				e.logger.Warn("search: skipping unreadable cloud chunk",
+					"vault", cre.vaultID, "chunk", cre.chunkID, "error", cre.err)
+			}
+			ms.chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted
+			continue
+		}
+		return err
 	}
 	return nil
 }
@@ -375,16 +390,60 @@ func (e *Engine) primeHeap(
 		return nil
 	}
 	for _, sc := range deferred {
-		if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
-			return err
+		if err := e.primeCloudChunk(ctx, q, sc, ms); err != nil {
+			return err // context error — abort
 		}
 	}
 	return nil
 }
 
+// primeCloudChunk primes a cloud-backed chunk, skipping it with a warning
+// if the S3 blob is unreadable (corrupt, truncated, etc.). Context errors
+// still propagate.
+func (e *Engine) primeCloudChunk(ctx context.Context, q Query, sc vaultChunk, ms *mergeState) error {
+	err := e.openAndPrimeScanner(ctx, q, sc, nil, ms)
+	if err == nil {
+		return nil
+	}
+	// Context cancellation — abort.
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	// Data access error — skip this chunk.
+	var cre *chunkReadError
+	if errors.As(err, &cre) {
+		if e.logger != nil {
+			e.logger.Warn("search: skipping unreadable cloud chunk",
+				"vault", cre.vaultID, "chunk", cre.chunkID, "error", cre.err)
+		}
+		ms.chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted
+		return nil
+	}
+	return err
+}
+
+// chunkReadError wraps a data access error for a specific chunk, allowing
+// callers to skip individual unreadable chunks without aborting the search.
+type chunkReadError struct {
+	vaultID uuid.UUID
+	chunkID chunk.ChunkID
+	err     error
+}
+
+func (e *chunkReadError) Error() string {
+	return e.err.Error()
+}
+
+func (e *chunkReadError) Unwrap() error {
+	return e.err
+}
+
 // openAndPrimeScanner opens a single chunk iterator and pushes its first
 // record onto the merge heap. If the chunk is immediately exhausted, it
 // marks it in chunkPositions. Returns error if the first Next() call fails.
+// Cloud-backed chunks that fail to open are skipped (logged by the caller)
+// rather than aborting the entire search — one corrupted S3 blob shouldn't
+// prevent reading all other chunks.
 func (e *Engine) openAndPrimeScanner(
 	ctx context.Context,
 	q Query,
@@ -403,7 +462,12 @@ func (e *Engine) openAndPrimeScanner(
 	}
 	if err != nil {
 		stop()
-		return err
+		// Context errors must propagate — everything else is a data access
+		// failure that should skip this chunk, not abort the search.
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return &chunkReadError{vaultID: sc.vaultID, chunkID: sc.meta.ID, err: err}
 	}
 
 	entry := &cursorEntry{
