@@ -15,7 +15,7 @@ Each tier has a **type** that determines how it stores data:
 | Memory | RAM-only. Fast, but lost on restart. |
 | File | Local disk. The most common choice for durable storage. |
 | Cloud | Sealed chunks in S3/GCS/Azure, active chunk on local disk. |
-| JSONL | Append-only JSON lines file. Write-only sink for debugging or export. |
+| JSONL | Append-only JSON lines file. Write-only — cannot be searched or queried. Useful for debugging tier chains or exporting raw records to external tools. |
 
 ### Common Settings
 
