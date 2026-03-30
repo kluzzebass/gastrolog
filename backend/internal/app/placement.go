@@ -290,6 +290,7 @@ func (pm *placementManager) secondaryCandidates(tier config.TierConfig, primaryS
 func (pm *placementManager) selectSecondaries(tier *config.TierConfig, desired int, primaryStorageID, primaryNodeID string, candidates []eligibleStorage, nscs []config.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []config.TierPlacement {
 	var kept []config.TierPlacement
 	usedStorages := map[string]bool{primaryStorageID: true}
+	usedNodes := map[string]bool{primaryNodeID: true} // 1:1:1: one store per tier per node
 
 	// Keep existing valid secondary placements.
 	for _, p := range tier.Placements {
@@ -297,9 +298,10 @@ func (pm *placementManager) selectSecondaries(tier *config.TierConfig, desired i
 			continue
 		}
 		nid := config.NodeIDForStorage(p.StorageID, nscs)
-		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && pm.storageEligible(p.StorageID, *tier, nscs) {
+		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && !usedNodes[nid] && pm.storageEligible(p.StorageID, *tier, nscs) {
 			kept = append(kept, p)
 			usedStorages[p.StorageID] = true
+			usedNodes[nid] = true
 		}
 	}
 
@@ -308,11 +310,12 @@ func (pm *placementManager) selectSecondaries(tier *config.TierConfig, desired i
 		if len(kept) >= desired {
 			break
 		}
-		if usedStorages[ea.storageID] {
+		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
 			continue
 		}
 		kept = append(kept, config.TierPlacement{StorageID: ea.storageID, Primary: false})
 		usedStorages[ea.storageID] = true
+		usedNodes[ea.nodeID] = true
 		tierCount[ea.nodeID]++
 	}
 	return kept

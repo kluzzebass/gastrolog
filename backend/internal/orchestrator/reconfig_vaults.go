@@ -443,9 +443,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			tiers = append(tiers, ti)
 		}
 
-		// Secondary: build ALL instances with explicit storage resolution
-		// to avoid directory/storage ID mismatch. Each local placement gets
-		// its own TierInstance with its own chunk manager directory.
+		// Secondary: build one instance for this node's placement.
+		// 1:1:1 constraint: at most one store per tier per node.
 		if isSecondary {
 			localTargets := tierCfg.SecondaryTargets(nscs)
 			for _, tgt := range localTargets {
@@ -462,6 +461,7 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				sti.StorageID = tgt.StorageID
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				tiers = append(tiers, sti)
+				break // 1:1:1: one store per tier per node
 			}
 		}
 	}
