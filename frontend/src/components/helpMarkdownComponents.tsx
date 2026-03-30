@@ -88,7 +88,7 @@ export function buildMarkdownComponents(
         const chart = childrenToText(children);
         return <Suspense fallback={<div className="py-4 text-center text-text-ghost text-[0.85em]">Loading diagram...</div>}><MermaidDiagram chart={chart.trim()} dark={dark} /></Suspense>;
       }
-      return <code className={`font-mono text-[0.85em] ${className}`}>{children}</code>;
+      return <code className={`font-mono text-[0.85em] ${c("text-text-normal", "text-light-text-normal")} ${className}`}>{children}</code>;
     },
     pre: ({ children }: { children?: React.ReactNode }) => {
       if (
