@@ -30,8 +30,8 @@ Each tier has a **type** that determines how it stores data:
 ### Cloud Tier Settings
 
 - **Cloud Storage** — which [cloud service](help:storage-config) to use for sealed chunks.
-- **Active Chunk Class** — the local storage class for the active chunk (before upload). Use fast storage.
-- **Cache Class** — the local storage class for cached cloud chunks during queries. Can be slower.
+- **Active Chunk Class** — the [file storage](help:storage-config) class for the active chunk (before upload). Use fast storage.
+- **Cache Class** — the [file storage](help:storage-config) class for cached cloud chunks during queries. Can be slower.
 
 ### Memory Tier Settings
 

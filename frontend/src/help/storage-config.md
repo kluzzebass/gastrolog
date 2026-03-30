@@ -28,11 +28,11 @@ Cloud storage endpoints are cluster-wide — not tied to any specific node. Clou
 - **GCS** — Google Cloud Storage. Requires Bucket and a service account Credentials JSON.
 - **Azure** — Azure Blob Storage. Requires a Container name and Connection String.
 
-### Cloud tier local storage
+### Cloud tier file storage
 
-Cloud tiers also need local disk storage for two purposes:
+Cloud tiers also need file storages for two purposes:
 
-- **Active Chunk Class** — the local storage class used for active (writable) chunks before they are sealed and uploaded to the cloud. This is where records are written in real-time, so fast storage (low class number) is recommended.
-- **Cache Class** — the local storage class used for cached copies of sealed chunks downloaded from the cloud during queries. Can be a slower class than active chunks since cache reads are less latency-sensitive.
+- **Active Chunk Class** — the file storage class for active (writable) chunks before they are sealed and uploaded. Fast storage (low class number) is recommended.
+- **Cache Class** — the file storage class for cached copies of sealed chunks downloaded from the cloud during queries. Can be a slower class since cache reads are less latency-sensitive.
 
-Both fields reference file storage classes. The file storages with matching classes must exist on any node that hosts a cloud tier replica.
+Both fields reference file storage classes. File storages with matching classes must exist on any node that hosts a cloud tier replica.
