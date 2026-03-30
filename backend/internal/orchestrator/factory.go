@@ -99,9 +99,8 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 	if err := o.applyVaults(cfg, factories); err != nil {
 		return err
 	}
-	if err := o.applyRetention(cfg); err != nil {
-		return err
-	}
+	// Retention and rotation are now applied per-vault inside initVault
+	// via applyTierPolicies. No separate pass needed.
 	if err := o.applyIngesters(cfg, factories); err != nil {
 		return err
 	}
