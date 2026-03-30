@@ -511,79 +511,41 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			continue
 		}
 
-		// Build the main tier instance (primary, or first secondary).
-		ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, isSecondary)
-		if err != nil {
-			closeTiers(tiers)
-			return nil, fmt.Errorf("build tier %s: %w", tierID, err)
-		}
-		ti.IsSecondary = isSecondary
-		ti.StorageID = tierCfg.PrimaryStorageID()
-		if isSecondary {
-			ti.PrimaryNodeID = primaryNodeID
-			ti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-			// Set the storage ID from the first local secondary placement.
-			for _, tgt := range tierCfg.SecondaryTargets(nscs) {
-				if tgt.NodeID == o.localNodeID {
-					ti.StorageID = tgt.StorageID
-					break
-				}
-			}
-		}
 		if isPrimary {
-			ti.SecondaryTargets = tierCfg.SecondaryTargets(nscs)
-		}
-		tiers = append(tiers, ti)
-
-		// Same-node replication: create additional secondary instances for
-		// each extra placement on this node beyond the first.
-		if isSecondary {
-			extraTiers, err := o.buildSameNodeReplicas(cfg, vaultCfg, tierCfg, factories, nscs, primaryNodeID, ti.StorageID)
+			// Primary: build with default storage resolution.
+			ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, false)
 			if err != nil {
 				closeTiers(tiers)
-				return nil, err
+				return nil, fmt.Errorf("build tier %s: %w", tierID, err)
 			}
-			tiers = append(tiers, extraTiers...)
+			ti.StorageID = tierCfg.PrimaryStorageID()
+			ti.SecondaryTargets = tierCfg.SecondaryTargets(nscs)
+			tiers = append(tiers, ti)
+		}
+
+		// Secondary: build ALL instances with explicit storage resolution
+		// to avoid directory/storage ID mismatch. Each local placement gets
+		// its own TierInstance with its own chunk manager directory.
+		if isSecondary {
+			localTargets := tierCfg.SecondaryTargets(nscs)
+			for _, tgt := range localTargets {
+				if tgt.NodeID != o.localNodeID {
+					continue
+				}
+				sti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, tgt.StorageID)
+				if err != nil {
+					closeTiers(tiers)
+					return nil, fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
+				}
+				sti.IsSecondary = true
+				sti.PrimaryNodeID = primaryNodeID
+				sti.StorageID = tgt.StorageID
+				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+				tiers = append(tiers, sti)
+			}
 		}
 	}
 	return tiers, nil
-}
-
-// buildSameNodeReplicas creates additional secondary TierInstances for
-// same-node placements beyond the first.
-func (o *Orchestrator) buildSameNodeReplicas(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig, factories Factories, nscs []config.NodeStorageConfig, primaryNodeID, excludeStorageID string) ([]*TierInstance, error) {
-	extras := o.localSecondaryStorages(tierCfg, nscs, excludeStorageID)
-	if len(extras) == 0 {
-		return nil, nil
-	}
-	var tiers []*TierInstance
-	for _, storageID := range extras {
-		eti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID)
-		if err != nil {
-			for _, t := range tiers {
-				_ = t.Chunks.Close()
-			}
-			return nil, fmt.Errorf("build tier %s storage %s: %w", tierCfg.ID, storageID, err)
-		}
-		eti.IsSecondary = true
-		eti.PrimaryNodeID = primaryNodeID
-		eti.StorageID = storageID
-		eti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-		tiers = append(tiers, eti)
-	}
-	return tiers, nil
-}
-
-// localSecondaryStorages returns the storage IDs of same-node secondary
-// placements EXCLUDING the one already used by the main instance.
-func (o *Orchestrator) localSecondaryStorages(tierCfg *config.TierConfig, nscs []config.NodeStorageConfig, excludeStorageID string) []string {
-	var extras []string
-	for _, tgt := range tierCfg.SecondaryTargets(nscs) {
-		if tgt.NodeID == o.localNodeID && tgt.StorageID != excludeStorageID {
-			extras = append(extras, tgt.StorageID)
-		}
-	}
-	return extras
 }
 
 // buildTierInstance creates a single TierInstance from a TierConfig.
