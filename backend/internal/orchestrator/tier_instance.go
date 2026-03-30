@@ -41,3 +41,11 @@ type TierInstance struct {
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
 }
+
+// IsPrimary returns true if this node is the primary for this tier.
+func (t *TierInstance) IsPrimary() bool { return !t.IsSecondary }
+
+// ShouldForwardToSecondaries returns true if this primary tier has replication targets.
+func (t *TierInstance) ShouldForwardToSecondaries() bool {
+	return t.IsPrimary() && len(t.SecondaryTargets) > 0
+}

@@ -542,7 +542,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	}
 }
 
-func TestAddIngesterDuplicate(t *testing.T) {
+func TestAddIngesterReplacesDuplicate(t *testing.T) {
 	t.Parallel()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
@@ -557,9 +557,13 @@ func TestAddIngesterDuplicate(t *testing.T) {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
-	err = orch.AddIngester(ingesterID, "test-2", "mock", recv2)
-	if err == nil {
-		t.Fatal("expected error for duplicate ingester")
+	// Adding with the same ID should replace, not error.
+	if err := orch.AddIngester(ingesterID, "test-2", "mock", recv2); err != nil {
+		t.Fatalf("AddIngester (replace): %v", err)
+	}
+
+	if ids := orch.ListIngesters(); len(ids) != 1 {
+		t.Fatalf("expected 1 ingester, got %d", len(ids))
 	}
 }
 

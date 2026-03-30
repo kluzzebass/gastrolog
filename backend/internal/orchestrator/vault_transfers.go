@@ -219,7 +219,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, target
 
 	// Remove per-tier retention and rotation jobs (no longer needed locally).
 	if vault := o.vaults[vaultID]; vault != nil {
-		o.removeVaultTierJobs(vaultID, vault)
+		o.removeVaultJobs(vaultID, vault)
 	}
 
 	o.mu.Unlock()

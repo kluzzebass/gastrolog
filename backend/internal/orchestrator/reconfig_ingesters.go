@@ -7,16 +7,17 @@ import (
 	"github.com/google/uuid"
 )
 
-// AddIngester adds and optionally starts a new ingester.
-// If the orchestrator is running, the ingester is started immediately.
-// Returns ErrDuplicateID if a ingester with this ID already exists.
+// AddIngester adds and starts a new ingester. If an ingester with the same ID
+// already exists, it is stopped and replaced — making the operation idempotent.
 func (o *Orchestrator) AddIngester(id uuid.UUID, name, ingType string, r Ingester) error {
 	o.mu.Lock()
-	defer o.mu.Unlock()
 
-	if _, exists := o.ingesters[id]; exists {
-		return fmt.Errorf("%w: %s", ErrDuplicateID, id)
+	// Stop existing ingester if present (idempotent replace).
+	if cancel, ok := o.ingesterCancels[id]; ok && o.running {
+		cancel()
+		delete(o.ingesterCancels, id)
 	}
+	delete(o.ingesters, id)
 
 	o.ingesters[id] = r
 	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType}
@@ -35,6 +36,7 @@ func (o *Orchestrator) AddIngester(id uuid.UUID, name, ingType string, r Ingeste
 		o.logger.Info("ingester started", "id", id, "name", name, "type", ingType)
 	}
 
+	o.mu.Unlock()
 	return nil
 }
 

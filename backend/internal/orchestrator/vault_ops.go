@@ -233,7 +233,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 
 		// Primary: collect remote forward targets (local appends happen under lock).
 		var remotes []remoteForwardTarget
-		if !tier.IsSecondary && len(tier.SecondaryTargets) > 0 {
+		if tier.ShouldForwardToSecondaries() {
 			remotes = o.forwardToSecondaries(vault, vaultID, tier, cm, rec)
 		}
 
@@ -387,7 +387,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	activeTier := vault.ActiveTier()
 	var task *replicationTask
 	var remotes []remoteForwardTarget
-	if !activeTier.IsSecondary && len(activeTier.SecondaryTargets) > 0 {
+	if activeTier.ShouldForwardToSecondaries() {
 		if rec.WaitForReplica {
 			activeNow := cm.Active()
 			var activeChunkID chunk.ChunkID

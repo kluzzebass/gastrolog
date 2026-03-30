@@ -169,25 +169,41 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 		}
 	}
 
-	// Remove per-tier retention and rotation jobs.
-	o.removeVaultTierJobs(id, vault)
-
-	// Remove from registry.
-	delete(o.vaults, id)
-
-	// Rebuild filter set without this vault.
-	o.rebuildFilterSetLocked()
-
+	o.teardownVault(id, vault)
 	o.logger.Info("vault removed", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
 
-// removeVaultTierJobs removes all per-tier retention runners and cron rotation jobs for a vault.
-func (o *Orchestrator) removeVaultTierJobs(vaultID uuid.UUID, vault *Vault) {
+// removeVaultJobs removes retention runners and cron rotation jobs for a vault
+// without closing managers or unregistering. Used by UnregisterVault and drain.
+func (o *Orchestrator) removeVaultJobs(id uuid.UUID, vault *Vault) {
 	for _, tier := range vault.Tiers {
 		delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	}
-	o.cronRotation.removeAllForVault(vaultID)
+	o.cronRotation.removeAllForVault(id)
+}
+
+// teardownVault performs the common cleanup for all vault removal paths:
+// cancels pending jobs, closes managers, removes from registry, rebuilds filters.
+func (o *Orchestrator) teardownVault(id uuid.UUID, vault *Vault) {
+	// Cancel pending compress/index jobs to prevent use-after-close.
+	vaultPrefix := id.String()
+	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
+	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
+
+	// Remove per-tier retention runners and cron rotation jobs.
+	for _, tier := range vault.Tiers {
+		delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+	}
+	o.cronRotation.removeAllForVault(id)
+
+	// Close chunk/index managers to release file locks.
+	if err := vault.Close(); err != nil {
+		o.logger.Warn("failed to close vault during teardown", "vault", id, "error", err)
+	}
+
+	delete(o.vaults, id)
+	o.rebuildFilterSetLocked()
 }
 
 // DisableVault disables ingestion for a vault.
@@ -276,27 +292,7 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 		}
 	}
 
-	// Cancel pending compress/index jobs before closing the chunk manager
-	// to prevent use-after-close on the managers they capture.
-	vaultPrefix := id.String()
-	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
-	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
-
-	// Close all tiers to release file locks.
-	if err := vault.Close(); err != nil {
-		o.logger.Warn("failed to close vault during force remove",
-			"vault", id, "error", err)
-	}
-
-	// Remove per-tier retention and rotation jobs.
-	o.removeVaultTierJobs(id, vault)
-
-	// Remove from registry.
-	delete(o.vaults, id)
-
-	// Rebuild filter set without this vault.
-	o.rebuildFilterSetLocked()
-
+	o.teardownVault(id, vault)
 	o.logger.Info("vault force-removed", "id", id, "name", vault.Name, "type", vault.Type())
 	return nil
 }
@@ -358,7 +354,7 @@ func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
 	}
 
 	// Remove per-tier retention and rotation jobs.
-	o.removeVaultTierJobs(id, vault)
+	o.removeVaultJobs(id, vault)
 
 	// Remove from registry.
 	delete(o.vaults, id)

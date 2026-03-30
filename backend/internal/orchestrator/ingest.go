@@ -207,7 +207,7 @@ func (o *Orchestrator) tierReplicationInfo(vaultID uuid.UUID, cm chunk.ChunkMana
 		return uuid.UUID{}, nil
 	}
 	for _, tier := range vault.Tiers {
-		if tier.Chunks == cm && !tier.IsSecondary && len(tier.SecondaryTargets) > 0 {
+		if tier.Chunks == cm && tier.ShouldForwardToSecondaries() {
 			return tier.TierID, tier.SecondaryTargets
 		}
 	}
