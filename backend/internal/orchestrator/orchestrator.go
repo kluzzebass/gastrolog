@@ -199,6 +199,8 @@ type Orchestrator struct {
 	ingesterWg sync.WaitGroup // tracks ingester goroutines
 	digestWg   sync.WaitGroup // tracks digest goroutine
 	writeWg    sync.WaitGroup // tracks write goroutine
+	ackWg      sync.WaitGroup // tracks in-flight ack-gated replication goroutines
+	auxWg      sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
 
 	// Per-tier import mutex for serializing SetNextChunkID + ImportRecords.
 	importMu sync.Map // tierID → *sync.Mutex

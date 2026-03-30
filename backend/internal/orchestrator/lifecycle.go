@@ -79,7 +79,7 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	cw.Watch("digestedCh", func() (int, int) {
 		return len(o.digestedCh), cap(o.digestedCh)
 	}, 0.9)
-	go cw.Run(ctx)
+	o.auxWg.Go(func() { cw.Run(ctx) })
 
 	return nil
 }
@@ -122,6 +122,12 @@ func (o *Orchestrator) Stop() error {
 
 	// Stage 3: Wait for write loop to drain remaining records.
 	o.writeWg.Wait()
+
+	// Stage 4: Wait for in-flight ack-gated replication goroutines.
+	o.ackWg.Wait()
+
+	// Stage 5: Wait for auxiliary goroutines (watchdog, etc.).
+	o.auxWg.Wait()
 
 	// Stop shared scheduler — waits for running jobs (index builds,
 	// cron rotation, retention) to finish.
@@ -249,7 +255,9 @@ func (o *Orchestrator) writeLoop() {
 			} else {
 				// Ack-gated: sync forward to secondaries in a goroutine
 				// so the writeLoop isn't blocked by network round-trips.
-				go o.ackAfterReplication(dr.ack, tasks, dr.rec)
+				o.ackWg.Go(func() {
+					o.ackAfterReplication(dr.ack, tasks, dr.rec)
+				})
 			}
 		}
 	}
