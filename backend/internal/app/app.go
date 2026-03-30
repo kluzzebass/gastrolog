@@ -208,6 +208,11 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 	close(orchReady)
 
+	// Reconcile tier Raft group membership after all vaults/tiers are
+	// registered. On snapshot restore, individual NotifyTierPut events
+	// don't fire, so the primary may not have added secondaries yet.
+	disp.reconcileAllTierRaftGroups(ctx)
+
 	// Monitor slog capture channel pressure.
 	if cfg.SlogCapture != nil {
 		slogCW := chanwatch.New(logger, 1*time.Second)

@@ -460,6 +460,13 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				sti.PrimaryNodeID = primaryNodeID
 				sti.StorageID = tgt.StorageID
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+				// Create the tier Raft group (non-bootstrapped) so this
+				// node accepts AppendEntries from the leader.
+				raftCB := o.wireTierRaftGroup(sti.Chunks, *tierCfg, nscs, factories, true)
+				sti.HasRaftLeader = raftCB.hasLeader
+				sti.IsRaftLeader = raftCB.isLeader
+				sti.ApplyRaftDelete = raftCB.applyDelete
+				sti.ListManifest = raftCB.listChunks
 				tiers = append(tiers, sti)
 				break // 1:1:1: one store per tier per node
 			}
@@ -479,6 +486,13 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg con
 			return nil, err
 		}
 		ti.StorageID = storageID
+		// Wire tier Raft group for the primary — buildTierInstanceForStorage
+		// doesn't call wireTierRaftGroup itself.
+		raftCB := o.wireTierRaftGroup(ti.Chunks, *tierCfg, cfg.NodeStorageConfigs, factories, false)
+		ti.HasRaftLeader = raftCB.hasLeader
+		ti.IsRaftLeader = raftCB.isLeader
+		ti.ApplyRaftDelete = raftCB.applyDelete
+		ti.ListManifest = raftCB.listChunks
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
@@ -558,6 +572,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 			Type:            string(tierCfg.Type),
 			Chunks:          cm,
 			HasRaftLeader:   raftCB.hasLeader,
+			IsRaftLeader:    raftCB.isLeader,
 			ApplyRaftDelete: raftCB.applyDelete,
 			ListManifest:    raftCB.listChunks,
 		}, nil
@@ -671,6 +686,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 			timeout := 10 * time.Second
 			raftCB = tierRaftCallbacks{
 				hasLeader: func() bool { return r.Leader() != "" },
+		isLeader:  func() bool { return r.State() == hraft.Leader },
 				applyDelete: func(id chunk.ChunkID) error {
 					return r.Apply(multiraft.MarshalDeleteChunk(id), timeout).Error()
 				},
@@ -719,6 +735,7 @@ func findFileStorageByID(cfg *config.Config, storageID string) *config.FileStora
 // all nodes via consensus.
 type tierRaftCallbacks struct {
 	hasLeader   func() bool
+	isLeader    func() bool
 	applyDelete func(id chunk.ChunkID) error
 	listChunks  func() []chunk.ChunkID
 }
@@ -758,6 +775,7 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 	timeout := 10 * time.Second
 	return tierRaftCallbacks{
 		hasLeader: func() bool { return r.Leader() != "" },
+		isLeader:  func() bool { return r.State() == hraft.Leader },
 		applyDelete: func(id chunk.ChunkID) error {
 			f := r.Apply(multiraft.MarshalDeleteChunk(id), timeout)
 			return f.Error()

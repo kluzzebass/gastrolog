@@ -32,6 +32,10 @@ type TierInstance struct {
 	// Nil when no Raft group exists (single-node / memory mode).
 	HasRaftLeader func() bool
 
+	// IsRaftLeader returns true if THIS node is the Raft leader for this tier.
+	// Nil when no Raft group exists (single-node / memory mode — always leader).
+	IsRaftLeader func() bool
+
 	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
 	// until committed. Returns an error if not leader or timeout. Nil when no
 	// Raft group exists.

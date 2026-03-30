@@ -234,17 +234,25 @@ func (m *GroupManager) RemoveMember(groupID string, serverID hraft.ServerID) err
 }
 
 // Shutdown gracefully stops all groups, tier groups first, config last.
+// Tier groups are shut down concurrently to avoid sequential election
+// timeout delays on follower nodes.
 func (m *GroupManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Shut down non-config groups first.
+	// Shut down non-config groups concurrently.
+	var wg sync.WaitGroup
 	for id, g := range m.groups {
 		if id == "config" {
 			continue
 		}
-		m.shutdownGroup(id, g)
+		wg.Add(1)
+		go func(id string, g *Group) {
+			defer wg.Done()
+			m.shutdownGroup(id, g)
+		}(id, g)
 	}
+	wg.Wait()
 
 	// Config group last.
 	if g, ok := m.groups["config"]; ok {

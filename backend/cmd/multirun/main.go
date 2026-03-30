@@ -38,12 +38,18 @@ const reset = "\033[0m"
 
 // lineWriter serializes colored, prefixed line output across goroutines.
 type lineWriter struct {
-	mu sync.Mutex
+	mu      sync.Mutex
+	teeFile *os.File // optional merged log file
 }
 
 func (lw *lineWriter) writeTo(w *os.File, prefix, color, line string) {
 	lw.mu.Lock()
-	_, _ = io.WriteString(w, color+"["+prefix+"]"+reset+" "+line+"\n") //#nosec G705 -- terminal output only
+	formatted := color + "[" + prefix + "]" + reset + " " + line + "\n"
+	_, _ = io.WriteString(w, formatted) //#nosec G705 -- terminal output only
+	if lw.teeFile != nil {
+		// Write without ANSI colors to the tee file.
+		_, _ = io.WriteString(lw.teeFile, "["+prefix+"] "+line+"\n")
+	}
 	lw.mu.Unlock()
 }
 
@@ -76,6 +82,7 @@ is still available.`,
 	rootCmd.Flags().String("name", "", "comma-separated process names (default: 1,2,3,...)")
 	rootCmd.Flags().Duration("grace", 60*time.Second, "grace period before SIGKILL after SIGTERM")
 	rootCmd.Flags().Bool("no-fail-fast", false, "keep running when a process exits or dies")
+	rootCmd.Flags().String("tee", "", "file path to tee merged output to (without ANSI colors)")
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
@@ -86,6 +93,7 @@ func runMulti(cmd *cobra.Command, args []string) error {
 	nameFlag, _ := cmd.Flags().GetString("name")
 	grace, _ := cmd.Flags().GetDuration("grace")
 	noFailFast, _ := cmd.Flags().GetBool("no-fail-fast")
+	teePath, _ := cmd.Flags().GetString("tee")
 
 	var names []string
 	if nameFlag != "" {
@@ -122,6 +130,15 @@ func runMulti(cmd *cobra.Command, args []string) error {
 
 	// Start children sequentially so children[i] always corresponds to
 	// names[i]. They all run concurrently once started.
+	if teePath != "" {
+		f, err := os.Create(teePath) //nolint:gosec // user-provided path is the purpose of this flag
+		if err != nil {
+			return fmt.Errorf("create tee file: %w", err)
+		}
+		defer func() { _ = f.Close() }()
+		lw.teeFile = f
+	}
+
 	children := make([]*childProc, len(args))
 	var wg sync.WaitGroup
 	for i, cmdStr := range args {

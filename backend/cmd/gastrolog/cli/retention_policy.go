@@ -101,9 +101,14 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 		Short: "Create a retention policy",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			maxAge, _ := cmd.Flags().GetInt64("max-age")
+			maxAgeStr, _ := cmd.Flags().GetString("max-age")
 			maxBytes, _ := cmd.Flags().GetInt64("max-bytes")
 			maxChunks, _ := cmd.Flags().GetInt64("max-chunks")
+
+			var maxAge int64
+			if maxAgeStr != "" {
+				maxAge = parseDurationSeconds(maxAgeStr)
+			}
 
 			client := clientFromCmd(cmd)
 			id := uuid.Must(uuid.NewV7()).String()
@@ -124,7 +129,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
-	cmd.Flags().Int64("max-age", 0, "max age in seconds")
+	cmd.Flags().String("max-age", "", "max age (e.g. 3m, 1h, 30s)")
 	cmd.Flags().Int64("max-bytes", 0, "max bytes")
 	cmd.Flags().Int64("max-chunks", 0, "max chunks")
 	_ = cmd.MarkFlagRequired("name")

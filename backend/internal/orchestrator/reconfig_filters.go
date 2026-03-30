@@ -120,11 +120,19 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 	}
 
 	// Swap filter set atomically (we're under the lock).
-	o.filterSet = fs
+	oldCount := 0
+	if o.filterSet != nil {
+		oldCount = len(o.filterSet.filters)
+	}
+	newCount := 0
 	if fs != nil {
-		o.logger.Info("filters updated from routes", "count", len(fs.filters))
-	} else {
+		newCount = len(fs.filters)
+	}
+	o.filterSet = fs
+	if fs == nil && oldCount > 0 {
 		o.logger.Warn("no route filters compiled, ingested records will be dropped")
+	} else if newCount != oldCount {
+		o.logger.Info("filters updated from routes", "count", newCount)
 	}
 
 	return nil

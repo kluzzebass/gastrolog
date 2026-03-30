@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"connectrpc.com/connect"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -19,6 +21,8 @@ func newNodeCmd() *cobra.Command {
 		newNodeListCmd(),
 		newNodeGetCmd(),
 		newNodeRenameCmd(),
+		newNodeAddStorageCmd(),
+		newNodeListStorageCmd(),
 	)
 	return cmd
 }
@@ -113,4 +117,122 @@ func newNodeRenameCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func newNodeAddStorageCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "add-storage <node-name-or-id>",
+		Short: "Add a file storage to a node",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			name, _ := cmd.Flags().GetString("name")
+			path, _ := cmd.Flags().GetString("path")
+			storageClass, _ := cmd.Flags().GetUint32("storage-class")
+
+			client := clientFromCmd(cmd)
+			r, err := newResolver(context.Background(), client)
+			if err != nil {
+				return err
+			}
+			nodeID, err := resolve(args[0], r.nodes, "node")
+			if err != nil {
+				return err
+			}
+
+			// Get existing storage config for this node.
+			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			var existing []*v1.FileStorage
+			for _, nsc := range resp.Msg.NodeStorageConfigs {
+				if nsc.NodeId == nodeID {
+					existing = nsc.FileStorages
+					break
+				}
+			}
+
+			// Append new storage.
+			fsID := uuid.Must(uuid.NewV7()).String()
+			existing = append(existing, &v1.FileStorage{
+				Id:           fsID,
+				Name:         name,
+				Path:         path,
+				StorageClass: storageClass,
+			})
+
+			_, err = client.Config.SetNodeStorageConfig(context.Background(), connect.NewRequest(&v1.SetNodeStorageConfigRequest{
+				Config: &v1.NodeStorageConfig{
+					NodeId:       nodeID,
+					FileStorages: existing,
+				},
+			}))
+			if err != nil {
+				return err
+			}
+			fmt.Printf("Added file storage %q to node %s (id=%s, class=%d, path=%s)\n", name, args[0], fsID, storageClass, path)
+			return nil
+		},
+	}
+	cmd.Flags().String("name", "", "storage name (required)")
+	cmd.Flags().String("path", "", "storage path (default: auto)")
+	cmd.Flags().Uint32("storage-class", 1, "storage class")
+	_ = cmd.MarkFlagRequired("name")
+	return cmd
+}
+
+func newNodeListStorageCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "list-storage [node-name-or-id]",
+		Short: "List file storages for a node (or all nodes)",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client := clientFromCmd(cmd)
+			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+
+			var filterNodeID string
+			if len(args) > 0 {
+				r, err := newResolver(context.Background(), client)
+				if err != nil {
+					return err
+				}
+				filterNodeID, err = resolve(args[0], r.nodes, "node")
+				if err != nil {
+					return err
+				}
+			}
+
+			// Build node name lookup.
+			nodeNames := make(map[string]string)
+			for _, n := range resp.Msg.NodeConfigs {
+				nodeNames[n.Id] = n.Name
+			}
+
+			p := newPrinter(outputFormat(cmd))
+			if outputFormat(cmd) == "json" {
+				return p.json(resp.Msg.NodeStorageConfigs)
+			}
+			var rows [][]string
+			for _, nsc := range resp.Msg.NodeStorageConfigs {
+				if filterNodeID != "" && nsc.NodeId != filterNodeID {
+					continue
+				}
+				nodeName := nodeNames[nsc.NodeId]
+				if nodeName == "" {
+					nodeName = nsc.NodeId[:8]
+				}
+				for _, fs := range nsc.FileStorages {
+					rows = append(rows, []string{
+						nodeName, fs.Id, fs.Name,
+						strconv.FormatUint(uint64(fs.StorageClass), 10),
+						fs.Path,
+					})
+				}
+			}
+			p.table([]string{"NODE", "STORAGE ID", "NAME", "CLASS", "PATH"}, rows)
+			return nil
+		},
+	}
 }

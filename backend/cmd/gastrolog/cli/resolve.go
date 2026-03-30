@@ -17,6 +17,7 @@ type resolver struct {
 	filters           map[string]string // name → id
 	rotationPolicies  map[string]string
 	retentionPolicies map[string]string
+	tiers             map[string]string
 	vaults            map[string]string
 	ingesters         map[string]string
 	nodes             map[string]string
@@ -36,6 +37,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 		filters:           make(map[string]string),
 		rotationPolicies:  make(map[string]string),
 		retentionPolicies: make(map[string]string),
+		tiers:             make(map[string]string),
 		vaults:            make(map[string]string),
 		ingesters:         make(map[string]string),
 		nodes:             make(map[string]string),
@@ -53,6 +55,9 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 	for _, p := range cfg.RetentionPolicies {
 		r.retentionPolicies[strings.ToLower(p.Name)] = p.Id
+	}
+	for _, t := range cfg.Tiers {
+		r.tiers[strings.ToLower(t.Name)] = t.Id
 	}
 	for _, v := range cfg.Vaults {
 		r.vaults[strings.ToLower(v.Name)] = v.Id

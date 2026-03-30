@@ -453,6 +453,33 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.
+// reconcileAllTierRaftGroups reconciles membership for all tier Raft groups.
+// Called once on startup after all vaults are registered, to handle the case
+// where the FSM was restored from a snapshot (no individual NotifyTierPut).
+func (d *configDispatcher) reconcileAllTierRaftGroups(ctx context.Context) {
+	if d.factories.GroupManager == nil {
+		return
+	}
+	tiers, err := d.cfgStore.ListTiers(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list tiers for raft reconciliation", "error", err)
+		return
+	}
+	nscs, err := d.cfgStore.ListNodeStorageConfigs(ctx)
+	if err != nil {
+		d.logger.Error("dispatch: list node storage configs for raft reconciliation", "error", err)
+		return
+	}
+	for _, tier := range tiers {
+		primaryNodeID := tier.PrimaryNodeID(nscs)
+		if primaryNodeID == d.localNodeID {
+			d.logger.Info("dispatch: reconciling tier raft group on startup",
+				"tier", tier.ID, "primary", primaryNodeID)
+			d.reconcileTierRaftGroup(tier.ID, &tier, nscs)
+		}
+	}
+}
+
 // reconcileTierRaftGroup ensures the tier's Raft group membership matches the
 // tier config's node assignments (primary + secondaries). Only called on the
 // primary node (which is the Raft leader for the group).
@@ -481,6 +508,8 @@ func (d *configDispatcher) reconcileTierRaftGroup(tierID uuid.UUID, tierCfg *con
 		}
 	}
 	if len(expected) == 0 {
+		d.logger.Warn("dispatch: no expected members resolved for tier raft group",
+			"tier", tierID)
 		return
 	}
 

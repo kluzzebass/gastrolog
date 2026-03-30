@@ -53,8 +53,7 @@ type retentionRunner struct {
 	// single-node / memory mode — local delete proceeds without Raft.
 	applyRaftDelete func(id chunk.ChunkID) error
 
-	isSecondary bool // secondaries force all actions to expire
-	now         func() time.Time
+	now func() time.Time
 	logger      *slog.Logger
 }
 
@@ -63,15 +62,10 @@ type sweepTarget struct {
 	rules  []retentionRule
 }
 
-// retentionSweepAll is the single scheduled retention job. Each tick it
-// discovers all local tier instances and evaluates retention rules.
-//
-// Primaries: evaluate rules, apply CmdDeleteChunk to tier Raft, delete locally.
-// Secondaries: evaluate the same rules but force all actions to expire.
-//
-// Additionally, the tier Raft's OnDelete callback provides real-time
-// propagation when connected (see wireOnDeleteCallback). The scheduled
-// reconciliation (reconcileSecondary) handles gaps when Raft isn't connected.
+// retentionSweepAll is the single scheduled retention job. Each tick:
+//   - Leader: evaluates retention rules, applies CmdDeleteChunk to tier Raft, deletes locally.
+//   - Followers: reconcile local disk against the tier Raft manifest — delete anything
+//     the leader has removed. No independent rule evaluation.
 func (o *Orchestrator) retentionSweepAll() {
 	cfg, err := o.loadConfig(context.Background())
 	if err != nil {
@@ -85,6 +79,8 @@ func (o *Orchestrator) retentionSweepAll() {
 	var targets []sweepTarget
 	active := make(map[string]bool)
 
+	var reconcileTiers []*TierInstance
+
 	o.mu.Lock()
 	for _, vaultCfg := range cfg.Vaults {
 		vault := o.vaults[vaultCfg.ID]
@@ -92,6 +88,16 @@ func (o *Orchestrator) retentionSweepAll() {
 			continue
 		}
 		for _, tier := range vault.Tiers {
+			if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
+				continue
+			}
+			// Non-leaders reconcile against the manifest — no rule evaluation.
+			// Uses Raft leadership, not config-driven IsSecondary.
+			isLeader := tier.IsRaftLeader == nil || tier.IsRaftLeader()
+			if !isLeader && tier.ListManifest != nil {
+				reconcileTiers = append(reconcileTiers, tier)
+				continue
+			}
 			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
 				targets = append(targets, *t)
 			}
@@ -104,8 +110,14 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	o.mu.Unlock()
 
+	// Leader: evaluate retention rules.
 	for _, t := range targets {
 		t.runner.sweep(t.rules)
+	}
+
+	// Followers: reconcile against the tier Raft manifest.
+	for _, tier := range reconcileTiers {
+		o.reconcileSecondary(tier)
 	}
 }
 
@@ -145,10 +157,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 		}
 		o.retention[key] = runner
 	}
-	runner.isSecondary = tier.IsSecondary
-	if !tier.IsSecondary {
-		runner.applyRaftDelete = tier.ApplyRaftDelete
-	}
+	runner.applyRaftDelete = tier.ApplyRaftDelete
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
@@ -249,11 +258,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 			func() {
 				defer r.clearInflight(id)
-				action := b.action
-				if r.isSecondary {
-					action = config.RetentionActionExpire
-				}
-				switch action {
+				switch b.action {
 				case config.RetentionActionExpire:
 					r.expireChunk(id)
 				case config.RetentionActionEject:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -105,9 +106,14 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
 			maxBytes, _ := cmd.Flags().GetInt64("max-bytes")
-			maxAge, _ := cmd.Flags().GetInt64("max-age")
+			maxAgeStr, _ := cmd.Flags().GetString("max-age")
 			maxRecords, _ := cmd.Flags().GetInt64("max-records")
 			cron, _ := cmd.Flags().GetString("cron")
+
+			var maxAge int64
+			if maxAgeStr != "" {
+				maxAge = parseDurationSeconds(maxAgeStr)
+			}
 
 			client := clientFromCmd(cmd)
 			id := uuid.Must(uuid.NewV7()).String()
@@ -130,7 +136,7 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 	}
 	cmd.Flags().String("name", "", "policy name (required)")
 	cmd.Flags().Int64("max-bytes", 0, "max bytes before rotation")
-	cmd.Flags().Int64("max-age", 0, "max age in seconds before rotation")
+	cmd.Flags().String("max-age", "", "max age before rotation (e.g. 1m, 30s, 2h)")
 	cmd.Flags().Int64("max-records", 0, "max records before rotation")
 	cmd.Flags().String("cron", "", "cron schedule for rotation")
 	_ = cmd.MarkFlagRequired("name")
@@ -160,6 +166,19 @@ func newRotationPolicyDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+// parseDurationSeconds parses a duration string (e.g. "1m", "30s", "2h") or
+// a plain integer (seconds) and returns the value in seconds.
+func parseDurationSeconds(s string) int64 {
+	if d, err := time.ParseDuration(s); err == nil {
+		return int64(d.Seconds())
+	}
+	// Fall back to plain integer (seconds).
+	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return v
+	}
+	return 0
 }
 
 func formatInt64(v int64) string {

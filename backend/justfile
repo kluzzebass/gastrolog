@@ -179,6 +179,7 @@ cluster-run:
   go run ./cmd/multirun \
     --no-fail-fast \
     --name node1,node2,node3,node4 \
+    --tee data/cluster.log \
     "go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566" \
     "go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576" \
     "go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586" \
