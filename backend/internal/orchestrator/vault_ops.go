@@ -223,15 +223,8 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		}
 
 		// Primary: forward to secondaries for active-chunk durability.
-		if !tier.IsSecondary && len(tier.SecondaryTargets) > 0 && o.forwarder != nil {
-			activeNow := cm.Active()
-			var activeChunkID chunk.ChunkID
-			if activeNow != nil {
-				activeChunkID = activeNow.ID
-			}
-			for _, tgt := range tier.SecondaryTargets {
-				_ = o.forwarder.ForwardToTier(context.Background(), tgt.NodeID, vaultID, tierID, activeChunkID, []chunk.Record{rec})
-			}
+		if !tier.IsSecondary && len(tier.SecondaryTargets) > 0 {
+			o.forwardToSecondaries(vault, vaultID, tier, cm, rec)
 		}
 
 		activeAfter := cm.Active()
@@ -246,6 +239,41 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		return nil
 	}
 	return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+}
+
+// forwardToSecondaries forwards a record to all secondary targets for active-chunk
+// durability. Same-node targets use direct append; cross-node targets use gRPC.
+// Called under o.mu.RLock.
+func (o *Orchestrator) forwardToSecondaries(vault *Vault, vaultID uuid.UUID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) {
+	activeNow := cm.Active()
+	var activeChunkID chunk.ChunkID
+	if activeNow != nil {
+		activeChunkID = activeNow.ID
+	}
+	for _, tgt := range tier.SecondaryTargets {
+		if tgt.NodeID == o.localNodeID {
+			o.appendToLocalSecondary(vault, tier.TierID, tgt.StorageID, activeChunkID, rec)
+		} else if o.forwarder != nil {
+			_ = o.forwarder.ForwardToTier(context.Background(), tgt.NodeID, vaultID, tier.TierID, activeChunkID, []chunk.Record{rec})
+		}
+	}
+}
+
+// appendToLocalSecondary appends a record to a same-node secondary tier instance,
+// identified by storageID. Called under o.mu.RLock — vault is already resolved.
+func (o *Orchestrator) appendToLocalSecondary(vault *Vault, tierID uuid.UUID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID && t.StorageID == storageID && t.IsSecondary {
+			if primaryChunkID != (chunk.ChunkID{}) {
+				if active := t.Chunks.Active(); active != nil && active.ID != primaryChunkID {
+					_ = t.Chunks.Seal()
+				}
+				t.Chunks.SetNextChunkID(primaryChunkID)
+			}
+			_, _, _ = t.Chunks.Append(rec)
+			return
+		}
+	}
 }
 
 // --- Chunk write ---
@@ -304,23 +332,20 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	activeTier := vault.ActiveTier()
 	var task *replicationTask
 	if !activeTier.IsSecondary && len(activeTier.SecondaryTargets) > 0 {
-		activeNow := cm.Active()
-		var activeChunkID chunk.ChunkID
-		if activeNow != nil {
-			activeChunkID = activeNow.ID
-		}
-
 		if rec.WaitForReplica {
+			activeNow := cm.Active()
+			var activeChunkID chunk.ChunkID
+			if activeNow != nil {
+				activeChunkID = activeNow.ID
+			}
 			task = &replicationTask{
 				vaultID: vaultID,
 				tierID:  activeTier.TierID,
 				chunkID: activeChunkID,
 				targets: activeTier.SecondaryTargets,
 			}
-		} else if o.forwarder != nil {
-			for _, tgt := range activeTier.SecondaryTargets {
-				_ = o.forwarder.ForwardToTier(context.Background(), tgt.NodeID, vaultID, activeTier.TierID, activeChunkID, []chunk.Record{rec})
-			}
+		} else {
+			o.forwardToSecondaries(vault, vaultID, activeTier, cm, rec)
 		}
 	}
 

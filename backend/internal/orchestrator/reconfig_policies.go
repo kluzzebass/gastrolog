@@ -68,9 +68,8 @@ func (o *Orchestrator) ReloadRotationPolicies(ctx context.Context) error {
 func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) error {
 	if tier.IsSecondary {
 		tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-		if o.cronRotation.hasJob(vaultCfg.ID, tier.TierID) {
-			o.cronRotation.removeJob(vaultCfg.ID, tier.TierID)
-		}
+		// Don't touch the cron job — it's keyed by (vaultID, tierID) and
+		// owned by the primary instance, which shares the same key.
 		return nil
 	}
 
