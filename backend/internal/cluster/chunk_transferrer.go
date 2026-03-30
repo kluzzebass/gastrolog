@@ -291,27 +291,6 @@ func (ct *ChunkTransferrer) ForwardSealTier(ctx context.Context, nodeID string, 
 	return nil
 }
 
-// DeleteRemoteChunk commands a secondary node to delete a specific chunk from
-// a tier. Used by retention: the primary decides, secondaries obey.
-func (ct *ChunkTransferrer) DeleteRemoteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
-	conn, err := ct.peers.Conn(nodeID)
-	if err != nil {
-		return fmt.Errorf("dial node %s: %w", nodeID, err)
-	}
-
-	req := &gastrologv1.ForwardDeleteChunkRequest{
-		VaultId: vaultID.String(),
-		TierId:  tierID.String(),
-		ChunkId: chunkID.String(),
-	}
-	resp := &gastrologv1.ForwardDeleteChunkResponse{}
-	if err := conn.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardDeleteChunk", req, resp); err != nil {
-		ct.peers.Invalidate(nodeID)
-		return fmt.Errorf("forward delete chunk to %s: %w", nodeID, err)
-	}
-	return nil
-}
-
 // WaitVaultReady polls the target node until the vault is registered and
 // accepting records, or ctx expires. Uses ForwardListChunks as a lightweight
 // existence probe — it returns an error if the vault doesn't exist.

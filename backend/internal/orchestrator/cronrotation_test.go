@@ -117,71 +117,41 @@ func TestRotateVaultSkipsNilActive(t *testing.T) {
 	}
 }
 
-func TestAddAndRemoveJob(t *testing.T) {
+func TestEnsureCreatesAndUpdatesJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
 	vaultA := uuid.Must(uuid.NewV7())
 	tierA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, tierA, "vault-a", "* * * * *", cm); err != nil {
-		t.Fatalf("addJob failed: %v", err)
+
+	// First ensure creates the job.
+	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+
+	name := cronJobName(vaultA, tierA)
+	if !m.scheduler.HasJob(name) {
+		t.Error("expected job to be registered after ensure")
+	}
+	if m.schedules[name] != "* * * * *" {
+		t.Errorf("expected schedule '* * * * *', got %q", m.schedules[name])
 	}
 
-	if !m.hasJob(vaultA, tierA) {
-		t.Error("expected job to be registered")
+	// Ensure with same schedule is a no-op.
+	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	if m.schedules[name] != "* * * * *" {
+		t.Error("schedule should be unchanged")
 	}
 
-	// Adding the same vault+tier again should fail.
-	if err := m.addJob(vaultA, tierA, "vault-a", "0 * * * *", cm); err == nil {
-		t.Error("expected error when adding duplicate job")
+	// Ensure with new schedule updates.
+	m.ensure(vaultA, tierA, "vault-a", "0 * * * *", cm)
+	if m.schedules[name] != "0 * * * *" {
+		t.Errorf("expected updated schedule '0 * * * *', got %q", m.schedules[name])
 	}
-
-	m.removeJob(vaultA, tierA)
-
-	if m.hasJob(vaultA, tierA) {
-		t.Error("expected job to be removed")
-	}
-
-	// Removing a non-existent job should be a no-op.
-	nonexistent := uuid.Must(uuid.NewV7())
-	m.removeJob(nonexistent, nonexistent)
-}
-
-func TestUpdateJob(t *testing.T) {
-	cm := &cronFakeChunkManager{}
-	m := newTestCronManager(t)
-
-	vaultA := uuid.Must(uuid.NewV7())
-	tierA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, tierA, "vault-a", "* * * * *", cm); err != nil {
-		t.Fatalf("addJob failed: %v", err)
-	}
-
-	if err := m.updateJob(vaultA, tierA, "vault-a", "0 * * * *", cm); err != nil {
-		t.Fatalf("updateJob failed: %v", err)
-	}
-
-	if !m.hasJob(vaultA, tierA) {
-		t.Error("expected job to still exist after update")
+	if !m.scheduler.HasJob(name) {
+		t.Error("job should still exist after schedule update")
 	}
 }
 
-func TestAddJobRejectsInvalidCron(t *testing.T) {
-	cm := &cronFakeChunkManager{}
-	m := newTestCronManager(t)
-
-	vaultA := uuid.Must(uuid.NewV7())
-	tierA := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, tierA, "vault-a", "not a cron", cm); err == nil {
-		t.Error("expected error for invalid cron expression")
-	}
-
-	if m.hasJob(vaultA, tierA) {
-		t.Error("expected no job to be registered for invalid cron")
-	}
-}
-
-func TestSchedulerListJobs(t *testing.T) {
+func TestPruneExceptRemovesStaleJobs(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
@@ -189,30 +159,47 @@ func TestSchedulerListJobs(t *testing.T) {
 	vaultB := uuid.Must(uuid.NewV7())
 	tierA := uuid.Must(uuid.NewV7())
 	tierB := uuid.Must(uuid.NewV7())
-	if err := m.addJob(vaultA, tierA, "vault-a", "* * * * *", cm); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.addJob(vaultB, tierB, "vault-b", "0 * * * *", cm); err != nil {
-		t.Fatal(err)
-	}
 
-	jobs := m.scheduler.ListJobs()
-	if len(jobs) != 2 {
-		t.Fatalf("expected 2 jobs, got %d", len(jobs))
-	}
+	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultB, tierB, "vault-b", "0 * * * *", cm)
 
-	names := map[string]bool{}
-	for _, j := range jobs {
-		names[j.Name] = true
-		if j.Schedule == "" {
-			t.Errorf("expected non-empty schedule for job %s", j.Name)
-		}
-	}
+	nameA := cronJobName(vaultA, tierA)
+	nameB := cronJobName(vaultB, tierB)
 
-	if !names[cronJobName(vaultA, tierA)] {
-		t.Error("expected job for vault-a")
+	// Prune everything except vault-a's job.
+	m.pruneExcept(map[string]bool{nameA: true})
+
+	if !m.scheduler.HasJob(nameA) {
+		t.Error("vault-a job should survive prune")
 	}
-	if !names[cronJobName(vaultB, tierB)] {
-		t.Error("expected job for vault-b")
+	if m.scheduler.HasJob(nameB) {
+		t.Error("vault-b job should be pruned")
+	}
+	if _, ok := m.schedules[nameB]; ok {
+		t.Error("vault-b schedule should be removed from tracking map")
+	}
+}
+
+func TestRemoveAllForVault(t *testing.T) {
+	cm := &cronFakeChunkManager{}
+	m := newTestCronManager(t)
+
+	vaultA := uuid.Must(uuid.NewV7())
+	tierA := uuid.Must(uuid.NewV7())
+	tierB := uuid.Must(uuid.NewV7())
+
+	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
+	m.ensure(vaultA, tierB, "vault-a", "0 * * * *", cm)
+
+	m.removeAllForVault(vaultA)
+
+	if m.scheduler.HasJob(cronJobName(vaultA, tierA)) {
+		t.Error("tier-a job should be removed")
+	}
+	if m.scheduler.HasJob(cronJobName(vaultA, tierB)) {
+		t.Error("tier-b job should be removed")
+	}
+	if len(m.schedules) != 0 {
+		t.Errorf("expected empty schedules map, got %d entries", len(m.schedules))
 	}
 }

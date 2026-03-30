@@ -897,10 +897,6 @@ func (m *ackTestTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _
 func (m *ackTestTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
 	return nil
 }
-func (m *ackTestTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-
 func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}

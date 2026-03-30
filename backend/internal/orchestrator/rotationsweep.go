@@ -1,7 +1,10 @@
 package orchestrator
 
 import (
+	"context"
+
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 
 	"github.com/google/uuid"
 )
@@ -11,44 +14,115 @@ const (
 	rotationSweepSchedule = "*/15 * * * * *" // every 15 seconds
 )
 
-// rotationSweep checks all tiers in all vaults for active chunks that need
-// rotation based on their current rotation policy (e.g., age exceeded).
-// This runs as a scheduled job so time-based policies trigger even when
-// no records are being appended to a vault.
+// rotationSweep is the single scheduled rotation job. Each tick it:
+//  1. Loads current config and applies rotation policies to all primary tiers.
+//  2. Reconciles cron rotation jobs (add new, remove stale).
+//  3. Checks each primary tier's active chunk for time-based rotation triggers.
+//
+// This discovery-based approach replaces the per-tier lifecycle management
+// (applyTierRotation / reloadTierRotation) — no setup, teardown, or hot-swap.
 func (o *Orchestrator) rotationSweep() {
-	// Collect seals under the read lock.
+	cfg, err := o.loadConfig(context.Background())
+	if err != nil {
+		o.logger.Error("rotation sweep: failed to load config", "error", err)
+		// Fall through with nil cfg — skip policy/cron reconciliation
+		// but still check rotation triggers with whatever policies are set.
+	}
+
 	type sealEvent struct {
 		vaultID uuid.UUID
 		cm      chunk.ChunkManager
 		chunkID chunk.ChunkID
 	}
 	var seals []sealEvent
+	activeCronJobs := make(map[string]bool)
 
 	o.mu.RLock()
-	for id, vault := range o.vaults {
+	for vaultID, vault := range o.vaults {
+		// Find vault config for cron reconciliation.
+		var vaultCfg *config.VaultConfig
+		if cfg != nil {
+			for i := range cfg.Vaults {
+				if cfg.Vaults[i].ID == vaultID {
+					vaultCfg = &cfg.Vaults[i]
+					break
+				}
+			}
+		}
+
 		for _, tier := range vault.Tiers {
 			if tier.IsSecondary {
+				tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				continue
 			}
+
+			// Apply rotation policy + reconcile cron job from config.
+			if cfg != nil && vaultCfg != nil {
+				tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+				o.applyRotationFromConfig(cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
+			}
+
+			// Check for time-based rotation triggers.
 			activeBefore := tier.Chunks.Active()
 			if trigger := tier.Chunks.CheckRotation(); trigger != nil {
 				o.logger.Info("background rotation triggered",
-					"vault", id,
+					"vault", vaultID,
 					"name", vault.Name,
 					"tier", tier.TierID,
 					"trigger", *trigger,
 				)
 				if activeBefore != nil {
-					seals = append(seals, sealEvent{vaultID: id, cm: tier.Chunks, chunkID: activeBefore.ID})
+					seals = append(seals, sealEvent{vaultID: vaultID, cm: tier.Chunks, chunkID: activeBefore.ID})
 				}
 			}
 		}
 	}
 	o.mu.RUnlock()
 
+	// Prune cron jobs for tiers that no longer need them.
+	if cfg != nil {
+		o.cronRotation.pruneExcept(activeCronJobs)
+	}
+
 	// Schedule compression + index builds outside the outer lock.
-	// postSealWork acquires its own lock internally.
 	for _, s := range seals {
 		o.postSealWork(s.vaultID, s.cm, s.chunkID)
+	}
+}
+
+// applyRotationFromConfig resolves the rotation policy for a primary tier
+// from the current config and applies it. Also ensures the cron job exists
+// if configured. Called each tick by rotationSweep.
+func (o *Orchestrator) applyRotationFromConfig(
+	cfg *config.Config,
+	vaultCfg config.VaultConfig,
+	tier *TierInstance,
+	tierCfg *config.TierConfig,
+	activeCronJobs map[string]bool,
+) {
+	if tierCfg == nil || tierCfg.RotationPolicyID == nil {
+		return
+	}
+
+	policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
+	if policyCfg == nil {
+		return
+	}
+
+	policy, err := policyCfg.ToRotationPolicy()
+	if err != nil {
+		o.logger.Warn("rotation sweep: invalid policy",
+			"vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+		return
+	}
+	if policy != nil {
+		tier.Chunks.SetRotationPolicy(policy)
+	}
+
+	// Ensure cron job exists with the right schedule.
+	if policyCfg.Cron != nil && *policyCfg.Cron != "" {
+		jobName := cronJobName(vaultCfg.ID, tier.TierID)
+		activeCronJobs[jobName] = true
+		o.cronRotation.ensure(vaultCfg.ID, tier.TierID, vaultCfg.Name, *policyCfg.Cron, tier.Chunks)
 	}
 }

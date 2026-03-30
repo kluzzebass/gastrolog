@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"testing"
 	"time"
@@ -298,57 +299,63 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	}
 }
 
-func TestRetentionSweepAllSkipsSecondary(t *testing.T) {
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	retPolicyID := uuid.Must(uuid.NewV7())
-	storageID := "secondary-storage-1"
-
-	cfg := &config.Config{
-		RetentionPolicies: []config.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
-		},
-		Tiers: []config.TierConfig{{
-			ID:   tierID,
-			Name: "tier",
-			Type: config.TierTypeMemory,
-			RetentionRules: []config.RetentionRule{{
-				RetentionPolicyID: retPolicyID,
-				Action:            config.RetentionActionExpire,
-			}},
-		}},
-		Vaults: []config.VaultConfig{{
-			ID:      vaultID,
-			Name:    "v",
-			TierIDs: []uuid.UUID{tierID},
-		}},
+func TestExpireChunkAppliesRaftDeleteBeforeLocal(t *testing.T) {
+	id := chunkIDAt(time.Now())
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true}},
 	}
-
-	o, err := New(Config{ConfigLoader: testConfigLoader{cfg}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cm := &retentionFakeChunkManager{}
 	im := &retentionFakeIndexManager{}
 
-	tier := &TierInstance{
-		TierID:      tierID,
-		StorageID:   storageID,
-		IsSecondary: true,
-		Chunks:      cm,
-		Indexes:     im,
+	var raftApplied bool
+	r := &retentionRunner{
+		vaultID: uuid.Must(uuid.NewV7()),
+		tierID:  uuid.Must(uuid.NewV7()),
+		cm:      cm,
+		im:      im,
+		now:     time.Now,
+		logger:  slog.Default(),
+		applyRaftDelete: func(deleteID chunk.ChunkID) error {
+			if deleteID != id {
+				t.Errorf("unexpected chunk ID: %s", deleteID)
+			}
+			raftApplied = true
+			return nil
+		},
 	}
 
-	vault := NewVault(vaultID, tier)
-	vault.Name = "v"
-	o.RegisterVault(vault)
+	r.expireChunk(id)
 
-	o.retentionSweepAll()
+	if !raftApplied {
+		t.Error("expected Raft delete to be applied before local delete")
+	}
+	if len(cm.deleted) != 1 || cm.deleted[0] != id {
+		t.Errorf("expected local chunk deletion, got %v", cm.deleted)
+	}
+}
 
-	key := retentionKey(tierID, storageID)
-	if _, ok := o.retention[key]; ok {
-		t.Error("retentionSweepAll should NOT create a runner for secondary tier instances")
+func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
+	id := chunkIDAt(time.Now())
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{{ID: id, Sealed: true}},
+	}
+	im := &retentionFakeIndexManager{}
+
+	r := &retentionRunner{
+		vaultID: uuid.Must(uuid.NewV7()),
+		tierID:  uuid.Must(uuid.NewV7()),
+		cm:      cm,
+		im:      im,
+		now:     time.Now,
+		logger:  slog.Default(),
+		applyRaftDelete: func(_ chunk.ChunkID) error {
+			return fmt.Errorf("not leader")
+		},
+	}
+
+	r.expireChunk(id)
+
+	if len(cm.deleted) != 0 {
+		t.Error("local delete should NOT happen when Raft apply fails")
 	}
 }
 

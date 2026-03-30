@@ -122,11 +122,6 @@ type RemoteTransferrer interface {
 	// tier, preserving the original chunk ID. Used for sealed-chunk replication.
 	ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
-	// DeleteRemoteChunk commands a secondary node to delete a specific chunk
-	// from a tier. Used by retention: the primary decides which chunks expire,
-	// then fans out deletions to all secondaries.
-	DeleteRemoteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
-
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
 	// synchronize with the target node's AddVault before unregistering

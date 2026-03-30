@@ -78,6 +78,11 @@ func (e *ChunkEntry) ToChunkMeta() chunk.ChunkMeta {
 type ChunkFSM struct {
 	mu     sync.RWMutex
 	chunks map[chunk.ChunkID]*ChunkEntry
+
+	// OnDelete is called after a CmdDeleteChunk is applied. Secondaries use
+	// this to delete local chunk data + indexes immediately when the primary
+	// commits a deletion to the manifest.
+	OnDelete func(id chunk.ChunkID)
 }
 
 // NewChunkFSM creates an empty chunk metadata FSM.
@@ -270,6 +275,9 @@ func (f *ChunkFSM) applyDelete(data []byte) error {
 	var id chunk.ChunkID
 	copy(id[:], data[:16])
 	delete(f.chunks, id)
+	if f.OnDelete != nil {
+		f.OnDelete(id)
+	}
 	return nil
 }
 

@@ -27,4 +27,17 @@ type TierInstance struct {
 	IsSecondary      bool                     // true if this node is a secondary for this tier
 	PrimaryNodeID    string                   // the primary node's ID (empty if this IS the primary)
 	SecondaryTargets []config.ReplicationTarget // per-storage targets (populated on primary only)
+
+	// HasRaftLeader returns true if the tier's Raft group has an elected leader.
+	// Nil when no Raft group exists (single-node / memory mode).
+	HasRaftLeader func() bool
+
+	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
+	// until committed. Returns an error if not leader or timeout. Nil when no
+	// Raft group exists.
+	ApplyRaftDelete func(id chunk.ChunkID) error
+
+	// ListManifest returns all chunk IDs in the tier Raft FSM — the authoritative
+	// set of chunks that should exist. Nil when no Raft group exists.
+	ListManifest func() []chunk.ChunkID
 }

@@ -21,7 +21,6 @@ const (
 )
 
 // retentionKey returns a unique map key for a tier instance's retention state.
-// StorageID disambiguates same-node primary/secondary instances of the same tier.
 func retentionKey(tierID uuid.UUID, storageID string) string {
 	if storageID == "" {
 		return tierID.String()
@@ -37,8 +36,8 @@ type retentionRule struct {
 }
 
 // retentionRunner holds per-tier-instance state that persists across sweeps.
-// Only primaries get runners — the primary decides what expires, then fans
-// out deletions to all secondaries (same-node and cross-node).
+// Only primaries get runners — secondaries react to the tier Raft manifest
+// via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
 	mu         sync.Mutex
 	vaultID    uuid.UUID
@@ -47,17 +46,32 @@ type retentionRunner struct {
 	im         index.IndexManager
 	inflight   map[chunk.ChunkID]bool // chunks currently being processed
 	unreadable map[chunk.ChunkID]bool // chunks that failed to read — skipped until restart
-	orch       *Orchestrator          // for eject action (loadConfig, Append, transferrer)
+	orch       *Orchestrator          // for eject/transition callbacks
 
-	secondaryNodeIDs []string         // cross-node secondary targets for deletion fan-out
-	now              func() time.Time
-	logger           *slog.Logger
+	// applyRaftDelete applies CmdDeleteChunk to the tier Raft before local
+	// deletion, so secondaries learn about it via the manifest. Nil in
+	// single-node / memory mode — local delete proceeds without Raft.
+	applyRaftDelete func(id chunk.ChunkID) error
+
+	isSecondary bool // secondaries force all actions to expire
+	now         func() time.Time
+	logger      *slog.Logger
+}
+
+type sweepTarget struct {
+	runner *retentionRunner
+	rules  []retentionRule
 }
 
 // retentionSweepAll is the single scheduled retention job. Each tick it
-// discovers all local PRIMARY tier instances, resolves their retention
-// rules from the current config, and sweeps each one. Secondaries never
-// run retention — the primary is the sole authority on chunk lifecycle.
+// discovers all local tier instances and evaluates retention rules.
+//
+// Primaries: evaluate rules, apply CmdDeleteChunk to tier Raft, delete locally.
+// Secondaries: evaluate the same rules but force all actions to expire.
+//
+// Additionally, the tier Raft's OnDelete callback provides real-time
+// propagation when connected (see wireOnDeleteCallback). The scheduled
+// reconciliation (reconcileSecondary) handles gaps when Raft isn't connected.
 func (o *Orchestrator) retentionSweepAll() {
 	cfg, err := o.loadConfig(context.Background())
 	if err != nil {
@@ -66,11 +80,6 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	if cfg == nil {
 		return
-	}
-
-	type sweepTarget struct {
-		runner *retentionRunner
-		rules  []retentionRule
 	}
 
 	var targets []sweepTarget
@@ -83,45 +92,11 @@ func (o *Orchestrator) retentionSweepAll() {
 			continue
 		}
 		for _, tier := range vault.Tiers {
-			if tier.IsSecondary {
-				continue // only primaries make retention decisions
+			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
+				targets = append(targets, *t)
 			}
-			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-			if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
-				continue
-			}
-			rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
-			if err != nil {
-				o.logger.Warn("retention: failed to resolve rules",
-					"vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
-				continue
-			}
-			if len(rules) == 0 {
-				continue
-			}
-
-			key := retentionKey(tier.TierID, tier.StorageID)
-			active[key] = true
-
-			runner := o.retention[key]
-			if runner == nil {
-				runner = &retentionRunner{
-					vaultID: vaultCfg.ID,
-					tierID:  tier.TierID,
-					cm:      tier.Chunks,
-					im:      tier.Indexes,
-					orch:    o,
-					now:     o.now,
-					logger:  o.logger,
-				}
-				o.retention[key] = runner
-			}
-			// Refresh secondary targets from config each tick.
-			runner.secondaryNodeIDs = tierCfg.SecondaryNodeIDs(cfg.NodeStorageConfigs)
-			targets = append(targets, sweepTarget{runner: runner, rules: rules})
 		}
 	}
-	// Prune runners for tier instances that no longer exist.
 	for key := range o.retention {
 		if !active[key] {
 			delete(o.retention, key)
@@ -129,14 +104,91 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	o.mu.Unlock()
 
-	// Execute sweeps without holding o.mu — sweep callbacks (expireChunk,
-	// deleteFromSecondaries, ejectChunk) need to acquire it.
 	for _, t := range targets {
 		t.runner.sweep(t.rules)
 	}
 }
 
-// sweep evaluates retention rules and applies expire/eject/transition actions.
+// retentionTargetForTier resolves a single tier instance into a sweep target.
+// Returns nil if the tier should be skipped (no rules, no leader, etc.).
+func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
+	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
+		return nil
+	}
+	tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+	if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
+		return nil
+	}
+	rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
+	if err != nil {
+		o.logger.Warn("retention: failed to resolve rules",
+			"vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
+		return nil
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+
+	key := retentionKey(tier.TierID, tier.StorageID)
+	active[key] = true
+
+	runner := o.retention[key]
+	if runner == nil {
+		runner = &retentionRunner{
+			vaultID: vaultCfg.ID,
+			tierID:  tier.TierID,
+			cm:      tier.Chunks,
+			im:      tier.Indexes,
+			orch:    o,
+			now:     o.now,
+			logger:  o.logger,
+		}
+		o.retention[key] = runner
+	}
+	runner.isSecondary = tier.IsSecondary
+	if !tier.IsSecondary {
+		runner.applyRaftDelete = tier.ApplyRaftDelete
+	}
+	return &sweepTarget{runner: runner, rules: rules}
+}
+
+// reconcileSecondary compares on-disk chunks against the tier Raft manifest
+// and deletes any sealed chunks that the primary has removed. This is the
+// fallback for cases where OnDelete didn't fire (snapshot restore, startup,
+// Raft connectivity gaps).
+func (o *Orchestrator) reconcileSecondary(tier *TierInstance) {
+	manifestIDs := tier.ListManifest()
+	if len(manifestIDs) == 0 {
+		return // manifest not yet populated — don't delete anything
+	}
+	manifest := make(map[chunk.ChunkID]bool, len(manifestIDs))
+	for _, id := range manifestIDs {
+		manifest[id] = true
+	}
+
+	localMetas, err := tier.Chunks.List()
+	if err != nil {
+		return
+	}
+
+	for _, meta := range localMetas {
+		if manifest[meta.ID] || !meta.Sealed {
+			continue
+		}
+		if tier.Indexes != nil {
+			_ = tier.Indexes.DeleteIndexes(meta.ID)
+		}
+		if err := tier.Chunks.Delete(meta.ID); err != nil {
+			o.logger.Warn("reconcile: failed to delete orphaned chunk",
+				"tier", tier.TierID, "chunk", meta.ID, "error", err)
+			continue
+		}
+		o.logger.Info("reconcile: deleted orphaned chunk from secondary",
+			"tier", tier.TierID, "chunk", meta.ID)
+	}
+}
+
+// sweep evaluates retention rules on a primary and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {
 	r.mu.Lock()
 	if r.inflight == nil {
@@ -154,7 +206,6 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		return
 	}
 
-	// Filter to sealed chunks only, skipping unreadable ones.
 	r.mu.Lock()
 	unreadable := r.unreadable
 	r.mu.Unlock()
@@ -174,7 +225,6 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 		Now:    r.now(),
 	}
 
-	// Track already-processed chunk IDs to avoid double-processing across rules.
 	processed := make(map[chunk.ChunkID]bool)
 
 	for _, b := range rules {
@@ -189,7 +239,6 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 			}
 			processed[id] = true
 
-			// Skip chunks already being processed by an overlapping sweep.
 			r.mu.Lock()
 			if r.inflight[id] {
 				r.mu.Unlock()
@@ -200,7 +249,11 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 			func() {
 				defer r.clearInflight(id)
-				switch b.action {
+				action := b.action
+				if r.isSecondary {
+					action = config.RetentionActionExpire
+				}
+				switch action {
 				case config.RetentionActionExpire:
 					r.expireChunk(id)
 				case config.RetentionActionEject:
@@ -222,8 +275,7 @@ func (r *retentionRunner) clearInflight(id chunk.ChunkID) {
 	r.mu.Unlock()
 }
 
-// markUnreadable flags a chunk as unreadable so retention skips it on future
-// sweeps. The chunk remains on disk for manual investigation. Cleared on restart.
+// markUnreadable flags a chunk as unreadable so retention skips it on future sweeps.
 func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -240,9 +292,18 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	}
 }
 
-// expireChunk deletes a chunk locally, then fans out the deletion to all
-// secondaries: same-node instances via direct call, cross-node via RPC.
+// expireChunk commits the deletion to the tier Raft manifest (so secondaries
+// learn about it via OnDelete), then deletes locally. If the Raft apply fails,
+// the local delete is skipped and retried next tick.
 func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
+	if r.applyRaftDelete != nil {
+		if err := r.applyRaftDelete(id); err != nil {
+			r.logger.Warn("retention: raft delete failed, will retry",
+				"vault", r.vaultID, "chunk", id.String(), "error", err)
+			return
+		}
+	}
+
 	if err := r.im.DeleteIndexes(id); err != nil {
 		r.logger.Error("retention: failed to delete indexes",
 			"vault", r.vaultID, "chunk", id.String(), "error", err)
@@ -255,37 +316,12 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 		return
 	}
 
-	// Delete from same-node secondary instances.
+	// Delete from same-node secondary instances that don't have their own
+	// Raft-driven OnDelete (e.g., single-node mode without tier Raft).
 	if r.orch != nil {
 		r.orch.deleteFromSecondaries(r.vaultID, r.tierID, id)
 	}
 
-	// Fan out deletion to cross-node secondaries.
-	r.deleteFromRemoteSecondaries(id)
-
 	r.logger.Info("retention: deleted chunk",
 		"vault", r.vaultID, "chunk", id.String())
-}
-
-// deleteFromRemoteSecondaries sends ForwardDeleteChunk RPCs to all cross-node
-// secondary nodes. Best-effort: failures are logged but don't block the
-// primary's retention. The next sweep tick will find the chunk already gone
-// on the primary, but any failed secondary will still have it — eventual
-// consistency handled by periodic reconciliation (future).
-func (r *retentionRunner) deleteFromRemoteSecondaries(id chunk.ChunkID) {
-	if r.orch == nil || r.orch.transferrer == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	for _, nodeID := range r.secondaryNodeIDs {
-		if nodeID == r.orch.localNodeID {
-			continue // same-node secondaries handled by deleteFromSecondaries
-		}
-		if err := r.orch.transferrer.DeleteRemoteChunk(ctx, nodeID, r.vaultID, r.tierID, id); err != nil {
-			r.logger.Warn("retention: failed to delete chunk on secondary",
-				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
-				"node", nodeID, "error", err)
-		}
-	}
 }

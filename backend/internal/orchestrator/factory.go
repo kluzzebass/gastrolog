@@ -173,7 +173,6 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled
 	o.RegisterVault(vault)
-	o.applyTierPolicies(cfg, vaultCfg, vault)
 	if o.alerts != nil {
 		o.alerts.Clear(alertKey)
 	}

@@ -1005,10 +1005,6 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 	})
 	return nil
 }
-func (m *transitionFakeTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-
 // ---------- cloud tier transition test ----------
 
 // newCloudFileTier creates a file-backed TierInstance with cloud storage.
