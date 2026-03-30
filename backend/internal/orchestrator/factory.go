@@ -190,6 +190,9 @@ func (o *Orchestrator) applyRetention(cfg *config.Config) error {
 		}
 
 		for _, tier := range vault.Tiers {
+			if tier.IsSecondary {
+				continue
+			}
 			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 			if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
 				continue
