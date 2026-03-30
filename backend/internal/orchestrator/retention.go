@@ -166,7 +166,8 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	}
 }
 
-// expireChunk deletes a chunk's indexes then data.
+// expireChunk deletes a chunk's indexes then data from the primary AND all
+// same-node secondary instances.
 func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 	if err := r.im.DeleteIndexes(id); err != nil {
 		r.logger.Error("retention: failed to delete indexes",
@@ -178,6 +179,11 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 		r.logger.Error("retention: failed to delete chunk",
 			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return
+	}
+
+	// Delete from same-node secondary instances so replicas don't linger.
+	if r.orch != nil {
+		r.orch.deleteFromSecondaries(r.vaultID, r.tierID, id)
 	}
 
 	r.logger.Info("retention: deleted chunk",

@@ -276,6 +276,22 @@ func (o *Orchestrator) appendToLocalSecondary(vault *Vault, tierID uuid.UUID, st
 	}
 }
 
+// deleteFromSecondaries removes a chunk from all same-node secondary instances
+// of a tier. Called by retention after deleting from the primary.
+func (o *Orchestrator) deleteFromSecondaries(vaultID uuid.UUID, tierID uuid.UUID, chunkID chunk.ChunkID) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return
+	}
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID && t.IsSecondary {
+			_ = t.Chunks.Delete(chunkID)
+		}
+	}
+}
+
 // --- Chunk write ---
 
 // Append appends a record to the vault's active chunk.
