@@ -130,7 +130,11 @@ func (o *Orchestrator) applyTierRotation(cfg *config.Config, vaultCfg config.Vau
 }
 
 // applyTierRetention sets up a retention runner for a tier with retention rules.
+// Only runs on the primary instance — secondaries receive data via replication.
 func (o *Orchestrator) applyTierRetention(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
+	if tier.IsSecondary {
+		return
+	}
 	if len(tierCfg.RetentionRules) == 0 {
 		return
 	}
