@@ -358,11 +358,12 @@ func (g *groupTransport[K]) AppendEntriesPipeline(id raft.ServerID, target raft.
 		return nil, err
 	}
 	p := &pipelineAPI{
-		stream:     stream,
-		groupID:    g.parent.encodeKey(g.groupID),
-		cancel:     cancel,
-		inflightCh: make(chan *appendFuture, 20),
-		doneCh:     make(chan raft.AppendFuture, 20),
+		stream:       stream,
+		groupID:      g.parent.encodeKey(g.groupID),
+		cancel:       cancel,
+		inflightCh:   make(chan *appendFuture, 20),
+		doneCh:       make(chan raft.AppendFuture, 20),
+		receiverDone: make(chan struct{}),
 	}
 	go p.receiver()
 	return p, nil
@@ -418,6 +419,7 @@ type pipelineAPI struct {
 	inflightChMtx sync.Mutex
 	inflightCh    chan *appendFuture
 	doneCh        chan raft.AppendFuture
+	receiverDone  chan struct{} // closed when receiver() exits
 }
 
 func (p *pipelineAPI) AppendEntries(req *raft.AppendEntriesRequest, _ *raft.AppendEntriesResponse) (raft.AppendFuture, error) {
@@ -446,10 +448,12 @@ func (p *pipelineAPI) Close() error {
 	p.inflightChMtx.Lock()
 	close(p.inflightCh)
 	p.inflightChMtx.Unlock()
+	<-p.receiverDone // wait for receiver goroutine to exit
 	return nil
 }
 
 func (p *pipelineAPI) receiver() {
+	defer close(p.receiverDone)
 	for af := range p.inflightCh {
 		msg := new(gastrologv1.MultiRaftAppendEntriesResponse)
 		if err := p.stream.RecvMsg(msg); err != nil {
@@ -458,7 +462,11 @@ func (p *pipelineAPI) receiver() {
 			af.response = *decodeAppendEntriesResponse(msg)
 		}
 		close(af.done)
-		p.doneCh <- af
+		select {
+		case p.doneCh <- af:
+		case <-p.stream.Context().Done():
+			return
+		}
 	}
 }
 

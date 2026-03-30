@@ -558,3 +558,116 @@ func TestNonStringGroupID(t *testing.T) {
 		t.Errorf("group 9999: Term got %d, want 9999", resp2.Term)
 	}
 }
+
+func TestPipelineCloseDoesNotDeadlockWhenConsumerStops(t *testing.T) {
+	// Regression test: the receiver() goroutine used to block forever on
+	// doneCh <- af when the consumer stopped reading. Now it selects on
+	// the stream context and exits cleanly.
+	nodes := makeTestCluster(t, 2)
+
+	group := "pipeline-deadlock-test"
+	tp0 := nodes[0].transport.GroupTransport(group)
+	tp1 := nodes[1].transport.GroupTransport(group)
+
+	// Server side: respond to every AppendEntries.
+	go func() {
+		for rpc := range tp1.Consumer() {
+			req := rpc.Command.(*raft.AppendEntriesRequest)
+			rpc.Respond(&raft.AppendEntriesResponse{
+				Term:    req.Term,
+				LastLog: req.PrevLogEntry + uint64(len(req.Entries)),
+				Success: true,
+			}, nil)
+		}
+	}()
+
+	pipeline, err := tp0.AppendEntriesPipeline("node-1", nodes[1].transport.localAddress)
+	if err != nil {
+		t.Fatalf("open pipeline: %v", err)
+	}
+
+	// Send several entries but DON'T read from Consumer().
+	// This fills the doneCh buffer (cap 20). The receiver will block
+	// on the 21st send unless the context-aware select works.
+	for i := range 25 {
+		req := &raft.AppendEntriesRequest{
+			RPCHeader:    raft.RPCHeader{ProtocolVersion: 3},
+			Term:         1,
+			Leader:       []byte("node-0"),
+			PrevLogEntry: uint64(i),
+			Entries:      []*raft.Log{{Index: uint64(i + 1), Term: 1, Type: raft.LogCommand, Data: []byte("x")}},
+		}
+		if _, sendErr := pipeline.AppendEntries(req, nil); sendErr != nil {
+			// Expected: pipeline may error once doneCh is full and context cancels.
+			break
+		}
+	}
+
+	// Close must return promptly — the receiver should exit via context cancellation,
+	// not block on the full doneCh. A test timeout catches the deadlock.
+	done := make(chan struct{})
+	go func() {
+		_ = pipeline.Close()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Success — Close returned without deadlock.
+	case <-time.After(5 * time.Second):
+		t.Fatal("pipeline.Close() deadlocked — receiver goroutine is stuck")
+	}
+}
+
+func TestPipelineCloseWaitsForReceiver(t *testing.T) {
+	// Verify that Close() blocks until the receiver goroutine has exited.
+	nodes := makeTestCluster(t, 2)
+
+	group := "pipeline-close-wait"
+	tp0 := nodes[0].transport.GroupTransport(group)
+	tp1 := nodes[1].transport.GroupTransport(group)
+
+	go func() {
+		for rpc := range tp1.Consumer() {
+			req := rpc.Command.(*raft.AppendEntriesRequest)
+			rpc.Respond(&raft.AppendEntriesResponse{
+				Term: req.Term, Success: true,
+			}, nil)
+		}
+	}()
+
+	pipeline, err := tp0.AppendEntriesPipeline("node-1", nodes[1].transport.localAddress)
+	if err != nil {
+		t.Fatalf("open pipeline: %v", err)
+	}
+
+	// Send one entry and consume the response.
+	req := &raft.AppendEntriesRequest{
+		RPCHeader: raft.RPCHeader{ProtocolVersion: 3},
+		Term:      1,
+		Leader:    []byte("node-0"),
+		Entries:   []*raft.Log{{Index: 1, Term: 1, Type: raft.LogCommand, Data: []byte("x")}},
+	}
+	if _, err := pipeline.AppendEntries(req, nil); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	select {
+	case <-pipeline.Consumer():
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for response")
+	}
+
+	// Close — must wait for receiver to exit (receiverDone channel).
+	if err := pipeline.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Access the underlying pipelineAPI to check receiverDone is closed.
+	p := pipeline.(*pipelineAPI)
+	select {
+	case <-p.receiverDone:
+		// Good — receiver has exited.
+	default:
+		t.Error("receiverDone channel not closed after Close()")
+	}
+}
