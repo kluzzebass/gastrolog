@@ -52,7 +52,7 @@ const addRotationFormInitial: AddRotationFormState = {
   newName: "",
   newMaxBytes: "",
   newMaxRecords: "",
-  newMaxAge: "5m",
+  newMaxAge: "",
   newCron: "",
 };
 
