@@ -71,30 +71,36 @@ type RecordForwarder struct {
 
 	sent atomic.Int64 // records successfully sent
 
-	mu       sync.Mutex
-	nodes    map[string]*nodeForwarder // keyed by node ID
-	wg       sync.WaitGroup
-	closed   bool
-	stop     chan struct{}       // closed on Close() to unblock backoff sleeps
-	cwCancel context.CancelFunc // cancels the chanwatch goroutine
+	mu     sync.Mutex
+	nodes  map[string]*nodeForwarder // keyed by node ID
+	wg     sync.WaitGroup
+	closed bool
+	stop   chan struct{} // closed on Close() to signal goroutines to drain and exit
+
+	stopCtx    context.Context    // scoped to forwarder lifetime; used for gRPC streams
+	stopCancel context.CancelFunc // cancels stopCtx; called after goroutines exit
+	cwCancel   context.CancelFunc // cancels the chanwatch goroutine
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
 func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Collector) *RecordForwarder {
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	cwCtx, cwCancel := context.WithCancel(context.Background())
 	rf := &RecordForwarder{
-		peers:  peers,
-		logger: logger,
-		alerts: alerts,
-		cw:     chanwatch.New(logger, 1*time.Second),
-		nodes:  make(map[string]*nodeForwarder),
-		stop:   make(chan struct{}),
+		peers:      peers,
+		logger:     logger,
+		alerts:     alerts,
+		cw:         chanwatch.New(logger, 1*time.Second),
+		nodes:      make(map[string]*nodeForwarder),
+		stop:       make(chan struct{}),
+		stopCtx:    stopCtx,
+		stopCancel: stopCancel,
+		cwCancel:   cwCancel,
 	}
 	rf.cw.SetAlerts(alerts)
 	// Run the channel pressure watcher until Close().
-	ctx, cancel := context.WithCancel(context.Background())
-	rf.cwCancel = cancel
 	rf.wg.Go(func() {
-		rf.cw.Run(ctx)
+		rf.cw.Run(cwCtx)
 	})
 	return rf
 }
@@ -218,7 +224,7 @@ func (rf *RecordForwarder) openStream(nodeID string) (grpc.ClientStream, error) 
 		return nil, fmt.Errorf("dial: %w", err)
 	}
 	stream, err := conn.NewStream(
-		context.Background(),
+		rf.stopCtx,
 		streamForwardRecordsDesc,
 		"/gastrolog.v1.ClusterService/StreamForwardRecords",
 	)
@@ -237,6 +243,8 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 		select {
 		case first = <-nf.ch:
 		case <-rf.stop:
+			// Best-effort flush of remaining buffered entries before exiting.
+			rf.flushRemaining(nodeID, nf, stream)
 			return true
 		}
 
@@ -255,6 +263,24 @@ func (rf *RecordForwarder) drainToStream(nodeID string, nf *nodeForwarder, strea
 	send:
 		if err := rf.sendBurst(nodeID, nf, stream, burst); err != nil {
 			return false
+		}
+	}
+}
+
+// flushRemaining does a best-effort non-blocking drain of any records
+// remaining in the channel and sends them on the stream. Errors are
+// ignored — we're shutting down and forwarding is best-effort.
+func (rf *RecordForwarder) flushRemaining(nodeID string, nf *nodeForwarder, stream grpc.ClientStream) {
+	var remaining []forwardEntry
+	for {
+		select {
+		case entry := <-nf.ch:
+			remaining = append(remaining, entry)
+		default:
+			if len(remaining) > 0 {
+				_ = rf.sendBurst(nodeID, nf, stream, remaining)
+			}
+			return
 		}
 	}
 }
@@ -384,16 +410,21 @@ func (rf *RecordForwarder) Sent() int64 {
 
 // Close shuts down all per-node forwarders. Connection cleanup is handled
 // by PeerConns.
+//
+// Shutdown order:
+//  1. Reject new Forward calls (closed = true)
+//  2. Signal goroutines to drain remaining records and exit (close stop)
+//  3. Stop the chanwatch goroutine (cwCancel)
+//  4. Wait for all goroutines to finish — streams stay alive for flush
+//  5. Cancel stream context (stopCancel) — no goroutines using it anymore
 func (rf *RecordForwarder) Close() error {
 	rf.mu.Lock()
 	rf.closed = true
-	close(rf.stop) // unblock any backoff sleeps
-	rf.cwCancel()  // stop the channel pressure watcher
-	for _, nf := range rf.nodes {
-		close(nf.ch)
-	}
+	close(rf.stop)
+	rf.cwCancel()
 	rf.mu.Unlock()
 
 	rf.wg.Wait()
+	rf.stopCancel()
 	return nil
 }

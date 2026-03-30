@@ -106,18 +106,21 @@ func TestForwardEntryToProto(t *testing.T) {
 
 func TestForwardEnqueuesAndCloses(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	cwCtx, cwCancel := context.WithCancel(context.Background())
 	rf := &RecordForwarder{
-		logger:   discardLogger(),
-		nodes:    make(map[string]*nodeForwarder),
-		stop:     make(chan struct{}),
-		cwCancel: cancel,
-		cw:       chanwatch.New(discardLogger(), 1*time.Second),
+		logger:     discardLogger(),
+		nodes:      make(map[string]*nodeForwarder),
+		stop:       make(chan struct{}),
+		stopCtx:    stopCtx,
+		stopCancel: stopCancel,
+		cwCancel:   cwCancel,
+		cw:         chanwatch.New(discardLogger(), 1*time.Second),
 	}
 	rf.wg.Add(1)
 	go func() {
 		defer rf.wg.Done()
-		rf.cw.Run(ctx)
+		rf.cw.Run(cwCtx)
 	}()
 
 	nodeID := "test-node"
@@ -127,12 +130,17 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 	}
 	rf.nodes[nodeID] = nf
 
-	// Start a dummy stream goroutine that just drains.
+	// Start a dummy stream goroutine that drains until stop.
 	rf.wg.Add(1)
 	go func() {
 		defer rf.wg.Done()
 		defer close(nf.done)
-		for range nf.ch {
+		for {
+			select {
+			case <-nf.ch:
+			case <-rf.stop:
+				return
+			}
 		}
 	}()
 
@@ -202,6 +210,68 @@ func TestBackoffProgression(t *testing.T) {
 	}
 	if nf.backoff != 0 {
 		t.Errorf("backoff after success = %v, want 0", nf.backoff)
+	}
+}
+
+func TestCloseDoesNotRaceWithDrain(t *testing.T) {
+	t.Parallel()
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	cwCtx, cwCancel := context.WithCancel(context.Background())
+	rf := &RecordForwarder{
+		logger:     discardLogger(),
+		nodes:      make(map[string]*nodeForwarder),
+		stop:       make(chan struct{}),
+		stopCtx:    stopCtx,
+		stopCancel: stopCancel,
+		cwCancel:   cwCancel,
+		cw:         chanwatch.New(discardLogger(), 1*time.Second),
+	}
+	rf.wg.Add(1)
+	go func() {
+		defer rf.wg.Done()
+		rf.cw.Run(cwCtx)
+	}()
+
+	nodeID := "race-node"
+	nf := &nodeForwarder{
+		ch:   make(chan forwardEntry, forwardChanCap),
+		done: make(chan struct{}),
+	}
+	rf.nodes[nodeID] = nf
+
+	// Start a goroutine that simulates drainToStream by reading from the channel.
+	rf.wg.Add(1)
+	go func() {
+		defer rf.wg.Done()
+		defer close(nf.done)
+		for {
+			select {
+			case <-nf.ch:
+			case <-rf.stop:
+				// Drain remaining.
+				for {
+					select {
+					case <-nf.ch:
+					default:
+						return
+					}
+				}
+			}
+		}
+	}()
+
+	// Enqueue records concurrently with close.
+	vaultID := uuid.Must(uuid.NewV7())
+	go func() {
+		for range 500 {
+			_ = rf.Forward(context.Background(), nodeID, vaultID, []chunk.Record{{Raw: []byte("x")}})
+		}
+	}()
+
+	// Close while records are still being enqueued.
+	time.Sleep(1 * time.Millisecond)
+	if err := rf.Close(); err != nil {
+		t.Fatalf("Close failed: %v", err)
 	}
 }
 
