@@ -84,9 +84,24 @@ func (o *Orchestrator) rotationSweep() {
 		o.cronRotation.pruneExcept(activeCronJobs)
 	}
 
+	// Reconcile filters from routes (safety net — dispatch also reloads
+	// on config changes for immediate effect).
+	if cfg != nil {
+		o.reconcileFilters(cfg)
+	}
+
 	// Schedule compression + index builds outside the outer lock.
 	for _, s := range seals {
 		o.postSealWork(s.vaultID, s.cm, s.chunkID)
+	}
+}
+
+// reconcileFilters recompiles the filter set from config under a write lock.
+func (o *Orchestrator) reconcileFilters(cfg *config.Config) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+		o.logger.Warn("rotation sweep: filter reconciliation failed", "error", err)
 	}
 }
 

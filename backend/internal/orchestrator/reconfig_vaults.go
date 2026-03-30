@@ -73,15 +73,14 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	vault.Name = vaultCfg.Name
 	o.vaults[vaultCfg.ID] = vault
 
-	// Rebuild filter set from routes to include the new vault as a destination.
-	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
-		// Rollback registration on filter error.
-		delete(o.vaults, vaultCfg.ID)
-		return err
+	// Compile filters immediately so the vault can receive records right away.
+	// The rotation sweep also reconciles filters every 15s as a safety net.
+	if cfg != nil {
+		_ = o.reloadFiltersFromRoutes(cfg)
 	}
 
-	// Rotation and retention policies are applied by the discovery-based
-	// sweep jobs (rotationSweep and retentionSweepAll) on their next tick.
+	// Rotation and retention are reconciled by the discovery-based sweep
+	// jobs on their next tick.
 
 	o.logger.Info("vault added", "id", vaultCfg.ID, "name", vaultCfg.Name, "tiers", len(tiers))
 	return nil

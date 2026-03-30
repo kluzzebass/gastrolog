@@ -133,11 +133,11 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 		}
 	}
 
-	// Build filter set from routes.
+	// Compile filters at startup so vaults can receive records immediately.
+	// The rotation sweep also reconciles every 15s as a safety net.
 	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
 		return err
 	}
-
 	return nil
 }
 
