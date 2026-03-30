@@ -208,7 +208,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
         </nav>
 
         {/* Content */}
-        <div ref={contentRef} className="flex-1 overflow-y-auto app-scroll p-6">
+        <div ref={contentRef} className={`flex-1 overflow-y-auto app-scroll p-6 ${c("text-text-muted", "text-light-text-muted")}`}>
           <ContentPanel {...contentProps} />
         </div>
 
