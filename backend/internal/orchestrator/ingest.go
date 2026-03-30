@@ -119,11 +119,14 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID uuid.UUID) *PerRouteStat
 
 // appendLocal appends a record to a local vault.
 // Returns a replicationTask when the record needs sync forwarding (ack-gated).
+// Remote fire-and-forget forwards are dispatched after the lock is released.
 func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) (*replicationTask, error) {
-	_, _, task, err := o.appendRecord(vaultID, rec)
+	_, _, task, remotes, err := o.appendRecord(vaultID, rec)
 	if err != nil {
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
 	}
+	// Remote forwards happen outside the orchestrator lock.
+	o.fireAndForgetRemote(remotes, rec)
 	return task, err
 }
 

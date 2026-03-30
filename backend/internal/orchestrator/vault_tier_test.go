@@ -1030,7 +1030,7 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	rec.WaitForReplica = true
 
 	orch.mu.RLock()
-	_, _, task, err := orch.appendRecord(vaultID, rec)
+	_, _, task, _, err := orch.appendRecord(vaultID, rec)
 	orch.mu.RUnlock()
 
 	if err != nil {
@@ -1076,7 +1076,7 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 	rec.WaitForReplica = false
 
 	orch.mu.RLock()
-	_, _, task, err := orch.appendRecord(vaultID, rec)
+	_, _, task, remotes, err := orch.appendRecord(vaultID, rec)
 	orch.mu.RUnlock()
 
 	if err != nil {
@@ -1086,13 +1086,19 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 		t.Error("expected nil replicationTask for WaitForReplica=false")
 	}
 
-	// Fire-and-forget MUST have been called.
+	// Remote targets must have been collected (not fired yet — caller's responsibility).
+	if len(remotes) != 1 {
+		t.Fatalf("expected 1 remote forward target, got %d", len(remotes))
+	}
+	if remotes[0].nodeID != "node-2" {
+		t.Errorf("forward target nodeID = %s, want node-2", remotes[0].nodeID)
+	}
+
+	// Fire and verify the forwarder was called.
+	orch.fireAndForgetRemote(remotes, rec)
 	calls := fwd.getCalls()
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 fire-and-forget forward call, got %d", len(calls))
-	}
-	if calls[0].NodeID != "node-2" {
-		t.Errorf("forward call nodeID = %s, want node-2", calls[0].NodeID)
 	}
 }
 

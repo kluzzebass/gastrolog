@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -201,10 +202,11 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID uuid.UUID) *TierInstance {
 // secondary has real, queryable, promotable chunks.
 func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
-	defer o.mu.RUnlock()
+	// NOTE: manually unlocked below — remote forwards happen outside the lock.
 
 	vault := o.vaults[vaultID]
 	if vault == nil {
+		o.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
@@ -229,40 +231,69 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 			return err
 		}
 
-		// Primary: forward to secondaries for active-chunk durability.
+		// Primary: collect remote forward targets (local appends happen under lock).
+		var remotes []remoteForwardTarget
 		if !tier.IsSecondary && len(tier.SecondaryTargets) > 0 {
-			o.forwardToSecondaries(vault, vaultID, tier, cm, rec)
+			remotes = o.forwardToSecondaries(vault, vaultID, tier, cm, rec)
 		}
 
 		activeAfter := cm.Active()
 		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			// Skip post-seal on secondaries — their sealed chunks are from
-			// forwarding and will be replaced by ImportToTier's canonical version.
-			// Scheduling compression races with the delete-and-replace in ImportToTier.
 			if !tier.IsSecondary {
 				o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 			}
 		}
+		o.mu.RUnlock()
+		// Fire remote forwards OUTSIDE the lock — network I/O with timeout.
+		o.fireAndForgetRemote(remotes, rec)
 		return nil
 	}
+	o.mu.RUnlock()
 	return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
 }
 
+// remoteForwardTarget captures the parameters for a fire-and-forget forward
+// to a cross-node secondary. Collected under o.mu.RLock, executed after release.
+type remoteForwardTarget struct {
+	nodeID       string
+	vaultID      uuid.UUID
+	tierID       uuid.UUID
+	activeChunkID chunk.ChunkID
+}
+
 // forwardToSecondaries forwards a record to all secondary targets for active-chunk
-// durability. Same-node targets use direct append; cross-node targets use gRPC.
+// durability. Same-node targets use direct append (under lock); cross-node targets
+// are collected and returned for the caller to forward AFTER releasing the lock.
 // Called under o.mu.RLock.
-func (o *Orchestrator) forwardToSecondaries(vault *Vault, vaultID uuid.UUID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) {
+func (o *Orchestrator) forwardToSecondaries(vault *Vault, vaultID uuid.UUID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
 	activeNow := cm.Active()
 	var activeChunkID chunk.ChunkID
 	if activeNow != nil {
 		activeChunkID = activeNow.ID
 	}
+	var remotes []remoteForwardTarget
 	for _, tgt := range tier.SecondaryTargets {
 		if tgt.NodeID == o.localNodeID {
 			o.appendToLocalSecondary(vault, tier.TierID, tgt.StorageID, activeChunkID, rec)
-		} else if o.forwarder != nil {
-			_ = o.forwarder.ForwardToTier(context.Background(), tgt.NodeID, vaultID, tier.TierID, activeChunkID, []chunk.Record{rec})
+		} else {
+			remotes = append(remotes, remoteForwardTarget{
+				nodeID: tgt.NodeID, vaultID: vaultID,
+				tierID: tier.TierID, activeChunkID: activeChunkID,
+			})
 		}
+	}
+	return remotes
+}
+
+// fireAndForgetRemote sends records to remote secondaries outside any lock.
+func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
+	if o.forwarder == nil || len(targets) == 0 {
+		return
+	}
+	for _, tgt := range targets {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = o.forwarder.ForwardToTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+		cancel()
 	}
 }
 
@@ -309,8 +340,9 @@ func (o *Orchestrator) deleteFromSecondaries(vaultID uuid.UUID, tierID uuid.UUID
 // cluster-forwarded records, and the ImportRecords API.
 func (o *Orchestrator) Append(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, error) {
 	o.mu.RLock()
-	defer o.mu.RUnlock()
-	cid, pos, _, err := o.appendRecord(vaultID, rec)
+	cid, pos, _, remotes, err := o.appendRecord(vaultID, rec)
+	o.mu.RUnlock()
+	o.fireAndForgetRemote(remotes, rec)
 	return cid, pos, err
 }
 
@@ -325,25 +357,25 @@ type replicationTask struct {
 }
 
 // appendRecord is the unified append-with-seal-detection path.
-// Caller MUST hold o.mu.
+// Caller MUST hold o.mu.RLock.
 //
 // Returns a replicationTask when the record has WaitForReplica set and
-// the tier has secondaries. The caller is responsible for doing the sync
-// forward AFTER releasing the lock.
-func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, error) {
+// the tier has secondaries. Also returns remoteForwardTargets for
+// fire-and-forget forwarding — the caller fires these AFTER releasing the lock.
+func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.ChunkID, uint64, *replicationTask, []remoteForwardTarget, error) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	if !vault.Enabled {
-		return chunk.ChunkID{}, 0, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
+		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s", ErrVaultDisabled, vaultID)
 	}
 
 	cm := vault.ChunkManager()
 	activeBefore := cm.Active()
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
-		return cid, pos, nil, err
+		return cid, pos, nil, nil, err
 	}
 
 	// Forward record to secondaries for active-chunk durability.
@@ -354,6 +386,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	// sync forwarding outside the lock via ackAfterReplication.
 	activeTier := vault.ActiveTier()
 	var task *replicationTask
+	var remotes []remoteForwardTarget
 	if !activeTier.IsSecondary && len(activeTier.SecondaryTargets) > 0 {
 		if rec.WaitForReplica {
 			activeNow := cm.Active()
@@ -368,7 +401,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 				targets: activeTier.SecondaryTargets,
 			}
 		} else {
-			o.forwardToSecondaries(vault, vaultID, activeTier, cm, rec)
+			remotes = o.forwardToSecondaries(vault, vaultID, activeTier, cm, rec)
 		}
 	}
 
@@ -378,7 +411,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 
-	return cid, pos, task, nil
+	return cid, pos, task, remotes, nil
 }
 
 // ImportChunkRecords creates a new sealed chunk from the given records in the
