@@ -738,6 +738,39 @@ func (s *Server) forwardSealTier(ctx context.Context, req *gastrologv1.ForwardSe
 	return &gastrologv1.ForwardSealTierResponse{}, nil
 }
 
+// DeleteChunkExecutor deletes a specific chunk from a tier on this node.
+type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+
+// SetDeleteChunkExecutor injects the callback for handling ForwardDeleteChunk RPCs.
+func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
+	s.deleteChunkExecutor = fn
+}
+
+// forwardDeleteChunk handles the ForwardDeleteChunk RPC. Deletes a chunk
+// from a secondary tier. The primary sends this after its retention sweep
+// decides the chunk should expire.
+func (s *Server) forwardDeleteChunk(ctx context.Context, req *gastrologv1.ForwardDeleteChunkRequest) (*gastrologv1.ForwardDeleteChunkResponse, error) {
+	if s.deleteChunkExecutor == nil {
+		return nil, status.Error(codes.Unavailable, "delete chunk executor not configured")
+	}
+	vaultID, err := uuid.Parse(req.GetVaultId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	tierID, err := uuid.Parse(req.GetTierId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+	}
+	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+	}
+	if err := s.deleteChunkExecutor(ctx, vaultID, tierID, chunkID); err != nil {
+		return nil, status.Errorf(codes.Internal, "delete chunk: %v", err)
+	}
+	return &gastrologv1.ForwardDeleteChunkResponse{}, nil
+}
+
 // forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
 // for a local vault.
 func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.ForwardReindexVaultRequest) (*gastrologv1.ForwardReindexVaultResponse, error) {
@@ -971,6 +1004,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardSealTier",
 			Handler:    forwardSealTierHandler,
+		},
+		{
+			MethodName: "ForwardDeleteChunk",
+			Handler:    forwardDeleteChunkHandler,
 		},
 		{
 			MethodName: "ForwardReindexVault",
@@ -1285,6 +1322,25 @@ func forwardSealTierHandler(srv any, ctx context.Context, dec func(any) error, i
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardSealTier(ctx, req.(*gastrologv1.ForwardSealTierRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardDeleteChunkHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardDeleteChunkRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardDeleteChunk(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardDeleteChunk",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardDeleteChunk(ctx, req.(*gastrologv1.ForwardDeleteChunkRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

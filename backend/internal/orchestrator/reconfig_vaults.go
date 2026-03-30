@@ -89,7 +89,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 	return nil
 }
 
-// applyTierPolicies applies rotation and retention policies for all tiers in a vault.
+// applyTierPolicies applies rotation policies for all tiers in a vault.
+// Retention is handled by the single retentionSweepAll job — no per-tier setup needed.
 func (o *Orchestrator) applyTierPolicies(cfg *config.Config, vaultCfg config.VaultConfig, vault *Vault) {
 	for _, tier := range vault.Tiers {
 		tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
@@ -97,7 +98,6 @@ func (o *Orchestrator) applyTierPolicies(cfg *config.Config, vaultCfg config.Vau
 			continue
 		}
 		o.applyTierRotation(cfg, vaultCfg, tier, tierCfg)
-		o.applyTierRetention(cfg, vaultCfg, tier, tierCfg)
 	}
 }
 
@@ -129,42 +129,8 @@ func (o *Orchestrator) applyTierRotation(cfg *config.Config, vaultCfg config.Vau
 	}
 }
 
-// applyTierRetention sets up a retention runner for a tier with retention rules.
-// Only runs on the primary instance — secondaries receive data via replication.
-func (o *Orchestrator) applyTierRetention(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
-	if tier.IsSecondary {
-		return
-	}
-	if len(tierCfg.RetentionRules) == 0 {
-		return
-	}
-	rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
-	if err != nil {
-		o.logger.Warn("invalid retention rules for tier", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
-		return
-	}
-	if len(rules) == 0 {
-		return
-	}
-	key := tier.TierID
-	runner := &retentionRunner{
-		vaultID: vaultCfg.ID,
-		tierID:  tier.TierID,
-		cm:      tier.Chunks,
-		im:      tier.Indexes,
-		rules:   rules,
-		orch:    o,
-		now:     o.now,
-		logger:  o.logger,
-	}
-	runner.isSecondary.Store(tier.IsSecondary)
-	o.retention[key] = runner
-	jobName := retentionJobName(tier.TierID)
-	if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, runner.sweep); err != nil {
-		o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
-	}
-	o.scheduler.Describe(jobName, fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
-}
+// Retention is handled by the single retentionSweepAll job, which discovers
+// all tier instances each tick. No per-tier setup is needed here.
 
 // findTierConfig finds a TierConfig by ID in a slice.
 func findTierConfig(tiers []config.TierConfig, id uuid.UUID) *config.TierConfig {
@@ -261,9 +227,7 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 // removeVaultTierJobs removes all per-tier retention runners and cron rotation jobs for a vault.
 func (o *Orchestrator) removeVaultTierJobs(vaultID uuid.UUID, vault *Vault) {
 	for _, tier := range vault.Tiers {
-		key := tier.TierID
-		o.scheduler.RemoveJob(retentionJobName(tier.TierID))
-		delete(o.retention, key)
+		delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	}
 	o.cronRotation.removeAllForVault(vaultID)
 }

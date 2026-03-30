@@ -671,21 +671,21 @@ func TestTransitionSweepDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	rules := []retentionRule{{
+		policy: &keepNPolicy{n: 0}, // matches all sealed chunks
+		action: config.RetentionActionTransition,
+	}}
 	runner := &retentionRunner{
 		vaultID: vaultID,
 		tierID:  tier0ID,
 		cm:      tier0CM,
 		im:      vault.Tiers[0].Indexes,
-		rules: []retentionRule{{
-			policy: &keepNPolicy{n: 0}, // matches all sealed chunks
-			action: config.RetentionActionTransition,
-		}},
-		orch:   orch,
-		now:    time.Now,
-		logger: slog.Default(),
+		orch:    orch,
+		now:     time.Now,
+		logger:  slog.Default(),
 	}
 
-	runner.sweep()
+	runner.sweep(rules)
 
 	// Verify: source chunk deleted (transition happened via sweep dispatch).
 	metasAfter, _ := tier0CM.List()
@@ -762,21 +762,21 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	// clock set 5 minutes in the future — the chunk should match.
 	frozenNow := time.Now().Add(5 * time.Minute)
 
+	rules := []retentionRule{{
+		policy: chunk.NewTTLRetentionPolicy(3 * time.Minute),
+		action: config.RetentionActionTransition,
+	}}
 	runner := &retentionRunner{
 		vaultID: vaultID,
 		tierID:  cloudTierID,
 		cm:      cloudTier.Chunks,
 		im:      cloudTier.Indexes,
-		rules: []retentionRule{{
-			policy: chunk.NewTTLRetentionPolicy(3 * time.Minute),
-			action: config.RetentionActionTransition,
-		}},
-		orch:   orch,
-		now:    func() time.Time { return frozenNow },
-		logger: slog.Default(),
+		orch:    orch,
+		now:     func() time.Time { return frozenNow },
+		logger:  slog.Default(),
 	}
 
-	runner.sweep()
+	runner.sweep(rules)
 
 	// Verify: cloud chunk deleted from source tier.
 	metasFinal, _ := cloudTier.Chunks.List()
@@ -1005,6 +1005,9 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 	})
 	return nil
 }
+func (m *transitionFakeTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 
 // ---------- cloud tier transition test ----------
 
@@ -1215,23 +1218,23 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 
 	// Create a retention runner with a "match all sealed" policy and
 	// transition action. This simulates what the production retention sweep does.
+	rules := []retentionRule{{
+		policy: &keepNPolicy{n: 0}, // matches all sealed chunks
+		action: config.RetentionActionTransition,
+	}}
 	runner := &retentionRunner{
 		vaultID: vaultID,
 		tierID:  cloudTierID,
 		cm:      cloudTier.Chunks,
 		im:      cloudTier.Indexes,
-		rules: []retentionRule{{
-			policy: &keepNPolicy{n: 0}, // matches all sealed chunks
-			action: config.RetentionActionTransition,
-		}},
-		orch:   orch,
-		now:    time.Now,
-		logger: slog.Default(),
+		orch:    orch,
+		now:     time.Now,
+		logger:  slog.Default(),
 	}
 
 	// Run the sweep — this should find the cloud-backed chunk, open a cloud
 	// cursor, stream records to the next tier, and delete the source.
-	runner.sweep()
+	runner.sweep(rules)
 
 	// Verify: cloud chunk deleted.
 	metasFinal, _ := cloudTier.Chunks.List()

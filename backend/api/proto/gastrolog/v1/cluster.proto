@@ -166,6 +166,17 @@ message ForwardSealTierRequest {
 
 message ForwardSealTierResponse {}
 
+// ForwardDeleteChunkRequest commands a secondary to delete a specific
+// sealed chunk from a tier. Sent by the primary after its retention
+// sweep expires the chunk, so secondaries don't hold orphaned replicas.
+message ForwardDeleteChunkRequest {
+  string vault_id = 1;
+  string tier_id = 2;
+  string chunk_id = 3;
+}
+
+message ForwardDeleteChunkResponse {}
+
 // ForwardSearchRequest is sent to the node that owns a remote vault,
 // asking it to execute a search locally and return matching records.
 message ForwardSearchRequest {

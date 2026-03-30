@@ -67,6 +67,9 @@ func (m *replicationFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ s
 func (m *replicationFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
 	return nil
 }
+func (m *replicationFakeTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 
 // ---------- helpers ----------
 

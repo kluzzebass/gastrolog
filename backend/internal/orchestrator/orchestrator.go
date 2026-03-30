@@ -122,6 +122,11 @@ type RemoteTransferrer interface {
 	// tier, preserving the original chunk ID. Used for sealed-chunk replication.
 	ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
+	// DeleteRemoteChunk commands a secondary node to delete a specific chunk
+	// from a tier. Used by retention: the primary decides which chunks expire,
+	// then fans out deletions to all secondaries.
+	DeleteRemoteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
 	// synchronize with the target node's AddVault before unregistering
@@ -208,8 +213,8 @@ type Orchestrator struct {
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[uuid.UUID]*drainState
 
-	// Retention runners (keyed by tier ID, invoked by the shared scheduler).
-	retention map[uuid.UUID]*retentionRunner
+	// Retention runners (keyed by tierID:storageID, invoked by the shared scheduler).
+	retention map[string]*retentionRunner
 
 	// Shared scheduler for all periodic tasks (cron rotation, retention, etc.).
 	scheduler *Scheduler
@@ -312,7 +317,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
 		ingesterMeta:    make(map[uuid.UUID]ingesterInfo),
 		draining:        make(map[uuid.UUID]*drainState),
-		retention:       make(map[uuid.UUID]*retentionRunner),
+		retention: make(map[string]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,
@@ -327,6 +332,12 @@ func New(cfg Config) (*Orchestrator, error) {
 	// Wire up post-seal callback for cron rotation so sealed chunks
 	// get compressed and indexed (same pipeline as ingest-triggered seals).
 	o.cronRotation.onSeal = o.postSealWork
+
+	// Register the single retention sweep that discovers all tier instances
+	// each tick. No per-tier lifecycle management needed.
+	if err := o.startRetentionSweep(); err != nil {
+		return nil, fmt.Errorf("retention sweep: %w", err)
+	}
 
 	return o, nil
 }

@@ -697,23 +697,23 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
 	// Policy: keep 1 chunk → oldest chunk (chunkID) is flagged.
+	rules := []retentionRule{
+		{
+			policy:        chunk.NewCountRetentionPolicy(1),
+			action:        config.RetentionActionEject,
+			ejectRouteIDs: []uuid.UUID{routeID},
+		},
+	}
 	r := &retentionRunner{
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
-		rules: []retentionRule{
-			{
-				policy:        chunk.NewCountRetentionPolicy(1),
-				action:        config.RetentionActionEject,
-				ejectRouteIDs: []uuid.UUID{routeID},
-			},
-		},
-		orch:   orch,
-		now:    time.Now,
-		logger: slog.Default(),
+		orch:    orch,
+		now:     time.Now,
+		logger:  slog.Default(),
 	}
 
-	r.sweep()
+	r.sweep(rules)
 
 	// Verify eject was executed via sweep for the oldest chunk.
 	if len(dstCM.appended) != 2 {
@@ -734,5 +734,8 @@ func (m *ejectFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string,
 	return nil
 }
 func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (m *ejectFakeTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }

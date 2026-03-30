@@ -330,6 +330,30 @@ func (o *Orchestrator) deleteFromSecondaries(vaultID uuid.UUID, tierID uuid.UUID
 	}
 }
 
+// DeleteChunkFromTier deletes a specific chunk's indexes and data from all
+// local instances of a tier (both primary and secondary). Called by the
+// ForwardDeleteChunk RPC handler when the primary's retention sweep decides
+// a chunk should expire.
+func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return nil // vault not on this node — nothing to delete
+	}
+	for _, t := range vault.Tiers {
+		if t.TierID != tierID {
+			continue
+		}
+		_ = t.Indexes.DeleteIndexes(chunkID)
+		if err := t.Chunks.Delete(chunkID); err != nil {
+			o.logger.Warn("retention: remote delete failed",
+				"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+		}
+	}
+	return nil
+}
+
 // --- Chunk write ---
 
 // Append appends a record to the vault's active chunk.

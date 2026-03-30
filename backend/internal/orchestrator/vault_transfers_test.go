@@ -699,4 +699,7 @@ func (m *mockTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uu
 func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
 	return nil
 }
+func (m *mockTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 

@@ -36,13 +36,6 @@ type remoteKey struct {
 // sealed chunk, evaluated against each route's filter, and delivered to matching
 // destinations (local via Append, remote via TransferRecords).
 func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
-	if r.isSecondary.Load() {
-		r.logger.Error("ejectChunk called on secondary — this is a bug",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
-		r.expireChunk(id)
-		return
-	}
-
 	ctx := context.Background()
 
 	cfg, err := r.orch.loadConfig(ctx)

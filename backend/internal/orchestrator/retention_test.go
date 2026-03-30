@@ -125,21 +125,21 @@ func chunkIDAt(_ time.Time) chunk.ChunkID {
 	return chunk.NewChunkID()
 }
 
-func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chunk.RetentionPolicy) *retentionRunner {
+func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chunk.RetentionPolicy) (*retentionRunner, []retentionRule) {
 	var rules []retentionRule
 	if policy != nil {
 		rules = []retentionRule{
 			{policy: policy, action: config.RetentionActionExpire},
 		}
 	}
-	return &retentionRunner{
-		vaultID:  uuid.Must(uuid.NewV7()),
-		cm:       cm,
-		im:       im,
-		rules: rules,
-		now:      time.Now,
-		logger:   slog.Default(),
+	r := &retentionRunner{
+		vaultID: uuid.Must(uuid.NewV7()),
+		cm:      cm,
+		im:      im,
+		now:     time.Now,
+		logger:  slog.Default(),
 	}
+	return r, rules
 }
 
 // ---------- tests ----------
@@ -163,9 +163,9 @@ func TestSweepDeletesExpiredChunks(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	policy := chunk.NewCountRetentionPolicy(2)
-	r := newRetentionRunner(cm, im, policy)
+	r, rules := newRetentionRunner(cm, im, policy)
 
-	r.sweep()
+	r.sweep(rules)
 
 	// With max 2, the 2 oldest (id0, id1) should be deleted.
 	if len(cm.deleted) != 2 {
@@ -211,9 +211,9 @@ func TestSweepSkipsActiveChunks(t *testing.T) {
 	// Keep max 2 sealed chunks. With 3 sealed, oldest 1 should be deleted.
 	// The active chunk must not be considered.
 	policy := chunk.NewCountRetentionPolicy(2)
-	r := newRetentionRunner(cm, im, policy)
+	r, rules := newRetentionRunner(cm, im, policy)
 
-	r.sweep()
+	r.sweep(rules)
 
 	if len(cm.deleted) != 1 {
 		t.Fatalf("expected 1 chunk deletion, got %d", len(cm.deleted))
@@ -243,9 +243,9 @@ func TestSweepWithNoBindings(t *testing.T) {
 	}
 	im := &retentionFakeIndexManager{}
 
-	r := newRetentionRunner(cm, im, nil)
+	r, rules := newRetentionRunner(cm, im, nil)
 
-	r.sweep()
+	r.sweep(rules)
 
 	if len(cm.deleted) != 0 {
 		t.Errorf("expected no chunk deletions with no rules, got %d", len(cm.deleted))
@@ -272,20 +272,20 @@ func TestSetBindingsHotSwap(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	// Start with keep-all (max 10) so nothing gets deleted.
-	r := newRetentionRunner(cm, im, chunk.NewCountRetentionPolicy(10))
+	r, rules := newRetentionRunner(cm, im, chunk.NewCountRetentionPolicy(10))
 
-	r.sweep()
+	r.sweep(rules)
 
 	if len(cm.deleted) != 0 {
 		t.Fatalf("expected no deletions with generous policy, got %d", len(cm.deleted))
 	}
 
 	// Hot-swap to keep-1 policy. Next sweep should delete the 2 oldest.
-	r.setRules([]retentionRule{
+	newRules := []retentionRule{
 		{policy: chunk.NewCountRetentionPolicy(1), action: config.RetentionActionExpire},
-	})
+	}
 
-	r.sweep()
+	r.sweep(newRules)
 
 	if len(cm.deleted) != 2 {
 		t.Fatalf("expected 2 chunk deletions after rule swap, got %d", len(cm.deleted))
@@ -297,3 +297,65 @@ func TestSetBindingsHotSwap(t *testing.T) {
 		t.Errorf("expected second deleted chunk %s, got %s", id1, cm.deleted[1])
 	}
 }
+
+func TestRetentionSweepAllSkipsSecondary(t *testing.T) {
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	retPolicyID := uuid.Must(uuid.NewV7())
+	storageID := "secondary-storage-1"
+
+	cfg := &config.Config{
+		RetentionPolicies: []config.RetentionPolicyConfig{
+			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
+		},
+		Tiers: []config.TierConfig{{
+			ID:   tierID,
+			Name: "tier",
+			Type: config.TierTypeMemory,
+			RetentionRules: []config.RetentionRule{{
+				RetentionPolicyID: retPolicyID,
+				Action:            config.RetentionActionExpire,
+			}},
+		}},
+		Vaults: []config.VaultConfig{{
+			ID:      vaultID,
+			Name:    "v",
+			TierIDs: []uuid.UUID{tierID},
+		}},
+	}
+
+	o, err := New(Config{ConfigLoader: testConfigLoader{cfg}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cm := &retentionFakeChunkManager{}
+	im := &retentionFakeIndexManager{}
+
+	tier := &TierInstance{
+		TierID:      tierID,
+		StorageID:   storageID,
+		IsSecondary: true,
+		Chunks:      cm,
+		Indexes:     im,
+	}
+
+	vault := NewVault(vaultID, tier)
+	vault.Name = "v"
+	o.RegisterVault(vault)
+
+	o.retentionSweepAll()
+
+	key := retentionKey(tierID, storageID)
+	if _, ok := o.retention[key]; ok {
+		t.Error("retentionSweepAll should NOT create a runner for secondary tier instances")
+	}
+}
+
+type testConfigLoader struct{ cfg *config.Config }
+
+func (l testConfigLoader) Load(_ context.Context) (*config.Config, error) {
+	return l.cfg, nil
+}
+
+func strPtr(s string) *string { return &s }

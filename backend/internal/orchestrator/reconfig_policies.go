@@ -114,98 +114,10 @@ func (o *Orchestrator) reloadTierRotation(cfg *config.Config, vaultCfg config.Va
 	return nil
 }
 
-// ReloadRetentionPolicies loads the full config and resolves retention rules
-// for all registered vaults. This is called when a retention policy is
-// created/updated/deleted or when vault config changes.
-//
-// Handles three transitions:
-//   - Rules added to a vault without a runner → creates runner + scheduler job
-//   - Rules changed on a vault with a runner → hot-swaps rules
-//   - Rules removed from a vault with a runner → removes runner + scheduler job
-func (o *Orchestrator) ReloadRetentionPolicies(ctx context.Context) error {
-	cfg, err := o.loadConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("load config for retention policy reload: %w", err)
-	}
-	if cfg == nil {
-		return nil
-	}
-
-	o.mu.Lock()
-	defer o.mu.Unlock()
-
-	for _, vaultCfg := range cfg.Vaults {
-		vault := o.vaults[vaultCfg.ID]
-		if vault == nil {
-			continue // Vault not registered locally.
-		}
-
-		for _, tier := range vault.Tiers {
-			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-			o.reloadTierRetention(cfg, vaultCfg, tier, tierCfg)
-		}
-	}
-
+// ReloadRetentionPolicies is a no-op — retained for interface compatibility.
+// The single retentionSweepAll job discovers all tier instances and resolves
+// rules from the current config each tick. Config changes take effect on the
+// next sweep (within 1 minute).
+func (o *Orchestrator) ReloadRetentionPolicies(_ context.Context) error {
 	return nil
-}
-
-// reloadTierRetention reconciles the retention runner for a single tier.
-// reloadTierRetention reconciles the retention runner for a single tier.
-// Secondaries run retention too (to clean up expired replicas), but all
-// actions resolve to expire — the primary handles transition/eject.
-func (o *Orchestrator) reloadTierRetention(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, tierCfg *config.TierConfig) {
-	key := tier.TierID
-	jobName := retentionJobName(tier.TierID)
-
-	var tierRetentionRules []config.RetentionRule
-	if tierCfg != nil {
-		tierRetentionRules = tierCfg.RetentionRules
-	}
-
-	runner, hasRunner := o.retention[key]
-	hasRules := len(tierRetentionRules) > 0
-
-	switch {
-	case hasRules && hasRunner:
-		rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
-		if err != nil {
-			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
-			return
-		}
-		runner.setRules(rules)
-		runner.isSecondary.Store(tier.IsSecondary)
-		o.logger.Info("tier retention rules updated", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules), "secondary", tier.IsSecondary)
-
-	case hasRules && !hasRunner:
-		rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
-		if err != nil {
-			o.logger.Warn("failed to resolve retention rules", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
-			return
-		}
-		if len(rules) == 0 {
-			return
-		}
-		newRunner := &retentionRunner{
-			vaultID: vaultCfg.ID,
-			tierID:  tier.TierID,
-			cm:      tier.Chunks,
-			im:      tier.Indexes,
-			rules:   rules,
-			orch:    o,
-			now:     o.now,
-			logger:  o.logger,
-		}
-		newRunner.isSecondary.Store(tier.IsSecondary)
-		o.retention[key] = newRunner
-		if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, newRunner.sweep); err != nil {
-			o.logger.Warn("failed to add retention job", "vault", vaultCfg.ID, "tier", tier.TierID, "error", err)
-		}
-		o.scheduler.Describe(jobName, fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
-		o.logger.Info("tier retention runner created", "vault", vaultCfg.ID, "tier", tier.TierID, "rules", len(rules))
-
-	case !hasRules && hasRunner:
-		o.scheduler.RemoveJob(jobName)
-		delete(o.retention, key)
-		o.logger.Info("tier retention runner removed", "vault", vaultCfg.ID, "tier", tier.TierID)
-	}
 }

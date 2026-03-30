@@ -8,8 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"log/slog"
-
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/config"
@@ -333,116 +331,6 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 	}
 	if rules3[0].action != config.RetentionActionExpire {
 		t.Errorf("position 2 of 3: expected expire, got %v", rules3[0].action)
-	}
-}
-
-// --- Retention secondary forces expire ---
-
-func TestRetentionSecondaryForcesExpire(t *testing.T) {
-	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
-	vault.Name = "secondary-expire"
-	orch.RegisterVault(vault)
-
-	// Append and seal a chunk.
-	if _, _, err := tier.Chunks.Append(testRecord("data")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tier.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	metas, _ := tier.Chunks.List()
-	if len(metas) == 0 {
-		t.Fatal("expected sealed chunk")
-	}
-
-	runner := &retentionRunner{
-		vaultID: vaultID,
-		tierID:  tierID,
-		cm:      tier.Chunks,
-		im:      tier.Indexes,
-		rules: []retentionRule{
-			{
-				// RetentionPolicyFunc that matches all sealed chunks.
-				policy: chunk.RetentionPolicyFunc(func(state chunk.VaultState) []chunk.ChunkID {
-					var ids []chunk.ChunkID
-					for _, c := range state.Chunks {
-						ids = append(ids, c.ID)
-					}
-					return ids
-				}),
-				action: config.RetentionActionTransition,
-			},
-		},
-		orch: orch,
-		now:  time.Now,
-		logger: func() *slog.Logger {
-			return slog.Default()
-		}(),
-	}
-	runner.isSecondary.Store(true)
-
-	runner.sweep()
-
-	// Chunk should be deleted (expire), not transitioned.
-	metasAfter, _ := tier.Chunks.List()
-	if len(metasAfter) != 0 {
-		t.Errorf("expected chunk to be deleted by secondary expire, got %d chunks", len(metasAfter))
-	}
-}
-
-// --- Transition guards secondary ---
-
-func TestTransitionChunkGuardsSecondary(t *testing.T) {
-	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, true, nil)
-	vault := NewVault(vaultID, tier)
-	vault.Name = "guard-secondary"
-	orch.RegisterVault(vault)
-
-	if _, _, err := tier.Chunks.Append(testRecord("data")); err != nil {
-		t.Fatal(err)
-	}
-	if err := tier.Chunks.Seal(); err != nil {
-		t.Fatal(err)
-	}
-
-	metas, _ := tier.Chunks.List()
-	chunkID := metas[0].ID
-
-	runner := &retentionRunner{
-		vaultID: vaultID,
-		tierID:  tierID,
-		cm:      tier.Chunks,
-		im:      tier.Indexes,
-		orch:    orch,
-		now:     time.Now,
-		logger:  slog.Default(),
-	}
-	runner.isSecondary.Store(true)
-
-	// Directly call transitionChunk — it should fall back to expire.
-	runner.transitionChunk(chunkID)
-
-	metasAfter, _ := tier.Chunks.List()
-	if len(metasAfter) != 0 {
-		t.Errorf("expected chunk deleted by guard fallback, got %d chunks", len(metasAfter))
 	}
 }
 
@@ -1007,6 +895,9 @@ func (m *ackTestTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _
 	return nil
 }
 func (m *ackTestTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+	return nil
+}
+func (m *ackTestTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
 

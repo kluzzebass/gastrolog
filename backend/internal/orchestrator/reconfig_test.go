@@ -1029,79 +1029,13 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	}
 }
 
-func TestReloadRetentionCreatesRunner(t *testing.T) {
+func TestRetentionSingleJobRegistered(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
 	retPolicyID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 
-	// Config starts WITHOUT retention rules on the tier.
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
-			{ID: filterID, Expression: "*"},
-		},
-		Routes: []config.RouteConfig{
-			{ID: uuid.Must(uuid.NewV7()), FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
-		},
-		RetentionPolicies: []config.RetentionPolicyConfig{
-			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
-		},
-		Tiers: []config.TierConfig{
-			{ID: tierID, Name: "tier", Type: config.TierTypeMemory},
-		},
-		Vaults: []config.VaultConfig{
-			{ID: vaultID, Name: "src", TierIDs: []uuid.UUID{tierID}},
-		},
-	}}
-
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	factories := orchestrator.Factories{
-		ChunkManagers: map[string]chunk.ManagerFactory{"memory": chunkmem.NewFactory()},
-		IndexManagers: map[string]index.ManagerFactory{"memory": indexmem.NewFactory()},
-	}
-	if err := orch.AddVault(context.Background(), loader.cfg.Vaults[0], factories); err != nil {
-		t.Fatal(err)
-	}
-
-	// No retention job should exist yet.
-	sched := orch.Scheduler()
-	jobName := "retention:" + tierID.String()
-	if sched.HasJob(jobName) {
-		t.Fatal("retention job should not exist before rules are added")
-	}
-
-	// Now update config to include retention rules on the tier.
-	loader.cfg.Tiers[0].RetentionRules = []config.RetentionRule{{
-		RetentionPolicyID: retPolicyID,
-		Action:            config.RetentionActionEject,
-		EjectRouteIDs:     []uuid.UUID{dstID},
-	}}
-
-	// ReloadRetentionPolicies should create the runner.
-	if err := orch.ReloadRetentionPolicies(context.Background()); err != nil {
-		t.Fatalf("ReloadRetentionPolicies: %v", err)
-	}
-
-	if !sched.HasJob(jobName) {
-		t.Fatal("retention job should exist after ReloadRetentionPolicies")
-	}
-}
-
-func TestReloadRetentionRemovesRunner(t *testing.T) {
-	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
-	retPolicyID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-
-	// Config starts WITH retention rules on the tier.
 	loader := &fakeConfigLoader{cfg: &config.Config{
 		Filters: []config.FilterConfig{
 			{ID: filterID, Expression: "*"},
@@ -1115,8 +1049,7 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 		Tiers: []config.TierConfig{
 			{ID: tierID, Name: "tier", Type: config.TierTypeMemory, RetentionRules: []config.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
-				Action:            config.RetentionActionEject,
-				EjectRouteIDs:     []uuid.UUID{dstID},
+				Action:            config.RetentionActionExpire,
 			}}},
 		},
 		Vaults: []config.VaultConfig{
@@ -1137,21 +1070,14 @@ func TestReloadRetentionRemovesRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// The single "retention" job should be registered, not per-tier jobs.
 	sched := orch.Scheduler()
-	jobName := "retention:" + tierID.String()
-	if !sched.HasJob(jobName) {
-		t.Fatal("retention job should exist after AddVault with rules")
+	if !sched.HasJob("retention") {
+		t.Fatal("single retention sweep job should exist")
 	}
-
-	// Remove retention rules from the tier config.
-	loader.cfg.Tiers[0].RetentionRules = nil
-
-	if err := orch.ReloadRetentionPolicies(context.Background()); err != nil {
-		t.Fatalf("ReloadRetentionPolicies: %v", err)
-	}
-
-	if sched.HasJob(jobName) {
-		t.Fatal("retention job should be removed after rules are cleared")
+	perTierJobName := "retention:" + tierID.String()
+	if sched.HasJob(perTierJobName) {
+		t.Fatal("per-tier retention job should NOT exist — retention uses a single discovery-based sweep")
 	}
 }
 

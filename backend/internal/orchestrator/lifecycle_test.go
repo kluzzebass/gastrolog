@@ -45,6 +45,9 @@ func (m *slowAckTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _
 func (m *slowAckTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
 	return nil
 }
+func (m *slowAckTransferrer) DeleteRemoteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 
 // TestStopWaitsForAckGoroutines verifies that Stop() blocks until all
 // in-flight ack-gated replication goroutines have completed.

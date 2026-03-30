@@ -181,52 +181,13 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 	return nil
 }
 
-// applyRetention sets up retention jobs for all tiers that have retention rules.
-func (o *Orchestrator) applyRetention(cfg *config.Config) error {
-	for _, vaultCfg := range cfg.Vaults {
-		vault := o.vaults[vaultCfg.ID]
-		if vault == nil {
-			continue
-		}
-
-		for _, tier := range vault.Tiers {
-			if tier.IsSecondary {
-				continue
-			}
-			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-			if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
-				continue
-			}
-
-			rules, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tierCfg)
-			if err != nil {
-				return err
-			}
-			if len(rules) == 0 {
-				continue
-			}
-
-			key := tier.TierID
-			runner := &retentionRunner{
-				vaultID: vaultCfg.ID,
-				tierID:  tier.TierID,
-				cm:      tier.Chunks,
-				im:      tier.Indexes,
-				rules:   rules,
-				orch:    o,
-				now:     o.now,
-				logger:  o.logger,
-			}
-			runner.isSecondary.Store(tier.IsSecondary)
-			o.retention[key] = runner
-			jobName := retentionJobName(tier.TierID)
-			if err := o.scheduler.AddJob(jobName, defaultRetentionSchedule, runner.sweep); err != nil {
-				return fmt.Errorf("retention job for vault %s tier %s: %w", vaultCfg.ID, tier.TierID, err)
-			}
-			o.scheduler.Describe(jobName, fmt.Sprintf("Retention sweep for '%s'", vaultCfg.Name))
-		}
+// startRetentionSweep registers the single retention sweep job that discovers
+// and evaluates all tier instances each tick. No per-tier lifecycle needed.
+func (o *Orchestrator) startRetentionSweep() error {
+	if err := o.scheduler.AddJob(retentionJobName, defaultRetentionSchedule, o.retentionSweepAll); err != nil {
+		return fmt.Errorf("retention sweep job: %w", err)
 	}
-
+	o.scheduler.Describe(retentionJobName, "Retention sweep (all tiers)")
 	return nil
 }
 

@@ -21,13 +21,6 @@ import (
 // to the destination tier's ImportRecords (one pass, one sealed chunk).
 // The destination tier handles its own secondary replication.
 func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
-	if r.isSecondary.Load() {
-		r.logger.Error("transitionChunk called on secondary — this is a bug",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
-		r.expireChunk(id)
-		return
-	}
-
 	ctx := context.Background()
 
 	cfg, err := r.orch.loadConfig(ctx)
