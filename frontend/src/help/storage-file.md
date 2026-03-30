@@ -1,19 +1,21 @@
-# File Vault
+# File Tier
 
-Type: `file`
+Persists chunks to local disk. Each chunk becomes a directory containing the record data, [indexes](help:indexers) for fast lookups, and record attributes. Sealed chunks are compressed with seekable zstd and memory-mapped for efficient reads.
 
-Persists logs to disk. Each [chunk](help:general-concepts) becomes a directory containing the record data, an [index](help:indexers) for fast lookups, and the record attributes. Sealed chunks are compressed with zstd and memory-mapped for efficient reads.
+## Settings
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| Directory | Vault directory | `<vaults>/<name>` |
-| Sealed Backing | Where sealed chunks are stored after sealing | Local |
+| Setting | Description |
+|---------|-------------|
+| Storage Class | Which [file storages](help:storage-config) this tier uses. The placement manager assigns one file storage per replica. |
+| Replication Factor | Number of copies across available file storages with the matching class. |
+| Rotation Policy | When to seal the active chunk and start a new one. |
+| Retention Rules | What to do with sealed chunks that age out — delete or eject to another tier. |
 
 ## What You Should Know
 
-- When left empty, the directory defaults to `vaults/<name>` under the `--vaults` directory (which itself defaults to `--home`)
-- Only one process can open a vault directory at a time (enforced by a lock file). In a [cluster](help:clustering), each node must have its own vault directories on local storage
-- Sealed chunks are automatically compressed using seekable zstd — no configuration needed
-- If GastroLog crashes, it recovers on restart — at most the last partially-written record is lost
-- Maximum log file size within a chunk is **4 GB** (32-bit offsets in the file format)
-- File vaults can optionally upload sealed chunks to cloud storage — see [Sealed Backing](help:storage-cloud)
+- The tier's data directory is derived from its assigned file storage path — you don't set it manually.
+- Only one process can open a chunk directory at a time (enforced by a lock file).
+- Sealed chunks are automatically compressed — no configuration needed.
+- If GastroLog crashes, it recovers on restart — at most the last partially-written record is lost.
+- Maximum log file size within a chunk is **4 GB** (32-bit offsets in the file format).
+- Multiple file storages with the same storage class form a pool. The placement manager spreads replicas across them.

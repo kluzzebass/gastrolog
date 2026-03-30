@@ -1,53 +1,56 @@
-# Sealed Backing (Cloud Storage)
+# Cloud Tier
 
-File vaults can optionally upload sealed chunks to cloud object storage. When **Sealed Backing** is set to a cloud provider, chunks are compressed locally, converted to GLCB format, uploaded, and the local copy is deleted. The active chunk always lives on local disk — only sealed chunks move to the cloud.
-
-Supported providers:
-
-| Provider | Description |
-|----------|-------------|
-| **S3 / S3-compatible** | Amazon S3, MinIO, Cloudflare R2, Backblaze B2, Wasabi, Hetzner, DigitalOcean Spaces |
-| **Azure Blob Storage** | Microsoft Azure |
-| **Google Cloud Storage** | Google Cloud |
+Stores sealed chunks in cloud object storage (S3, GCS, or Azure Blob Storage). The active chunk lives on local disk — only sealed chunks are uploaded. After upload, the local copy is deleted and queries fetch data via range requests.
 
 ## Settings
 
+| Setting | Description |
+|---------|-------------|
+| Cloud Service | Which [cloud storage endpoint](help:storage-config) to use for sealed chunks. |
+| Active Chunk Class | The [file storage](help:storage-config) class for the local active chunk. Fast storage recommended. |
+| Cache Class | The file storage class for cached cloud chunks during queries. Can be slower. |
+| Replication Factor | Number of copies. Each replica has its own local active chunk; sealed chunks are shared in the cloud. |
+| Rotation Policy | When to seal the active chunk and upload it. |
+| Retention Rules | What to do with aged-out cloud chunks — delete from the cloud store. |
+
+## Cloud Providers
+
 ### S3 / S3-compatible
 
-| Setting | Description | Required |
-|---------|-------------|----------|
-| Bucket | S3 bucket name | Yes |
-| Region | AWS region (e.g. `us-east-1`) | No |
-| Access Key | AWS access key ID | Depends |
-| Secret Key | AWS secret access key | Depends |
-| Endpoint | Custom endpoint URL for S3-compatible services | Depends |
+Supports Amazon S3, MinIO, Cloudflare R2, Backblaze B2, Wasabi, Hetzner, DigitalOcean Spaces, and other S3-compatible services.
 
-When Access Key and Secret Key are left empty, the AWS SDK resolves credentials automatically using its default chain: environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), shared credentials file (`~/.aws/credentials`), and IAM instance roles (EC2/ECS). This is the recommended approach for AWS-hosted deployments — avoid embedding keys in the configuration.
+| Field | Required | Notes |
+|-------|----------|-------|
+| Bucket | Yes | |
+| Region | No | AWS region (e.g. `us-east-1`) |
+| Access Key | Depends | Leave empty for IAM roles / default credential chain |
+| Secret Key | Depends | |
+| Endpoint | Depends | Required for non-AWS S3-compatible services |
 
-For S3-compatible services (MinIO, R2, etc.), you must set **Endpoint** to the service URL and typically provide explicit Access Key and Secret Key, since the default credential chain won't apply.
+When credentials are left empty, the AWS SDK resolves them automatically: environment variables, shared credentials file (`~/.aws/credentials`), and IAM instance roles. For S3-compatible services, set **Endpoint** and provide explicit credentials.
 
 ### Azure Blob Storage
 
-| Setting | Description | Required |
-|---------|-------------|----------|
-| Container | Blob container name | Yes |
-| Connection String | Azure storage connection string | Yes |
+| Field | Required |
+|-------|----------|
+| Container | Yes |
+| Connection String | Yes |
 
 ### Google Cloud Storage
 
-| Setting | Description | Required |
-|---------|-------------|----------|
-| Bucket | GCS bucket name | Yes |
-| Credentials JSON | Service account key (JSON) | Depends |
-| Endpoint | Custom endpoint URL | No |
+| Field | Required | Notes |
+|-------|----------|-------|
+| Bucket | Yes | |
+| Credentials JSON | Depends | Leave empty for Application Default Credentials |
+| Endpoint | No | Custom endpoint URL |
 
-When Credentials JSON is left empty, the GCS client uses Application Default Credentials (ADC): the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, the attached service account on GCE/GKE, or credentials from `gcloud auth application-default login`. Paste a service account key JSON only when ADC is not available.
+When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION_CREDENTIALS` environment variable, attached service accounts on GCE/GKE, or `gcloud auth application-default login`.
 
 ## What You Should Know
 
-- File vaults with sealed backing support **live ingestion** — the active chunk is always local, so `Append` and eject both work normally
-- Cloud-backed sealed chunks appear in search results like any other chunk — queries download the blob and scan it (no pre-built indexes in cloud storage)
-- Each sealed chunk is stored as a single compressed blob (GLCB format with seekable zstd compression)
-- On startup, the vault lists blobs from the cloud store and merges them into the chunk metadata alongside any local chunks
-- Use the **Test Connection** button to verify credentials before saving
-- In a [cluster](help:clustering), vaults with sealed backing are assigned to a node like any other vault — the active chunk is local to that node, sealed chunks live in the cloud
+- The active chunk is always local — ingestion latency is unaffected by cloud storage.
+- Each sealed chunk is stored as a single blob in GLCB format (seekable zstd compression).
+- Queries read cloud chunks via HTTP range requests — only the needed frames are downloaded, not the entire blob.
+- Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name when creating cloud tiers.
+- Use the **Test Connection** button in cloud service settings to verify credentials.
+- Secondary replicas keep a local compressed copy for queries — they do not upload to the cloud (only the primary uploads).

@@ -1,40 +1,42 @@
 # Storage
 
-Once a record has been ingested and digested, [routes](help:routing) direct it into one or more **vaults** based on filter expressions. Each vault appends the record to its active chunk.
+Once a record has been ingested and digested, [routes](help:routing) direct it into one or more **vaults** based on filter expressions. Each vault contains an ordered chain of **tiers** that manage data through its lifecycle — from fast ingestion to long-term archival.
 
-Vaults manage the full lifecycle of your data:
+## Vaults and Tiers
 
-- [**Routes**](help:routing) control which records reach which vaults
-- [**Rotation**](help:policy-rotation) controls when the active chunk is sealed and a new one begins
-- [**Retention**](help:policy-retention) controls when old sealed chunks are deleted or moved
-- The **storage engine** determines how data is persisted (disk or memory)
+A **vault** is a logical container. It doesn't store data itself — its tiers do. Each tier is a full chunk manager with its own storage, rotation, retention, and replication settings. Records enter the first tier (the ingestion tier) and flow through the chain via [retention eject rules](help:policy-retention).
 
-## Storage Engines
+Example: a vault with three tiers:
+
+| Tier | Type | Purpose |
+|------|------|---------|
+| Tier 1 | [File](help:storage-file) | Hot storage on NVMe. 1-minute rotation, 5-minute retention, eject to tier 2. |
+| Tier 2 | [Cloud](help:storage-cloud) | Warm storage in S3. Sealed chunks uploaded to the cloud, local cache for queries. |
+| Tier 3 | [File](help:storage-file) | Cold archive on HDD. Long retention, slow but cheap. |
+
+## Tier Types
 
 | Type | What it does |
 |------|-------------|
-| [**File**](help:storage-file) | Persists logs to disk with memory-mapped reads — for production use |
-| [**Memory**](help:storage-memory) | Keeps everything in memory — fast but lost on restart, for testing |
+| [**File**](help:storage-file) | Persists chunks to local disk with memory-mapped reads |
+| [**Memory**](help:storage-memory) | Keeps chunks in RAM — fast but lost on restart |
+| [**Cloud**](help:storage-cloud) | Active chunk on local disk, sealed chunks uploaded to S3/GCS/Azure |
+| **JSONL** | Append-only JSON lines file — write-only sink for debugging or export |
 
-File vaults support optional [**sealed backing**](help:storage-cloud) — sealed chunks can be uploaded to S3, Azure Blob Storage, or GCS for long-term cloud archival while the active chunk stays on local disk.
+## Replication
+
+Each tier has its own **replication factor** (RF). Replicas are placed on [file storages](help:storage-config) with the matching storage class. The placement manager prefers different nodes (availability) but allows same-node placement on different disks (redundancy).
+
+- **RF=1** — no replication. Single copy.
+- **RF=2** — one primary, one secondary (nonvoter). Redundancy without fault tolerance.
+- **RF=3+** — full quorum. Survives node failures.
 
 ## Compression
 
-All file vaults compress sealed chunks automatically using seekable zstd. Compression runs asynchronously after sealing — there is no impact on ingestion latency. Log data typically compresses 5–10x, and the seekable format allows random-access reads without decompressing the entire chunk.
+All file and cloud tiers compress sealed chunks automatically using seekable zstd. Compression runs asynchronously after sealing — no impact on ingestion latency. Log data typically compresses 5-10x, and the seekable format allows random-access reads without decompressing the entire chunk.
 
-## Tiered Storage
+## Queries
 
-Combine local and cloud-backed vaults to build a hot/cold storage tier:
+Queries automatically search all tiers in a vault. Results from cloud-backed chunks, local sealed chunks, and active chunks are merged transparently. Cloud chunks are fetched on demand via range requests — no full download required.
 
-- **Hot tier:** A local file vault with short retention (e.g. 7 days, 50 GB cap). Fast queries, fast ingestion, bounded disk use.
-- **Cold tier:** A file vault with [sealed backing](help:storage-cloud) pointing to S3, GCS, or Azure. Cheap, virtually unlimited capacity. Queries work but download each chunk on demand.
-
-Use [retention eject](help:policy-retention) to move records from hot to cold automatically. Set up an eject-only [route](help:routing) targeting the cold vault, then configure the hot vault's retention to eject through that route. Records age out of the hot tier and land in cloud storage without manual intervention.
-
-Queries automatically search both tiers — results from cloud-backed chunks are merged transparently with local results.
-
-## Clustering
-
-In a [cluster](help:clustering), each vault is assigned to a specific [node](help:clustering-nodes). Log data is stored locally on that node and is **not replicated** — clustering replicates configuration only. Searches automatically reach vaults on all nodes.
-
-Select a topic from the sidebar for details on engines, rotation, and retention.
+Select a topic from the sidebar for details on each tier type.
