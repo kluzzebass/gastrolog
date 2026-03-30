@@ -41,7 +41,7 @@ export const helpTopics: HelpTopic[] = [
   },
   { id: 'routing', title: 'Routes & Filtering', load: md(() => import('./routing.md?raw')) },
   {
-    id: 'storage', title: 'Storage', load: md(() => import('./storage.md?raw')),
+    id: 'storage', title: 'Vaults & Tiers', load: md(() => import('./storage.md?raw')),
     children: [
       { id: 'storage-file', title: 'File Tier', load: md(() => import('./storage-file.md?raw')) },
       { id: 'storage-memory', title: 'Memory Tier', load: md(() => import('./storage-memory.md?raw')) },

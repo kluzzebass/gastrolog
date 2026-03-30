@@ -1,4 +1,4 @@
-# Storage
+# Vaults & Tiers
 
 Once a record has been ingested and digested, [routes](help:routing) direct it into one or more **vaults** based on filter expressions. Each vault contains an ordered chain of **tiers** that manage data through its lifecycle — from fast ingestion to long-term archival.
 
