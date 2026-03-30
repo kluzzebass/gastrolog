@@ -436,14 +436,12 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	}
 	primaryNodeID := tierCfg.PrimaryNodeID(nscs)
 	secondaryNodeIDs := tierCfg.SecondaryNodeIDs(nscs)
-	secondaryTargets := tierCfg.SecondaryTargets(nscs)
 	shouldBeSecondary := slices.Contains(secondaryNodeIDs, d.localNodeID)
-	if existing.IsSecondary == shouldBeSecondary &&
-		len(existing.SecondaryTargets) == len(secondaryTargets) {
-		return // role and secondaries unchanged
+	if existing.IsSecondary == shouldBeSecondary {
+		return // role unchanged
 	}
 	existing.IsSecondary = shouldBeSecondary
-	existing.SecondaryTargets = secondaryTargets
+	// SecondaryTargets are refreshed by the rotation sweep every 15s.
 	if shouldBeSecondary {
 		existing.PrimaryNodeID = primaryNodeID
 	} else {
@@ -451,8 +449,7 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	}
 	d.logger.Info("dispatch: tier role updated in place",
 		"vault", vaultID, "tier", tierID,
-		"isSecondary", shouldBeSecondary,
-		"targets", len(secondaryTargets))
+		"isSecondary", shouldBeSecondary)
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.

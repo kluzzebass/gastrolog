@@ -56,7 +56,7 @@ func (o *Orchestrator) rotationSweep() {
 				continue
 			}
 
-			// Apply rotation policy + reconcile cron job from config.
+			// Apply rotation policy + reconcile cron job + refresh replication targets.
 			if cfg != nil && vaultCfg != nil {
 				tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 				o.applyRotationFromConfig(cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
@@ -100,7 +100,13 @@ func (o *Orchestrator) applyRotationFromConfig(
 	tierCfg *config.TierConfig,
 	activeCronJobs map[string]bool,
 ) {
-	if tierCfg == nil || tierCfg.RotationPolicyID == nil {
+	if tierCfg == nil {
+		return
+	}
+	// Refresh replication targets from current config.
+	tier.SecondaryTargets = tierCfg.SecondaryTargets(cfg.NodeStorageConfigs)
+
+	if tierCfg.RotationPolicyID == nil {
 		return
 	}
 
