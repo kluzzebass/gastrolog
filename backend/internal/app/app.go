@@ -126,16 +126,21 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// Wrap in a proxy so runtime cluster join can swap the inner store.
 	// All consumers hold a reference to proxy; on join, only the inner changes.
 	proxy := config.NewStoreProxy(rawStore)
-	defer func() { _ = proxy.Close() }() // safety net for early returns
 	cfgStore := config.Store(proxy)
 	var groupMgr *multiraft.GroupManager // set later if cluster mode
 
 	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
+		_ = proxy.Close()
 		return err
 	}
+	// Shutdown order matters: config Raft must stop BEFORE the cluster
+	// server, because the Raft follower reads from the transport's rpcChan.
+	// Closing the transport first causes a nil-channel deadlock in Raft.
+	// Defers run LIFO, so cluster Stop is registered first (runs last).
 	if clusterSrv != nil {
-		defer clusterSrv.Stop() // safety net for early returns
+		defer clusterSrv.Stop()
 	}
+	defer func() { _ = proxy.Close() }()
 
 	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
 	appCfg, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterTLS, nodeID)
