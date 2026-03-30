@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"gastrolog/internal/chunk"
@@ -512,13 +513,11 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		}
 
 		if isPrimary {
-			// Primary: build with default storage resolution.
-			ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, false)
+			ti, err := o.buildPrimaryTierInstance(cfg, vaultCfg, tierCfg, factories)
 			if err != nil {
 				closeTiers(tiers)
 				return nil, fmt.Errorf("build tier %s: %w", tierID, err)
 			}
-			ti.StorageID = tierCfg.PrimaryStorageID()
 			ti.SecondaryTargets = tierCfg.SecondaryTargets(nscs)
 			tiers = append(tiers, ti)
 		}
@@ -546,6 +545,28 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		}
 	}
 	return tiers, nil
+}
+
+// buildPrimaryTierInstance creates the primary TierInstance using the placement's
+// storage ID. This avoids directory collisions with same-node secondary placements
+// that would occur if findLocalFileStorage picked a different storage by class.
+func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig, factories Factories) (*TierInstance, error) {
+	storageID := tierCfg.PrimaryStorageID()
+	if storageID != "" && !strings.HasPrefix(storageID, config.SyntheticStoragePrefix) {
+		ti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID)
+		if err != nil {
+			return nil, err
+		}
+		ti.StorageID = storageID
+		return ti, nil
+	}
+	// Synthetic or unplaced — fall back to class-based resolution.
+	ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, false)
+	if err != nil {
+		return nil, err
+	}
+	ti.StorageID = storageID
+	return ti, nil
 }
 
 // buildTierInstance creates a single TierInstance from a TierConfig.
