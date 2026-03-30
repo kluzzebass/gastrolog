@@ -190,7 +190,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const handleCreateStorage = async () => {
     const targetNodeId = storageNodeId || localNodeId;
     const effectiveName = storageName.trim() || storageNamePlaceholder || "file-storage";
-    const path = storagePath.trim() || effectiveName;
+    const path = storagePath.trim() || `storage/${effectiveName}`;
     const cls = parseInt(storageClass, 10);
     if (!targetNodeId || isNaN(cls)) return;
 
@@ -267,7 +267,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                 <TextInput
                   value={storagePath}
                   onChange={setStoragePath}
-                  placeholder={storageName.trim() || storageNamePlaceholder || ""}
+                  placeholder={`storage/${storageName.trim() || storageNamePlaceholder || ""}`}
                   dark={dark}
                   mono
                 />
