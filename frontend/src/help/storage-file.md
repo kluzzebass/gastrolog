@@ -1,6 +1,6 @@
 # File Tier
 
-Persists chunks to local disk. Each chunk becomes a directory containing the record data, [indexes](help:indexers) for fast lookups, and record attributes. Sealed chunks are compressed with seekable zstd and memory-mapped for efficient reads.
+Persists chunks to local disk. Sealed chunks are compressed automatically for efficient storage and fast reads.
 
 ## Settings
 
