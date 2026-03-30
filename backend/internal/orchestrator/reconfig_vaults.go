@@ -601,10 +601,9 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}, nil
 }
 
-// buildTierInstanceForStorage creates a secondary TierInstance whose data directory
-// is resolved from a specific file storage ID rather than the default findLocalFileStorage
-// lookup. Used for same-node replication where each secondary placement targets a
-// different physical disk.
+// buildTierInstanceForStorage creates a TierInstance whose data directory is
+// resolved from a specific file storage ID. Used for both primaries with
+// explicit placements and secondaries (one per node per tier).
 func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, storageID string) (*TierInstance, error) {
 	fs := findFileStorageByID(cfg, storageID)
 	if fs == nil {
@@ -700,36 +699,6 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		ApplyRaftDelete: raftCB.applyDelete,
 		ListManifest:    raftCB.listChunks,
 	}, nil
-}
-
-// wireOnDeleteCallback wires the tier Raft FSM's OnDelete callback so that
-// when the primary commits a CmdDeleteChunk, the secondary immediately deletes
-// local chunk data + indexes. Multiple secondaries on the same node chain
-// their callbacks — each one wraps the previous.
-func wireOnDeleteCallback(ti *TierInstance, factories Factories) {
-	if factories.GroupManager == nil {
-		return
-	}
-	g := factories.GroupManager.GetGroup(ti.TierID.String())
-	if g == nil {
-		return
-	}
-	fsm, ok := g.FSM.(*multiraft.ChunkFSM)
-	if !ok || fsm == nil {
-		return
-	}
-	cm := ti.Chunks
-	im := ti.Indexes
-	prev := fsm.OnDelete
-	fsm.OnDelete = func(id chunk.ChunkID) {
-		if prev != nil {
-			prev(id)
-		}
-		if im != nil {
-			_ = im.DeleteIndexes(id)
-		}
-		_ = cm.Delete(id)
-	}
 }
 
 // findFileStorageByID resolves a file storage ID to its config across all nodes.
