@@ -29,11 +29,11 @@ type ContextResult struct {
 func (e *Engine) ReadRecord(_ context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64) (chunk.Record, error) {
 	cm, _ := e.getVaultManagers(vaultID)
 	if cm == nil {
-		return chunk.Record{}, fmt.Errorf("vault %q not found", vaultID)
+		return chunk.Record{}, fmt.Errorf("vault %q: %w", vaultID, chunk.ErrVaultNotFound)
 	}
 	cursor, err := cm.OpenCursor(chunkID)
 	if err != nil {
-		return chunk.Record{}, fmt.Errorf("chunk %s not found: %w", chunkID, err)
+		return chunk.Record{}, fmt.Errorf("chunk %s: %w", chunkID, err)
 	}
 	ref := chunk.RecordRef{ChunkID: chunkID, Pos: pos}
 	if err := cursor.Seek(ref); err != nil {

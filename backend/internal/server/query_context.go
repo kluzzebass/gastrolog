@@ -117,6 +117,11 @@ func (s *QueryServer) readAnchor(ctx context.Context, vaultID uuid.UUID, chunkID
 	eng := s.orch.PrimaryTierQueryEngine()
 	anchor, err := eng.ReadRecord(ctx, vaultID, chunkID, pos)
 	if err != nil {
+		// Chunk may have been deleted by retention between search and context read.
+		// Return nil anchor instead of erroring — the caller handles missing anchors.
+		if errors.Is(err, chunk.ErrVaultNotFound) || errors.Is(err, chunk.ErrChunkNotFound) {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("read anchor vault=%s chunk=%s pos=%d: %w", vaultID, chunkID, pos, err)
 	}
 	return recordToProto(anchor), nil

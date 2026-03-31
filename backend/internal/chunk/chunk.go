@@ -15,6 +15,7 @@ var (
 	ErrNoMoreRecords  = errors.New("no more records")
 	ErrChunkNotSealed = errors.New("chunk is not sealed")
 	ErrChunkNotFound  = errors.New("chunk not found")
+	ErrVaultNotFound  = errors.New("vault not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
 	ErrChunkArchived = errors.New("chunk is archived and not immediately readable")
 	ErrNoTSIndex     = errors.New("no TS index available")
