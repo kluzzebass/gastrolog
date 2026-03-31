@@ -79,8 +79,6 @@ func (o *Orchestrator) retentionSweepAll() {
 	var targets []sweepTarget
 	active := make(map[string]bool)
 
-	var reconcileTiers []*TierInstance
-
 	o.mu.Lock()
 	for _, vaultCfg := range cfg.Vaults {
 		vault := o.vaults[vaultCfg.ID]
@@ -91,11 +89,10 @@ func (o *Orchestrator) retentionSweepAll() {
 			if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 				continue
 			}
-			// Non-leaders reconcile against the manifest — no rule evaluation.
-			// Uses Raft leadership, not config-driven IsFollower.
+			// Only the Raft leader runs retention. Followers skip — the manifest
+			// can't be trusted until Raft leader == config leader (gastrolog-15fqq).
 			isLeader := tier.IsRaftLeader == nil || tier.IsRaftLeader()
-			if !isLeader && tier.ListManifest != nil {
-				reconcileTiers = append(reconcileTiers, tier)
+			if !isLeader {
 				continue
 			}
 			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
@@ -110,14 +107,8 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	o.mu.Unlock()
 
-	// Leader: evaluate retention rules.
 	for _, t := range targets {
 		t.runner.sweep(t.rules)
-	}
-
-	// Followers: reconcile against the tier Raft manifest.
-	for _, tier := range reconcileTiers {
-		o.reconcileSecondary(tier)
 	}
 }
 

@@ -47,9 +47,14 @@ func (a *RaftAnnouncer) AnnounceDelete(id chunk.ChunkID) {
 }
 
 func (a *RaftAnnouncer) apply(op string, id chunk.ChunkID, data []byte) {
-	// Only the Raft leader can apply. Secondaries also run PostSealProcess
-	// (compress, index) but their announcements are redundant — the primary
-	// already announced. Skip silently to avoid log noise.
+	// Only the tier Raft leader can apply log entries. Non-leaders skip
+	// silently — they also run PostSealProcess (compress, index) and their
+	// announces would fail with ErrNotLeader anyway.
+	//
+	// When the ingest node and tier leader diverge (gastrolog-15fqq), the
+	// ingest node's announces are dropped. The sealed chunk replication
+	// path still delivers the actual data; the manifest is incomplete
+	// until leadership alignment is implemented.
 	if a.raft.State() != hraft.Leader {
 		return
 	}
