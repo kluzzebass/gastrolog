@@ -26,7 +26,7 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 	for i, p := range tier.Placements {
 		placements[i] = &gastrologv1.TierPlacementEntry{
 			StorageId:  p.StorageID,
-			Primary: p.Primary,
+			Primary: p.Leader,
 		}
 	}
 	return &gastrologv1.PutTierCommand{
@@ -102,7 +102,7 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 	for _, p := range cmd.GetPlacements() {
 		placements = append(placements, config.TierPlacement{
 			StorageID:  p.GetStorageId(),
-			Primary: p.GetPrimary(),
+			Leader: p.GetPrimary(),
 		})
 	}
 

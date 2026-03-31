@@ -234,15 +234,15 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID)
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
-	// temporary: find the tier's primary node to determine the owning node (until tier election).
+	// temporary: find the tier's leader node to determine the owning node (until tier election).
 	for _, tierID := range vaultCfg.TierIDs {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue
 		}
-		primaryNodeID := tc.PrimaryNodeID(nscs)
-		if primaryNodeID != "" && primaryNodeID != s.localNodeID {
-			return primaryNodeID
+		leaderNodeID := tc.LeaderNodeID(nscs)
+		if leaderNodeID != "" && leaderNodeID != s.localNodeID {
+			return leaderNodeID
 		}
 	}
 	return ""

@@ -674,35 +674,35 @@ type TierConfig struct {
 // The node is derived from the file storage's NodeStorageConfig.
 type TierPlacement struct {
 	StorageID  string `json:"storageId"`
-	Primary bool   `json:"primary"`
+	Leader bool   `json:"leader"`
 }
 
-// PrimaryStorageID returns the storage ID of the primary placement, or empty if unplaced.
-func (t TierConfig) PrimaryStorageID() string {
+// LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.
+func (t TierConfig) LeaderStorageID() string {
 	for _, p := range t.Placements {
-		if p.Primary {
+		if p.Leader {
 			return p.StorageID
 		}
 	}
 	return ""
 }
 
-// SecondaryStorageIDs returns the storage IDs of all secondary placements.
-func (t TierConfig) SecondaryStorageIDs() []string {
+// FollowerStorageIDs returns the storage IDs of all follower placements.
+func (t TierConfig) FollowerStorageIDs() []string {
 	var ids []string
 	for _, p := range t.Placements {
-		if !p.Primary {
+		if !p.Leader {
 			ids = append(ids, p.StorageID)
 		}
 	}
 	return ids
 }
 
-// StorageIDs returns all placed storage IDs (primary first, then secondaries).
+// StorageIDs returns all placed storage IDs (leader first, then followers).
 func (t TierConfig) StorageIDs() []string {
 	var ids []string
 	for _, p := range t.Placements {
-		if p.Primary {
+		if p.Leader {
 			ids = append([]string{p.StorageID}, ids...)
 		} else {
 			ids = append(ids, p.StorageID)
@@ -765,29 +765,29 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 			return fs.ID.String()
 		}
 	}
-	// Fallback for secondary replicas on nodes without exact class match.
+	// Fallback for follower replicas on nodes without exact class match.
 	if len(nsc.FileStorages) > 0 {
 		return nsc.FileStorages[0].ID.String()
 	}
 	return SyntheticStorageID(nodeID)
 }
 
-// PrimaryNodeID derives the primary node from placements + storage configs.
-func (t TierConfig) PrimaryNodeID(nscs []NodeStorageConfig) string {
-	storageID := t.PrimaryStorageID()
+// LeaderNodeID derives the leader node from placements + storage configs.
+func (t TierConfig) LeaderNodeID(nscs []NodeStorageConfig) string {
+	storageID := t.LeaderStorageID()
 	if storageID == "" {
 		return ""
 	}
 	return NodeIDForStorage(storageID, nscs)
 }
 
-// SecondaryNodeIDs derives unique secondary node IDs from placements + storage configs.
-// Multiple same-node placements are deduplicated. Use SecondaryTargets for
+// FollowerNodeIDs derives unique follower node IDs from placements + storage configs.
+// Multiple same-node placements are deduplicated. Use FollowerTargets for
 // storage-level granularity.
-func (t TierConfig) SecondaryNodeIDs(nscs []NodeStorageConfig) []string {
+func (t TierConfig) FollowerNodeIDs(nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
-	for _, storageID := range t.SecondaryStorageIDs() {
+	for _, storageID := range t.FollowerStorageIDs() {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" && !seen[nid] {
 			seen[nid] = true
@@ -803,12 +803,12 @@ type ReplicationTarget struct {
 	StorageID string
 }
 
-// SecondaryTargets returns one target per secondary placement — NOT deduplicated
+// FollowerTargets returns one target per follower placement — NOT deduplicated
 // by node. Multiple placements on the same node produce multiple targets,
 // enabling same-node replication across different file storages.
-func (t TierConfig) SecondaryTargets(nscs []NodeStorageConfig) []ReplicationTarget {
+func (t TierConfig) FollowerTargets(nscs []NodeStorageConfig) []ReplicationTarget {
 	var targets []ReplicationTarget
-	for _, storageID := range t.SecondaryStorageIDs() {
+	for _, storageID := range t.FollowerStorageIDs() {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" {
 			targets = append(targets, ReplicationTarget{NodeID: nid, StorageID: storageID})

@@ -402,7 +402,7 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 }
 
 // buildTierInstances creates TierInstance objects for each tier in the vault config.
-// Tiers whose primary/secondary storages don't resolve to the local node are skipped
+// Tiers whose leader/follower storages don't resolve to the local node are skipped
 // (placement manager assigns storages via Raft).
 func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) ([]*TierInstance, error) {
 	if len(vaultCfg.TierIDs) == 0 {
@@ -424,29 +424,29 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 			return nil, fmt.Errorf("tier %s not found in config", tierID)
 		}
 
-		// Determine if this node hosts this tier (as primary or secondary).
-		primaryNodeID := tierCfg.PrimaryNodeID(nscs)
-		secondaryNodeIDs := tierCfg.SecondaryNodeIDs(nscs)
-		isPrimary := primaryNodeID == "" || primaryNodeID == o.localNodeID
-		isSecondary := slices.Contains(secondaryNodeIDs, o.localNodeID)
-		if !isPrimary && !isSecondary {
+		// Determine if this node hosts this tier (as leader or follower).
+		leaderNodeID := tierCfg.LeaderNodeID(nscs)
+		followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
+		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
+		if !isLeader && !isFollower {
 			continue
 		}
 
-		if isPrimary {
+		if isLeader {
 			ti, err := o.buildPrimaryTierInstance(cfg, vaultCfg, tierCfg, factories)
 			if err != nil {
 				closeTiers(tiers)
 				return nil, fmt.Errorf("build tier %s: %w", tierID, err)
 			}
-			ti.SecondaryTargets = tierCfg.SecondaryTargets(nscs)
+			ti.FollowerTargets = tierCfg.FollowerTargets(nscs)
 			tiers = append(tiers, ti)
 		}
 
-		// Secondary: build one instance for this node's placement.
+		// Follower: build one instance for this node's placement.
 		// 1:1:1 constraint: at most one store per tier per node.
-		if isSecondary {
-			localTargets := tierCfg.SecondaryTargets(nscs)
+		if isFollower {
+			localTargets := tierCfg.FollowerTargets(nscs)
 			for _, tgt := range localTargets {
 				if tgt.NodeID != o.localNodeID {
 					continue
@@ -456,8 +456,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 					closeTiers(tiers)
 					return nil, fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
 				}
-				sti.IsSecondary = true
-				sti.PrimaryNodeID = primaryNodeID
+				sti.IsFollower = true
+				sti.LeaderNodeID = leaderNodeID
 				sti.StorageID = tgt.StorageID
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				// Create the tier Raft group (non-bootstrapped) so this
@@ -475,18 +475,18 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 	return tiers, nil
 }
 
-// buildPrimaryTierInstance creates the primary TierInstance using the placement's
-// storage ID. This avoids directory collisions with same-node secondary placements
+// buildPrimaryTierInstance creates the leader TierInstance using the placement's
+// storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
 func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig, factories Factories) (*TierInstance, error) {
-	storageID := tierCfg.PrimaryStorageID()
+	storageID := tierCfg.LeaderStorageID()
 	if storageID != "" && !strings.HasPrefix(storageID, config.SyntheticStoragePrefix) {
 		ti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID)
 		if err != nil {
 			return nil, err
 		}
 		ti.StorageID = storageID
-		// Wire tier Raft group for the primary — buildTierInstanceForStorage
+		// Wire tier Raft group for the leader — buildTierInstanceForStorage
 		// doesn't call wireTierRaftGroup itself.
 		raftCB := o.wireTierRaftGroup(ti.Chunks, *tierCfg, cfg.NodeStorageConfigs, factories, false)
 		ti.HasRaftLeader = raftCB.hasLeader
@@ -505,21 +505,21 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg con
 }
 
 // buildTierInstance creates a single TierInstance from a TierConfig.
-// When isSecondary is true, cloud backing params are stripped so the secondary's
+// When isFollower is true, cloud backing params are stripped so the follower's
 // PostSealProcess only runs compress + index without uploading to cloud storage.
-// Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the secondary
-// also uploads, it overwrites the primary's blob with a different-sized version,
-// corrupting the primary's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, isSecondary bool) (*TierInstance, error) {
+// Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
+// also uploads, it overwrites the leader's blob with a different-sized version,
+// corrupting the leader's stored diskBytes and breaking all future cloud reads.
+func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, isFollower bool) (*TierInstance, error) {
 	// Map TierConfig.Type to factory name.
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 
 	// Build params from tier config.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
 
-	// Secondaries must NOT upload to cloud storage. The primary owns the
-	// cloud blob; the secondary keeps a local compressed copy for queries.
-	if isSecondary {
+	// Followers must NOT upload to cloud storage. The leader owns the
+	// cloud blob; the follower keeps a local compressed copy for queries.
+	if isFollower {
 		delete(params, "sealed_backing")
 	}
 
@@ -563,7 +563,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}
 
 	// Wire Raft-backed metadata announcer if a GroupManager is available.
-	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories, isSecondary)
+	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories, isFollower)
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
@@ -627,7 +627,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
-	delete(params, "sealed_backing") // always secondary
+	delete(params, "sealed_backing") // always follower
 	params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
 
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
@@ -650,7 +650,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		return nil, fmt.Errorf("create chunk manager: %w", err)
 	}
 
-	// Secondary replicas need index builders for local queries.
+	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
 		_ = cm.Close()
@@ -677,7 +677,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 	}
 
 	// Same-node secondaries share the primary's tier Raft group.
-	// Wire the manifest callbacks so they reconcile like any other secondary.
+	// Wire the manifest callbacks so they reconcile like any other follower.
 	var raftCB tierRaftCallbacks
 	if factories.GroupManager != nil {
 		if g := factories.GroupManager.GetGroup(tierCfg.ID.String()); g != nil {
@@ -740,7 +740,7 @@ type tierRaftCallbacks struct {
 	listChunks  func() []chunk.ChunkID
 }
 
-func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories, isSecondary bool) tierRaftCallbacks {
+func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories, isFollower bool) tierRaftCallbacks {
 	if factories.GroupManager == nil {
 		return tierRaftCallbacks{}
 	}
@@ -753,13 +753,13 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 	g := factories.GroupManager.GetGroup(groupID)
 	if g == nil {
 		members := o.buildTierRaftMembers(tierCfg, nscs, factories)
-		primaryNodeID := tierCfg.PrimaryNodeID(nscs)
-		isPrimary := primaryNodeID == "" || primaryNodeID == o.localNodeID
+		leaderNodeID := tierCfg.LeaderNodeID(nscs)
+		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		var err error
 		g, err = factories.GroupManager.CreateGroup(multiraft.GroupConfig{
 			GroupID:   groupID,
 			FSM:       multiraft.NewChunkFSM(),
-			Bootstrap: isPrimary,
+			Bootstrap: isLeader,
 			Members:   members,
 		})
 		if err != nil {
@@ -800,7 +800,7 @@ func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, nscs []co
 		return nil
 	}
 	var members []hraft.Server
-	nodeID := tierCfg.PrimaryNodeID(nscs)
+	nodeID := tierCfg.LeaderNodeID(nscs)
 	if nodeID == "" {
 		nodeID = o.localNodeID
 	}
@@ -810,7 +810,7 @@ func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, nscs []co
 			Address: hraft.ServerAddress(addr),
 		})
 	}
-	for _, secID := range tierCfg.SecondaryNodeIDs(nscs) {
+	for _, secID := range tierCfg.FollowerNodeIDs(nscs) {
 		if addr, ok := factories.NodeAddressResolver(secID); ok {
 			members = append(members, hraft.Server{
 				ID:      hraft.ServerID(secID),

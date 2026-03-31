@@ -6,7 +6,7 @@ import { useToast } from "../Toast";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
-import { primaryNodeId, secondaryNodeIds } from "../../utils/tierPlacement";
+import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
@@ -161,8 +161,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   }
 
   // Deduplicate replicas: when RF > 1, the same chunk ID appears from
-  // multiple nodes. Keep the primary's version — it's compressed and
-  // indexed. Secondaries may briefly have uncompressed forwarded copies
+  // multiple nodes. Keep the leader's version — it's compressed and
+  // indexed. Followers may briefly have uncompressed forwarded copies
   // before ImportToTier replaces them with the canonical version.
   const bestChunk = new Map<string, ChunkMeta>();
   for (const ch of chunks ?? []) {
@@ -199,14 +199,14 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
       .map((tid) => {
         const tc = config.tiers.find((t) => t.id === tid);
         if (!tc) return null;
-        const pnId = primaryNodeId(tc, nscs);
+        const pnId = leaderNodeId(tc, nscs);
         return {
           id: tid,
           pos: tierPositions.get(tid) ?? 0,
           type: tierTypeMap[tc.type] ?? "unknown",
           nodeName: pnId ? (nodeNameMap.get(pnId) ?? pnId) : "",
           rf: tc.replicationFactor || 1,
-          secondaryNodeIds: secondaryNodeIds(tc, nscs),
+          followerNodeIds: followerNodeIds(tc, nscs),
           storageClass: tc.storageClass,
         };
       })
@@ -243,10 +243,10 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               <Badge variant="muted" dark={dark}>{`Tier ${String(pos)}: ${remote.type}`}</Badge>
               <span>{remote.nodeName ? `on ${remote.nodeName}` : "unplaced"}</span>
               {remote.rf > 1 && <Badge variant="info" dark={dark}>{`RF=${String(remote.rf)}`}</Badge>}
-              {remote.secondaryNodeIds.length > 0 && (
+              {remote.followerNodeIds.length > 0 && (
                 <span>
                   {"\u2192 "}
-                  {remote.secondaryNodeIds.map((id, si) => {
+                  {remote.followerNodeIds.map((id, si) => {
                     const name = nodeNameMap.get(id) ?? id;
                     let fallbackClass = 0;
                     if (remote.storageClass > 0) {
@@ -278,8 +278,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         const tierCfg = config?.tiers.find((t) => t.id === tierId);
         const nscs = config?.nodeStorageConfigs ?? [];
         const rf = tierCfg?.replicationFactor || 1;
-        const secondaries = tierCfg ? secondaryNodeIds(tierCfg, nscs) : [];
-        const pnId = tierCfg ? primaryNodeId(tierCfg, nscs) : "";
+        const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
+        const pnId = tierCfg ? leaderNodeId(tierCfg, nscs) : "";
         const nodeName = pnId ? (nodeNameMap.get(pnId) ?? pnId) : "";
         return (
         <div key={tierId}>

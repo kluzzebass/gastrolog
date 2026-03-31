@@ -153,10 +153,10 @@ func (o *Orchestrator) postSealWork(vaultID uuid.UUID, cm chunk.ChunkManager, ch
 // schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
-// After the pipeline completes, sealed-chunk replication is triggered for primary tiers.
+// After the pipeline completes, sealed-chunk replication is triggered for leader tiers.
 func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	// Resolve tier info for post-pipeline replication.
-	tierID, secondaryNodeIDs := o.tierReplicationInfo(vaultID, cm)
+	tierID, followerTargets := o.tierReplicationInfo(vaultID, cm)
 
 	processor, ok := cm.(chunk.ChunkPostSealProcessor)
 	if ok {
@@ -167,7 +167,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 			}
 			// Schedule replication as a separate job — never blocks the
 			// post-seal scheduler slot.
-			o.scheduleReplication(vaultID, tierID, id, secondaryNodeIDs)
+			o.scheduleReplication(vaultID, tierID, id, followerTargets)
 			return nil
 		}
 		if err := o.scheduler.RunOnce(name, wrappedFn, context.Background(), chunkID); err != nil {
@@ -185,7 +185,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 			if err := compressor.CompressChunk(id); err != nil {
 				return err
 			}
-			o.scheduleReplication(vaultID, tierID, id, secondaryNodeIDs)
+			o.scheduleReplication(vaultID, tierID, id, followerTargets)
 			return nil
 		}
 		if err := o.scheduler.RunOnce(name, wrappedFn, chunkID); err != nil {
@@ -195,20 +195,20 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 	}
 
 	// No post-processing — schedule replication directly.
-	o.scheduleReplication(vaultID, tierID, chunkID, secondaryNodeIDs)
+	o.scheduleReplication(vaultID, tierID, chunkID, followerTargets)
 }
 
-// tierReplicationInfo returns the tier ID and secondary targets for the tier
+// tierReplicationInfo returns the tier ID and follower targets for the tier
 // that owns the given ChunkManager. Returns zero values if not found or if the
-// tier is a secondary (secondaries don't replicate further).
+// tier is a follower (followers don't replicate further).
 func (o *Orchestrator) tierReplicationInfo(vaultID uuid.UUID, cm chunk.ChunkManager) (uuid.UUID, []config.ReplicationTarget) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return uuid.UUID{}, nil
 	}
 	for _, tier := range vault.Tiers {
-		if tier.Chunks == cm && tier.ShouldForwardToSecondaries() {
-			return tier.TierID, tier.SecondaryTargets
+		if tier.Chunks == cm && tier.ShouldForwardToFollowers() {
+			return tier.TierID, tier.FollowerTargets
 		}
 	}
 	return uuid.UUID{}, nil

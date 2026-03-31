@@ -288,7 +288,7 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 		for _, p := range tier.Placements {
 			placements = append(placements, &apiv1.TierPlacement{
 				StorageId:  p.StorageID,
-				Primary: p.Primary,
+				Leader: p.Leader,
 			})
 		}
 		tc := &apiv1.TierConfig{

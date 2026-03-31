@@ -199,7 +199,7 @@ func (o *Orchestrator) findLocalTier(vaultID, tierID uuid.UUID) *TierInstance {
 // bypassing the vault's active tier. Includes seal detection.
 // AppendToTier appends a record to a specific tier. primaryChunkID, when
 // non-zero on secondaries, syncs the chunk ID with the primary so the
-// secondary has real, queryable, promotable chunks.
+// follower has real, queryable, promotable chunks.
 func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
 	o.mu.RLock()
 	// NOTE: manually unlocked below — remote forwards happen outside the lock.
@@ -216,10 +216,10 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		}
 		cm := tier.Chunks
 
-		// On secondaries, sync chunk ID with the primary. If the active
-		// chunk has a different ID (left over from a previous primary cycle),
+		// On followers, sync chunk ID with the leader. If the active
+		// chunk has a different ID (left over from a previous leader cycle),
 		// seal it so the next append opens a new chunk with the synced ID.
-		if tier.IsSecondary && primaryChunkID != (chunk.ChunkID{}) {
+		if tier.IsFollower && primaryChunkID != (chunk.ChunkID{}) {
 			if active := cm.Active(); active != nil && active.ID != primaryChunkID {
 				_ = cm.Seal()
 			}
@@ -231,15 +231,15 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 			return err
 		}
 
-		// Primary: collect remote forward targets (local appends happen under lock).
+		// Leader: collect remote forward targets (local appends happen under lock).
 		var remotes []remoteForwardTarget
-		if tier.ShouldForwardToSecondaries() {
-			remotes = o.forwardToSecondaries(vault, vaultID, tier, cm, rec)
+		if tier.ShouldForwardToFollowers() {
+			remotes = o.forwardToFollowers(vault, vaultID, tier, cm, rec)
 		}
 
 		activeAfter := cm.Active()
 		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			if !tier.IsSecondary {
+			if !tier.IsFollower {
 				o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 			}
 		}
@@ -253,7 +253,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 }
 
 // remoteForwardTarget captures the parameters for a fire-and-forget forward
-// to a cross-node secondary. Collected under o.mu.RLock, executed after release.
+// to a cross-node follower. Collected under o.mu.RLock, executed after release.
 type remoteForwardTarget struct {
 	nodeID       string
 	vaultID      uuid.UUID
@@ -261,20 +261,20 @@ type remoteForwardTarget struct {
 	activeChunkID chunk.ChunkID
 }
 
-// forwardToSecondaries forwards a record to all secondary targets for active-chunk
+// forwardToFollowers forwards a record to all follower targets for active-chunk
 // durability. Same-node targets use direct append (under lock); cross-node targets
 // are collected and returned for the caller to forward AFTER releasing the lock.
 // Called under o.mu.RLock.
-func (o *Orchestrator) forwardToSecondaries(vault *Vault, vaultID uuid.UUID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
+func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID uuid.UUID, tier *TierInstance, cm chunk.ChunkManager, rec chunk.Record) []remoteForwardTarget {
 	activeNow := cm.Active()
 	var activeChunkID chunk.ChunkID
 	if activeNow != nil {
 		activeChunkID = activeNow.ID
 	}
 	var remotes []remoteForwardTarget
-	for _, tgt := range tier.SecondaryTargets {
+	for _, tgt := range tier.FollowerTargets {
 		if tgt.NodeID == o.localNodeID {
-			o.appendToLocalSecondary(vault, tier.TierID, tgt.StorageID, activeChunkID, rec)
+			o.appendToLocalFollower(vault, tier.TierID, tgt.StorageID, activeChunkID, rec)
 		} else {
 			remotes = append(remotes, remoteForwardTarget{
 				nodeID: tgt.NodeID, vaultID: vaultID,
@@ -285,7 +285,7 @@ func (o *Orchestrator) forwardToSecondaries(vault *Vault, vaultID uuid.UUID, tie
 	return remotes
 }
 
-// fireAndForgetRemote sends records to remote secondaries outside any lock.
+// fireAndForgetRemote sends records to remote followers outside any lock.
 func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
 	if o.forwarder == nil || len(targets) == 0 {
 		return
@@ -297,11 +297,11 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 	}
 }
 
-// appendToLocalSecondary appends a record to a same-node secondary tier instance,
+// appendToLocalFollower appends a record to a same-node follower tier instance,
 // identified by storageID. Called under o.mu.RLock — vault is already resolved.
-func (o *Orchestrator) appendToLocalSecondary(vault *Vault, tierID uuid.UUID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
+func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID uuid.UUID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && t.StorageID == storageID && t.IsSecondary {
+		if t.TierID == tierID && t.StorageID == storageID && t.IsFollower {
 			if primaryChunkID != (chunk.ChunkID{}) {
 				if active := t.Chunks.Active(); active != nil && active.ID != primaryChunkID {
 					_ = t.Chunks.Seal()
@@ -314,9 +314,9 @@ func (o *Orchestrator) appendToLocalSecondary(vault *Vault, tierID uuid.UUID, st
 	}
 }
 
-// deleteFromSecondaries removes a chunk from all same-node secondary instances
-// of a tier. Called by retention after deleting from the primary.
-func (o *Orchestrator) deleteFromSecondaries(vaultID uuid.UUID, tierID uuid.UUID, chunkID chunk.ChunkID) {
+// deleteFromFollowers removes a chunk from all same-node follower instances
+// of a tier. Called by retention after deleting from the leader.
+func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
@@ -324,7 +324,7 @@ func (o *Orchestrator) deleteFromSecondaries(vaultID uuid.UUID, tierID uuid.UUID
 		return
 	}
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && t.IsSecondary {
+		if t.TierID == tierID && t.IsFollower {
 			_ = t.Chunks.Delete(chunkID)
 		}
 	}
@@ -378,16 +378,16 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 		return cid, pos, nil, nil, err
 	}
 
-	// Forward record to secondaries for active-chunk durability.
-	// Secondaries append to their ChunkManager — real, queryable chunks
-	// that allow immediate promotion if the primary dies.
+	// Forward record to followers for active-chunk durability.
+	// Followers append to their ChunkManager — real, queryable chunks
+	// that allow immediate promotion if the leader dies.
 	//
 	// When WaitForReplica is set, skip fire-and-forget — the caller does
 	// sync forwarding outside the lock via ackAfterReplication.
 	activeTier := vault.ActiveTier()
 	var task *replicationTask
 	var remotes []remoteForwardTarget
-	if activeTier.ShouldForwardToSecondaries() {
+	if activeTier.ShouldForwardToFollowers() {
 		if rec.WaitForReplica {
 			activeNow := cm.Active()
 			var activeChunkID chunk.ChunkID
@@ -398,10 +398,10 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 				vaultID: vaultID,
 				tierID:  activeTier.TierID,
 				chunkID: activeChunkID,
-				targets: activeTier.SecondaryTargets,
+				targets: activeTier.FollowerTargets,
 			}
 		} else {
-			remotes = o.forwardToSecondaries(vault, vaultID, activeTier, cm, rec)
+			remotes = o.forwardToFollowers(vault, vaultID, activeTier, cm, rec)
 		}
 	}
 
@@ -440,9 +440,9 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID uuid.UUID
 
 // ImportToTier imports records as a sealed chunk into a specific tier,
 // preserving the given chunk ID. Used by sealed-chunk replication —
-// the secondary receives a sealed chunk from the primary with the same ID.
+// the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
-// but won't trigger further replication (gated by !IsSecondary in tierReplicationInfo).
+// but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
 func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
 }
@@ -457,7 +457,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	// deadlocks the entire orchestrator.
 	type tierRef struct {
 		cm          chunk.ChunkManager
-		isSecondary bool
+		isFollower bool
 	}
 	ref := func() *tierRef {
 		o.mu.RLock()
@@ -468,7 +468,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		}
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID && (storageID == "" || t.StorageID == storageID) {
-				return &tierRef{cm: t.Chunks, isSecondary: t.IsSecondary}
+				return &tierRef{cm: t.Chunks, isFollower: t.IsFollower}
 			}
 		}
 		return nil
@@ -496,15 +496,15 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 
 	chunkExists := metaErr == nil || activeIsChunk
 
-	// Primary: idempotent skip — canonical version is already here.
-	if chunkExists && !ref.isSecondary {
+	// Leader: idempotent skip — canonical version is already here.
+	if chunkExists && !ref.isFollower {
 		o.logger.Info("replication: chunk already exists, skipping import",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
 		drainIterator(next)
 		return nil
 	}
 
-	// Secondary: replace the forwarded version (may be incomplete due to
+	// Follower: replace the forwarded version (may be incomplete due to
 	// fire-and-forget drops) with the canonical sealed chunk.
 	if chunkExists {
 		if activeIsChunk {

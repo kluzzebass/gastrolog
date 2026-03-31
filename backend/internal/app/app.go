@@ -199,8 +199,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
-	disp.catchupScheduler = func(tierID uuid.UUID, secondaryNodeIDs []string) {
-		orch.ScheduleCatchupForTier(tierID, secondaryNodeIDs)
+	disp.catchupScheduler = func(tierID uuid.UUID, followerNodeIDs []string) {
+		orch.ScheduleCatchupForTier(tierID, followerNodeIDs)
 	}
 
 	if err := startOrchestrator(ctx, logger, orch, appCfg, factories); err != nil {

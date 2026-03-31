@@ -23,7 +23,7 @@ const sampleConfig = {
     },
   ],
   tiers: [
-    { id: "t1", name: "local-tier", type: 2 /* LOCAL */, rotationPolicyId: "p1", retentionRules: [{ retentionPolicyId: "rp1" }], secondaryNodeIds: [], replicationFactor: 1 },
+    { id: "t1", name: "local-tier", type: 2 /* LOCAL */, rotationPolicyId: "p1", retentionRules: [{ retentionPolicyId: "rp1" }], followerNodeIds: [], replicationFactor: 1 },
   ],
   rotationPolicies: [{ id: "p1", name: "daily" }],
   retentionPolicies: [{ id: "rp1", name: "30-day" }],

@@ -58,7 +58,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	}
 	orch.transferrer = transferrer
 
-	// Create a vault with a secondary target so ack-gated records trigger replication.
+	// Create a vault with a follower target so ack-gated records trigger replication.
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 	cm, _ := chunkmem.NewManager(chunkmem.Config{})
@@ -70,7 +70,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 		Chunks:           cm,
 		Indexes:          im,
 		Query:            qe,
-		SecondaryTargets: []config.ReplicationTarget{{NodeID: "node-2"}},
+		FollowerTargets: []config.ReplicationTarget{{NodeID: "node-2"}},
 	}
 	vault := NewVault(vaultID, tier)
 	vault.Name = "ack-test"

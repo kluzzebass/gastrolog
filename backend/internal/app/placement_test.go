@@ -16,7 +16,7 @@ import (
 
 // primaryPlacement creates a Placements slice with a single primary using a synthetic storage ID.
 func primaryPlacement(nodeID string) []config.TierPlacement {
-	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}}
+	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *cfgmem.Store, *alert.Collector) {
@@ -53,7 +53,7 @@ func tierNode(t *testing.T, store *cfgmem.Store, tierID uuid.UUID) string {
 	if err != nil {
 		t.Fatalf("ListNodeStorageConfigs: %v", err)
 	}
-	return tier.PrimaryNodeID(nscs)
+	return tier.LeaderNodeID(nscs)
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
@@ -711,15 +711,15 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 
 	tier, _ := store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if tier.PrimaryNodeID(nscs) == "" {
-		t.Fatal("expected primary assigned")
+	if tier.LeaderNodeID(nscs) == "" {
+		t.Fatal("expected leader assigned")
 	}
-	secondaries := tier.SecondaryNodeIDs(nscs)
-	if len(secondaries) != 1 {
-		t.Fatalf("expected 1 secondary, got %d", len(secondaries))
+	followers := tier.FollowerNodeIDs(nscs)
+	if len(followers) != 1 {
+		t.Fatalf("expected 1 follower, got %d", len(followers))
 	}
-	if secondaries[0] == tier.PrimaryNodeID(nscs) {
-		t.Error("secondary should not be the same as primary")
+	if followers[0] == tier.LeaderNodeID(nscs) {
+		t.Error("follower should not be the same as leader")
 	}
 }
 
@@ -736,8 +736,8 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 
 	tier, _ := store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if secondaries := tier.SecondaryNodeIDs(nscs); len(secondaries) != 0 {
-		t.Errorf("expected 0 secondaries for RF=1, got %d", len(secondaries))
+	if followers := tier.FollowerNodeIDs(nscs); len(followers) != 0 {
+		t.Errorf("expected 0 followers for RF=1, got %d", len(followers))
 	}
 }
 
@@ -754,9 +754,9 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 
 	tier, _ := store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	// RF=3 needs 2 secondaries, but only 1 other node available.
-	if secondaries := tier.SecondaryNodeIDs(nscs); len(secondaries) != 1 {
-		t.Errorf("expected 1 secondary (max available), got %d", len(secondaries))
+	// RF=3 needs 2 followers, but only 1 other node available.
+	if followers := tier.FollowerNodeIDs(nscs); len(followers) != 1 {
+		t.Errorf("expected 1 follower (max available), got %d", len(followers))
 	}
 	if !hasAlert(alerts, "tier-underreplicated:") {
 		t.Error("expected underreplicated alert")

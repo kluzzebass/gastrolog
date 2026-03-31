@@ -18,7 +18,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func newMemTier(t *testing.T, tierID uuid.UUID, isSecondary bool, secondaries []config.ReplicationTarget) *TierInstance {
+func newMemTier(t *testing.T, tierID uuid.UUID, isFollower bool, followers []config.ReplicationTarget) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -35,8 +35,8 @@ func newMemTier(t *testing.T, tierID uuid.UUID, isSecondary bool, secondaries []
 		Chunks:           cm,
 		Indexes:          im,
 		Query:            query.New(cm, im, nil),
-		IsSecondary:      isSecondary,
-		SecondaryTargets: secondaries,
+		IsFollower:      isFollower,
+		FollowerTargets: followers,
 	}
 }
 
@@ -212,7 +212,7 @@ func TestListAllChunkMetasIncludesAllTiers(t *testing.T) {
 
 // --- LocalPrimaryTierIDs ---
 
-func TestLocalPrimaryTierIDsExcludesSecondaries(t *testing.T) {
+func TestLocalPrimaryTierIDsExcludesFollowers(t *testing.T) {
 	t.Parallel()
 	orch, err := New(Config{LocalNodeID: "node-1"})
 	if err != nil {
@@ -220,12 +220,12 @@ func TestLocalPrimaryTierIDsExcludesSecondaries(t *testing.T) {
 	}
 
 	primaryTierID := uuid.Must(uuid.NewV7())
-	secondaryTierID := uuid.Must(uuid.NewV7())
+	followerTierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
 	primary := newMemTier(t, primaryTierID, false, nil)
-	secondary := newMemTier(t, secondaryTierID, true, nil)
-	vault := NewVault(vaultID, primary, secondary)
+	follower := newMemTier(t, followerTierID, true, nil)
+	vault := NewVault(vaultID, primary, follower)
 	vault.Name = "mixed-roles"
 	orch.RegisterVault(vault)
 
@@ -233,14 +233,14 @@ func TestLocalPrimaryTierIDsExcludesSecondaries(t *testing.T) {
 	if !ids[primaryTierID] {
 		t.Error("primary tier should be in LocalPrimaryTierIDs")
 	}
-	if ids[secondaryTierID] {
-		t.Error("secondary tier should NOT be in LocalPrimaryTierIDs")
+	if ids[followerTierID] {
+		t.Error("follower tier should NOT be in LocalPrimaryTierIDs")
 	}
 }
 
 // --- tierReplicationInfo ---
 
-func TestTierReplicationInfoSkipsSecondaries(t *testing.T) {
+func TestTierReplicationInfoSkipsFollowers(t *testing.T) {
 	t.Parallel()
 	orch, err := New(Config{LocalNodeID: "node-1"})
 	if err != nil {
@@ -248,12 +248,12 @@ func TestTierReplicationInfoSkipsSecondaries(t *testing.T) {
 	}
 
 	primaryTierID := uuid.Must(uuid.NewV7())
-	secondaryTierID := uuid.Must(uuid.NewV7())
+	followerTierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
 	primary := newMemTier(t, primaryTierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
-	secondary := newMemTier(t, secondaryTierID, true, nil)
-	vault := NewVault(vaultID, primary, secondary)
+	follower := newMemTier(t, followerTierID, true, nil)
+	vault := NewVault(vaultID, primary, follower)
 	vault.Name = "repl-info"
 	orch.RegisterVault(vault)
 
@@ -266,13 +266,13 @@ func TestTierReplicationInfoSkipsSecondaries(t *testing.T) {
 		t.Errorf("expected [node-2], got %v", nodes)
 	}
 
-	// Secondary tier should return nothing.
-	tid2, nodes2 := orch.tierReplicationInfo(vaultID, secondary.Chunks)
+	// Follower tier should return nothing.
+	tid2, nodes2 := orch.tierReplicationInfo(vaultID, follower.Chunks)
 	if tid2 != (uuid.UUID{}) {
-		t.Errorf("expected zero tier ID for secondary, got %s", tid2)
+		t.Errorf("expected zero tier ID for follower, got %s", tid2)
 	}
 	if len(nodes2) != 0 {
-		t.Errorf("expected no nodes for secondary, got %v", nodes2)
+		t.Errorf("expected no nodes for follower, got %v", nodes2)
 	}
 }
 
@@ -416,7 +416,7 @@ func (f *tierTestForwarder) getCalls() []tierForwardCall {
 	return append([]tierForwardCall(nil), f.calls...)
 }
 
-func TestAppendToTierPrimaryForwardsToSecondaries(t *testing.T) {
+func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
 	orch, err := New(Config{LocalNodeID: "node-1"})
@@ -439,7 +439,7 @@ func TestAppendToTierPrimaryForwardsToSecondaries(t *testing.T) {
 
 	calls := fwd.getCalls()
 	if len(calls) != 2 {
-		t.Fatalf("expected 2 ForwardToTier calls (one per secondary), got %d", len(calls))
+		t.Fatalf("expected 2 ForwardToTier calls (one per follower), got %d", len(calls))
 	}
 	nodes := map[string]bool{}
 	for _, c := range calls {
@@ -473,7 +473,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	// Secondary tier — should NOT re-forward.
+	// Follower tier — should NOT re-forward.
 	tier := newMemTier(t, tierID, true, nil)
 	vault := NewVault(vaultID, tier)
 	vault.Name = "no-reforward"
@@ -485,7 +485,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	}
 
 	if len(fwd.getCalls()) != 0 {
-		t.Error("secondary should NOT forward to other nodes (prevents loops)")
+		t.Error("follower should NOT forward to other nodes (prevents loops)")
 	}
 }
 
@@ -508,13 +508,13 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The secondary's active chunk should have the primary's chunk ID.
+	// The follower's active chunk should have the leader's chunk ID.
 	active := tier.Chunks.Active()
 	if active == nil {
-		t.Fatal("expected active chunk on secondary")
+		t.Fatal("expected active chunk on follower")
 	}
 	if active.ID != primaryChunkID {
-		t.Errorf("secondary chunk ID = %s, want primary's %s", active.ID, primaryChunkID)
+		t.Errorf("follower chunk ID = %s, want leader's %s", active.ID, primaryChunkID)
 	}
 }
 
@@ -543,7 +543,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 		Chunks:      cm,
 		Indexes:     im,
 		Query:       query.New(cm, im, nil),
-		IsSecondary: true,
+		IsFollower: true,
 	}
 	vault := NewVault(vaultID, tier)
 	vault.Name = "skip-postseal"
@@ -558,7 +558,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// If post-seal were scheduled on a secondary, it would queue compression
+	// If post-seal were scheduled on a follower, it would queue compression
 	// work that races with ImportToTier's delete-and-replace. The test just
 	// verifies no panic occurred and the seal happened cleanly.
 	metas, _ := cm.List()
@@ -573,7 +573,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 	}
 }
 
-// --- Import keeps forwarded version on secondary (no delete-and-replace) ---
+// --- Import keeps forwarded version on follower (no delete-and-replace) ---
 
 func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 	t.Parallel()
@@ -591,7 +591,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 
 	chunkID := chunk.NewChunkID()
 
-	// Simulate active record forwarding: secondary has an active chunk
+	// Simulate active record forwarding: follower has an active chunk
 	// with the primary's ID, still receiving records.
 	tier.Chunks.SetNextChunkID(chunkID)
 	for range 3 {
@@ -640,7 +640,7 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 
 	chunkID := chunk.NewChunkID()
 
-	// Simulate: forwarded version is already sealed (e.g., secondary
+	// Simulate: forwarded version is already sealed (e.g., follower
 	// received SealActiveTier before the canonical import arrives).
 	tier.Chunks.SetNextChunkID(chunkID)
 	for range 3 {
@@ -1114,7 +1114,7 @@ func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, true, nil) // secondary receives forwarded + canonical
+	tier := newMemTier(t, tierID, true, nil) // follower receives forwarded + canonical
 	vault := NewVault(vaultID, tier)
 	vault.Name = "incomplete-forward"
 	orch.RegisterVault(vault)
@@ -1236,11 +1236,11 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory,
-		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}},
+		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory,
-		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}},
+		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1446,7 +1446,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 		t.Errorf("expected %d records in active chunk, got %d", total, active.RecordCount)
 	}
 
-	// Verify the forwarder was called for each record to each secondary.
+	// Verify the forwarder was called for each record to each follower.
 	// 200 records * 2 secondaries = 400 calls.
 	expectedCalls := total * 2
 	if got := fwd.callCount(); got != expectedCalls {

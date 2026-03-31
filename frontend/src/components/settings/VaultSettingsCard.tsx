@@ -24,7 +24,7 @@ import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
 import { JobProgress } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 import { useThemeClass } from "../../hooks/useThemeClass";
-import { primaryNodeId, secondaryNodeIds } from "../../utils/tierPlacement";
+import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
 function formatBytes(b: bigint | number): string {
   const n = typeof b === "bigint" ? Number(b) : b;
   if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TB`;
@@ -487,7 +487,7 @@ export function VaultSettingsCard({
           {vaultTiers.length > 0 && (
             <div className="flex flex-col gap-1.5">
               {vaultTiers.map((tier, i) => {
-                const pnId = primaryNodeId(tier, nodeStorageConfigs);
+                const pnId = leaderNodeId(tier, nodeStorageConfigs);
                 const nodeName = pnId ? resolveNodeName(pnId) : null;
                 const csName = tier.cloudServiceId
                   ? cloudServiceOptions.find((cs) => cs.value === tier.cloudServiceId)?.label || tier.cloudServiceId
@@ -578,9 +578,9 @@ export function VaultSettingsCard({
                       {tier.type !== TierType.JSONL && (
                         <span>{`RF=${String(tier.replicationFactor || 1)}`}</span>
                       )}
-                      {secondaryNodeIds(tier, nodeStorageConfigs).length > 0 && (
+                      {followerNodeIds(tier, nodeStorageConfigs).length > 0 && (
                         <span>
-                          {secondaryNodeIds(tier, nodeStorageConfigs).map((id: string, si: number) => {
+                          {followerNodeIds(tier, nodeStorageConfigs).map((id: string, si: number) => {
                             const name = resolveNodeName(id);
                             const sc = tier.storageClass > 0 ? nodeStorageClass(id, tier.storageClass) : null;
                             const fallback = sc && !sc.exact && sc.actualClass > 0;
@@ -596,7 +596,7 @@ export function VaultSettingsCard({
                           })}
                         </span>
                       )}
-                      {(tier.replicationFactor || 1) > 1 && secondaryNodeIds(tier, nodeStorageConfigs).length + 1 < (tier.replicationFactor || 1) && (
+                      {(tier.replicationFactor || 1) > 1 && followerNodeIds(tier, nodeStorageConfigs).length + 1 < (tier.replicationFactor || 1) && (
                         <span className="text-severity-error">
                           {`insufficient nodes for RF=${String(tier.replicationFactor)}`}
                         </span>

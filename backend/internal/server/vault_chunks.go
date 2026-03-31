@@ -82,14 +82,14 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 		if !tierIDs[t.ID] {
 			continue
 		}
-		// Primary node.
-		primaryNodeID := t.PrimaryNodeID(nscs)
-		if primaryNodeID != "" && primaryNodeID != s.localNodeID && !seen[primaryNodeID] {
-			seen[primaryNodeID] = true
-			nodes = append(nodes, primaryNodeID)
+		// Leader node.
+		leaderNodeID := t.LeaderNodeID(nscs)
+		if leaderNodeID != "" && leaderNodeID != s.localNodeID && !seen[leaderNodeID] {
+			seen[leaderNodeID] = true
+			nodes = append(nodes, leaderNodeID)
 		}
-		// Secondary nodes.
-		for _, sid := range t.SecondaryNodeIDs(nscs) {
+		// Follower nodes.
+		for _, sid := range t.FollowerNodeIDs(nscs) {
 			if sid != s.localNodeID && !seen[sid] {
 				seen[sid] = true
 				nodes = append(nodes, sid)

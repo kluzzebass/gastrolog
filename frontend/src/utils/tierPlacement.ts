@@ -1,12 +1,12 @@
 /**
  * Resolves tier placement information from TierConfig.placements and
  * NodeStorageConfig arrays. Replaces the removed TierConfig.nodeId and
- * TierConfig.secondaryNodeIds fields.
+ * TierConfig.followerNodeIds fields.
  */
 
 interface Placement {
   storageId: string;
-  primary: boolean;
+  leader: boolean;
 }
 
 interface StorageRef {
@@ -26,23 +26,23 @@ export function nodeIdForStorage(storageId: string, nscs: readonly NSC[]): strin
   return "";
 }
 
-/** Returns the node ID of the primary placement, or "" if none. */
-export function primaryNodeId(
+/** Returns the node ID of the leader placement, or "" if none. */
+export function leaderNodeId(
   tier: { placements: readonly Placement[] },
   nscs: readonly NSC[],
 ): string {
-  const p = tier.placements.find((pl) => pl.primary);
+  const p = tier.placements.find((pl) => pl.leader);
   if (!p) return "";
   return nodeIdForStorage(p.storageId, nscs);
 }
 
-/** Returns the node IDs of all secondary (non-primary) placements. */
-export function secondaryNodeIds(
+/** Returns the node IDs of all follower (non-leader) placements. */
+export function followerNodeIds(
   tier: { placements: readonly Placement[] },
   nscs: readonly NSC[],
 ): string[] {
   return tier.placements
-    .filter((pl) => !pl.primary)
+    .filter((pl) => !pl.leader)
     .map((pl) => nodeIdForStorage(pl.storageId, nscs))
     .filter((id) => id !== "");
 }

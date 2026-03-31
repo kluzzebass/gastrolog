@@ -740,7 +740,7 @@ message TierConfig {
 // The node is derived from the file storage's NodeStorageConfig.
 message TierPlacement {
   string storage_id = 1;   // references FileStorage.id
-  bool primary = 2;     // true = this storage hosts the primary (write path)
+  bool leader = 2;         // true = this storage bootstraps the Raft group (initial leader)
 }
 
 message PutNodeConfigRequest {

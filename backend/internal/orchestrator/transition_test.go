@@ -22,7 +22,7 @@ import (
 
 // syntheticPlacements creates a Placements slice with a primary using a synthetic storage ID.
 func syntheticPlacements(nodeID string) []config.TierPlacement {
-	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Primary: true}}
+	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 // ---------- config loader adapter ----------
@@ -810,47 +810,47 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	}
 }
 
-// TestTransitionCloudTierSecondaryDoesNotOverwriteBlob verifies that the
-// secondary's PostSealProcess does NOT upload to cloud storage, preventing
-// it from overwriting the primary's blob with a different-sized version.
-// This was the root cause of gastrolog-9umo2: the secondary's upload changed
-// the blob size, corrupting the primary's stored diskBytes and breaking all
+// TestTransitionCloudTierFollowerDoesNotOverwriteBlob verifies that the
+// follower's PostSealProcess does NOT upload to cloud storage, preventing
+// it from overwriting the leader's blob with a different-sized version.
+// This was the root cause of gastrolog-9umo2: the follower's upload changed
+// the blob size, corrupting the leader's stored diskBytes and breaking all
 // future cloud cursor reads (S3 416 Range Not Satisfiable).
-func TestTransitionCloudTierSecondaryDoesNotOverwriteBlob(t *testing.T) {
+func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	cloudTierID := uuid.Must(uuid.NewV7())
 	nextTierID := uuid.Must(uuid.NewV7())
-	primaryNode := "primary-node"
-	secondaryNode := "secondary-node"
+	leaderNode := "leader-node"
+	followerNode := "follower-node"
 
 	cloudStore := blobstore.NewMemory()
 
-	// Create primary cloud tier (has cloud backing).
+	// Create leader cloud tier (has cloud backing).
 	primaryTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
-	// Create secondary cloud tier — should NOT have cloud backing.
-	secondaryDir := t.TempDir()
-	secondaryCM, err := chunkfile.NewManager(chunkfile.Config{
-		Dir:            secondaryDir,
+	// Create follower cloud tier — should NOT have cloud backing.
+	followerDir := t.TempDir()
+	followerCM, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            followerDir,
 		Now:            time.Now,
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		// NOTE: No CloudStore — this is the fix. Before the fix, the
-		// secondary would also get CloudStore configured.
+		// follower would also get CloudStore configured.
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
-	// Primary orchestrator.
-	primaryOrch, err := New(Config{LocalNodeID: primaryNode})
+	// Leader orchestrator.
+	leaderOrch, err := New(Config{LocalNodeID: leaderNode})
 	if err != nil {
 		t.Fatal(err)
 	}
 	primaryVault := NewVault(vaultID, primaryTier, nextTier)
 	primaryVault.Name = "overwrite-test"
-	primaryOrch.RegisterVault(primaryVault)
+	leaderOrch.RegisterVault(primaryVault)
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
@@ -859,19 +859,19 @@ func TestTransitionCloudTierSecondaryDoesNotOverwriteBlob(t *testing.T) {
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud,
 		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID(primaryNode), Primary: true},
-			{StorageID: config.SyntheticStorageID(secondaryNode), Primary: false},
+			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
+			{StorageID: config.SyntheticStorageID(followerNode), Leader: false},
 		},
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeFile,
 		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID(primaryNode), Primary: true},
+			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
 		},
 	})
-	primaryOrch.cfgLoader = &transitionConfigLoader{store: store}
+	leaderOrch.cfgLoader = &transitionConfigLoader{store: store}
 
-	// Ingest records on primary, seal, and upload to cloud.
+	// Ingest records on leader, seal, and upload to cloud.
 	const recordCount = 20
 	for i := 0; i < recordCount; i++ {
 		if _, _, err := primaryTier.Chunks.Append(makeRecord("primary-rec")); err != nil {
@@ -890,7 +890,7 @@ func TestTransitionCloudTierSecondaryDoesNotOverwriteBlob(t *testing.T) {
 		t.Fatalf("primary PostSealProcess failed: %v", err)
 	}
 
-	// Verify primary's blob is in cloud.
+	// Verify leader's blob is in cloud.
 	primaryMetas, _ := primaryTier.Chunks.List()
 	var primaryDiskBytes int64
 	for _, m := range primaryMetas {
@@ -902,34 +902,34 @@ func TestTransitionCloudTierSecondaryDoesNotOverwriteBlob(t *testing.T) {
 		t.Fatal("expected non-zero diskBytes after cloud upload")
 	}
 
-	// Simulate secondary receiving the same records via replication.
-	// Import the records to the secondary's chunk manager.
+	// Simulate follower receiving the same records via replication.
+	// Import the records to the follower's chunk manager.
 	recs := make([]chunk.Record, recordCount)
 	for i := range recs {
 		recs[i] = makeRecord("primary-rec")
 	}
-	secondaryCM.SetNextChunkID(chunkID)
-	_, importErr := secondaryCM.ImportRecords(testIterFromRecords(recs))
+	followerCM.SetNextChunkID(chunkID)
+	_, importErr := followerCM.ImportRecords(testIterFromRecords(recs))
 	if importErr != nil {
-		t.Fatalf("secondary import failed: %v", importErr)
+		t.Fatalf("follower import failed: %v", importErr)
 	}
 
-	// Run PostSealProcess on secondary — should NOT upload to cloud
+	// Run PostSealProcess on follower — should NOT upload to cloud
 	// because CloudStore is nil (the fix).
-	if err := secondaryCM.PostSealProcess(context.Background(), chunkID); err != nil {
-		t.Fatalf("secondary PostSealProcess failed: %v", err)
+	if err := followerCM.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("follower PostSealProcess failed: %v", err)
 	}
 
-	// Verify: secondary chunk is NOT cloud-backed (local only).
-	secMetas, _ := secondaryCM.List()
-	for _, m := range secMetas {
+	// Verify: follower chunk is NOT cloud-backed (local only).
+	followerMetas, _ := followerCM.List()
+	for _, m := range followerMetas {
 		if m.ID == chunkID && m.CloudBacked {
-			t.Error("secondary chunk should NOT be cloud-backed")
+			t.Error("follower chunk should NOT be cloud-backed")
 		}
 	}
 
-	// Verify: primary can still transition from cloud (blob wasn't overwritten).
-	runner := newTestRetentionRunner(primaryOrch, vaultID, cloudTierID, primaryTier.Chunks, primaryTier.Indexes)
+	// Verify: leader can still transition from cloud (blob wasn't overwritten).
+	runner := newTestRetentionRunner(leaderOrch, vaultID, cloudTierID, primaryTier.Chunks, primaryTier.Indexes)
 	runner.transitionChunk(chunkID)
 
 	// Verify: records arrived in next tier.

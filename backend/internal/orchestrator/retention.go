@@ -92,7 +92,7 @@ func (o *Orchestrator) retentionSweepAll() {
 				continue
 			}
 			// Non-leaders reconcile against the manifest — no rule evaluation.
-			// Uses Raft leadership, not config-driven IsSecondary.
+			// Uses Raft leadership, not config-driven IsFollower.
 			isLeader := tier.IsRaftLeader == nil || tier.IsRaftLeader()
 			if !isLeader && tier.ListManifest != nil {
 				reconcileTiers = append(reconcileTiers, tier)
@@ -192,7 +192,7 @@ func (o *Orchestrator) reconcileSecondary(tier *TierInstance) {
 				"tier", tier.TierID, "chunk", meta.ID, "error", err)
 			continue
 		}
-		o.logger.Info("reconcile: deleted orphaned chunk from secondary",
+		o.logger.Info("reconcile: deleted orphaned chunk from follower",
 			"tier", tier.TierID, "chunk", meta.ID)
 	}
 }
@@ -321,10 +321,10 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 		return
 	}
 
-	// Delete from same-node secondary instances that don't have their own
+	// Delete from same-node follower instances that don't have their own
 	// Raft-driven OnDelete (e.g., single-node mode without tier Raft).
 	if r.orch != nil {
-		r.orch.deleteFromSecondaries(r.vaultID, r.tierID, id)
+		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
 	}
 
 	r.logger.Info("retention: deleted chunk",

@@ -4855,11 +4855,11 @@ export class TierPlacement extends Message<TierPlacement> {
   storageId = "";
 
   /**
-   * true = this storage hosts the primary (write path)
+   * true = this storage bootstraps the Raft group (initial leader)
    *
-   * @generated from field: bool primary = 2;
+   * @generated from field: bool leader = 2;
    */
-  primary = false;
+  leader = false;
 
   constructor(data?: PartialMessage<TierPlacement>) {
     super();
@@ -4870,7 +4870,7 @@ export class TierPlacement extends Message<TierPlacement> {
   static readonly typeName = "gastrolog.v1.TierPlacement";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "storage_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "primary", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 2, name: "leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierPlacement {

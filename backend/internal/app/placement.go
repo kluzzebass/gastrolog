@@ -124,14 +124,14 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	}
 
 	// Count current tier assignments per node (for load balancing).
-	// Counts both primaries and secondaries.
+	// Counts both leaders and followers.
 	tierCount := make(map[string]int)
 	for _, t := range tiers {
-		primaryNodeID := t.PrimaryNodeID(nscs)
-		if primaryNodeID != "" && alive[primaryNodeID] {
-			tierCount[primaryNodeID]++
+		leaderNodeID := t.LeaderNodeID(nscs)
+		if leaderNodeID != "" && alive[leaderNodeID] {
+			tierCount[leaderNodeID]++
 		}
-		for _, sid := range t.SecondaryNodeIDs(nscs) {
+		for _, sid := range t.FollowerNodeIDs(nscs) {
 			if alive[sid] {
 				tierCount[sid]++
 			}
@@ -150,14 +150,14 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
 	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
 
-	currentPrimary := tier.PrimaryNodeID(nscs)
+	currentLeader := tier.LeaderNodeID(nscs)
 
-	// Current primary assignment still valid — check secondaries too.
-	if currentPrimary != "" && alive[currentPrimary] && pm.nodeEligible(tier, currentPrimary, nscs) {
+	// Current leader assignment still valid — check followers too.
+	if currentLeader != "" && alive[currentLeader] && pm.nodeEligible(tier, currentLeader, nscs) {
 		if pm.alerts != nil {
 			pm.alerts.Clear(alertKey)
 		}
-		pm.placeSecondaries(ctx, &tier, alive, nscs, tierCount)
+		pm.placeFollowers(ctx, &tier, alive, nscs, tierCount)
 		return
 	}
 
@@ -169,13 +169,13 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 	}
 
 	best := pm.selectNode(eligible, tierCount)
-	if best == currentPrimary {
+	if best == currentLeader {
 		return
 	}
 
-	old := currentPrimary
-	// Replace the primary placement.
-	tier.Placements = replacePrimaryPlacement(tier.Placements, config.StorageIDForNode(best, tier, nscs))
+	old := currentLeader
+	// Replace the leader placement.
+	tier.Placements = replaceLeaderPlacement(tier.Placements, config.StorageIDForNode(best, tier, nscs))
 	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 		pm.logger.Error("placement: assign tier", "tier", tier.ID, "name", tier.Name, "node", best, "error", err)
 		return
@@ -196,84 +196,84 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 		pm.logger.Info("placement: tier reassigned", "tier", tier.ID, "name", tier.Name, "from", old, "to", best)
 	}
 
-	// Place secondaries if replication is configured.
-	pm.placeSecondaries(ctx, &tier, alive, nscs, tierCount)
+	// Place followers if replication is configured.
+	pm.placeFollowers(ctx, &tier, alive, nscs, tierCount)
 }
 
-// replacePrimaryPlacement returns a new Placements slice with the primary set to storageID.
-func replacePrimaryPlacement(placements []config.TierPlacement, storageID string) []config.TierPlacement {
+// replaceLeaderPlacement returns a new Placements slice with the leader set to storageID.
+func replaceLeaderPlacement(placements []config.TierPlacement, storageID string) []config.TierPlacement {
 	var result []config.TierPlacement
 	for _, p := range placements {
-		if !p.Primary {
+		if !p.Leader {
 			result = append(result, p)
 		}
 	}
-	return append([]config.TierPlacement{{StorageID: storageID, Primary: true}}, result...)
+	return append([]config.TierPlacement{{StorageID: storageID, Leader: true}}, result...)
 }
 
-// placeSecondaries assigns secondary file storages for a tier based on its ReplicationFactor.
+// placeFollowers assigns follower file storages for a tier based on its ReplicationFactor.
 // Prefers storages on different nodes (availability), falls back to different storages on
 // the same node (redundancy). Never places two replicas on the same file storage.
-func (pm *placementManager) placeSecondaries(ctx context.Context, tier *config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+func (pm *placementManager) placeFollowers(ctx context.Context, tier *config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
 	desired := int(tier.ReplicationFactor) - 1
 	if desired <= 0 {
-		pm.clearStaleSecondaries(ctx, tier, nscs, tierCount)
+		pm.clearStaleFollowers(ctx, tier, nscs, tierCount)
 		return
 	}
 
-	primaryStorageID := tier.PrimaryStorageID()
-	primaryNodeID := config.NodeIDForStorage(primaryStorageID, nscs)
-	candidates := pm.secondaryCandidates(*tier, primaryStorageID, primaryNodeID, alive, nscs, tierCount)
-	kept := pm.selectSecondaries(tier, desired, primaryStorageID, primaryNodeID, candidates, nscs, alive, tierCount)
+	leaderStorageID := tier.LeaderStorageID()
+	leaderNodeID := config.NodeIDForStorage(leaderStorageID, nscs)
+	candidates := pm.followerCandidates(*tier, leaderStorageID, leaderNodeID, alive, nscs, tierCount)
+	kept := pm.selectFollowers(tier, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, tierCount)
 
 	// Build new placements.
-	newPlacements := []config.TierPlacement{{StorageID: primaryStorageID, Primary: true}}
+	newPlacements := []config.TierPlacement{{StorageID: leaderStorageID, Leader: true}}
 	newPlacements = append(newPlacements, kept...)
 
 	if !placementsEqual(tier.Placements, newPlacements) {
 		tier.Placements = newPlacements
 		if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-			pm.logger.Error("placement: assign secondaries", "tier", tier.ID, "error", err)
+			pm.logger.Error("placement: assign followers", "tier", tier.ID, "error", err)
 			return
 		}
-		pm.logger.Info("placement: secondaries updated",
+		pm.logger.Info("placement: followers updated",
 			"tier", tier.ID, "name", tier.Name, "placements", len(newPlacements))
 	}
 
 	pm.alertReplication(tier, len(kept), desired)
 }
 
-// clearStaleSecondaries removes leftover secondary placements when RF <= 1.
-func (pm *placementManager) clearStaleSecondaries(ctx context.Context, tier *config.TierConfig, nscs []config.NodeStorageConfig, tierCount map[string]int) {
-	currentSecondaries := tier.SecondaryStorageIDs()
-	if len(currentSecondaries) == 0 {
+// clearStaleFollowers removes leftover follower placements when RF <= 1.
+func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *config.TierConfig, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+	currentFollowers := tier.FollowerStorageIDs()
+	if len(currentFollowers) == 0 {
 		return
 	}
-	for _, sID := range currentSecondaries {
+	for _, sID := range currentFollowers {
 		if nid := config.NodeIDForStorage(sID, nscs); nid != "" {
 			tierCount[nid]--
 		}
 	}
-	tier.Placements = clearSecondaryPlacements(tier.Placements)
+	tier.Placements = clearFollowerPlacements(tier.Placements)
 	if err := pm.cfgStore.PutTier(ctx, *tier); err != nil {
-		pm.logger.Error("placement: clear stale secondaries", "tier", tier.ID, "error", err)
+		pm.logger.Error("placement: clear stale followers", "tier", tier.ID, "error", err)
 	}
 }
 
-// secondaryCandidates returns eligible storages excluding the primary, sorted
+// followerCandidates returns eligible storages excluding the leader, sorted
 // by preference: cross-node first (availability), then same-node (redundancy),
 // then least-loaded.
-func (pm *placementManager) secondaryCandidates(tier config.TierConfig, primaryStorageID, primaryNodeID string, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) []eligibleStorage {
+func (pm *placementManager) followerCandidates(tier config.TierConfig, leaderStorageID, leaderNodeID string, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) []eligibleStorage {
 	all := pm.eligibleStorages(tier, alive, nscs)
 	var candidates []eligibleStorage
 	for _, ea := range all {
-		if ea.storageID != primaryStorageID {
+		if ea.storageID != leaderStorageID {
 			candidates = append(candidates, ea)
 		}
 	}
 	slices.SortFunc(candidates, func(a, b eligibleStorage) int {
-		aRemote := a.nodeID != primaryNodeID
-		bRemote := b.nodeID != primaryNodeID
+		aRemote := a.nodeID != leaderNodeID
+		bRemote := b.nodeID != leaderNodeID
 		if aRemote != bRemote {
 			if aRemote {
 				return -1
@@ -285,16 +285,16 @@ func (pm *placementManager) secondaryCandidates(tier config.TierConfig, primaryS
 	return candidates
 }
 
-// selectSecondaries picks secondary placements: retains existing valid ones first,
+// selectFollowers picks follower placements: retains existing valid ones first,
 // then fills from sorted candidates.
-func (pm *placementManager) selectSecondaries(tier *config.TierConfig, desired int, primaryStorageID, primaryNodeID string, candidates []eligibleStorage, nscs []config.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []config.TierPlacement {
+func (pm *placementManager) selectFollowers(tier *config.TierConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []config.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []config.TierPlacement {
 	var kept []config.TierPlacement
-	usedStorages := map[string]bool{primaryStorageID: true}
-	usedNodes := map[string]bool{primaryNodeID: true} // 1:1:1: one store per tier per node
+	usedStorages := map[string]bool{leaderStorageID: true}
+	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per tier per node
 
-	// Keep existing valid secondary placements.
+	// Keep existing valid follower placements.
 	for _, p := range tier.Placements {
-		if p.Primary || len(kept) >= desired {
+		if p.Leader || len(kept) >= desired {
 			continue
 		}
 		nid := config.NodeIDForStorage(p.StorageID, nscs)
@@ -313,7 +313,7 @@ func (pm *placementManager) selectSecondaries(tier *config.TierConfig, desired i
 		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
 			continue
 		}
-		kept = append(kept, config.TierPlacement{StorageID: ea.storageID, Primary: false})
+		kept = append(kept, config.TierPlacement{StorageID: ea.storageID, Leader: false})
 		usedStorages[ea.storageID] = true
 		usedNodes[ea.nodeID] = true
 		tierCount[ea.nodeID]++
@@ -392,11 +392,11 @@ func (pm *placementManager) storageEligible(storageID string, tier config.TierCo
 	return false
 }
 
-// clearSecondaryPlacements removes all non-primary placements.
-func clearSecondaryPlacements(placements []config.TierPlacement) []config.TierPlacement {
+// clearFollowerPlacements removes all non-leader placements.
+func clearFollowerPlacements(placements []config.TierPlacement) []config.TierPlacement {
 	var result []config.TierPlacement
 	for _, p := range placements {
-		if p.Primary {
+		if p.Leader {
 			result = append(result, p)
 		}
 	}
@@ -408,7 +408,7 @@ func placementsEqual(a, b []config.TierPlacement) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].StorageID != b[i].StorageID || a[i].Primary != b[i].Primary {
+		if a[i].StorageID != b[i].StorageID || a[i].Leader != b[i].Leader {
 			return false
 		}
 	}
@@ -429,9 +429,9 @@ func slicesEqual(a, b []string) bool {
 
 // handleUnplaceable clears a tier's assignment when no eligible node exists.
 func (pm *placementManager) handleUnplaceable(ctx context.Context, tier config.TierConfig, alertKey string, nscs []config.NodeStorageConfig, tierCount map[string]int) {
-	currentPrimary := tier.PrimaryNodeID(nscs)
-	if currentPrimary != "" {
-		old := currentPrimary
+	currentLeader := tier.LeaderNodeID(nscs)
+	if currentLeader != "" {
+		old := currentLeader
 		tier.Placements = nil
 		if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 			pm.logger.Error("placement: clear tier assignment", "tier", tier.ID, "name", tier.Name, "error", err)
@@ -457,8 +457,8 @@ func (pm *placementManager) nodeEligible(tier config.TierConfig, nodeID string, 
 		return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)
 	case config.TierTypeJSONL:
 		// JSONL tiers have explicit node assignment via Path.
-		primaryNodeID := tier.PrimaryNodeID(nscs)
-		return primaryNodeID == nodeID
+		leaderNodeID := tier.LeaderNodeID(nscs)
+		return leaderNodeID == nodeID
 	default:
 		return false
 	}

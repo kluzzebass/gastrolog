@@ -117,16 +117,16 @@ func (o *Orchestrator) ListVaults() []uuid.UUID {
 }
 
 // LocalPrimaryTierIDs returns the set of tier IDs where this node is the
-// primary. Used by search fan-out: secondary tiers are NOT included because
+// leader. Used by search fan-out: follower tiers are NOT included because
 // they may be incomplete (missing active chunk, replication lag). The search
-// always fans out to the primary for authoritative results.
+// always fans out to the leader for authoritative results.
 func (o *Orchestrator) LocalPrimaryTierIDs() map[uuid.UUID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	ids := make(map[uuid.UUID]bool)
 	for _, v := range o.vaults {
 		for _, t := range v.Tiers {
-			if !t.IsSecondary {
+			if !t.IsFollower {
 				ids[t.TierID] = true
 			}
 		}
@@ -181,14 +181,14 @@ func (o *Orchestrator) MultiVaultQueryEngine() *query.Engine {
 	return query.NewWithRegistry(o, o.logger)
 }
 
-// PrimaryTierQueryEngine returns a query engine that only searches primary
-// tiers (not secondary replicas). Used by ForwardSearch handlers to avoid
-// double-counting when the requesting node already searches its own secondaries.
+// PrimaryTierQueryEngine returns a query engine that only searches leader
+// tiers (not follower replicas). Used by ForwardSearch handlers to avoid
+// double-counting when the requesting node already searches its own followers.
 func (o *Orchestrator) PrimaryTierQueryEngine() *query.Engine {
 	return query.NewWithRegistry(&primaryTierRegistry{o: o}, o.logger)
 }
 
-// primaryTierRegistry provides a flat view of all primary tiers across all
+// primaryTierRegistry provides a flat view of all leader tiers across all
 // vaults. Each tier is a searchable unit keyed by its tier ID.
 type primaryTierRegistry struct {
 	o *Orchestrator
@@ -200,7 +200,7 @@ func (r *primaryTierRegistry) ListVaults() []uuid.UUID {
 	var ids []uuid.UUID
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if !t.IsSecondary && t.Query != nil {
+			if !t.IsFollower && t.Query != nil {
 				ids = append(ids, t.TierID)
 			}
 		}
@@ -213,7 +213,7 @@ func (r *primaryTierRegistry) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsSecondary && t.Query != nil {
+			if t.TierID == key && !t.IsFollower && t.Query != nil {
 				return t.Chunks
 			}
 		}
@@ -226,7 +226,7 @@ func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsSecondary && t.Query != nil {
+			if t.TierID == key && !t.IsFollower && t.Query != nil {
 				return t.Indexes
 			}
 		}
@@ -236,7 +236,7 @@ func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
 
 func (r *primaryTierRegistry) QueryEngine(_ uuid.UUID) *query.Engine { return nil }
 
-// PrimaryTierQueryEngineForVault returns a query engine scoped to primary
+// PrimaryTierQueryEngineForVault returns a query engine scoped to leader
 // tiers of a single vault. Used by ForwardSearch — the vault is already
 // selected, no vault_id= filtering needed.
 func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID uuid.UUID) *query.Engine {
@@ -248,7 +248,7 @@ func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID uuid.UUID) *query.
 	}
 	var primary []*TierInstance
 	for _, t := range v.Tiers {
-		if !t.IsSecondary && t.Query != nil {
+		if !t.IsFollower && t.Query != nil {
 			primary = append(primary, t)
 		}
 	}

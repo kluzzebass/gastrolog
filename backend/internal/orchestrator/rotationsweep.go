@@ -51,7 +51,7 @@ func (o *Orchestrator) rotationSweep() {
 		}
 
 		for _, tier := range vault.Tiers {
-			if tier.IsSecondary {
+			if tier.IsFollower {
 				tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				continue
 			}
@@ -105,7 +105,7 @@ func (o *Orchestrator) reconcileFilters(cfg *config.Config) {
 	}
 }
 
-// applyRotationFromConfig resolves the rotation policy for a primary tier
+// applyRotationFromConfig resolves the rotation policy for a leader tier
 // from the current config and applies it. Also ensures the cron job exists
 // if configured. Called each tick by rotationSweep.
 func (o *Orchestrator) applyRotationFromConfig(
@@ -119,7 +119,7 @@ func (o *Orchestrator) applyRotationFromConfig(
 		return
 	}
 	// Refresh replication targets from current config.
-	tier.SecondaryTargets = tierCfg.SecondaryTargets(cfg.NodeStorageConfigs)
+	tier.FollowerTargets = tierCfg.FollowerTargets(cfg.NodeStorageConfigs)
 
 	if tierCfg.RotationPolicyID == nil {
 		return

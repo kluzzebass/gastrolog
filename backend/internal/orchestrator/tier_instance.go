@@ -24,9 +24,9 @@ type TierInstance struct {
 	Chunks           chunk.ChunkManager
 	Indexes          index.IndexManager
 	Query            *query.Engine
-	IsSecondary      bool                     // true if this node is a secondary for this tier
-	PrimaryNodeID    string                   // the primary node's ID (empty if this IS the primary)
-	SecondaryTargets []config.ReplicationTarget // per-storage targets (populated on primary only)
+	IsFollower      bool                     // true if this node is a follower for this tier
+	LeaderNodeID    string                   // the leader node's ID (empty if this IS the leader)
+	FollowerTargets []config.ReplicationTarget // per-storage targets (populated on leader only)
 
 	// HasRaftLeader returns true if the tier's Raft group has an elected leader.
 	// Nil when no Raft group exists (single-node / memory mode).
@@ -46,10 +46,10 @@ type TierInstance struct {
 	ListManifest func() []chunk.ChunkID
 }
 
-// IsPrimary returns true if this node is the primary for this tier.
-func (t *TierInstance) IsPrimary() bool { return !t.IsSecondary }
+// IsLeader returns true if this node is the leader for this tier.
+func (t *TierInstance) IsLeader() bool { return !t.IsFollower }
 
-// ShouldForwardToSecondaries returns true if this primary tier has replication targets.
-func (t *TierInstance) ShouldForwardToSecondaries() bool {
-	return t.IsPrimary() && len(t.SecondaryTargets) > 0
+// ShouldForwardToFollowers returns true if this leader tier has replication targets.
+func (t *TierInstance) ShouldForwardToFollowers() bool {
+	return t.IsLeader() && len(t.FollowerTargets) > 0
 }

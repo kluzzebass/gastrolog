@@ -5776,7 +5776,7 @@ func (x *TierConfig) GetPlacements() []*TierPlacement {
 type TierPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	StorageId     string                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
-	Primary       bool                   `protobuf:"varint,2,opt,name=primary,proto3" json:"primary,omitempty"`                     // true = this storage hosts the primary (write path)
+	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // true = this storage bootstraps the Raft group (initial leader)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5818,9 +5818,9 @@ func (x *TierPlacement) GetStorageId() string {
 	return ""
 }
 
-func (x *TierPlacement) GetPrimary() bool {
+func (x *TierPlacement) GetLeader() bool {
 	if x != nil {
-		return x.Primary
+		return x.Leader
 	}
 	return false
 }
@@ -7797,11 +7797,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x04path\x18\x0e \x01(\tR\x04path\x12;\n" +
 	"\n" +
 	"placements\x18\x0f \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
-	"placementsJ\x04\b\v\x10\fJ\x04\b\r\x10\x0e\"H\n" +
+	"placementsJ\x04\b\v\x10\fJ\x04\b\r\x10\x0e\"F\n" +
 	"\rTierPlacement\x12\x1d\n" +
 	"\n" +
-	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x18\n" +
-	"\aprimary\x18\x02 \x01(\bR\aprimary\"H\n" +
+	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x16\n" +
+	"\x06leader\x18\x02 \x01(\bR\x06leader\"H\n" +
 	"\x14PutNodeConfigRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.NodeConfigR\x06config\"P\n" +
 	"\x15PutNodeConfigResponse\x127\n" +

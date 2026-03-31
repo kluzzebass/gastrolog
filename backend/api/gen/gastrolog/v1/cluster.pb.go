@@ -1124,8 +1124,8 @@ func (x *ForwardRecordsResponse) GetRecordsWritten() int64 {
 	return 0
 }
 
-// ForwardSealTierRequest commands a secondary to seal its active chunk
-// at the same boundary as the primary. Used for seal synchronization
+// ForwardSealTierRequest commands a follower to seal its active chunk
+// at the same boundary as the leader. Used for seal synchronization
 // during record-level replication.
 type ForwardSealTierRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1223,9 +1223,9 @@ func (*ForwardSealTierResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{14}
 }
 
-// ForwardDeleteChunkRequest commands a secondary to delete a specific
-// sealed chunk from a tier. Sent by the primary after its retention
-// sweep expires the chunk, so secondaries don't hold orphaned replicas.
+// ForwardDeleteChunkRequest commands a follower to delete a specific
+// sealed chunk from a tier. Sent by the leader after its retention
+// sweep expires the chunk, so followers don't hold orphaned replicas.
 type ForwardDeleteChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`

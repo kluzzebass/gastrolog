@@ -304,15 +304,15 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
-	// temporary: find the tier's primary node to determine the owning node (until tier election).
+	// temporary: find the tier's leader node to determine the owning node (until tier election).
 	for _, tierID := range vaultCfg.TierIDs {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue
 		}
-		primaryNodeID := tc.PrimaryNodeID(nscs)
-		if primaryNodeID != "" && primaryNodeID != c.localNodeID {
-			return primaryNodeID
+		leaderNodeID := tc.LeaderNodeID(nscs)
+		if leaderNodeID != "" && leaderNodeID != c.localNodeID {
+			return leaderNodeID
 		}
 	}
 	return ""

@@ -13,7 +13,7 @@ import (
 )
 
 // SealActiveTier seals the active chunk for a specific tier.
-// Used by the ForwardSealTier handler on secondary nodes.
+// Used by the ForwardSealTier handler on follower nodes.
 func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
@@ -37,7 +37,7 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 	return nil
 }
 
-// ackAfterReplication does sync forwarding to secondaries for ack-gated records,
+// ackAfterReplication does sync forwarding to followers for ack-gated records,
 // then sends the ack. Runs in a goroutine — doesn't block the writeLoop.
 func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replicationTask, rec chunk.Record) {
 	if o.transferrer == nil {
@@ -66,7 +66,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
 	if err := o.scheduler.RunOnce(name, func() {
 		// 10s network deadline per chunk — enough for any healthy transfer,
-		// short enough to release the gRPC connection when a secondary is down.
+		// short enough to release the gRPC connection when a follower is down.
 		// Created inside the closure so the timeout starts when the job executes,
 		// not when it's scheduled.
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -75,10 +75,10 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 	}); err != nil {
 		o.logger.Warn("failed to schedule replication", "name", name, "error", err)
 	}
-	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d secondaries", chunkID, len(targets)))
+	o.scheduler.Describe(name, fmt.Sprintf("Replicate chunk %s to %d followers", chunkID, len(targets)))
 }
 
-// replicateSealedChunk copies a sealed chunk from the primary to all secondary
+// replicateSealedChunk copies a sealed chunk from the leader to all follower
 // targets. Each target is a (nodeID, storageID) pair — multiple targets on the
 // same node are distinct (different file storages for same-node replication).
 func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []config.ReplicationTarget) {
@@ -113,7 +113,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uu
 		}
 		return
 	}
-	if err := o.replicateToSecondary(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
+	if err := o.replicateToFollower(ctx, vaultID, tierID, chunkID, sourceCM, tgt.NodeID); err != nil {
 		o.logger.Warn("replication: sealed chunk failed",
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
 			"chunk", chunkID.String(), "error", err)
@@ -138,10 +138,10 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID uui
 	return o.ImportToTierStorage(ctx, vaultID, tierID, storageID, chunkID, iter)
 }
 
-// replicateToSecondary streams a single sealed chunk to one secondary node.
+// replicateToFollower streams a single sealed chunk to one follower node.
 // Validates that the chunk is readable before opening the network stream —
 // corrupted chunks fail fast without touching the wire.
-func (o *Orchestrator) replicateToSecondary(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
+func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
 	// Pre-flight: open and read the first record to confirm the chunk is intact.
 	// Corrupted compressed data fails here instantly — no network round-trip.
 	probe, err := cm.OpenCursor(chunkID)

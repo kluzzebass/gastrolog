@@ -19,7 +19,7 @@ import (
 //
 // Both local and remote transitions use the same model: stream an iterator
 // to the destination tier's ImportRecords (one pass, one sealed chunk).
-// The destination tier handles its own secondary replication.
+// The destination tier handles its own follower replication.
 func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	ctx := context.Background()
 
@@ -44,8 +44,8 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	}
 	defer func() { _ = cursor.Close() }()
 
-	nextPrimaryNodeID := nextTierCfg.PrimaryNodeID(cfg.NodeStorageConfigs)
-	remote := nextPrimaryNodeID != "" && nextPrimaryNodeID != r.orch.localNodeID
+	nextLeaderNodeID := nextTierCfg.LeaderNodeID(cfg.NodeStorageConfigs)
+	remote := nextLeaderNodeID != "" && nextLeaderNodeID != r.orch.localNodeID
 
 	var streamErr error
 	if remote {
@@ -54,7 +54,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
 			return
 		}
-		streamErr = r.orch.transferrer.StreamToTier(ctx, nextPrimaryNodeID, r.vaultID, nextTierID, chunk.CursorIterator(cursor))
+		streamErr = r.orch.transferrer.StreamToTier(ctx, nextLeaderNodeID, r.vaultID, nextTierID, chunk.CursorIterator(cursor))
 	} else {
 		streamErr = r.streamLocal(cursor, nextTierID)
 	}

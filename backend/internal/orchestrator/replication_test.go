@@ -69,7 +69,7 @@ func (m *replicationFakeTransferrer) StreamToTier(_ context.Context, _ string, _
 }
 // ---------- helpers ----------
 
-func newReplicationTier(t *testing.T, tierID uuid.UUID, secondaries []config.ReplicationTarget, isSecondary bool, primaryNodeID string) *TierInstance {
+func newReplicationTier(t *testing.T, tierID uuid.UUID, followers []config.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -85,9 +85,9 @@ func newReplicationTier(t *testing.T, tierID uuid.UUID, secondaries []config.Rep
 		Chunks:           cm,
 		Indexes:          im,
 		Query:            query.New(cm, im, nil),
-		IsSecondary:      isSecondary,
-		PrimaryNodeID:    primaryNodeID,
-		SecondaryTargets: secondaries,
+		IsFollower:      isFollower,
+		LeaderNodeID:    leaderNodeID,
+		FollowerTargets: followers,
 	}
 }
 
@@ -156,7 +156,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	}
 
 	// Seal with a wrong chunk ID — should be a no-op (the expected chunk
-	// was already rotated by the secondary's own rotation policy).
+	// was already rotated by the follower's own rotation policy).
 	wrongID := chunkIDAt(time.Now().Add(-1 * time.Hour))
 	if err := orch.SealActiveTier(vaultID, tierID, wrongID); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	orch.transferrer = mock
 
 	// No sealed chunks — catchup should be a no-op.
-	err = orch.catchupSecondary(context.Background(), vaultID, tierID, "node-2")
+	err = orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -248,13 +248,13 @@ func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	// This is a secondary — should not initiate catchup.
+	// This is a follower — should not initiate catchup.
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, true, "node-2"))
 	orch.RegisterVault(vault)
 
-	err = orch.catchupSecondary(context.Background(), vaultID, tierID, "node-3")
+	err = orch.catchupFollower(context.Background(), vaultID, tierID, "node-3")
 	if err != nil {
-		t.Fatalf("expected nil (no-op) for secondary, got %v", err)
+		t.Fatalf("expected nil (no-op) for follower, got %v", err)
 	}
 }
 
@@ -271,7 +271,7 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	orch.RegisterVault(vault)
 	// No transferrer set.
 
-	err = orch.catchupSecondary(context.Background(), vaultID, tierID, "node-2")
+	err = orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
 	if err == nil {
 		t.Fatal("expected error for missing transferrer")
 	}

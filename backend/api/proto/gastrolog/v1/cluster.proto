@@ -155,8 +155,8 @@ message ForwardRecordsResponse {
   int64 records_written = 1;
 }
 
-// ForwardSealTierRequest commands a secondary to seal its active chunk
-// at the same boundary as the primary. Used for seal synchronization
+// ForwardSealTierRequest commands a follower to seal its active chunk
+// at the same boundary as the leader. Used for seal synchronization
 // during record-level replication.
 message ForwardSealTierRequest {
   string vault_id = 1;
@@ -166,9 +166,9 @@ message ForwardSealTierRequest {
 
 message ForwardSealTierResponse {}
 
-// ForwardDeleteChunkRequest commands a secondary to delete a specific
-// sealed chunk from a tier. Sent by the primary after its retention
-// sweep expires the chunk, so secondaries don't hold orphaned replicas.
+// ForwardDeleteChunkRequest commands a follower to delete a specific
+// sealed chunk from a tier. Sent by the leader after its retention
+// sweep expires the chunk, so followers don't hold orphaned replicas.
 message ForwardDeleteChunkRequest {
   string vault_id = 1;
   string tier_id = 2;

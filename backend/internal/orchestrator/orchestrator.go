@@ -81,8 +81,8 @@ type drainState struct {
 // enqueue) so they're safe to call under the orchestrator mutex.
 type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
-	// ForwardToTier sends records to a specific tier on a secondary for
-	// active-chunk durability. Records are appended to the secondary's
+	// ForwardToTier sends records to a specific tier on a follower for
+	// active-chunk durability. Records are appended to the follower's
 	// ChunkManager (real, queryable chunks). chunkID syncs the chunk ID.
 	// Fire-and-forget.
 	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
@@ -106,7 +106,7 @@ type RemoteTransferrer interface {
 	ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 
 	// ForwardTierAppend sends records to a specific tier on a remote node.
-	// Used by ack-gated ingestion for sync secondary confirmation.
+	// Used by ack-gated ingestion for sync follower confirmation.
 	ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
 
 	// StreamToTier opens a single streaming connection and pipes all records
@@ -114,11 +114,11 @@ type RemoteTransferrer interface {
 	// no per-batch round trips.
 	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error
 
-	// ForwardSealTier commands a secondary to seal its active chunk at the
-	// same boundary as the primary. Used for seal synchronization during replication.
+	// ForwardSealTier commands a follower to seal its active chunk at the
+	// same boundary as the leader. Used for seal synchronization during replication.
 	ForwardSealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
 
-	// ReplicateSealedChunk streams a sealed chunk to a secondary node's specific
+	// ReplicateSealedChunk streams a sealed chunk to a follower node's specific
 	// tier, preserving the original chunk ID. Used for sealed-chunk replication.
 	ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 

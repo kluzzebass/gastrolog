@@ -146,13 +146,13 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 			if tc == nil {
 				continue
 			}
-			primaryNodeID := tc.PrimaryNodeID(nscs)
-			if primaryNodeID == "" || primaryNodeID == s.localNodeID {
+			leaderNodeID := tc.LeaderNodeID(nscs)
+			if leaderNodeID == "" || leaderNodeID == s.localNodeID {
 				continue
 			}
-			if !seen[primaryNodeID] {
-				seen[primaryNodeID] = true
-				byNode[primaryNodeID] = append(byNode[primaryNodeID], v.ID)
+			if !seen[leaderNodeID] {
+				seen[leaderNodeID] = true
+				byNode[leaderNodeID] = append(byNode[leaderNodeID], v.ID)
 			}
 		}
 	}

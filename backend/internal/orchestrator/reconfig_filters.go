@@ -41,7 +41,7 @@ func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
 		}
 		tier := findTierConfig(cfg.Tiers, v.TierIDs[0])
 		if tier != nil {
-			return tier.PrimaryNodeID(cfg.NodeStorageConfigs)
+			return tier.LeaderNodeID(cfg.NodeStorageConfigs)
 		}
 	}
 	return ""

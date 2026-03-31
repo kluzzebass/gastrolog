@@ -66,7 +66,7 @@ type configDispatcher struct {
 	tlsFilePath       string              // path to persist cluster TLS on rotation
 	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler   // nil for single-node or before wiring
-	catchupScheduler   func(tierID uuid.UUID, secondaryNodeIDs []string) // nil until orch is wired
+	catchupScheduler   func(tierID uuid.UUID, followerNodeIDs []string) // nil until orch is wired
 	placementTrigger   func() // triggers immediate placement reconcile; nil for single-node
 }
 
@@ -348,14 +348,14 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		return
 	}
 
-	primaryNodeID := tierCfg.PrimaryNodeID(nscs)
-	secondaryNodeIDs := tierCfg.SecondaryNodeIDs(nscs)
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
 
 	// Only react to placement changes. If the tier belongs here and the vault
 	// is already registered, or if the tier doesn't belong here and the vault
 	// isn't registered, there's nothing to do. The key question is: did this
 	// tier JUST arrive or JUST leave this node?
-	tierBelongsHere := primaryNodeID == "" || primaryNodeID == d.localNodeID || slices.Contains(secondaryNodeIDs, d.localNodeID)
+	tierBelongsHere := leaderNodeID == "" || leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
 
 	vaults, err := d.cfgStore.ListVaults(ctx)
 	if err != nil {
@@ -375,10 +375,10 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		// because this vault may have OTHER tiers that DO belong here.
 	}
 
-	// Reconcile tier Raft group membership. When secondaries are assigned
+	// Reconcile tier Raft group membership. When followers are assigned
 	// (a separate PutTier after initial creation), the group needs new members.
-	// Only the primary (Raft leader) can add members.
-	if d.factories.GroupManager != nil && primaryNodeID == d.localNodeID {
+	// Only the leader (Raft leader) can add members.
+	if d.factories.GroupManager != nil && leaderNodeID == d.localNodeID {
 		d.reconcileTierRaftGroup(tierID, tierCfg, nscs)
 	}
 
@@ -387,9 +387,9 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	d.reloadRotationPolicies(ctx)
 	d.reloadRetentionPolicies(ctx)
 
-	// If this node is the primary and has secondaries, schedule catchup.
-	if primaryNodeID == d.localNodeID && len(secondaryNodeIDs) > 0 && d.catchupScheduler != nil {
-		d.catchupScheduler(tierID, secondaryNodeIDs)
+	// If this node is the leader and has followers, schedule catchup.
+	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
+		d.catchupScheduler(tierID, followerNodeIDs)
 	}
 
 	// Trigger immediate placement reconcile so secondaries are assigned
@@ -423,7 +423,7 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v conf
 	}
 }
 
-// updateTierRoleIfNeeded checks whether a tier's role (primary ↔ secondary) has changed
+// updateTierRoleIfNeeded checks whether a tier's role (leader ↔ follower) has changed
 // and updates it in place — avoiding a full vault rebuild and file lock churn.
 func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, tierID uuid.UUID, existing *orchestrator.TierInstance) {
 	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
@@ -434,22 +434,22 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	if err != nil {
 		return
 	}
-	primaryNodeID := tierCfg.PrimaryNodeID(nscs)
-	secondaryNodeIDs := tierCfg.SecondaryNodeIDs(nscs)
-	shouldBeSecondary := slices.Contains(secondaryNodeIDs, d.localNodeID)
-	if existing.IsSecondary == shouldBeSecondary {
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
+	if existing.IsFollower == shouldBeFollower {
 		return // role unchanged
 	}
-	existing.IsSecondary = shouldBeSecondary
-	// SecondaryTargets are refreshed by the rotation sweep every 15s.
-	if shouldBeSecondary {
-		existing.PrimaryNodeID = primaryNodeID
+	existing.IsFollower = shouldBeFollower
+	// FollowerTargets are refreshed by the rotation sweep every 15s.
+	if shouldBeFollower {
+		existing.LeaderNodeID = leaderNodeID
 	} else {
-		existing.PrimaryNodeID = ""
+		existing.LeaderNodeID = ""
 	}
 	d.logger.Info("dispatch: tier role updated in place",
 		"vault", vaultID, "tier", tierID,
-		"isSecondary", shouldBeSecondary)
+		"isFollower", shouldBeFollower)
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.
@@ -471,18 +471,18 @@ func (d *configDispatcher) reconcileAllTierRaftGroups(ctx context.Context) {
 		return
 	}
 	for _, tier := range tiers {
-		primaryNodeID := tier.PrimaryNodeID(nscs)
-		if primaryNodeID == d.localNodeID {
+		leaderNodeID := tier.LeaderNodeID(nscs)
+		if leaderNodeID == d.localNodeID {
 			d.logger.Info("dispatch: reconciling tier raft group on startup",
-				"tier", tier.ID, "primary", primaryNodeID)
+				"tier", tier.ID, "leader", leaderNodeID)
 			d.reconcileTierRaftGroup(tier.ID, &tier, nscs)
 		}
 	}
 }
 
 // reconcileTierRaftGroup ensures the tier's Raft group membership matches the
-// tier config's node assignments (primary + secondaries). Only called on the
-// primary node (which is the Raft leader for the group).
+// tier config's node assignments (leader + followers). Only called on the
+// leader node (which is the Raft leader for the group).
 func (d *configDispatcher) reconcileTierRaftGroup(tierID uuid.UUID, tierCfg *config.TierConfig, nscs []config.NodeStorageConfig) {
 	gm := d.factories.GroupManager
 	groupID := tierID.String()
@@ -494,14 +494,14 @@ func (d *configDispatcher) reconcileTierRaftGroup(tierID uuid.UUID, tierCfg *con
 	// Build the expected member set from tier config.
 	expected := make(map[string]string) // nodeID → address
 	if d.factories.NodeAddressResolver != nil {
-		primary := tierCfg.PrimaryNodeID(nscs)
-		if primary == "" {
-			primary = d.localNodeID
+		leader := tierCfg.LeaderNodeID(nscs)
+		if leader == "" {
+			leader = d.localNodeID
 		}
-		if addr, ok := d.factories.NodeAddressResolver(primary); ok {
-			expected[primary] = addr
+		if addr, ok := d.factories.NodeAddressResolver(leader); ok {
+			expected[leader] = addr
 		}
-		for _, secID := range tierCfg.SecondaryNodeIDs(nscs) {
+		for _, secID := range tierCfg.FollowerNodeIDs(nscs) {
 			if addr, ok := d.factories.NodeAddressResolver(secID); ok {
 				expected[secID] = addr
 			}
