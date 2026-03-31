@@ -531,6 +531,15 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		"chunk", meta.ID.String(), "records", meta.RecordCount)
 
 	if meta.ID != (chunk.ChunkID{}) {
+		// Announce to tier Raft so the manifest tracks imported chunks.
+		// On the tier leader, this commits to the log. On followers,
+		// it's silently skipped (leader's announces are authoritative).
+		if ann, ok := cm.(chunk.AnnouncerGetter); ok {
+			if a := ann.GetAnnouncer(); a != nil {
+				a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
+				a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestEnd, meta.SourceEnd)
+			}
+		}
 		o.postSealWork(vaultID, cm, meta.ID)
 	}
 	return nil

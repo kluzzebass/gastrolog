@@ -21,3 +21,8 @@ type MetadataAnnouncer interface {
 type AnnouncerSetter interface {
 	SetAnnouncer(MetadataAnnouncer)
 }
+
+// AnnouncerGetter retrieves the current announcer from a chunk manager.
+type AnnouncerGetter interface {
+	GetAnnouncer() MetadataAnnouncer
+}

@@ -2309,6 +2309,12 @@ func (m *Manager) SetAnnouncer(a chunk.MetadataAnnouncer) {
 	m.cfg.Announcer = a
 }
 
+func (m *Manager) GetAnnouncer() chunk.MetadataAnnouncer {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.cfg.Announcer
+}
+
 func (m *Manager) CheckRotation() *string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

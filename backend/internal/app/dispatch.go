@@ -477,6 +477,7 @@ func (d *configDispatcher) reconcileAllTierRaftGroups(ctx context.Context) {
 				"tier", tier.ID, "leader", leaderNodeID)
 			d.reconcileTierRaftGroup(tier.ID, &tier, nscs)
 		}
+
 	}
 }
 

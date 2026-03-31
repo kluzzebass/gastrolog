@@ -10,8 +10,8 @@ import (
 )
 
 // RaftAnnouncer implements chunk.MetadataAnnouncer by applying commands to
-// a tier's Raft group. All methods are best-effort — failures are logged
-// but don't block the local operation.
+// a tier's Raft group. Only the tier leader can apply — non-leaders skip
+// silently. All methods are best-effort.
 type RaftAnnouncer struct {
 	raft    *hraft.Raft
 	timeout time.Duration
@@ -47,14 +47,6 @@ func (a *RaftAnnouncer) AnnounceDelete(id chunk.ChunkID) {
 }
 
 func (a *RaftAnnouncer) apply(op string, id chunk.ChunkID, data []byte) {
-	// Only the tier Raft leader can apply log entries. Non-leaders skip
-	// silently — they also run PostSealProcess (compress, index) and their
-	// announces would fail with ErrNotLeader anyway.
-	//
-	// When the ingest node and tier leader diverge (gastrolog-15fqq), the
-	// ingest node's announces are dropped. The sealed chunk replication
-	// path still delivers the actual data; the manifest is incomplete
-	// until leadership alignment is implemented.
 	if a.raft.State() != hraft.Leader {
 		return
 	}

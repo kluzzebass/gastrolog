@@ -77,6 +77,7 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 
 	var targets []sweepTarget
+	var reconcileTiers []*TierInstance
 	active := make(map[string]bool)
 
 	o.mu.Lock()
@@ -89,10 +90,13 @@ func (o *Orchestrator) retentionSweepAll() {
 			if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 				continue
 			}
-			// Only the Raft leader runs retention. Followers skip — the manifest
-			// can't be trusted until Raft leader == config leader (gastrolog-15fqq).
+			// Only the tier Raft leader evaluates retention rules.
+			// Followers reconcile against the manifest.
 			isLeader := tier.IsRaftLeader == nil || tier.IsRaftLeader()
 			if !isLeader {
+				if tier.ListManifest != nil {
+					reconcileTiers = append(reconcileTiers, tier)
+				}
 				continue
 			}
 			if t := o.retentionTargetForTier(cfg, vaultCfg, tier, active); t != nil {
@@ -107,8 +111,14 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 	o.mu.Unlock()
 
+	// Leader: evaluate retention rules.
 	for _, t := range targets {
 		t.runner.sweep(t.rules)
+	}
+
+	// Followers: reconcile against the tier Raft manifest.
+	for _, tier := range reconcileTiers {
+		o.reconcileFollower(tier)
 	}
 }
 
@@ -152,11 +162,11 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
-// reconcileSecondary compares on-disk chunks against the tier Raft manifest
+// reconcileFollower compares on-disk chunks against the tier Raft manifest
 // and deletes any sealed chunks that the primary has removed. This is the
 // fallback for cases where OnDelete didn't fire (snapshot restore, startup,
 // Raft connectivity gaps).
-func (o *Orchestrator) reconcileSecondary(tier *TierInstance) {
+func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 	manifestIDs := tier.ListManifest()
 	if len(manifestIDs) == 0 {
 		return // manifest not yet populated — don't delete anything
