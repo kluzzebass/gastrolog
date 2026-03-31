@@ -25,10 +25,10 @@ import (
 // returned map is always a new copy — the caller's params are never mutated.
 // The stored config retains the original relative path so each node resolves
 // independently against its own directory.
-func resolveVaultDir(params map[string]string, vaultsDir, vaultName string) map[string]string {
+func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[string]string {
 	dir := params["dir"]
 	if dir == "" {
-		dir = filepath.Join("vaults", vaultName)
+		dir = filepath.Join("vaults", vaultID)
 	}
 	if !filepath.IsAbs(dir) && vaultsDir != "" {
 		dir = filepath.Join(vaultsDir, dir)
@@ -533,7 +533,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID)
 	}
 
-	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.Name)
+	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.ID.String())
 	cmParams["_expect_existing"] = "true"
 	cmParams["_vault_id"] = vaultCfg.ID.String()
 
@@ -641,7 +641,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		cmLogger = cmLogger.With("vault", vaultCfg.ID, "tier", tierCfg.ID, "storage", storageID)
 	}
 
-	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.Name)
+	cmParams := resolveVaultDir(params, factories.VaultsDir, vaultCfg.ID.String())
 	cmParams["_expect_existing"] = "true"
 	cmParams["_vault_id"] = vaultCfg.ID.String()
 
@@ -865,19 +865,8 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 		if tierCfg.Path != "" {
 			params["path"] = tierCfg.Path
 		} else {
-			// Default: jsonl/<vault-name>/sink_<tier-number>.jsonl
-			tierNum := 1
-			for i, tid := range vaultCfg.TierIDs {
-				if tid == tierCfg.ID {
-					tierNum = i + 1
-					break
-				}
-			}
-			vaultName := vaultCfg.Name
-			if vaultName == "" {
-				vaultName = vaultCfg.ID.String()
-			}
-			params["path"] = filepath.Join("jsonl", vaultName, fmt.Sprintf("sink_%d.jsonl", tierNum))
+			// Default: jsonl/<vault-id>/<tier-id>.jsonl
+			params["path"] = filepath.Join("jsonl", vaultCfg.ID.String(), tierCfg.ID.String()+".jsonl")
 		}
 
 	case config.TierTypeCloud:
@@ -901,8 +890,10 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 			}
 		}
 		// Cloud tiers also need a local file storage for active chunks.
+		// Scope by tier ID to prevent collisions between cloud tiers sharing
+		// the same active chunk storage class.
 		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
-			params["dir"] = fs.Path
+			params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
 		}
 	}
 
