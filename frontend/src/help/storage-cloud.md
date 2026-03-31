@@ -53,4 +53,4 @@ When Credentials JSON is empty, the GCS client uses ADC: the `GOOGLE_APPLICATION
 - Queries read cloud chunks via HTTP range requests — only the needed frames are downloaded, not the entire blob.
 - Cloud services are configured in the [Storage settings](help:storage-config) tab and referenced by name when creating cloud tiers.
 - Use the **Test Connection** button in cloud service settings to verify credentials.
-- Secondary replicas keep a local compressed copy for queries — they do not upload to the cloud (only the primary uploads).
+- Follower replicas keep a local compressed copy for queries — they do not upload to the cloud (only the leader uploads).

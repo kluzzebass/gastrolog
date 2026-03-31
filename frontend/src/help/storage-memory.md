@@ -13,6 +13,6 @@ Keeps all chunks in memory. Fast ingestion and queries, but data is lost on rest
 ## What You Should Know
 
 - Memory tiers don't require file storages — they use RAM on whichever nodes they're placed on.
-- Replication mirrors writes to secondary nodes in real-time, so a memory tier with RF=2+ survives a single node failure.
+- Replication mirrors writes to follower nodes in real-time, so a memory tier with RF=2+ survives a single node failure.
 - Commonly paired with the [Chatterbox ingester](help:ingester-chatterbox) for quick experimentation.
 - No compression is applied — chunks are held in their raw form in memory.

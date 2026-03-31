@@ -28,7 +28,7 @@ Example: a vault with three tiers:
 Each tier has its own **replication factor** (RF). Replicas are placed on [file storages](help:storage-config) with the matching storage class. The placement manager prefers different nodes (availability) but allows same-node placement on different disks (redundancy).
 
 - **RF=1** — no replication. Single copy.
-- **RF=2** — one primary, one secondary (nonvoter). Redundancy without fault tolerance.
+- **RF=2** — one leader, one follower (nonvoter). Redundancy without fault tolerance.
 - **RF=3+** — full quorum. Survives node failures.
 
 ## Compression
