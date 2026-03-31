@@ -28,14 +28,19 @@ func (s *VaultServer) ListChunks(
 		return nil, connErr
 	}
 
-	// Collect local chunks.
+	// Collect local chunks, marking any with retention-pending in the tier Raft.
+	pending := s.orch.RetentionPendingChunks(vaultID)
 	var allChunks []*apiv1.ChunkMeta
 	metas, err := s.orch.ListAllChunkMetas(vaultID)
 	if err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return nil, mapVaultError(err)
 	}
 	for _, meta := range metas {
-		allChunks = append(allChunks, TieredChunkMetaToProto(meta))
+		pb := TieredChunkMetaToProto(meta)
+		if pending[meta.ID] {
+			pb.RetentionPending = true
+		}
+		allChunks = append(allChunks, pb)
 	}
 
 	// Collect remote chunks from nodes that own other tiers.

@@ -451,6 +451,9 @@ function ChunkRow({
             {chunk.archived && (
               <Badge variant="warn" dark={dark}>archived</Badge>
             )}
+            {chunk.retentionPending && (
+              <Badge variant="warn" dark={dark}>exp</Badge>
+            )}
             {rf > 1 && (() => {
               let badgeVariant: "info" | "error" | "warn";
               let badgeTitle: string;

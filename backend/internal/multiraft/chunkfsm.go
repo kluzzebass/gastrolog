@@ -21,7 +21,8 @@ const (
 	CmdSealChunk     ChunkCommand = 2
 	CmdCompressChunk ChunkCommand = 3
 	CmdUploadChunk   ChunkCommand = 4
-	CmdDeleteChunk   ChunkCommand = 5
+	CmdDeleteChunk      ChunkCommand = 5
+	CmdRetentionPending ChunkCommand = 6
 )
 
 // ChunkEntry holds the full metadata for one chunk in the FSM.
@@ -41,9 +42,10 @@ type ChunkEntry struct {
 	SourceStart time.Time
 	SourceEnd   time.Time
 
-	CloudBacked bool
-	Archived    bool
-	NumFrames   int32
+	CloudBacked      bool
+	Archived         bool
+	RetentionPending bool
+	NumFrames        int32
 
 	// Cloud-specific TOC offsets (GLCB format).
 	IngestIdxOffset int64
@@ -146,6 +148,8 @@ func (f *ChunkFSM) Apply(log *hraft.Log) any {
 		return f.applyUpload(payload)
 	case CmdDeleteChunk:
 		return f.applyDelete(payload)
+	case CmdRetentionPending:
+		return f.applyRetentionPending(payload)
 	default:
 		return fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -273,6 +277,19 @@ func (f *ChunkFSM) applyDelete(data []byte) error {
 	return nil
 }
 
+// RetentionPending: [16 bytes ChunkID]
+func (f *ChunkFSM) applyRetentionPending(data []byte) error {
+	if len(data) < 16 {
+		return fmt.Errorf("retention pending: payload too short (%d bytes)", len(data))
+	}
+	var id chunk.ChunkID
+	copy(id[:], data[:16])
+	if e := f.chunks[id]; e != nil {
+		e.RetentionPending = true
+	}
+	return nil
+}
+
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
 // MarshalCreateChunk builds the Raft log data for a CreateChunk command.
@@ -326,6 +343,14 @@ func MarshalUploadChunk(id chunk.ChunkID, diskBytes, ingestIdxOff, ingestIdxSize
 func MarshalDeleteChunk(id chunk.ChunkID) []byte {
 	buf := make([]byte, 1+16)
 	buf[0] = byte(CmdDeleteChunk)
+	copy(buf[1:17], id[:])
+	return buf
+}
+
+// MarshalRetentionPending builds the Raft log data for a RetentionPending command.
+func MarshalRetentionPending(id chunk.ChunkID) []byte {
+	buf := make([]byte, 1+16)
+	buf[0] = byte(CmdRetentionPending)
 	copy(buf[1:17], id[:])
 	return buf
 }
@@ -400,6 +425,9 @@ func encodeChunkEntry(w io.Writer, e *ChunkEntry) error {
 	if e.Archived {
 		flags |= 1 << 3
 	}
+	if e.RetentionPending {
+		flags |= 1 << 4
+	}
 	binary.BigEndian.PutUint16(buf[124:126], flags)
 	_, err := w.Write(buf[:])
 	return err
@@ -435,10 +463,11 @@ func decodeChunkSnapshot(r io.Reader) ([]ChunkEntry, error) {
 			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])), //nolint:gosec // G115: round-trip
 			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])), //nolint:gosec // G115: round-trip
 			NumFrames:       int32(binary.BigEndian.Uint32(buf[120:124])), //nolint:gosec // G115: round-trip
-			Sealed:          flags&(1<<0) != 0,
-			Compressed:      flags&(1<<1) != 0,
-			CloudBacked:     flags&(1<<2) != 0,
-			Archived:        flags&(1<<3) != 0,
+			Sealed:           flags&(1<<0) != 0,
+			Compressed:       flags&(1<<1) != 0,
+			CloudBacked:      flags&(1<<2) != 0,
+			Archived:         flags&(1<<3) != 0,
+			RetentionPending: flags&(1<<4) != 0,
 		})
 	}
 	return entries, nil

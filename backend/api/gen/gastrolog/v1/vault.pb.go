@@ -387,24 +387,25 @@ func (x *ListChunksResponse) GetChunks() []*ChunkMeta {
 }
 
 type ChunkMeta struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	WriteStart    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=write_start,json=writeStart,proto3" json:"write_start,omitempty"`
-	WriteEnd      *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=write_end,json=writeEnd,proto3" json:"write_end,omitempty"`
-	Sealed        bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
-	RecordCount   int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
-	Bytes         int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
-	Compressed    bool                   `protobuf:"varint,7,opt,name=compressed,proto3" json:"compressed,omitempty"`                // true if raw.log/attr.log are compressed
-	DiskBytes     int64                  `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"` // actual on-disk size (may differ from bytes if compressed)
-	IngestStart   *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
-	IngestEnd     *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
-	CloudBacked   bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"` // true = chunk lives in cloud storage (S3/Azure/GCS)
-	Archived      bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                          // true = chunk is in offline storage tier (Glacier, etc.)
-	NumFrames     int32                  `protobuf:"varint,13,opt,name=num_frames,json=numFrames,proto3" json:"num_frames,omitempty"`       // seekable zstd frame count (cloud chunks, 0 = unknown)
-	TierId        string                 `protobuf:"bytes,14,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                 // which tier this chunk belongs to
-	TierType      string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`           // tier type: "memory", "file", "cloud"
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	WriteStart       *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=write_start,json=writeStart,proto3" json:"write_start,omitempty"`
+	WriteEnd         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=write_end,json=writeEnd,proto3" json:"write_end,omitempty"`
+	Sealed           bool                   `protobuf:"varint,4,opt,name=sealed,proto3" json:"sealed,omitempty"`
+	RecordCount      int64                  `protobuf:"varint,5,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
+	Bytes            int64                  `protobuf:"varint,6,opt,name=bytes,proto3" json:"bytes,omitempty"`
+	Compressed       bool                   `protobuf:"varint,7,opt,name=compressed,proto3" json:"compressed,omitempty"`                // true if raw.log/attr.log are compressed
+	DiskBytes        int64                  `protobuf:"varint,8,opt,name=disk_bytes,json=diskBytes,proto3" json:"disk_bytes,omitempty"` // actual on-disk size (may differ from bytes if compressed)
+	IngestStart      *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=ingest_start,json=ingestStart,proto3" json:"ingest_start,omitempty"`
+	IngestEnd        *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=ingest_end,json=ingestEnd,proto3" json:"ingest_end,omitempty"`
+	CloudBacked      bool                   `protobuf:"varint,11,opt,name=cloud_backed,json=cloudBacked,proto3" json:"cloud_backed,omitempty"`                // true = chunk lives in cloud storage (S3/Azure/GCS)
+	Archived         bool                   `protobuf:"varint,12,opt,name=archived,proto3" json:"archived,omitempty"`                                         // true = chunk is in offline storage tier (Glacier, etc.)
+	NumFrames        int32                  `protobuf:"varint,13,opt,name=num_frames,json=numFrames,proto3" json:"num_frames,omitempty"`                      // seekable zstd frame count (cloud chunks, 0 = unknown)
+	TierId           string                 `protobuf:"bytes,14,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                                // which tier this chunk belongs to
+	TierType         string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud"
+	RetentionPending bool                   `protobuf:"varint,16,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *ChunkMeta) Reset() {
@@ -540,6 +541,13 @@ func (x *ChunkMeta) GetTierType() string {
 		return x.TierType
 	}
 	return ""
+}
+
+func (x *ChunkMeta) GetRetentionPending() bool {
+	if x != nil {
+		return x.RetentionPending
+	}
+	return false
 }
 
 type GetChunkRequest struct {
@@ -2346,7 +2354,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xaf\x04\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xdc\x04\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2369,7 +2377,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\n" +
 	"num_frames\x18\r \x01(\x05R\tnumFrames\x12\x17\n" +
 	"\atier_id\x18\x0e \x01(\tR\x06tierId\x12\x1b\n" +
-	"\ttier_type\x18\x0f \x01(\tR\btierType\"B\n" +
+	"\ttier_type\x18\x0f \x01(\tR\btierType\x12+\n" +
+	"\x11retention_pending\x18\x10 \x01(\bR\x10retentionPending\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +

@@ -467,6 +467,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				sti.IsRaftLeader = raftCB.isLeader
 				sti.ApplyRaftDelete = raftCB.applyDelete
 				sti.ListManifest = raftCB.listChunks
+				sti.ApplyRaftRetentionPending = raftCB.applyRetPending
+				sti.ListRetentionPending = raftCB.listRetPending
 				tiers = append(tiers, sti)
 				break // 1:1:1: one store per tier per node
 			}
@@ -493,6 +495,8 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg con
 		ti.IsRaftLeader = raftCB.isLeader
 		ti.ApplyRaftDelete = raftCB.applyDelete
 		ti.ListManifest = raftCB.listChunks
+		ti.ApplyRaftRetentionPending = raftCB.applyRetPending
+		ti.ListRetentionPending = raftCB.listRetPending
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
@@ -573,8 +577,10 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 			Chunks:          cm,
 			HasRaftLeader:   raftCB.hasLeader,
 			IsRaftLeader:    raftCB.isLeader,
-			ApplyRaftDelete: raftCB.applyDelete,
-			ListManifest:    raftCB.listChunks,
+			ApplyRaftDelete:           raftCB.applyDelete,
+			ListManifest:             raftCB.listChunks,
+			ApplyRaftRetentionPending: raftCB.applyRetPending,
+			ListRetentionPending:     raftCB.listRetPending,
 		}, nil
 	}
 
@@ -610,9 +616,11 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           qe,
-		HasRaftLeader:   raftCB.hasLeader,
-		ApplyRaftDelete: raftCB.applyDelete,
-		ListManifest:    raftCB.listChunks,
+		HasRaftLeader:             raftCB.hasLeader,
+		ApplyRaftDelete:           raftCB.applyDelete,
+		ListManifest:             raftCB.listChunks,
+		ApplyRaftRetentionPending: raftCB.applyRetPending,
+		ListRetentionPending:     raftCB.listRetPending,
 	}, nil
 }
 
@@ -711,9 +719,11 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           qe,
-		HasRaftLeader:   raftCB.hasLeader,
-		ApplyRaftDelete: raftCB.applyDelete,
-		ListManifest:    raftCB.listChunks,
+		HasRaftLeader:             raftCB.hasLeader,
+		ApplyRaftDelete:           raftCB.applyDelete,
+		ListManifest:             raftCB.listChunks,
+		ApplyRaftRetentionPending: raftCB.applyRetPending,
+		ListRetentionPending:     raftCB.listRetPending,
 	}, nil
 }
 
@@ -734,10 +744,12 @@ func findFileStorageByID(cfg *config.Config, storageID string) *config.FileStora
 // a RaftAnnouncer into the chunk manager so chunk lifecycle events replicate to
 // all nodes via consensus.
 type tierRaftCallbacks struct {
-	hasLeader   func() bool
-	isLeader    func() bool
-	applyDelete func(id chunk.ChunkID) error
-	listChunks  func() []chunk.ChunkID
+	hasLeader       func() bool
+	isLeader        func() bool
+	applyDelete     func(id chunk.ChunkID) error
+	applyRetPending func(id chunk.ChunkID) error
+	listChunks      func() []chunk.ChunkID
+	listRetPending  func() []chunk.ChunkID
 }
 
 func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories, isFollower bool) tierRaftCallbacks {
@@ -780,6 +792,9 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 			f := r.Apply(multiraft.MarshalDeleteChunk(id), timeout)
 			return f.Error()
 		},
+		applyRetPending: func(id chunk.ChunkID) error {
+			return r.Apply(multiraft.MarshalRetentionPending(id), timeout).Error()
+		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {
 				return nil
@@ -788,6 +803,18 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 			ids := make([]chunk.ChunkID, len(entries))
 			for i := range entries {
 				ids[i] = entries[i].ID
+			}
+			return ids
+		},
+		listRetPending: func() []chunk.ChunkID {
+			if fsm == nil {
+				return nil
+			}
+			var ids []chunk.ChunkID
+			for _, e := range fsm.List() {
+				if e.RetentionPending {
+					ids = append(ids, e.ID)
+				}
 			}
 			return ids
 		},

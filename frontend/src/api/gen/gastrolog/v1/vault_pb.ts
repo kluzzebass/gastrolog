@@ -402,6 +402,13 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   tierType = "";
 
+  /**
+   * true = chunk is marked for retention processing
+   *
+   * @generated from field: bool retention_pending = 16;
+   */
+  retentionPending = false;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -425,6 +432,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 13, name: "num_frames", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 14, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

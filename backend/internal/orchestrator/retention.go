@@ -51,7 +51,8 @@ type retentionRunner struct {
 	// applyRaftDelete applies CmdDeleteChunk to the tier Raft before local
 	// deletion, so secondaries learn about it via the manifest. Nil in
 	// single-node / memory mode — local delete proceeds without Raft.
-	applyRaftDelete func(id chunk.ChunkID) error
+	applyRaftDelete           func(id chunk.ChunkID) error
+	applyRaftRetentionPending func(id chunk.ChunkID) error
 
 	now func() time.Time
 	logger      *slog.Logger
@@ -122,6 +123,26 @@ func (o *Orchestrator) retentionSweepAll() {
 	}
 }
 
+// RetentionPendingChunks returns chunk IDs marked as retention-pending in the
+// tier Raft FSM for a vault. Visible to all nodes via Raft replication.
+func (o *Orchestrator) RetentionPendingChunks(vaultID uuid.UUID) map[chunk.ChunkID]bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return nil
+	}
+	result := make(map[chunk.ChunkID]bool)
+	for _, tier := range vault.Tiers {
+		if tier.ListRetentionPending != nil {
+			for _, id := range tier.ListRetentionPending() {
+				result[id] = true
+			}
+		}
+	}
+	return result
+}
+
 // retentionTargetForTier resolves a single tier instance into a sweep target.
 // Returns nil if the tier should be skipped (no rules, no leader, etc.).
 func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
@@ -159,6 +180,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 		o.retention[key] = runner
 	}
 	runner.applyRaftDelete = tier.ApplyRaftDelete
+	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
@@ -256,6 +278,11 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 			}
 			r.inflight[id] = true
 			r.mu.Unlock()
+
+			// Mark as retention-pending in the tier Raft so all nodes see it.
+			if r.applyRaftRetentionPending != nil {
+				_ = r.applyRaftRetentionPending(id)
+			}
 
 			func() {
 				defer r.clearInflight(id)

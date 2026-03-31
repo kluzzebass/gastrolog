@@ -36,6 +36,12 @@ type TierInstance struct {
 	// Nil when no Raft group exists (single-node / memory mode — always leader).
 	IsRaftLeader func() bool
 
+	// ApplyRaftRetentionPending marks a chunk as retention-pending in the tier Raft.
+	ApplyRaftRetentionPending func(id chunk.ChunkID) error
+
+	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
+	ListRetentionPending func() []chunk.ChunkID
+
 	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
 	// until committed. Returns an error if not leader or timeout. Nil when no
 	// Raft group exists.
