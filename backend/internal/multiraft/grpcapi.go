@@ -31,29 +31,35 @@ func (g *grpcAPI[K]) handleRPC(groupID []byte, command any, data io.Reader) (any
 		Reader:   data,
 	}
 
+	dispatched := false
 	if req, ok := command.(*raft.AppendEntriesRequest); ok && isHeartbeat(req) {
 		gs.heartbeatFuncMtx.Lock()
 		fn := gs.heartbeatFunc
 		gs.heartbeatFuncMtx.Unlock()
 		if fn != nil {
 			fn(rpc)
-			goto wait
+			dispatched = true
 		}
 	}
 
-	select {
-	case gs.rpcChan <- rpc:
-	case <-g.transport.shutdownCh:
-		return nil, raft.ErrTransportShutdown
+	if !dispatched {
+		select {
+		case gs.rpcChan <- rpc:
+		case <-gs.doneCh:
+			return nil, status.Error(codes.Unavailable, "raft group removed")
+		case <-g.transport.shutdownCh:
+			return nil, raft.ErrTransportShutdown
+		}
 	}
 
-wait:
 	select {
 	case resp := <-ch:
 		if resp.Error != nil {
 			return nil, resp.Error
 		}
 		return resp.Response, nil
+	case <-gs.doneCh:
+		return nil, status.Error(codes.Unavailable, "raft group removed")
 	case <-g.transport.shutdownCh:
 		return nil, raft.ErrTransportShutdown
 	}

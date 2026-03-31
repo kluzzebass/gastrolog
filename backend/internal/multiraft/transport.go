@@ -37,6 +37,7 @@ type Transport[K comparable] struct {
 // groupState holds the per-group dispatch state (rpcChan + heartbeat handler).
 type groupState struct {
 	rpcChan          chan raft.RPC
+	doneCh           chan struct{} // closed when the group is removed
 	heartbeatFunc    func(raft.RPC)
 	heartbeatFuncMtx sync.Mutex
 	heartbeatTimeout time.Duration
@@ -131,6 +132,7 @@ func (t *Transport[K]) GroupTransport(groupID K) raft.Transport {
 	if !ok {
 		gs = &groupState{
 			rpcChan: make(chan raft.RPC),
+			doneCh:  make(chan struct{}),
 		}
 		t.groups[groupID] = gs
 	}
@@ -148,7 +150,7 @@ func (t *Transport[K]) RemoveGroup(groupID K) {
 	}
 	t.mu.Unlock()
 	if ok {
-		close(gs.rpcChan)
+		close(gs.doneCh)
 	}
 }
 
@@ -208,10 +210,11 @@ func (t *Transport[K]) Close() error {
 	close(t.shutdownCh)
 	t.shutdown = true
 
-	// Close all group rpcChans so consumer goroutines exit.
+	// Signal all groups to stop. doneCh unblocks senders and the
+	// Consumer() bridge goroutine, which closes the output channel.
 	t.mu.Lock()
 	for k, gs := range t.groups {
-		close(gs.rpcChan)
+		close(gs.doneCh)
 		delete(t.groups, k)
 	}
 	t.mu.Unlock()
@@ -246,7 +249,26 @@ var (
 	_ raft.WithPreVote = (*groupTransport[string])(nil)
 )
 
-func (g *groupTransport[K]) Consumer() <-chan raft.RPC { return g.state.rpcChan }
+func (g *groupTransport[K]) Consumer() <-chan raft.RPC {
+	// Return a bridge channel that closes when doneCh fires,
+	// so callers using `for range Consumer()` exit cleanly.
+	out := make(chan raft.RPC)
+	go func() {
+		defer close(out)
+		for {
+			select {
+			case rpc, ok := <-g.state.rpcChan:
+				if !ok {
+					return
+				}
+				out <- rpc
+			case <-g.state.doneCh:
+				return
+			}
+		}
+	}()
+	return out
+}
 func (g *groupTransport[K]) LocalAddr() raft.ServerAddress { return g.parent.localAddress }
 
 func (g *groupTransport[K]) AppendEntries(id raft.ServerID, target raft.ServerAddress, args *raft.AppendEntriesRequest, resp *raft.AppendEntriesResponse) error {
