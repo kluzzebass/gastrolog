@@ -115,6 +115,7 @@ func (m *mockOrch) ForceRemoveVault(id uuid.UUID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
 }
+func (m *mockOrch) RemoveTierFromVault(_, _ uuid.UUID) bool { return false }
 func (m *mockOrch) UnregisterVault(id uuid.UUID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr

@@ -328,6 +328,73 @@ func (o *Orchestrator) DeleteTierData(tierID uuid.UUID) {
 	}
 }
 
+// RemoveTierFromVault removes a single tier instance from a vault, deletes its
+// data (chunks + indexes), closes its managers, and cleans up retention/rotation
+// jobs. Used when this node loses ownership of a tier (rebalancing, RF reduction).
+// Returns true if a tier was removed.
+func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	vault, exists := o.vaults[vaultID]
+	if !exists {
+		return false
+	}
+
+	idx := -1
+	for i, t := range vault.Tiers {
+		if t.TierID == tierID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+
+	tier := vault.Tiers[idx]
+
+	// Cancel pending jobs for this tier.
+	prefix := vaultID.String()
+	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + tierID.String())
+	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + tierID.String())
+
+	// Delete all chunk data and indexes.
+	if active := tier.Chunks.Active(); active != nil {
+		_ = tier.Chunks.Seal()
+	}
+	metas, err := tier.Chunks.List()
+	if err == nil {
+		for _, m := range metas {
+			if tier.Indexes != nil {
+				_ = tier.Indexes.DeleteIndexes(m.ID)
+			}
+			_ = tier.Chunks.Delete(m.ID)
+		}
+	}
+
+	// Close managers.
+	_ = tier.Chunks.Close()
+
+	// Remove retention runner and cron rotation for this tier.
+	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+	o.cronRotation.removeAllForVault(vaultID)
+
+	// Remove tier from vault's tier list.
+	vault.Tiers = append(vault.Tiers[:idx], vault.Tiers[idx+1:]...)
+
+	// If the vault has no tiers left, remove it entirely.
+	if len(vault.Tiers) == 0 {
+		delete(o.vaults, vaultID)
+		o.rebuildFilterSetLocked()
+		o.logger.Info("vault removed (no remaining tiers)", "vault", vaultID)
+	}
+
+	o.logger.Info("tier removed from vault",
+		"vault", vaultID, "tier", tierID, "remaining_tiers", len(vault.Tiers))
+	return true
+}
+
 // UnregisterVault removes a vault from the orchestrator without deleting any
 // data. The chunk manager is closed (releasing connections/locks) but chunks
 // and indexes are left intact in storage. This is the correct operation for

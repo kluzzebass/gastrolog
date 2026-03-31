@@ -31,6 +31,7 @@ type orchActions interface {
 	DisableVault(id uuid.UUID) error
 	EnableVault(id uuid.UUID) error
 	ForceRemoveVault(id uuid.UUID) error
+	RemoveTierFromVault(vaultID, tierID uuid.UUID) bool
 	UnregisterVault(id uuid.UUID) error
 	HasMissingTiers(vaultID uuid.UUID, tierIDs []uuid.UUID) bool
 	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
@@ -370,9 +371,14 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 
 		if tierBelongsHere {
 			d.rebuildVaultIfTierMissing(ctx, v, tierID)
+		} else if slices.Contains(d.orch.ListVaults(), v.ID) {
+			// This node no longer owns this tier — remove it (but keep the
+			// vault if it has other tiers that belong here).
+			if d.orch.RemoveTierFromVault(v.ID, tierID) {
+				d.logger.Info("dispatch: removed stale tier",
+					"vault", v.ID, "tier", tierID)
+			}
 		}
-		// Note: we do NOT unregister on !tierBelongsHere && isLocalVault
-		// because this vault may have OTHER tiers that DO belong here.
 	}
 
 	// Reconcile tier Raft group membership. When followers are assigned
