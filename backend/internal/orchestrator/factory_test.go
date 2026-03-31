@@ -542,9 +542,8 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Verify dir param derived from NodeStorageConfig was passed to factories.
-	// The path is scoped per tier: <storage-path>/<tier-id>
-	expectedDir := "/data/chunks/" + tierID.String()
+	// Verify dir param: <storage-path>/vaults/<vault-id>/<tier-id>
+	expectedDir := "/data/chunks/vaults/" + vaultID.String() + "/" + tierID.String()
 	if cmReceivedParams["dir"] != expectedDir {
 		t.Errorf("chunk manager: expected dir=%s, got %s", expectedDir, cmReceivedParams["dir"])
 	}

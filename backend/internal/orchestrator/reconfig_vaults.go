@@ -628,7 +628,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
 	delete(params, "sealed_backing") // always follower
-	params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
+	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 	cmFactory, ok := factories.ChunkManagers[factoryName]
@@ -854,11 +854,8 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 		}
 
 	case config.TierTypeFile:
-		// Find a FileStorage matching this tier's StorageClass on the local node.
-		// Scope the directory per tier to prevent lock conflicts when multiple
-		// file tiers share the same storage class.
 		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.StorageClass); fs != nil {
-			params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
+			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 
 	case config.TierTypeJSONL:
@@ -890,10 +887,8 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 			}
 		}
 		// Cloud tiers also need a local file storage for active chunks.
-		// Scope by tier ID to prevent collisions between cloud tiers sharing
-		// the same active chunk storage class.
 		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
-			params["dir"] = filepath.Join(fs.Path, tierCfg.ID.String())
+			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 	}
 
