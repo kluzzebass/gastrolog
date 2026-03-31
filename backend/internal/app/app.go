@@ -67,10 +67,8 @@ type RunConfig struct {
 	VaultsFlag  string
 	ConfigType  string
 	ServerAddr  string
-	Bootstrap   bool
 	NoAuth      bool
 	ClusterAddr string
-	ClusterInit bool
 	JoinAddr    string
 	JoinToken   string
 	Voteless    bool
@@ -92,10 +90,6 @@ type RunConfig struct {
 // Run starts the gastrolog server. It wires all components, starts the
 // orchestrator and HTTP server, and blocks until ctx is cancelled.
 func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
-	if cfg.ClusterInit {
-		logger.Warn("--cluster-init is deprecated; raft servers auto-bootstrap on first start")
-	}
-
 	hd, err := resolveHome(cfg.HomeFlag)
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
@@ -115,7 +109,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	statsSignal := notify.NewSignal()
 	disp := &configDispatcher{localNodeID: nodeID, logger: logger.With("component", "dispatch"), clusterTLS: clusterTLS, tlsFilePath: hd.ClusterTLSPath(), configSignal: configSignal}
 	rawStore, err := openConfigStore(cfg.ConfigType, raftStoreOpts{
-		Home: hd, NodeID: nodeID, Init: cfg.ClusterInit, JoinAddr: cfg.JoinAddr,
+		Home: hd, NodeID: nodeID, JoinAddr: cfg.JoinAddr,
 		ClusterSrv: clusterSrv, ClusterTLS: clusterTLS,
 		Logger: logger, FSMOpts: []raftfsm.Option{raftfsm.WithOnApply(disp.Handle)},
 	})
@@ -547,7 +541,7 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	}
 
 	logger.Info("loading config", "type", cfg.ConfigType)
-	appCfg, err := ensureConfig(ctx, logger, cfgStore, cfg.Bootstrap)
+	appCfg, err := ensureConfig(ctx, logger, cfgStore)
 	if err != nil {
 		return nil, false, err
 	}
@@ -709,7 +703,7 @@ func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, c
 	}
 }
 
-func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store, bootstrap bool) (*config.Config, error) {
+func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store) (*config.Config, error) {
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return nil, err
@@ -723,12 +717,7 @@ func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Stor
 		return cfg, nil
 	}
 
-	if cfg == nil && bootstrap {
-		logger.Info("no config found, bootstrapping default configuration")
-		if err := config.Bootstrap(ctx, cfgStore); err != nil {
-			return nil, fmt.Errorf("bootstrap config: %w", err)
-		}
-	} else if ss.Auth.JWTSecret == "" {
+	if ss.Auth.JWTSecret == "" {
 		logger.Info("bootstrapping server settings (auth + query defaults)")
 		if err := config.BootstrapMinimal(ctx, cfgStore); err != nil {
 			return nil, fmt.Errorf("bootstrap minimal config: %w", err)

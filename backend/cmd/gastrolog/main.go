@@ -81,10 +81,8 @@ func main() {
 				VaultsFlag:  mustString(cmd, "vaults"),
 				ConfigType:  mustString(cmd, "config-type"),
 				ServerAddr:  mustString(cmd, "listen"),
-				Bootstrap:   mustBool(cmd, "bootstrap"),
 				NoAuth:      mustBool(cmd, "no-auth"),
 				ClusterAddr: mustString(cmd, "cluster-addr"),
-				ClusterInit: mustBool(cmd, "cluster-init"),
 				JoinAddr:    mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
 				Voteless:    mustBool(cmd, "voteless"),
@@ -104,10 +102,8 @@ func main() {
 
 	serverCmd.Flags().String("listen", ":4564", "listen address (host:port)")
 	serverCmd.Flags().String("vaults", "", "vault storage directory (default: <home>/vaults)")
-	serverCmd.Flags().Bool("bootstrap", false, "bootstrap with default config (memory store + chatterbox)")
 	serverCmd.Flags().Bool("no-auth", false, "disable authentication (all requests treated as admin)")
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
-	serverCmd.Flags().Bool("cluster-init", false, "deprecated: raft servers auto-bootstrap on first start")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
 	serverCmd.Flags().Bool("voteless", false, "join cluster as a nonvoter")

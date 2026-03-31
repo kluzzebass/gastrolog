@@ -184,31 +184,12 @@ func TestEnsureConfig_ExistingConfigWithSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := ensureConfig(ctx, discardLogger(), store, false)
+	cfg, err := ensureConfig(ctx, discardLogger(), store)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if cfg == nil {
 		t.Fatal("expected config, got nil")
-	}
-}
-
-func TestEnsureConfig_NoConfigWithBootstrap(t *testing.T) {
-	t.Parallel()
-	store := memory.NewStore()
-	ctx := context.Background()
-
-	cfg, err := ensureConfig(ctx, discardLogger(), store, true)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if cfg == nil {
-		t.Fatal("expected bootstrapped config, got nil")
-	}
-	// Should have created server settings with a JWT secret.
-	ss, _ := store.LoadServerSettings(ctx)
-	if ss.Auth.JWTSecret == "" {
-		t.Fatal("expected JWT secret after bootstrap")
 	}
 }
 
@@ -223,7 +204,7 @@ func TestEnsureConfig_ConfigWithoutSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg, err := ensureConfig(ctx, discardLogger(), store, false)
+	cfg, err := ensureConfig(ctx, discardLogger(), store)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -240,7 +221,7 @@ func TestEnsureConfig_LoadError(t *testing.T) {
 	t.Parallel()
 	store := &startupStub{loadErr: errors.New("corrupt")}
 
-	_, err := ensureConfig(context.Background(), discardLogger(), store, false)
+	_, err := ensureConfig(context.Background(), discardLogger(), store)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -345,7 +326,7 @@ func TestLoadLocalConfig_RaftWithLocalFSM(t *testing.T) {
 func TestLoadLocalConfig_MemoryBootstraps(t *testing.T) {
 	t.Parallel()
 	store := memory.NewStore()
-	cfg := RunConfig{ConfigType: "memory", Bootstrap: true}
+	cfg := RunConfig{ConfigType: "memory"}
 
 	appCfg, fromFSM, err := loadLocalConfig(context.Background(), discardLogger(), cfg, store, nil, "node1")
 	if err != nil {

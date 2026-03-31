@@ -80,198 +80,20 @@ audit:
 
 # --- Cluster development recipes ---
 
-# Removes all cluster node data directories.
-cluster-clean:
-  rm -rf data/node1 data/node2 data/node3 data/node4 data/cluster-token
 
-# Starts cluster node 1 (leader). Writes join token to data/cluster-token.
-cluster-node1:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  mkdir -p data
-  # Logs go to stderr; merge into stdout so we can tee and extract the token.
-  go run ./cmd/gastrolog server \
-    --name node-1 \
-    --home data/node1 \
-    --listen :4564 \
-    --cluster-addr :4566 2>&1 | while IFS= read -r line; do
-      echo "$line" >&2
-      if [[ "$line" == *"cluster join token"*"token="* ]]; then
-        token="${line##*token=}"
-        token="${token%% *}"
-        if [[ -n "$token" ]]; then
-          echo "$token" > data/cluster-token
-          echo ">>> join token saved to data/cluster-token" >&2
-        fi
-      fi
-    done
-
-# Starts cluster node 2 (follower). Requires node 1 to be running.
-cluster-node2:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -f data/cluster-token ]]; then
-    echo "error: data/cluster-token not found — start node 1 first (just cluster-node1)"
-    exit 1
-  fi
-  TOKEN=$(cat data/cluster-token)
-  exec go run ./cmd/gastrolog server \
-    --name node-2 \
-    --home data/node2 \
-    --listen :4574 \
-    --cluster-addr :4576 \
-    --join-addr localhost:4566 \
-    --join-token "$TOKEN"
-
-# Starts cluster node 3 (follower). Requires node 1 to be running.
-cluster-node3:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -f data/cluster-token ]]; then
-    echo "error: data/cluster-token not found — start node 1 first (just cluster-node1)"
-    exit 1
-  fi
-  TOKEN=$(cat data/cluster-token)
-  exec go run ./cmd/gastrolog server \
-    --name node-3 \
-    --home data/node3 \
-    --listen :4584 \
-    --cluster-addr :4586 \
-    --join-addr localhost:4566 \
-    --join-token "$TOKEN"
-
-# Starts cluster node 4 (nonvoter). Requires node 1 to be running.
-cluster-node4:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  if [[ ! -f data/cluster-token ]]; then
-    echo "error: data/cluster-token not found — start node 1 first (just cluster-node1)"
-    exit 1
-  fi
-  TOKEN=$(cat data/cluster-token)
-  exec go run ./cmd/gastrolog server \
-    --name node-4 \
-    --home data/node4 \
-    --listen :4594 \
-    --cluster-addr :4596 \
-    --join-addr localhost:4566 \
-    --join-token "$TOKEN" \
-    --voteless
-
-# Runs an existing cluster node 1 (no init, no enrollment).
-run-node1:
-  go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566
-
-# Runs an existing cluster node 2 (no init, no enrollment).
-run-node2:
-  go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576
-
-# Runs an existing cluster node 3 (no init, no enrollment).
-run-node3:
-  go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586
-
-# Runs an existing cluster node 4 (nonvoter, no init, no enrollment).
-run-node4:
-  go run ./cmd/gastrolog server --home data/node4 --listen :4594 --cluster-addr :4596
-
-# Runs all 4 cluster nodes in one terminal with colored output.
+# Runs an existing 4-node cluster. No init, no configuration.
 cluster-run:
-  go run ./cmd/multirun \
-    --no-fail-fast \
-    --name node1,node2,node3,node4 \
-    --tee data/cluster.log \
-    "go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566" \
-    "go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576" \
-    "go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586" \
-    "go run ./cmd/gastrolog server --home data/node4 --listen :4594 --cluster-addr :4596"
+  ../scripts/cluster.sh run
 
-# Runs all 4 cluster nodes with pprof enabled on each (node1=6060, node2=6061, etc).
+# Runs an existing 4-node cluster with pprof enabled (ports 6060-6063).
 cluster-run-pprof:
-  go run ./cmd/multirun \
-    --no-fail-fast \
-    --name node1,node2,node3,node4 \
-    "go run ./cmd/gastrolog server --home data/node1 --listen :4564 --cluster-addr :4566 --pprof localhost:6060" \
-    "go run ./cmd/gastrolog server --home data/node2 --listen :4574 --cluster-addr :4576 --pprof localhost:6061" \
-    "go run ./cmd/gastrolog server --home data/node3 --listen :4584 --cluster-addr :4586 --pprof localhost:6062" \
-    "go run ./cmd/gastrolog server --home data/node4 --listen :4594 --cluster-addr :4596 --pprof localhost:6063"
+  ../scripts/cluster.sh run --pprof
 
 # Bootstraps a fresh 4-node cluster from scratch.
-# Cleans data, starts all nodes, enrolls nodes 2-4 with node 1's join token.
+# Starts all nodes, enrolls them, configures storage/policies/vault/ingesters.
 # Runs in the foreground — Ctrl-C stops everything.
 cluster-init:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  just cluster-clean
-  mkdir -p data
-  rm -f data/cluster-token
-
-  # Start node 1 in the background. Extract join token from its log output.
-  go run ./cmd/gastrolog server \
-    --name node-1 \
-    --home data/node1 \
-    --listen :4564 \
-    --cluster-addr :4566 2>&1 | while IFS= read -r line; do
-      echo "[node1] $line"
-      if [[ "$line" == *"cluster join token"*"token="* ]]; then
-        token="${line##*token=}"
-        token="${token%% *}"
-        if [[ -n "$token" ]]; then
-          echo "$token" > data/cluster-token
-        fi
-      fi
-    done &
-  NODE1_PID=$!
-
-  # Wait for the join token (up to 30 seconds).
-  for i in $(seq 1 60); do
-    [[ -f data/cluster-token ]] && break
-    sleep 0.5
-  done
-  if [[ ! -f data/cluster-token ]]; then
-    echo ">>> error: timed out waiting for join token" >&2
-    kill $NODE1_PID 2>/dev/null || true
-    exit 1
-  fi
-  TOKEN=$(cat data/cluster-token)
-  echo ">>> Join token acquired. Starting nodes 2-4..."
-
-  # Start nodes 2-4 with --join flags. They enroll, then persist their state.
-  go run ./cmd/gastrolog server \
-    --name node-2 \
-    --home data/node2 \
-    --listen :4574 \
-    --cluster-addr :4576 \
-    --join-addr localhost:4566 \
-    --join-token "$TOKEN" 2>&1 | sed 's/^/[node2] /' &
-  NODE2_PID=$!
-
-  go run ./cmd/gastrolog server \
-    --name node-3 \
-    --home data/node3 \
-    --listen :4584 \
-    --cluster-addr :4586 \
-    --join-addr localhost:4566 \
-    --join-token "$TOKEN" 2>&1 | sed 's/^/[node3] /' &
-  NODE3_PID=$!
-
-  go run ./cmd/gastrolog server \
-    --name node-4 \
-    --home data/node4 \
-    --listen :4594 \
-    --cluster-addr :4596 \
-    --join-addr localhost:4566 \
-    --join-token "$TOKEN" \
-    --voteless 2>&1 | sed 's/^/[node4] /' &
-  NODE4_PID=$!
-
-  shutdown() {
-    echo ""
-    echo ">>> Shutting down cluster..."
-    kill -INT $NODE1_PID $NODE2_PID $NODE3_PID $NODE4_PID 2>/dev/null
-    wait
-  }
-  trap shutdown INT TERM
-  wait
+  ../scripts/cluster.sh init
 
 # Dumps heap profile for a node and shows top allocators. Usage: just heap-profile 1
 heap-profile node="1":
