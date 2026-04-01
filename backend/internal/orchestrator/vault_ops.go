@@ -210,6 +210,12 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
+	// Block appends to tiers that are draining.
+	if _, draining := o.tierDraining[tierDrainKey(vaultID, tierID)]; draining {
+		o.mu.RUnlock()
+		return ErrTierDraining
+	}
+
 	for _, tier := range vault.Tiers {
 		if tier.TierID != tierID {
 			continue

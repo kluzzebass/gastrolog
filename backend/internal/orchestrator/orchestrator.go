@@ -208,6 +208,9 @@ type Orchestrator struct {
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
 	draining map[uuid.UUID]*drainState
 
+	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress tier drains).
+	tierDraining map[string]*tierDrainState
+
 	// Retention runners (keyed by tierID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 
@@ -311,8 +314,9 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
 		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
 		ingesterMeta:    make(map[uuid.UUID]ingesterInfo),
-		draining:        make(map[uuid.UUID]*drainState),
-		retention: make(map[string]*retentionRunner),
+		draining:     make(map[uuid.UUID]*drainState),
+		tierDraining: make(map[string]*tierDrainState),
+		retention:    make(map[string]*retentionRunner),
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,

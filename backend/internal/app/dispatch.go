@@ -32,6 +32,7 @@ type orchActions interface {
 	EnableVault(id uuid.UUID) error
 	ForceRemoveVault(id uuid.UUID) error
 	RemoveTierFromVault(vaultID, tierID uuid.UUID) bool
+	DrainTier(ctx context.Context, vaultID, tierID uuid.UUID, mode orchestrator.TierDrainMode, targetNodeID string) error
 	UnregisterVault(id uuid.UUID) error
 	HasMissingTiers(vaultID uuid.UUID, tierIDs []uuid.UUID) bool
 	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
@@ -372,11 +373,11 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		if tierBelongsHere {
 			d.rebuildVaultIfTierMissing(ctx, v, tierID)
 		} else if slices.Contains(d.orch.ListVaults(), v.ID) {
-			// This node no longer owns this tier — remove it (but keep the
-			// vault if it has other tiers that belong here).
-			if d.orch.RemoveTierFromVault(v.ID, tierID) {
-				d.logger.Info("dispatch: removed stale tier",
-					"vault", v.ID, "tier", tierID)
+			// This node no longer owns this tier — drain to the new owner.
+			if err := d.orch.DrainTier(ctx, v.ID, tierID, orchestrator.TierDrainRebalance, leaderNodeID); err != nil {
+				d.logger.Warn("dispatch: tier rebalance drain failed, removing immediately",
+					"vault", v.ID, "tier", tierID, "error", err)
+				d.orch.RemoveTierFromVault(v.ID, tierID)
 			}
 		}
 	}
@@ -546,13 +547,6 @@ func (d *configDispatcher) reconcileTierRaftGroup(tierID uuid.UUID, tierCfg *con
 }
 
 func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UUID) {
-	// Destroy the tier's Raft group if one exists.
-	if d.factories.GroupManager != nil {
-		if err := d.factories.GroupManager.DestroyGroup(tierID.String()); err != nil {
-			d.logger.Debug("dispatch: destroy tier raft group (may not exist)", "tier", tierID, "error", err)
-		}
-	}
-
 	vaults, err := d.cfgStore.ListVaults(ctx)
 	if err != nil {
 		d.logger.Error("dispatch: list vaults for tier deletion", "tier", tierID, "error", err)
@@ -563,14 +557,23 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UU
 		if !slices.Contains(v.TierIDs, tierID) {
 			continue
 		}
-		if slices.Contains(d.orch.ListVaults(), v.ID) {
-			// Vault references a deleted tier — rebuild to pick up the change.
-			if err := d.orch.UnregisterVault(v.ID); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-				d.logger.Error("dispatch: unregister vault for deleted tier", "vault", v.ID, "error", err)
-			}
-			if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
-				d.logger.Error("dispatch: re-add vault after tier deletion", "vault", v.ID, "error", err)
-			}
+		if !slices.Contains(d.orch.ListVaults(), v.ID) {
+			continue
+		}
+		// Drain the tier gracefully (transition chunks to next tier) before removing.
+		if err := d.orch.DrainTier(ctx, v.ID, tierID, orchestrator.TierDrainDecommission, ""); err != nil {
+			d.logger.Warn("dispatch: tier drain failed, removing immediately",
+				"vault", v.ID, "tier", tierID, "error", err)
+			// Fall back to immediate removal.
+			d.orch.RemoveTierFromVault(v.ID, tierID)
+		}
+	}
+
+	// Destroy the tier's Raft group after drain completes or on fallback.
+	// The drain's finishTierDrain will also call RemoveTierFromVault.
+	if d.factories.GroupManager != nil {
+		if err := d.factories.GroupManager.DestroyGroup(tierID.String()); err != nil {
+			d.logger.Debug("dispatch: destroy tier raft group (may not exist)", "tier", tierID, "error", err)
 		}
 	}
 }

@@ -1,0 +1,336 @@
+package orchestrator
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
+
+	"github.com/google/uuid"
+)
+
+// TierDrainMode determines where chunks go during a tier drain.
+type TierDrainMode int
+
+const (
+	// TierDrainDecommission transitions chunks to the next tier in the vault chain.
+	TierDrainDecommission TierDrainMode = iota
+	// TierDrainRebalance replicates chunks to the same tier on a different node.
+	TierDrainRebalance
+)
+
+// tierDrainState tracks an in-progress tier drain.
+type tierDrainState struct {
+	VaultID      uuid.UUID
+	TierID       uuid.UUID
+	Mode         TierDrainMode
+	TargetNodeID string             // only for rebalance mode
+	JobID        string
+	Cancel       context.CancelFunc
+}
+
+// ErrTierDraining is returned when an operation targets a tier that is mid-drain.
+var ErrTierDraining = errors.New("tier is draining")
+
+// tierDrainKey returns the map key for the tierDraining map.
+func tierDrainKey(vaultID, tierID uuid.UUID) string {
+	return vaultID.String() + ":" + tierID.String()
+}
+
+// DrainTier starts an async drain of a tier's chunks. In decommission mode,
+// chunks transition to the next tier in the vault chain. In rebalance mode,
+// chunks replicate to the same tier on the target node.
+func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID uuid.UUID, mode TierDrainMode, targetNodeID string) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config for tier drain: %w", err)
+	}
+
+	o.mu.Lock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+
+	key := tierDrainKey(vaultID, tierID)
+	if _, already := o.tierDraining[key]; already {
+		o.mu.Unlock()
+		return fmt.Errorf("tier %s in vault %s is already draining", tierID, vaultID)
+	}
+
+	// Find the tier instance.
+	var tier *TierInstance
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID {
+			tier = t
+			break
+		}
+	}
+	if tier == nil {
+		o.mu.Unlock()
+		return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+	}
+
+	// Validate mode-specific requirements.
+	switch mode {
+	case TierDrainDecommission:
+		_, _, err := resolveNextTierInChain(cfg, vaultID, tierID)
+		if err != nil {
+			o.mu.Unlock()
+			// Terminal tier — just expire all chunks instead of transitioning.
+			// That's fine, we'll handle it in the worker.
+		}
+	case TierDrainRebalance:
+		if targetNodeID == "" {
+			o.mu.Unlock()
+			return errors.New("target node required for rebalance drain")
+		}
+		if o.transferrer == nil {
+			o.mu.Unlock()
+			return errors.New("no remote transferrer configured (single-node mode)")
+		}
+	}
+
+	// Mark as draining.
+	drainCtx, cancel := context.WithCancel(context.Background())
+	ds := &tierDrainState{
+		VaultID:      vaultID,
+		TierID:       tierID,
+		Mode:         mode,
+		TargetNodeID: targetNodeID,
+		Cancel:       cancel,
+	}
+	o.tierDraining[key] = ds
+
+	// Remove retention/rotation jobs for this tier so they don't interfere.
+	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
+
+	// Seal the active chunk.
+	cm := tier.Chunks
+	o.mu.Unlock()
+
+	if active := cm.Active(); active != nil {
+		if err := cm.Seal(); err != nil {
+			o.logger.Warn("tier drain: failed to seal active chunk",
+				"vault", vaultID, "tier", tierID, "error", err)
+		}
+	}
+
+	// Submit async drain job.
+	jobName := fmt.Sprintf("drain-tier:%s:%s", vaultID, tierID)
+	jobID := o.scheduler.Submit(jobName, func(ctx2 context.Context, job *JobProgress) {
+		o.tierDrainWorker(drainCtx, vaultID, tierID, mode, targetNodeID)
+	})
+	o.scheduler.Describe(jobName, fmt.Sprintf("Drain tier %s from vault", tierID))
+
+	o.mu.Lock()
+	if d, ok := o.tierDraining[key]; ok {
+		d.JobID = jobID
+	}
+	o.mu.Unlock()
+
+	o.logger.Info("tier drain started",
+		"vault", vaultID, "tier", tierID,
+		"mode", drainModeName(mode), "target", targetNodeID)
+	return nil
+}
+
+// tierDrainWorker is the async job that transfers all chunks and cleans up.
+func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid.UUID, mode TierDrainMode, targetNodeID string) {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		o.logger.Error("tier drain: failed to load config", "vault", vaultID, "tier", tierID, "error", err)
+		return
+	}
+
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.RUnlock()
+		o.finishTierDrain(vaultID, tierID)
+		return
+	}
+	var tier *TierInstance
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID {
+			tier = t
+			break
+		}
+	}
+	o.mu.RUnlock()
+
+	if tier == nil {
+		o.finishTierDrain(vaultID, tierID)
+		return
+	}
+
+	// Transfer all sealed chunks.
+	if !o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID) {
+		return // context cancelled or error
+	}
+
+	// Final seal to catch any stragglers.
+	if active := tier.Chunks.Active(); active != nil {
+		_ = tier.Chunks.Seal()
+		// Drain the newly sealed chunk.
+		o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID)
+	}
+
+	o.finishTierDrain(vaultID, tierID)
+}
+
+// drainTierChunks transfers all sealed chunks from the tier. Returns false if cancelled.
+func (o *Orchestrator) drainTierChunks(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, tier *TierInstance, mode TierDrainMode, targetNodeID string) bool {
+	metas, err := tier.Chunks.List()
+	if err != nil {
+		o.logger.Error("tier drain: list chunks failed", "vault", vaultID, "tier", tierID, "error", err)
+		return false
+	}
+
+	for _, meta := range metas {
+		if !meta.Sealed {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		default:
+		}
+
+		if err := o.drainOneChunk(ctx, cfg, vaultID, tierID, tier, meta.ID, mode, targetNodeID); err != nil {
+			o.logger.Error("tier drain: chunk transfer failed",
+				"vault", vaultID, "tier", tierID, "chunk", meta.ID, "error", err)
+			continue // best effort — try the rest
+		}
+	}
+	return true
+}
+
+// drainOneChunk transfers a single chunk and deletes the source.
+func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
+	cursor, err := tier.Chunks.OpenCursor(chunkID)
+	if err != nil {
+		return fmt.Errorf("open cursor: %w", err)
+	}
+	defer func() { _ = cursor.Close() }()
+
+	switch mode {
+	case TierDrainDecommission:
+		if err := o.drainChunkToNextTier(ctx, cfg, vaultID, tierID, cursor); err != nil {
+			return err
+		}
+
+	case TierDrainRebalance:
+		if err := o.transferrer.ReplicateSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, chunk.CursorIterator(cursor)); err != nil {
+			return fmt.Errorf("replicate to target node: %w", err)
+		}
+	}
+
+	// Delete source chunk.
+	if tier.Indexes != nil {
+		_ = tier.Indexes.DeleteIndexes(chunkID)
+	}
+	if err := tier.Chunks.Delete(chunkID); err != nil {
+		return fmt.Errorf("delete source chunk: %w", err)
+	}
+
+	o.logger.Info("tier drain: chunk transferred",
+		"vault", vaultID, "tier", tierID, "chunk", chunkID, "mode", drainModeName(mode))
+	return nil
+}
+
+// finishTierDrain cleans up after a completed or cancelled tier drain.
+func (o *Orchestrator) finishTierDrain(vaultID, tierID uuid.UUID) {
+	key := tierDrainKey(vaultID, tierID)
+
+	o.mu.Lock()
+	ds, ok := o.tierDraining[key]
+	if ok {
+		delete(o.tierDraining, key)
+		if ds.Cancel != nil {
+			ds.Cancel()
+		}
+	}
+	o.mu.Unlock()
+
+	// Remove the tier instance (closes managers, deletes remaining data).
+	if o.RemoveTierFromVault(vaultID, tierID) {
+		o.logger.Info("tier drain: completed",
+			"vault", vaultID, "tier", tierID)
+	}
+}
+
+// CancelTierDrain aborts an in-progress tier drain. The tier remains in the
+// vault with whatever chunks haven't been transferred yet.
+func (o *Orchestrator) CancelTierDrain(vaultID, tierID uuid.UUID) error {
+	key := tierDrainKey(vaultID, tierID)
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	ds, ok := o.tierDraining[key]
+	if !ok {
+		return fmt.Errorf("tier %s in vault %s is not draining", tierID, vaultID)
+	}
+
+	ds.Cancel()
+	delete(o.tierDraining, key)
+	o.scheduler.RemoveJob(ds.JobID)
+
+	o.logger.Info("tier drain: cancelled", "vault", vaultID, "tier", tierID)
+	return nil
+}
+
+// IsTierDraining returns true if the given tier is currently draining.
+func (o *Orchestrator) IsTierDraining(vaultID, tierID uuid.UUID) bool {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	_, ok := o.tierDraining[tierDrainKey(vaultID, tierID)]
+	return ok
+}
+
+// drainChunkToNextTier streams a chunk to the next tier in the vault chain.
+// If the tier is terminal, returns nil (chunk will just be deleted).
+func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, cursor chunk.RecordCursor) error {
+	nextTierID, nextTierCfg, _ := resolveNextTierInChain(cfg, vaultID, tierID)
+	if nextTierCfg == nil {
+		return nil // terminal tier — caller deletes the chunk
+	}
+	nextLeader := nextTierCfg.LeaderNodeID(cfg.NodeStorageConfigs)
+	remote := nextLeader != "" && nextLeader != o.localNodeID
+
+	if remote {
+		if o.transferrer == nil {
+			return errors.New("no transferrer for remote transition")
+		}
+		return o.transferrer.StreamToTier(ctx, nextLeader, vaultID, nextTierID, chunk.CursorIterator(cursor))
+	}
+
+	iter := chunk.CursorIterator(cursor)
+	for {
+		rec, iterErr := iter()
+		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if iterErr != nil {
+			return fmt.Errorf("read chunk: %w", iterErr)
+		}
+		if err := o.AppendToTier(vaultID, nextTierID, chunk.ChunkID{}, rec); err != nil {
+			return fmt.Errorf("append to next tier: %w", err)
+		}
+	}
+}
+
+func drainModeName(m TierDrainMode) string {
+	switch m {
+	case TierDrainDecommission:
+		return "decommission"
+	case TierDrainRebalance:
+		return "rebalance"
+	default:
+		return "unknown"
+	}
+}

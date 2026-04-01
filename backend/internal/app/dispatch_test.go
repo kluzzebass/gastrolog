@@ -116,6 +116,9 @@ func (m *mockOrch) ForceRemoveVault(id uuid.UUID) error {
 	return m.forceRemoveErr
 }
 func (m *mockOrch) RemoveTierFromVault(_, _ uuid.UUID) bool { return false }
+func (m *mockOrch) DrainTier(_ context.Context, _, _ uuid.UUID, _ orchestrator.TierDrainMode, _ string) error {
+	return nil
+}
 func (m *mockOrch) UnregisterVault(id uuid.UUID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr
