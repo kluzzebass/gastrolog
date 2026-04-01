@@ -2516,11 +2516,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		return fmt.Errorf("upload GLCB: %w", err)
 	}
 
-	// Get the uploaded blob size for metadata.
-	info, err := m.cfg.CloudStore.Head(context.Background(), key)
-	if err != nil {
-		m.logger.Warn("failed to head after cloud upload", "chunk", id, "error", err)
-	}
+	blobSize := int64(buf.Len())
 
 	// Delete local chunk directory.
 	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
@@ -2534,7 +2530,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
-		meta.diskBytes = info.Size
+		meta.diskBytes = blobSize
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
 		meta.sourceIdxOffset = toc.SourceIdxOffset
@@ -2564,7 +2560,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	m.logger.Info("chunk uploaded to cloud",
 		"chunk", id,
-		"bytes", info.Size,
+		"bytes", blobSize,
 	)
 	return nil
 }

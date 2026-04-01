@@ -48,6 +48,10 @@ type RemoteReader struct {
 // Only downloads the header/dict/record index at creation time (small, contiguous).
 // Record data is fetched on demand via seekable zstd + range requests.
 func NewRemoteReader(store blobstore.Store, key string, blobSize int64) (*RemoteReader, error) {
+	if blobSize < headerSize+tocSize {
+		return nil, fmt.Errorf("blob too small (%d bytes, need at least %d)", blobSize, headerSize+tocSize)
+	}
+
 	// --- Read header (96 bytes) via range request ---
 	hdrBuf, err := downloadBytes(store, key, 0, headerSize)
 	if err != nil {
