@@ -6,6 +6,7 @@ import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/
 import {
   usePutVault,
   useDeleteVault,
+  useDeleteTier,
   useSealVault,
   useReindexVault,
   useMigrateVault,
@@ -106,7 +107,9 @@ export function VaultSettingsCard({
   const c = useThemeClass(dark);
   const putVault = usePutVault();
   const putTier = usePutTier();
+  const deleteTier = useDeleteTier();
   const deleteVault = useDeleteVault();
+  const [confirmRemoveTier, setConfirmRemoveTier] = useState<string | null>(null);
   const seal = useSealVault();
   const reindex = useReindexVault();
   const migrate = useMigrateVault();
@@ -122,10 +125,16 @@ export function VaultSettingsCard({
   const [activeJob, setActiveJob] = useState<{ jobId: string; label: string } | null>(null);
 
   // All vault+tier edits in one place. Initialized from props, reset on cancel/save.
+  interface TierRemoval {
+    tierId: string;
+    drain: boolean; // true = drain to next tier, false = delete data immediately
+  }
+
   interface VaultEdit {
     name: string;
     enabled: boolean;
     tierIds: string[];
+    tierRemovals: TierRemoval[];             // staged tier removals (executed on save)
     tierRotation: Record<string, string>;    // tierId → rotationPolicyId
     tierRetention: Record<string, string>;   // tierId → retentionPolicyId
     tierRF: Record<string, string>;          // tierId → replicationFactor (string during editing)
@@ -138,6 +147,7 @@ export function VaultSettingsCard({
     name: vault.name,
     enabled: vault.enabled,
     tierIds: [...vault.tierIds],
+    tierRemovals: [],
     tierRotation: Object.fromEntries(
       tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.rotationPolicyId]),
     ),
@@ -316,12 +326,39 @@ export function VaultSettingsCard({
         : [];
       await putTier.mutateAsync({ config: updated });
     }
-    // Save vault-level changes (name, enabled, tier order).
-    const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
-      JSON.stringify(newTierIds) !== JSON.stringify([...vault.tierIds]);
-    if (vaultChanged) {
-      saveVault(vault.id, { name: edit.name, tierIds: newTierIds, enabled: edit.enabled });
+    // Execute staged tier removals BEFORE the vault save.
+    // deleteTier handles removing the tier from the vault's tier list:
+    //   drain=false → backend removes immediately
+    //   drain=true  → drain completion removes asynchronously
+    for (const removal of edit.tierRemovals) {
+      try {
+        await deleteTier.mutateAsync({ id: removal.tierId, drain: removal.drain });
+      } catch (err: unknown) {
+        const action = removal.drain ? "drain" : "delete";
+        const msg = err instanceof Error ? err.message : `Failed to ${action} tier`;
+        addToast(msg, "error");
+      }
     }
+
+    // For the vault save, keep drain-removal tiers in the tier list — the
+    // tier must remain in the vault during the async drain. Delete removals
+    // are already handled by the backend (deleteTier removes them).
+    const drainTierIds = new Set(edit.tierRemovals.filter((r) => r.drain).map((r) => r.tierId));
+    // Reconstruct: original order, minus delete-only removals.
+    const saveTierIds = vault.tierIds.filter((id) =>
+      newTierIds.includes(id) || drainTierIds.has(id),
+    );
+    // Append any newly-created tiers (not in the original list).
+    for (const id of newTierIds) {
+      if (!saveTierIds.includes(id)) saveTierIds.push(id);
+    }
+
+    const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
+      JSON.stringify(saveTierIds) !== JSON.stringify([...vault.tierIds]);
+    if (vaultChanged) {
+      saveVault(vault.id, { name: edit.name, tierIds: saveTierIds, enabled: edit.enabled });
+    }
+
     // Mark for reset — the next props update will sync edit state.
     setPendingReset(true);
   };
@@ -547,15 +584,58 @@ export function VaultSettingsCard({
                           {"\u25BC"}
                         </button>
                       </div>
-                      <button
-                        onClick={() => setLocalTierIds(localTierIds.filter((id) => id !== tier.id))}
-                        className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                          "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                          "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
-                        )}`}
-                      >
-                        Remove
-                      </button>
+                      {confirmRemoveTier === tier.id ? (
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}>
+                            Remove tier?
+                          </span>
+                          {i < vaultTiers.length - 1 && (
+                            <button
+                              onClick={() => {
+                                setEdit({
+                                  tierIds: localTierIds.filter((id) => id !== tier.id),
+                                  tierRemovals: [...edit.tierRemovals, { tierId: tier.id, drain: true }],
+                                });
+                                setConfirmRemoveTier(null);
+                              }}
+                              className="px-2 py-1 text-[0.7em] rounded bg-copper/15 text-copper hover:bg-copper/25 transition-colors"
+                            >
+                              Drain
+                            </button>
+                          )}
+                          <button
+                            onClick={() => {
+                              setEdit({
+                                tierIds: localTierIds.filter((id) => id !== tier.id),
+                                tierRemovals: [...edit.tierRemovals, { tierId: tier.id, drain: false }],
+                              });
+                              setConfirmRemoveTier(null);
+                            }}
+                            className="px-2 py-1 text-[0.7em] rounded bg-severity-error/15 text-severity-error hover:bg-severity-error/25 transition-colors"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            onClick={() => setConfirmRemoveTier(null)}
+                            className={`px-2 py-1 text-[0.7em] rounded transition-colors ${c(
+                              "text-text-muted hover:bg-ink-hover",
+                              "text-light-text-muted hover:bg-light-hover",
+                            )}`}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmRemoveTier(tier.id)}
+                          className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
+                            "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
+                            "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                          )}`}
+                        >
+                          Remove
+                        </button>
+                      )}
                     </div>
                     <div className={`flex items-center gap-3 pl-6 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                       {nodeName && <span>{"node: " + nodeName}</span>}
@@ -668,7 +748,11 @@ export function VaultSettingsCard({
                             onChange={(v) => setTierRF(tier.id, v)}
                             dark={dark}
                             min={1}
-                            max={maxRFForTier(tier)}
+                            max={maxRFForTier({
+                              type: tier.type,
+                              storageClass: parseInt(edit.tierStorageClass[tier.id] ?? String(tier.storageClass || 0), 10) || 0,
+                              activeChunkClass: parseInt(edit.tierActiveChunkClass[tier.id] ?? String(tier.activeChunkClass || 0), 10) || 0,
+                            })}
                           />
                         </FormField>
                       )}
@@ -689,6 +773,11 @@ export function VaultSettingsCard({
               retentionPolicyOptions={retentionPolicyOptions}
               nodeOptions={nodeConfigs.map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
               vaultName={vault.name || ""}
+              maxRF={maxRFForTier({
+                type: tierTypeEnum(newTier.type),
+                storageClass: parseInt(newTier.storageClass, 10) || 0,
+                activeChunkClass: parseInt(newTier.activeChunkClass, 10) || 0,
+              })}
               onUpdate={(patch) => setNewTier((t) => t ? { ...t, ...patch } : t)}
               onRemove={() => setNewTier(null)}
             />

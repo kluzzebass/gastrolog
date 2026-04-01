@@ -140,7 +140,7 @@ type Store interface {
 	GetTier(ctx context.Context, id uuid.UUID) (*TierConfig, error)
 	ListTiers(ctx context.Context) ([]TierConfig, error)
 	PutTier(ctx context.Context, tier TierConfig) error
-	DeleteTier(ctx context.Context, id uuid.UUID) error
+	DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error
 
 	// Node storage (per-node)
 	GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error)

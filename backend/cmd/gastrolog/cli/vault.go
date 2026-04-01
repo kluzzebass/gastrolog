@@ -109,32 +109,49 @@ func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
 func newVaultCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a vault",
+		Short: "Create or update a vault",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			tierIDs, _ := cmd.Flags().GetStringSlice("tier")
-			enabled, _ := cmd.Flags().GetBool("enabled")
 
 			client := clientFromCmd(cmd)
+			ctx := context.Background()
 
-			id := uuid.Must(uuid.NewV7()).String()
-			_, err := client.Config.PutVault(context.Background(), connect.NewRequest(&v1.PutVaultRequest{
-				Config: &v1.VaultConfig{
-					Id:      id,
-					Name:    name,
-					Enabled: enabled,
-					TierIds: tierIDs,
-				},
+			cfg := &v1.VaultConfig{
+				Id:      uuid.Must(uuid.NewV7()).String(),
+				Name:    name,
+				Enabled: true,
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			for _, v := range resp.Msg.Vaults {
+				if v.Name == name {
+					cfg = v
+					verb = "Updated"
+					break
+				}
+			}
+
+			if cmd.Flags().Changed("enabled") {
+				cfg.Enabled, _ = cmd.Flags().GetBool("enabled")
+			}
+
+			_, err = client.Config.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created vault %q (%s)\n", name, id)
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s vault %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}
 	cmd.Flags().String("name", "", "vault name (required)")
-	cmd.Flags().StringSlice("tier", nil, "tier ID (repeatable, required)")
 	cmd.Flags().Bool("enabled", true, "enable the vault")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd

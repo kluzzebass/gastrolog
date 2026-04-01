@@ -338,6 +338,7 @@ message TierPlacementEntry {
 
 message DeleteTierCommand {
   string id = 1;
+  bool drain = 2; // When true, drain chunks to the next tier before deleting.
 }
 
 // --- Snapshot ---

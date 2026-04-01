@@ -1770,7 +1770,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 			t.Fatalf("Put: %v", err)
 		}
 
-		if err := s.DeleteTier(ctx, id); err != nil {
+		if err := s.DeleteTier(ctx, id, false); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
@@ -1783,7 +1783,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteTier(ctx, uuid.Must(uuid.NewV7())); err != nil {
+		if err := s.DeleteTier(ctx, uuid.Must(uuid.NewV7()), false); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})

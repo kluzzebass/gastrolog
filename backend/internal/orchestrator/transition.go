@@ -72,42 +72,43 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		"next_tier", nextTierID, "remote", remote)
 }
 
-// resolveNextTier finds the next tier in the vault's chain after this runner's tier.
-// Returns the next tier's ID and config, or nil if this is the terminal tier.
+// resolveNextTier delegates to resolveNextTierInChain.
 func (r *retentionRunner) resolveNextTier(cfg *config.Config) (uuid.UUID, *config.TierConfig) {
+	nextID, nextCfg, err := resolveNextTierInChain(cfg, r.vaultID, r.tierID)
+	if err != nil {
+		r.logger.Warn("transition: "+err.Error(), "vault", r.vaultID, "tier", r.tierID)
+	}
+	return nextID, nextCfg
+}
+
+// resolveNextTierInChain finds the next tier in a vault's chain after the given tier.
+// Returns an error string if the tier is terminal or not found.
+func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid.UUID, *config.TierConfig, error) {
 	var vaultCfg *config.VaultConfig
 	for i := range cfg.Vaults {
-		if cfg.Vaults[i].ID == r.vaultID {
+		if cfg.Vaults[i].ID == vaultID {
 			vaultCfg = &cfg.Vaults[i]
 			break
 		}
 	}
 	if vaultCfg == nil {
-		r.logger.Error("transition: vault not found in config",
-			"vault", r.vaultID, "tier", r.tierID)
-		return uuid.UUID{}, nil
+		return uuid.UUID{}, nil, fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
-	idx := slices.Index(vaultCfg.TierIDs, r.tierID)
+	idx := slices.Index(vaultCfg.TierIDs, tierID)
 	if idx < 0 {
-		r.logger.Error("transition: tier not found in vault's tier chain",
-			"vault", r.vaultID, "tier", r.tierID)
-		return uuid.UUID{}, nil
+		return uuid.UUID{}, nil, fmt.Errorf("tier %s not found in vault's tier chain", tierID)
 	}
 	if idx == len(vaultCfg.TierIDs)-1 {
-		r.logger.Warn("transition: terminal tier has no next tier, skipping",
-			"vault", r.vaultID, "tier", r.tierID)
-		return uuid.UUID{}, nil
+		return uuid.UUID{}, nil, errors.New("terminal tier has no next tier")
 	}
 
 	nextTierID := vaultCfg.TierIDs[idx+1]
 	nextTierCfg := findTierConfig(cfg.Tiers, nextTierID)
 	if nextTierCfg == nil {
-		r.logger.Error("transition: next tier config not found",
-			"vault", r.vaultID, "tier", r.tierID, "next_tier", nextTierID)
-		return uuid.UUID{}, nil
+		return uuid.UUID{}, nil, fmt.Errorf("next tier %s config not found", nextTierID)
 	}
-	return nextTierID, nextTierCfg
+	return nextTierID, nextTierCfg, nil
 }
 
 // streamLocal appends records from a cursor to a local tier via AppendToTier.

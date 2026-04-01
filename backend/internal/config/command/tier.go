@@ -54,10 +54,10 @@ func NewPutTier(tier config.TierConfig) *gastrologv1.ConfigCommand {
 }
 
 // NewDeleteTier creates a ConfigCommand for DeleteTier.
-func NewDeleteTier(id uuid.UUID) *gastrologv1.ConfigCommand {
+func NewDeleteTier(id uuid.UUID, drain bool) *gastrologv1.ConfigCommand {
 	return &gastrologv1.ConfigCommand{
 		Command: &gastrologv1.ConfigCommand_DeleteTier{
-			DeleteTier: &gastrologv1.DeleteTierCommand{Id: id.String()},
+			DeleteTier: &gastrologv1.DeleteTierCommand{Id: id.String(), Drain: drain},
 		},
 	}
 }

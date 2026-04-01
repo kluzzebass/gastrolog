@@ -89,6 +89,11 @@ type mockOrch struct {
 	unregisterErr       error
 	removeIngesterIDs   []uuid.UUID // IDs passed to RemoveIngester
 	reloadFiltersCalls  int         // number of ReloadFilters calls
+
+	// Tier drain tracking.
+	tierDrainCalls      []uuid.UUID                                                  // tier IDs passed to DrainTier
+	removeTierCalls     [][2]uuid.UUID                                               // [vaultID, tierID] pairs passed to RemoveTierFromVault
+	localTierExported   func(vaultID, tierID uuid.UUID) *orchestrator.TierInstance   // configurable return
 }
 
 func (m *mockOrch) ListVaults() []uuid.UUID    { return m.vaults }
@@ -115,12 +120,23 @@ func (m *mockOrch) ForceRemoveVault(id uuid.UUID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
 }
-func (m *mockOrch) RemoveTierFromVault(_, _ uuid.UUID) bool { return false }
+func (m *mockOrch) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
+	m.removeTierCalls = append(m.removeTierCalls, [2]uuid.UUID{vaultID, tierID})
+	return true
+}
+func (m *mockOrch) DrainTier(_ context.Context, _, tierID uuid.UUID, _ orchestrator.TierDrainMode, _ string) error {
+	m.tierDrainCalls = append(m.tierDrainCalls, tierID)
+	return nil
+}
 func (m *mockOrch) UnregisterVault(id uuid.UUID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr
 }
 func (m *mockOrch) HasMissingTiers(_ uuid.UUID, _ []uuid.UUID) bool { return false }
+func (m *mockOrch) LocalTierIDs(_ uuid.UUID) []uuid.UUID             { return nil }
+func (m *mockOrch) AddTierToVault(_ context.Context, _, _ uuid.UUID, _ orchestrator.Factories) error {
+	return nil
+}
 func (m *mockOrch) DrainVault(_ context.Context, id uuid.UUID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)
 	return m.drainVaultErr
@@ -141,13 +157,15 @@ func (m *mockOrch) AddIngester(uuid.UUID, string, string, orchestrator.Ingester)
 }
 
 // stubCfgStore implements config.Store with configurable returns for the
-// four methods the dispatcher reads. The nil-embedded interface panics on
+// methods the dispatcher reads. The nil-embedded interface panics on
 // any other method call — a deliberate test safety net.
 type stubCfgStore struct {
 	config.Store // nil embed — panics on uncalled methods
 
 	vault       *config.VaultConfig
 	vaultErr    error
+	vaultList   []config.VaultConfig
+	vaultListErr error
 	ingester    *config.IngesterConfig
 	ingesterErr error
 	settings    config.ServerSettings
@@ -158,6 +176,9 @@ type stubCfgStore struct {
 
 func (s *stubCfgStore) GetVault(context.Context, uuid.UUID) (*config.VaultConfig, error) {
 	return s.vault, s.vaultErr
+}
+func (s *stubCfgStore) ListVaults(context.Context) ([]config.VaultConfig, error) {
+	return s.vaultList, s.vaultListErr
 }
 func (s *stubCfgStore) GetIngester(context.Context, uuid.UUID) (*config.IngesterConfig, error) {
 	return s.ingester, s.ingesterErr
@@ -239,7 +260,7 @@ func TestHandle_VaultPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // no error → AddVault succeeds
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
+			vault: &config.VaultConfig{ID: id, Enabled: true, TierIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -253,7 +274,7 @@ func TestHandle_VaultPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
+			vault: &config.VaultConfig{ID: id, Enabled: true, TierIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -794,6 +815,118 @@ func TestHandle_VaultDrain(t *testing.T) {
 	})
 }
 
-func (m *mockOrch) FindLocalTierExported(_ uuid.UUID, _ uuid.UUID) *orchestrator.TierInstance {
+func (m *mockOrch) FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrator.TierInstance {
+	if m.localTierExported != nil {
+		return m.localTierExported(vaultID, tierID)
+	}
 	return nil
+}
+
+// TestHandleTierDeleted_DrainOnlyOnLeader verifies that when a tier is deleted
+// with drain=true, only the config leader for that tier initiates a drain.
+// Follower nodes should immediately remove their local tier instance.
+func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+
+	t.Run("leader_drains", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults: []uuid.UUID{vaultID},
+			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+				return &orchestrator.TierInstance{
+					TierID:     tierID,
+					IsFollower: false, // this node is the leader
+				}
+			},
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
+
+		if len(mo.tierDrainCalls) != 1 {
+			t.Fatalf("expected 1 DrainTier call, got %d", len(mo.tierDrainCalls))
+		}
+		if mo.tierDrainCalls[0] != tierID {
+			t.Fatalf("DrainTier called with wrong tier: %s", mo.tierDrainCalls[0])
+		}
+		if len(mo.removeTierCalls) != 0 {
+			t.Fatalf("leader should not call RemoveTierFromVault, got %d calls", len(mo.removeTierCalls))
+		}
+	})
+
+	t.Run("follower_removes_immediately", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults: []uuid.UUID{vaultID},
+			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+				return &orchestrator.TierInstance{
+					TierID:       tierID,
+					IsFollower:   true,
+					LeaderNodeID: "other-node",
+				}
+			},
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
+
+		if len(mo.tierDrainCalls) != 0 {
+			t.Fatalf("follower should not drain, got %d DrainTier calls", len(mo.tierDrainCalls))
+		}
+		if len(mo.removeTierCalls) != 1 {
+			t.Fatalf("expected 1 RemoveTierFromVault call, got %d", len(mo.removeTierCalls))
+		}
+	})
+
+	t.Run("no_local_tier_removes_nothing", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults: []uuid.UUID{vaultID},
+			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+				return nil // this node doesn't host the tier
+			},
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
+
+		if len(mo.tierDrainCalls) != 0 {
+			t.Fatalf("node without tier should not drain, got %d calls", len(mo.tierDrainCalls))
+		}
+		if len(mo.removeTierCalls) != 0 {
+			t.Fatalf("node without tier should not remove, got %d calls", len(mo.removeTierCalls))
+		}
+	})
+
+	t.Run("non_drain_always_removes", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{
+			vaults: []uuid.UUID{vaultID},
+			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+				return &orchestrator.TierInstance{
+					TierID:     tierID,
+					IsFollower: false,
+				}
+			},
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: false})
+
+		if len(mo.tierDrainCalls) != 0 {
+			t.Fatalf("non-drain delete should not call DrainTier, got %d calls", len(mo.tierDrainCalls))
+		}
+		if len(mo.removeTierCalls) != 1 {
+			t.Fatalf("expected 1 RemoveTierFromVault call, got %d", len(mo.removeTierCalls))
+		}
+	})
 }

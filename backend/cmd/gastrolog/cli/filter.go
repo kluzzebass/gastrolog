@@ -90,23 +90,45 @@ func newFilterGetCmd() *cobra.Command {
 func newFilterCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a filter",
+		Short: "Create or update a filter",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			expr, _ := cmd.Flags().GetString("expression")
+
 			client := clientFromCmd(cmd)
-			id := uuid.Must(uuid.NewV7()).String()
-			_, err := client.Config.PutFilter(context.Background(), connect.NewRequest(&v1.PutFilterRequest{
-				Config: &v1.FilterConfig{
-					Id:         id,
-					Name:       name,
-					Expression: expr,
-				},
+			ctx := context.Background()
+
+			cfg := &v1.FilterConfig{
+				Id:         uuid.Must(uuid.NewV7()).String(),
+				Name:       name,
+				Expression: "*",
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			for _, f := range resp.Msg.Filters {
+				if f.Name == name {
+					cfg = f
+					verb = "Updated"
+					break
+				}
+			}
+
+			if cmd.Flags().Changed("expression") {
+				cfg.Expression, _ = cmd.Flags().GetString("expression")
+			}
+
+			_, err = client.Config.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created filter %q (%s)\n", name, id)
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s filter %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}

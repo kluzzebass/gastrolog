@@ -6161,11 +6161,11 @@ export class DeleteTierRequest extends Message<DeleteTierRequest> {
   id = "";
 
   /**
-   * When true, the tier's data directory is deleted from disk.
+   * When true, drain chunks to the next tier before deleting.
    *
-   * @generated from field: bool delete_data = 2;
+   * @generated from field: bool drain = 3;
    */
-  deleteData = false;
+  drain = false;
 
   constructor(data?: PartialMessage<DeleteTierRequest>) {
     super();
@@ -6176,7 +6176,7 @@ export class DeleteTierRequest extends Message<DeleteTierRequest> {
   static readonly typeName = "gastrolog.v1.DeleteTierRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "delete_data", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 3, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteTierRequest {

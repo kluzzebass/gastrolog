@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -103,40 +104,70 @@ func newIngesterGetCmd() *cobra.Command {
 func newIngesterCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create an ingester",
+		Short: "Create or update an ingester",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			ingType, _ := cmd.Flags().GetString("type")
-			params, _ := cmd.Flags().GetStringSlice("param")
-			enabled, _ := cmd.Flags().GetBool("enabled")
-			nodeID, _ := cmd.Flags().GetString("node-id")
 
 			client := clientFromCmd(cmd)
-			id := uuid.Must(uuid.NewV7()).String()
-			_, err := client.Config.PutIngester(context.Background(), connect.NewRequest(&v1.PutIngesterRequest{
-				Config: &v1.IngesterConfig{
-					Id:      id,
-					Name:    name,
-					Type:    ingType,
-					Params:  parseParams(params),
-					Enabled: enabled,
-					NodeId:  nodeID,
-				},
+			ctx := context.Background()
+
+			// Upsert: if an ingester with this name exists, start from its config.
+			cfg := &v1.IngesterConfig{
+				Id:      uuid.Must(uuid.NewV7()).String(),
+				Name:    name,
+				Enabled: true, // default for new ingesters
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			for _, ig := range resp.Msg.Ingesters {
+				if ig.Name == name {
+					cfg = ig
+					verb = "Updated"
+					break
+				}
+			}
+
+			// Overlay explicitly-set flags.
+			if cmd.Flags().Changed("type") {
+				cfg.Type, _ = cmd.Flags().GetString("type")
+			}
+			if cmd.Flags().Changed("enabled") {
+				cfg.Enabled, _ = cmd.Flags().GetBool("enabled")
+			}
+			if cmd.Flags().Changed("node-id") {
+				cfg.NodeId, _ = cmd.Flags().GetString("node-id")
+			}
+			if cmd.Flags().Changed("param") {
+				params, _ := cmd.Flags().GetStringSlice("param")
+				cfg.Params = parseParams(params)
+			}
+
+			if cfg.Type == "" {
+				return errors.New("--type is required for new ingesters")
+			}
+
+			_, err = client.Config.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created ingester %q (%s)\n", name, id)
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s ingester %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}
 	cmd.Flags().String("name", "", "ingester name (required)")
-	cmd.Flags().String("type", "", "ingester type (required)")
+	cmd.Flags().String("type", "", "ingester type")
 	cmd.Flags().StringSlice("param", nil, "key=value parameter (repeatable)")
 	cmd.Flags().Bool("enabled", true, "enable the ingester")
 	cmd.Flags().String("node-id", "", "node ID to assign")
 	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("type")
 	return cmd
 }
 

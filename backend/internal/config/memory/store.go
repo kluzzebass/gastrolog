@@ -648,7 +648,7 @@ func (s *Store) PutTier(ctx context.Context, tier config.TierConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID, _ bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -173,6 +173,25 @@ func (o *Orchestrator) HasMissingTiers(vaultID uuid.UUID, tierIDs []uuid.UUID) b
 	return false
 }
 
+// LocalTierIDs returns the tier IDs currently instantiated for the given vault.
+func (o *Orchestrator) LocalTierIDs(vaultID uuid.UUID) []uuid.UUID {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return nil
+	}
+	seen := make(map[uuid.UUID]bool, len(vault.Tiers))
+	var ids []uuid.UUID
+	for _, t := range vault.Tiers {
+		if !seen[t.TierID] {
+			seen[t.TierID] = true
+			ids = append(ids, t.TierID)
+		}
+	}
+	return ids
+}
+
 func (o *Orchestrator) FindLocalTierExported(vaultID, tierID uuid.UUID) *TierInstance {
 	return o.findLocalTier(vaultID, tierID)
 }
@@ -208,6 +227,12 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 	if vault == nil {
 		o.mu.RUnlock()
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+
+	// Block appends to tiers that are draining.
+	if _, draining := o.tierDraining[tierDrainKey(vaultID, tierID)]; draining {
+		o.mu.RUnlock()
+		return ErrTierDraining
 	}
 
 	for _, tier := range vault.Tiers {

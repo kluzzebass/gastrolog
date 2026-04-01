@@ -368,8 +368,8 @@ func (s *Store) PutTier(ctx context.Context, tier config.TierConfig) error {
 	return s.apply(command.NewPutTier(tier))
 }
 
-func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID) error {
-	return s.apply(command.NewDeleteTier(id))
+func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error {
+	return s.apply(command.NewDeleteTier(id, drain))
 }
 
 func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg config.NodeStorageConfig) error {

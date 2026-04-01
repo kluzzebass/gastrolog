@@ -99,6 +99,15 @@ func findTierConfig(tiers []config.TierConfig, id uuid.UUID) *config.TierConfig 
 	return nil
 }
 
+func findVaultConfig(vaults []config.VaultConfig, id uuid.UUID) *config.VaultConfig {
+	for i := range vaults {
+		if vaults[i].ID == id {
+			return &vaults[i]
+		}
+	}
+	return nil
+}
+
 // resolveRetentionRulesFromTier converts tier retention rules to resolved retentionRule objects.
 func resolveRetentionRulesFromTier(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig) ([]retentionRule, error) {
 	// Derive the retention action from the tier's position in the vault chain.
@@ -395,6 +404,99 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 	return true
 }
 
+// AddTierToVault builds a single tier instance and adds it to an existing vault
+// without tearing down any other tiers. This is the incremental counterpart to
+// RemoveTierFromVault.
+func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.UUID, factories Factories) error {
+	cfg, err := o.loadConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
+	o.mu.Lock()
+	vault, exists := o.vaults[vaultID]
+	if !exists {
+		o.mu.Unlock()
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	// Already present?
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID {
+			o.mu.Unlock()
+			return nil
+		}
+	}
+	o.mu.Unlock()
+
+	tierCfg := findTierConfig(cfg.Tiers, tierID)
+	if tierCfg == nil {
+		return fmt.Errorf("tier %s not found in config", tierID)
+	}
+
+	vaultCfg := findVaultConfig(cfg.Vaults, vaultID)
+	if vaultCfg == nil {
+		return fmt.Errorf("vault %s not found in config", vaultID)
+	}
+
+	nscs := cfg.NodeStorageConfigs
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
+	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
+	if !isLeader && !isFollower {
+		return nil // this node doesn't host this tier
+	}
+
+	var ti *TierInstance
+	if isLeader {
+		t, err := o.buildPrimaryTierInstance(cfg, *vaultCfg, tierCfg, factories)
+		if err != nil {
+			return fmt.Errorf("build tier %s: %w", tierID, err)
+		}
+		t.FollowerTargets = tierCfg.FollowerTargets(nscs)
+		ti = t
+	} else {
+		for _, tgt := range tierCfg.FollowerTargets(nscs) {
+			if tgt.NodeID != o.localNodeID {
+				continue
+			}
+			t, err := o.buildTierInstanceForStorage(cfg, *vaultCfg, *tierCfg, factories, tgt.StorageID)
+			if err != nil {
+				return fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
+			}
+			t.IsFollower = true
+			t.LeaderNodeID = leaderNodeID
+			t.StorageID = tgt.StorageID
+			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
+			raftCB := o.wireTierRaftGroup(t.Chunks, *tierCfg, nscs, factories, true)
+			t.HasRaftLeader = raftCB.hasLeader
+			t.IsRaftLeader = raftCB.isLeader
+			t.ApplyRaftDelete = raftCB.applyDelete
+			t.ListManifest = raftCB.listChunks
+			t.ApplyRaftRetentionPending = raftCB.applyRetPending
+			t.ListRetentionPending = raftCB.listRetPending
+			ti = t
+			break
+		}
+	}
+
+	if ti == nil {
+		return nil
+	}
+
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	vault = o.vaults[vaultID]
+	if vault == nil {
+		_ = ti.Chunks.Close()
+		return fmt.Errorf("%w: %s (disappeared during build)", ErrVaultNotFound, vaultID)
+	}
+	vault.Tiers = append(vault.Tiers, ti)
+	o.logger.Info("tier added to vault",
+		"vault", vaultID, "tier", tierID, "total_tiers", len(vault.Tiers))
+	return nil
+}
+
 // UnregisterVault removes a vault from the orchestrator without deleting any
 // data. The chunk manager is closed (releasing connections/locks) but chunks
 // and indexes are left intact in storage. This is the correct operation for
@@ -488,7 +590,12 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 	for _, tierID := range vaultCfg.TierIDs {
 		tierCfg := findTierConfig(cfg.Tiers, tierID)
 		if tierCfg == nil {
-			return nil, fmt.Errorf("tier %s not found in config", tierID)
+			// Tier config was deleted (e.g. drain-delete) but the vault still
+			// references it. Skip gracefully — the vault tier list will be
+			// cleaned up when the drain completes or on next reconciliation.
+			o.logger.Warn("buildTierInstances: tier not in config, skipping",
+				"vault", vaultCfg.ID, "tier", tierID)
+			continue
 		}
 
 		// Determine if this node hosts this tier (as leader or follower).
