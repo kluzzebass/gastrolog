@@ -656,13 +656,13 @@ func (p *StoreProxy) PutTier(ctx context.Context, tier TierConfig) error {
 	return p.inner.PutTier(ctx, tier)
 }
 
-func (p *StoreProxy) DeleteTier(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
 		return err
 	}
-	return p.inner.DeleteTier(ctx, id)
+	return p.inner.DeleteTier(ctx, id, drain)
 }
 
 func (p *StoreProxy) GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error) {

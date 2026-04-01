@@ -3040,6 +3040,7 @@ func (x *TierPlacementEntry) GetPrimary() bool {
 type DeleteTierCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Drain         bool                   `protobuf:"varint,2,opt,name=drain,proto3" json:"drain,omitempty"` // When true, drain chunks to the next tier before deleting.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3079,6 +3080,13 @@ func (x *DeleteTierCommand) GetId() string {
 		return x.Id
 	}
 	return ""
+}
+
+func (x *DeleteTierCommand) GetDrain() bool {
+	if x != nil {
+		return x.Drain
+	}
+	return false
 }
 
 // ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
@@ -3499,9 +3507,10 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x12TierPlacementEntry\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x18\n" +
-	"\aprimary\x18\x02 \x01(\bR\aprimary\"#\n" +
+	"\aprimary\x18\x02 \x01(\bR\aprimary\"9\n" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xae\t\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x05drain\x18\x02 \x01(\bR\x05drain\"\xae\t\n" +
 	"\x0eConfigSnapshot\x128\n" +
 	"\afilters\x18\x01 \x03(\v2\x1e.gastrolog.v1.PutFilterCommandR\afilters\x12S\n" +
 	"\x11rotation_policies\x18\x02 \x03(\v2&.gastrolog.v1.PutRotationPolicyCommandR\x10rotationPolicies\x12V\n" +

@@ -239,28 +239,37 @@ func (s *ConfigServer) DeleteTier(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("tier not found"))
 	}
 
-	// Referential integrity: reject if any vault references this tier.
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
-	for _, v := range vaults {
-		if slices.Contains(v.TierIDs, id) {
-			return nil, connect.NewError(connect.CodeFailedPrecondition,
-				fmt.Errorf("tier %q is referenced by vault %q", req.Msg.Id, v.ID))
+	drain := req.Msg.GetDrain()
+
+	if err := s.cfgStore.DeleteTier(ctx, id, drain); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+
+	// When draining, do NOT remove the tier from vault tier lists yet.
+	// The drain must complete first — removing the tier from vaults triggers
+	// a vault rebuild that tears down the tier instance mid-drain.
+	// The drain completion callback handles the vault tier list cleanup.
+	if !drain {
+		for _, v := range vaults {
+			if !slices.Contains(v.TierIDs, id) {
+				continue
+			}
+			var updated []uuid.UUID
+			for _, tid := range v.TierIDs {
+				if tid != id {
+					updated = append(updated, tid)
+				}
+			}
+			v.TierIDs = updated
+			_ = s.cfgStore.PutVault(ctx, v)
 		}
 	}
 
-	// Delete data files if requested (before removing from config, so we can
-	// still resolve the file storage path).
-	if req.Msg.GetDeleteData() && s.orch != nil {
-		s.orch.DeleteTierData(id)
-	}
-
-	if err := s.cfgStore.DeleteTier(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
-	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: id})
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: id, Drain: drain})
 
 	return connect.NewResponse(&apiv1.DeleteTierResponse{Config: s.buildFullConfig(ctx)}), nil
 }

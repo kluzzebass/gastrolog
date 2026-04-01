@@ -2,7 +2,9 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -10,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/server"
 )
 
 func newTierCmd() *cobra.Command {
@@ -55,70 +58,67 @@ func newTierListCmd() *cobra.Command {
 func newTierCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a tier",
+		Short: "Create or update a tier",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			tierType, _ := cmd.Flags().GetString("type")
-			rf, _ := cmd.Flags().GetUint32("replication-factor")
-			rotPolicy, _ := cmd.Flags().GetString("rotation-policy")
-			retPolicy, _ := cmd.Flags().GetString("retention-policy")
-			storageClass, _ := cmd.Flags().GetUint32("storage-class")
-
-			tt, ok := parseTierType(tierType)
-			if !ok {
-				return fmt.Errorf("invalid tier type %q (valid: memory, file, cloud, jsonl)", tierType)
-			}
 
 			client := clientFromCmd(cmd)
-			id := uuid.Must(uuid.NewV7()).String()
+			ctx := context.Background()
 
-			tc := &v1.TierConfig{
-				Id:                id,
+			cfg := &v1.TierConfig{
+				Id:                uuid.Must(uuid.NewV7()).String(),
 				Name:              name,
-				Type:              tt,
-				ReplicationFactor: rf,
-				StorageClass:      storageClass,
+				Type:              v1.TierType_TIER_TYPE_FILE,
+				ReplicationFactor: 1,
+				StorageClass:      1,
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			for _, t := range resp.Msg.Tiers {
+				if t.Name == name {
+					cfg = t
+					verb = "Updated"
+					break
+				}
 			}
 
-			// Resolve rotation policy by name.
-			if rotPolicy != "" {
-				r, err := newResolver(context.Background(), client)
-				if err != nil {
-					return err
-				}
-				rpID, err := resolve(rotPolicy, r.rotationPolicies, "rotation policy")
-				if err != nil {
-					return err
-				}
-				tc.RotationPolicyId = rpID
+			if err := applyTierFlags(ctx, cmd, client, cfg); err != nil {
+				return err
 			}
 
-			// Resolve retention policy by name and add as a rule.
-			if retPolicy != "" {
-				r, err := newResolver(context.Background(), client)
-				if err != nil {
-					return err
-				}
-				retID, err := resolve(retPolicy, r.retentionPolicies, "retention policy")
-				if err != nil {
-					return err
-				}
-				tc.RetentionRules = []*v1.RetentionRule{{
-					RetentionPolicyId: retID,
-				}}
+			if cfg.Type == v1.TierType_TIER_TYPE_UNSPECIFIED {
+				return errors.New("--type is required for new tiers")
+			}
+			if verb == "Created" && !cmd.Flags().Changed("vault") {
+				return errors.New("--vault is required when creating a new tier")
 			}
 
-			_, err := client.Config.PutTier(context.Background(), connect.NewRequest(&v1.PutTierRequest{
-				Config: tc,
+			_, err = client.Config.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created tier %q (%s) type=%s rf=%d\n", name, id, tierType, rf)
+
+			// Add tier to vault's tier list (tiers must always belong to a vault).
+			if cmd.Flags().Changed("vault") {
+				if err := addTierToVault(ctx, cmd, client, cfg.Id); err != nil {
+					return err
+				}
+			}
+
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s tier %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}
 	cmd.Flags().String("name", "", "tier name (required)")
+	cmd.Flags().String("vault", "", "vault to assign this tier to (required for new tiers)")
 	cmd.Flags().String("type", "file", "tier type: memory, file, cloud, jsonl")
 	cmd.Flags().Uint32("replication-factor", 1, "replication factor")
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
@@ -128,13 +128,117 @@ func newTierCreateCmd() *cobra.Command {
 	return cmd
 }
 
+// applyTierFlags overlays explicitly-set CLI flags onto the tier config.
+func applyTierFlags(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.TierConfig) error {
+	if cmd.Flags().Changed("type") {
+		tierType, _ := cmd.Flags().GetString("type")
+		tt, ok := parseTierType(tierType)
+		if !ok {
+			return fmt.Errorf("invalid tier type %q (valid: memory, file, cloud, jsonl)", tierType)
+		}
+		cfg.Type = tt
+	}
+	if cmd.Flags().Changed("replication-factor") {
+		cfg.ReplicationFactor, _ = cmd.Flags().GetUint32("replication-factor")
+	}
+	if cmd.Flags().Changed("storage-class") {
+		cfg.StorageClass, _ = cmd.Flags().GetUint32("storage-class")
+	}
+	if cmd.Flags().Changed("rotation-policy") {
+		if err := resolveRotationPolicy(ctx, cmd, client, cfg); err != nil {
+			return err
+		}
+	}
+	if cmd.Flags().Changed("retention-policy") {
+		if err := resolveRetentionPolicy(ctx, cmd, client, cfg); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveRotationPolicy resolves the --rotation-policy flag value to an ID and
+// sets it on cfg.
+func resolveRotationPolicy(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.TierConfig) error {
+	rotPolicy, _ := cmd.Flags().GetString("rotation-policy")
+	if rotPolicy == "" {
+		cfg.RotationPolicyId = ""
+		return nil
+	}
+	r, err := newResolver(ctx, client)
+	if err != nil {
+		return err
+	}
+	rpID, err := resolve(rotPolicy, r.rotationPolicies, "rotation policy")
+	if err != nil {
+		return err
+	}
+	cfg.RotationPolicyId = rpID
+	return nil
+}
+
+// resolveRetentionPolicy resolves the --retention-policy flag value to an ID
+// and sets it on cfg.
+func resolveRetentionPolicy(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.TierConfig) error {
+	retPolicy, _ := cmd.Flags().GetString("retention-policy")
+	if retPolicy == "" {
+		cfg.RetentionRules = nil
+		return nil
+	}
+	r, err := newResolver(ctx, client)
+	if err != nil {
+		return err
+	}
+	retID, err := resolve(retPolicy, r.retentionPolicies, "retention policy")
+	if err != nil {
+		return err
+	}
+	cfg.RetentionRules = []*v1.RetentionRule{{
+		RetentionPolicyId: retID,
+	}}
+	return nil
+}
+
+// addTierToVault resolves the --vault flag and adds tierID to the vault's tier
+// list if not already present.
+func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Client, tierID string) error {
+	vaultName, _ := cmd.Flags().GetString("vault")
+	r, err := newResolver(ctx, client)
+	if err != nil {
+		return err
+	}
+	vaultID, err := resolve(vaultName, r.vaults, "vault")
+	if err != nil {
+		return err
+	}
+	vResp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+	if err != nil {
+		return err
+	}
+	for _, v := range vResp.Msg.Vaults {
+		if v.Id != vaultID {
+			continue
+		}
+		if slices.Contains(v.TierIds, tierID) {
+			return nil
+		}
+		v.TierIds = append(v.TierIds, tierID)
+		_, err = client.Config.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{Config: v}))
+		if err != nil {
+			return fmt.Errorf("tier created but failed to add to vault: %w", err)
+		}
+		return nil
+	}
+	return nil
+}
+
 func newTierDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <name-or-id>",
 		Short: "Delete a tier",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			deleteData, _ := cmd.Flags().GetBool("delete-data")
+			drain, _ := cmd.Flags().GetBool("drain")
 			client := clientFromCmd(cmd)
 			r, err := newResolver(context.Background(), client)
 			if err != nil {
@@ -145,17 +249,21 @@ func newTierDeleteCmd() *cobra.Command {
 				return err
 			}
 			_, err = client.Config.DeleteTier(context.Background(), connect.NewRequest(&v1.DeleteTierRequest{
-				Id:         id,
-				DeleteData: deleteData,
+				Id:    id,
+				Drain: drain,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Deleted tier %s\n", args[0])
+			if drain {
+				fmt.Printf("Tier %s draining to next tier (will be removed after completion)\n", args[0])
+			} else {
+				fmt.Printf("Deleted tier %s\n", args[0])
+			}
 			return nil
 		},
 	}
-	cmd.Flags().Bool("delete-data", false, "also delete tier data from disk")
+	cmd.Flags().Bool("drain", false, "drain chunks to next tier before deleting")
 	return cmd
 }
 

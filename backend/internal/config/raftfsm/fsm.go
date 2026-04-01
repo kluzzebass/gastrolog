@@ -56,6 +56,7 @@ type Notification struct {
 	NodeID     string    // owning node (populated on vault/ingester deletes)
 	Dir        string    // file vault directory (populated on file vault deletes)
 	DeleteData bool      // when true, vault data directory should be removed from disk
+	Drain      bool      // when true, drain tier data to next tier before deleting
 	Index      uint64    // Raft log index of this mutation (monotonically increasing config version)
 }
 
@@ -495,10 +496,10 @@ func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCom
 	if err != nil {
 		return nil, err
 	}
-	if err := f.store.DeleteTier(ctx, id); err != nil {
+	if err := f.store.DeleteTier(ctx, id, pb.GetDrain()); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifyTierDeleted, ID: id}, nil
+	return &Notification{Kind: NotifyTierDeleted, ID: id, Drain: pb.GetDrain()}, nil
 }
 
 // applyUser dispatches user-management commands.

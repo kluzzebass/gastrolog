@@ -140,6 +140,17 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID uuid.UUID,
 
 // tierDrainWorker is the async job that transfers all chunks and cleans up.
 func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid.UUID, mode TierDrainMode, targetNodeID string) {
+	// Always clean up drain state on exit — leaked state keeps Raft groups alive.
+	// But only notify completion (vault config update) on success.
+	success := false
+	defer func() {
+		if success {
+			o.finishTierDrain(vaultID, tierID)
+		} else {
+			o.cancelTierDrainState(vaultID, tierID)
+		}
+	}()
+
 	cfg, err := o.loadConfig(ctx)
 	if err != nil {
 		o.logger.Error("tier drain: failed to load config", "vault", vaultID, "tier", tierID, "error", err)
@@ -150,7 +161,6 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		o.mu.RUnlock()
-		o.finishTierDrain(vaultID, tierID)
 		return
 	}
 	var tier *TierInstance
@@ -163,23 +173,21 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 	o.mu.RUnlock()
 
 	if tier == nil {
-		o.finishTierDrain(vaultID, tierID)
 		return
 	}
 
 	// Transfer all sealed chunks.
 	if !o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID) {
-		return // context cancelled or error
+		return // context cancelled or error — defer handles cleanup
 	}
 
 	// Final seal to catch any stragglers.
 	if active := tier.Chunks.Active(); active != nil {
 		_ = tier.Chunks.Seal()
-		// Drain the newly sealed chunk.
 		o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID)
 	}
 
-	o.finishTierDrain(vaultID, tierID)
+	success = true
 }
 
 // drainTierChunks transfers all sealed chunks from the tier. Returns false if cancelled.
@@ -259,6 +267,35 @@ func (o *Orchestrator) finishTierDrain(vaultID, tierID uuid.UUID) {
 	// Remove the tier instance (closes managers, deletes remaining data).
 	if o.RemoveTierFromVault(vaultID, tierID) {
 		o.logger.Info("tier drain: completed",
+			"vault", vaultID, "tier", tierID)
+	}
+
+	// Notify the dispatch layer to remove the tier from the vault's tier
+	// list in config. This fires a vault-put through Raft, causing all
+	// nodes to rebuild the vault without the drained tier.
+	if o.OnTierDrainComplete != nil {
+		o.OnTierDrainComplete(context.Background(), vaultID, tierID)
+	}
+}
+
+// cancelTierDrainState removes drain state without triggering vault config
+// updates or Raft group destruction. Used when the drain worker exits early
+// (error, vault already gone, etc.) to prevent leaked drain state.
+func (o *Orchestrator) cancelTierDrainState(vaultID, tierID uuid.UUID) {
+	key := tierDrainKey(vaultID, tierID)
+
+	o.mu.Lock()
+	ds, ok := o.tierDraining[key]
+	if ok {
+		delete(o.tierDraining, key)
+		if ds.Cancel != nil {
+			ds.Cancel()
+		}
+	}
+	o.mu.Unlock()
+
+	if ok {
+		o.logger.Info("tier drain: state cleaned up (drain did not complete)",
 			"vault", vaultID, "tier", tierID)
 	}
 }

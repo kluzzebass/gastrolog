@@ -211,6 +211,11 @@ type Orchestrator struct {
 	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress tier drains).
 	tierDraining map[string]*tierDrainState
 
+	// OnTierDrainComplete is called after a tier drain finishes. The dispatch
+	// layer uses this to remove the tier from vault tier lists in the config
+	// store (which fires a subsequent vault-put notification to rebuild).
+	OnTierDrainComplete func(ctx context.Context, vaultID, tierID uuid.UUID)
+
 	// Retention runners (keyed by tierID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
 

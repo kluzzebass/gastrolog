@@ -102,35 +102,58 @@ func newRotationPolicyGetCmd() *cobra.Command {
 func newRotationPolicyCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a rotation policy",
+		Short: "Create or update a rotation policy",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			maxBytes, _ := cmd.Flags().GetInt64("max-bytes")
-			maxAgeStr, _ := cmd.Flags().GetString("max-age")
-			maxRecords, _ := cmd.Flags().GetInt64("max-records")
-			cron, _ := cmd.Flags().GetString("cron")
-
-			var maxAge int64
-			if maxAgeStr != "" {
-				maxAge = parseDurationSeconds(maxAgeStr)
-			}
 
 			client := clientFromCmd(cmd)
-			id := uuid.Must(uuid.NewV7()).String()
-			_, err := client.Config.PutRotationPolicy(context.Background(), connect.NewRequest(&v1.PutRotationPolicyRequest{
-				Config: &v1.RotationPolicyConfig{
-					Id:            id,
-					Name:          name,
-					MaxBytes:      maxBytes,
-					MaxAgeSeconds: maxAge,
-					MaxRecords:    maxRecords,
-					Cron:          cron,
-				},
+			ctx := context.Background()
+
+			cfg := &v1.RotationPolicyConfig{
+				Id:   uuid.Must(uuid.NewV7()).String(),
+				Name: name,
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			for _, rp := range resp.Msg.RotationPolicies {
+				if rp.Name == name {
+					cfg = rp
+					verb = "Updated"
+					break
+				}
+			}
+
+			if cmd.Flags().Changed("max-bytes") {
+				cfg.MaxBytes, _ = cmd.Flags().GetInt64("max-bytes")
+			}
+			if cmd.Flags().Changed("max-age") {
+				maxAgeStr, _ := cmd.Flags().GetString("max-age")
+				if maxAgeStr != "" {
+					cfg.MaxAgeSeconds = parseDurationSeconds(maxAgeStr)
+				} else {
+					cfg.MaxAgeSeconds = 0
+				}
+			}
+			if cmd.Flags().Changed("max-records") {
+				cfg.MaxRecords, _ = cmd.Flags().GetInt64("max-records")
+			}
+			if cmd.Flags().Changed("cron") {
+				cfg.Cron, _ = cmd.Flags().GetString("cron")
+			}
+
+			_, err = client.Config.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created rotation policy %q (%s)\n", name, id)
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s rotation policy %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}

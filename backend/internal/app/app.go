@@ -197,6 +197,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		orch.ScheduleCatchupForTier(tierID, followerNodeIDs)
 	}
 
+	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger, factories)
+
 	if err := startOrchestrator(ctx, logger, orch, appCfg, factories); err != nil {
 		return err
 	}
@@ -290,6 +292,37 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
 	})
+}
+
+// makeTierDrainCompleteHandler returns a callback that removes a drained tier
+// from its vault's tier list and destroys the tier's Raft group.
+func makeTierDrainCompleteHandler(cfgStore config.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, uuid.UUID, uuid.UUID) {
+	return func(ctx context.Context, vaultID, tierID uuid.UUID) {
+		v, err := cfgStore.GetVault(ctx, vaultID)
+		if err != nil || v == nil {
+			return
+		}
+		var updated []uuid.UUID
+		for _, tid := range v.TierIDs {
+			if tid != tierID {
+				updated = append(updated, tid)
+			}
+		}
+		if len(updated) == len(v.TierIDs) {
+			return // tier already removed
+		}
+		v.TierIDs = updated
+		if err := cfgStore.PutVault(ctx, *v); err != nil {
+			logger.Error("tier drain complete: failed to update vault tier list",
+				"vault", vaultID, "tier", tierID, "error", err)
+		}
+		// Destroy the tier's Raft group now that the drain is done.
+		if factories.GroupManager != nil {
+			if err := factories.GroupManager.DestroyGroup(tierID.String()); err != nil {
+				logger.Debug("tier drain complete: destroy tier raft group", "tier", tierID, "error", err)
+			}
+		}
+	}
 }
 
 // wireClusterForwarding sets up cross-node record, search, context, vault,

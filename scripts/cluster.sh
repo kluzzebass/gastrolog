@@ -202,20 +202,16 @@ configure() {
   echo ">>> Creating filter..."
   $GLOG config filter create --addr "$S" --name "catch-all" --expression "*" 2>&1 | sed 's/^/  /'
 
+  echo ">>> Creating vault..."
+  $GLOG config vault create --addr "$S" --name "default-vault" 2>&1 | sed 's/^/  /'
+
   echo ">>> Creating tiers..."
-  $GLOG config tier create --addr "$S" \
+  $GLOG config tier create --addr "$S" --vault "default-vault" \
     --name "hot" --type file --rotation-policy "1m-rotate" --retention-policy "3m-retain" \
     --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
-  $GLOG config tier create --addr "$S" \
+  $GLOG config tier create --addr "$S" --vault "default-vault" \
     --name "warm" --type file --rotation-policy "1m-rotate" --retention-policy "3m-retain" \
     --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
-
-  echo ">>> Creating vault..."
-  local HOT_ID WARM_ID
-  HOT_ID=$($GLOG config tier list --addr "$S" -o json 2>&1 | jq -r '.[0].id')
-  WARM_ID=$($GLOG config tier list --addr "$S" -o json 2>&1 | jq -r '.[-1].id')
-  $GLOG config vault create --addr "$S" \
-    --name "default-vault" --tier "$HOT_ID" --tier "$WARM_ID" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating route..."
   $GLOG config route create --addr "$S" \
@@ -224,7 +220,7 @@ configure() {
   echo ">>> Creating ingesters (disabled)..."
   local NODE_IDS=()
   local node_json
-  node_json=$($GLOG config node list --addr "$S" -o json 2>&1)
+  node_json=$($GLOG config node list --addr "$S" -o json 2>/dev/null)
   for i in $(seq 1 "$NODES"); do
     local nid
     nid=$(echo "$node_json" | jq -r ".[] | select(.name == \"node-${i}\") | .id")

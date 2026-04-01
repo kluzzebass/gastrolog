@@ -892,7 +892,8 @@ message PutTierResponse {
 
 message DeleteTierRequest {
   string id = 1;
-  bool delete_data = 2; // When true, the tier's data directory is deleted from disk.
+  reserved 2;       // was delete_data
+  bool drain = 3;   // When true, drain chunks to the next tier before deleting.
 }
 
 message DeleteTierResponse {

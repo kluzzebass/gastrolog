@@ -98,33 +98,55 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 func newRetentionPolicyCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a retention policy",
+		Short: "Create or update a retention policy",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			maxAgeStr, _ := cmd.Flags().GetString("max-age")
-			maxBytes, _ := cmd.Flags().GetInt64("max-bytes")
-			maxChunks, _ := cmd.Flags().GetInt64("max-chunks")
-
-			var maxAge int64
-			if maxAgeStr != "" {
-				maxAge = parseDurationSeconds(maxAgeStr)
-			}
 
 			client := clientFromCmd(cmd)
-			id := uuid.Must(uuid.NewV7()).String()
-			_, err := client.Config.PutRetentionPolicy(context.Background(), connect.NewRequest(&v1.PutRetentionPolicyRequest{
-				Config: &v1.RetentionPolicyConfig{
-					Id:            id,
-					Name:          name,
-					MaxAgeSeconds: maxAge,
-					MaxBytes:      maxBytes,
-					MaxChunks:     maxChunks,
-				},
+			ctx := context.Background()
+
+			cfg := &v1.RetentionPolicyConfig{
+				Id:   uuid.Must(uuid.NewV7()).String(),
+				Name: name,
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			if err != nil {
+				return err
+			}
+			for _, rp := range resp.Msg.RetentionPolicies {
+				if rp.Name == name {
+					cfg = rp
+					verb = "Updated"
+					break
+				}
+			}
+
+			if cmd.Flags().Changed("max-age") {
+				maxAgeStr, _ := cmd.Flags().GetString("max-age")
+				if maxAgeStr != "" {
+					cfg.MaxAgeSeconds = parseDurationSeconds(maxAgeStr)
+				} else {
+					cfg.MaxAgeSeconds = 0
+				}
+			}
+			if cmd.Flags().Changed("max-bytes") {
+				cfg.MaxBytes, _ = cmd.Flags().GetInt64("max-bytes")
+			}
+			if cmd.Flags().Changed("max-chunks") {
+				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
+			}
+
+			_, err = client.Config.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created retention policy %q (%s)\n", name, id)
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s retention policy %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}

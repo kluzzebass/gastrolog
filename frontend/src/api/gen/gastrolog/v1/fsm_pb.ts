@@ -2267,6 +2267,13 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
    */
   id = "";
 
+  /**
+   * When true, drain chunks to the next tier before deleting.
+   *
+   * @generated from field: bool drain = 2;
+   */
+  drain = false;
+
   constructor(data?: PartialMessage<DeleteTierCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2276,6 +2283,7 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
   static readonly typeName = "gastrolog.v1.DeleteTierCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteTierCommand {

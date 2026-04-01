@@ -543,7 +543,7 @@ func TestApplyDeleteTier(t *testing.T) {
 	applyCmd(t, fsm, command.NewPutTier(config.TierConfig{
 		ID: id, Name: "tier", Type: config.TierTypeMemory,
 	}))
-	applyCmd(t, fsm, command.NewDeleteTier(id))
+	applyCmd(t, fsm, command.NewDeleteTier(id, false))
 
 	got, err := fsm.Store().GetTier(context.Background(), id)
 	if err != nil {

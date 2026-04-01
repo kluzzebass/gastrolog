@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/server"
 )
 
 func newRouteCmd() *cobra.Command {
@@ -109,52 +110,53 @@ func newRouteGetCmd() *cobra.Command {
 func newRouteCreateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Create a route",
+		Short: "Create or update a route",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, _ := cmd.Flags().GetString("name")
-			filterName, _ := cmd.Flags().GetString("filter")
-			destNames, _ := cmd.Flags().GetStringSlice("destination")
-			dist, _ := cmd.Flags().GetString("distribution")
-			enabled, _ := cmd.Flags().GetBool("enabled")
 
 			client := clientFromCmd(cmd)
-			r, err := newResolver(context.Background(), client)
+			ctx := context.Background()
+
+			cfg := &v1.RouteConfig{
+				Id:           uuid.Must(uuid.NewV7()).String(),
+				Name:         name,
+				Distribution: "fanout",
+				Enabled:      true,
+			}
+			verb := "Created"
+			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
 			if err != nil {
 				return err
 			}
-
-			var filterID string
-			if filterName != "" {
-				filterID, err = resolve(filterName, r.filters, "filter")
-				if err != nil {
-					return err
+			for _, rt := range resp.Msg.Routes {
+				if rt.Name == name {
+					cfg = rt
+					verb = "Updated"
+					break
 				}
 			}
 
-			var dests []*v1.RouteDestination
-			for _, d := range destNames {
-				vaultID, err := resolve(d, r.vaults, "vault")
-				if err != nil {
-					return err
-				}
-				dests = append(dests, &v1.RouteDestination{VaultId: vaultID})
+			if err := resolveRouteFilterAndDestinations(ctx, cmd, client, cfg); err != nil {
+				return err
 			}
 
-			id := uuid.Must(uuid.NewV7()).String()
-			_, err = client.Config.PutRoute(context.Background(), connect.NewRequest(&v1.PutRouteRequest{
-				Config: &v1.RouteConfig{
-					Id:           id,
-					Name:         name,
-					FilterId:     filterID,
-					Destinations: dests,
-					Distribution: dist,
-					Enabled:      enabled,
-				},
+			if cmd.Flags().Changed("distribution") {
+				cfg.Distribution, _ = cmd.Flags().GetString("distribution")
+			}
+			if cmd.Flags().Changed("enabled") {
+				cfg.Enabled, _ = cmd.Flags().GetBool("enabled")
+			}
+
+			_, err = client.Config.PutRoute(ctx, connect.NewRequest(&v1.PutRouteRequest{
+				Config: cfg,
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created route %q (%s)\n", name, id)
+			if outputFormat(cmd) == "json" {
+				return newPrinter("json").json(cfg)
+			}
+			fmt.Printf("%s route %q (%s)\n", verb, name, cfg.Id)
 			return nil
 		},
 	}
@@ -165,6 +167,43 @@ func newRouteCreateCmd() *cobra.Command {
 	cmd.Flags().Bool("enabled", true, "enable the route")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
+}
+
+// resolveRouteFilterAndDestinations resolves the --filter and --destination
+// flags, updating cfg in place. It only creates a resolver if needed.
+func resolveRouteFilterAndDestinations(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.RouteConfig) error {
+	needsResolver := cmd.Flags().Changed("filter") || cmd.Flags().Changed("destination")
+	if !needsResolver {
+		return nil
+	}
+	r, err := newResolver(ctx, client)
+	if err != nil {
+		return err
+	}
+	if cmd.Flags().Changed("filter") {
+		filterName, _ := cmd.Flags().GetString("filter")
+		if filterName != "" {
+			cfg.FilterId, err = resolve(filterName, r.filters, "filter")
+			if err != nil {
+				return err
+			}
+		} else {
+			cfg.FilterId = ""
+		}
+	}
+	if cmd.Flags().Changed("destination") {
+		destNames, _ := cmd.Flags().GetStringSlice("destination")
+		var dests []*v1.RouteDestination
+		for _, d := range destNames {
+			vaultID, err := resolve(d, r.vaults, "vault")
+			if err != nil {
+				return err
+			}
+			dests = append(dests, &v1.RouteDestination{VaultId: vaultID})
+		}
+		cfg.Destinations = dests
+	}
+	return nil
 }
 
 func newRouteDeleteCmd() *cobra.Command {

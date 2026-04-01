@@ -84,8 +84,8 @@ export function usePutTier() {
 
 export function useDeleteTier() {
   return useConfigMutation(
-    async (args: { id: string }) => {
-      return configClient.deleteTier({ id: args.id });
+    async (args: { id: string; drain?: boolean }) => {
+      return configClient.deleteTier({ id: args.id, drain: args.drain });
     },
     [["vaults"], ["stats"]],
   );
