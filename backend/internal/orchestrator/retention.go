@@ -370,14 +370,22 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 	}
 
 	// Forward deletion to remote follower nodes.
-	if r.orch != nil && r.orch.transferrer != nil {
+	if r.orch != nil {
 		for _, target := range r.followerTargets {
 			if target.NodeID == r.orch.localNodeID {
 				continue // already handled by deleteFromFollowers
 			}
-			if err := r.orch.transferrer.ForwardDeleteChunk(
-				context.Background(), target.NodeID, r.vaultID, r.tierID, id,
-			); err != nil {
+			var err error
+			if r.orch.tierReplicator != nil {
+				err = r.orch.tierReplicator.DeleteChunk(
+					context.Background(), target.NodeID, r.vaultID, r.tierID, id,
+				)
+			} else if r.orch.transferrer != nil {
+				err = r.orch.transferrer.ForwardDeleteChunk(
+					context.Background(), target.NodeID, r.vaultID, r.tierID, id,
+				)
+			}
+			if err != nil {
 				r.logger.Warn("retention: failed to forward chunk deletion to follower",
 					"vault", r.vaultID, "chunk", id.String(),
 					"follower", target.NodeID, "error", err)

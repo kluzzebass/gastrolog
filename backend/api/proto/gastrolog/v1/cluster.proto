@@ -177,6 +177,60 @@ message ForwardDeleteChunkRequest {
 
 message ForwardDeleteChunkResponse {}
 
+// --- Tier Replication Protocol ---
+//
+// A single ordered bidirectional stream per tier per follower. Replaces
+// the separate ForwardRecords (fire-and-forget) and ReplicateSealedChunk
+// (one-shot) streams with a unified protocol where all operations for a
+// tier are sequenced on one stream. This eliminates the race between
+// record forwarding and sealed chunk replacement.
+
+// TierReplicationCommand is sent leader → follower. The vault_id and
+// tier_id identify the target tier; the oneof command determines the
+// operation. New command types can be added without changing framing.
+message TierReplicationCommand {
+  string vault_id = 1;
+  string tier_id = 2;
+
+  oneof command {
+    TierReplicationAppend append = 10;
+    TierReplicationSeal seal = 11;
+    TierReplicationImport import_sealed = 12;
+    TierReplicationDelete delete_chunk = 13;
+  }
+}
+
+// TierReplicationAppend forwards records to the follower's active chunk.
+message TierReplicationAppend {
+  string chunk_id = 1;               // leader's active chunk ID
+  repeated ExportRecord records = 2;
+}
+
+// TierReplicationSeal tells the follower to seal its active chunk.
+message TierReplicationSeal {
+  string chunk_id = 1; // expected active chunk ID
+}
+
+// TierReplicationImport sends the canonical sealed chunk. The follower
+// replaces any forwarded version with this authoritative copy.
+message TierReplicationImport {
+  string chunk_id = 1;
+  repeated ExportRecord records = 2;
+}
+
+// TierReplicationDelete tells the follower to delete a sealed chunk
+// (e.g. after retention expiry or tier transition on the leader).
+message TierReplicationDelete {
+  string chunk_id = 1;
+}
+
+// TierReplicationAck is sent follower → leader after each command.
+message TierReplicationAck {
+  bool ok = 1;
+  string error = 2;
+  string chunk_id = 3; // echoes the chunk_id from the command
+}
+
 // ForwardSearchRequest is sent to the node that owns a remote vault,
 // asking it to execute a search locally and return matching records.
 message ForwardSearchRequest {
