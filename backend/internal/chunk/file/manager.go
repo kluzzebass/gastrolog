@@ -97,7 +97,8 @@ type Manager struct {
 	active   *chunkState
 	metas    map[chunk.ChunkID]*chunkMeta // In-memory chunk metadata
 	closed   bool
-	zstdEnc  *zstd.Encoder
+	zstdEnc   *zstd.Encoder
+	zstdEncMu sync.Mutex // serializes concurrent CompressChunk calls sharing zstdEnc
 	cloudIdx      *cloudIndex              // local B+ tree cache of cloud chunk metadata (nil if no cloud store)
 	cloudIdxMu    sync.Mutex              // serializes cloudIdx Insert/Delete/Sync (B+ tree is not thread-safe)
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
@@ -2203,23 +2204,35 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return nil
 	}
+	// Mark as compressed BEFORE releasing the lock to prevent a second
+	// concurrent CompressChunk from double-compressing the same files.
+	// If compression fails below, we clear the flag.
+	meta.compressed = true
 	rawPath := m.rawLogPath(id)
 	attrPath := m.attrLogPath(id)
 	mode := m.cfg.FileMode
-	enc := m.zstdEnc
 	m.mu.Unlock()
 
-	if err := compressFile(rawPath, enc, mode); err != nil {
+	// Serialize encoder access — zstd.Encoder is not safe for concurrent use
+	// via seekable.NewWriter. Multiple PostSealProcess jobs can run concurrently
+	// for different chunks, all sharing m.zstdEnc.
+	m.zstdEncMu.Lock()
+	if err := compressFile(rawPath, m.zstdEnc, mode); err != nil {
+		m.zstdEncMu.Unlock()
+		m.rollbackCompressed(id)
 		return fmt.Errorf("compress raw.log: %w", err)
 	}
-	if err := compressFile(attrPath, enc, mode); err != nil {
+	if err := compressFile(attrPath, m.zstdEnc, mode); err != nil {
+		m.zstdEncMu.Unlock()
+		m.rollbackCompressed(id)
 		return fmt.Errorf("compress attr.log: %w", err)
 	}
+	m.zstdEncMu.Unlock()
 
-	// Update in-memory meta to reflect compressed state.
+	// Update in-memory meta to reflect compressed state and refresh sizes.
 	m.mu.Lock()
 	if meta := m.metas[id]; meta != nil {
-		meta.compressed = true
+		// meta.compressed already set above; refresh disk sizes.
 		meta.diskBytes = m.computeDiskBytes(id)
 		if m.cfg.Announcer != nil {
 			m.cfg.Announcer.AnnounceCompress(id, meta.diskBytes)
@@ -2227,6 +2240,15 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	}
 	m.mu.Unlock()
 	return nil
+}
+
+// rollbackCompressed clears the compressed flag if compression fails partway.
+func (m *Manager) rollbackCompressed(id chunk.ChunkID) {
+	m.mu.Lock()
+	if meta := m.metas[id]; meta != nil {
+		meta.compressed = false
+	}
+	m.mu.Unlock()
 }
 
 // SetIndexBuilders injects index builders into the post-seal pipeline.
