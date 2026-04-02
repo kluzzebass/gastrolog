@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -190,3 +191,59 @@ func isS3NotFoundError(err error) bool {
 	var nsk *types.NoSuchKey
 	return errors.As(err, &nsk)
 }
+
+// --- Archiver implementation ---
+
+func (s *S3Store) Archive(ctx context.Context, key string, storageClass string) error {
+	src := s.bucket + "/" + key
+	_, err := s.client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:       &s.bucket,
+		Key:          &key,
+		CopySource:   &src,
+		StorageClass: types.StorageClass(storageClass),
+	})
+	return err
+}
+
+func (s *S3Store) Restore(ctx context.Context, key string, tier string, days int) error {
+	if tier == "" {
+		tier = "Standard"
+	}
+	if days <= 0 {
+		days = 7
+	}
+	d := int32(days)
+	_, err := s.client.RestoreObject(ctx, &s3.RestoreObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+		RestoreRequest: &types.RestoreRequest{
+			Days: &d,
+			GlacierJobParameters: &types.GlacierJobParameters{
+				Tier: types.Tier(tier),
+			},
+		},
+	})
+	// 409 = already restored or restore in progress — not an error.
+	if err != nil {
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) && apiErr.ErrorCode() == "RestoreAlreadyInProgress" {
+			return nil
+		}
+	}
+	return err
+}
+
+func (s *S3Store) IsRestoring(ctx context.Context, key string) (bool, error) {
+	out, err := s.client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: &s.bucket,
+		Key:    &key,
+	})
+	if err != nil {
+		return false, err
+	}
+	// x-amz-restore header: ongoing-request="true" means restoring.
+	restore := aws.ToString(out.Restore)
+	return restore != "" && !strings.Contains(restore, "ongoing-request=\"false\""), nil
+}
+
+var _ Archiver = (*S3Store)(nil)

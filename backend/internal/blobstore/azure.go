@@ -183,3 +183,37 @@ func isAzureNotFoundError(err error) bool {
 		strings.Contains(errStr, "ContainerNotFound") ||
 		strings.Contains(errStr, "404")
 }
+
+// --- Archiver implementation ---
+
+func (a *AzureStore) Archive(ctx context.Context, key string, storageClass string) error {
+	tier := blob.AccessTier(storageClass)
+	_, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).SetTier(ctx, tier, nil)
+	return err
+}
+
+func (a *AzureStore) Restore(ctx context.Context, key string, tier string, _ int) error {
+	// Azure restore = set tier back to Hot (or Cool). Priority via options.
+	targetTier := blob.AccessTierHot
+	opts := &blob.SetTierOptions{}
+	if tier == "High" {
+		priority := blob.RehydratePriorityHigh
+		opts.RehydratePriority = &priority
+	}
+	_, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).SetTier(ctx, targetTier, opts)
+	return err
+}
+
+func (a *AzureStore) IsRestoring(ctx context.Context, key string) (bool, error) {
+	resp, err := a.client.ServiceClient().NewContainerClient(a.containerName).NewBlobClient(key).GetProperties(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	// ArchiveStatus is set during rehydration. Empty = not rehydrating.
+	if resp.ArchiveStatus == nil {
+		return false, nil
+	}
+	return strings.Contains(*resp.ArchiveStatus, "rehydrate-pending"), nil
+}
+
+var _ Archiver = (*AzureStore)(nil)
