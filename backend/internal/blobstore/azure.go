@@ -64,6 +64,9 @@ func (a *AzureStore) Download(ctx context.Context, key string) (io.ReadCloser, e
 		if isAzureArchivedError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
 		}
+		if isAzureNotFoundError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
+		}
 		return nil, err
 	}
 	return resp.Body, nil
@@ -76,6 +79,9 @@ func (a *AzureStore) DownloadRange(ctx context.Context, key string, offset, leng
 	if err != nil {
 		if isAzureArchivedError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
+		}
+		if isAzureNotFoundError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
 		}
 		return nil, err
 	}
@@ -165,4 +171,15 @@ func isAzureArchivedError(err error) bool {
 	errStr := err.Error()
 	return strings.Contains(errStr, "BlobArchived") ||
 		strings.Contains(errStr, "This operation is not permitted on an archived blob")
+}
+
+// isAzureNotFoundError checks if an Azure error indicates blob doesn't exist.
+func isAzureNotFoundError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "BlobNotFound") ||
+		strings.Contains(errStr, "ContainerNotFound") ||
+		strings.Contains(errStr, "404")
 }

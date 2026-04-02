@@ -68,11 +68,25 @@ func (g *GCSStore) Upload(ctx context.Context, key string, data io.Reader, metad
 }
 
 func (g *GCSStore) Download(ctx context.Context, key string) (io.ReadCloser, error) {
-	return g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
+	rc, err := g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
+		}
+		return nil, err
+	}
+	return rc, nil
 }
 
 func (g *GCSStore) DownloadRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
-	return g.client.Bucket(g.bucket).Object(key).NewRangeReader(ctx, offset, length)
+	rc, err := g.client.Bucket(g.bucket).Object(key).NewRangeReader(ctx, offset, length)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
+		}
+		return nil, err
+	}
+	return rc, nil
 }
 
 func (g *GCSStore) Delete(ctx context.Context, key string) error {

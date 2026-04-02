@@ -21,6 +21,11 @@ var (
 	// tier (S3 Glacier Flexible Retrieval/Deep Archive, Azure Archive) and
 	// cannot be read without a restore operation.
 	ErrBlobArchived = errors.New("blob is archived and not immediately readable")
+
+	// ErrBlobNotFound indicates the blob does not exist in the store.
+	// Distinct from transient errors (timeouts, auth failures) — this is
+	// a definitive 404 from the provider.
+	ErrBlobNotFound = errors.New("blob not found")
 )
 
 // Store is the interface for cloud object storage operations.

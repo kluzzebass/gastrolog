@@ -85,6 +85,9 @@ func (s *S3Store) Download(ctx context.Context, key string) (io.ReadCloser, erro
 		if isS3ArchivedError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
 		}
+		if isS3NotFoundError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
+		}
 		return nil, err
 	}
 	return out.Body, nil
@@ -100,6 +103,9 @@ func (s *S3Store) DownloadRange(ctx context.Context, key string, offset, length 
 	if err != nil {
 		if isS3ArchivedError(err) {
 			return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
+		}
+		if isS3NotFoundError(err) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
 		}
 		return nil, err
 	}
@@ -173,4 +179,14 @@ func isS3ArchivedError(err error) bool {
 	// Also check for the typed error from the S3 SDK.
 	var invalidState *types.InvalidObjectState
 	return errors.As(err, &invalidState)
+}
+
+// isS3NotFoundError checks if an S3 error is NoSuchKey (HTTP 404).
+func isS3NotFoundError(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode() == "NoSuchKey" || apiErr.ErrorCode() == "NotFound"
+	}
+	var nsk *types.NoSuchKey
+	return errors.As(err, &nsk)
 }

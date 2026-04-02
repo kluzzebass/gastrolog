@@ -83,7 +83,7 @@ func (m *Memory) Download(_ context.Context, key string) (io.ReadCloser, error) 
 	}
 	m.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("blob %q not found", key)
+		return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
 	}
 	if blob.isArchived(m.cfg.Now(), m.cfg.RestoreDelay) {
 		return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
@@ -99,7 +99,7 @@ func (m *Memory) DownloadRange(_ context.Context, key string, offset, length int
 	}
 	m.mu.Unlock()
 	if !ok {
-		return nil, fmt.Errorf("blob %q not found", key)
+		return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
 	}
 	if blob.isArchived(m.cfg.Now(), m.cfg.RestoreDelay) {
 		return nil, fmt.Errorf("%w: %s", ErrBlobArchived, key)
@@ -147,7 +147,7 @@ func (m *Memory) Head(_ context.Context, key string) (BlobInfo, error) {
 	blob, ok := m.blobs[key]
 	m.mu.Unlock()
 	if !ok {
-		return BlobInfo{}, fmt.Errorf("blob %q not found", key)
+		return BlobInfo{}, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
 	}
 	return BlobInfo{Key: key, Size: int64(len(blob.data)), Metadata: blob.metadata, StorageClass: blob.storageClass}, nil
 }
