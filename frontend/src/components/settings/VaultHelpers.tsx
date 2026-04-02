@@ -11,6 +11,7 @@ export interface RetentionRuleEdit {
   retentionPolicyId: string;
   action: string;
   ejectRouteIds: string[];
+  archiveStorageClass: string;
 }
 
 /** Returns true when the retention rule (if present) has required fields filled in. */
@@ -107,7 +108,15 @@ export function RetentionRuleEditor({
   ];
   const actionOptions = [
     { value: "expire", label: "expire" },
+    { value: "transition", label: "transition" },
     { value: "eject", label: "eject" },
+    { value: "archive", label: "archive" },
+  ];
+
+  const archiveClassOptions = [
+    { value: "GLACIER", label: "Glacier" },
+    { value: "DEEP_ARCHIVE", label: "Deep Archive" },
+    { value: "Archive", label: "Archive (Azure)" },
   ];
 
   // Only eject-only routes are eligible as eject targets.
@@ -134,7 +143,7 @@ export function RetentionRuleEditor({
           onClick={() =>
             enabled
               ? onChange([])
-              : onChange([{ retentionPolicyId: "", action: "expire", ejectRouteIds: [] }])
+              : onChange([{ retentionPolicyId: "", action: "expire", ejectRouteIds: [], archiveStorageClass: "" }])
           }
         >
           {enabled ? "Remove" : "+ Add"}
@@ -168,6 +177,7 @@ export function RetentionRuleEditor({
                     setRule({
                       action: v,
                       ejectRouteIds: v === "eject" ? rule.ejectRouteIds : [],
+                      archiveStorageClass: v === "archive" ? (rule.archiveStorageClass || "GLACIER") : "",
                     })
                   }
                   options={actionOptions}
@@ -183,6 +193,18 @@ export function RetentionRuleEditor({
               routes={ejectRoutes}
               dark={dark}
             />
+          )}
+          {rule.action === "archive" && (
+            <div className="w-40">
+              <FormField label="Storage Class" dark={dark}>
+                <SelectInput
+                  value={rule.archiveStorageClass || "GLACIER"}
+                  onChange={(v) => setRule({ archiveStorageClass: v })}
+                  options={archiveClassOptions}
+                  dark={dark}
+                />
+              </FormField>
+            </div>
           )}
         </div>
       )}

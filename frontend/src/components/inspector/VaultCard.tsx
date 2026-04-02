@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
-import { useChunks, useIndexes, useValidateVault, useConfig } from "../../api/hooks";
+import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
 import { useToast } from "../Toast";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
@@ -455,6 +455,12 @@ function ChunkRow({
             {chunk.archived && (
               <Badge variant="warn" dark={dark}>archived</Badge>
             )}
+            {chunk.cloudBacked && chunk.sealed && !chunk.archived && (
+              <ArchiveButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+            )}
+            {chunk.archived && (
+              <RestoreButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+            )}
             {chunk.retentionPending && (
               <Badge variant="warn" dark={dark}>exp</Badge>
             )}
@@ -694,6 +700,62 @@ function ChunkDetail({
         </>
       )}
     </div>
+  );
+}
+
+function ArchiveButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; chunkId: string; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const archive = useArchiveChunk();
+  const { addToast } = useToast();
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        archive.mutate(
+          { vaultId, chunkId, storageClass: "GLACIER" },
+          {
+            onSuccess: () => addToast("Chunk archived to Glacier", "info"),
+            onError: (err) => addToast(err instanceof Error ? err.message : "Archive failed", "error"),
+          },
+        );
+      }}
+      disabled={archive.isPending}
+      title="Archive to Glacier"
+      className={`px-1.5 py-0.5 text-[0.65em] rounded transition-colors ${c(
+        "text-text-ghost hover:text-copper hover:bg-ink-hover",
+        "text-light-text-ghost hover:text-copper hover:bg-light-hover",
+      )}`}
+    >
+      {archive.isPending ? "..." : "Archive"}
+    </button>
+  );
+}
+
+function RestoreButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; chunkId: string; dark: boolean }>) {
+  const c = useThemeClass(dark);
+  const restore = useRestoreChunk();
+  const { addToast } = useToast();
+  return (
+    <button
+      onClick={(e) => {
+        e.stopPropagation();
+        restore.mutate(
+          { vaultId, chunkId },
+          {
+            onSuccess: () => addToast("Chunk restore initiated", "info"),
+            onError: (err) => addToast(err instanceof Error ? err.message : "Restore failed", "error"),
+          },
+        );
+      }}
+      disabled={restore.isPending}
+      title="Restore from archive"
+      className={`px-1.5 py-0.5 text-[0.65em] rounded transition-colors ${c(
+        "text-severity-warn hover:text-copper hover:bg-ink-hover",
+        "text-severity-warn hover:text-copper hover:bg-light-hover",
+      )}`}
+    >
+      {restore.isPending ? "..." : "Restore"}
+    </button>
   );
 }
 

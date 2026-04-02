@@ -137,6 +137,8 @@ export function VaultSettingsCard({
     tierRemovals: TierRemoval[];             // staged tier removals (executed on save)
     tierRotation: Record<string, string>;    // tierId → rotationPolicyId
     tierRetention: Record<string, string>;   // tierId → retentionPolicyId
+    tierRetentionAction: Record<string, string>; // tierId → action override ("" = auto from position)
+    tierArchiveClass: Record<string, string>;    // tierId → archive storage class
     tierRF: Record<string, string>;          // tierId → replicationFactor (string during editing)
     tierStorageClass: Record<string, string>; // tierId → storageClass (string during editing)
     tierActiveChunkClass: Record<string, string>;
@@ -153,6 +155,12 @@ export function VaultSettingsCard({
     ),
     tierRetention: Object.fromEntries(
       tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
+    ),
+    tierRetentionAction: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.action ?? ""]),
+    ),
+    tierArchiveClass: Object.fromEntries(
+      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.archiveStorageClass ?? ""]),
     ),
     tierRF: Object.fromEntries(
       tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.replicationFactor || 1)]),
@@ -302,7 +310,10 @@ export function VaultSettingsCard({
       const cc = parseInt(ccStr, 10) || 0;
 
       const tierIndex = newTierIds.indexOf(tierId);
-      const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
+      const autoAction = retentionActionForPosition(tierIndex, newTierIds.length);
+      const userAction = edit.tierRetentionAction[tierId];
+      const expectedAction = userAction || autoAction;
+      const archiveClass = edit.tierArchiveClass[tierId] ?? "";
       const currentAction = tier.retentionRules[0]?.action;
       const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
 
@@ -322,7 +333,11 @@ export function VaultSettingsCard({
       if (accChanged) updated.activeChunkClass = acc;
       if (ccChanged) updated.cacheClass = cc;
       updated.retentionRules = retPolicyId
-        ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: expectedAction })]
+        ? [new RetentionRule({
+            retentionPolicyId: retPolicyId,
+            action: expectedAction,
+            archiveStorageClass: expectedAction === "archive" ? (archiveClass || "GLACIER") : "",
+          })]
         : [];
       await putTier.mutateAsync({ config: updated });
     }
@@ -705,6 +720,54 @@ export function VaultSettingsCard({
                               dark={dark}
                             />
                           </FormField>
+                          {getTierRetentionPolicyId(tier.id) && (
+                            <div className="flex items-end gap-2">
+                              <div className="w-32">
+                                <FormField label="Action" dark={dark}>
+                                  <SelectInput
+                                    value={edit.tierRetentionAction[tier.id] || retentionActionForPosition(i, vaultTiers.length)}
+                                    onChange={(v) =>
+                                      setEditState((prev) => ({
+                                        ...prev,
+                                        tierRetentionAction: { ...prev.tierRetentionAction, [tier.id]: v },
+                                        tierArchiveClass: v === "archive"
+                                          ? { ...prev.tierArchiveClass, [tier.id]: prev.tierArchiveClass[tier.id] || "GLACIER" }
+                                          : { ...prev.tierArchiveClass, [tier.id]: "" },
+                                      }))
+                                    }
+                                    options={[
+                                      { value: "expire", label: "Expire" },
+                                      { value: "transition", label: "Transition" },
+                                      { value: "archive", label: "Archive" },
+                                      { value: "eject", label: "Eject" },
+                                    ]}
+                                    dark={dark}
+                                  />
+                                </FormField>
+                              </div>
+                              {(edit.tierRetentionAction[tier.id] || retentionActionForPosition(i, vaultTiers.length)) === "archive" && (
+                                <div className="w-36">
+                                  <FormField label="Storage Class" dark={dark}>
+                                    <SelectInput
+                                      value={edit.tierArchiveClass[tier.id] || "GLACIER"}
+                                      onChange={(v) =>
+                                        setEditState((prev) => ({
+                                          ...prev,
+                                          tierArchiveClass: { ...prev.tierArchiveClass, [tier.id]: v },
+                                        }))
+                                      }
+                                      options={[
+                                        { value: "GLACIER", label: "Glacier" },
+                                        { value: "DEEP_ARCHIVE", label: "Deep Archive" },
+                                        { value: "Archive", label: "Archive (Azure)" },
+                                      ]}
+                                      dark={dark}
+                                    />
+                                  </FormField>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </>
                       )}
                       {tier.type === TierType.FILE && storageClassOptions.length > 0 && (
