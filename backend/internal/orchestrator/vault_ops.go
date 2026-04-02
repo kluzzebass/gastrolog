@@ -264,13 +264,16 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		}
 
 		activeAfter := cm.Active()
-		if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
-			if !tier.IsFollower {
-				o.schedulePostSeal(vaultID, cm, activeBefore.ID)
-			}
+		sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
+		if sealed && !tier.IsFollower {
+			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 		}
 		o.mu.RUnlock()
-		// Fire remote forwards OUTSIDE the lock — network I/O with timeout.
+
+		// Post-rotation: seal followers, then forward the record.
+		if sealed {
+			o.sealRemoteFollowers(remotes, activeBefore.ID)
+		}
 		o.fireAndForgetRemote(remotes, rec)
 		return nil
 	}
@@ -311,14 +314,32 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID uuid.UUID, tier 
 	return remotes
 }
 
-// fireAndForgetRemote sends records to remote followers outside any lock.
-func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
-	if o.forwarder == nil || len(targets) == 0 {
+// sealRemoteFollowers sends seal commands to remote followers through the
+// tier replication stream, ensuring they seal at the same boundary as the
+// leader. Must be called BEFORE the next record's append to maintain ordering.
+func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkID chunk.ChunkID) {
+	if o.tierReplicator == nil || len(targets) == 0 {
 		return
 	}
 	for _, tgt := range targets {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = o.forwarder.ForwardToTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+		_ = o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID)
+		cancel()
+	}
+}
+
+// fireAndForgetRemote sends records to remote followers outside any lock.
+func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
+	if len(targets) == 0 {
+		return
+	}
+	for _, tgt := range targets {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if o.tierReplicator != nil {
+			_ = o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+		} else if o.forwarder != nil {
+			_ = o.forwarder.ForwardToTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+		}
 		cancel()
 	}
 }

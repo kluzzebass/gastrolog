@@ -161,6 +161,22 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 	}
 	defer func() { _ = cursor.Close() }()
 
+	// Prefer ordered tier replication stream over legacy separate-stream path.
+	if o.tierReplicator != nil {
+		var records []chunk.Record
+		for {
+			rec, _, recErr := cursor.Next()
+			if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if recErr != nil {
+				return fmt.Errorf("read chunk: %w", recErr)
+			}
+			records = append(records, rec)
+		}
+		return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
+	}
+
 	iter := chunk.CursorIterator(cursor)
 	return o.transferrer.ReplicateSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, iter)
 }

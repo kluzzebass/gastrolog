@@ -1021,6 +1021,12 @@ var clusterServiceDesc = grpc.ServiceDesc{
 	},
 	Streams: []grpc.StreamDesc{
 		{
+			StreamName:    "TierReplication",
+			Handler:       tierReplicationStreamHandler,
+			ClientStreams:  true,
+			ServerStreams:  true,
+		},
+		{
 			StreamName:    "ForwardImportRecords",
 			Handler:       forwardImportRecordsStreamHandler,
 			ClientStreams: true,

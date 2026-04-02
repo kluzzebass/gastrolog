@@ -88,6 +88,16 @@ type RecordForwarder interface {
 	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
 }
 
+// TierReplicator sequences all replication commands for a tier on a single
+// ordered stream per follower. Replaces the separate ForwardRecords and
+// ReplicateSealedChunk streams. Nil in single-node mode.
+type TierReplicator interface {
+	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
+	SealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
+	DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+}
+
 // RemoteTransferrer sends records to a remote node for cross-node chunk
 // migration. Unlike RecordForwarder (fire-and-forget for ingestion), this
 // is synchronous and reliable — the caller blocks until the remote node
@@ -192,6 +202,9 @@ type Orchestrator struct {
 
 	// Remote transferrer for cross-node chunk migration (nil in single-node mode).
 	transferrer RemoteTransferrer
+
+	// Tier replicator: ordered stream per tier per follower (nil in single-node mode).
+	tierReplicator TierReplicator
 
 	// Ingest channel and lifecycle.
 	ingestCh   chan IngestMessage
@@ -360,6 +373,11 @@ func (o *Orchestrator) SetRecordForwarder(f RecordForwarder) {
 // Must be called before Start(). Safe to leave nil for single-node mode.
 func (o *Orchestrator) SetRemoteTransferrer(t RemoteTransferrer) {
 	o.transferrer = t
+}
+
+// SetTierReplicator injects the ordered tier replication client.
+func (o *Orchestrator) SetTierReplicator(tr TierReplicator) {
+	o.tierReplicator = tr
 }
 
 // Logger returns a child logger scoped for a subcomponent.
