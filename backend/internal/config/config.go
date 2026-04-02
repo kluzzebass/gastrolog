@@ -511,13 +511,18 @@ const (
 	RetentionActionEject RetentionAction = "eject"
 	// RetentionActionTransition streams matching chunks' records to the next tier in the vault's chain.
 	RetentionActionTransition RetentionAction = "transition"
+	// RetentionActionArchive transitions matching cloud-backed chunks to an
+	// offline storage class (S3 Glacier, Azure Archive). The chunk stays in
+	// the tier but becomes unreadable until restored.
+	RetentionActionArchive RetentionAction = "archive"
 )
 
 // RetentionRule pairs a retention policy with an action.
 type RetentionRule struct {
-	RetentionPolicyID uuid.UUID       `json:"retentionPolicyId"`
-	Action            RetentionAction `json:"action"`
-	EjectRouteIDs     []uuid.UUID     `json:"ejectRouteIds,omitempty"` // target routes, only for eject
+	RetentionPolicyID   uuid.UUID       `json:"retentionPolicyId"`
+	Action              RetentionAction `json:"action"`
+	EjectRouteIDs       []uuid.UUID     `json:"ejectRouteIds,omitempty"`       // target routes, only for eject
+	ArchiveStorageClass string          `json:"archiveStorageClass,omitempty"` // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive")
 }
 
 // VaultConfig describes a storage backend to instantiate.

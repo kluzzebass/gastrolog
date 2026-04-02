@@ -142,9 +142,10 @@ func resolveRetentionRulesFromTier(cfg *config.Config, vaultCfg config.VaultConf
 		}
 
 		rules = append(rules, retentionRule{
-			policy:        policy,
-			action:        action,
-			ejectRouteIDs: b.EjectRouteIDs,
+			policy:              policy,
+			action:              action,
+			ejectRouteIDs:       b.EjectRouteIDs,
+			archiveStorageClass: b.ArchiveStorageClass,
 		})
 	}
 	return rules, nil
