@@ -369,3 +369,168 @@ func (l testConfigLoader) Load(_ context.Context) (*config.Config, error) {
 }
 
 func strPtr(s string) *string { return &s }
+
+// ==========================================================================
+// Multi-node retention sweep tests
+//
+// Uses setupCluster (from transition_test.go) with file-backed tiers and
+// directTransferrer to verify that retention sweep expiry correctly
+// propagates chunk deletions to all follower nodes.
+// ==========================================================================
+
+// TestClusterRetentionSweepDeletesOnAllNodes sets up a 4-node cluster,
+// ingests records to create 10 sealed chunks, replicates to all followers,
+// then runs a retention sweep with keepN=3 on the leader. Verifies:
+//   - Expired chunks (7 oldest) deleted from leader AND all followers
+//   - Retained chunks (3 newest) still readable on leader AND all followers
+//   - Expired chunk directories removed from disk on ALL nodes
+func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 100)
+
+	leaderNode := h.nodes["leader"]
+	leaderTier := leaderNode.tiers[0]
+
+	// Ingest 1000 records → 10 sealed chunks.
+	const totalRecords = 1_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "retention-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if active := leaderTier.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderTier.Chunks.Seal()
+	}
+
+	metas, _ := leaderTier.Chunks.List()
+	t.Logf("leader: %d sealed chunks before retention", len(metas))
+	if len(metas) < 5 {
+		t.Fatalf("expected at least 5 sealed chunks, got %d", len(metas))
+	}
+
+	// PostSealProcess + replicate to all followers.
+	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	ctx := context.Background()
+	for _, m := range metas {
+		if ok {
+			_ = processor.PostSealProcess(ctx, m.ID)
+		}
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], m.ID, leaderTier.FollowerTargets)
+	}
+
+	// Verify followers have all records before sweep.
+	for _, fid := range []string{"f1", "f2", "f3"} {
+		count := cursorCountRecords(t, h.nodes[fid].tiers[0].Chunks)
+		if count != totalRecords {
+			t.Fatalf("follower %s: expected %d records before sweep, got %d", fid, totalRecords, count)
+		}
+	}
+
+	// Run retention sweep with keepN=3 — keeps 3 newest, expires the rest.
+	const keepN = 3
+	rules := []retentionRule{{
+		policy: chunk.NewCountRetentionPolicy(keepN),
+		action: config.RetentionActionExpire,
+	}}
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], leaderTier)
+	runner.sweep(rules)
+
+	// ---- Verify: leader retained exactly keepN chunks ----
+	metasAfter, _ := leaderTier.Chunks.List()
+	if len(metasAfter) != keepN {
+		t.Errorf("leader: expected %d retained chunks, got %d", keepN, len(metasAfter))
+	}
+	leaderRecords := cursorCountRecords(t, leaderTier.Chunks)
+	expectedRetained := int64(keepN) * 100 // 100 records per chunk
+	if leaderRecords != expectedRetained {
+		t.Errorf("leader: cursor read %d records, expected %d (keepN=%d × 100)", leaderRecords, expectedRetained, keepN)
+	}
+
+	// ---- Verify: followers also have exactly keepN chunks ----
+	for _, fid := range []string{"f1", "f2", "f3"} {
+		followerCM := h.nodes[fid].tiers[0].Chunks
+		followerMetas, _ := followerCM.List()
+		if len(followerMetas) != keepN {
+			t.Errorf("follower %s: expected %d retained chunks, got %d", fid, keepN, len(followerMetas))
+		}
+		followerRecords := cursorCountRecords(t, followerCM)
+		if followerRecords != expectedRetained {
+			t.Errorf("follower %s: cursor read %d records, expected %d", fid, followerRecords, expectedRetained)
+		}
+	}
+
+	// ---- Verify: expired chunk directories gone from disk on ALL nodes ----
+	// Each node should have exactly keepN chunk directories remaining.
+	for _, nid := range h.allNodeIDs() {
+		dirs := h.listChunkDirsOnNode(t, nid, 0)
+		if len(dirs) != keepN {
+			t.Errorf("%s: expected %d chunk dirs on disk, got %d: %v", nid, keepN, len(dirs), dirs)
+		}
+	}
+}
+
+// TestClusterRetentionSweepWithTTLOnAllNodes uses a TTL policy (expire chunks
+// older than 1 minute) with a frozen clock. Verifies cross-node cleanup.
+func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 50)
+
+	leaderNode := h.nodes["leader"]
+	leaderTier := leaderNode.tiers[0]
+
+	// Ingest 500 records → 10 sealed chunks.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 500 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "ttl-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if active := leaderTier.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderTier.Chunks.Seal()
+	}
+
+	metas, _ := leaderTier.Chunks.List()
+	t.Logf("leader: %d sealed chunks", len(metas))
+
+	// Replicate to followers.
+	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	ctx := context.Background()
+	for _, m := range metas {
+		if ok {
+			_ = processor.PostSealProcess(ctx, m.ID)
+		}
+		leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], m.ID, leaderTier.FollowerTargets)
+	}
+
+	// Run TTL sweep with clock set 5 minutes in the future — all chunks expired.
+	frozenNow := time.Now().Add(5 * time.Minute)
+	rules := []retentionRule{{
+		policy: chunk.NewTTLRetentionPolicy(1 * time.Minute),
+		action: config.RetentionActionExpire,
+	}}
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], leaderTier)
+	runner.now = func() time.Time { return frozenNow }
+	runner.sweep(rules)
+
+	// ---- Verify: ALL chunks expired on ALL nodes ----
+	for _, nid := range h.allNodeIDs() {
+		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
+		if count != 0 {
+			t.Errorf("%s: cursor read %d records after TTL sweep (should be 0)", nid, count)
+		}
+	}
+
+	// ---- Verify: no chunk directories on disk on ANY node ----
+	h.assertTierDirEmpty(t, 0)
+}
