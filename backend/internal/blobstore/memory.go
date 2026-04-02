@@ -156,7 +156,7 @@ func (m *Memory) Head(_ context.Context, key string) (BlobInfo, error) {
 // not yet restored (or restore delay hasn't elapsed).
 func (b memBlob) isArchived(now time.Time, restoreDelay time.Duration) bool {
 	switch b.storageClass {
-	case "GLACIER", "DEEP_ARCHIVE", "Archive", "archive":
+	case "GLACIER", "DEEP_ARCHIVE", "Archive", "cold", "deep-freeze":
 		// not restoring at all
 		if b.restoreAt.IsZero() {
 			return true

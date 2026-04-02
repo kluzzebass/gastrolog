@@ -95,7 +95,7 @@ func (b BlobInfo) IsArchived() bool {
 		return true
 	case "Archive": // Azure
 		return true
-	case "archive": // Memory provider
+	case "cold", "deep-freeze": // Memory provider
 		return true
 	}
 	return false

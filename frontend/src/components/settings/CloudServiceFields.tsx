@@ -168,7 +168,9 @@ const gcsClassOptions = [
 ];
 
 const memoryClassOptions = [
-  { value: "archive", label: "Archive" },
+  { value: "cool", label: "Cool" },
+  { value: "cold", label: "Cold" },
+  { value: "deep-freeze", label: "Deep Freeze" },
   { value: "", label: "Delete" },
 ];
 
