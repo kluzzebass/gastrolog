@@ -10,19 +10,32 @@ import (
 )
 
 func putCloudServiceCmd(cs config.CloudService) *gastrologv1.PutCloudServiceCommand {
+	transitions := make([]*gastrologv1.CloudServiceTransition, len(cs.Transitions))
+	for i, t := range cs.Transitions {
+		transitions[i] = &gastrologv1.CloudServiceTransition{
+			AfterDays:    t.AfterDays,
+			StorageClass: t.StorageClass,
+		}
+	}
 	return &gastrologv1.PutCloudServiceCommand{
-		Id:               cs.ID.String(),
-		Name:             cs.Name,
-		Provider:         cs.Provider,
-		Bucket:           cs.Bucket,
-		Region:           cs.Region,
-		Endpoint:         cs.Endpoint,
-		AccessKey:        cs.AccessKey,
-		SecretKey:        cs.SecretKey,
-		Container:        cs.Container,
-		ConnectionString: cs.ConnectionString,
-		CredentialsJson:  cs.CredentialsJSON,
-		StorageClass:        cs.StorageClass,
+		Id:                cs.ID.String(),
+		Name:              cs.Name,
+		Provider:          cs.Provider,
+		Bucket:            cs.Bucket,
+		Region:            cs.Region,
+		Endpoint:          cs.Endpoint,
+		AccessKey:         cs.AccessKey,
+		SecretKey:         cs.SecretKey,
+		Container:         cs.Container,
+		ConnectionString:  cs.ConnectionString,
+		CredentialsJson:   cs.CredentialsJSON,
+		StorageClass:      cs.StorageClass,
+		ArchivalMode:      cs.ArchivalMode,
+		Transitions:       transitions,
+		RestoreTier:       cs.RestoreTier,
+		RestoreDays:       cs.RestoreDays,
+		SuspectGraceDays:  cs.SuspectGraceDays,
+		ReconcileSchedule: cs.ReconcileSchedule,
 	}
 }
 
@@ -48,19 +61,32 @@ func ExtractPutCloudService(cmd *gastrologv1.PutCloudServiceCommand) (config.Clo
 	if err != nil {
 		return config.CloudService{}, fmt.Errorf("parse cloud service id: %w", err)
 	}
+	transitions := make([]config.CloudStorageTransition, len(cmd.GetTransitions()))
+	for i, t := range cmd.GetTransitions() {
+		transitions[i] = config.CloudStorageTransition{
+			AfterDays:    t.GetAfterDays(),
+			StorageClass: t.GetStorageClass(),
+		}
+	}
 	return config.CloudService{
-		ID:               id,
-		Name:             cmd.GetName(),
-		Provider:         cmd.GetProvider(),
-		Bucket:           cmd.GetBucket(),
-		Region:           cmd.GetRegion(),
-		Endpoint:         cmd.GetEndpoint(),
-		AccessKey:        cmd.GetAccessKey(),
-		SecretKey:        cmd.GetSecretKey(),
-		Container:        cmd.GetContainer(),
-		ConnectionString: cmd.GetConnectionString(),
-		CredentialsJSON:      cmd.GetCredentialsJson(),
-		StorageClass:         cmd.GetStorageClass(),
+		ID:                id,
+		Name:              cmd.GetName(),
+		Provider:          cmd.GetProvider(),
+		Bucket:            cmd.GetBucket(),
+		Region:            cmd.GetRegion(),
+		Endpoint:          cmd.GetEndpoint(),
+		AccessKey:         cmd.GetAccessKey(),
+		SecretKey:         cmd.GetSecretKey(),
+		Container:         cmd.GetContainer(),
+		ConnectionString:  cmd.GetConnectionString(),
+		CredentialsJSON:   cmd.GetCredentialsJson(),
+		StorageClass:      cmd.GetStorageClass(),
+		ArchivalMode:      cmd.GetArchivalMode(),
+		Transitions:       transitions,
+		RestoreTier:       cmd.GetRestoreTier(),
+		RestoreDays:       cmd.GetRestoreDays(),
+		SuspectGraceDays:  cmd.GetSuspectGraceDays(),
+		ReconcileSchedule: cmd.GetReconcileSchedule(),
 	}, nil
 }
 

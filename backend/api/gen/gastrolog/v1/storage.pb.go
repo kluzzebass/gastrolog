@@ -153,6 +153,61 @@ func (x *NodeStorageConfig) GetFileStorages() []*FileStorage {
 	return nil
 }
 
+// CloudStorageTransition defines a single step in an archival lifecycle chain.
+// Transitions are ordered by after_days (ascending). An empty storage_class
+// means "delete" (expiry).
+type CloudStorageTransition struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AfterDays     uint32                 `protobuf:"varint,1,opt,name=after_days,json=afterDays,proto3" json:"after_days,omitempty"`         // days after chunk seal before this transition fires
+	StorageClass  string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"` // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloudStorageTransition) Reset() {
+	*x = CloudStorageTransition{}
+	mi := &file_gastrolog_v1_storage_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloudStorageTransition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloudStorageTransition) ProtoMessage() {}
+
+func (x *CloudStorageTransition) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_storage_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloudStorageTransition.ProtoReflect.Descriptor instead.
+func (*CloudStorageTransition) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *CloudStorageTransition) GetAfterDays() uint32 {
+	if x != nil {
+		return x.AfterDays
+	}
+	return 0
+}
+
+func (x *CloudStorageTransition) GetStorageClass() string {
+	if x != nil {
+		return x.StorageClass
+	}
+	return ""
+}
+
 // CloudService defines a cluster-wide cloud storage endpoint.
 // Not tied to any node. Active chunks and cached chunks live on
 // local storage, referenced by storage class.
@@ -170,13 +225,22 @@ type CloudService struct {
 	ConnectionString string                 `protobuf:"bytes,10,opt,name=connection_string,json=connectionString,proto3" json:"connection_string,omitempty"`
 	CredentialsJson  string                 `protobuf:"bytes,11,opt,name=credentials_json,json=credentialsJson,proto3" json:"credentials_json,omitempty"`
 	StorageClass     uint32                 `protobuf:"varint,15,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Archival lifecycle configuration.
+	// "none" = bucket-level lifecycle handles it (or no archival).
+	// "active" = GastroLog manages transitions via the sweep job.
+	ArchivalMode      string                    `protobuf:"bytes,20,opt,name=archival_mode,json=archivalMode,proto3" json:"archival_mode,omitempty"`
+	Transitions       []*CloudStorageTransition `protobuf:"bytes,21,rep,name=transitions,proto3" json:"transitions,omitempty"`                                      // ordered by after_days
+	RestoreTier       string                    `protobuf:"bytes,22,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`                   // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
+	RestoreDays       uint32                    `protobuf:"varint,23,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"`                  // S3: how long restored copy stays readable (days)
+	SuspectGraceDays  uint32                    `protobuf:"varint,24,opt,name=suspect_grace_days,json=suspectGraceDays,proto3" json:"suspect_grace_days,omitempty"` // days before suspect chunk removed from index (default 7)
+	ReconcileSchedule string                    `protobuf:"bytes,25,opt,name=reconcile_schedule,json=reconcileSchedule,proto3" json:"reconcile_schedule,omitempty"` // cron for reconciliation sweep (default "0 3 * * *")
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CloudService) Reset() {
 	*x = CloudService{}
-	mi := &file_gastrolog_v1_storage_proto_msgTypes[2]
+	mi := &file_gastrolog_v1_storage_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -188,7 +252,7 @@ func (x *CloudService) String() string {
 func (*CloudService) ProtoMessage() {}
 
 func (x *CloudService) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_storage_proto_msgTypes[2]
+	mi := &file_gastrolog_v1_storage_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -201,7 +265,7 @@ func (x *CloudService) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CloudService.ProtoReflect.Descriptor instead.
 func (*CloudService) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{2}
+	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *CloudService) GetId() string {
@@ -288,6 +352,48 @@ func (x *CloudService) GetStorageClass() uint32 {
 	return 0
 }
 
+func (x *CloudService) GetArchivalMode() string {
+	if x != nil {
+		return x.ArchivalMode
+	}
+	return ""
+}
+
+func (x *CloudService) GetTransitions() []*CloudStorageTransition {
+	if x != nil {
+		return x.Transitions
+	}
+	return nil
+}
+
+func (x *CloudService) GetRestoreTier() string {
+	if x != nil {
+		return x.RestoreTier
+	}
+	return ""
+}
+
+func (x *CloudService) GetRestoreDays() uint32 {
+	if x != nil {
+		return x.RestoreDays
+	}
+	return 0
+}
+
+func (x *CloudService) GetSuspectGraceDays() uint32 {
+	if x != nil {
+		return x.SuspectGraceDays
+	}
+	return 0
+}
+
+func (x *CloudService) GetReconcileSchedule() string {
+	if x != nil {
+		return x.ReconcileSchedule
+	}
+	return ""
+}
+
 var File_gastrolog_v1_storage_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_storage_proto_rawDesc = "" +
@@ -301,7 +407,11 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12>\n" +
-	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"\x85\x03\n" +
+	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"\\\n" +
+	"\x16CloudStorageTransition\x12\x1d\n" +
+	"\n" +
+	"after_days\x18\x01 \x01(\rR\tafterDays\x12#\n" +
+	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x95\x05\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
@@ -317,7 +427,13 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x11connection_string\x18\n" +
 	" \x01(\tR\x10connectionString\x12)\n" +
 	"\x10credentials_json\x18\v \x01(\tR\x0fcredentialsJson\x12#\n" +
-	"\rstorage_class\x18\x0f \x01(\rR\fstorageClassJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\rstorage_class\x18\x0f \x01(\rR\fstorageClass\x12#\n" +
+	"\rarchival_mode\x18\x14 \x01(\tR\farchivalMode\x12F\n" +
+	"\vtransitions\x18\x15 \x03(\v2$.gastrolog.v1.CloudStorageTransitionR\vtransitions\x12!\n" +
+	"\frestore_tier\x18\x16 \x01(\tR\vrestoreTier\x12!\n" +
+	"\frestore_days\x18\x17 \x01(\rR\vrestoreDays\x12,\n" +
+	"\x12suspect_grace_days\x18\x18 \x01(\rR\x10suspectGraceDays\x12-\n" +
+	"\x12reconcile_schedule\x18\x19 \x01(\tR\x11reconcileScheduleJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0fB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_storage_proto_rawDescOnce sync.Once
@@ -331,19 +447,21 @@ func file_gastrolog_v1_storage_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_storage_proto_rawDescData
 }
 
-var file_gastrolog_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
+var file_gastrolog_v1_storage_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
 var file_gastrolog_v1_storage_proto_goTypes = []any{
-	(*FileStorage)(nil),       // 0: gastrolog.v1.FileStorage
-	(*NodeStorageConfig)(nil), // 1: gastrolog.v1.NodeStorageConfig
-	(*CloudService)(nil),      // 2: gastrolog.v1.CloudService
+	(*FileStorage)(nil),            // 0: gastrolog.v1.FileStorage
+	(*NodeStorageConfig)(nil),      // 1: gastrolog.v1.NodeStorageConfig
+	(*CloudStorageTransition)(nil), // 2: gastrolog.v1.CloudStorageTransition
+	(*CloudService)(nil),           // 3: gastrolog.v1.CloudService
 }
 var file_gastrolog_v1_storage_proto_depIdxs = []int32{
 	0, // 0: gastrolog.v1.NodeStorageConfig.file_storages:type_name -> gastrolog.v1.FileStorage
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 1: gastrolog.v1.CloudService.transitions:type_name -> gastrolog.v1.CloudStorageTransition
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_storage_proto_init() }
@@ -357,7 +475,7 @@ func file_gastrolog_v1_storage_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_storage_proto_rawDesc), len(file_gastrolog_v1_storage_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   3,
+			NumMessages:   4,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

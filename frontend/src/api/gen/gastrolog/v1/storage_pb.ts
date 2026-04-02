@@ -117,6 +117,57 @@ export class NodeStorageConfig extends Message<NodeStorageConfig> {
 }
 
 /**
+ * CloudStorageTransition defines a single step in an archival lifecycle chain.
+ * Transitions are ordered by after_days (ascending). An empty storage_class
+ * means "delete" (expiry).
+ *
+ * @generated from message gastrolog.v1.CloudStorageTransition
+ */
+export class CloudStorageTransition extends Message<CloudStorageTransition> {
+  /**
+   * days after chunk seal before this transition fires
+   *
+   * @generated from field: uint32 after_days = 1;
+   */
+  afterDays = 0;
+
+  /**
+   * target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
+   *
+   * @generated from field: string storage_class = 2;
+   */
+  storageClass = "";
+
+  constructor(data?: PartialMessage<CloudStorageTransition>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloudStorageTransition";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "after_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 2, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudStorageTransition {
+    return new CloudStorageTransition().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloudStorageTransition {
+    return new CloudStorageTransition().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloudStorageTransition {
+    return new CloudStorageTransition().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloudStorageTransition | PlainMessage<CloudStorageTransition> | undefined, b: CloudStorageTransition | PlainMessage<CloudStorageTransition> | undefined): boolean {
+    return proto3.util.equals(CloudStorageTransition, a, b);
+  }
+}
+
+/**
  * CloudService defines a cluster-wide cloud storage endpoint.
  * Not tied to any node. Active chunks and cached chunks live on
  * local storage, referenced by storage class.
@@ -184,6 +235,50 @@ export class CloudService extends Message<CloudService> {
    */
   storageClass = 0;
 
+  /**
+   * Archival lifecycle configuration.
+   * "none" = bucket-level lifecycle handles it (or no archival).
+   * "active" = GastroLog manages transitions via the sweep job.
+   *
+   * @generated from field: string archival_mode = 20;
+   */
+  archivalMode = "";
+
+  /**
+   * ordered by after_days
+   *
+   * @generated from field: repeated gastrolog.v1.CloudStorageTransition transitions = 21;
+   */
+  transitions: CloudStorageTransition[] = [];
+
+  /**
+   * default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
+   *
+   * @generated from field: string restore_tier = 22;
+   */
+  restoreTier = "";
+
+  /**
+   * S3: how long restored copy stays readable (days)
+   *
+   * @generated from field: uint32 restore_days = 23;
+   */
+  restoreDays = 0;
+
+  /**
+   * days before suspect chunk removed from index (default 7)
+   *
+   * @generated from field: uint32 suspect_grace_days = 24;
+   */
+  suspectGraceDays = 0;
+
+  /**
+   * cron for reconciliation sweep (default "0 3 * * *")
+   *
+   * @generated from field: string reconcile_schedule = 25;
+   */
+  reconcileSchedule = "";
+
   constructor(data?: PartialMessage<CloudService>) {
     super();
     proto3.util.initPartial(data, this);
@@ -204,6 +299,12 @@ export class CloudService extends Message<CloudService> {
     { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 20, name: "archival_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 21, name: "transitions", kind: "message", T: CloudStorageTransition, repeated: true },
+    { no: 22, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 23, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 24, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 25, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudService {

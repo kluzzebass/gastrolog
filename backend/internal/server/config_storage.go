@@ -268,18 +268,31 @@ func (s *ConfigServer) DeleteTier(
 // --- Proto <-> Config conversion helpers for storage ---
 
 func protoToCloudService(p *apiv1.CloudService) config.CloudService {
+	transitions := make([]config.CloudStorageTransition, len(p.Transitions))
+	for i, t := range p.Transitions {
+		transitions[i] = config.CloudStorageTransition{
+			AfterDays:    t.AfterDays,
+			StorageClass: t.StorageClass,
+		}
+	}
 	return config.CloudService{
-		Name:             p.Name,
-		Provider:         p.Provider,
-		Bucket:           p.Bucket,
-		Region:           p.Region,
-		Endpoint:         p.Endpoint,
-		AccessKey:        p.AccessKey,
-		SecretKey:        p.SecretKey,
-		Container:        p.Container,
-		ConnectionString: p.ConnectionString,
-		CredentialsJSON:      p.CredentialsJson,
-		StorageClass:         p.StorageClass,
+		Name:              p.Name,
+		Provider:          p.Provider,
+		Bucket:            p.Bucket,
+		Region:            p.Region,
+		Endpoint:          p.Endpoint,
+		AccessKey:         p.AccessKey,
+		SecretKey:         p.SecretKey,
+		Container:         p.Container,
+		ConnectionString:  p.ConnectionString,
+		CredentialsJSON:   p.CredentialsJson,
+		StorageClass:      p.StorageClass,
+		ArchivalMode:      p.ArchivalMode,
+		Transitions:       transitions,
+		RestoreTier:       p.RestoreTier,
+		RestoreDays:       p.RestoreDays,
+		SuspectGraceDays:  p.SuspectGraceDays,
+		ReconcileSchedule: p.ReconcileSchedule,
 	}
 }
 
