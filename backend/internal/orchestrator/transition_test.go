@@ -2753,3 +2753,166 @@ func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
 	// ---- Verify: no chunk directories on disk for tier 0 on ANY node ----
 	h.assertTierDirEmpty(t, 0)
 }
+
+// ==========================================================================
+// Multi-node drain tests
+// ==========================================================================
+
+// waitForDrainJob polls the scheduler until the drain job completes or times out.
+// Uses ListJobs which returns snapshots — no race with the scheduler goroutine.
+func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID uuid.UUID, timeout time.Duration) {
+	t.Helper()
+	jobName := "drain:" + vaultID.String()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		// ListJobs returns snapshot copies under the scheduler's lock.
+		for _, j := range orch.Scheduler().ListJobs() {
+			if j.Name != jobName {
+				continue
+			}
+			snap := j.Snapshot()
+			if snap.Progress != nil && snap.Progress.Status == JobStatusCompleted {
+				return
+			}
+			if snap.Progress != nil && snap.Progress.Status == JobStatusFailed {
+				t.Fatalf("drain job failed: %s", snap.Progress.Error)
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("drain job did not complete within %s", timeout)
+}
+
+// TestClusterDrainVaultRecordsArriveOnDestination drains a file-backed vault
+// from node-A to node-B via directTransferrer. Verifies:
+//   - All records arrive on node-B (cursor-verified)
+//   - Source vault unregistered on node-A
+//   - Source chunk directories removed from disk
+func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
+	t.Parallel()
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+
+	// Config store — both nodes share the same vault/tier config.
+	store := cfgmem.NewStore()
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "hot", Type: config.TierTypeFile,
+		Placements: []config.TierPlacement{
+			{StorageID: config.SyntheticStorageID("node-A"), Leader: true},
+		},
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "drain-test", TierIDs: []uuid.UUID{tierID},
+	})
+	_ = store.PutFilter(context.Background(), config.FilterConfig{
+		ID: uuid.Must(uuid.NewV7()), Name: "catch-all", Expression: "*",
+	})
+
+	// Create node-A (source) with file-backed tier.
+	dirA := t.TempDir()
+	orchA, err := New(Config{
+		LocalNodeID:  "node-A",
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmA, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dirA,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(100),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imA := indexfile.NewManager(dirA, nil, nil)
+	tierA := &TierInstance{TierID: tierID, Type: "file", Chunks: cmA, Indexes: imA, Query: query.New(cmA, imA, nil)}
+	orchA.RegisterVault(NewVault(vaultID, tierA))
+
+	// Create node-B (destination) with file-backed tier.
+	dirB := t.TempDir()
+	orchB, err := New(Config{
+		LocalNodeID:  "node-B",
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmB, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dirB,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(100),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	imB := indexfile.NewManager(dirB, nil, nil)
+	tierB := &TierInstance{TierID: tierID, Type: "file", Chunks: cmB, Indexes: imB, Query: query.New(cmB, imB, nil)}
+	orchB.RegisterVault(NewVault(vaultID, tierB))
+
+	// Wire directTransferrer between the two nodes.
+	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})
+	orchB.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-A": orchA}})
+
+	t.Cleanup(func() {
+		orchA.Stop()
+		orchB.Stop()
+		_ = cmA.Close()
+		_ = cmB.Close()
+	})
+
+	// Ingest 1K records on node-A (10 sealed chunks).
+	const totalRecords = 1_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if _, _, err := orchA.Append(vaultID, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "drain-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Verify records on node-A before drain.
+	preCount := cursorCountRecords(t, cmA)
+	if preCount != totalRecords {
+		t.Fatalf("node-A pre-drain: cursor read %d, expected %d", preCount, totalRecords)
+	}
+
+	// Start drain from node-A to node-B.
+	if err := orchA.DrainVault(context.Background(), vaultID, "node-B"); err != nil {
+		t.Fatalf("DrainVault: %v", err)
+	}
+
+	// Wait for drain to complete.
+	waitForDrainJob(t, orchA, vaultID, 30*time.Second)
+
+	// ---- Verify: node-B has all records (cursor-verified) ----
+	destCount := cursorCountRecords(t, cmB)
+	if destCount != totalRecords {
+		t.Errorf("node-B: cursor read %d records, expected %d (lost %d)", destCount, totalRecords, totalRecords-destCount)
+	}
+
+	// ---- Verify: node-A vault unregistered ----
+	if orchA.VaultExists(vaultID) {
+		t.Error("node-A: vault should be unregistered after drain")
+	}
+
+	// ---- Verify: node-A chunk directories removed from disk ----
+	entries, err := os.ReadDir(dirA)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", dirA, err)
+	}
+	var chunkDirs []string
+	for _, e := range entries {
+		if e.IsDir() && len(e.Name()) == 26 {
+			chunkDirs = append(chunkDirs, e.Name())
+		}
+	}
+	if len(chunkDirs) > 0 {
+		t.Errorf("node-A: %d chunk directories still on disk after drain: %v", len(chunkDirs), chunkDirs)
+	}
+}
