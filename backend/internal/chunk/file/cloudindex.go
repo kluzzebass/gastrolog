@@ -28,7 +28,6 @@ const (
 	cloudMetaValSize = 110
 	flagSealed       = 1 << 0
 	flagCompressed   = 1 << 1
-	flagArchived     = 1 << 2
 )
 
 func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
@@ -48,9 +47,6 @@ func encodeCloudMeta(m *chunkMeta) cloudMetaValue {
 	}
 	if m.compressed {
 		flags |= flagCompressed
-	}
-	if m.archived {
-		flags |= flagArchived
 	}
 	binary.LittleEndian.PutUint16(v[72:74], flags)
 	binary.LittleEndian.PutUint64(v[74:82], uint64(m.ingestIdxOffset))  //nolint:gosec // offset is always non-negative
@@ -76,7 +72,6 @@ func decodeCloudMeta(id chunk.ChunkID, v cloudMetaValue) *chunkMeta {
 		sourceEnd:       time.Unix(0, int64(binary.LittleEndian.Uint64(v[64:72]))),  //nolint:gosec // round-trip
 		sealed:          flags&flagSealed != 0,
 		compressed:      flags&flagCompressed != 0,
-		archived:        flags&flagArchived != 0,
 		cloudBacked:     true,
 		ingestIdxOffset: int64(binary.LittleEndian.Uint64(v[74:82])),  //nolint:gosec // round-trip
 		ingestIdxSize:   int64(binary.LittleEndian.Uint64(v[82:90])),  //nolint:gosec // round-trip

@@ -60,24 +60,6 @@ type BlobInfo struct {
 	StorageClass string // Provider-specific: S3 StorageClass, Azure AccessTier, GCS StorageClass
 }
 
-// Archiver extends Store with storage-class lifecycle operations.
-// Not all providers support this (GCS has no offline tiers). Callers
-// should type-assert to check availability.
-type Archiver interface {
-	// Archive transitions a blob to an offline storage class.
-	// The blob remains in the store but Download/DownloadRange will return
-	// ErrBlobArchived until Restore completes.
-	Archive(ctx context.Context, key string, storageClass string) error
-
-	// Restore initiates retrieval of an archived blob. On S3 this is async
-	// (RestoreObject, takes minutes to hours). On Azure this is sync
-	// (SetBlobTier to Hot/Cool). Returns nil if already restored or not archived.
-	Restore(ctx context.Context, key string) error
-
-	// IsRestoring returns true if a restore is in progress for the key.
-	IsRestoring(ctx context.Context, key string) (bool, error)
-}
-
 // IsArchived returns true if the blob is in an offline storage tier that
 // requires a restore operation before it can be read.
 // S3: GLACIER, DEEP_ARCHIVE. Azure: Archive. GCS: always false (all readable).

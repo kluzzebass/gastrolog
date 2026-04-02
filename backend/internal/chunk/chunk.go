@@ -161,19 +161,6 @@ type ChunkPostSealProcessor interface {
 	HasIndexBuilders() bool
 }
 
-// ChunkArchiver extends ChunkManager with storage-class lifecycle operations
-// for cloud-backed chunks. Callers should type-assert to check availability.
-type ChunkArchiver interface {
-	// ArchiveChunk transitions a cloud-backed sealed chunk to an offline
-	// storage class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"). After this,
-	// the chunk's Archived flag is set and cursor reads return ErrChunkArchived.
-	ArchiveChunk(ctx context.Context, id ChunkID, storageClass string) error
-
-	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
-	// async (RestoreObject). Returns nil if already restored or not archived.
-	RestoreChunk(ctx context.Context, id ChunkID) error
-}
-
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {
 	Next() (Record, RecordRef, error)
