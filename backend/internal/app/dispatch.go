@@ -233,6 +233,10 @@ func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID uuid
 	}
 
 	d.applyExistingVaultChanges(ctx, vaultID, vaultCfg)
+
+	if d.placementTrigger != nil {
+		d.placementTrigger()
+	}
 }
 
 func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uuid.UUID, cfg *config.VaultConfig) {

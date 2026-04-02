@@ -139,8 +139,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const vaultCfg = config?.vaults.find((v) => v.id === vaultId);
   const tierPositions = new Map<string, number>();
   if (vaultCfg) {
-    for (const [i, tid] of vaultCfg.tierIds.entries()) {
-      tierPositions.set(tid, i + 1);
+    const configTierIds = new Set(config?.tiers.map((t) => t.id));
+    let pos = 1;
+    for (const tid of vaultCfg.tierIds) {
+      if (configTierIds.has(tid)) {
+        tierPositions.set(tid, pos++);
+      }
     }
   }
 

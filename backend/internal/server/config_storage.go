@@ -153,22 +153,10 @@ func (s *ConfigServer) PutTier(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, file, cloud, or jsonl"))
 	}
 
-	// For cloud tiers, validate the referenced cloud service exists.
+	// For cloud tiers, validate required fields.
 	if tierType == config.TierTypeCloud {
-		if req.Msg.Config.CloudServiceId == "" {
-			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cloud_service_id required for cloud tiers"))
-		}
-		csID, connErr := parseUUID(req.Msg.Config.CloudServiceId)
-		if connErr != nil {
+		if connErr := s.validateCloudTierFields(ctx, req.Msg.Config); connErr != nil {
 			return nil, connErr
-		}
-		cs, err := s.cfgStore.GetCloudService(ctx, csID)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
-		}
-		if cs == nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("cloud service %q not found", req.Msg.Config.CloudServiceId))
 		}
 	}
 
@@ -265,7 +253,10 @@ func (s *ConfigServer) DeleteTier(
 				}
 			}
 			v.TierIDs = updated
-			_ = s.cfgStore.PutVault(ctx, v)
+			if err := s.cfgStore.PutVault(ctx, v); err != nil {
+				return nil, connect.NewError(connect.CodeInternal,
+					fmt.Errorf("tier deleted but failed to update vault %s tier list: %w", v.ID, err))
+			}
 		}
 	}
 
@@ -326,6 +317,33 @@ func protoToTierType(t apiv1.TierType) config.TierType {
 	default:
 		return ""
 	}
+}
+
+// validateCloudTierFields checks that a cloud tier has all required fields and
+// that the referenced cloud service exists.
+func (s *ConfigServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.TierConfig) *connect.Error {
+	if cfg.CloudServiceId == "" {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("cloud_service_id required for cloud tiers"))
+	}
+	if cfg.ActiveChunkClass == 0 {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("active_chunk_class required for cloud tiers"))
+	}
+	if cfg.CacheClass == 0 {
+		return connect.NewError(connect.CodeInvalidArgument, errors.New("cache_class required for cloud tiers"))
+	}
+	csID, connErr := parseUUID(cfg.CloudServiceId)
+	if connErr != nil {
+		return connErr
+	}
+	cs, err := s.cfgStore.GetCloudService(ctx, csID)
+	if err != nil {
+		return connect.NewError(connect.CodeInternal, err)
+	}
+	if cs == nil {
+		return connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("cloud service %q not found", cfg.CloudServiceId))
+	}
+	return nil
 }
 
 // validateReplicationFactor rejects RF higher than the number of eligible nodes.
