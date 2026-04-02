@@ -391,6 +391,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                     { value: "s3", label: "S3" },
                     { value: "gcs", label: "GCS" },
                     { value: "azure", label: "Azure" },
+                    { value: "memory", label: "Memory" },
                   ]}
                   dark={dark}
                 />

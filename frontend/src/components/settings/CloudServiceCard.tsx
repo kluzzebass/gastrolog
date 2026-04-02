@@ -23,6 +23,7 @@ const providerOptions = [
   { value: "s3", label: "S3" },
   { value: "gcs", label: "GCS" },
   { value: "azure", label: "Azure" },
+  { value: "memory", label: "Memory" },
 ];
 
 function providerLabel(provider: string): string {
@@ -30,6 +31,7 @@ function providerLabel(provider: string): string {
     case "s3": return "S3";
     case "gcs": return "GCS";
     case "azure": return "Azure";
+    case "memory": return "Memory";
     default: return provider || "unknown";
   }
 }

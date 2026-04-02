@@ -140,6 +140,9 @@ func createStore(provider string, params map[string]string) (blobstore.Store, er
 		}
 		return blobstore.NewGCS(context.Background(), cfg)
 
+	case "memory":
+		return blobstore.NewMemory(), nil
+
 	default:
 		return nil, ErrUnknownProvider
 	}
