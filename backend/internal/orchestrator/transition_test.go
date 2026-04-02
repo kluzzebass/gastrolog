@@ -719,7 +719,7 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
-	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
@@ -835,7 +835,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	cloudStore := blobstore.NewMemory()
 
 	// Create leader cloud tier (has cloud backing).
-	primaryTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	primaryTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
 	// Create follower cloud tier — should NOT have cloud backing.
 	followerDir := t.TempDir()
@@ -1021,7 +1021,7 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 // newCloudFileTier creates a file-backed TierInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud tier behavior.
-func newCloudFileTier(t *testing.T, tierID uuid.UUID, vaultID uuid.UUID, store blobstore.Store) *TierInstance {
+func newCloudFileTier(t *testing.T, tierID uuid.UUID, vaultID uuid.UUID, store blobstore.Store) (*TierInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1041,7 +1041,7 @@ func newCloudFileTier(t *testing.T, tierID uuid.UUID, vaultID uuid.UUID, store b
 		Chunks:  cm,
 		Indexes: im,
 		Query:   query.New(cm, im, nil),
-	}
+	}, dir
 }
 
 // TestTransitionCloudTierToNextTier verifies that sealed cloud-backed chunks
@@ -1056,7 +1056,7 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
-	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
@@ -1169,7 +1169,7 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
-	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
@@ -1279,7 +1279,8 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 // ---------- helpers for new tests ----------
 
 // newFileTierInstance creates a file-backed TierInstance without cloud storage.
-func newFileTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
+// Returns the tier instance and its filesystem directory for post-test verification.
+func newFileTierInstance(t *testing.T, tierID uuid.UUID) (*TierInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1297,9 +1298,24 @@ func newFileTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
 		Chunks:  cm,
 		Indexes: im,
 		Query:   query.New(cm, im, nil),
-	}
+	}, dir
 }
 
+
+// assertNoDirsOnDisk verifies no chunk subdirectories remain in a tier directory.
+func assertNoDirsOnDisk(t *testing.T, label, dir string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Errorf("%s: ReadDir(%s): %v", label, dir, err)
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() && len(e.Name()) == 26 {
+			t.Errorf("%s: chunk directory %s still on disk at %s", label, e.Name(), dir)
+		}
+	}
+}
 
 // countAllTierRecords counts all records across both sealed and active chunks.
 func countAllTierRecords(tb testing.TB, cm chunk.ChunkManager) int64 {
@@ -1489,9 +1505,9 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 
 	cloudStore := blobstore.NewMemory()
 
-	tier0 := newFileTierInstance(t, tier0ID)
-	tier1 := newFileTierInstance(t, tier1ID)
-	tier2 := newCloudFileTier(t, tier2ID, vaultID, cloudStore)
+	tier0, tier0Dir := newFileTierInstance(t, tier0ID)
+	tier1, tier1Dir := newFileTierInstance(t, tier1ID)
+	tier2, _ := newCloudFileTier(t, tier2ID, vaultID, cloudStore)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
 	if err != nil {
@@ -1574,6 +1590,10 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 	if got := countAllTierRecords(t, tier1.Chunks); got != 0 {
 		t.Errorf("tier 1: expected 0 records after full chain, got %d", got)
 	}
+
+	// Verify chunk directories removed from disk on tiers 0 and 1.
+	assertNoDirsOnDisk(t, "tier 0", tier0Dir)
+	assertNoDirsOnDisk(t, "tier 1", tier1Dir)
 
 	// Seal and upload tier 2 to cloud, verify cloud-backed.
 	if err := tier2.Chunks.Seal(); err != nil {
@@ -1681,7 +1701,7 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
-	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
@@ -1767,8 +1787,8 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 	tier1ID := uuid.Must(uuid.NewV7())
 	nodeID := "test-node"
 
-	tier0 := newFileTierInstance(t, tier0ID)
-	tier1 := newFileTierInstance(t, tier1ID)
+	tier0, tier0Dir := newFileTierInstance(t, tier0ID)
+	tier1, _ := newFileTierInstance(t, tier1ID)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
 	if err != nil {
@@ -1841,6 +1861,9 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 	if metaTotal != recordCount {
 		t.Errorf("tier 1: expected %d total records, got %d", recordCount, metaTotal)
 	}
+
+	// Verify source tier 0 chunk directories removed from disk.
+	assertNoDirsOnDisk(t, "tier 0", tier0Dir)
 }
 
 // ---------- Cloud search after transition ----------
@@ -1856,7 +1879,7 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 
 	cloudStore := blobstore.NewMemory()
 	tier0 := newMemoryTierInstance(t, tier0ID)
-	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
 	if err != nil {
@@ -1939,7 +1962,7 @@ func TestTransitionCloudUploadOnlyOneBlob(t *testing.T) {
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
-	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
 	orch, err := New(Config{LocalNodeID: nodeID})
 	if err != nil {
