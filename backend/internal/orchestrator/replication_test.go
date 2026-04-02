@@ -61,6 +61,9 @@ func (m *replicationFakeTransferrer) ForwardSealTier(_ context.Context, nodeID s
 	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, tierID: tierID, chunkID: chunkID})
 	return nil
 }
+func (m *replicationFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 func (m *replicationFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }

@@ -59,6 +59,10 @@ type retentionRunner struct {
 	// all nodes from independently transitioning the same chunks.
 	isLeader bool
 
+	// followerTargets are the remote nodes that hold replicas of this tier's
+	// chunks. Used to forward chunk deletions after retention expires them.
+	followerTargets []config.ReplicationTarget
+
 	now func() time.Time
 	logger      *slog.Logger
 }
@@ -93,13 +97,9 @@ func (o *Orchestrator) retentionSweepAll() {
 			continue
 		}
 		for _, tier := range vault.Tiers {
-			if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
-				continue
-			}
-			// Only the tier Raft leader evaluates retention rules.
+			// Only the config leader evaluates retention rules.
 			// Followers reconcile against the manifest.
-			isLeader := tier.IsRaftLeader == nil || tier.IsRaftLeader()
-			if !isLeader {
+			if !tier.IsLeader() {
 				if tier.ListManifest != nil {
 					reconcileTiers = append(reconcileTiers, tier)
 				}
@@ -187,6 +187,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 	runner.applyRaftDelete = tier.ApplyRaftDelete
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
 	runner.isLeader = tier.IsLeader()
+	runner.followerTargets = tier.FollowerTargets
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
@@ -312,6 +313,7 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 			}()
 		}
 	}
+
 }
 
 // clearInflight removes a chunk from the in-flight set.
@@ -362,10 +364,25 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 		return
 	}
 
-	// Delete from same-node follower instances that don't have their own
-	// Raft-driven OnDelete (e.g., single-node mode without tier Raft).
+	// Delete from same-node follower instances.
 	if r.orch != nil {
 		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
+	}
+
+	// Forward deletion to remote follower nodes.
+	if r.orch != nil && r.orch.transferrer != nil {
+		for _, target := range r.followerTargets {
+			if target.NodeID == r.orch.localNodeID {
+				continue // already handled by deleteFromFollowers
+			}
+			if err := r.orch.transferrer.ForwardDeleteChunk(
+				context.Background(), target.NodeID, r.vaultID, r.tierID, id,
+			); err != nil {
+				r.logger.Warn("retention: failed to forward chunk deletion to follower",
+					"vault", r.vaultID, "chunk", id.String(),
+					"follower", target.NodeID, "error", err)
+			}
+		}
 	}
 
 	r.logger.Info("retention: deleted chunk",

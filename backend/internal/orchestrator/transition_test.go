@@ -99,6 +99,7 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.
 
 func newTestRetentionRunner(orch *Orchestrator, vaultID, tierID uuid.UUID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
+		isLeader: true,
 		vaultID: vaultID,
 		tierID:  tierID,
 		cm:      cm,
@@ -676,8 +677,9 @@ func TestTransitionSweepDispatch(t *testing.T) {
 		action: config.RetentionActionTransition,
 	}}
 	runner := &retentionRunner{
-		vaultID: vaultID,
-		tierID:  tier0ID,
+		isLeader: true,
+		vaultID:  vaultID,
+		tierID:   tier0ID,
 		cm:      tier0CM,
 		im:      vault.Tiers[0].Indexes,
 		orch:    orch,
@@ -767,8 +769,9 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 		action: config.RetentionActionTransition,
 	}}
 	runner := &retentionRunner{
-		vaultID: vaultID,
-		tierID:  cloudTierID,
+		isLeader: true,
+		vaultID:  vaultID,
+		tierID:   cloudTierID,
 		cm:      cloudTier.Chunks,
 		im:      cloudTier.Indexes,
 		orch:    orch,
@@ -984,6 +987,9 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 }
 
 func (m *transitionFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+func (m *transitionFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *transitionFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
@@ -1219,8 +1225,9 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 		action: config.RetentionActionTransition,
 	}}
 	runner := &retentionRunner{
-		vaultID: vaultID,
-		tierID:  cloudTierID,
+		isLeader: true,
+		vaultID:  vaultID,
+		tierID:   cloudTierID,
 		cm:      cloudTier.Chunks,
 		im:      cloudTier.Indexes,
 		orch:    orch,

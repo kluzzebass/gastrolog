@@ -39,6 +39,9 @@ func (m *slowAckTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.
 func (m *slowAckTransferrer) ForwardSealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
+func (m *slowAckTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 func (m *slowAckTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }

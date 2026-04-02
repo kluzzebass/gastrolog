@@ -105,6 +105,10 @@ type Server struct {
 	// Used for seal synchronization during replication.
 	sealTierExecutor SealTierExecutor
 
+	// deleteChunkExecutor deletes a sealed chunk from a tier on this node.
+	// Used by the leader to propagate retention deletions to followers.
+	deleteChunkExecutor DeleteChunkExecutor
+
 	// recordImporter imports records as a sealed chunk in a local vault.
 	// Set after the orchestrator is created, before chunk transfer starts.
 	recordImporter RecordImporter

@@ -693,6 +693,9 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 func (m *mockTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
+func (m *mockTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
 func (m *mockTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
 	return nil
 }
