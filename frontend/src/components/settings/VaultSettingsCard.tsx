@@ -356,10 +356,11 @@ export function VaultSettingsCard({
     const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
       JSON.stringify(saveTierIds) !== JSON.stringify([...vault.tierIds]);
     if (vaultChanged) {
-      saveVault(vault.id, { name: edit.name, tierIds: saveTierIds, enabled: edit.enabled });
+      await saveVault(vault.id, { name: edit.name, tierIds: saveTierIds, enabled: edit.enabled });
     }
 
-    // Mark for reset — the next props update will sync edit state.
+    // Mark for reset — saveVault awaited above triggers a query refetch,
+    // so the next render cycle will have updated props.
     setPendingReset(true);
   };
 
@@ -544,11 +545,6 @@ export function VaultSettingsCard({
                       <Badge variant="copper" dark={dark}>
                         {tierTypeLabel(tier.type)}
                       </Badge>
-                      {i === 0 && (
-                        <span className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
-                          hottest
-                        </span>
-                      )}
                       <span className="flex-1" />
                       <div className="flex items-center gap-1">
                         <button

@@ -195,8 +195,14 @@ configure() {
       "node-${i}" --name "disk-1" --storage-class 1 --path "storage/disk-1" 2>&1 | sed 's/^/  /'
   done
 
+  echo ">>> Creating cloud service..."
+  $GLOG config cloud-service create --addr "$S" \
+    --name "S3" --provider s3 --bucket gastrolog --region gastrolog \
+    --endpoint "localhost:9000" --access-key gastrolog --secret-key gastrolog 2>&1 | sed 's/^/  /'
+
   echo ">>> Creating policies..."
   $GLOG config rotation-policy create --addr "$S" --name "1m-rotate" --max-age 1m 2>&1 | sed 's/^/  /'
+  $GLOG config rotation-policy create --addr "$S" --name "100-rows" --max-records 100 2>&1 | sed 's/^/  /'
   $GLOG config retention-policy create --addr "$S" --name "3m-retain" --max-age 3m 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating filter..."
@@ -207,11 +213,15 @@ configure() {
 
   echo ">>> Creating tiers..."
   $GLOG config tier create --addr "$S" --vault "default-vault" \
-    --name "hot" --type file --rotation-policy "1m-rotate" --retention-policy "3m-retain" \
+    --name "hot" --type file --rotation-policy "100-rows" --retention-policy "3m-retain" \
     --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
   $GLOG config tier create --addr "$S" --vault "default-vault" \
-    --name "warm" --type file --rotation-policy "1m-rotate" --retention-policy "3m-retain" \
+    --name "warm" --type file --rotation-policy "100-rows" --retention-policy "3m-retain" \
     --replication-factor "$NODES" --storage-class 1 2>&1 | sed 's/^/  /'
+  $GLOG config tier create --addr "$S" --vault "default-vault" \
+    --name "cold" --type cloud --rotation-policy "100-rows" \
+    --cloud-service "S3" --active-chunk-class 1 --cache-class 1 \
+    --replication-factor "$NODES" 2>&1 | sed 's/^/  /'
 
   echo ">>> Creating route..."
   $GLOG config route create --addr "$S" \

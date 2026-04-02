@@ -54,6 +54,11 @@ type retentionRunner struct {
 	applyRaftDelete           func(id chunk.ChunkID) error
 	applyRaftRetentionPending func(id chunk.ChunkID) error
 
+	// isLeader returns true if this node is the config leader for this tier.
+	// Retention (expiry + transitions) only runs on the leader to prevent
+	// all nodes from independently transitioning the same chunks.
+	isLeader bool
+
 	now func() time.Time
 	logger      *slog.Logger
 }
@@ -181,6 +186,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 	}
 	runner.applyRaftDelete = tier.ApplyRaftDelete
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
+	runner.isLeader = tier.IsLeader()
 	return &sweepTarget{runner: runner, rules: rules}
 }
 
@@ -222,6 +228,13 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 
 // sweep evaluates retention rules on a primary and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {
+	// Only the tier Raft leader runs retention. Followers must not
+	// independently evaluate and transition chunks — that causes N×
+	// duplication (every node transitions the same chunks).
+	if !r.isLeader {
+		return
+	}
+
 	r.mu.Lock()
 	if r.inflight == nil {
 		r.inflight = make(map[chunk.ChunkID]bool)

@@ -33,6 +33,7 @@ func NewConfigCommand() *cobra.Command {
 	}
 
 	cmd.AddCommand(
+		newCloudServiceCmd(),
 		newFilterCmd(),
 		newRotationPolicyCmd(),
 		newRetentionPolicyCmd(),

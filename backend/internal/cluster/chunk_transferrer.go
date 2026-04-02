@@ -333,5 +333,7 @@ func chunkRecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 		er.Attrs = make(map[string]string, len(rec.Attrs))
 		maps.Copy(er.Attrs, rec.Attrs)
 	}
+	er.IngestSeq = rec.EventID.IngestSeq
+	er.IngesterId = rec.EventID.IngesterID[:]
 	return er
 }

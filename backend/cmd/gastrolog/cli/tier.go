@@ -124,6 +124,9 @@ func newTierCreateCmd() *cobra.Command {
 	cmd.Flags().String("rotation-policy", "", "rotation policy name or ID")
 	cmd.Flags().String("retention-policy", "", "retention policy name or ID")
 	cmd.Flags().Uint32("storage-class", 1, "storage class for file/cloud tiers")
+	cmd.Flags().String("cloud-service", "", "cloud service name or ID (required for cloud tiers)")
+	cmd.Flags().Uint32("active-chunk-class", 0, "storage class for cloud tier active chunks")
+	cmd.Flags().Uint32("cache-class", 0, "storage class for cloud tier read cache")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -144,6 +147,17 @@ func applyTierFlags(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	if cmd.Flags().Changed("storage-class") {
 		cfg.StorageClass, _ = cmd.Flags().GetUint32("storage-class")
 	}
+	if cmd.Flags().Changed("active-chunk-class") {
+		cfg.ActiveChunkClass, _ = cmd.Flags().GetUint32("active-chunk-class")
+	}
+	if cmd.Flags().Changed("cache-class") {
+		cfg.CacheClass, _ = cmd.Flags().GetUint32("cache-class")
+	}
+	if cmd.Flags().Changed("cloud-service") {
+		if err := resolveCloudService(ctx, cmd, client, cfg); err != nil {
+			return err
+		}
+	}
 	if cmd.Flags().Changed("rotation-policy") {
 		if err := resolveRotationPolicy(ctx, cmd, client, cfg); err != nil {
 			return err
@@ -154,6 +168,26 @@ func applyTierFlags(ctx context.Context, cmd *cobra.Command, client *server.Clie
 			return err
 		}
 	}
+	return nil
+}
+
+// resolveCloudService resolves the --cloud-service flag value to an ID and sets
+// it on cfg. An empty value clears the cloud service.
+func resolveCloudService(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.TierConfig) error {
+	csName, _ := cmd.Flags().GetString("cloud-service")
+	if csName == "" {
+		cfg.CloudServiceId = ""
+		return nil
+	}
+	r, err := newResolver(ctx, client)
+	if err != nil {
+		return err
+	}
+	csID, err := resolve(csName, r.cloudServices, "cloud service")
+	if err != nil {
+		return err
+	}
+	cfg.CloudServiceId = csID
 	return nil
 }
 

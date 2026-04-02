@@ -129,7 +129,9 @@ export function isTierComplete(tier: TierEntry, hasCloudServices: boolean): bool
     case "file":
       return tier.storageClass !== "";
     case "cloud":
-      return tier.cloudServiceId !== "" || !hasCloudServices;
+      return (tier.cloudServiceId !== "" || !hasCloudServices)
+        && tier.activeChunkClass !== "" && tier.activeChunkClass !== "0"
+        && tier.cacheClass !== "" && tier.cacheClass !== "0";
     case "jsonl":
       return tier.nodeId !== "";
   }
