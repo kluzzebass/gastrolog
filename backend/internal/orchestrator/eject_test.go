@@ -7,8 +7,15 @@ import (
 	"testing"
 	"time"
 
+	"fmt"
+	"os"
+
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/config"
+	cfgmem "gastrolog/internal/config/memory"
+	indexfile "gastrolog/internal/index/file"
+	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
 )
@@ -746,4 +753,316 @@ func (m *ejectFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string,
 }
 func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
 	return nil
+}
+
+// ==========================================================================
+// File-backed eject tests
+//
+// These use real chunkfile.Manager instances with filesystem directories.
+// Verifies records arrive in destination via cursor AND source chunk
+// directories are removed from disk.
+// ==========================================================================
+
+// TestEjectChunkFileBackedLocalDelivery ejects records from a file-backed
+// source vault to a file-backed destination vault on the same node.
+// Verifies via cursor reads and filesystem checks.
+func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
+	t.Parallel()
+
+	srcVaultID := uuid.Must(uuid.NewV7())
+	dstVaultID := uuid.Must(uuid.NewV7())
+	srcTierID := uuid.Must(uuid.NewV7())
+	dstTierID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
+	nodeID := "node-A"
+
+	// Config store with source vault, destination vault, filter, and eject route.
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: srcVaultID, Name: "src", TierIDs: []uuid.UUID{srcTierID},
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: dstVaultID, Name: "dst", TierIDs: []uuid.UUID{dstTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: srcTierID, Name: "src-hot", Type: config.TierTypeFile,
+		Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: dstTierID, Name: "dst-hot", Type: config.TierTypeFile,
+		Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutFilter(context.Background(), config.FilterConfig{
+		ID: filterID, Name: "catch-all", Expression: "*",
+	})
+	_ = store.PutRoute(context.Background(), config.RouteConfig{
+		ID: routeID, Name: "eject-route", FilterID: &filterID,
+		Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true,
+	})
+
+	// File-backed source vault.
+	srcDir := t.TempDir()
+	srcCM, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            srcDir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(50),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcIM := indexfile.NewManager(srcDir, nil, nil)
+
+	// File-backed destination vault.
+	dstDir := t.TempDir()
+	dstCM, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dstDir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstIM := indexfile.NewManager(dstDir, nil, nil)
+
+	orch, err := New(Config{
+		ConfigLoader: &transitionConfigLoader{store: store},
+		LocalNodeID:  nodeID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+
+	orch.RegisterVault(NewVault(srcVaultID, srcTier))
+	orch.RegisterVault(NewVault(dstVaultID, dstTier))
+
+	t.Cleanup(func() {
+		orch.Stop()
+		_ = srcCM.Close()
+		_ = dstCM.Close()
+	})
+
+	// Ingest 200 records into source (4 sealed chunks × 50 records).
+	const totalRecords = 200
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := orch.AppendToTier(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "eject-%d", i),
+			Attrs:    chunk.Attributes{"level": "error"},
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = srcCM.Seal()
+	}
+
+	// PostSealProcess source chunks (compress so cursors work on sealed chunks).
+	metas, _ := srcCM.List()
+	t.Logf("source: %d sealed chunks", len(metas))
+	for _, m := range metas {
+		if err := srcCM.PostSealProcess(context.Background(), m.ID); err != nil {
+			t.Fatalf("PostSealProcess(%s): %v", m.ID, err)
+		}
+	}
+
+	// Capture source chunk dirs before eject.
+	srcEntriesBefore, _ := os.ReadDir(srcDir)
+	var srcChunkDirsBefore int
+	for _, e := range srcEntriesBefore {
+		if e.IsDir() && len(e.Name()) == 26 {
+			srcChunkDirsBefore++
+		}
+	}
+	if srcChunkDirsBefore == 0 {
+		t.Fatal("expected chunk directories on disk before eject")
+	}
+
+	// Eject each sealed chunk.
+	runner := &retentionRunner{
+		isLeader:        true,
+		vaultID:         srcVaultID,
+		tierID:          srcTierID,
+		cm:              srcCM,
+		im:              srcIM,
+		orch:            orch,
+		now:             time.Now,
+		logger:          slog.Default(),
+	}
+	for _, m := range metas {
+		runner.ejectChunk(m.ID, []uuid.UUID{routeID})
+	}
+
+	// ---- Verify: destination has all records (cursor-verified) ----
+	dstRecords := readAllRecords(t, dstCM)
+	if len(dstRecords) != totalRecords {
+		t.Errorf("destination: cursor read %d records, expected %d", len(dstRecords), totalRecords)
+	}
+
+	// ---- Verify: source has 0 records (cursor-verified) ----
+	srcRemaining := cursorCountRecords(t, srcCM)
+	if srcRemaining != 0 {
+		t.Errorf("source: cursor read %d records after eject (should be 0)", srcRemaining)
+	}
+
+	// ---- Verify: source chunk directories removed from disk ----
+	srcEntriesAfter, _ := os.ReadDir(srcDir)
+	var srcChunkDirsAfter int
+	for _, e := range srcEntriesAfter {
+		if e.IsDir() && len(e.Name()) == 26 {
+			srcChunkDirsAfter++
+		}
+	}
+	if srcChunkDirsAfter > 0 {
+		t.Errorf("source: %d chunk directories still on disk after eject", srcChunkDirsAfter)
+	}
+}
+
+// TestEjectChunkFileBackedRemoteDelivery ejects records from a file-backed
+// source vault on node-A to a file-backed destination vault on node-B via
+// directTransferrer. Verifies records arrive on the remote node.
+func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
+	t.Parallel()
+
+	srcVaultID := uuid.Must(uuid.NewV7())
+	dstVaultID := uuid.Must(uuid.NewV7())
+	srcTierID := uuid.Must(uuid.NewV7())
+	dstTierID := uuid.Must(uuid.NewV7())
+	filterID := uuid.Must(uuid.NewV7())
+	routeID := uuid.Must(uuid.NewV7())
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: srcVaultID, Name: "src", TierIDs: []uuid.UUID{srcTierID},
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: dstVaultID, Name: "dst", TierIDs: []uuid.UUID{dstTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: srcTierID, Name: "src-hot", Type: config.TierTypeFile,
+		Placements: syntheticPlacements("node-A"),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: dstTierID, Name: "dst-hot", Type: config.TierTypeFile,
+		Placements: syntheticPlacements("node-B"),
+	})
+	_ = store.PutFilter(context.Background(), config.FilterConfig{
+		ID: filterID, Name: "catch-all", Expression: "*",
+	})
+	_ = store.PutRoute(context.Background(), config.RouteConfig{
+		ID: routeID, Name: "eject-route", FilterID: &filterID,
+		Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true,
+	})
+
+	// Node-A (source).
+	srcDir := t.TempDir()
+	srcCM, err := chunkfile.NewManager(chunkfile.Config{
+		Dir: srcDir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(50),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcIM := indexfile.NewManager(srcDir, nil, nil)
+
+	orchA, err := New(Config{
+		ConfigLoader: &transitionConfigLoader{store: store},
+		LocalNodeID:  "node-A",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
+	orchA.RegisterVault(NewVault(srcVaultID, srcTier))
+
+	// Node-B (destination).
+	dstDir := t.TempDir()
+	dstCM, err := chunkfile.NewManager(chunkfile.Config{
+		Dir: dstDir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(10000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstIM := indexfile.NewManager(dstDir, nil, nil)
+
+	orchB, err := New(Config{
+		ConfigLoader: &transitionConfigLoader{store: store},
+		LocalNodeID:  "node-B",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}
+	orchB.RegisterVault(NewVault(dstVaultID, dstTier))
+
+	// Wire transferrer.
+	orchA.SetRemoteTransferrer(&directTransferrer{nodes: map[string]*Orchestrator{"node-B": orchB}})
+
+	t.Cleanup(func() {
+		orchA.Stop()
+		orchB.Stop()
+		_ = srcCM.Close()
+		_ = dstCM.Close()
+	})
+
+	// Ingest 200 records on node-A.
+	const totalRecords = 200
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := orchA.AppendToTier(srcVaultID, srcTierID, chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts,
+			Raw:   fmt.Appendf(nil, "remote-eject-%d", i),
+			Attrs: chunk.Attributes{"level": "error"},
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if active := srcCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = srcCM.Seal()
+	}
+
+	metas, _ := srcCM.List()
+	t.Logf("source: %d sealed chunks", len(metas))
+	for _, m := range metas {
+		_ = srcCM.PostSealProcess(context.Background(), m.ID)
+	}
+
+	// Eject to remote node.
+	runner := &retentionRunner{
+		isLeader: true,
+		vaultID:  srcVaultID,
+		tierID:   srcTierID,
+		cm:       srcCM,
+		im:       srcIM,
+		orch:     orchA,
+		now:      time.Now,
+		logger:   slog.Default(),
+	}
+	for _, m := range metas {
+		runner.ejectChunk(m.ID, []uuid.UUID{routeID})
+	}
+
+	// ---- Verify: node-B has all records (cursor-verified) ----
+	dstCount := cursorCountRecords(t, dstCM)
+	if dstCount != totalRecords {
+		t.Errorf("node-B: cursor read %d records, expected %d", dstCount, totalRecords)
+	}
+
+	// ---- Verify: node-A source chunk dirs removed from disk ----
+	entries, _ := os.ReadDir(srcDir)
+	var chunkDirs int
+	for _, e := range entries {
+		if e.IsDir() && len(e.Name()) == 26 {
+			chunkDirs++
+		}
+	}
+	if chunkDirs > 0 {
+		t.Errorf("node-A: %d source chunk directories still on disk", chunkDirs)
+	}
 }
