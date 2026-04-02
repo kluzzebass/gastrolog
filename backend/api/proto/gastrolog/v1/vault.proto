@@ -319,6 +319,8 @@ message ArchiveChunkResponse {}
 message RestoreChunkRequest {
   string vault_id = 1;
   string chunk_id = 2;
+  string restore_tier = 3; // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+  int32 restore_days = 4;  // How long restored copy stays readable (S3 only, 0 = provider default)
 }
 
 message RestoreChunkResponse {}

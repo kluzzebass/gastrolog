@@ -171,7 +171,10 @@ type ChunkArchiver interface {
 
 	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
 	// async (RestoreObject). Returns nil if already restored or not archived.
-	RestoreChunk(ctx context.Context, id ChunkID) error
+	// tier is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
+	// "High"/"Standard" for Azure). days is how long the restored copy stays
+	// readable (S3 only).
+	RestoreChunk(ctx context.Context, id ChunkID, tier string, days int) error
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

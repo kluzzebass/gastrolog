@@ -223,10 +223,12 @@ export function useArchiveChunk() {
 export function useRestoreChunk() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (args: { vaultId: string; chunkId: string }) => {
+    mutationFn: async (args: { vaultId: string; chunkId: string; restoreTier?: string; restoreDays?: number }) => {
       await vaultClient.restoreChunk({
         vaultId: args.vaultId,
         chunkId: args.chunkId,
+        restoreTier: args.restoreTier ?? "Standard",
+        restoreDays: args.restoreDays ?? 7,
       });
     },
     onSuccess: () => {

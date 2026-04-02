@@ -72,7 +72,10 @@ type Archiver interface {
 	// Restore initiates retrieval of an archived blob. On S3 this is async
 	// (RestoreObject, takes minutes to hours). On Azure this is sync
 	// (SetBlobTier to Hot/Cool). Returns nil if already restored or not archived.
-	Restore(ctx context.Context, key string) error
+	// tier is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
+	// "High"/"Standard" for Azure, ignored for GCS).
+	// days is how long the restored copy stays readable (S3 only, ignored elsewhere).
+	Restore(ctx context.Context, key string, tier string, days int) error
 
 	// IsRestoring returns true if a restore is in progress for the key.
 	IsRestoring(ctx context.Context, key string) (bool, error)

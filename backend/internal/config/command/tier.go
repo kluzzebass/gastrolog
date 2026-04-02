@@ -17,10 +17,9 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 			ejectIDs[j] = eid.String()
 		}
 		rules[i] = &gastrologv1.VaultRetentionRule{
-			RetentionPolicyId:   r.RetentionPolicyID.String(),
-			Action:              string(r.Action),
-			EjectRouteIds:       ejectIDs,
-			ArchiveStorageClass: r.ArchiveStorageClass,
+			RetentionPolicyId: r.RetentionPolicyID.String(),
+			Action:            string(r.Action),
+			EjectRouteIds:     ejectIDs,
 		}
 	}
 	placements := make([]*gastrologv1.TierPlacementEntry, len(tier.Placements))
@@ -93,10 +92,9 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 			ejectRouteIDs = append(ejectRouteIDs, eidParsed)
 		}
 		rules = append(rules, config.RetentionRule{
-			RetentionPolicyID:   rpID,
-			Action:              config.RetentionAction(r.GetAction()),
-			EjectRouteIDs:       ejectRouteIDs,
-			ArchiveStorageClass: r.GetArchiveStorageClass(),
+			RetentionPolicyID: rpID,
+			Action:            config.RetentionAction(r.GetAction()),
+			EjectRouteIDs:     ejectRouteIDs,
 		})
 	}
 

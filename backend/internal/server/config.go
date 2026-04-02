@@ -311,9 +311,8 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 		}
 		for _, r := range tier.RetentionRules {
 			pb := &apiv1.RetentionRule{
-				RetentionPolicyId:   r.RetentionPolicyID.String(),
-				Action:              string(r.Action),
-				ArchiveStorageClass: r.ArchiveStorageClass,
+				RetentionPolicyId: r.RetentionPolicyID.String(),
+				Action:            string(r.Action),
 			}
 			for _, eid := range r.EjectRouteIDs {
 				pb.EjectRouteIds = append(pb.EjectRouteIds, eid.String())

@@ -2045,6 +2045,20 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
    */
   chunkId = "";
 
+  /**
+   * "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+   *
+   * @generated from field: string restore_tier = 3;
+   */
+  restoreTier = "";
+
+  /**
+   * How long restored copy stays readable (S3 only, 0 = provider default)
+   *
+   * @generated from field: int32 restore_days = 4;
+   */
+  restoreDays = 0;
+
   constructor(data?: PartialMessage<RestoreChunkRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2055,6 +2069,8 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "restore_days", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RestoreChunkRequest {

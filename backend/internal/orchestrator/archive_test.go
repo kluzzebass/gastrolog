@@ -90,23 +90,10 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 		t.Fatalf("pre-archive: expected %d records, got %d", recordCount, len(preRecords))
 	}
 
-	// Run retention sweep with archive action → GLACIER.
-	rules := []retentionRule{{
-		policy:              &keepNPolicy{n: 0}, // match all sealed chunks
-		action:              config.RetentionActionArchive,
-		archiveStorageClass: "GLACIER",
-	}}
-	runner := &retentionRunner{
-		isLeader: true,
-		vaultID:  vaultID,
-		tierID:   tierID,
-		cm:       cm,
-		im:       im,
-		orch:     orch,
-		now:      time.Now,
-		logger:   orch.logger,
+	// Archive via orchestrator RPC path.
+	if err := orch.ArchiveChunk(context.Background(), vaultID, chunkID, "GLACIER"); err != nil {
+		t.Fatalf("ArchiveChunk: %v", err)
 	}
-	runner.sweep(rules)
 
 	// Verify: chunk is now archived.
 	meta, _ = cm.Meta(chunkID)
@@ -142,7 +129,7 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	}
 
 	// Restore the chunk.
-	if err := cm.RestoreChunk(context.Background(), chunkID); err != nil {
+	if err := cm.RestoreChunk(context.Background(), chunkID, "Standard", 7); err != nil {
 		t.Fatalf("RestoreChunk: %v", err)
 	}
 

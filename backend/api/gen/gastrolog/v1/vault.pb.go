@@ -2428,6 +2428,8 @@ type RestoreChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	RestoreTier   string                 `protobuf:"bytes,3,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`  // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+	RestoreDays   int32                  `protobuf:"varint,4,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"` // How long restored copy stays readable (S3 only, 0 = provider default)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2474,6 +2476,20 @@ func (x *RestoreChunkRequest) GetChunkId() string {
 		return x.ChunkId
 	}
 	return ""
+}
+
+func (x *RestoreChunkRequest) GetRestoreTier() string {
+	if x != nil {
+		return x.RestoreTier
+	}
+	return ""
+}
+
+func (x *RestoreChunkRequest) GetRestoreDays() int32 {
+	if x != nil {
+		return x.RestoreDays
+	}
+	return 0
 }
 
 type RestoreChunkResponse struct {
@@ -2710,10 +2726,12 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12#\n" +
 	"\rstorage_class\x18\x03 \x01(\tR\fstorageClass\"\x16\n" +
-	"\x14ArchiveChunkResponse\"K\n" +
+	"\x14ArchiveChunkResponse\"\x91\x01\n" +
 	"\x13RestoreChunkRequest\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"\x16\n" +
+	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12!\n" +
+	"\frestore_tier\x18\x03 \x01(\tR\vrestoreTier\x12!\n" +
+	"\frestore_days\x18\x04 \x01(\x05R\vrestoreDays\"\x16\n" +
 	"\x14RestoreChunkResponse2\xc1\n" +
 	"\n" +
 	"\fVaultService\x12O\n" +

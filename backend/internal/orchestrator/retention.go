@@ -30,10 +30,9 @@ func retentionKey(tierID uuid.UUID, storageID string) string {
 
 // retentionRule is a resolved rule: a compiled policy paired with an action.
 type retentionRule struct {
-	policy              chunk.RetentionPolicy
-	action              config.RetentionAction
-	ejectRouteIDs       []uuid.UUID // target route IDs, only for eject
-	archiveStorageClass string      // target class for archive action
+	policy        chunk.RetentionPolicy
+	action        config.RetentionAction
+	ejectRouteIDs []uuid.UUID // target route IDs, only for eject
 }
 
 // retentionRunner holds per-tier-instance state that persists across sweeps.
@@ -308,8 +307,6 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 					r.ejectChunk(id, b.ejectRouteIDs)
 				case config.RetentionActionTransition:
 					r.transitionChunk(id)
-				case config.RetentionActionArchive:
-					r.archiveChunk(id, b.archiveStorageClass)
 				default:
 					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
 				}
@@ -341,32 +338,6 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 			fmt.Sprintf("Chunk %s unreadable: %v", id, reason),
 		)
 	}
-}
-
-// archiveChunk transitions a cloud-backed chunk to an offline storage class.
-// The chunk stays in the tier's chunk list but becomes unreadable until restored.
-func (r *retentionRunner) archiveChunk(id chunk.ChunkID, storageClass string) {
-	if storageClass == "" {
-		storageClass = "GLACIER" // default to S3 Glacier
-	}
-
-	archiver, ok := r.cm.(chunk.ChunkArchiver)
-	if !ok {
-		r.logger.Error("retention archive: chunk manager does not support archival",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
-		return
-	}
-
-	if err := archiver.ArchiveChunk(context.Background(), id, storageClass); err != nil {
-		r.logger.Error("retention archive: failed",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
-			"storageClass", storageClass, "error", err)
-		return
-	}
-
-	r.logger.Info("retention archive: completed",
-		"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
-		"storageClass", storageClass)
 }
 
 // expireChunk commits the deletion to the tier Raft manifest (so secondaries

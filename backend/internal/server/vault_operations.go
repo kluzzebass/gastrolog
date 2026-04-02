@@ -448,7 +448,16 @@ func (s *VaultServer) RestoreChunk(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
 
-	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID); err != nil {
+	tier := req.Msg.RestoreTier
+	if tier == "" {
+		tier = "Standard"
+	}
+	days := int(req.Msg.RestoreDays)
+	if days <= 0 {
+		days = 7
+	}
+
+	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID, tier, days); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
