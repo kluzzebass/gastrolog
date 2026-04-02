@@ -448,17 +448,59 @@ func (s *VaultServer) RestoreChunk(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
 
-	tier := req.Msg.RestoreTier
-	if tier == "" {
-		tier = "Standard"
-	}
-	days := int(req.Msg.RestoreDays)
-	if days <= 0 {
-		days = 7
-	}
+	// Use request values, falling back to cloud service defaults, then hardcoded defaults.
+	tier, days := s.resolveRestoreDefaults(ctx, vaultID, chunkID, req.Msg.RestoreTier, int(req.Msg.RestoreDays))
 
 	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID, tier, days); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
+}
+
+// resolveRestoreDefaults fills in restore tier and days from cloud service config.
+func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, reqTier string, reqDays int) (string, int) {
+	tier, days := reqTier, reqDays
+	if (tier == "" || days <= 0) && s.cfgStore != nil {
+		cs := s.lookupCloudServiceForChunk(ctx, vaultID, chunkID)
+		if cs != nil && tier == "" {
+			tier = cs.RestoreTier
+		}
+		if cs != nil && days <= 0 {
+			days = int(cs.RestoreDays)
+		}
+	}
+	if tier == "" {
+		tier = "Standard"
+	}
+	if days <= 0 {
+		days = 7
+	}
+	return tier, days
+}
+
+// lookupCloudServiceForChunk finds the CloudService config for a chunk's tier.
+func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID uuid.UUID, _ chunk.ChunkID) *config.CloudService {
+	cfg, err := s.cfgStore.Load(ctx)
+	if err != nil || cfg == nil {
+		return nil
+	}
+	// Find vault → tiers → cloud service.
+	for _, v := range cfg.Vaults {
+		if v.ID != vaultID {
+			continue
+		}
+		for _, tierID := range v.TierIDs {
+			for i := range cfg.Tiers {
+				t := &cfg.Tiers[i]
+				if t.ID == tierID && t.CloudServiceID != nil {
+					for j := range cfg.CloudServices {
+						if cfg.CloudServices[j].ID == *t.CloudServiceID {
+							return &cfg.CloudServices[j]
+						}
+					}
+				}
+			}
+		}
+	}
+	return nil
 }
