@@ -166,9 +166,10 @@ message GetConfigResponse {
 
 message RetentionRule {
   string retention_policy_id = 1;
-  string action = 2;              // "expire" or "eject"
+  string action = 2;              // "expire", "eject", "transition", or "archive"
   string destination_id = 3;      // deprecated — was target vault for action=migrate
   repeated string eject_route_ids = 4; // target routes, only for action=eject
+  string archive_storage_class = 5;    // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
 }
 
 message VaultConfig {

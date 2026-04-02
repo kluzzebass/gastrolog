@@ -68,6 +68,12 @@ const (
 	VaultServiceMergeVaultsProcedure = "/gastrolog.v1.VaultService/MergeVaults"
 	// VaultServiceSealVaultProcedure is the fully-qualified name of the VaultService's SealVault RPC.
 	VaultServiceSealVaultProcedure = "/gastrolog.v1.VaultService/SealVault"
+	// VaultServiceArchiveChunkProcedure is the fully-qualified name of the VaultService's ArchiveChunk
+	// RPC.
+	VaultServiceArchiveChunkProcedure = "/gastrolog.v1.VaultService/ArchiveChunk"
+	// VaultServiceRestoreChunkProcedure is the fully-qualified name of the VaultService's RestoreChunk
+	// RPC.
+	VaultServiceRestoreChunkProcedure = "/gastrolog.v1.VaultService/RestoreChunk"
 )
 
 // VaultServiceClient is a client for the gastrolog.v1.VaultService service.
@@ -102,6 +108,13 @@ type VaultServiceClient interface {
 	MergeVaults(context.Context, *connect.Request[v1.MergeVaultsRequest]) (*connect.Response[v1.MergeVaultsResponse], error)
 	// SealVault seals the active chunk of a vault.
 	SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error)
+	// ArchiveChunk transitions a cloud-backed sealed chunk to an offline
+	// storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
+	// in the tier but becomes unreadable until restored.
+	ArchiveChunk(context.Context, *connect.Request[v1.ArchiveChunkRequest]) (*connect.Response[v1.ArchiveChunkResponse], error)
+	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
+	// async (RestoreObject). The chunk becomes readable once restore completes.
+	RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error)
 }
 
 // NewVaultServiceClient constructs a client for the gastrolog.v1.VaultService service. By default,
@@ -199,6 +212,18 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("SealVault")),
 			connect.WithClientOptions(opts...),
 		),
+		archiveChunk: connect.NewClient[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse](
+			httpClient,
+			baseURL+VaultServiceArchiveChunkProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("ArchiveChunk")),
+			connect.WithClientOptions(opts...),
+		),
+		restoreChunk: connect.NewClient[v1.RestoreChunkRequest, v1.RestoreChunkResponse](
+			httpClient,
+			baseURL+VaultServiceRestoreChunkProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("RestoreChunk")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -218,6 +243,8 @@ type vaultServiceClient struct {
 	importRecords *connect.Client[v1.ImportRecordsRequest, v1.ImportRecordsResponse]
 	mergeVaults   *connect.Client[v1.MergeVaultsRequest, v1.MergeVaultsResponse]
 	sealVault     *connect.Client[v1.SealVaultRequest, v1.SealVaultResponse]
+	archiveChunk  *connect.Client[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse]
+	restoreChunk  *connect.Client[v1.RestoreChunkRequest, v1.RestoreChunkResponse]
 }
 
 // ListVaults calls gastrolog.v1.VaultService.ListVaults.
@@ -290,6 +317,16 @@ func (c *vaultServiceClient) SealVault(ctx context.Context, req *connect.Request
 	return c.sealVault.CallUnary(ctx, req)
 }
 
+// ArchiveChunk calls gastrolog.v1.VaultService.ArchiveChunk.
+func (c *vaultServiceClient) ArchiveChunk(ctx context.Context, req *connect.Request[v1.ArchiveChunkRequest]) (*connect.Response[v1.ArchiveChunkResponse], error) {
+	return c.archiveChunk.CallUnary(ctx, req)
+}
+
+// RestoreChunk calls gastrolog.v1.VaultService.RestoreChunk.
+func (c *vaultServiceClient) RestoreChunk(ctx context.Context, req *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error) {
+	return c.restoreChunk.CallUnary(ctx, req)
+}
+
 // VaultServiceHandler is an implementation of the gastrolog.v1.VaultService service.
 type VaultServiceHandler interface {
 	// ListVaults returns all registered vaults.
@@ -322,6 +359,13 @@ type VaultServiceHandler interface {
 	MergeVaults(context.Context, *connect.Request[v1.MergeVaultsRequest]) (*connect.Response[v1.MergeVaultsResponse], error)
 	// SealVault seals the active chunk of a vault.
 	SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error)
+	// ArchiveChunk transitions a cloud-backed sealed chunk to an offline
+	// storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
+	// in the tier but becomes unreadable until restored.
+	ArchiveChunk(context.Context, *connect.Request[v1.ArchiveChunkRequest]) (*connect.Response[v1.ArchiveChunkResponse], error)
+	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
+	// async (RestoreObject). The chunk becomes readable once restore completes.
+	RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error)
 }
 
 // NewVaultServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -415,6 +459,18 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("SealVault")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vaultServiceArchiveChunkHandler := connect.NewUnaryHandler(
+		VaultServiceArchiveChunkProcedure,
+		svc.ArchiveChunk,
+		connect.WithSchema(vaultServiceMethods.ByName("ArchiveChunk")),
+		connect.WithHandlerOptions(opts...),
+	)
+	vaultServiceRestoreChunkHandler := connect.NewUnaryHandler(
+		VaultServiceRestoreChunkProcedure,
+		svc.RestoreChunk,
+		connect.WithSchema(vaultServiceMethods.ByName("RestoreChunk")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.VaultService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VaultServiceListVaultsProcedure:
@@ -445,6 +501,10 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceMergeVaultsHandler.ServeHTTP(w, r)
 		case VaultServiceSealVaultProcedure:
 			vaultServiceSealVaultHandler.ServeHTTP(w, r)
+		case VaultServiceArchiveChunkProcedure:
+			vaultServiceArchiveChunkHandler.ServeHTTP(w, r)
+		case VaultServiceRestoreChunkProcedure:
+			vaultServiceRestoreChunkHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -508,4 +568,12 @@ func (UnimplementedVaultServiceHandler) MergeVaults(context.Context, *connect.Re
 
 func (UnimplementedVaultServiceHandler) SealVault(context.Context, *connect.Request[v1.SealVaultRequest]) (*connect.Response[v1.SealVaultResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.SealVault is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) ArchiveChunk(context.Context, *connect.Request[v1.ArchiveChunkRequest]) (*connect.Response[v1.ArchiveChunkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.ArchiveChunk is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.RestoreChunk is not implemented"))
 }

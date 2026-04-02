@@ -1005,13 +1005,14 @@ func (x *DeleteRetentionPolicyCommand) GetId() string {
 // RetentionRule for vault commands. Separate from config.proto's RetentionRule
 // to avoid naming collisions and to match Go types exactly.
 type VaultRetentionRule struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	RetentionPolicyId string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
-	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                      // "expire" or "eject"
-	Destination       string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`                            // deprecated — was target vault for action=migrate
-	EjectRouteIds     []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"` // target routes, only for action=eject
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	RetentionPolicyId   string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
+	Action              string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                                        // "expire", "eject", "transition", or "archive"
+	Destination         string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`                                              // deprecated — was target vault for action=migrate
+	EjectRouteIds       []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"`                   // target routes, only for action=eject
+	ArchiveStorageClass string                 `protobuf:"bytes,5,opt,name=archive_storage_class,json=archiveStorageClass,proto3" json:"archive_storage_class,omitempty"` // target class for archive
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *VaultRetentionRule) Reset() {
@@ -1070,6 +1071,13 @@ func (x *VaultRetentionRule) GetEjectRouteIds() []string {
 		return x.EjectRouteIds
 	}
 	return nil
+}
+
+func (x *VaultRetentionRule) GetArchiveStorageClass() string {
+	if x != nil {
+		return x.ArchiveStorageClass
+	}
+	return ""
 }
 
 type PutVaultCommand struct {
@@ -3342,12 +3350,13 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"_max_bytesB\r\n" +
 	"\v_max_chunks\".\n" +
 	"\x1cDeleteRetentionPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xa6\x01\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"\xda\x01\n" +
 	"\x12VaultRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12 \n" +
 	"\vdestination\x18\x03 \x01(\tR\vdestination\x12&\n" +
-	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\"\x8e\x01\n" +
+	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\x122\n" +
+	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"\x8e\x01\n" +
 	"\x0fPutVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +

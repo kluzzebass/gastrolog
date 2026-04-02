@@ -439,8 +439,9 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 			return config.TierConfig{}, fmt.Errorf("invalid retention_policy_id in rule: %w", err)
 		}
 		rule := config.RetentionRule{
-			RetentionPolicyID: rpID,
-			Action:            config.RetentionAction(r.Action),
+			RetentionPolicyID:   rpID,
+			Action:              config.RetentionAction(r.Action),
+			ArchiveStorageClass: r.ArchiveStorageClass,
 		}
 		for _, eid := range r.EjectRouteIds {
 			routeID, err := uuid.Parse(eid)

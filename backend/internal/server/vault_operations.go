@@ -407,3 +407,49 @@ func (s *VaultServer) createVault(ctx context.Context, cfg config.VaultConfig) *
 
 	return nil
 }
+
+// ArchiveChunk transitions a cloud-backed sealed chunk to an offline storage class.
+// Routing: RouteTargeted — forwarded to the vault-owning node.
+func (s *VaultServer) ArchiveChunk(
+	ctx context.Context,
+	req *connect.Request[apiv1.ArchiveChunkRequest],
+) (*connect.Response[apiv1.ArchiveChunkResponse], error) {
+	vaultID, connErr := parseUUID(req.Msg.VaultId)
+	if connErr != nil {
+		return nil, connErr
+	}
+	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
+	}
+	storageClass := req.Msg.StorageClass
+	if storageClass == "" {
+		storageClass = "GLACIER"
+	}
+
+	if err := s.orch.ArchiveChunk(ctx, vaultID, chunkID, storageClass); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.ArchiveChunkResponse{}), nil
+}
+
+// RestoreChunk initiates retrieval of an archived chunk from offline storage.
+// Routing: RouteTargeted — forwarded to the vault-owning node.
+func (s *VaultServer) RestoreChunk(
+	ctx context.Context,
+	req *connect.Request[apiv1.RestoreChunkRequest],
+) (*connect.Response[apiv1.RestoreChunkResponse], error) {
+	vaultID, connErr := parseUUID(req.Msg.VaultId)
+	if connErr != nil {
+		return nil, connErr
+	}
+	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
+	}
+
+	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
+}

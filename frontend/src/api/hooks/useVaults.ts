@@ -204,3 +204,34 @@ export function useDeleteVault() {
   );
 }
 
+export function useArchiveChunk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { vaultId: string; chunkId: string; storageClass?: string }) => {
+      await vaultClient.archiveChunk({
+        vaultId: args.vaultId,
+        chunkId: args.chunkId,
+        storageClass: args.storageClass ?? "GLACIER",
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["chunks"] });
+    },
+  });
+}
+
+export function useRestoreChunk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (args: { vaultId: string; chunkId: string }) => {
+      await vaultClient.restoreChunk({
+        vaultId: args.vaultId,
+        chunkId: args.chunkId,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["chunks"] });
+    },
+  });
+}
+

@@ -63,6 +63,49 @@ func (o *Orchestrator) indexManager(vaultID uuid.UUID) (index.IndexManager, erro
 	return s.IndexManager(), nil
 }
 
+// findChunkManagerForChunk searches all tiers in a vault for the chunk manager
+// that owns the given chunk ID.
+func (o *Orchestrator) findChunkManagerForChunk(vaultID uuid.UUID, chunkID chunk.ChunkID) (chunk.ChunkManager, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	for _, tier := range vault.Tiers {
+		if _, err := tier.Chunks.Meta(chunkID); err == nil {
+			return tier.Chunks, nil
+		}
+	}
+	return nil, fmt.Errorf("%w: chunk %s in vault %s", chunk.ErrChunkNotFound, chunkID, vaultID)
+}
+
+// ArchiveChunk transitions a cloud-backed sealed chunk to an offline storage class.
+func (o *Orchestrator) ArchiveChunk(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, storageClass string) error {
+	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
+	if err != nil {
+		return err
+	}
+	archiver, ok := cm.(chunk.ChunkArchiver)
+	if !ok {
+		return errors.New("chunk manager does not support archival")
+	}
+	return archiver.ArchiveChunk(ctx, chunkID, storageClass)
+}
+
+// RestoreChunk initiates retrieval of an archived chunk.
+func (o *Orchestrator) RestoreChunk(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) error {
+	cm, err := o.findChunkManagerForChunk(vaultID, chunkID)
+	if err != nil {
+		return err
+	}
+	archiver, ok := cm.(chunk.ChunkArchiver)
+	if !ok {
+		return errors.New("chunk manager does not support restore")
+	}
+	return archiver.RestoreChunk(ctx, chunkID)
+}
+
 // --- Chunk read ---
 
 // TieredChunkMeta pairs a chunk with the tier it belongs to.

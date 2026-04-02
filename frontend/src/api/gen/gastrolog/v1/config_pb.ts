@@ -194,7 +194,7 @@ export class RetentionRule extends Message<RetentionRule> {
   retentionPolicyId = "";
 
   /**
-   * "expire" or "eject"
+   * "expire", "eject", "transition", or "archive"
    *
    * @generated from field: string action = 2;
    */
@@ -214,6 +214,13 @@ export class RetentionRule extends Message<RetentionRule> {
    */
   ejectRouteIds: string[] = [];
 
+  /**
+   * target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
+   *
+   * @generated from field: string archive_storage_class = 5;
+   */
+  archiveStorageClass = "";
+
   constructor(data?: PartialMessage<RetentionRule>) {
     super();
     proto3.util.initPartial(data, this);
@@ -226,6 +233,7 @@ export class RetentionRule extends Message<RetentionRule> {
     { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "destination_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "eject_route_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "archive_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RetentionRule {

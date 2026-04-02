@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -168,6 +168,31 @@ export const VaultService = {
       name: "SealVault",
       I: SealVaultRequest,
       O: SealVaultResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * ArchiveChunk transitions a cloud-backed sealed chunk to an offline
+     * storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
+     * in the tier but becomes unreadable until restored.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.ArchiveChunk
+     */
+    archiveChunk: {
+      name: "ArchiveChunk",
+      I: ArchiveChunkRequest,
+      O: ArchiveChunkResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * RestoreChunk initiates retrieval of an archived chunk. On S3 this is
+     * async (RestoreObject). The chunk becomes readable once restore completes.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.RestoreChunk
+     */
+    restoreChunk: {
+      name: "RestoreChunk",
+      I: RestoreChunkRequest,
+      O: RestoreChunkResponse,
       kind: MethodKind.Unary,
     },
   }

@@ -10,6 +10,8 @@ export {
   useMergeVaults,
   usePutVault,
   useDeleteVault,
+  useArchiveChunk,
+  useRestoreChunk,
 } from "./useVaults";
 export { useSearch, extractTokens } from "./useSearch";
 export { useFollow } from "./useFollow";

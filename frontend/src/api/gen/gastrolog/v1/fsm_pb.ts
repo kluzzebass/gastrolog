@@ -598,7 +598,7 @@ export class VaultRetentionRule extends Message<VaultRetentionRule> {
   retentionPolicyId = "";
 
   /**
-   * "expire" or "eject"
+   * "expire", "eject", "transition", or "archive"
    *
    * @generated from field: string action = 2;
    */
@@ -618,6 +618,13 @@ export class VaultRetentionRule extends Message<VaultRetentionRule> {
    */
   ejectRouteIds: string[] = [];
 
+  /**
+   * target class for archive
+   *
+   * @generated from field: string archive_storage_class = 5;
+   */
+  archiveStorageClass = "";
+
   constructor(data?: PartialMessage<VaultRetentionRule>) {
     super();
     proto3.util.initPartial(data, this);
@@ -630,6 +637,7 @@ export class VaultRetentionRule extends Message<VaultRetentionRule> {
     { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "eject_route_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "archive_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRetentionRule {
