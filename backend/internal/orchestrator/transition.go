@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
@@ -109,6 +110,38 @@ func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid
 		return uuid.UUID{}, nil, fmt.Errorf("next tier %s config not found", nextTierID)
 	}
 	return nextTierID, nextTierCfg, nil
+}
+
+// TransitionChunk transitions a single sealed chunk from the given tier to the
+// next tier in the vault's chain. Exported for integration tests that need to
+// trigger transitions from outside the package.
+func (o *Orchestrator) TransitionChunk(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) {
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		return
+	}
+	var tier *TierInstance
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID {
+			tier = t
+			break
+		}
+	}
+	if tier == nil {
+		return
+	}
+	r := &retentionRunner{
+		isLeader:        true,
+		vaultID:         vaultID,
+		tierID:          tierID,
+		cm:              tier.Chunks,
+		im:              tier.Indexes,
+		orch:            o,
+		followerTargets: tier.FollowerTargets,
+		now:             time.Now,
+		logger:          o.logger,
+	}
+	r.transitionChunk(chunkID)
 }
 
 // streamLocal appends records from a cursor to a local tier via AppendToTier.
