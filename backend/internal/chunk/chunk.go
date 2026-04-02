@@ -18,6 +18,7 @@ var (
 	ErrVaultNotFound  = errors.New("vault not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
 	ErrChunkArchived = errors.New("chunk is archived and not immediately readable")
+	ErrChunkSuspect  = errors.New("chunk blob not found in cloud storage — may be transient")
 	ErrNoTSIndex     = errors.New("no TS index available")
 )
 
