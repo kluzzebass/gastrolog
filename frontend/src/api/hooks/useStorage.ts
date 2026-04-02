@@ -18,6 +18,12 @@ export function usePutCloudService() {
       container: string;
       connectionString: string;
       credentialsJson: string;
+      archivalMode?: string;
+      transitions?: Array<{ afterDays: number; storageClass: string }>;
+      restoreTier?: string;
+      restoreDays?: number;
+      suspectGraceDays?: number;
+      reconcileSchedule?: string;
     }) => {
       return configClient.putCloudService({
         config: {
@@ -32,6 +38,15 @@ export function usePutCloudService() {
           container: args.container,
           connectionString: args.connectionString,
           credentialsJson: args.credentialsJson,
+          archivalMode: args.archivalMode ?? "",
+          transitions: (args.transitions ?? []).map((t) => ({
+            afterDays: t.afterDays,
+            storageClass: t.storageClass,
+          })),
+          restoreTier: args.restoreTier ?? "",
+          restoreDays: args.restoreDays ?? 0,
+          suspectGraceDays: args.suspectGraceDays ?? 0,
+          reconcileSchedule: args.reconcileSchedule ?? "",
         } as CloudService,
       });
     },
