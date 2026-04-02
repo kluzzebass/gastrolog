@@ -253,7 +253,7 @@ function ArchivalSection({
       {isActive && (
         <div className="flex flex-col gap-2">
           <p className={`text-[0.75em] leading-snug ${c("text-text-ghost", "text-light-text-ghost")}`}>
-            Transitions are applied in order. Empty storage class = delete.
+            Transitions are applied in order by chunk age.
           </p>
 
           {values.transitions.map((t, i) => (
