@@ -34,6 +34,11 @@ function providerLabel(provider: string): string {
   }
 }
 
+interface TransitionEdit {
+  afterDays: number;
+  storageClass: string;
+}
+
 interface CloudServiceEdit {
   name: string;
   provider: string;
@@ -45,6 +50,12 @@ interface CloudServiceEdit {
   container: string;
   connectionString: string;
   credentialsJson: string;
+  archivalMode: string;
+  transitions: TransitionEdit[];
+  restoreTier: string;
+  restoreDays: number;
+  suspectGraceDays: number;
+  reconcileSchedule: string;
 }
 
 export function CloudServiceCard({
@@ -69,6 +80,15 @@ export function CloudServiceCard({
     container: service.container,
     connectionString: service.connectionString,
     credentialsJson: service.credentialsJson,
+    archivalMode: service.archivalMode || "none",
+    transitions: service.transitions.map((t) => ({
+      afterDays: t.afterDays,
+      storageClass: t.storageClass,
+    })),
+    restoreTier: service.restoreTier || "",
+    restoreDays: service.restoreDays || 7,
+    suspectGraceDays: service.suspectGraceDays || 7,
+    reconcileSchedule: service.reconcileSchedule || "0 3 * * *",
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -90,6 +110,15 @@ export function CloudServiceCard({
       container: e.container,
       connectionString: e.connectionString,
       credentialsJson: e.credentialsJson,
+      archivalMode: e.archivalMode,
+      transitions: e.transitions.map((t) => ({
+        afterDays: t.afterDays,
+        storageClass: t.storageClass,
+      })),
+      restoreTier: e.restoreTier,
+      restoreDays: e.restoreDays,
+      suspectGraceDays: e.suspectGraceDays,
+      reconcileSchedule: e.reconcileSchedule,
     }),
     onDeleteTransform: (id) => ({ id }),
     clearEdit,

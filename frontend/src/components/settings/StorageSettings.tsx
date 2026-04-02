@@ -35,6 +35,12 @@ interface AddFormState {
   container: string;
   connectionString: string;
   credentialsJson: string;
+  archivalMode: string;
+  transitions: Array<{ afterDays: number; storageClass: string }>;
+  restoreTier: string;
+  restoreDays: number;
+  suspectGraceDays: number;
+  reconcileSchedule: string;
 }
 
 const addFormInitial: AddFormState = {
@@ -50,6 +56,12 @@ const addFormInitial: AddFormState = {
   container: "",
   connectionString: "",
   credentialsJson: "",
+  archivalMode: "none",
+  transitions: [],
+  restoreTier: "",
+  restoreDays: 7,
+  suspectGraceDays: 7,
+  reconcileSchedule: "0 3 * * *",
 };
 
 type AddFormAction =
