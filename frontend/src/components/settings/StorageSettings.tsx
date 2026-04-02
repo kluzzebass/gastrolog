@@ -437,7 +437,8 @@ function TestCloudButton({
     provider !== "" &&
     ((provider === "s3" && values.bucket !== "") ||
       (provider === "azure" && values.container !== "" && values.connectionString !== "") ||
-      (provider === "gcs" && values.bucket !== ""));
+      (provider === "gcs" && values.bucket !== "") ||
+      provider === "memory");
 
   return (
     <div className="flex items-center gap-3">
