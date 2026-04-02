@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -341,6 +342,48 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID uuid.UUID, sto
 
 // deleteFromFollowers removes a chunk from all same-node follower instances
 // of a tier. Called by retention after deleting from the leader.
+// DeleteChunkFromTier deletes a specific sealed chunk from a tier.
+// Used by the ForwardDeleteChunk RPC handler on follower nodes.
+func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	if vault == nil {
+		o.mu.RUnlock()
+		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	for _, t := range vault.Tiers {
+		if t.TierID == tierID {
+			o.mu.RUnlock()
+			if t.Indexes != nil {
+				_ = t.Indexes.DeleteIndexes(chunkID)
+			}
+			return t.Chunks.Delete(chunkID)
+		}
+	}
+	o.mu.RUnlock()
+	return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+}
+
+// replaceForwardedChunk seals (if active) and deletes a forwarded chunk
+// to make room for the canonical sealed version from the leader. Retries
+// if a concurrent Append reopens the active chunk between seal and delete.
+func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActive bool) error {
+	if isActive {
+		if err := cm.Seal(); err != nil {
+			return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
+		}
+	}
+	if err := cm.Delete(chunkID); errors.Is(err, chunk.ErrActiveChunk) {
+		_ = cm.Seal()
+		if err = cm.Delete(chunkID); err != nil {
+			return fmt.Errorf("delete forwarded chunk %s (after re-seal): %w", chunkID, err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("delete forwarded chunk %s: %w", chunkID, err)
+	}
+	return nil
+}
+
 func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -532,15 +575,9 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	// Follower: replace the forwarded version (may be incomplete due to
 	// fire-and-forget drops) with the canonical sealed chunk.
 	if chunkExists {
-		if activeIsChunk {
-			if err := cm.Seal(); err != nil {
-				drainIterator(next)
-				return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
-			}
-		}
-		if err := cm.Delete(chunkID); err != nil {
+		if err := replaceForwardedChunk(cm, chunkID, activeIsChunk); err != nil {
 			drainIterator(next)
-			return fmt.Errorf("delete forwarded chunk %s: %w", chunkID, err)
+			return err
 		}
 		o.logger.Info("replication: replacing forwarded chunk with canonical version",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())

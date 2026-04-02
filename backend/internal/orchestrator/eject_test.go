@@ -233,6 +233,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, &retentionFakeIndexManager{}, nil))
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -295,6 +296,7 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -368,6 +370,7 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -446,6 +449,7 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 	orch.RegisterVault(NewVaultFromComponents(dstB, dstBCM, nil, nil))
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -511,6 +515,7 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 	orch.SetRemoteTransferrer(mock)
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -569,6 +574,7 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 	}
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -627,6 +633,7 @@ func TestEjectChunkNoFilter(t *testing.T) {
 	orch.SetRemoteTransferrer(mock)
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -705,6 +712,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 		},
 	}
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: srcVaultID,
 		cm:      cm,
 		im:      &retentionFakeIndexManager{},
@@ -728,6 +736,9 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 var errTest = errors.New("test error")
 
 func (m *ejectFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+func (m *ejectFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
 func (m *ejectFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {

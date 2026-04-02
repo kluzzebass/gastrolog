@@ -134,6 +134,7 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 		}
 	}
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: uuid.Must(uuid.NewV7()),
 		cm:      cm,
 		im:      im,
@@ -308,6 +309,7 @@ func TestExpireChunkAppliesRaftDeleteBeforeLocal(t *testing.T) {
 
 	var raftApplied bool
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: uuid.Must(uuid.NewV7()),
 		tierID:  uuid.Must(uuid.NewV7()),
 		cm:      cm,
@@ -341,6 +343,7 @@ func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	r := &retentionRunner{
+		isLeader: true,
 		vaultID: uuid.Must(uuid.NewV7()),
 		tierID:  uuid.Must(uuid.NewV7()),
 		cm:      cm,
