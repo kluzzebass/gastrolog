@@ -155,19 +155,15 @@ func (m *Memory) Head(_ context.Context, key string) (BlobInfo, error) {
 // isArchived returns true if this blob is in an offline storage class and
 // not yet restored (or restore delay hasn't elapsed).
 func (b memBlob) isArchived(now time.Time, restoreDelay time.Duration) bool {
-	switch b.storageClass {
-	case "GLACIER", "DEEP_ARCHIVE", "Archive", "cold", "deep-freeze":
-		// not restoring at all
-		if b.restoreAt.IsZero() {
-			return true
-		}
-		// still within restore delay
-		if now.Before(b.restoreAt.Add(restoreDelay)) {
-			return true
-		}
+	if !(BlobInfo{StorageClass: b.storageClass}).IsArchived() {
 		return false
 	}
-	return false
+	// Not restoring at all.
+	if b.restoreAt.IsZero() {
+		return true
+	}
+	// Still within restore delay.
+	return now.Before(b.restoreAt.Add(restoreDelay))
 }
 
 // checkExpiry re-archives a restored blob if RestoreExpiry has elapsed.
