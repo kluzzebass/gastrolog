@@ -167,6 +167,12 @@ const gcsClassOptions = [
   { value: "", label: "Delete" },
 ];
 
+const memoryClassOptions = [
+  { value: "cold", label: "Cold" },
+  { value: "archive", label: "Archive" },
+  { value: "", label: "Delete" },
+];
+
 const s3RestoreTierOptions = [
   { value: "Expedited", label: "Expedited (1-5 min)" },
   { value: "Standard", label: "Standard (3-5 hr)" },
@@ -183,6 +189,7 @@ function classOptionsForProvider(provider: string) {
     case "s3": return s3ClassOptions;
     case "azure": return azureClassOptions;
     case "gcs": return gcsClassOptions;
+    case "memory": return memoryClassOptions;
     default: return s3ClassOptions;
   }
 }
@@ -200,6 +207,7 @@ function ArchivalSection({
   const isS3 = values.provider === "s3";
   const isAzure = values.provider === "azure";
   const isGCS = values.provider === "gcs";
+  const isMemory = values.provider === "memory";
   const isActive = values.archivalMode === "active";
   const classOptions = classOptionsForProvider(values.provider);
 
@@ -286,7 +294,7 @@ function ArchivalSection({
           </Button>
 
           {/* Restore defaults — S3 and Azure only (GCS has no restore step) */}
-          {!isGCS && (
+          {!isGCS && !isMemory && (
             <div className="flex items-end gap-2 pt-1">
               <div className="flex-1">
                 <FormField label="Restore Speed" dark={dark}>
