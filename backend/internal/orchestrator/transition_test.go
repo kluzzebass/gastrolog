@@ -6,6 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"errors"
+	"fmt"
+
+	"os"
+
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
@@ -1269,4 +1274,1482 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	if totalRecords != recordCount {
 		t.Errorf("expected %d records in next tier after sweep, got %d", recordCount, totalRecords)
 	}
+}
+
+// ---------- helpers for new tests ----------
+
+// newFileTierInstance creates a file-backed TierInstance without cloud storage.
+func newFileTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
+	t.Helper()
+	dir := t.TempDir()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir:            dir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(1000),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	im := indexfile.NewManager(dir, nil, nil)
+	return &TierInstance{
+		TierID:  tierID,
+		Type:    "file",
+		Chunks:  cm,
+		Indexes: im,
+		Query:   query.New(cm, im, nil),
+	}
+}
+
+
+// countAllTierRecords counts all records across both sealed and active chunks.
+func countAllTierRecords(tb testing.TB, cm chunk.ChunkManager) int64 {
+	tb.Helper()
+	metas, _ := cm.List()
+	var total int64
+	for _, m := range metas {
+		total += m.RecordCount
+	}
+	active := cm.Active()
+	if active != nil {
+		listed := false
+		for _, m := range metas {
+			if m.ID == active.ID {
+				listed = true
+				break
+			}
+		}
+		if !listed {
+			total += active.RecordCount
+		}
+	}
+	return total
+}
+
+// readAllRecords reads every record from a chunk manager (all sealed + active).
+func readAllRecords(t *testing.T, cm chunk.ChunkManager) []chunk.Record {
+	t.Helper()
+	var all []chunk.Record
+	metas, _ := cm.List()
+
+	// Collect chunk IDs to read (sealed chunks).
+	ids := make([]chunk.ChunkID, 0, len(metas))
+	for _, m := range metas {
+		ids = append(ids, m.ID)
+	}
+	// Include active chunk if not already in the list.
+	if active := cm.Active(); active != nil {
+		found := false
+		for _, m := range metas {
+			if m.ID == active.ID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			ids = append(ids, active.ID)
+		}
+	}
+
+	for _, id := range ids {
+		cursor, err := cm.OpenCursor(id)
+		if err != nil {
+			t.Fatalf("OpenCursor(%s): %v", id, err)
+		}
+		for {
+			rec, _, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if err != nil {
+				_ = cursor.Close()
+				t.Fatalf("cursor.Next: %v", err)
+			}
+			all = append(all, rec.Copy())
+		}
+		_ = cursor.Close()
+	}
+	return all
+}
+
+// makeRecordWithEventID creates a record with an explicit EventID for testing preservation.
+func makeRecordWithEventID(raw string, ingesterID uuid.UUID, seq uint32) chunk.Record {
+	now := time.Now()
+	return chunk.Record{
+		SourceTS: now,
+		IngestTS: now,
+		EventID: chunk.EventID{
+			IngesterID: ingesterID,
+			IngestTS:   now,
+			IngestSeq:  seq,
+		},
+		Attrs: chunk.Attributes{"msg": raw},
+		Raw:   []byte(raw),
+	}
+}
+
+// ---------- 3-tier chain transition tests ----------
+
+// TestTransitionThreeTierChainMemory verifies that a 3-tier chain
+// (memory→memory→memory) preserves exact record count with no duplication.
+func TestTransitionThreeTierChainMemory(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	tier2ID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	tier0 := newMemoryTierInstance(t, tier0ID)
+	tier1 := newMemoryTierInstance(t, tier1ID)
+	tier2 := newMemoryTierInstance(t, tier2ID)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, tier0, tier1, tier2)
+	vault.Name = "three-tier"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "three-tier", TierIDs: []uuid.UUID{tier0ID, tier1ID, tier2ID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier2ID, Name: "cold", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	const recordCount = 50
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("chain-%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier0.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Transition tier 0 → tier 1.
+	metas0, _ := tier0.Chunks.List()
+	if len(metas0) == 0 {
+		t.Fatal("expected sealed chunk in tier 0")
+	}
+	runner0 := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
+	runner0.transitionChunk(metas0[0].ID)
+
+	// Verify: tier 0 empty, tier 1 has all records.
+	if got := countAllTierRecords(t, tier0.Chunks); got != 0 {
+		t.Errorf("tier 0: expected 0 records, got %d", got)
+	}
+	if got := countAllTierRecords(t, tier1.Chunks); got != recordCount {
+		t.Errorf("tier 1: expected %d records, got %d", recordCount, got)
+	}
+
+	// Seal tier 1, then transition tier 1 → tier 2.
+	if err := tier1.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	metas1, _ := tier1.Chunks.List()
+	if len(metas1) == 0 {
+		t.Fatal("expected sealed chunk in tier 1")
+	}
+	runner1 := newTestRetentionRunner(orch, vaultID, tier1ID, tier1.Chunks, tier1.Indexes)
+	runner1.transitionChunk(metas1[0].ID)
+
+	// Verify final state: only tier 2 has records.
+	if got := countAllTierRecords(t, tier0.Chunks); got != 0 {
+		t.Errorf("tier 0: expected 0 records after full chain, got %d", got)
+	}
+	if got := countAllTierRecords(t, tier1.Chunks); got != 0 {
+		t.Errorf("tier 1: expected 0 records after full chain, got %d", got)
+	}
+	if got := countAllTierRecords(t, tier2.Chunks); got != recordCount {
+		t.Errorf("tier 2: expected %d records after full chain, got %d", recordCount, got)
+	}
+}
+
+// TestTransitionThreeTierChainFileFileCloud verifies the production-like
+// file→file→cloud chain preserves all records without N× duplication.
+// This is the exact scenario from the gastrolog-1rv42 session bugs.
+func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	tier2ID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+
+	tier0 := newFileTierInstance(t, tier0ID)
+	tier1 := newFileTierInstance(t, tier1ID)
+	tier2 := newCloudFileTier(t, tier2ID, vaultID, cloudStore)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, tier0, tier1, tier2)
+	vault.Name = "file-file-cloud"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "file-file-cloud", TierIDs: []uuid.UUID{tier0ID, tier1ID, tier2ID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier2ID, Name: "cold", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest records into tier 0 (hot file tier).
+	const recordCount = 30
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("ffc-%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier0.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Run PostSealProcess on tier 0 (compress + index, no cloud upload).
+	metas0, _ := tier0.Chunks.List()
+	if len(metas0) == 0 {
+		t.Fatal("expected sealed chunk in tier 0")
+	}
+	processor0 := tier0.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor0.PostSealProcess(context.Background(), metas0[0].ID); err != nil {
+		t.Fatalf("tier 0 PostSealProcess: %v", err)
+	}
+
+	// Transition tier 0 → tier 1.
+	runner0 := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
+	runner0.transitionChunk(metas0[0].ID)
+
+	if got := countAllTierRecords(t, tier1.Chunks); got != recordCount {
+		t.Fatalf("tier 1: expected %d records after tier 0→1, got %d", recordCount, got)
+	}
+
+	// Seal tier 1 and run post-seal.
+	if err := tier1.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	metas1, _ := tier1.Chunks.List()
+	if len(metas1) == 0 {
+		t.Fatal("expected sealed chunk in tier 1")
+	}
+	processor1 := tier1.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor1.PostSealProcess(context.Background(), metas1[0].ID); err != nil {
+		t.Fatalf("tier 1 PostSealProcess: %v", err)
+	}
+
+	// Transition tier 1 → tier 2 (cloud).
+	runner1 := newTestRetentionRunner(orch, vaultID, tier1ID, tier1.Chunks, tier1.Indexes)
+	runner1.transitionChunk(metas1[0].ID)
+
+	if got := countAllTierRecords(t, tier2.Chunks); got != recordCount {
+		t.Fatalf("tier 2 (cloud): expected %d records after tier 1→2, got %d", recordCount, got)
+	}
+
+	// Verify no duplication: tiers 0 and 1 should be empty.
+	if got := countAllTierRecords(t, tier0.Chunks); got != 0 {
+		t.Errorf("tier 0: expected 0 records after full chain, got %d", got)
+	}
+	if got := countAllTierRecords(t, tier1.Chunks); got != 0 {
+		t.Errorf("tier 1: expected 0 records after full chain, got %d", got)
+	}
+
+	// Seal and upload tier 2 to cloud, verify cloud-backed.
+	if err := tier2.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	metas2, _ := tier2.Chunks.List()
+	if len(metas2) == 0 {
+		t.Fatal("expected sealed chunk in tier 2")
+	}
+	processor2 := tier2.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor2.PostSealProcess(context.Background(), metas2[0].ID); err != nil {
+		t.Fatalf("tier 2 PostSealProcess: %v", err)
+	}
+
+	// Verify cloud-backed.
+	metas2After, _ := tier2.Chunks.List()
+	for _, m := range metas2After {
+		if !m.CloudBacked {
+			t.Errorf("chunk %s in tier 2 should be cloud-backed", m.ID)
+		}
+	}
+
+	// Verify records readable from cloud.
+	cloudRecords := readAllRecords(t, tier2.Chunks)
+	if len(cloudRecords) != recordCount {
+		t.Errorf("cloud tier: expected %d readable records, got %d", recordCount, len(cloudRecords))
+	}
+}
+
+// ---------- EventID preservation tests ----------
+
+// TestTransitionEventIDPreserved verifies that EventIDs survive local tier transitions.
+func TestTransitionEventIDPreserved(t *testing.T) {
+	t.Parallel()
+	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
+
+	store := cfgmem.NewStore()
+	for _, v := range cfg.Vaults {
+		_ = store.PutVault(context.Background(), v)
+	}
+	for _, tc := range cfg.Tiers {
+		_ = store.PutTier(context.Background(), tc)
+	}
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	vault := orch.vaults[vaultID]
+	tier0CM := vault.Tiers[0].Chunks
+
+	// Ingest records with distinct EventIDs.
+	ingesterID := uuid.Must(uuid.NewV7())
+	const recordCount = 10
+	type eventSnapshot struct {
+		raw       string
+		ingesterID uuid.UUID
+		ingestSeq  uint32
+	}
+	originals := make([]eventSnapshot, recordCount)
+	for i := 0; i < recordCount; i++ {
+		rec := makeRecordWithEventID(fmt.Sprintf("eid-%d", i), ingesterID, uint32(i))
+		originals[i] = eventSnapshot{
+			raw:        fmt.Sprintf("eid-%d", i),
+			ingesterID: ingesterID,
+			ingestSeq:  uint32(i),
+		}
+		if _, _, err := tier0CM.Append(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier0CM.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, _ := tier0CM.List()
+	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0CM, vault.Tiers[0].Indexes)
+	runner.transitionChunk(metas[0].ID)
+
+	// Read records from tier 1 and verify EventIDs match.
+	tier1Records := readAllRecords(t, vault.Tiers[1].Chunks)
+	if len(tier1Records) != recordCount {
+		t.Fatalf("expected %d records in tier 1, got %d", recordCount, len(tier1Records))
+	}
+
+	for i, rec := range tier1Records {
+		orig := originals[i]
+		if string(rec.Raw) != orig.raw {
+			t.Errorf("record %d: raw mismatch: %q vs %q", i, string(rec.Raw), orig.raw)
+		}
+		if rec.EventID.IngesterID != orig.ingesterID {
+			t.Errorf("record %d: IngesterID mismatch: %s vs %s", i, rec.EventID.IngesterID, orig.ingesterID)
+		}
+		if rec.EventID.IngestSeq != orig.ingestSeq {
+			t.Errorf("record %d: IngestSeq mismatch: %d vs %d", i, rec.EventID.IngestSeq, orig.ingestSeq)
+		}
+	}
+}
+
+// TestTransitionEventIDPreservedThroughCloudTier verifies EventIDs survive
+// transitions through a cloud-backed tier (the full round-trip: ingest → seal
+// → cloud upload → cloud cursor read → transition to next tier).
+func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nextTierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+	nextTier := newMemoryTierInstance(t, nextTierID)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, cloudTier, nextTier)
+	vault.Name = "eventid-cloud"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "eventid-cloud", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: nextTierID, Name: "local", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest records with distinct EventIDs.
+	ingesterID := uuid.Must(uuid.NewV7())
+	const recordCount = 15
+	type snapshot struct {
+		raw       string
+		ingestSeq uint32
+	}
+	originals := make([]snapshot, recordCount)
+	for i := 0; i < recordCount; i++ {
+		raw := fmt.Sprintf("cloud-eid-%d", i)
+		rec := makeRecordWithEventID(raw, ingesterID, uint32(i))
+		originals[i] = snapshot{raw: raw, ingestSeq: uint32(i)}
+		if _, _, err := cloudTier.Chunks.Append(rec); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cloudTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Upload to cloud.
+	metas, _ := cloudTier.Chunks.List()
+	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor.PostSealProcess(context.Background(), metas[0].ID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	// Transition cloud → next tier.
+	runner := newTestRetentionRunner(orch, vaultID, cloudTierID, cloudTier.Chunks, cloudTier.Indexes)
+	runner.transitionChunk(metas[0].ID)
+
+	// Verify EventIDs in next tier.
+	nextRecords := readAllRecords(t, nextTier.Chunks)
+	if len(nextRecords) != recordCount {
+		t.Fatalf("expected %d records, got %d", recordCount, len(nextRecords))
+	}
+
+	for i, rec := range nextRecords {
+		orig := originals[i]
+		if string(rec.Raw) != orig.raw {
+			t.Errorf("record %d: raw mismatch: %q vs %q", i, string(rec.Raw), orig.raw)
+		}
+		if rec.EventID.IngesterID != ingesterID {
+			t.Errorf("record %d: IngesterID lost after cloud transition", i)
+		}
+		if rec.EventID.IngestSeq != orig.ingestSeq {
+			t.Errorf("record %d: IngestSeq: got %d, want %d", i, rec.EventID.IngestSeq, orig.ingestSeq)
+		}
+	}
+}
+
+// ---------- Record count accuracy tests ----------
+
+// TestTransitionRecordCountAccuracy verifies that chunk metadata RecordCount
+// matches the actual number of records readable via cursor at each tier stage.
+func TestTransitionRecordCountAccuracy(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	tier0 := newFileTierInstance(t, tier0ID)
+	tier1 := newFileTierInstance(t, tier1ID)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, tier0, tier1)
+	vault.Name = "count-accuracy"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "count-accuracy", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	const recordCount = 100
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("acc-%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier0.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify tier 0 metadata vs actual records.
+	metas0, _ := tier0.Chunks.List()
+	if len(metas0) != 1 {
+		t.Fatalf("expected 1 sealed chunk in tier 0, got %d", len(metas0))
+	}
+	if metas0[0].RecordCount != recordCount {
+		t.Errorf("tier 0 metadata: expected RecordCount=%d, got %d", recordCount, metas0[0].RecordCount)
+	}
+	tier0Actual := readAllRecords(t, tier0.Chunks)
+	if int64(len(tier0Actual)) != metas0[0].RecordCount {
+		t.Errorf("tier 0: metadata says %d records but cursor read %d", metas0[0].RecordCount, len(tier0Actual))
+	}
+
+	// Run post-seal then transition.
+	processor0 := tier0.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor0.PostSealProcess(context.Background(), metas0[0].ID); err != nil {
+		t.Fatalf("tier 0 PostSealProcess: %v", err)
+	}
+	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
+	runner.transitionChunk(metas0[0].ID)
+
+	// Seal tier 1 and verify metadata vs actual.
+	if err := tier1.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	metas1, _ := tier1.Chunks.List()
+	if len(metas1) == 0 {
+		t.Fatal("expected sealed chunk in tier 1")
+	}
+	var metaTotal int64
+	for _, m := range metas1 {
+		metaTotal += m.RecordCount
+	}
+	tier1Actual := readAllRecords(t, tier1.Chunks)
+	if int64(len(tier1Actual)) != metaTotal {
+		t.Errorf("tier 1: metadata says %d records but cursor read %d", metaTotal, len(tier1Actual))
+	}
+	if metaTotal != recordCount {
+		t.Errorf("tier 1: expected %d total records, got %d", recordCount, metaTotal)
+	}
+}
+
+// ---------- Cloud search after transition ----------
+
+// TestTransitionCloudSearchAfterTransition verifies that records in a cloud
+// tier are searchable via the query engine after transition and upload.
+func TestTransitionCloudSearchAfterTransition(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+	tier0 := newMemoryTierInstance(t, tier0ID)
+	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, tier0, cloudTier)
+	vault.Name = "cloud-search"
+	orch.RegisterVault(vault)
+
+	store := cfgmem.NewStore()
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "cloud-search", TierIDs: []uuid.UUID{tier0ID, cloudTierID},
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	})
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	// Ingest distinct records.
+	const recordCount = 20
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("searchable-%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tier0.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Transition tier 0 → cloud tier.
+	metas0, _ := tier0.Chunks.List()
+	runner := newTestRetentionRunner(orch, vaultID, tier0ID, tier0.Chunks, tier0.Indexes)
+	runner.transitionChunk(metas0[0].ID)
+
+	// Seal the cloud tier and upload.
+	if err := cloudTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	metasCloud, _ := cloudTier.Chunks.List()
+	if len(metasCloud) == 0 {
+		t.Fatal("expected sealed chunk in cloud tier")
+	}
+	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if err := processor.PostSealProcess(context.Background(), metasCloud[0].ID); err != nil {
+		t.Fatalf("cloud PostSealProcess: %v", err)
+	}
+
+	// Verify: records searchable via query engine on cloud tier.
+	ctx := context.Background()
+	q := query.Query{}
+	results, _ := cloudTier.Query.Search(ctx, q, nil)
+
+	var searchCount int
+	for rec, err := range results {
+		if err != nil {
+			t.Fatalf("search iteration error: %v", err)
+		}
+		_ = rec
+		searchCount++
+	}
+
+	if searchCount != recordCount {
+		t.Errorf("cloud search returned %d records, expected %d", searchCount, recordCount)
+	}
+}
+
+// ---------- Cloud upload idempotency ----------
+
+// TestTransitionCloudUploadOnlyOneBlob verifies that uploading a sealed chunk
+// to cloud produces exactly one blob in the blobstore, and that the blob
+// contains all records. This guards against duplicate uploads from racing nodes.
+func TestTransitionCloudUploadOnlyOneBlob(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	cloudStore := blobstore.NewMemory()
+	cloudTier := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, cloudTier)
+	vault.Name = "one-blob"
+	orch.RegisterVault(vault)
+
+	// Ingest multiple chunks worth of records (3 sealed chunks).
+	const recordsPerChunk = 25
+	const numChunks = 3
+	for c := 0; c < numChunks; c++ {
+		for i := 0; i < recordsPerChunk; i++ {
+			if _, _, err := cloudTier.Chunks.Append(makeRecord(fmt.Sprintf("blob-%d-%d", c, i))); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := cloudTier.Chunks.Seal(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	metas, _ := cloudTier.Chunks.List()
+	if len(metas) != numChunks {
+		t.Fatalf("expected %d sealed chunks, got %d", numChunks, len(metas))
+	}
+
+	processor := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	for _, m := range metas {
+		if err := processor.PostSealProcess(context.Background(), m.ID); err != nil {
+			t.Fatalf("PostSealProcess(%s): %v", m.ID, err)
+		}
+	}
+
+	// Count blobs in cloud store — should be exactly numChunks.
+	var blobCount int
+	if err := cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
+		blobCount++
+		return nil
+	}); err != nil {
+		t.Fatalf("blobstore List: %v", err)
+	}
+	if blobCount != numChunks {
+		t.Errorf("expected %d blobs in cloud store, got %d", numChunks, blobCount)
+	}
+
+	// Verify all chunks are cloud-backed and records readable.
+	metasAfter, _ := cloudTier.Chunks.List()
+	for _, m := range metasAfter {
+		if !m.CloudBacked {
+			t.Errorf("chunk %s not cloud-backed", m.ID)
+		}
+		if m.RecordCount != recordsPerChunk {
+			t.Errorf("chunk %s: metadata RecordCount=%d, expected %d", m.ID, m.RecordCount, recordsPerChunk)
+		}
+	}
+
+	// Verify all records readable.
+	allRecords := readAllRecords(t, cloudTier.Chunks)
+	if len(allRecords) != numChunks*recordsPerChunk {
+		t.Errorf("expected %d total records, got %d", numChunks*recordsPerChunk, len(allRecords))
+	}
+}
+
+// ==========================================================================
+// Multi-node cluster transition tests
+//
+// These wire up multiple full orchestrators with in-process RemoteTransferrers,
+// multi-tier vaults with leader/follower replication, rotation policies that
+// create many sealed chunks, and burst ingestion to stress the transition +
+// replication pipeline under realistic conditions.
+// ==========================================================================
+
+// directTransferrer implements RemoteTransferrer by calling directly into
+// the target orchestrator. This is the in-process equivalent of the gRPC
+// transferrer used in production — same operations, no network.
+type directTransferrer struct {
+	nodes map[string]*Orchestrator
+}
+
+func (d *directTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
+}
+
+func (d *directTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
+}
+
+func (d *directTransferrer) ForwardSealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	return orch.SealActiveTier(vaultID, tierID, chunkID)
+}
+
+func (d *directTransferrer) ForwardDeleteChunk(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
+}
+
+func (d *directTransferrer) ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	for _, rec := range records {
+		if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	for _, rec := range records {
+		if _, _, err := orch.Append(vaultID, rec); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+	orch, ok := d.nodes[nodeID]
+	if !ok {
+		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
+	}
+	for {
+		rec, err := next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, _, err := orch.Append(vaultID, rec); err != nil {
+			return err
+		}
+	}
+}
+
+func (d *directTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+	return nil
+}
+
+// newClusterRetentionRunner creates a retention runner with follower targets
+// for proper cross-node delete forwarding.
+func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID uuid.UUID, tier *TierInstance) *retentionRunner {
+	return &retentionRunner{
+		isLeader:        true,
+		vaultID:         vaultID,
+		tierID:          tierID,
+		cm:              tier.Chunks,
+		im:              tier.Indexes,
+		orch:            orch,
+		followerTargets: tier.FollowerTargets,
+		now:             time.Now,
+		logger:          slog.Default(),
+	}
+}
+
+// clusterTestNode is one node in a multi-node cluster test.
+type clusterTestNode struct {
+	nodeID   string
+	orch     *Orchestrator
+	tiers    []*TierInstance // all tier instances on this node
+	tierDirs []string        // filesystem directories, one per tier
+}
+
+// clusterHarness holds the full multi-node cluster.
+type clusterHarness struct {
+	nodes    map[string]*clusterTestNode
+	cfgStore *cfgmem.Store
+	vaultID  uuid.UUID
+	tierIDs  []uuid.UUID
+}
+
+// allNodeIDs returns sorted node IDs.
+func (h *clusterHarness) allNodeIDs() []string {
+	ids := make([]string, 0, len(h.nodes))
+	for id := range h.nodes {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// cursorCountRecords opens cursors on every chunk (sealed + active) and counts
+// records by actually reading them. Does NOT trust ChunkMeta.RecordCount.
+func cursorCountRecords(t *testing.T, cm chunk.ChunkManager) int64 {
+	t.Helper()
+	return int64(len(readAllRecords(t, cm)))
+}
+
+// countRecordsOnNode counts all cursor-verified records across all tiers on a node.
+func (h *clusterHarness) countRecordsOnNode(t *testing.T, nodeID string) int64 {
+	t.Helper()
+	node := h.nodes[nodeID]
+	var total int64
+	for _, tier := range node.tiers {
+		total += cursorCountRecords(t, tier.Chunks)
+	}
+	return total
+}
+
+// countRecordsOnTier counts cursor-verified records in a specific tier across ALL nodes.
+func (h *clusterHarness) countRecordsOnTier(t *testing.T, tierIdx int) map[string]int64 {
+	t.Helper()
+	counts := make(map[string]int64)
+	for nodeID, node := range h.nodes {
+		if tierIdx < len(node.tiers) {
+			counts[nodeID] = cursorCountRecords(t, node.tiers[tierIdx].Chunks)
+		}
+	}
+	return counts
+}
+
+// countChunksOnTier counts sealed chunks in a specific tier across ALL nodes.
+func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string]int {
+	t.Helper()
+	counts := make(map[string]int)
+	for nodeID, node := range h.nodes {
+		if tierIdx < len(node.tiers) {
+			metas, _ := node.tiers[tierIdx].Chunks.List()
+			counts[nodeID] = len(metas)
+		}
+	}
+	return counts
+}
+
+// setupCluster creates a multi-node cluster with a shared vault using
+// file-backed chunk managers with real filesystem directories.
+//
+// Layout:
+//   - nodeIDs[0] is the leader for all tiers
+//   - nodeIDs[1:] are followers for all tiers
+//   - Each tier gets its own TempDir per node (real filesystem I/O)
+//   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
+//   - The leader's tiers have FollowerTargets pointing to all followers
+//   - Every node has a directTransferrer wired to all other nodes
+func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords uint64) *clusterHarness {
+	t.Helper()
+	if len(nodeIDs) < 2 {
+		t.Fatal("setupCluster needs at least 2 nodes")
+	}
+	leaderID := nodeIDs[0]
+	vaultID := uuid.Must(uuid.NewV7())
+	tierIDs := make([]uuid.UUID, tierCount)
+	for i := range tierCount {
+		tierIDs[i] = uuid.Must(uuid.NewV7())
+	}
+
+	// Create config store.
+	store := cfgmem.NewStore()
+	tierCfgs := make([]config.TierConfig, tierCount)
+	for i := range tierCount {
+		placements := make([]config.TierPlacement, 0, len(nodeIDs))
+		placements = append(placements, config.TierPlacement{
+			StorageID: config.SyntheticStorageID(leaderID), Leader: true,
+		})
+		for _, fid := range nodeIDs[1:] {
+			placements = append(placements, config.TierPlacement{
+				StorageID: config.SyntheticStorageID(fid), Leader: false,
+			})
+		}
+		tierCfgs[i] = config.TierConfig{
+			ID:         tierIDs[i],
+			Name:       fmt.Sprintf("tier-%d", i),
+			Type:       config.TierTypeFile,
+			Placements: placements,
+		}
+		_ = store.PutTier(context.Background(), tierCfgs[i])
+	}
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "cluster-vault", TierIDs: tierIDs,
+	})
+
+	// Build follower targets for the leader.
+	followerTargets := make([]config.ReplicationTarget, 0, len(nodeIDs)-1)
+	for _, fid := range nodeIDs[1:] {
+		followerTargets = append(followerTargets, config.ReplicationTarget{NodeID: fid})
+	}
+
+	// Create all orchestrators with file-backed tiers.
+	orchs := make(map[string]*Orchestrator)
+	nodes := make(map[string]*clusterTestNode)
+
+	for _, nid := range nodeIDs {
+		orch, err := New(Config{LocalNodeID: nid})
+		if err != nil {
+			t.Fatal(err)
+		}
+		orch.cfgLoader = &transitionConfigLoader{store: store}
+		orchs[nid] = orch
+
+		isLeader := nid == leaderID
+		tiers := make([]*TierInstance, tierCount)
+		tierDirs := make([]string, tierCount)
+		for i := range tierCount {
+			dir := t.TempDir()
+			tierDirs[i] = dir
+			cm, cmErr := chunkfile.NewManager(chunkfile.Config{
+				Dir:            dir,
+				Now:            time.Now,
+				RotationPolicy: chunk.NewRecordCountPolicy(rotationRecords),
+			})
+			if cmErr != nil {
+				t.Fatal(cmErr)
+			}
+			im := indexfile.NewManager(dir, nil, nil)
+			tier := &TierInstance{
+				TierID:  tierIDs[i],
+				Type:    "file",
+				Chunks:  cm,
+				Indexes: im,
+				Query:   query.New(cm, im, nil),
+			}
+			if isLeader {
+				tier.FollowerTargets = followerTargets
+			} else {
+				tier.IsFollower = true
+				tier.LeaderNodeID = leaderID
+			}
+			tiers[i] = tier
+		}
+
+		vault := NewVault(vaultID, tiers...)
+		vault.Name = "cluster-vault"
+		orch.RegisterVault(vault)
+
+		nodes[nid] = &clusterTestNode{
+			nodeID:   nid,
+			orch:     orch,
+			tiers:    tiers,
+			tierDirs: tierDirs,
+		}
+	}
+
+	// Wire directTransferrer: each node can reach all other nodes.
+	for _, nid := range nodeIDs {
+		remotes := make(map[string]*Orchestrator)
+		for _, other := range nodeIDs {
+			if other != nid {
+				remotes[other] = orchs[other]
+			}
+		}
+		orchs[nid].SetRemoteTransferrer(&directTransferrer{nodes: remotes})
+	}
+
+	t.Cleanup(func() {
+		// Close file managers BEFORE t.TempDir cleanup removes their directories.
+		// Stop orchestrators first (stops schedulers), then close chunk managers.
+		for _, n := range nodes {
+			n.orch.Stop()
+		}
+		for _, n := range nodes {
+			for _, tier := range n.tiers {
+				_ = tier.Chunks.Close()
+			}
+		}
+	})
+
+	return &clusterHarness{
+		nodes:    nodes,
+		cfgStore: store,
+		vaultID:  vaultID,
+		tierIDs:  tierIDs,
+	}
+}
+
+// assertTierDirEmpty verifies that a tier's filesystem directory contains no
+// chunk subdirectories on ANY node. This goes below the chunk manager API —
+// it checks the actual filesystem to catch silent delete failures, leaked
+// directories, and stale files.
+func (h *clusterHarness) assertTierDirEmpty(t *testing.T, tierIdx int) {
+	t.Helper()
+	for _, nid := range h.allNodeIDs() {
+		node := h.nodes[nid]
+		dir := node.tierDirs[tierIdx]
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			t.Errorf("tier %d on %s: ReadDir(%s): %v", tierIdx, nid, dir, err)
+			continue
+		}
+		// Filter to only chunk directories (chunk IDs are 26-char base32).
+		// Skip .lock, index files, and other manager artifacts.
+		var chunkDirs []string
+		for _, e := range entries {
+			if e.IsDir() && len(e.Name()) == 26 {
+				chunkDirs = append(chunkDirs, e.Name())
+			}
+		}
+		if len(chunkDirs) > 0 {
+			t.Errorf("tier %d on %s: %d chunk directories still on disk: %v",
+				tierIdx, nid, len(chunkDirs), chunkDirs)
+		}
+	}
+}
+
+// listChunkDirsOnNode returns the chunk directory names in a tier dir on a node.
+func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierIdx int) []string {
+	t.Helper()
+	dir := h.nodes[nodeID].tierDirs[tierIdx]
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("ReadDir(%s): %v", dir, err)
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() && len(e.Name()) == 26 {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs
+}
+
+// TestClusterTransitionBurstNoOrphans creates a 4-node cluster with 2 tiers,
+// bursts 10K records with a 100-record rotation policy (100 sealed chunks),
+// transitions all chunks from tier 0 → tier 1, and verifies:
+//   - All records arrive in tier 1 on the LEADER
+//   - Source tier 0 is empty on ALL nodes
+//   - No records are lost or duplicated
+//   - Record count matches on the leader
+func TestClusterTransitionBurstNoOrphans(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "follower-1", "follower-2", "follower-3"}, 2, 100)
+
+	leaderNode := h.nodes["leader"]
+	tier0 := leaderNode.tiers[0]
+
+	// Burst ingest 10K records into tier 0 on the leader.
+	const totalRecords = 10_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		rec := chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "burst-%d", i),
+		}
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+			t.Fatalf("AppendToTier failed at record %d: %v", i, err)
+		}
+	}
+
+	// Seal the last active chunk if any records remain.
+	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		if err := tier0.Chunks.Seal(); err != nil {
+			t.Fatalf("final seal: %v", err)
+		}
+	}
+
+	// Count sealed chunks — should be ~100 (totalRecords/rotationRecords).
+	metas0, _ := tier0.Chunks.List()
+	if len(metas0) < 50 {
+		t.Fatalf("expected many sealed chunks from rotation, got %d", len(metas0))
+	}
+	t.Logf("tier 0 leader: %d sealed chunks", len(metas0))
+
+	// Verify total records in tier 0 on leader (cursor-verified, not metadata).
+	tier0LeaderCount := cursorCountRecords(t, tier0.Chunks)
+	if tier0LeaderCount != totalRecords {
+		t.Fatalf("tier 0 leader: expected %d records, got %d", totalRecords, tier0LeaderCount)
+	}
+
+	// Transition ALL sealed chunks from tier 0 → tier 1.
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0)
+	for _, m := range metas0 {
+		runner.transitionChunk(m.ID)
+	}
+	// Also transition any chunk that was active when we listed.
+	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		if err := tier0.Chunks.Seal(); err != nil {
+			t.Fatalf("post-transition seal: %v", err)
+		}
+		metas0Extra, _ := tier0.Chunks.List()
+		for _, m := range metas0Extra {
+			runner.transitionChunk(m.ID)
+		}
+	}
+
+	// ---- Verify: tier 0 is EMPTY on ALL nodes (cursor-verified) ----
+	for _, nodeID := range h.allNodeIDs() {
+		count := cursorCountRecords(t, h.nodes[nodeID].tiers[0].Chunks)
+		if count != 0 {
+			metas, _ := h.nodes[nodeID].tiers[0].Chunks.List()
+			t.Errorf("tier 0 on %s: cursor read %d records (should be 0, %d sealed chunks remain)",
+				nodeID, count, len(metas))
+		}
+	}
+
+	// ---- Verify: tier 0 chunk directories removed from disk on ALL nodes ----
+	h.assertTierDirEmpty(t, 0)
+
+	// ---- Verify: tier 1 on leader has ALL records (cursor-verified) ----
+	tier1LeaderCount := cursorCountRecords(t, leaderNode.tiers[1].Chunks)
+	if tier1LeaderCount != totalRecords {
+		t.Errorf("tier 1 leader: cursor read %d records, expected %d", tier1LeaderCount, totalRecords)
+	}
+
+	// ---- Verify: no net duplication across entire cluster ----
+	// Total records across all tiers on the leader should equal totalRecords.
+	leaderTotal := h.countRecordsOnNode(t, "leader")
+	if leaderTotal != totalRecords {
+		t.Errorf("leader total across all tiers: expected %d, got %d", totalRecords, leaderTotal)
+	}
+}
+
+// TestClusterTransitionThreeTierChainBurst creates a 4-node cluster with
+// 3 tiers and bursts 10K records through the full tier chain with 100-record
+// rotation. Verifies no orphans on any node and exact record preservation.
+func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 3, 100)
+
+	leaderNode := h.nodes["leader"]
+	tier0 := leaderNode.tiers[0]
+
+	const totalRecords = 10_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "chain3-%d", i),
+		}); err != nil {
+			t.Fatalf("append record %d: %v", i, err)
+		}
+	}
+
+	// Seal and transition tier 0 → tier 1.
+	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = tier0.Chunks.Seal()
+	}
+	metas0, _ := tier0.Chunks.List()
+	t.Logf("tier 0: %d sealed chunks to transition", len(metas0))
+	runner0 := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0)
+	for _, m := range metas0 {
+		runner0.transitionChunk(m.ID)
+	}
+
+	// Verify tier 0 empty on leader (cursor-verified).
+	if got := cursorCountRecords(t, tier0.Chunks); got != 0 {
+		t.Fatalf("tier 0 leader should be empty after transition, cursor read %d", got)
+	}
+
+	// Tier 1 should have all records. Seal and transition tier 1 → tier 2.
+	tier1 := leaderNode.tiers[1]
+	tier1Count := cursorCountRecords(t, tier1.Chunks)
+	if tier1Count != totalRecords {
+		t.Fatalf("tier 1 leader: expected %d, got %d", totalRecords, tier1Count)
+	}
+
+	if active := tier1.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = tier1.Chunks.Seal()
+	}
+	metas1, _ := tier1.Chunks.List()
+	t.Logf("tier 1: %d sealed chunks to transition", len(metas1))
+	runner1 := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[1], tier1)
+	for _, m := range metas1 {
+		runner1.transitionChunk(m.ID)
+	}
+
+	// ---- Final state: ONLY tier 2 on leader has records ----
+	for tierIdx := range 3 {
+		counts := h.countRecordsOnTier(t, tierIdx)
+		leaderCount := counts["leader"]
+		expected := int64(0)
+		if tierIdx == 2 {
+			expected = totalRecords
+		}
+		if leaderCount != expected {
+			t.Errorf("tier %d leader: expected %d records, got %d", tierIdx, expected, leaderCount)
+		}
+	}
+
+	// ---- Verify tier 0 empty on ALL nodes (cursor-verified) ----
+	for _, nid := range h.allNodeIDs() {
+		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
+		if count != 0 {
+			t.Errorf("tier 0 on %s: cursor read %d records after full chain (should be 0)", nid, count)
+		}
+	}
+
+	// ---- Verify tier 0 AND tier 1 chunk directories gone from disk ----
+	h.assertTierDirEmpty(t, 0)
+	h.assertTierDirEmpty(t, 1)
+
+	// ---- Verify no net duplication on leader (cursor-verified) ----
+	leaderTotal := h.countRecordsOnNode(t, "leader")
+	if leaderTotal != totalRecords {
+		t.Errorf("leader total: expected %d across all tiers, got %d", totalRecords, leaderTotal)
+	}
+}
+
+// TestClusterTransitionEventIDPreservedAcrossNodes verifies that EventIDs
+// survive transitions in a multi-node cluster with replication.
+func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
+
+	leaderNode := h.nodes["leader"]
+	tier0 := leaderNode.tiers[0]
+
+	// Ingest records with distinct EventIDs.
+	ingesterID := uuid.Must(uuid.NewV7())
+	const totalRecords = 5_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		rec := chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "eid-cluster-%d", i),
+			EventID: chunk.EventID{
+				IngesterID: ingesterID,
+				IngestTS:   ts,
+				IngestSeq:  uint32(i),
+			},
+		}
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+			t.Fatalf("append record %d: %v", i, err)
+		}
+	}
+
+	// Seal and transition.
+	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = tier0.Chunks.Seal()
+	}
+	metas0, _ := tier0.Chunks.List()
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0)
+	for _, m := range metas0 {
+		runner.transitionChunk(m.ID)
+	}
+
+	// Read records from tier 1 on leader and verify EventIDs.
+	tier1Records := readAllRecords(t, leaderNode.tiers[1].Chunks)
+	if len(tier1Records) != totalRecords {
+		t.Fatalf("tier 1: expected %d records, got %d", totalRecords, len(tier1Records))
+	}
+
+	// Verify every record has a valid EventID (not zero).
+	var zeroEventIDs int
+	var wrongIngester int
+	for _, rec := range tier1Records {
+		if rec.EventID == (chunk.EventID{}) {
+			zeroEventIDs++
+		} else if rec.EventID.IngesterID != ingesterID {
+			wrongIngester++
+		}
+	}
+	if zeroEventIDs > 0 {
+		t.Errorf("%d records lost their EventID after cluster transition", zeroEventIDs)
+	}
+	if wrongIngester > 0 {
+		t.Errorf("%d records have wrong IngesterID after cluster transition", wrongIngester)
+	}
+}
+
+// TestClusterTransitionLargeBurst ingests a large burst (10K records) through
+// the serialized AppendToTier path and verifies no data loss after transition.
+// The burst creates ~100 sealed chunks via the 100-record rotation policy.
+//
+// NOTE: concurrent Append through the file chunk manager's attr.log writer
+// is not safe (see gastrolog-3l7ow findings). Production serializes through
+// the digest loop. This test uses sequential ingestion to match that model.
+func TestClusterTransitionLargeBurst(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
+
+	leaderNode := h.nodes["leader"]
+	tier0 := leaderNode.tiers[0]
+
+	const totalRecords = 10_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		rec := chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "burst-%d", i),
+		}
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, rec); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	// Seal remaining active chunk.
+	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = tier0.Chunks.Seal()
+	}
+
+	// Count what we have before transition (cursor-verified).
+	tier0Count := cursorCountRecords(t, tier0.Chunks)
+	if tier0Count != totalRecords {
+		t.Fatalf("tier 0 after concurrent burst: cursor read %d, expected %d", tier0Count, totalRecords)
+	}
+
+	metas0, _ := tier0.Chunks.List()
+	t.Logf("tier 0: %d sealed chunks from concurrent burst", len(metas0))
+
+	// Transition all chunks.
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0)
+	for _, m := range metas0 {
+		runner.transitionChunk(m.ID)
+	}
+
+	// Verify: tier 0 empty on ALL nodes, tier 1 has all records on leader (all cursor-verified).
+	for _, nid := range h.allNodeIDs() {
+		remaining := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
+		if remaining != 0 {
+			t.Errorf("tier 0 on %s: cursor read %d records after transition (should be 0)", nid, remaining)
+		}
+	}
+
+	// Verify: tier 0 chunk directories gone from disk on ALL nodes.
+	h.assertTierDirEmpty(t, 0)
+
+	tier1Count := cursorCountRecords(t, leaderNode.tiers[1].Chunks)
+	if tier1Count != totalRecords {
+		t.Errorf("tier 1 leader: cursor read %d records, expected %d (lost %d)", tier1Count, totalRecords, totalRecords-tier1Count)
+	}
+}
+
+// TestClusterTransitionNoChunksLeftBehindOnFollowers verifies that after
+// transition, the source tier's sealed chunks are cleaned up on follower nodes
+// (via deleteFromFollowers), not just on the leader.
+func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
+
+	leaderNode := h.nodes["leader"]
+	tier0Leader := leaderNode.tiers[0]
+
+	// Ingest records — rotation at 100 creates multiple sealed chunks.
+	const totalRecords = 1_000
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "follower-cleanup-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	if active := tier0Leader.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		_ = tier0Leader.Chunks.Seal()
+	}
+
+	// Capture chunk IDs before transition.
+	metas0, _ := tier0Leader.Chunks.List()
+	originalChunkIDs := make(map[chunk.ChunkID]bool)
+	for _, m := range metas0 {
+		originalChunkIDs[m.ID] = true
+	}
+	t.Logf("tier 0: %d sealed chunks to transition", len(metas0))
+
+	// Transition all chunks.
+	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0Leader)
+	for _, m := range metas0 {
+		runner.transitionChunk(m.ID)
+	}
+
+	// ---- Verify: NO original chunks exist on ANY node in tier 0 ----
+	for _, nid := range h.allNodeIDs() {
+		node := h.nodes[nid]
+		tier0CM := node.tiers[0].Chunks
+		metas, _ := tier0CM.List()
+		for _, m := range metas {
+			if originalChunkIDs[m.ID] {
+				t.Errorf("tier 0 on %s: chunk %s still exists after transition (should be deleted)",
+					nid, m.ID)
+			}
+		}
+		// Also check active chunk.
+		if active := tier0CM.Active(); active != nil && originalChunkIDs[active.ID] {
+			t.Errorf("tier 0 on %s: chunk %s is still active after transition", nid, active.ID)
+		}
+	}
+
+	// ---- Verify: tier 0 has 0 cursor-readable records on ALL nodes ----
+	for _, nid := range h.allNodeIDs() {
+		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
+		if count != 0 {
+			t.Errorf("tier 0 on %s: cursor read %d records (should be 0)", nid, count)
+		}
+	}
+
+	// ---- Verify: no chunk directories on disk for tier 0 on ANY node ----
+	h.assertTierDirEmpty(t, 0)
 }
