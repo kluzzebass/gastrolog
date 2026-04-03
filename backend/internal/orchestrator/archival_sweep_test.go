@@ -834,6 +834,242 @@ func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 	}
 }
 
+func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, []config.CloudStorageTransition{
+		{AfterDays: 1, StorageClass: "cold"},
+	})
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "unreadable-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Archive via sweep.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	leaderNode.orch.archivalSweepAll()
+
+	// Try to read — should get ErrChunkArchived or ErrChunkSuspect.
+	metasAfter, _ := leaderCM.List()
+	for _, m := range metasAfter {
+		if !m.Archived {
+			continue
+		}
+		_, err := leaderCM.OpenCursor(m.ID)
+		if err == nil {
+			t.Errorf("chunk %s: expected error reading archived chunk, got nil", m.ID)
+		} else if !errors.Is(err, chunk.ErrChunkArchived) {
+			// ErrChunkSuspect is also acceptable (the download returns 404-like from archived blob).
+			if !errors.Is(err, chunk.ErrChunkSuspect) {
+				t.Errorf("chunk %s: expected ErrChunkArchived or ErrChunkSuspect, got %v", m.ID, err)
+			}
+		}
+	}
+}
+
+func TestCloudClusterSweepThresholdBoundary(t *testing.T) {
+	t.Parallel()
+	// AfterDays=5: chunks younger than 5 days should NOT be archived.
+	h := setupCloudCluster(t, []config.CloudStorageTransition{
+		{AfterDays: 5, StorageClass: "cold"},
+	})
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "boundary-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// 3 days later — below threshold, should NOT archive.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(72 * time.Hour) }
+	leaderNode.orch.archivalSweepAll()
+
+	metasMid, _ := leaderCM.List()
+	for _, m := range metasMid {
+		if m.Archived {
+			t.Errorf("chunk %s archived at 3 days (threshold is 5)", m.ID)
+		}
+	}
+
+	// 6 days later — above threshold, should archive.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(144 * time.Hour) }
+	leaderNode.orch.archivalSweepAll()
+
+	metasFinal, _ := leaderCM.List()
+	archivedCount := 0
+	for _, m := range metasFinal {
+		if m.Archived {
+			archivedCount++
+		}
+	}
+	if archivedCount == 0 {
+		t.Error("expected chunks archived at 6 days (threshold is 5)")
+	}
+	t.Logf("archived %d chunks at 6 days", archivedCount)
+}
+
+func TestCloudClusterGracePeriodBoundary(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, nil)
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	// Set grace period to 3 days.
+	cfg, _ := h.cfgStore.Load(context.Background())
+	cs := cfg.CloudServices[0]
+	cs.SuspectGraceDays = 3
+	_ = h.cfgStore.PutCloudService(context.Background(), cs)
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 100 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "grace-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Delete blobs.
+	_ = h.cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
+		return h.cloudStore.Delete(context.Background(), info.Key)
+	})
+
+	// Day 0: reconcile marks suspect.
+	leaderNode.orch.reconcileSweepAll()
+	metasDay0, _ := leaderCM.List()
+	if len(metasDay0) == 0 {
+		t.Fatal("chunks should not be removed on day 0")
+	}
+
+	// Day 2 (within grace): still not removed.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	leaderNode.orch.reconcileSweepAll()
+	metasDay2, _ := leaderCM.List()
+	if len(metasDay2) == 0 {
+		t.Fatal("chunks should not be removed within grace period (day 2 of 3)")
+	}
+
+	// Day 4 (past grace): removed.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(96 * time.Hour) }
+	leaderNode.orch.reconcileSweepAll()
+	metasDay4, _ := leaderCM.List()
+	cloudRemaining := 0
+	for _, m := range metasDay4 {
+		if m.CloudBacked {
+			cloudRemaining++
+		}
+	}
+	if cloudRemaining > 0 {
+		t.Errorf("expected cloud chunks removed after grace period, %d remain", cloudRemaining)
+	}
+}
+
+func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, []config.CloudStorageTransition{
+		{AfterDays: 1, StorageClass: "cold"},
+	})
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "restart-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Archive via sweep.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	leaderNode.orch.archivalSweepAll()
+
+	// Verify archived.
+	metasArchived, _ := leaderCM.List()
+	archivedBefore := 0
+	for _, m := range metasArchived {
+		if m.Archived {
+			archivedBefore++
+		}
+	}
+	if archivedBefore == 0 {
+		t.Fatal("expected archived chunks before restart")
+	}
+
+	// Simulate restart: close and reopen the chunk manager with the same directory.
+	dir := leaderNode.tierDirs[0]
+	_ = leaderCM.Close()
+
+	cm2, err := chunkfile.NewManager(chunkfile.Config{
+		Dir: dir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(100),
+		CloudStore: h.cloudStore, VaultID: h.vaultID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cm2.Close()
+
+	// The archived flag should be persisted in the cloud B+ tree index.
+	metasAfterRestart, _ := cm2.List()
+	archivedAfter := 0
+	for _, m := range metasAfterRestart {
+		if m.Archived {
+			archivedAfter++
+		}
+	}
+	if archivedAfter != archivedBefore {
+		t.Errorf("archived chunks before restart=%d, after=%d — flag not persisted", archivedBefore, archivedAfter)
+	}
+}
+
 func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, nil)
