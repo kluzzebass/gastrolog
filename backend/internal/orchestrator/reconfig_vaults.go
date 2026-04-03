@@ -194,8 +194,9 @@ func (o *Orchestrator) removeVaultJobs(id uuid.UUID, vault *Vault) {
 // teardownVault performs the common cleanup for all vault removal paths:
 // cancels pending jobs, closes managers, removes from registry, rebuilds filters.
 func (o *Orchestrator) teardownVault(id uuid.UUID, vault *Vault) {
-	// Cancel pending compress/index jobs to prevent use-after-close.
+	// Cancel pending post-seal/compress/index jobs to prevent use-after-close.
 	vaultPrefix := id.String()
+	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
@@ -365,6 +366,7 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 
 	// Cancel pending jobs for this tier.
 	prefix := vaultID.String()
+	o.scheduler.RemoveJobsByPrefix("post-seal:" + prefix + ":" + tierID.String())
 	o.scheduler.RemoveJobsByPrefix("compress:" + prefix + ":" + tierID.String())
 	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + tierID.String())
 
@@ -460,7 +462,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
-			t, err := o.buildTierInstanceForStorage(cfg, *vaultCfg, *tierCfg, factories, tgt.StorageID)
+			t, err := o.buildTierInstanceForStorage(cfg, *vaultCfg, *tierCfg, factories, tgt.StorageID, true)
 			if err != nil {
 				return fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
 			}
@@ -511,8 +513,9 @@ func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
 		return fmt.Errorf("%w: %s", ErrVaultNotFound, id)
 	}
 
-	// Cancel pending compress/index jobs before closing the chunk manager.
+	// Cancel pending post-seal/compress/index jobs before closing the chunk manager.
 	vaultPrefix := id.String()
+	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 
@@ -625,7 +628,7 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				if tgt.NodeID != o.localNodeID {
 					continue
 				}
-				sti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, tgt.StorageID)
+				sti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
 				if err != nil {
 					closeTiers(tiers)
 					return nil, fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
@@ -657,7 +660,7 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg *config.TierConfig, factories Factories) (*TierInstance, error) {
 	storageID := tierCfg.LeaderStorageID()
 	if storageID != "" && !strings.HasPrefix(storageID, config.SyntheticStoragePrefix) {
-		ti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID)
+		ti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -801,7 +804,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 // buildTierInstanceForStorage creates a TierInstance whose data directory is
 // resolved from a specific file storage ID. Used for both primaries with
 // explicit placements and secondaries (one per node per tier).
-func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, storageID string) (*TierInstance, error) {
+func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg config.TierConfig, factories Factories, storageID string, isFollower bool) (*TierInstance, error) {
 	fs := findFileStorageByID(cfg, storageID)
 	if fs == nil {
 		return nil, fmt.Errorf("file storage %s not found", storageID)
@@ -809,7 +812,12 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
-	delete(params, "sealed_backing") // always follower
+	// Followers must NOT upload to cloud storage — the leader owns the cloud
+	// blob. If the follower also uploads, it overwrites the leader's blob with
+	// a different-sized version, corrupting diskBytes and breaking cloud reads.
+	if isFollower {
+		delete(params, "sealed_backing")
+	}
 	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 
 	factoryName := mapTierTypeToFactory(tierCfg.Type)

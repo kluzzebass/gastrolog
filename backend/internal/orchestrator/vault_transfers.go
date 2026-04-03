@@ -321,9 +321,10 @@ func (o *Orchestrator) finishDrain(vaultID uuid.UUID) {
 		return // already removed (e.g. CancelDrain + ForceRemoveVault raced)
 	}
 
-	// Cancel pending compress/index jobs before closing the chunk manager
+	// Cancel pending post-seal/compress/index jobs before closing the chunk manager
 	// to prevent use-after-close on the managers they capture.
 	vaultPrefix := vaultID.String()
+	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("compress:" + vaultPrefix)
 	o.scheduler.RemoveJobsByPrefix("index-build:" + vaultPrefix)
 

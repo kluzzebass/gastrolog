@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	"os"
+	"path/filepath"
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
@@ -815,6 +816,156 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	}
 	if totalRecords != recordCount {
 		t.Errorf("expected %d records in next tier after TTL sweep, got %d", recordCount, totalRecords)
+	}
+}
+
+// TestCloudTierLeaderPreservesCloudBacking verifies that a cloud tier leader
+// built through the production code path (buildPrimaryTierInstance →
+// buildTierInstanceForStorage) retains the sealed_backing parameter so that
+// PostSealProcess uploads chunks to cloud storage.
+//
+// Regression test: buildTierInstanceForStorage previously stripped sealed_backing
+// unconditionally (with the comment "always follower"), even when called for the
+// leader. This caused cloud tier leaders to have CloudStore=nil, silently
+// preventing all cloud uploads and breaking the entire archival lifecycle.
+func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
+	t.Parallel()
+	nodeID := "test-node"
+	vaultID := uuid.Must(uuid.NewV7())
+	cloudTierID := uuid.Must(uuid.NewV7())
+	fsID := uuid.Must(uuid.NewV7())
+	csID := uuid.Must(uuid.NewV7())
+
+	storageDir := t.TempDir()
+
+	// Pre-create the vault/tier directory so the chunk manager factory
+	// doesn't warn about missing paths.
+	tierDir := filepath.Join(storageDir, "vaults", vaultID.String(), cloudTierID.String())
+	if err := os.MkdirAll(tierDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &config.Config{
+		Vaults: []config.VaultConfig{{
+			ID:      vaultID,
+			Name:    "cloud-leader-test",
+			TierIDs: []uuid.UUID{cloudTierID},
+		}},
+		Tiers: []config.TierConfig{{
+			ID:               cloudTierID,
+			Name:             "cloud",
+			Type:             config.TierTypeCloud,
+			CloudServiceID:   &csID,
+			ActiveChunkClass: 1,
+			Placements: []config.TierPlacement{
+				{StorageID: fsID.String(), Leader: true},
+			},
+		}},
+		CloudServices: []config.CloudService{{
+			ID:       csID,
+			Name:     "test-cloud",
+			Provider: "memory",
+		}},
+		NodeStorageConfigs: []config.NodeStorageConfig{{
+			NodeID: nodeID,
+			FileStorages: []config.FileStorage{{
+				ID:           fsID,
+				StorageClass: 1,
+				Name:         "disk-1",
+				Path:         storageDir,
+			}},
+		}},
+	}
+
+	factories := Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"file": chunkfile.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"file": indexfile.NewFactory(),
+		},
+		VaultsDir: storageDir,
+		Logger:    slog.Default(),
+	}
+
+	orch, err := New(Config{LocalNodeID: nodeID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	store := cfgmem.NewStore()
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	if err := orch.ApplyConfig(cfg, factories); err != nil {
+		t.Fatalf("ApplyConfig failed: %v", err)
+	}
+
+	// The vault should have been created with the cloud tier.
+	orch.mu.RLock()
+	vault := orch.vaults[vaultID]
+	orch.mu.RUnlock()
+	if vault == nil {
+		t.Fatal("vault not created")
+	}
+	if len(vault.Tiers) != 1 {
+		t.Fatalf("expected 1 tier, got %d", len(vault.Tiers))
+	}
+	cloudTier := vault.Tiers[0]
+	if cloudTier.IsFollower {
+		t.Fatal("expected cloud tier to be leader, got follower")
+	}
+
+	// Ingest records, seal, and run PostSealProcess.
+	const recordCount = 10
+	for i := 0; i < recordCount; i++ {
+		if _, _, err := cloudTier.Chunks.Append(makeRecord(fmt.Sprintf("cloud-leader-%d", i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cloudTier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, err := cloudTier.Chunks.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) == 0 {
+		t.Fatal("expected sealed chunk")
+	}
+	chunkID := metas[0].ID
+
+	processor, ok := cloudTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if !ok {
+		t.Fatal("chunk manager does not implement ChunkPostSealProcessor")
+	}
+	if err := processor.PostSealProcess(context.Background(), chunkID); err != nil {
+		t.Fatalf("PostSealProcess failed: %v", err)
+	}
+
+	// Verify the chunk is cloud-backed after PostSealProcess. If sealed_backing
+	// was stripped from the leader, CloudStore=nil and upload is skipped,
+	// leaving CloudBacked=false.
+	metas, err = cloudTier.Chunks.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, m := range metas {
+		if m.ID == chunkID {
+			found = true
+			if !m.CloudBacked {
+				t.Fatal("chunk is NOT cloud-backed after PostSealProcess — sealed_backing was incorrectly stripped for the leader")
+			}
+			if !m.Compressed {
+				t.Fatal("chunk was not compressed")
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("sealed chunk not found in list")
 	}
 }
 
