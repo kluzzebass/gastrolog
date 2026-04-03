@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -1119,4 +1121,134 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 		t.Error("expected suspect entries after reconciliation with missing blobs")
 	}
 	t.Logf("leader: %d suspect chunks after reconciliation", suspectCount)
+}
+
+// --- Warm cache cluster test ---
+
+func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
+	t.Parallel()
+
+	// Create a cloud cluster where the leader has a cache dir.
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	csID := uuid.Must(uuid.NewV7())
+	nodeID := "leader"
+
+	cloudStore := blobstore.NewMemory()
+	cacheDir := t.TempDir()
+
+	store := cfgmem.NewStore()
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "cache-test", TierIDs: []uuid.UUID{tierID},
+	})
+	_ = store.PutCloudService(context.Background(), config.CloudService{
+		ID: csID, Name: "test-cloud", Provider: "memory",
+	})
+
+	dir := t.TempDir()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir: dir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(100),
+		CloudStore: cloudStore, VaultID: vaultID, CacheDir: cacheDir,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	im := indexfile.NewManager(dir, nil, nil)
+
+	orch, err := New(Config{
+		LocalNodeID:  nodeID,
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = orch.Scheduler().Stop()
+
+	tier := &TierInstance{
+		TierID: tierID, Type: "cloud",
+		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
+	}
+	orch.RegisterVault(NewVault(vaultID, tier))
+
+	t.Cleanup(func() { orch.Stop(); _ = cm.Close() })
+
+	// Ingest, seal, upload.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 500 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "cache-cluster-%d", i),
+		})
+	}
+	if active := cm.Active(); active != nil && active.RecordCount > 0 {
+		_ = cm.Seal()
+	}
+	metas, _ := cm.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = cm.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Verify cache files exist.
+	metasAfter, _ := cm.List()
+	for _, m := range metasAfter {
+		if !m.CloudBacked {
+			continue
+		}
+		cachePath := filepath.Join(cacheDir, m.ID.String()+".glcb")
+		info, err := os.Stat(cachePath)
+		if err != nil {
+			t.Errorf("chunk %s: expected cache file at %s", m.ID, cachePath)
+			continue
+		}
+		if info.Size() == 0 {
+			t.Errorf("chunk %s: cache file is empty", m.ID)
+		}
+	}
+
+	// Read records via cursor — should hit cache, not cloud.
+	for _, m := range metasAfter {
+		if !m.CloudBacked {
+			continue
+		}
+		cursor, err := cm.OpenCursor(m.ID)
+		if err != nil {
+			t.Errorf("OpenCursor(%s): %v", m.ID, err)
+			continue
+		}
+		var count int
+		for {
+			_, _, err := cursor.Next()
+			if errors.Is(err, chunk.ErrNoMoreRecords) {
+				break
+			}
+			if err != nil {
+				_ = cursor.Close()
+				t.Errorf("chunk %s record %d: %v", m.ID, count, err)
+				break
+			}
+			count++
+		}
+		_ = cursor.Close()
+		if int64(count) != m.RecordCount {
+			t.Errorf("chunk %s: read %d records, meta says %d", m.ID, count, m.RecordCount)
+		}
+	}
+
+	// Delete a cloud chunk — cache file should also be removed.
+	if len(metasAfter) > 0 {
+		deleteID := metasAfter[0].ID
+		cachePath := filepath.Join(cacheDir, deleteID.String()+".glcb")
+		if err := cm.Delete(deleteID); err != nil {
+			t.Fatalf("Delete(%s): %v", deleteID, err)
+		}
+		if _, err := os.Stat(cachePath); !os.IsNotExist(err) {
+			t.Errorf("cache file should be removed after Delete: %v", err)
+		}
+	}
 }
