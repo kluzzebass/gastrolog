@@ -29,11 +29,24 @@ func init() {
 // Reader provides random-access record reads from a cloud blob.
 // The blob must be on local disk (temp file) so seekable zstd can use ReadAt.
 type Reader struct {
-	meta  BlobMeta
-	dict  *chunk.StringDict
-	index []recordIndex
-	seek  seekable.Reader
-	file  *os.File // temp file; closed and removed on Close()
+	meta     BlobMeta
+	dict     *chunk.StringDict
+	index    []recordIndex
+	seek     seekable.Reader
+	file     *os.File // temp file; closed and removed on Close()
+	keepFile bool     // if true, Close() does not remove the file (cache)
+}
+
+// NewCacheReader opens a cloud blob from a local cache file.
+// Unlike NewReader, Close() does NOT remove the file — the cache
+// manages the file's lifecycle.
+func NewCacheReader(f *os.File) (*Reader, error) {
+	rd, err := NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	rd.keepFile = true
+	return rd, nil
 }
 
 // NewReader opens a cloud blob from a local file.
@@ -178,7 +191,9 @@ func (rd *Reader) Close() error {
 		if err := rd.file.Close(); err != nil {
 			errs = append(errs, err)
 		}
-		_ = os.Remove(name) //nolint:gosec // name is from os.CreateTemp via rd.file
+		if !rd.keepFile {
+			_ = os.Remove(name) //nolint:gosec // name is from os.CreateTemp via rd.file
+		}
 	}
 	return errors.Join(errs...)
 }

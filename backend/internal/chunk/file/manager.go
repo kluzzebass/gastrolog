@@ -71,6 +71,11 @@ type Config struct {
 	// VaultID is required when CloudStore is set (used for blob key prefix).
 	VaultID uuid.UUID
 
+	// CacheDir, when non-empty, enables local caching of cloud GLCB blobs.
+	// Cloud chunks are cached after upload and on first read, avoiding
+	// range-request round-trips. Eviction is managed externally.
+	CacheDir string
+
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
@@ -256,6 +261,14 @@ func NewManager(cfg Config) (*Manager, error) {
 			_ = lockFile.Close()
 			return nil, fmt.Errorf("load cloud chunks: %w", err)
 		}
+	}
+
+	if cfg.CacheDir != "" {
+		if err := os.MkdirAll(cfg.CacheDir, 0o750); err != nil {
+			_ = lockFile.Close()
+			return nil, fmt.Errorf("create cache dir: %w", err)
+		}
+		logger.Info("warm cache enabled", "cache_dir", cfg.CacheDir)
 	}
 
 	if cfg.ExpectExisting && !dirExisted {
@@ -2150,7 +2163,7 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		return chunk.ErrChunkNotFound
 	}
 
-	if meta.cloudBacked {
+	if meta.cloudBacked { //nolint:nestif // cloud vs local branch is inherently nested
 		// Release the lock before the S3 API call — cloud deletes can take
 		// hundreds of milliseconds and would block all Appends.
 		key := m.blobKey(id)
@@ -2162,6 +2175,10 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 			return fmt.Errorf("delete cloud chunk %s: %w", id, err)
 		}
 		m.removeFromCloudIndex(id)
+		// Remove cached GLCB blob (best-effort).
+		if m.cfg.CacheDir != "" {
+			_ = os.Remove(m.cachePath(id))
+		}
 	} else {
 		dir := m.chunkDir(id)
 		// Wait for this chunk's post-seal work to finish — it may be writing
@@ -2314,6 +2331,91 @@ func (m *Manager) RefreshDiskSizes(id chunk.ChunkID) {
 	}
 	meta.bytes = m.computeTotalLogicalBytes(id, meta.logicalDataBytes)
 	meta.diskBytes = m.computeDiskBytes(id)
+}
+
+// --- Warm cache helpers ---
+
+// cachePath returns the local cache file path for a cloud chunk's GLCB blob.
+func (m *Manager) cachePath(id chunk.ChunkID) string {
+	return filepath.Join(m.cfg.CacheDir, id.String()+".glcb")
+}
+
+// writeBlobToCache atomically writes a GLCB blob to the cache directory.
+// Errors are logged and swallowed — cache writes are best-effort.
+func (m *Manager) writeBlobToCache(id chunk.ChunkID, data []byte) {
+	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
+		m.logger.Warn("cache: failed to create dir", "error", err)
+		return
+	}
+	tmp, err := os.CreateTemp(m.cfg.CacheDir, ".glcb-*.tmp")
+	if err != nil {
+		m.logger.Warn("cache: failed to create temp file", "error", err)
+		return
+	}
+	tmpPath := filepath.Clean(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
+		m.logger.Warn("cache: failed to write blob", "chunk", id, "error", err)
+		return
+	}
+	_ = tmp.Close()
+	if err := os.Rename(tmpPath, m.cachePath(id)); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		m.logger.Warn("cache: failed to rename blob", "chunk", id, "error", err)
+		return
+	}
+	m.logger.Debug("cache: wrote GLCB blob", "chunk", id, "bytes", len(data))
+}
+
+// openCachedCursor opens a cloud chunk from the local cache directory.
+// Returns an error if the cache file doesn't exist or is corrupt.
+func (m *Manager) openCachedCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	path := m.cachePath(id)
+	f, err := os.Open(filepath.Clean(path))
+	if err != nil {
+		return nil, err // cache miss
+	}
+	rd, err := chunkcloud.NewCacheReader(f)
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(path) // corrupt — remove so next access re-downloads
+		return nil, err
+	}
+	return chunkcloud.NewSeekableCursor(rd, id), nil
+}
+
+// downloadAndCacheCursor downloads the entire GLCB blob from cloud, writes it
+// to the cache directory, and opens a local cursor. Blocking on first access.
+func (m *Manager) downloadAndCacheCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rc.Close() }()
+
+	if err := os.MkdirAll(m.cfg.CacheDir, 0o750); err != nil {
+		return nil, err
+	}
+	tmp, err := os.CreateTemp(m.cfg.CacheDir, ".glcb-*.tmp")
+	if err != nil {
+		return nil, err
+	}
+	tmpPath := filepath.Clean(tmp.Name())
+	if _, err := io.Copy(tmp, rc); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp in CacheDir
+		return nil, err
+	}
+	_ = tmp.Close()
+
+	finalPath := m.cachePath(id)
+	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		_ = os.Remove(tmpPath) //nolint:gosec // G703: tmpPath is from os.CreateTemp
+		return nil, err
+	}
+
+	return m.openCachedCursor(id)
 }
 
 // SetRotationPolicy updates the rotation policy for future appends.
@@ -2649,6 +2751,11 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 
 	blobSize := int64(buf.Len())
 
+	// Write GLCB blob to local cache (best-effort).
+	if m.cfg.CacheDir != "" {
+		m.writeBlobToCache(id, buf.Bytes())
+	}
+
 	// Delete local chunk directory.
 	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
 		return fmt.Errorf("remove local chunk dir after cloud upload: %w", err)
@@ -2802,6 +2909,24 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 		return nil, chunk.ErrChunkNotFound
 	}
 
+	// Cache hit: open from local GLCB file.
+	if m.cfg.CacheDir != "" {
+		if cursor, err := m.openCachedCursor(id); err == nil {
+			return cursor, nil
+		}
+	}
+
+	// Cache miss: download entire blob to cache, then open locally.
+	if m.cfg.CacheDir != "" {
+		if cursor, err := m.downloadAndCacheCursor(id); err == nil {
+			return cursor, nil
+		} else {
+			m.logger.Warn("cache: download-and-cache failed, falling back to range requests",
+				"chunk", id, "error", err)
+		}
+	}
+
+	// Fallback: remote reader with range requests.
 	rd, err := chunkcloud.NewRemoteReader(m.cfg.CloudStore, m.blobKey(id), meta.diskBytes)
 	if err != nil {
 		return nil, fmt.Errorf("open remote reader %s: %w", id, err)

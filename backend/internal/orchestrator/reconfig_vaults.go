@@ -1091,6 +1091,10 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
+		// Cache directory for locally-cached GLCB blobs (avoids cloud range requests).
+		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.CacheClass); fs != nil {
+			params["cache_dir"] = filepath.Join(fs.Path, "cache", vaultCfg.ID.String(), tierCfg.ID.String())
+		}
 	}
 
 	return params
