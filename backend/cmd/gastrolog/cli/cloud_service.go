@@ -73,23 +73,7 @@ func newCloudServiceGetCmd() *cobra.Command {
 			}
 			for _, cs := range resp.Msg.CloudServices {
 				if cs.Id == id {
-					p := newPrinter(outputFormat(cmd))
-					if outputFormat(cmd) == "json" {
-						return p.json(cs)
-					}
-					pairs := [][2]string{
-						{"ID", cs.Id},
-						{"Name", cs.Name},
-						{"Provider", cs.Provider},
-						{"Bucket", cs.Bucket},
-						{"Region", cs.Region},
-						{"Endpoint", cs.Endpoint},
-					}
-					if cs.StorageClass > 0 {
-						pairs = append(pairs, [2]string{"Storage Class", strconv.FormatUint(uint64(cs.StorageClass), 10)})
-					}
-					p.kv(pairs)
-					return nil
+					return printCloudService(cmd, cs)
 				}
 			}
 			return fmt.Errorf("cloud service %q not found", args[0])
@@ -150,6 +134,12 @@ func newCloudServiceCreateCmd() *cobra.Command {
 	cmd.Flags().String("connection-string", "", "connection string (Azure)")
 	cmd.Flags().String("credentials-json", "", "credentials JSON (GCS)")
 	cmd.Flags().Uint32("storage-class", 0, "storage class for tier placement")
+	cmd.Flags().String("archival-mode", "", "storage class transition management: 'none' (external) or 'active' (managed by GastroLog)")
+	cmd.Flags().StringSlice("transition", nil, "archival transition: 'AFTER:CLASS' (e.g. '90d:GLACIER', '360d:DEEP_ARCHIVE', '730d:' for delete). Repeatable.")
+	cmd.Flags().String("restore-tier", "", "default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)")
+	cmd.Flags().Uint32("restore-days", 0, "S3: how long restored copy stays readable (days)")
+	cmd.Flags().Uint32("suspect-grace-days", 0, "days before suspect chunk removed from index (default 7)")
+	cmd.Flags().String("reconcile-schedule", "", "cron for reconciliation sweep (default '0 3 * * *')")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -177,6 +167,48 @@ func newCloudServiceDeleteCmd() *cobra.Command {
 			return nil
 		},
 	}
+}
+
+func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
+	p := newPrinter(outputFormat(cmd))
+	if outputFormat(cmd) == "json" {
+		return p.json(cs)
+	}
+	pairs := [][2]string{
+		{"ID", cs.Id},
+		{"Name", cs.Name},
+		{"Provider", cs.Provider},
+		{"Bucket", cs.Bucket},
+		{"Region", cs.Region},
+		{"Endpoint", cs.Endpoint},
+	}
+	if cs.StorageClass > 0 {
+		pairs = append(pairs, [2]string{"Storage Class", strconv.FormatUint(uint64(cs.StorageClass), 10)})
+	}
+	if cs.ArchivalMode != "" {
+		pairs = append(pairs, [2]string{"Archival Mode", cs.ArchivalMode})
+	}
+	for i, tr := range cs.Transitions {
+		class := tr.StorageClass
+		if class == "" {
+			class = "(delete)"
+		}
+		pairs = append(pairs, [2]string{fmt.Sprintf("Transition %d", i+1), fmt.Sprintf("after %s → %s", tr.After, class)})
+	}
+	if cs.RestoreTier != "" {
+		pairs = append(pairs, [2]string{"Restore Tier", cs.RestoreTier})
+	}
+	if cs.RestoreDays > 0 {
+		pairs = append(pairs, [2]string{"Restore Days", strconv.FormatUint(uint64(cs.RestoreDays), 10)})
+	}
+	if cs.SuspectGraceDays > 0 {
+		pairs = append(pairs, [2]string{"Suspect Grace Days", strconv.FormatUint(uint64(cs.SuspectGraceDays), 10)})
+	}
+	if cs.ReconcileSchedule != "" {
+		pairs = append(pairs, [2]string{"Reconcile Schedule", cs.ReconcileSchedule})
+	}
+	p.kv(pairs)
+	return nil
 }
 
 // applyCloudServiceFlags overlays explicitly-set CLI flags onto the cloud service config.
@@ -212,4 +244,43 @@ func applyCloudServiceFlags(cmd *cobra.Command, cfg *v1.CloudService) {
 		sc, _ := cmd.Flags().GetUint32("storage-class")
 		cfg.StorageClass = sc
 	}
+	if cmd.Flags().Changed("archival-mode") {
+		cfg.ArchivalMode, _ = cmd.Flags().GetString("archival-mode")
+	}
+	if cmd.Flags().Changed("transition") {
+		specs, _ := cmd.Flags().GetStringSlice("transition")
+		cfg.Transitions = nil
+		for _, spec := range specs {
+			parts := splitTransitionSpec(spec)
+			cfg.Transitions = append(cfg.Transitions, &v1.CloudStorageTransition{
+				After:        parts[0],
+				StorageClass: parts[1],
+			})
+		}
+	}
+	if cmd.Flags().Changed("restore-tier") {
+		cfg.RestoreTier, _ = cmd.Flags().GetString("restore-tier")
+	}
+	if cmd.Flags().Changed("restore-days") {
+		d, _ := cmd.Flags().GetUint32("restore-days")
+		cfg.RestoreDays = d
+	}
+	if cmd.Flags().Changed("suspect-grace-days") {
+		d, _ := cmd.Flags().GetUint32("suspect-grace-days")
+		cfg.SuspectGraceDays = d
+	}
+	if cmd.Flags().Changed("reconcile-schedule") {
+		cfg.ReconcileSchedule, _ = cmd.Flags().GetString("reconcile-schedule")
+	}
+}
+
+// splitTransitionSpec parses "AFTER:CLASS" into [after, class].
+// An empty class (e.g. "730d:") means delete.
+func splitTransitionSpec(spec string) [2]string {
+	for i, c := range spec {
+		if c == ':' {
+			return [2]string{spec[:i], spec[i+1:]}
+		}
+	}
+	return [2]string{spec, ""}
 }
