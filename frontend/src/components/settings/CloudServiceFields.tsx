@@ -234,19 +234,26 @@ function ArchivalSection({
 
   return (
     <div className="flex flex-col gap-2 pt-3">
-      <div className="flex items-center justify-between">
-        <span className={`text-[0.85em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
-          Archival Lifecycle
-        </span>
-        <SelectInput
-          value={values.archivalMode || "none"}
-          onChange={(v) => onChange({ archivalMode: v })}
-          options={[
-            { value: "none", label: "None" },
-            { value: "active", label: "Active" },
-          ]}
-          dark={dark}
-        />
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between">
+          <span className={`text-[0.85em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+            Storage Class Transitions
+          </span>
+          <SelectInput
+            value={values.archivalMode || "none"}
+            onChange={(v) => onChange({ archivalMode: v })}
+            options={[
+              { value: "none", label: "Managed externally" },
+              { value: "active", label: "Managed by GastroLog" },
+            ]}
+            dark={dark}
+          />
+        </div>
+        <p className={`text-[0.7em] leading-snug ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          {values.archivalMode === "active"
+            ? "GastroLog automatically transitions chunks between storage classes based on age."
+            : "Storage class transitions are handled outside GastroLog (e.g. S3 Lifecycle Rules, Azure Management Policies)."}
+        </p>
       </div>
 
       {isActive && (
