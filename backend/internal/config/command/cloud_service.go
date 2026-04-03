@@ -13,7 +13,7 @@ func putCloudServiceCmd(cs config.CloudService) *gastrologv1.PutCloudServiceComm
 	transitions := make([]*gastrologv1.CloudServiceTransition, len(cs.Transitions))
 	for i, t := range cs.Transitions {
 		transitions[i] = &gastrologv1.CloudServiceTransition{
-			AfterDays:    t.AfterDays,
+			After:        t.After,
 			StorageClass: t.StorageClass,
 		}
 	}
@@ -64,7 +64,7 @@ func ExtractPutCloudService(cmd *gastrologv1.PutCloudServiceCommand) (config.Clo
 	transitions := make([]config.CloudStorageTransition, len(cmd.GetTransitions()))
 	for i, t := range cmd.GetTransitions() {
 		transitions[i] = config.CloudStorageTransition{
-			AfterDays:    t.GetAfterDays(),
+			After:        t.GetAfter(),
 			StorageClass: t.GetStorageClass(),
 		}
 	}

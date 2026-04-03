@@ -19,7 +19,7 @@ export function usePutCloudService() {
       connectionString: string;
       credentialsJson: string;
       archivalMode?: string;
-      transitions?: Array<{ afterDays: number; storageClass: string }>;
+      transitions?: Array<{ after: string; storageClass: string }>;
       restoreTier?: string;
       restoreDays?: number;
       suspectGraceDays?: number;
@@ -40,7 +40,7 @@ export function usePutCloudService() {
           credentialsJson: args.credentialsJson,
           archivalMode: args.archivalMode ?? "",
           transitions: (args.transitions ?? []).map((t) => ({
-            afterDays: t.afterDays,
+            after: t.after,
             storageClass: t.storageClass,
           })),
           restoreTier: args.restoreTier ?? "",

@@ -276,7 +276,7 @@ message DeleteManagedFileCommand {
 // --- Cloud Services ---
 
 message CloudServiceTransition {
-  uint32 after_days = 1;
+  string after = 1;
   string storage_class = 2;
 }
 

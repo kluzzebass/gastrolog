@@ -115,7 +115,7 @@ func ingestSealUpload(t *testing.T, cm *chunkfile.Manager, n int) []chunk.ChunkI
 func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "GLACIER"},
+		{After: "1d", StorageClass: "GLACIER"},
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
@@ -132,6 +132,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 
 	// Hack WriteEnd to be 2 days ago by using a frozen Now on the orchestrator.
 	orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+
 	orch.archivalSweepAll()
 
 	meta, _ = cm.Meta(ids[0])
@@ -143,7 +144,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: ""},  // delete after 1 day
+		{After: "1d", StorageClass: ""},  // delete after 1 day
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
@@ -162,7 +163,7 @@ func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _, store := archivalTestSetup(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "GLACIER"},
+		{After: "1d", StorageClass: "GLACIER"},
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
@@ -185,8 +186,8 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, _, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
-		{AfterDays: 30, StorageClass: "deep-freeze"},
+		{After: "1d", StorageClass: "cold"},
+		{After: "30d", StorageClass: "deep-freeze"},
 	})
 
 	ids := ingestSealUpload(t, cm, 50)
@@ -336,7 +337,7 @@ func TestChunkSuspectSkippedInTransition(t *testing.T) {
 func TestArchivalFullLifecycle(t *testing.T) {
 	t.Parallel()
 	orch, _, cm, vaultID, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
+		{After: "1d", StorageClass: "cold"},
 	})
 
 	// 1. Ingest and upload to cloud.
@@ -457,9 +458,9 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 		Provider:          "memory",
 		ArchivalMode:      "active",
 		Transitions: []config.CloudStorageTransition{
-			{AfterDays: 30, StorageClass: "cold"},
-			{AfterDays: 90, StorageClass: "deep-freeze"},
-			{AfterDays: 365, StorageClass: ""},
+			{After: "30d", StorageClass: "cold"},
+			{After: "90d", StorageClass: "deep-freeze"},
+			{After: "365d", StorageClass: ""},
 		},
 		RestoreTier:       "Expedited",
 		RestoreDays:       14,
@@ -482,7 +483,7 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 	if len(loaded.Transitions) != 3 {
 		t.Fatalf("Transitions len=%d, want 3", len(loaded.Transitions))
 	}
-	if loaded.Transitions[0].AfterDays != 30 || loaded.Transitions[0].StorageClass != "cold" {
+	if loaded.Transitions[0].After != "30d" || loaded.Transitions[0].StorageClass != "cold" {
 		t.Errorf("Transition 0: %+v", loaded.Transitions[0])
 	}
 	if loaded.Transitions[2].StorageClass != "" {
@@ -679,7 +680,7 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
+		{After: "1d", StorageClass: "cold"},
 	})
 
 	leaderNode := h.nodes["leader"]
@@ -739,7 +740,7 @@ func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
+		{After: "1d", StorageClass: "cold"},
 	})
 
 	leaderNode := h.nodes["leader"]
@@ -780,7 +781,7 @@ func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
+		{After: "1d", StorageClass: "cold"},
 	})
 
 	leaderNode := h.nodes["leader"]
@@ -839,7 +840,7 @@ func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
+		{After: "1d", StorageClass: "cold"},
 	})
 
 	leaderNode := h.nodes["leader"]
@@ -888,7 +889,7 @@ func TestCloudClusterSweepThresholdBoundary(t *testing.T) {
 	t.Parallel()
 	// AfterDays=5: chunks younger than 5 days should NOT be archived.
 	h := setupCloudCluster(t, []config.CloudStorageTransition{
-		{AfterDays: 5, StorageClass: "cold"},
+		{After: "5d", StorageClass: "cold"},
 	})
 
 	leaderNode := h.nodes["leader"]
@@ -1007,7 +1008,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	t.Parallel()
 	h := setupCloudCluster(t, []config.CloudStorageTransition{
-		{AfterDays: 1, StorageClass: "cold"},
+		{After: "1d", StorageClass: "cold"},
 	})
 
 	leaderNode := h.nodes["leader"]

@@ -3,7 +3,7 @@ import { FormField, TextInput, TextArea, SelectInput, NumberInput } from "./Form
 import { Button } from "./Buttons";
 
 interface CloudStorageTransitionEdit {
-  afterDays: number;
+  after: string; // duration (e.g. "30s", "7d", "2w")
   storageClass: string; // empty = delete
 }
 
@@ -214,19 +214,17 @@ function ArchivalSection({
 
   const setTransition = (idx: number, patch: Partial<CloudStorageTransitionEdit>) => {
     const updated = values.transitions.map((t, i) =>
-      i === idx ? { afterDays: patch.afterDays ?? t.afterDays, storageClass: patch.storageClass ?? t.storageClass } : t,
+      i === idx ? { after: patch.after ?? t.after, storageClass: patch.storageClass ?? t.storageClass } : t,
     );
     onChange({ transitions: updated });
   };
 
   const addTransition = () => {
     const existing = values.transitions;
-    const last = existing.at(-1);
-    const lastDays = last?.afterDays ?? 0;
-    const step = isMemory ? 0 : 90;
+    const defaultAfter = isMemory ? "0s" : existing.length === 0 ? "90d" : "";
     const firstClass = classOptions[0]?.value ?? "";
     onChange({
-      transitions: [...existing, { afterDays: lastDays + step, storageClass: firstClass }],
+      transitions: [...existing, { after: defaultAfter, storageClass: firstClass }],
     });
   };
 
@@ -260,12 +258,12 @@ function ArchivalSection({
           {values.transitions.map((t, i) => (
             <div key={i} className="flex items-end gap-2">
               <div className="w-24">
-                <FormField label={i === 0 ? "After Days" : ""} dark={dark}>
-                  <NumberInput
-                    value={String(t.afterDays)}
-                    onChange={(v) => setTransition(i, { afterDays: parseInt(v, 10) || 0 })}
+                <FormField label={i === 0 ? "After" : ""} dark={dark}>
+                  <TextInput
+                    value={t.after}
+                    onChange={(v) => setTransition(i, { after: v })}
+                    placeholder="e.g. 90d"
                     dark={dark}
-                    min={0}
                   />
                 </FormField>
               </div>

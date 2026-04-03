@@ -1873,9 +1873,9 @@ export class DeleteManagedFileCommand extends Message<DeleteManagedFileCommand> 
  */
 export class CloudServiceTransition extends Message<CloudServiceTransition> {
   /**
-   * @generated from field: uint32 after_days = 1;
+   * @generated from field: string after = 1;
    */
-  afterDays = 0;
+  after = "";
 
   /**
    * @generated from field: string storage_class = 2;
@@ -1890,7 +1890,7 @@ export class CloudServiceTransition extends Message<CloudServiceTransition> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.CloudServiceTransition";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "after_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 1, name: "after", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 

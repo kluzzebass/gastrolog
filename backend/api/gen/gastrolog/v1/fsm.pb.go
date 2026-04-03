@@ -2551,7 +2551,7 @@ func (x *DeleteManagedFileCommand) GetId() string {
 
 type CloudServiceTransition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AfterDays     uint32                 `protobuf:"varint,1,opt,name=after_days,json=afterDays,proto3" json:"after_days,omitempty"`
+	After         string                 `protobuf:"bytes,1,opt,name=after,proto3" json:"after,omitempty"`
 	StorageClass  string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2587,11 +2587,11 @@ func (*CloudServiceTransition) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *CloudServiceTransition) GetAfterDays() uint32 {
+func (x *CloudServiceTransition) GetAfter() string {
 	if x != nil {
-		return x.AfterDays
+		return x.After
 	}
-	return 0
+	return ""
 }
 
 func (x *CloudServiceTransition) GetStorageClass() string {
@@ -3567,10 +3567,9 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\vuploaded_at\x18\x05 \x01(\tR\n" +
 	"uploadedAt\"*\n" +
 	"\x18DeleteManagedFileCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\\\n" +
-	"\x16CloudServiceTransition\x12\x1d\n" +
-	"\n" +
-	"after_days\x18\x01 \x01(\rR\tafterDays\x12#\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"S\n" +
+	"\x16CloudServiceTransition\x12\x14\n" +
+	"\x05after\x18\x01 \x01(\tR\x05after\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x9f\x05\n" +
 	"\x16PutCloudServiceCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +

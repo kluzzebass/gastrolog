@@ -36,7 +36,7 @@ interface AddFormState {
   connectionString: string;
   credentialsJson: string;
   archivalMode: string;
-  transitions: Array<{ afterDays: number; storageClass: string }>;
+  transitions: Array<{ after: string; storageClass: string }>;
   restoreTier: string;
   restoreDays: number;
   suspectGraceDays: number;

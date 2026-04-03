@@ -158,7 +158,7 @@ func (x *NodeStorageConfig) GetFileStorages() []*FileStorage {
 // means "delete" (expiry).
 type CloudStorageTransition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	AfterDays     uint32                 `protobuf:"varint,1,opt,name=after_days,json=afterDays,proto3" json:"after_days,omitempty"`         // days after chunk seal before this transition fires
+	After         string                 `protobuf:"bytes,1,opt,name=after,proto3" json:"after,omitempty"`                                   // duration after chunk seal (e.g. "30s", "7d", "2w", "360d")
 	StorageClass  string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"` // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -194,11 +194,11 @@ func (*CloudStorageTransition) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *CloudStorageTransition) GetAfterDays() uint32 {
+func (x *CloudStorageTransition) GetAfter() string {
 	if x != nil {
-		return x.AfterDays
+		return x.After
 	}
-	return 0
+	return ""
 }
 
 func (x *CloudStorageTransition) GetStorageClass() string {
@@ -407,10 +407,9 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12>\n" +
-	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"\\\n" +
-	"\x16CloudStorageTransition\x12\x1d\n" +
-	"\n" +
-	"after_days\x18\x01 \x01(\rR\tafterDays\x12#\n" +
+	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"S\n" +
+	"\x16CloudStorageTransition\x12\x14\n" +
+	"\x05after\x18\x01 \x01(\tR\x05after\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x95\x05\n" +
 	"\fCloudService\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +

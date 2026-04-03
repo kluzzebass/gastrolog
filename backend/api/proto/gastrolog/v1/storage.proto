@@ -27,8 +27,8 @@ message NodeStorageConfig {
 // Transitions are ordered by after_days (ascending). An empty storage_class
 // means "delete" (expiry).
 message CloudStorageTransition {
-  uint32 after_days = 1;    // days after chunk seal before this transition fires
-  string storage_class = 2; // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
+  string after = 1;          // duration after chunk seal (e.g. "30s", "7d", "2w", "360d")
+  string storage_class = 2;  // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
 }
 
 // CloudService defines a cluster-wide cloud storage endpoint.

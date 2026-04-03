@@ -630,7 +630,7 @@ type NodeStorageConfig struct {
 // CloudService defines a cluster-wide cloud storage endpoint.
 // CloudStorageTransition defines a single step in an archival lifecycle chain.
 type CloudStorageTransition struct {
-	AfterDays    uint32 `json:"afterDays"`
+	After        string `json:"after"`        // duration string (e.g. "30s", "7d", "2w", "360d")
 	StorageClass string `json:"storageClass"` // empty = delete (expiry)
 }
 
@@ -650,7 +650,7 @@ type CloudService struct {
 
 	// Archival lifecycle.
 	ArchivalMode      string                   `json:"archivalMode,omitempty"`      // "none" or "active"
-	Transitions       []CloudStorageTransition  `json:"transitions,omitempty"`       // ordered by AfterDays
+	Transitions       []CloudStorageTransition  `json:"transitions,omitempty"`       // ordered by After duration
 	RestoreTier       string                   `json:"restoreTier,omitempty"`       // default restore speed
 	RestoreDays       uint32                   `json:"restoreDays,omitempty"`       // S3 restore window
 	SuspectGraceDays  uint32                   `json:"suspectGraceDays,omitempty"`  // default 7

@@ -264,7 +264,7 @@ func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 		transitions := make([]*apiv1.CloudStorageTransition, len(cs.Transitions))
 		for i, t := range cs.Transitions {
 			transitions[i] = &apiv1.CloudStorageTransition{
-				AfterDays:    t.AfterDays,
+				After:        t.After,
 				StorageClass: t.StorageClass,
 			}
 		}

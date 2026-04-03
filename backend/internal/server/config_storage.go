@@ -271,7 +271,7 @@ func protoToCloudService(p *apiv1.CloudService) config.CloudService {
 	transitions := make([]config.CloudStorageTransition, len(p.Transitions))
 	for i, t := range p.Transitions {
 		transitions[i] = config.CloudStorageTransition{
-			AfterDays:    t.AfterDays,
+			After:        t.After,
 			StorageClass: t.StorageClass,
 		}
 	}

@@ -119,7 +119,7 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 
 	archiver, ok := tier.Chunks.(chunk.ChunkArchiver)
 	if !ok {
-		return // tier doesn't support archival (e.g., memory)
+		return
 	}
 
 	for _, m := range metas {
@@ -131,9 +131,8 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 		if age < 0 {
 			continue
 		}
-		ageDays := uint32(age.Hours() / 24)
 
-		target := resolveTransitionTarget(cs.Transitions, ageDays)
+		target := resolveTransitionTarget(cs.Transitions, age)
 		if target == nil {
 			continue
 		}
@@ -145,7 +144,7 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 					"chunk", m.ID.String(), "error", err)
 			} else {
 				o.logger.Info("archival sweep: expired chunk",
-					"chunk", m.ID.String(), "ageDays", ageDays)
+					"chunk", m.ID.String(), "age", age)
 			}
 			continue
 		}
@@ -160,17 +159,22 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 				"chunk", m.ID.String(), "class", target.StorageClass, "error", err)
 		} else {
 			o.logger.Info("archival sweep: archived chunk",
-				"chunk", m.ID.String(), "class", target.StorageClass, "ageDays", ageDays)
+				"chunk", m.ID.String(), "class", target.StorageClass, "age", age)
 		}
 	}
 }
 
 // resolveTransitionTarget finds the highest-matching transition for a chunk's age.
+// Parses each transition's After duration and returns the last one the age exceeds.
 // Returns nil if no transition applies yet.
-func resolveTransitionTarget(transitions []config.CloudStorageTransition, ageDays uint32) *config.CloudStorageTransition {
+func resolveTransitionTarget(transitions []config.CloudStorageTransition, age time.Duration) *config.CloudStorageTransition {
 	var best *config.CloudStorageTransition
 	for i := range transitions {
-		if ageDays >= transitions[i].AfterDays {
+		threshold, err := config.ParseDuration(transitions[i].After)
+		if err != nil {
+			continue // skip unparseable
+		}
+		if age >= threshold {
 			best = &transitions[i]
 		}
 	}

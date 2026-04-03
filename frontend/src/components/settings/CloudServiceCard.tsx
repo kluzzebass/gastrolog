@@ -37,7 +37,7 @@ function providerLabel(provider: string): string {
 }
 
 interface TransitionEdit {
-  afterDays: number;
+  after: string;
   storageClass: string;
 }
 
@@ -84,7 +84,7 @@ export function CloudServiceCard({
     credentialsJson: service.credentialsJson,
     archivalMode: service.archivalMode || "none",
     transitions: service.transitions.map((t) => ({
-      afterDays: t.afterDays,
+      after: t.after,
       storageClass: t.storageClass,
     })),
     restoreTier: service.restoreTier || "",
@@ -114,7 +114,7 @@ export function CloudServiceCard({
       credentialsJson: e.credentialsJson,
       archivalMode: e.archivalMode,
       transitions: e.transitions.map((t) => ({
-        afterDays: t.afterDays,
+        after: t.after,
         storageClass: t.storageClass,
       })),
       restoreTier: e.restoreTier,
