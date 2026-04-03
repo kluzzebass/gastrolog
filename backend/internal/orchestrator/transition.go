@@ -38,6 +38,11 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 
 	cursor, err := r.cm.OpenCursor(id)
 	if err != nil {
+		if errors.Is(err, chunk.ErrChunkSuspect) {
+			r.logger.Warn("transition: chunk suspect (blob not found in cloud), skipping",
+				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
+			return
+		}
 		r.logger.Error("transition: failed to open cursor",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
 		r.markUnreadable(id, err)

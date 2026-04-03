@@ -258,6 +258,9 @@ type Orchestrator struct {
 	// Alert collector for runtime system alerts.
 	alerts AlertCollector
 
+	// Suspect tracker for cloud chunks that returned 404.
+	suspects *suspectTracker
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -346,6 +349,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		localNodeID:     cfg.LocalNodeID,
 		ingestSeqs:      make(map[string]uint32),
 		alerts:          cfg.Alerts,
+		suspects:        newSuspectTracker(),
 		now:             cfg.Now,
 		logger:          logger,
 	}
@@ -358,6 +362,14 @@ func New(cfg Config) (*Orchestrator, error) {
 	// each tick. No per-tier lifecycle management needed.
 	if err := o.startRetentionSweep(); err != nil {
 		return nil, fmt.Errorf("retention sweep: %w", err)
+	}
+
+	if err := o.startArchivalSweep(); err != nil {
+		return nil, fmt.Errorf("archival sweep: %w", err)
+	}
+
+	if err := o.startReconcileSweep(); err != nil {
+		return nil, fmt.Errorf("reconcile sweep: %w", err)
 	}
 
 	return o, nil

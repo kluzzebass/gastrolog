@@ -96,9 +96,10 @@ message DeleteRetentionPolicyCommand {
 // to avoid naming collisions and to match Go types exactly.
 message VaultRetentionRule {
   string retention_policy_id = 1;
-  string action = 2; // "expire" or "eject"
+  string action = 2; // "expire", "eject", "transition", or "archive"
   string destination = 3; // deprecated — was target vault for action=migrate
   repeated string eject_route_ids = 4; // target routes, only for action=eject
+  string archive_storage_class = 5;    // target class for archive
 }
 
 message PutVaultCommand {
@@ -274,6 +275,11 @@ message DeleteManagedFileCommand {
 
 // --- Cloud Services ---
 
+message CloudServiceTransition {
+  uint32 after_days = 1;
+  string storage_class = 2;
+}
+
 message PutCloudServiceCommand {
   string id = 1;
   string name = 2;
@@ -286,9 +292,16 @@ message PutCloudServiceCommand {
   string container = 9;
   string connection_string = 10;
   string credentials_json = 11;
-  reserved 12; // was storage_class (string) — replaced by uint32 field 15
-  reserved 13, 14; // active_chunk_class, cache_class — moved to TierConfig
+  reserved 12;
+  reserved 13, 14;
   uint32 storage_class = 15;
+
+  string archival_mode = 20;
+  repeated CloudServiceTransition transitions = 21;
+  string restore_tier = 22;
+  uint32 restore_days = 23;
+  uint32 suspect_grace_days = 24;
+  string reconcile_schedule = 25;
 }
 
 message DeleteCloudServiceCommand {

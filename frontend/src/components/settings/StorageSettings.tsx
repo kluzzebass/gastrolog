@@ -35,6 +35,12 @@ interface AddFormState {
   container: string;
   connectionString: string;
   credentialsJson: string;
+  archivalMode: string;
+  transitions: Array<{ afterDays: number; storageClass: string }>;
+  restoreTier: string;
+  restoreDays: number;
+  suspectGraceDays: number;
+  reconcileSchedule: string;
 }
 
 const addFormInitial: AddFormState = {
@@ -50,6 +56,12 @@ const addFormInitial: AddFormState = {
   container: "",
   connectionString: "",
   credentialsJson: "",
+  archivalMode: "none",
+  transitions: [],
+  restoreTier: "",
+  restoreDays: 7,
+  suspectGraceDays: 7,
+  reconcileSchedule: "0 3 * * *",
 };
 
 type AddFormAction =
@@ -379,6 +391,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
                     { value: "s3", label: "S3" },
                     { value: "gcs", label: "GCS" },
                     { value: "azure", label: "Azure" },
+                    { value: "memory", label: "Memory" },
                   ]}
                   dark={dark}
                 />
@@ -424,7 +437,8 @@ function TestCloudButton({
     provider !== "" &&
     ((provider === "s3" && values.bucket !== "") ||
       (provider === "azure" && values.container !== "" && values.connectionString !== "") ||
-      (provider === "gcs" && values.bucket !== ""));
+      (provider === "gcs" && values.bucket !== "") ||
+      provider === "memory");
 
   return (
     <div className="flex items-center gap-3">

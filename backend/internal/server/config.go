@@ -261,19 +261,32 @@ func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 		return
 	}
 	for _, cs := range services {
+		transitions := make([]*apiv1.CloudStorageTransition, len(cs.Transitions))
+		for i, t := range cs.Transitions {
+			transitions[i] = &apiv1.CloudStorageTransition{
+				AfterDays:    t.AfterDays,
+				StorageClass: t.StorageClass,
+			}
+		}
 		resp.CloudServices = append(resp.CloudServices, &apiv1.CloudService{
-			Id:               cs.ID.String(),
-			Name:             cs.Name,
-			Provider:         cs.Provider,
-			Bucket:           cs.Bucket,
-			Region:           cs.Region,
-			Endpoint:         cs.Endpoint,
-			AccessKey:        cs.AccessKey,
-			SecretKey:        cs.SecretKey,
-			Container:        cs.Container,
-			ConnectionString: cs.ConnectionString,
-			CredentialsJson:      cs.CredentialsJSON,
-			StorageClass:         cs.StorageClass,
+			Id:                cs.ID.String(),
+			Name:              cs.Name,
+			Provider:          cs.Provider,
+			Bucket:            cs.Bucket,
+			Region:            cs.Region,
+			Endpoint:          cs.Endpoint,
+			AccessKey:         cs.AccessKey,
+			SecretKey:         cs.SecretKey,
+			Container:         cs.Container,
+			ConnectionString:  cs.ConnectionString,
+			CredentialsJson:   cs.CredentialsJSON,
+			StorageClass:      cs.StorageClass,
+			ArchivalMode:      cs.ArchivalMode,
+			Transitions:       transitions,
+			RestoreTier:       cs.RestoreTier,
+			RestoreDays:       cs.RestoreDays,
+			SuspectGraceDays:  cs.SuspectGraceDays,
+			ReconcileSchedule: cs.ReconcileSchedule,
 		})
 	}
 }

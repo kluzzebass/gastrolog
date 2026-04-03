@@ -153,6 +153,9 @@ func downloadBytes(store blobstore.Store, key string, offset, size int64) ([]byt
 		if errors.Is(err, blobstore.ErrBlobArchived) {
 			return nil, fmt.Errorf("%w: %s", chunk.ErrChunkArchived, key)
 		}
+		if errors.Is(err, blobstore.ErrBlobNotFound) {
+			return nil, fmt.Errorf("%w: %s", chunk.ErrChunkSuspect, key)
+		}
 		return nil, err
 	}
 	defer func() { _ = rc.Close() }()

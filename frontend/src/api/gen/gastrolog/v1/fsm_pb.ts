@@ -598,7 +598,7 @@ export class VaultRetentionRule extends Message<VaultRetentionRule> {
   retentionPolicyId = "";
 
   /**
-   * "expire" or "eject"
+   * "expire", "eject", "transition", or "archive"
    *
    * @generated from field: string action = 2;
    */
@@ -618,6 +618,13 @@ export class VaultRetentionRule extends Message<VaultRetentionRule> {
    */
   ejectRouteIds: string[] = [];
 
+  /**
+   * target class for archive
+   *
+   * @generated from field: string archive_storage_class = 5;
+   */
+  archiveStorageClass = "";
+
   constructor(data?: PartialMessage<VaultRetentionRule>) {
     super();
     proto3.util.initPartial(data, this);
@@ -630,6 +637,7 @@ export class VaultRetentionRule extends Message<VaultRetentionRule> {
     { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "eject_route_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "archive_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRetentionRule {
@@ -1861,6 +1869,49 @@ export class DeleteManagedFileCommand extends Message<DeleteManagedFileCommand> 
 }
 
 /**
+ * @generated from message gastrolog.v1.CloudServiceTransition
+ */
+export class CloudServiceTransition extends Message<CloudServiceTransition> {
+  /**
+   * @generated from field: uint32 after_days = 1;
+   */
+  afterDays = 0;
+
+  /**
+   * @generated from field: string storage_class = 2;
+   */
+  storageClass = "";
+
+  constructor(data?: PartialMessage<CloudServiceTransition>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.CloudServiceTransition";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "after_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 2, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudServiceTransition {
+    return new CloudServiceTransition().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloudServiceTransition {
+    return new CloudServiceTransition().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloudServiceTransition {
+    return new CloudServiceTransition().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: CloudServiceTransition | PlainMessage<CloudServiceTransition> | undefined, b: CloudServiceTransition | PlainMessage<CloudServiceTransition> | undefined): boolean {
+    return proto3.util.equals(CloudServiceTransition, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.PutCloudServiceCommand
  */
 export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
@@ -1924,6 +1975,36 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
    */
   storageClass = 0;
 
+  /**
+   * @generated from field: string archival_mode = 20;
+   */
+  archivalMode = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.CloudServiceTransition transitions = 21;
+   */
+  transitions: CloudServiceTransition[] = [];
+
+  /**
+   * @generated from field: string restore_tier = 22;
+   */
+  restoreTier = "";
+
+  /**
+   * @generated from field: uint32 restore_days = 23;
+   */
+  restoreDays = 0;
+
+  /**
+   * @generated from field: uint32 suspect_grace_days = 24;
+   */
+  suspectGraceDays = 0;
+
+  /**
+   * @generated from field: string reconcile_schedule = 25;
+   */
+  reconcileSchedule = "";
+
   constructor(data?: PartialMessage<PutCloudServiceCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1944,6 +2025,12 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
     { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 20, name: "archival_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 21, name: "transitions", kind: "message", T: CloudServiceTransition, repeated: true },
+    { no: 22, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 23, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 24, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 25, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCloudServiceCommand {

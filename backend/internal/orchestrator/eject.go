@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
@@ -52,6 +53,11 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
 
 	cursor, err := r.cm.OpenCursor(id)
 	if err != nil {
+		if errors.Is(err, chunk.ErrChunkSuspect) {
+			r.logger.Warn("retention eject: chunk suspect (blob not found), skipping",
+				"vault", r.vaultID, "chunk", id.String())
+			return
+		}
 		r.logger.Error("retention eject: failed to open cursor",
 			"vault", r.vaultID, "chunk", id.String(), "error", err)
 		return

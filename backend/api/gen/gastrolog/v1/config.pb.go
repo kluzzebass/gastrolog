@@ -248,13 +248,14 @@ func (x *GetConfigResponse) GetTiers() []*TierConfig {
 }
 
 type RetentionRule struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	RetentionPolicyId string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
-	Action            string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                      // "expire" or "eject"
-	DestinationId     string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`   // deprecated — was target vault for action=migrate
-	EjectRouteIds     []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"` // target routes, only for action=eject
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	RetentionPolicyId   string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
+	Action              string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                                        // "expire", "eject", "transition", or "archive"
+	DestinationId       string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`                     // deprecated — was target vault for action=migrate
+	EjectRouteIds       []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"`                   // target routes, only for action=eject
+	ArchiveStorageClass string                 `protobuf:"bytes,5,opt,name=archive_storage_class,json=archiveStorageClass,proto3" json:"archive_storage_class,omitempty"` // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
 }
 
 func (x *RetentionRule) Reset() {
@@ -313,6 +314,13 @@ func (x *RetentionRule) GetEjectRouteIds() []string {
 		return x.EjectRouteIds
 	}
 	return nil
+}
+
+func (x *RetentionRule) GetArchiveStorageClass() string {
+	if x != nil {
+		return x.ArchiveStorageClass
+	}
+	return ""
 }
 
 type VaultConfig struct {
@@ -7382,12 +7390,13 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x0ecloud_services\x18\n" +
 	" \x03(\v2\x1a.gastrolog.v1.CloudServiceR\rcloudServices\x12Q\n" +
 	"\x14node_storage_configs\x18\v \x03(\v2\x1f.gastrolog.v1.NodeStorageConfigR\x12nodeStorageConfigs\x12.\n" +
-	"\x05tiers\x18\f \x03(\v2\x18.gastrolog.v1.TierConfigR\x05tiers\"\xa6\x01\n" +
+	"\x05tiers\x18\f \x03(\v2\x18.gastrolog.v1.TierConfigR\x05tiers\"\xda\x01\n" +
 	"\rRetentionRule\x12.\n" +
 	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12%\n" +
 	"\x0edestination_id\x18\x03 \x01(\tR\rdestinationId\x12&\n" +
-	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\"\x90\x01\n" +
+	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\x122\n" +
+	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"\x90\x01\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x12\x12\n" +

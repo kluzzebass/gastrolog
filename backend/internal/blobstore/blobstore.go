@@ -21,6 +21,11 @@ var (
 	// tier (S3 Glacier Flexible Retrieval/Deep Archive, Azure Archive) and
 	// cannot be read without a restore operation.
 	ErrBlobArchived = errors.New("blob is archived and not immediately readable")
+
+	// ErrBlobNotFound indicates the blob does not exist in the store.
+	// Distinct from transient errors (timeouts, auth failures) — this is
+	// a definitive 404 from the provider.
+	ErrBlobNotFound = errors.New("blob not found")
 )
 
 // Store is the interface for cloud object storage operations.
@@ -60,6 +65,27 @@ type BlobInfo struct {
 	StorageClass string // Provider-specific: S3 StorageClass, Azure AccessTier, GCS StorageClass
 }
 
+// Archiver extends Store with storage-class lifecycle operations.
+// Not all providers support this (GCS has no offline tiers). Callers
+// should type-assert to check availability.
+type Archiver interface {
+	// Archive transitions a blob to an offline storage class.
+	// The blob remains in the store but Download/DownloadRange will return
+	// ErrBlobArchived until Restore completes.
+	Archive(ctx context.Context, key string, storageClass string) error
+
+	// Restore initiates retrieval of an archived blob. On S3 this is async
+	// (RestoreObject, takes minutes to hours). On Azure this is sync
+	// (SetBlobTier to Hot/Cool). Returns nil if already restored or not archived.
+	// tier is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
+	// "High"/"Standard" for Azure, ignored for GCS).
+	// days is how long the restored copy stays readable (S3 only, ignored elsewhere).
+	Restore(ctx context.Context, key string, tier string, days int) error
+
+	// IsRestoring returns true if a restore is in progress for the key.
+	IsRestoring(ctx context.Context, key string) (bool, error)
+}
+
 // IsArchived returns true if the blob is in an offline storage tier that
 // requires a restore operation before it can be read.
 // S3: GLACIER, DEEP_ARCHIVE. Azure: Archive. GCS: always false (all readable).
@@ -68,6 +94,8 @@ func (b BlobInfo) IsArchived() bool {
 	case "GLACIER", "DEEP_ARCHIVE": // S3
 		return true
 	case "Archive": // Azure
+		return true
+	case "cold", "deep-freeze": // Memory provider
 		return true
 	}
 	return false

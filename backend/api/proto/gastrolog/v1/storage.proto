@@ -23,6 +23,14 @@ message NodeStorageConfig {
   repeated FileStorage file_storages = 2;
 }
 
+// CloudStorageTransition defines a single step in an archival lifecycle chain.
+// Transitions are ordered by after_days (ascending). An empty storage_class
+// means "delete" (expiry).
+message CloudStorageTransition {
+  uint32 after_days = 1;    // days after chunk seal before this transition fires
+  string storage_class = 2; // target class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"), empty = delete
+}
+
 // CloudService defines a cluster-wide cloud storage endpoint.
 // Not tied to any node. Active chunks and cached chunks live on
 // local storage, referenced by storage class.
@@ -41,4 +49,14 @@ message CloudService {
   reserved 12; // was storage_class (string) — replaced by uint32 field 15
   reserved 13, 14; // active_chunk_class, cache_class — moved to TierConfig
   uint32 storage_class = 15;
+
+  // Archival lifecycle configuration.
+  // "none" = bucket-level lifecycle handles it (or no archival).
+  // "active" = GastroLog manages transitions via the sweep job.
+  string archival_mode = 20;
+  repeated CloudStorageTransition transitions = 21; // ordered by after_days
+  string restore_tier = 22;                         // default restore speed (S3: Expedited/Standard/Bulk, Azure: High/Standard)
+  uint32 restore_days = 23;                         // S3: how long restored copy stays readable (days)
+  uint32 suspect_grace_days = 24;                   // days before suspect chunk removed from index (default 7)
+  string reconcile_schedule = 25;                   // cron for reconciliation sweep (default "0 3 * * *")
 }

@@ -51,6 +51,15 @@ service VaultService {
 
   // SealVault seals the active chunk of a vault.
   rpc SealVault(SealVaultRequest) returns (SealVaultResponse);
+
+  // ArchiveChunk transitions a cloud-backed sealed chunk to an offline
+  // storage class (Glacier, Deep Archive, Azure Archive). The chunk stays
+  // in the tier but becomes unreadable until restored.
+  rpc ArchiveChunk(ArchiveChunkRequest) returns (ArchiveChunkResponse);
+
+  // RestoreChunk initiates retrieval of an archived chunk. On S3 this is
+  // async (RestoreObject). The chunk becomes readable once restore completes.
+  rpc RestoreChunk(RestoreChunkRequest) returns (RestoreChunkResponse);
 }
 
 message ListVaultsRequest {}
@@ -298,3 +307,20 @@ message SealVaultRequest {
 }
 
 message SealVaultResponse {}
+
+message ArchiveChunkRequest {
+  string vault_id = 1;
+  string chunk_id = 2;
+  string storage_class = 3; // Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
+}
+
+message ArchiveChunkResponse {}
+
+message RestoreChunkRequest {
+  string vault_id = 1;
+  string chunk_id = 2;
+  string restore_tier = 3; // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+  int32 restore_days = 4;  // How long restored copy stays readable (S3 only, 0 = provider default)
+}
+
+message RestoreChunkResponse {}

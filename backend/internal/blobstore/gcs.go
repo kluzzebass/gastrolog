@@ -68,11 +68,25 @@ func (g *GCSStore) Upload(ctx context.Context, key string, data io.Reader, metad
 }
 
 func (g *GCSStore) Download(ctx context.Context, key string) (io.ReadCloser, error) {
-	return g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
+	rc, err := g.client.Bucket(g.bucket).Object(key).NewReader(ctx)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
+		}
+		return nil, err
+	}
+	return rc, nil
 }
 
 func (g *GCSStore) DownloadRange(ctx context.Context, key string, offset, length int64) (io.ReadCloser, error) {
-	return g.client.Bucket(g.bucket).Object(key).NewRangeReader(ctx, offset, length)
+	rc, err := g.client.Bucket(g.bucket).Object(key).NewRangeReader(ctx, offset, length)
+	if err != nil {
+		if errors.Is(err, storage.ErrObjectNotExist) {
+			return nil, fmt.Errorf("%w: %s", ErrBlobNotFound, key)
+		}
+		return nil, err
+	}
+	return rc, nil
 }
 
 func (g *GCSStore) Delete(ctx context.Context, key string) error {
@@ -125,3 +139,27 @@ func (g *GCSStore) Head(ctx context.Context, key string) (BlobInfo, error) {
 	}
 	return info, nil
 }
+
+// --- Archiver implementation ---
+// GCS has no offline tiers — all storage classes are immediately readable.
+// Archive just changes the storage class (for cost optimization).
+// Restore is a no-op (already readable). IsRestoring always false.
+
+func (g *GCSStore) Archive(ctx context.Context, key string, storageClass string) error {
+	// GCS requires a rewrite (copy to self) to change storage class.
+	src := g.client.Bucket(g.bucket).Object(key)
+	copier := g.client.Bucket(g.bucket).Object(key).CopierFrom(src)
+	copier.StorageClass = storageClass
+	_, err := copier.Run(ctx)
+	return err
+}
+
+func (g *GCSStore) Restore(_ context.Context, _ string, _ string, _ int) error {
+	return nil // GCS: all classes readable, no restore needed
+}
+
+func (g *GCSStore) IsRestoring(_ context.Context, _ string) (bool, error) {
+	return false, nil // GCS: never restoring
+}
+
+var _ Archiver = (*GCSStore)(nil)

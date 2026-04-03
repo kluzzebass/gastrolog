@@ -18,6 +18,7 @@ var (
 	ErrVaultNotFound  = errors.New("vault not found")
 	ErrActiveChunk    = errors.New("cannot delete active chunk")
 	ErrChunkArchived = errors.New("chunk is archived and not immediately readable")
+	ErrChunkSuspect  = errors.New("chunk blob not found in cloud storage — may be transient")
 	ErrNoTSIndex     = errors.New("no TS index available")
 )
 
@@ -159,6 +160,22 @@ type ChunkPostSealProcessor interface {
 
 	// HasIndexBuilders reports whether index builders are injected.
 	HasIndexBuilders() bool
+}
+
+// ChunkArchiver extends ChunkManager with storage-class lifecycle operations
+// for cloud-backed chunks. Callers should type-assert to check availability.
+type ChunkArchiver interface {
+	// ArchiveChunk transitions a cloud-backed sealed chunk to an offline
+	// storage class (e.g. "GLACIER", "DEEP_ARCHIVE", "Archive"). After this,
+	// the chunk's Archived flag is set and cursor reads return ErrChunkArchived.
+	ArchiveChunk(ctx context.Context, id ChunkID, storageClass string) error
+
+	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
+	// async (RestoreObject). Returns nil if already restored or not archived.
+	// tier is the restore speed ("Expedited"/"Standard"/"Bulk" for S3,
+	// "High"/"Standard" for Azure). days is how long the restored copy stays
+	// readable (S3 only).
+	RestoreChunk(ctx context.Context, id ChunkID, tier string, days int) error
 }
 
 // RecordCursor provides bidirectional iteration over records in a chunk.

@@ -1949,3 +1949,175 @@ export class SealVaultResponse extends Message<SealVaultResponse> {
   }
 }
 
+/**
+ * @generated from message gastrolog.v1.ArchiveChunkRequest
+ */
+export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: string chunk_id = 2;
+   */
+  chunkId = "";
+
+  /**
+   * Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
+   *
+   * @generated from field: string storage_class = 3;
+   */
+  storageClass = "";
+
+  constructor(data?: PartialMessage<ArchiveChunkRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ArchiveChunkRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ArchiveChunkRequest {
+    return new ArchiveChunkRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ArchiveChunkRequest {
+    return new ArchiveChunkRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ArchiveChunkRequest {
+    return new ArchiveChunkRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ArchiveChunkRequest | PlainMessage<ArchiveChunkRequest> | undefined, b: ArchiveChunkRequest | PlainMessage<ArchiveChunkRequest> | undefined): boolean {
+    return proto3.util.equals(ArchiveChunkRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ArchiveChunkResponse
+ */
+export class ArchiveChunkResponse extends Message<ArchiveChunkResponse> {
+  constructor(data?: PartialMessage<ArchiveChunkResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ArchiveChunkResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ArchiveChunkResponse {
+    return new ArchiveChunkResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ArchiveChunkResponse {
+    return new ArchiveChunkResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ArchiveChunkResponse {
+    return new ArchiveChunkResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ArchiveChunkResponse | PlainMessage<ArchiveChunkResponse> | undefined, b: ArchiveChunkResponse | PlainMessage<ArchiveChunkResponse> | undefined): boolean {
+    return proto3.util.equals(ArchiveChunkResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RestoreChunkRequest
+ */
+export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
+  /**
+   * @generated from field: string vault_id = 1;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: string chunk_id = 2;
+   */
+  chunkId = "";
+
+  /**
+   * "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
+   *
+   * @generated from field: string restore_tier = 3;
+   */
+  restoreTier = "";
+
+  /**
+   * How long restored copy stays readable (S3 only, 0 = provider default)
+   *
+   * @generated from field: int32 restore_days = 4;
+   */
+  restoreDays = 0;
+
+  constructor(data?: PartialMessage<RestoreChunkRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RestoreChunkRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "restore_days", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RestoreChunkRequest {
+    return new RestoreChunkRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RestoreChunkRequest {
+    return new RestoreChunkRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RestoreChunkRequest {
+    return new RestoreChunkRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RestoreChunkRequest | PlainMessage<RestoreChunkRequest> | undefined, b: RestoreChunkRequest | PlainMessage<RestoreChunkRequest> | undefined): boolean {
+    return proto3.util.equals(RestoreChunkRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.RestoreChunkResponse
+ */
+export class RestoreChunkResponse extends Message<RestoreChunkResponse> {
+  constructor(data?: PartialMessage<RestoreChunkResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.RestoreChunkResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RestoreChunkResponse {
+    return new RestoreChunkResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RestoreChunkResponse {
+    return new RestoreChunkResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RestoreChunkResponse {
+    return new RestoreChunkResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: RestoreChunkResponse | PlainMessage<RestoreChunkResponse> | undefined, b: RestoreChunkResponse | PlainMessage<RestoreChunkResponse> | undefined): boolean {
+    return proto3.util.equals(RestoreChunkResponse, a, b);
+  }
+}
+
