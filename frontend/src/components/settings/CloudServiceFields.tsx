@@ -223,9 +223,10 @@ function ArchivalSection({
     const existing = values.transitions;
     const last = existing.at(-1);
     const lastDays = last?.afterDays ?? 0;
+    const step = isMemory ? 0 : 90;
     const firstClass = classOptions[0]?.value ?? "";
     onChange({
-      transitions: [...existing, { afterDays: lastDays + 90, storageClass: firstClass }],
+      transitions: [...existing, { afterDays: lastDays + step, storageClass: firstClass }],
     });
   };
 
@@ -264,7 +265,7 @@ function ArchivalSection({
                     value={String(t.afterDays)}
                     onChange={(v) => setTransition(i, { afterDays: parseInt(v, 10) || 0 })}
                     dark={dark}
-                    min={1}
+                    min={0}
                   />
                 </FormField>
               </div>

@@ -16,6 +16,17 @@ When implementing anything new, ask: **"Does this work if the user is on a diffe
 
 ## Always use Bun — `bun test`, `bunx tsc`, `bun install`. Never npm/npx.
 
+## Test Coverage — MANDATORY
+
+Every feature must have tests across ALL of these dimensions:
+- **Single-node**: basic correctness
+- **Multi-node**: cluster behavior with 4+ nodes, file-backed tiers, real transferrers
+- **Happy path**: feature works as designed
+- **Unhappy path**: failures, errors, races, partial operations, recovery, disk full, corrupt data
+- **Edge cases**: boundary conditions, concurrent access, restart survival, empty inputs
+
+Single-node happy-path tests are NOT sufficient. A feature is not done until all dimensions are covered. This applies to every new feature, every bug fix, every refactor that changes behavior.
+
 ## Renaming: Always Rename Through the Entire Stack
 
 When renaming a concept, type, field, or variable, rename it consistently across the entire stack: proto definitions, generated code (re-run `buf generate`), Go backend types, frontend TypeScript types, UI labels, and tests. Never leave a partial rename.
