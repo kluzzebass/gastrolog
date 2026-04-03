@@ -532,3 +532,355 @@ func (r *byteReaderImpl) Read(p []byte) (int, error) {
 	r.pos += n
 	return n, nil
 }
+
+// ==========================================================================
+// Multi-node cloud archival cluster tests
+// ==========================================================================
+
+// cloudClusterHarness extends clusterHarness with a shared cloud store.
+type cloudClusterHarness struct {
+	*clusterHarness
+	cloudStore *blobstore.Memory
+	csID       uuid.UUID
+}
+
+// setupCloudCluster creates a 4-node cluster where the single tier is cloud-backed
+// using a shared in-memory blobstore. The leader has a file-backed chunk manager
+// with CloudStore set; followers have file-backed chunk managers without CloudStore
+// (matching production: followers don't upload to cloud).
+func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition) *cloudClusterHarness {
+	t.Helper()
+	nodeIDs := []string{"leader", "f1", "f2", "f3"}
+	leaderID := nodeIDs[0]
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	csID := uuid.Must(uuid.NewV7())
+
+	cloudStore := blobstore.NewMemory()
+
+	store := cfgmem.NewStore()
+	placements := []config.TierPlacement{
+		{StorageID: config.SyntheticStorageID(leaderID), Leader: true},
+	}
+	for _, fid := range nodeIDs[1:] {
+		placements = append(placements, config.TierPlacement{
+			StorageID: config.SyntheticStorageID(fid), Leader: false,
+		})
+	}
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "cloud-tier", Type: config.TierTypeCloud,
+		Placements: placements, CloudServiceID: &csID,
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "cloud-vault", TierIDs: []uuid.UUID{tierID},
+	})
+	_ = store.PutCloudService(context.Background(), config.CloudService{
+		ID:           csID,
+		Name:         "test-cloud",
+		Provider:     "memory",
+		ArchivalMode: "active",
+		Transitions:  transitions,
+		RestoreTier:  "Standard",
+		RestoreDays:  7,
+	})
+
+	followerTargets := make([]config.ReplicationTarget, 0, len(nodeIDs)-1)
+	for _, fid := range nodeIDs[1:] {
+		followerTargets = append(followerTargets, config.ReplicationTarget{NodeID: fid})
+	}
+
+	orchs := make(map[string]*Orchestrator)
+	nodes := make(map[string]*clusterTestNode)
+
+	for _, nid := range nodeIDs {
+		orch, err := New(Config{
+			LocalNodeID:  nid,
+			ConfigLoader: &transitionConfigLoader{store: store},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = orch.Scheduler().Stop()
+		orchs[nid] = orch
+
+		isLeader := nid == leaderID
+		dir := t.TempDir()
+
+		var cmCfg chunkfile.Config
+		cmCfg.Dir = dir
+		cmCfg.Now = time.Now
+		cmCfg.RotationPolicy = chunk.NewRecordCountPolicy(100)
+		if isLeader {
+			cmCfg.CloudStore = cloudStore
+			cmCfg.VaultID = vaultID
+		}
+
+		cm, err := chunkfile.NewManager(cmCfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		im := indexfile.NewManager(dir, nil, nil)
+
+		tier := &TierInstance{
+			TierID: tierID, Type: "cloud",
+			Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
+		}
+		if isLeader {
+			tier.FollowerTargets = followerTargets
+		} else {
+			tier.IsFollower = true
+			tier.LeaderNodeID = leaderID
+		}
+
+		orch.RegisterVault(NewVault(vaultID, tier))
+		nodes[nid] = &clusterTestNode{
+			nodeID:   nid,
+			orch:     orch,
+			tiers:    []*TierInstance{tier},
+			tierDirs: []string{dir},
+		}
+	}
+
+	for _, nid := range nodeIDs {
+		remotes := make(map[string]*Orchestrator)
+		for _, other := range nodeIDs {
+			if other != nid {
+				remotes[other] = orchs[other]
+			}
+		}
+		orchs[nid].SetRemoteTransferrer(&directTransferrer{nodes: remotes})
+	}
+
+	t.Cleanup(func() {
+		for _, n := range nodes {
+			n.orch.Stop()
+		}
+		for _, n := range nodes {
+			for _, tier := range n.tiers {
+				_ = tier.Chunks.Close()
+			}
+		}
+	})
+
+	return &cloudClusterHarness{
+		clusterHarness: &clusterHarness{
+			nodes:    nodes,
+			cfgStore: store,
+			vaultID:  vaultID,
+			tierIDs:  []uuid.UUID{tierID},
+		},
+		cloudStore: cloudStore,
+		csID:       csID,
+	}
+}
+
+func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, []config.CloudStorageTransition{
+		{AfterDays: 1, StorageClass: "cold"},
+	})
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	// Ingest, seal, upload to cloud on leader.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 500 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "cluster-archive-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Verify cloud-backed before sweep.
+	metasAfter, _ := leaderCM.List()
+	cloudCount := 0
+	for _, m := range metasAfter {
+		if m.CloudBacked {
+			cloudCount++
+		}
+	}
+	if cloudCount == 0 {
+		t.Fatal("expected cloud-backed chunks after PostSealProcess")
+	}
+	t.Logf("leader: %d cloud-backed chunks", cloudCount)
+
+	// Run archival sweep with aged chunks.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	leaderNode.orch.archivalSweepAll()
+
+	// Verify archived on leader.
+	archivedCount := 0
+	metasFinal, _ := leaderCM.List()
+	for _, m := range metasFinal {
+		if m.Archived {
+			archivedCount++
+		}
+	}
+	if archivedCount == 0 {
+		t.Error("expected at least one archived chunk on leader after sweep")
+	}
+	t.Logf("leader: %d archived chunks", archivedCount)
+}
+
+func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, []config.CloudStorageTransition{
+		{AfterDays: 1, StorageClass: "cold"},
+	})
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	// Ingest and upload on leader.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "leader-only-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Run archival sweep on a FOLLOWER — should be a no-op.
+	follower := h.nodes["f1"]
+	follower.orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	follower.orch.archivalSweepAll()
+
+	// Leader's chunks should NOT be archived (follower can't archive them).
+	metasFinal, _ := leaderCM.List()
+	for _, m := range metasFinal {
+		if m.Archived {
+			t.Errorf("chunk %s should not be archived by follower sweep", m.ID)
+		}
+	}
+}
+
+func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, []config.CloudStorageTransition{
+		{AfterDays: 1, StorageClass: "cold"},
+	})
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	// Ingest, seal, upload, archive.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "restore-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Archive via sweep.
+	leaderNode.orch.now = func() time.Time { return time.Now().Add(48 * time.Hour) }
+	leaderNode.orch.archivalSweepAll()
+
+	// Verify archived.
+	metasArchived, _ := leaderCM.List()
+	var archivedID chunk.ChunkID
+	for _, m := range metasArchived {
+		if m.Archived {
+			archivedID = m.ID
+			break
+		}
+	}
+	if archivedID == (chunk.ChunkID{}) {
+		t.Fatal("no archived chunk found")
+	}
+
+	// Restore via orchestrator.
+	if err := leaderNode.orch.RestoreChunk(context.Background(), h.vaultID, archivedID, "Standard", 7); err != nil {
+		t.Fatalf("RestoreChunk: %v", err)
+	}
+
+	// Verify not archived.
+	meta, err := leaderCM.Meta(archivedID)
+	if err != nil {
+		t.Fatalf("Meta after restore: %v", err)
+	}
+	if meta.Archived {
+		t.Error("chunk should not be archived after restore")
+	}
+}
+
+func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, nil)
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	// Ingest, seal, upload.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "reconcile-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Delete blobs from cloud store (simulate external lifecycle).
+	_ = h.cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
+		return h.cloudStore.Delete(context.Background(), info.Key)
+	})
+
+	// Reconcile on leader — should mark suspect, NOT remove.
+	leaderNode.orch.reconcileSweepAll()
+
+	metasAfter, _ := leaderCM.List()
+	if len(metasAfter) == 0 {
+		t.Error("chunks should NOT be removed from index on first reconciliation")
+	}
+
+	// Verify suspect tracker has entries.
+	suspectCount := 0
+	for _, m := range metasAfter {
+		if _, ok := leaderNode.orch.suspects.suspectSince(m.ID); ok {
+			suspectCount++
+		}
+	}
+	if suspectCount == 0 {
+		t.Error("expected suspect entries after reconciliation with missing blobs")
+	}
+	t.Logf("leader: %d suspect chunks after reconciliation", suspectCount)
+}

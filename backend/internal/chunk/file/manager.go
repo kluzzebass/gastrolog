@@ -2406,6 +2406,7 @@ func (m *Manager) setArchivedFlag(id chunk.ChunkID, archived bool) {
 			_ = m.cloudIdx.Insert(id, meta)
 			_ = m.cloudIdx.Sync()
 			m.cloudIdxMu.Unlock()
+			m.cloudListCache = nil // invalidate cached List() results
 		}
 	}
 }
