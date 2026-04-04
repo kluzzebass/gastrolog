@@ -146,6 +146,13 @@ func (o *Orchestrator) Stop() error {
 	return nil
 }
 
+// Close releases scheduler resources without requiring a prior Start().
+// Safe to call on orchestrators that were only used for config/vault operations
+// (e.g., in tests). Idempotent — calling Close after Stop is harmless.
+func (o *Orchestrator) Close() {
+	_ = o.scheduler.Stop()
+}
+
 // runIngester executes a single ingester with panic recovery so that a
 // misbehaving ingester cannot crash the entire process.
 func (o *Orchestrator) runIngester(id uuid.UUID, r Ingester, ctx context.Context, out chan<- IngestMessage) {
