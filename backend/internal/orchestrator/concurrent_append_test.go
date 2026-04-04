@@ -180,13 +180,15 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "concurrent-transition", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "concurrent-transition",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
@@ -478,13 +480,15 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "delete-fail", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "delete-fail",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
@@ -652,13 +656,15 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "download-fail", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+		ID: vaultID, Name: "download-fail",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
@@ -727,13 +733,15 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "reconfig-race", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "reconfig-race",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
@@ -768,8 +776,12 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 
 	// Simultaneously reconfigure — remove tier 1 from the vault's config.
 	// The transition's resolveNextTierInChain will see the change.
+	// Remove tier1 from vault by clearing its VaultID.
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	})
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "reconfig-race", TierIDs: []uuid.UUID{tier0ID},
+		ID: vaultID, Name: "reconfig-race",
 	})
 
 	wg.Wait()
@@ -804,10 +816,11 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "drain-concurrent", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "drain-concurrent",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements("node-A"),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), config.FilterConfig{
 		ID: filterID, Name: "all", Expression: "*",

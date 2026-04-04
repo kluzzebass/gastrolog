@@ -144,7 +144,7 @@ export function SetupWizard() {
     const retentionId = hasRetention ? crypto.randomUUID() : "";
 
     // Setup wizard should create a TierConfig with the rotation/retention
-    // policies and vault type, then reference it from the vault's tierIds.
+    // policies and vault type, with vaultId pointing to this vault.
     // For now, policies are created but not linked to tiers (gastrolog-e0s05).
 
     // Build policy promises outside try so the compiler can optimize conditionals.
@@ -191,7 +191,6 @@ export function SetupWizard() {
           id: vaultId,
           name: vaultName,
           enabled: true,
-          tierIds: [],
         },
       });
 

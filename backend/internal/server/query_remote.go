@@ -138,7 +138,7 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 			continue
 		}
 		seen := make(map[string]bool)
-		for _, tierID := range v.TierIDs {
+		for _, tierID := range config.VaultTierIDs(tiers, v.ID) {
 			if localTierIDs[tierID] {
 				continue // searched locally, skip remote
 			}

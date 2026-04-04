@@ -166,6 +166,7 @@ type stubCfgStore struct {
 	vaultErr    error
 	vaultList   []config.VaultConfig
 	vaultListErr error
+	tiers       []config.TierConfig
 	ingester    *config.IngesterConfig
 	ingesterErr error
 	settings    config.ServerSettings
@@ -188,6 +189,15 @@ func (s *stubCfgStore) LoadServerSettings(context.Context) (config.ServerSetting
 }
 func (s *stubCfgStore) Load(context.Context) (*config.Config, error) {
 	return s.cfg, s.loadErr
+}
+func (s *stubCfgStore) ListTiers(context.Context) ([]config.TierConfig, error) {
+	if len(s.tiers) > 0 {
+		return s.tiers, nil
+	}
+	if s.cfg != nil {
+		return s.cfg.Tiers, nil
+	}
+	return nil, nil
 }
 
 // noopIngester satisfies orchestrator.Ingester.
@@ -259,8 +269,10 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // no error → AddVault succeeds
+		tierID := uuid.Must(uuid.NewV7())
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true, TierIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
+			tiers: []config.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -273,8 +285,10 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("add_vault_error", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
+		tierID := uuid.Must(uuid.NewV7())
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true, TierIDs: []uuid.UUID{uuid.Must(uuid.NewV7())}},
+			vault: &config.VaultConfig{ID: id, Enabled: true},
+			tiers: []config.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -841,7 +855,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+			vaultList: []config.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
@@ -870,7 +884,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+			vaultList: []config.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
@@ -892,7 +906,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+			vaultList: []config.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
@@ -917,7 +931,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID, TierIDs: []uuid.UUID{tierID}}},
+			vaultList: []config.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: false})

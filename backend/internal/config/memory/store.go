@@ -998,16 +998,11 @@ func copyRetentionPolicy(rp config.RetentionPolicyConfig) config.RetentionPolicy
 }
 
 func copyVaultConfig(st config.VaultConfig) config.VaultConfig {
-	c := config.VaultConfig{
+	return config.VaultConfig{
 		ID:      st.ID,
 		Name:    st.Name,
 		Enabled: st.Enabled,
 	}
-	if len(st.TierIDs) > 0 {
-		c.TierIDs = make([]uuid.UUID, len(st.TierIDs))
-		copy(c.TierIDs, st.TierIDs)
-	}
-	return c
 }
 
 func copyIngesterConfig(ing config.IngesterConfig) config.IngesterConfig {

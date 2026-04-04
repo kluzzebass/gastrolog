@@ -21,10 +21,6 @@ func FuzzProtoToVaultConfig(f *testing.F) {
 			Enabled: enabled,
 		}
 
-		if tierID != "" {
-			pb.TierIds = []string{tierID}
-		}
-
 		// Must not panic on any input.
 		_, _ = protoToVaultConfig(pb)
 	})

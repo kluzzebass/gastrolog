@@ -36,6 +36,8 @@ func DefaultConfig() *Config {
 				ID:               tierID,
 				Name:             "default",
 				Type:             TierTypeMemory,
+				VaultID:          vaultID,
+				Position:         0,
 				RotationPolicyID: new(rotationID),
 				RetentionRules: []RetentionRule{
 					{RetentionPolicyID: retentionID, Action: RetentionActionExpire},
@@ -47,7 +49,6 @@ func DefaultConfig() *Config {
 				ID:      vaultID,
 				Name:    "default",
 				Enabled: true,
-				TierIDs: []uuid.UUID{tierID},
 			},
 		},
 		Routes: []RouteConfig{

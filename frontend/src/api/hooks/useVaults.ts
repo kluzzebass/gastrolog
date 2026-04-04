@@ -157,14 +157,12 @@ export function usePutVault() {
     async (args: {
       id: string;
       name: string;
-      tierIds: string[];
       enabled?: boolean;
     }) => {
       return configClient.putVault({
         config: {
           id: args.id,
           name: args.name,
-          tierIds: args.tierIds,
           enabled: args.enabled ?? true,
         },
       });

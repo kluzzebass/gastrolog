@@ -1085,7 +1085,6 @@ type PutVaultCommand struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	TierIds       []string               `protobuf:"bytes,10,rep,name=tier_ids,json=tierIds,proto3" json:"tier_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1139,13 +1138,6 @@ func (x *PutVaultCommand) GetEnabled() bool {
 		return x.Enabled
 	}
 	return false
-}
-
-func (x *PutVaultCommand) GetTierIds() []string {
-	if x != nil {
-		return x.TierIds
-	}
-	return nil
 }
 
 type DeleteVaultCommand struct {
@@ -2968,6 +2960,8 @@ type PutTierCommand struct {
 	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"`
 	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`
 	Placements        []*TierPlacementEntry  `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`
+	VaultId           string                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -3091,6 +3085,20 @@ func (x *PutTierCommand) GetPlacements() []*TierPlacementEntry {
 		return x.Placements
 	}
 	return nil
+}
+
+func (x *PutTierCommand) GetVaultId() string {
+	if x != nil {
+		return x.VaultId
+	}
+	return ""
+}
+
+func (x *PutTierCommand) GetPosition() uint32 {
+	if x != nil {
+		return x.Position
+	}
+	return 0
 }
 
 type TierPlacementEntry struct {
@@ -3456,14 +3464,11 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12 \n" +
 	"\vdestination\x18\x03 \x01(\tR\vdestination\x12&\n" +
 	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\x122\n" +
-	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"\x8e\x01\n" +
+	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"O\n" +
 	"\x0fPutVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
-	"\aenabled\x18\a \x01(\bR\aenabled\x12\x19\n" +
-	"\btier_ids\x18\n" +
-	" \x03(\tR\atierIdsJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\b\x10\tJ\x04\b\t\x10\n" +
-	"\"E\n" +
+	"\aenabled\x18\a \x01(\bR\aenabled\"E\n" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vdelete_data\x18\x02 \x01(\bR\n" +
@@ -3603,7 +3608,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\xa0\x04\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\xcb\x04\n" +
 	"\x0ePutTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -3621,7 +3626,9 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x04path\x18\x0e \x01(\tR\x04path\x12@\n" +
 	"\n" +
 	"placements\x18\x0f \x03(\v2 .gastrolog.v1.TierPlacementEntryR\n" +
-	"placementsJ\x04\b\v\x10\fJ\x04\b\r\x10\x0e\"M\n" +
+	"placements\x12\x19\n" +
+	"\bvault_id\x18\x10 \x01(\tR\avaultId\x12\x1a\n" +
+	"\bposition\x18\x11 \x01(\rR\bposition\"M\n" +
 	"\x12TierPlacementEntry\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x18\n" +

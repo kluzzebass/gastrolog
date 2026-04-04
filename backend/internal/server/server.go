@@ -305,7 +305,7 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 	}
 
 	// temporary: find the tier's leader node to determine the owning node (until tier election).
-	for _, tierID := range vaultCfg.TierIDs {
+	for _, tierID := range config.VaultTierIDs(tiers, vaultCfg.ID) {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue

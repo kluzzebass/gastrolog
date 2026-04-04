@@ -105,14 +105,7 @@ message VaultRetentionRule {
 message PutVaultCommand {
   string id = 1;
   string name = 2;
-  reserved 3;  // was: type
-  reserved 4;  // was: filter
-  reserved 5;  // was: policy
-  reserved 6;  // was: retention_rules (moved to TierConfig)
   bool enabled = 7;
-  reserved 8;  // was: params
-  reserved 9;  // was: node_id
-  repeated string tier_ids = 10;
 }
 
 message DeleteVaultCommand {
@@ -337,11 +330,11 @@ message PutTierCommand {
   string cloud_service_id = 8;
   uint32 active_chunk_class = 9;
   uint32 cache_class = 10;
-  reserved 11;                      // was node_id — replaced by placements
   uint32 replication_factor = 12;
-  reserved 13;                      // was secondary_node_ids — replaced by placements
   string path = 14;
   repeated TierPlacementEntry placements = 15;
+  string vault_id = 16;
+  uint32 position = 17;
 }
 
 message TierPlacementEntry {

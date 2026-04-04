@@ -43,6 +43,8 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 		ReplicationFactor: tier.ReplicationFactor,
 		Path:              tier.Path,
 		Placements:        placements,
+		VaultId:           tier.VaultID.String(),
+		Position:          tier.Position,
 	}
 }
 
@@ -75,6 +77,10 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 	cloudServiceID, err := parseOptionalUUID(cmd.GetCloudServiceId())
 	if err != nil {
 		return config.TierConfig{}, fmt.Errorf("parse tier cloud service id: %w", err)
+	}
+	vaultID, err := uuid.Parse(cmd.GetVaultId())
+	if err != nil {
+		return config.TierConfig{}, fmt.Errorf("parse tier vault id: %w", err)
 	}
 
 	var rules []config.RetentionRule
@@ -120,6 +126,8 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 		ReplicationFactor: cmd.GetReplicationFactor(),
 		Path:              cmd.GetPath(),
 		Placements:        placements,
+		VaultID:           vaultID,
+		Position:          cmd.GetPosition(),
 	}, nil
 }
 

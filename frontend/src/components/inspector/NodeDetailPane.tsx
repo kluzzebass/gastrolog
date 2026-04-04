@@ -30,14 +30,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   // Build vault ID → cloud tier type map from config tiers.
   const cloudProviders = new Map<string, string>();
   if (config) {
-    const tierMap = new Map(config.tiers.map((t) => [t.id, t]));
-    for (const vc of config.vaults) {
-      for (const tid of vc.tierIds) {
-        const tier = tierMap.get(tid);
-        if (tier?.cloudServiceId) {
-          cloudProviders.set(vc.id, "cloud");
-          break;
-        }
+    for (const tier of config.tiers) {
+      if (tier.cloudServiceId && tier.vaultId) {
+        cloudProviders.set(tier.vaultId, "cloud");
       }
     }
   }

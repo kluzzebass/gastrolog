@@ -133,14 +133,11 @@ func TestPutRetentionPolicyNilOptionals(t *testing.T) {
 
 func TestPutVault(t *testing.T) {
 	t.Parallel()
-	tierID1 := uuid.Must(uuid.NewV7())
-	tierID2 := uuid.Must(uuid.NewV7())
 
 	want := config.VaultConfig{
 		ID:      uuid.Must(uuid.NewV7()),
 		Name:    "production",
 		Enabled: true,
-		TierIDs: []uuid.UUID{tierID1, tierID2},
 	}
 	got := roundTripCommand(t, NewPutVault(want), func(cmd *gastrologv1.ConfigCommand) (config.VaultConfig, error) {
 		return ExtractPutVault(cmd.GetPutVault())

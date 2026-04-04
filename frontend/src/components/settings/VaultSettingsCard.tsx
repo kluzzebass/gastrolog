@@ -124,6 +124,12 @@ export function VaultSettingsCard({
   const [mergeTarget, setMergeTarget] = useState<string | null>(null);
   const [activeJob, setActiveJob] = useState<{ jobId: string; label: string } | null>(null);
 
+  // Derive vault's tiers from the global tier list, sorted by position.
+  const derivedVaultTierIds = tiers
+    .filter((t) => t.vaultId === vault.id)
+    .toSorted((a, b) => a.position - b.position)
+    .map((t) => t.id);
+
   // All vault+tier edits in one place. Initialized from props, reset on cancel/save.
   interface TierRemoval {
     tierId: string;
@@ -143,28 +149,30 @@ export function VaultSettingsCard({
     tierCacheClass: Record<string, string>;
   }
 
+  const vaultTierConfigs = tiers.filter((t) => t.vaultId === vault.id);
+
   const buildInitialEdit = (): VaultEdit => ({
     name: vault.name,
     enabled: vault.enabled,
-    tierIds: [...vault.tierIds],
+    tierIds: [...derivedVaultTierIds],
     tierRemovals: [],
     tierRotation: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.rotationPolicyId]),
+      vaultTierConfigs.map((t) => [t.id, t.rotationPolicyId]),
     ),
     tierRetention: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
+      vaultTierConfigs.map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
     ),
     tierRF: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.replicationFactor || 1)]),
+      vaultTierConfigs.map((t) => [t.id, String(t.replicationFactor || 1)]),
     ),
     tierStorageClass: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.storageClass || 0)]),
+      vaultTierConfigs.map((t) => [t.id, String(t.storageClass || 0)]),
     ),
     tierActiveChunkClass: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.activeChunkClass || 0)]),
+      vaultTierConfigs.map((t) => [t.id, String(t.activeChunkClass || 0)]),
     ),
     tierCacheClass: Object.fromEntries(
-      tiers.filter((t) => vault.tierIds.includes(t.id)).map((t) => [t.id, String(t.cacheClass || 0)]),
+      vaultTierConfigs.map((t) => [t.id, String(t.cacheClass || 0)]),
     ),
   });
 
@@ -232,13 +240,11 @@ export function VaultSettingsCard({
       id,
       e: {
         name: string;
-        tierIds: string[];
         enabled: boolean;
       },
     ) => ({
       id,
       name: e.name,
-      tierIds: e.tierIds,
       enabled: e.enabled,
     }),
     onDeleteTransform: (id) => ({ id, force: true, deleteData }),
@@ -249,7 +255,7 @@ export function VaultSettingsCard({
 
   // eslint-disable-next-line sonarjs/cognitive-complexity -- save handler coordinates tier creation, per-tier updates, and vault save sequentially
   const handleSaveAll = async () => {
-    // Create staged new tier first, then include its ID in the vault save.
+    // Create staged new tier first, then include its ID in the tier list.
     let newTierIds = [...edit.tierIds];
     if (newTier && isTierComplete(newTier, cloudServiceOptions.length > 0)) {
       const tierId = crypto.randomUUID();
@@ -257,6 +263,8 @@ export function VaultSettingsCard({
         id: tierId,
         name: newTier.type,
         type: tierTypeEnum(newTier.type),
+        vaultId: vault.id,
+        position: newTierIds.length,
         storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
         cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
         activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
@@ -284,9 +292,10 @@ export function VaultSettingsCard({
     }
 
     // Save all tier-level changes in one pass per tier.
-    // Always recalculates retention actions — they depend on position,
-    // which changes when tiers are added/removed/reordered.
-    for (const tierId of newTierIds) {
+    // Always recalculates retention actions and position — they depend on
+    // order, which changes when tiers are added/removed/reordered.
+    for (let tierIndex = 0; tierIndex < newTierIds.length; tierIndex++) {
+      const tierId = newTierIds[tierIndex]!;
       const tier = tiers.find((t) => t.id === tierId);
       if (!tier) continue;
 
@@ -301,7 +310,6 @@ export function VaultSettingsCard({
       const ccStr = edit.tierCacheClass[tierId] ?? String(tier.cacheClass || 0);
       const cc = parseInt(ccStr, 10) || 0;
 
-      const tierIndex = newTierIds.indexOf(tierId);
       const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
       const currentAction = tier.retentionRules[0]?.action;
       const currentRetId = tier.retentionRules[0]?.retentionPolicyId ?? "";
@@ -312,8 +320,10 @@ export function VaultSettingsCard({
       const scChanged = sc !== (tier.storageClass || 0);
       const accChanged = acc !== (tier.activeChunkClass || 0);
       const ccChanged = cc !== (tier.cacheClass || 0);
+      const posChanged = tier.position !== tierIndex;
+      const vaultIdChanged = tier.vaultId !== vault.id;
 
-      if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged) continue;
+      if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged && !posChanged && !vaultIdChanged) continue;
 
       const updated = tier.clone();
       if (rotChanged) updated.rotationPolicyId = rpId;
@@ -321,13 +331,15 @@ export function VaultSettingsCard({
       if (scChanged) updated.storageClass = sc;
       if (accChanged) updated.activeChunkClass = acc;
       if (ccChanged) updated.cacheClass = cc;
+      updated.vaultId = vault.id;
+      updated.position = tierIndex;
       updated.retentionRules = retPolicyId
         ? [new RetentionRule({ retentionPolicyId: retPolicyId, action: expectedAction })]
         : [];
       await putTier.mutateAsync({ config: updated });
     }
-    // Execute staged tier removals BEFORE the vault save.
-    // deleteTier handles removing the tier from the vault's tier list:
+    // Execute staged tier removals.
+    // deleteTier handles removing the tier:
     //   drain=false → backend removes immediately
     //   drain=true  → drain completion removes asynchronously
     for (const removal of edit.tierRemovals) {
@@ -340,23 +352,10 @@ export function VaultSettingsCard({
       }
     }
 
-    // For the vault save, keep drain-removal tiers in the tier list — the
-    // tier must remain in the vault during the async drain. Delete removals
-    // are already handled by the backend (deleteTier removes them).
-    const drainTierIds = new Set(edit.tierRemovals.filter((r) => r.drain).map((r) => r.tierId));
-    // Reconstruct: original order, minus delete-only removals.
-    const saveTierIds = vault.tierIds.filter((id) =>
-      newTierIds.includes(id) || drainTierIds.has(id),
-    );
-    // Append any newly-created tiers (not in the original list).
-    for (const id of newTierIds) {
-      if (!saveTierIds.includes(id)) saveTierIds.push(id);
-    }
-
-    const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled ||
-      JSON.stringify(saveTierIds) !== JSON.stringify([...vault.tierIds]);
+    // Save vault-level changes (name, enabled).
+    const vaultChanged = edit.name !== vault.name || edit.enabled !== vault.enabled;
     if (vaultChanged) {
-      await saveVault(vault.id, { name: edit.name, tierIds: saveTierIds, enabled: edit.enabled });
+      await saveVault(vault.id, { name: edit.name, enabled: edit.enabled });
     }
 
     // Mark for reset — saveVault awaited above triggers a query refetch,

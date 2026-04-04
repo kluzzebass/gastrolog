@@ -174,16 +174,8 @@ message RetentionRule {
 
 message VaultConfig {
   string id = 1;
-  reserved 2;  // was: type
-  reserved 3;  // was: filter
-  reserved 4;  // was: policy
-  reserved 5;  // was: params
-  reserved 6;  // was: retention (single UUID)
   bool enabled = 7;
   string name = 8;
-  reserved 9;  // was: retention_rules (moved to TierConfig)
-  reserved 10; // was: node_id (tiers placed by election, not operator)
-  repeated string tier_ids = 11;
 }
 
 message RouteDestination {
@@ -713,12 +705,8 @@ enum TierType {
   TIER_TYPE_JSONL = 4;
 }
 
-// TierConfig defines a storage tier. A vault contains an ordered list
-// of tiers. Each tier is a full chunk manager with its own rotation
-// and retention policies. In the final model, tiers are placed on
-// nodes by election based on storage class availability. The node_id
-// field is a temporary stand-in until tier primary election is
-// implemented — it explicitly assigns a tier to a node.
+// TierConfig defines a storage tier owned by exactly one vault. Tiers are
+// ordered within a vault by their position field (0 = hottest / first).
 message TierConfig {
   string id = 1;
   string name = 2;
@@ -730,11 +718,11 @@ message TierConfig {
   string cloud_service_id = 8;
   uint32 active_chunk_class = 9;
   uint32 cache_class = 10;
-  reserved 11;                      // was node_id — replaced by placements
   uint32 replication_factor = 12;   // desired RF (1 = no replication, default)
-  reserved 13;                      // was secondary_node_ids — replaced by placements
   string path = 14;                       // direct path for JSONL sinks
   repeated TierPlacement placements = 15; // system-managed: file storage assignments by placement manager
+  string vault_id = 16;                   // owning vault — exactly one vault per tier
+  uint32 position = 17;                   // 0-based order within the vault's tier chain
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.

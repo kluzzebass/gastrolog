@@ -36,10 +36,11 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 // Returns empty string if the vault has no tiers or the active tier is unassigned.
 func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
 	for _, v := range cfg.Vaults {
-		if v.ID != vaultID || len(v.TierIDs) == 0 {
+		tierIDs := config.VaultTierIDs(cfg.Tiers, v.ID)
+		if v.ID != vaultID || len(tierIDs) == 0 {
 			continue
 		}
-		tier := findTierConfig(cfg.Tiers, v.TierIDs[0])
+		tier := findTierConfig(cfg.Tiers, tierIDs[0])
 		if tier != nil {
 			return tier.LeaderNodeID(cfg.NodeStorageConfigs)
 		}

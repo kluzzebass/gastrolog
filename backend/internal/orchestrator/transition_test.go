@@ -102,11 +102,11 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.
 
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, Name: "test-vault", TierIDs: []uuid.UUID{tier0ID, tier1ID}},
+			{ID: vaultID, Name: "test-vault"},
 		},
 		Tiers: []config.TierConfig{
-			{ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID)},
-			{ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID)},
+			{ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID), VaultID: vaultID, Position: 0},
+			{ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID), VaultID: vaultID, Position: 1},
 		},
 	}
 
@@ -270,10 +270,11 @@ func TestTransitionTerminalTier(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "terminal", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "terminal",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "only", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -503,13 +504,15 @@ func TestTransitionCrossNode(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cross-node", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "cross-node",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(localNode),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(remoteNode),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -572,13 +575,15 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "fail", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "fail",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(localNode),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(remoteNode),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -624,13 +629,15 @@ func TestTransitionNoTransferrer(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "no-xfer", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "no-xfer",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(localNode),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(remoteNode),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -729,13 +736,15 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "ttl-cloud", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+		ID: vaultID, Name: "ttl-cloud",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -842,11 +851,12 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{{
-			ID:      vaultID,
-			Name:    "cloud-leader-test",
-			TierIDs: []uuid.UUID{cloudTierID},
+			ID:   vaultID,
+			Name: "cloud-leader-test",
 		}},
 		Tiers: []config.TierConfig{{
+			VaultID:  vaultID,
+			Position: 0,
 			ID:               cloudTierID,
 			Name:             "cloud",
 			Type:             config.TierTypeCloud,
@@ -1005,10 +1015,11 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "overwrite-test", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+		ID: vaultID, Name: "overwrite-test",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud,
+		VaultID: vaultID, Position: 0,
 		Placements: []config.TierPlacement{
 			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
 			{StorageID: config.SyntheticStorageID(followerNode), Leader: false},
@@ -1016,6 +1027,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeFile,
+		VaultID: vaultID, Position: 1,
 		Placements: []config.TierPlacement{
 			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
 		},
@@ -1210,13 +1222,15 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cloud-transition", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+		ID: vaultID, Name: "cloud-transition",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1320,13 +1334,15 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cloud-sweep", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+		ID: vaultID, Name: "cloud-sweep",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1564,16 +1580,19 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "three-tier", TierIDs: []uuid.UUID{tier0ID, tier1ID, tier2ID},
+		ID: vaultID, Name: "three-tier",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier2ID, Name: "cold", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 2,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1651,16 +1670,19 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "file-file-cloud", TierIDs: []uuid.UUID{tier0ID, tier1ID, tier2ID},
+		ID: vaultID, Name: "file-file-cloud",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier2ID, Name: "cold", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 2,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1843,13 +1865,15 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "eventid-cloud", TierIDs: []uuid.UUID{cloudTierID, nextTierID},
+		ID: vaultID, Name: "eventid-cloud",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: nextTierID, Name: "local", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1926,13 +1950,15 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "count-accuracy", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "count-accuracy",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -2014,13 +2040,15 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cloud-search", TierIDs: []uuid.UUID{tier0ID, cloudTierID},
+		ID: vaultID, Name: "cloud-search",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -2369,11 +2397,13 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			Name:       fmt.Sprintf("tier-%d", i),
 			Type:       config.TierTypeFile,
 			Placements: placements,
+			VaultID:    vaultID,
+			Position:   uint32(i),
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
 	}
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cluster-vault", TierIDs: tierIDs,
+		ID: vaultID, Name: "cluster-vault",
 	})
 
 	// Build follower targets for the leader.
@@ -2937,12 +2967,13 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 	store := cfgmem.NewStore()
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "hot", Type: config.TierTypeFile,
+		VaultID: vaultID, Position: 0,
 		Placements: []config.TierPlacement{
 			{StorageID: config.SyntheticStorageID("node-A"), Leader: true},
 		},
 	})
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "drain-test", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "drain-test",
 	})
 	_ = store.PutFilter(context.Background(), config.FilterConfig{
 		ID: uuid.Must(uuid.NewV7()), Name: "catch-all", Expression: "*",

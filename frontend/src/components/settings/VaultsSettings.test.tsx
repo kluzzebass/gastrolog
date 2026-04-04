@@ -12,18 +12,16 @@ const sampleConfig = {
     {
       id: "v1",
       name: "vault-alpha",
-      tierIds: ["t1"],
       enabled: true,
     },
     {
       id: "v2",
       name: "vault-beta",
-      tierIds: [],
       enabled: false,
     },
   ],
   tiers: [
-    { id: "t1", name: "local-tier", type: 2 /* LOCAL */, rotationPolicyId: "p1", retentionRules: [{ retentionPolicyId: "rp1" }], followerNodeIds: [], replicationFactor: 1 },
+    { id: "t1", name: "local-tier", type: 2 /* FILE */, vaultId: "v1", position: 0, rotationPolicyId: "p1", retentionRules: [{ retentionPolicyId: "rp1" }], placements: [], replicationFactor: 1 },
   ],
   rotationPolicies: [{ id: "p1", name: "daily" }],
   retentionPolicies: [{ id: "rp1", name: "30-day" }],
@@ -245,8 +243,9 @@ describe("VaultsSettings", () => {
     expect(createBtn.disabled).toBe(true);
   });
 
-  test("create vault with memory tier calls putTier then putVault", async () => {
+  test("create vault with memory tier calls putVault then putTier", async () => {
     m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.configClient, "putVault").mockResolvedValueOnce({});
     m(mocks.configClient, "putTier").mockResolvedValueOnce({
       config: {
         ...sampleConfig,
@@ -256,7 +255,6 @@ describe("VaultsSettings", () => {
         ],
       },
     });
-    m(mocks.configClient, "putVault").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
 

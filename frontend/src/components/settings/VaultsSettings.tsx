@@ -106,16 +106,16 @@ export function tierTypeEnum(t: TierTypeLabel): TierType {
 
 // Extracted outside component so try/catch doesn't block the React Compiler.
 async function createVaultWithTiers(
+  vaultId: string,
+  name: string,
+  putVault: { mutateAsync: (args: { id: string; name: string }) => Promise<unknown> },
   configs: TierConfig[],
   putTier: { mutateAsync: (args: { config: TierConfig }) => Promise<unknown> },
-  name: string,
-  tierIds: string[],
-  putVault: { mutateAsync: (args: { id: string; name: string; tierIds: string[] }) => Promise<unknown> },
 ): Promise<void> {
+  await putVault.mutateAsync({ id: vaultId, name });
   for (const config of configs) {
     await putTier.mutateAsync({ config });
   }
-  await putVault.mutateAsync({ id: "", name, tierIds });
 }
 
 function extractErrorMessage(err: unknown, fallback: string): string {
@@ -542,35 +542,33 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
 
   const handleCreate = () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "vault";
+    const vaultId = crypto.randomUUID();
 
     // Build tier configs outside try/catch (React Compiler can't optimize
     // conditional expressions inside try/catch).
     const tierConfigs = addForm.tiers.map((tier, i) => {
       const tierId = crypto.randomUUID();
-      return {
-        tierId,
-        config: new TierConfig({
-          id: tierId,
-          name: tier.type,
-          type: tierTypeEnum(tier.type),
-          storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
-          cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
-          activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
-          cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
-          memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
-          rotationPolicyId: tier.rotationPolicyId,
-          retentionRules: tier.retentionPolicyId
-            ? [new RetentionRule({ retentionPolicyId: tier.retentionPolicyId, action: retentionActionForPosition(i, addForm.tiers.length) })]
-            : [],
-          replicationFactor: parseInt(tier.replicationFactor, 10) || 1,
-        }),
-      };
+      return new TierConfig({
+        id: tierId,
+        name: tier.type,
+        type: tierTypeEnum(tier.type),
+        vaultId,
+        position: i,
+        storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
+        cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
+        activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
+        cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
+        memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
+        rotationPolicyId: tier.rotationPolicyId,
+        retentionRules: tier.retentionPolicyId
+          ? [new RetentionRule({ retentionPolicyId: tier.retentionPolicyId, action: retentionActionForPosition(i, addForm.tiers.length) })]
+          : [],
+        replicationFactor: parseInt(tier.replicationFactor, 10) || 1,
+      });
     });
 
-    const tierIds = tierConfigs.map((tc) => tc.tierId);
-    const configs = tierConfigs.map((tc) => tc.config);
     setIsCreating(true);
-    createVaultWithTiers(configs, putTier, name, tierIds, putVault).then(
+    createVaultWithTiers(vaultId, name, putVault, tierConfigs, putTier).then(
       () => { setIsCreating(false); addToast(`Vault "${name}" created`, "info"); dispatchAdd({ type: "reset" }); },
       (err: unknown) => { setIsCreating(false); addToast(extractErrorMessage(err, "Failed to create vault"), "error"); },
     );

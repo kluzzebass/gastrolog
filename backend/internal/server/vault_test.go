@@ -309,10 +309,10 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	tierID := uuid.Must(uuid.NewV7())
 	cfgStore.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "default-tier", Type: config.TierTypeMemory,
+		VaultID: defaultID, Position: 0,
 	})
 	vaultCfg := config.VaultConfig{
-		ID:      defaultID,
-		TierIDs: []uuid.UUID{tierID},
+		ID: defaultID,
 	}
 	cfgStore.PutVault(context.Background(), vaultCfg)
 
@@ -658,12 +658,15 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
-	// Create a memory tier for vault factories.
-	tierID := uuid.Must(uuid.NewV7())
-	if err := cfgStore.PutTier(ctx, config.TierConfig{
-		ID: tierID, Name: "merge-tier", Type: config.TierTypeMemory,
-	}); err != nil {
-		t.Fatal(err)
+	// Create a memory tier for each vault.
+	for _, vid := range []uuid.UUID{srcID, dstID} {
+		tierID := uuid.Must(uuid.NewV7())
+		if err := cfgStore.PutTier(ctx, config.TierConfig{
+			ID: tierID, Name: "tier-" + vid.String()[:8], Type: config.TierTypeMemory,
+			VaultID: vid, Position: 0,
+		}); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
@@ -682,7 +685,6 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 				Id:      v.id.String(),
 				Name:    v.name,
 				Enabled: true,
-				TierIds: []string{tierID.String()},
 			},
 		}))
 		if err != nil {
@@ -814,6 +816,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		fileTierID := uuid.Must(uuid.NewV7())
 		if err := cfgStore.PutTier(ctx, config.TierConfig{
 			ID: fileTierID, Name: v.name + "-tier", Type: config.TierTypeFile, StorageClass: 1,
+			VaultID: v.id, Position: 0,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -828,7 +831,6 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 				Id:      v.id.String(),
 				Name:    v.name,
 				Enabled: true,
-				TierIds: []string{fileTierID.String()},
 			},
 		}))
 		if err != nil {

@@ -28,19 +28,38 @@ func NewVault(id uuid.UUID, tiers ...*TierInstance) *Vault {
 	}
 }
 
-// ActiveTier returns the first (hot) tier.
-func (v *Vault) ActiveTier() *TierInstance { return v.Tiers[0] }
+// ActiveTier returns the first (hot) tier, or nil if the vault has no tiers yet.
+func (v *Vault) ActiveTier() *TierInstance {
+	if len(v.Tiers) == 0 {
+		return nil
+	}
+	return v.Tiers[0]
+}
 
-// ChunkManager returns the chunk manager from the active tier.
-func (v *Vault) ChunkManager() chunk.ChunkManager { return v.Tiers[0].Chunks }
+// ChunkManager returns the chunk manager from the active tier, or nil if no tiers.
+func (v *Vault) ChunkManager() chunk.ChunkManager {
+	if len(v.Tiers) == 0 {
+		return nil
+	}
+	return v.Tiers[0].Chunks
+}
 
-// IndexManager returns the index manager from the active tier.
-func (v *Vault) IndexManager() index.IndexManager { return v.Tiers[0].Indexes }
+// IndexManager returns the index manager from the active tier, or nil if no tiers.
+func (v *Vault) IndexManager() index.IndexManager {
+	if len(v.Tiers) == 0 {
+		return nil
+	}
+	return v.Tiers[0].Indexes
+}
 
 // QueryEngine returns a query engine that searches ALL local tiers.
 // For single-tier vaults, this is the tier's own engine.
 // For multi-tier vaults, this uses a tier registry to fan out.
+// Returns nil if the vault has no tiers yet.
 func (v *Vault) QueryEngine() *query.Engine {
+	if len(v.Tiers) == 0 {
+		return nil
+	}
 	if len(v.Tiers) == 1 {
 		return v.Tiers[0].Query
 	}
@@ -50,8 +69,13 @@ func (v *Vault) QueryEngine() *query.Engine {
 	return v.multiTierQuery
 }
 
-// Type returns the storage type of the active tier.
-func (v *Vault) Type() string { return v.Tiers[0].Type }
+// Type returns the storage type of the active tier, or "" if no tiers.
+func (v *Vault) Type() string {
+	if len(v.Tiers) == 0 {
+		return ""
+	}
+	return v.Tiers[0].Type
+}
 
 // NewVaultFromComponents creates a Vault from raw components (chunk manager,
 // index manager, query engine). This wraps the components in a single

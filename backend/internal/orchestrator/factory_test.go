@@ -110,11 +110,11 @@ func testVaultCfg(vaultID uuid.UUID, tierType config.TierType) (config.VaultConf
 	return config.VaultConfig{
 			ID:      vaultID,
 			Enabled: true,
-			TierIDs: []uuid.UUID{tierID},
 		}, config.TierConfig{
-			ID:   tierID,
-			Name: "tier-" + vaultID.String()[:8],
-			Type: tierType,
+			ID:      tierID,
+			Name:    "tier-" + vaultID.String()[:8],
+			Type:    tierType,
+			VaultID: vaultID,
 		}
 }
 
@@ -486,10 +486,10 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	cfg := &config.Config{
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, Enabled: true, TierIDs: []uuid.UUID{tierID}},
+			{ID: vaultID, Enabled: true},
 		},
 		Tiers: []config.TierConfig{
-			{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1},
+			{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
 		},
 		NodeStorageConfigs: []config.NodeStorageConfig{
 			{NodeID: "node-1", FileStorages: []config.FileStorage{

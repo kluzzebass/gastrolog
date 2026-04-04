@@ -88,17 +88,12 @@ function useNodeContext() {
 }
 
 /** Build vault ID → "cloud" map from config tiers. */
-function buildCloudProviderMap(config: { vaults: { id: string; tierIds: string[] }[]; tiers: { id: string; cloudServiceId: string }[] } | undefined): Map<string, string> {
+function buildCloudProviderMap(config: { vaults: { id: string }[]; tiers: { id: string; vaultId: string; cloudServiceId: string }[] } | undefined): Map<string, string> {
   const map = new Map<string, string>();
   if (!config) return map;
-  const tierMap = new Map(config.tiers.map((t) => [t.id, t]));
-  for (const vc of config.vaults) {
-    for (const tid of vc.tierIds) {
-      const tier = tierMap.get(tid);
-      if (tier?.cloudServiceId) {
-        map.set(vc.id, "cloud");
-        break;
-      }
+  for (const tier of config.tiers) {
+    if (tier.cloudServiceId && tier.vaultId) {
+      map.set(tier.vaultId, "cloud");
     }
   }
   return map;

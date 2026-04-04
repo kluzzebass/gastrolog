@@ -101,15 +101,16 @@ func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid
 		return uuid.UUID{}, nil, fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
-	idx := slices.Index(vaultCfg.TierIDs, tierID)
+	tierIDs := config.VaultTierIDs(cfg.Tiers, vaultID)
+	idx := slices.Index(tierIDs, tierID)
 	if idx < 0 {
 		return uuid.UUID{}, nil, fmt.Errorf("tier %s not found in vault's tier chain", tierID)
 	}
-	if idx == len(vaultCfg.TierIDs)-1 {
+	if idx == len(tierIDs)-1 {
 		return uuid.UUID{}, nil, errors.New("terminal tier has no next tier")
 	}
 
-	nextTierID := vaultCfg.TierIDs[idx+1]
+	nextTierID := tierIDs[idx+1]
 	nextTierCfg := findTierConfig(cfg.Tiers, nextTierID)
 	if nextTierCfg == nil {
 		return uuid.UUID{}, nil, fmt.Errorf("next tier %s config not found", nextTierID)

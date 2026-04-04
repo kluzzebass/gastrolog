@@ -41,11 +41,12 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "archive-test", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "archive-test",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
 		Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})

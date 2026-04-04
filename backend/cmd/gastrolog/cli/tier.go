@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 
 	"connectrpc.com/connect"
@@ -233,8 +232,7 @@ func resolveRetentionPolicy(ctx context.Context, cmd *cobra.Command, client *ser
 	return nil
 }
 
-// addTierToVault resolves the --vault flag and adds tierID to the vault's tier
-// list if not already present.
+// addTierToVault resolves the --vault flag and sets VaultId/Position on the tier config.
 func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Client, tierID string) error {
 	vaultName, _ := cmd.Flags().GetString("vault")
 	r, err := newResolver(ctx, client)
@@ -245,21 +243,30 @@ func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	if err != nil {
 		return err
 	}
-	vResp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+	resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
 	if err != nil {
 		return err
 	}
-	for _, v := range vResp.Msg.Vaults {
-		if v.Id != vaultID {
+	// Find the tier config to update.
+	for _, t := range resp.Msg.Tiers {
+		if t.Id != tierID {
 			continue
 		}
-		if slices.Contains(v.TierIds, tierID) {
-			return nil
+		if t.VaultId == vaultID {
+			return nil // already assigned to this vault
 		}
-		v.TierIds = append(v.TierIds, tierID)
-		_, err = client.Config.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{Config: v}))
+		// Count existing tiers for this vault to determine position.
+		var maxPos uint32
+		for _, other := range resp.Msg.Tiers {
+			if other.VaultId == vaultID && other.Position >= maxPos {
+				maxPos = other.Position + 1
+			}
+		}
+		t.VaultId = vaultID
+		t.Position = maxPos
+		_, err = client.Config.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{Config: t}))
 		if err != nil {
-			return fmt.Errorf("tier created but failed to add to vault: %w", err)
+			return fmt.Errorf("tier created but failed to set vault: %w", err)
 		}
 		return nil
 	}

@@ -86,23 +86,21 @@ export function ruleRefsFor(
 interface Tier {
   id: string;
   name: string;
+  vaultId: string;
+  position: number;
   rotationPolicyId: string;
   retentionRules: { retentionPolicyId: string }[];
 }
 
 interface VaultRef {
+  id: string;
   name: string;
-  tierIds: string[];
 }
 
-function tierLabel(tierId: string, vaults: VaultRef[]): string | null {
-  for (const v of vaults) {
-    const pos = v.tierIds.indexOf(tierId);
-    if (pos !== -1) {
-      return `${v.name || v.tierIds[0] || tierId}/tier ${String(pos + 1)}`;
-    }
-  }
-  return null;
+function tierLabel(tier: Tier, vaults: VaultRef[]): string | null {
+  const vault = vaults.find((v) => v.id === tier.vaultId);
+  if (!vault) return null;
+  return `${vault.name || vault.id}/tier ${String(tier.position + 1)}`;
 }
 
 export function tierRefsForRotationPolicy(
@@ -112,7 +110,7 @@ export function tierRefsForRotationPolicy(
 ): string[] {
   return tiers
     .filter((t) => t.rotationPolicyId === rotationPolicyId)
-    .map((t) => tierLabel(t.id, vaults))
+    .map((t) => tierLabel(t, vaults))
     .filter((label): label is string => label !== null);
 }
 
@@ -127,6 +125,6 @@ export function tierRuleRefsFor(
         (r) => r.retentionPolicyId === retentionPolicyId,
       ),
     )
-    .map((t) => tierLabel(t.id, vaults))
+    .map((t) => tierLabel(t, vaults))
     .filter((label): label is string => label !== null);
 }

@@ -147,11 +147,6 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) error {
 	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
 
-	if len(vaultCfg.TierIDs) == 0 {
-		o.logger.Warn("vault has no tier IDs, skipping", "id", vaultCfg.ID, "name", vaultCfg.Name)
-		return nil
-	}
-
 	tiers, err := o.buildTierInstances(cfg, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
@@ -163,9 +158,11 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 		return nil
 	}
 
-	// temporary: if all tiers are assigned to other nodes, skip this vault locally (until tier election)
+	// During ApplyConfig (startup), skip vaults with no local tiers.
+	// The filter set handles forwarding to the correct node.
+	// (The dispatch path in handleVaultPut registers zero-tier vaults
+	// so handleTierPut can add tiers incrementally.)
 	if len(tiers) == 0 {
-		o.logger.Info("vault has no local tiers, skipping", "id", vaultCfg.ID, "name", vaultCfg.Name)
 		return nil
 	}
 

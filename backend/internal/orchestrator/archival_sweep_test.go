@@ -47,12 +47,13 @@ func archivalTestSetup(t *testing.T, transitions []config.CloudStorageTransition
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "archival-test", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "archival-test",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
 		Placements:     syntheticPlacements(nodeID),
 		CloudServiceID: &csID,
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutCloudService(context.Background(), config.CloudService{
 		ID:           csID,
@@ -570,9 +571,10 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "cloud-tier", Type: config.TierTypeCloud,
 		Placements: placements, CloudServiceID: &csID,
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cloud-vault", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "cloud-vault",
 	})
 	_ = store.PutCloudService(context.Background(), config.CloudService{
 		ID:           csID,
@@ -1136,9 +1138,10 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
 		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
+		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "cache-test", TierIDs: []uuid.UUID{tierID},
+		ID: vaultID, Name: "cache-test",
 	})
 	_ = store.PutCloudService(context.Background(), config.CloudService{
 		ID: csID, Name: "test-cloud", Provider: "memory",

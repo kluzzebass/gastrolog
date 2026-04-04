@@ -14,6 +14,7 @@
 package config
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -531,11 +532,44 @@ type VaultConfig struct {
 	// Enabled indicates whether ingestion is enabled for this vault.
 	// When false, the vault will not receive new records from the ingest pipeline.
 	Enabled bool `json:"enabled,omitempty"`
+}
 
-	// TierIDs references TierConfig entries by UUID, in priority order.
-	// The first tier is the active (hot) tier; subsequent tiers hold progressively
-	// colder data. An empty list means the vault has no storage.
-	TierIDs []uuid.UUID `json:"tierIds,omitempty"`
+// VaultTierIDs returns the ordered tier IDs for a vault by filtering tiers
+// with matching VaultID and sorting by Position. This replaces the old
+// VaultConfig.TierIDs field — tier ownership now lives on TierConfig.
+func VaultTierIDs(tiers []TierConfig, vaultID uuid.UUID) []uuid.UUID {
+	type entry struct {
+		id  uuid.UUID
+		pos uint32
+	}
+	var matched []entry
+	for _, t := range tiers {
+		if t.VaultID == vaultID {
+			matched = append(matched, entry{t.ID, t.Position})
+		}
+	}
+	slices.SortFunc(matched, func(a, b entry) int {
+		return cmp.Compare(a.pos, b.pos)
+	})
+	ids := make([]uuid.UUID, len(matched))
+	for i, e := range matched {
+		ids[i] = e.id
+	}
+	return ids
+}
+
+// VaultTiers returns the ordered tier configs for a vault.
+func VaultTiers(tiers []TierConfig, vaultID uuid.UUID) []TierConfig {
+	var matched []TierConfig
+	for _, t := range tiers {
+		if t.VaultID == vaultID {
+			matched = append(matched, t)
+		}
+	}
+	slices.SortFunc(matched, func(a, b TierConfig) int {
+		return cmp.Compare(a.Position, b.Position)
+	})
+	return matched
 }
 
 // RouteConfig defines a named routing rule that connects a filter to one or more
@@ -667,11 +701,14 @@ const (
 	TierTypeJSONL  TierType = "jsonl"
 )
 
-// TierConfig defines a storage tier within the tiered storage system.
+// TierConfig defines a storage tier owned by exactly one vault. Tiers are
+// ordered within a vault by their Position field (0 = hottest / first).
 type TierConfig struct {
 	ID                uuid.UUID       `json:"id"`
 	Name              string          `json:"name"`
 	Type              TierType        `json:"type"`
+	VaultID           uuid.UUID       `json:"vaultId"`             // owning vault
+	Position          uint32          `json:"position"`            // 0-based order in vault's tier chain
 	RotationPolicyID  *uuid.UUID      `json:"rotationPolicyId,omitempty"`
 	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
 	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`

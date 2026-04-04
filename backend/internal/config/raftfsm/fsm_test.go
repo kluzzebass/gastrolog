@@ -136,17 +136,15 @@ func TestApplyPutVault(t *testing.T) {
 	t.Parallel()
 	fsm := New()
 	id := newID()
-	tierID := newID()
 	applyCmd(t, fsm, command.NewPutVault(config.VaultConfig{
 		ID: id, Name: "vault", Enabled: true,
-		TierIDs: []uuid.UUID{tierID},
 	}))
 
 	got, err := fsm.Store().GetVault(context.Background(), id)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Name != "vault" || !got.Enabled || len(got.TierIDs) != 1 || got.TierIDs[0] != tierID {
+	if got == nil || got.Name != "vault" || !got.Enabled {
 		t.Fatalf("unexpected vault: %+v", got)
 	}
 }
@@ -685,20 +683,20 @@ func TestSnapshotRestore(t *testing.T) {
 	retID := newID()
 	applyCmd(t, fsm1, command.NewPutRetentionPolicy(config.RetentionPolicyConfig{ID: retID, Name: "ret1", MaxAge: &retMaxAge}))
 
+	vaultID := newID()
 	tierID := newID()
 	applyCmd(t, fsm1, command.NewPutTier(config.TierConfig{
 		ID: tierID, Name: "tier1", Type: config.TierTypeMemory,
+		VaultID: vaultID, Position: 0,
 		RotationPolicyID: &rpID,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: retID, Action: config.RetentionActionExpire},
 		},
 	}))
 
-	vaultID := newID()
 	applyCmd(t, fsm1, command.NewPutVault(config.VaultConfig{
 		ID: vaultID, Name: "vault1",
 		Enabled: true,
-		TierIDs: []uuid.UUID{tierID},
 	}))
 
 	ingID := newID()
@@ -769,13 +767,13 @@ func TestSnapshotRestore(t *testing.T) {
 	if gotVault == nil || gotVault.Name != "vault1" || !gotVault.Enabled {
 		t.Errorf("vault: %+v", gotVault)
 	}
-	if gotVault != nil && len(gotVault.TierIDs) != 1 {
-		t.Errorf("vault tier IDs: %+v", gotVault.TierIDs)
-	}
 
 	gotTier, _ := fsm2.Store().GetTier(ctx, tierID)
 	if gotTier == nil || gotTier.Name != "tier1" {
 		t.Errorf("tier: %+v", gotTier)
+	}
+	if gotTier != nil && gotTier.VaultID != vaultID {
+		t.Errorf("tier VaultID: got %v, want %v", gotTier.VaultID, vaultID)
 	}
 	if gotTier != nil && len(gotTier.RetentionRules) != 1 {
 		t.Errorf("tier retention rules: %+v", gotTier.RetentionRules)

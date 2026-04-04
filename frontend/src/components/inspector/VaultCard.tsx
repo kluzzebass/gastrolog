@@ -136,17 +136,13 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   const [expandedChunk, setExpandedChunk] = useState<string | null>(null);
 
   // Build tier position map from vault config for labeling.
-  const vaultCfg = config?.vaults.find((v) => v.id === vaultId);
-  const tierPositions = new Map<string, number>();
-  if (vaultCfg) {
-    const configTierIds = new Set(config?.tiers.map((t) => t.id));
-    let pos = 1;
-    for (const tid of vaultCfg.tierIds) {
-      if (configTierIds.has(tid)) {
-        tierPositions.set(tid, pos++);
-      }
-    }
-  }
+  // Tiers own their vault association via vaultId + position fields.
+  const vaultTiers = (config?.tiers ?? [])
+    .filter((t) => t.vaultId === vaultId)
+    .toSorted((a, b) => a.position - b.position);
+  const tierPositions = new Map<string, number>(
+    vaultTiers.map((t) => [t.id, t.position + 1]),
+  );
 
   if (isLoading) {
     return (
@@ -194,27 +190,24 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
 
   // Identify remote tiers (in vault config but no local chunks).
   const remoteTierInfo = (() => {
-    if (!vaultCfg || !config?.tiers) return [];
+    if (vaultTiers.length === 0) return [];
     const localTierIds = new Set(tierGroups.keys());
     const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud", 4: "jsonl" };
-    const nscs = config.nodeStorageConfigs;
-    return vaultCfg.tierIds
-      .filter((tid) => !localTierIds.has(tid))
-      .map((tid) => {
-        const tc = config.tiers.find((t) => t.id === tid);
-        if (!tc) return null;
+    const nscs = config?.nodeStorageConfigs ?? [];
+    return vaultTiers
+      .filter((tc) => !localTierIds.has(tc.id))
+      .map((tc) => {
         const pnId = leaderNodeId(tc, nscs);
         return {
-          id: tid,
-          pos: tierPositions.get(tid) ?? 0,
+          id: tc.id,
+          pos: tierPositions.get(tc.id) ?? 0,
           type: tierTypeMap[tc.type] ?? "unknown",
           nodeName: pnId ? (nodeNameMap.get(pnId) ?? pnId) : "",
           rf: tc.replicationFactor || 1,
           followerNodeIds: followerNodeIds(tc, nscs),
           storageClass: tc.storageClass,
         };
-      })
-      .filter((t): t is NonNullable<typeof t> => t !== null);
+      });
   })();
 
   const sortChunks = (arr: ChunkMeta[]) =>
@@ -229,7 +222,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   return (
     <div>
       {/* Build a unified tier list: local tiers with chunks + remote tiers without */}
-      {(vaultCfg?.tierIds ?? []).map((tierId) => {
+      {vaultTiers.map((vt) => vt.id).map((tierId) => {
         const pos = tierPositions.get(tierId) ?? 0;
         const group = tierGroups.get(tierId);
         const remote = remoteTierInfo.find((rt) => rt.id === tierId);

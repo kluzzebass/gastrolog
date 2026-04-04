@@ -24,7 +24,11 @@ func (o *Orchestrator) Search(ctx context.Context, key uuid.UUID, q query.Query,
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := vault.QueryEngine().Search(ctx, q, resume)
+	qe := vault.QueryEngine()
+	if qe == nil {
+		return nil, nil, ErrNoQueryEngines
+	}
+	seq, nextToken := qe.Search(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -41,7 +45,11 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key uuid.UUID, q qu
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := vault.QueryEngine().SearchThenFollow(ctx, q, resume)
+	qe := vault.QueryEngine()
+	if qe == nil {
+		return nil, nil, ErrNoQueryEngines
+	}
+	seq, nextToken := qe.SearchThenFollow(ctx, q, resume)
 	return seq, nextToken, nil
 }
 
@@ -58,7 +66,11 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key uuid.UUID, q q
 		return nil, nil, ErrUnknownRegistry
 	}
 
-	seq, nextToken := vault.QueryEngine().SearchWithContext(ctx, q)
+	qe := vault.QueryEngine()
+	if qe == nil {
+		return nil, nil, ErrNoQueryEngines
+	}
+	seq, nextToken := qe.SearchWithContext(ctx, q)
 	return seq, nextToken, nil
 }
 
@@ -75,5 +87,9 @@ func (o *Orchestrator) Explain(ctx context.Context, key uuid.UUID, q query.Query
 		return nil, ErrUnknownRegistry
 	}
 
-	return vault.QueryEngine().Explain(ctx, q)
+	qe := vault.QueryEngine()
+	if qe == nil {
+		return nil, ErrNoQueryEngines
+	}
+	return qe.Explain(ctx, q)
 }

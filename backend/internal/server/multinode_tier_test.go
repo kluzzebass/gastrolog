@@ -157,18 +157,20 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 
 	_ = cfgStore.PutTier(ctx, config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeFile,
+		VaultID: vaultID, Position: 0,
 		Placements: []config.TierPlacement{
 			{StorageID: config.SyntheticStorageID("data-1"), Leader: true},
 		},
 	})
 	_ = cfgStore.PutTier(ctx, config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile,
+		VaultID: vaultID, Position: 1,
 		Placements: []config.TierPlacement{
 			{StorageID: config.SyntheticStorageID("data-1"), Leader: true},
 		},
 	})
 	_ = cfgStore.PutVault(ctx, config.VaultConfig{
-		ID: vaultID, Name: "tiered-vault", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "tiered-vault",
 	})
 
 	// Create data-1 with file-backed 2-tier vault.

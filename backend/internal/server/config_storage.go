@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -227,38 +226,15 @@ func (s *ConfigServer) DeleteTier(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("tier not found"))
 	}
 
-	vaults, err := s.cfgStore.ListVaults(ctx)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
-	}
 	drain := req.Msg.GetDrain()
 
 	if err := s.cfgStore.DeleteTier(ctx, id, drain); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	// When draining, do NOT remove the tier from vault tier lists yet.
-	// The drain must complete first — removing the tier from vaults triggers
-	// a vault rebuild that tears down the tier instance mid-drain.
-	// The drain completion callback handles the vault tier list cleanup.
-	if !drain {
-		for _, v := range vaults {
-			if !slices.Contains(v.TierIDs, id) {
-				continue
-			}
-			var updated []uuid.UUID
-			for _, tid := range v.TierIDs {
-				if tid != id {
-					updated = append(updated, tid)
-				}
-			}
-			v.TierIDs = updated
-			if err := s.cfgStore.PutVault(ctx, v); err != nil {
-				return nil, connect.NewError(connect.CodeInternal,
-					fmt.Errorf("tier deleted but failed to update vault %s tier list: %w", v.ID, err))
-			}
-		}
-	}
+	// Tier ownership now lives on TierConfig (VaultID field), so there is no
+	// vault-side tier list to clean up. The tier config itself was already
+	// deleted above by cfgStore.DeleteTier.
 
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: id, Drain: drain})
 
@@ -428,6 +404,15 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		CacheClass:        p.CacheClass,
 		ReplicationFactor: p.ReplicationFactor,
 		Path:              p.Path,
+		Position:          p.Position,
+	}
+
+	if p.VaultId != "" {
+		vaultID, err := uuid.Parse(p.VaultId)
+		if err != nil {
+			return config.TierConfig{}, fmt.Errorf("invalid vault_id: %w", err)
+		}
+		cfg.VaultID = vaultID
 	}
 
 	if p.RotationPolicyId != "" {

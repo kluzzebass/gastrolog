@@ -207,15 +207,10 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 // ---------------------------------------------------------------------------
 
 func putVaultCmd(cfg config.VaultConfig) *gastrologv1.PutVaultCommand {
-	tierIDs := make([]string, len(cfg.TierIDs))
-	for i, tid := range cfg.TierIDs {
-		tierIDs[i] = tid.String()
-	}
 	return &gastrologv1.PutVaultCommand{
 		Id:      cfg.ID.String(),
 		Name:    cfg.Name,
 		Enabled: cfg.Enabled,
-		TierIds: tierIDs,
 	}
 }
 
@@ -242,20 +237,10 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (config.VaultConfig, erro
 		return config.VaultConfig{}, fmt.Errorf("parse vault id: %w", err)
 	}
 
-	var tierIDs []uuid.UUID
-	for _, tid := range cmd.GetTierIds() {
-		tierID, err := uuid.Parse(tid)
-		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("parse tier id: %w", err)
-		}
-		tierIDs = append(tierIDs, tierID)
-	}
-
 	return config.VaultConfig{
 		ID:      id,
 		Name:    cmd.GetName(),
 		Enabled: cmd.GetEnabled(),
-		TierIDs: tierIDs,
 	}, nil
 }
 

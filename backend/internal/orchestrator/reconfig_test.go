@@ -33,16 +33,16 @@ func (f *fakeConfigLoader) Load(_ context.Context) (*config.Config, error) {
 func memVaultCfg(vaultID uuid.UUID, loader *fakeConfigLoader) config.VaultConfig {
 	tierID := uuid.Must(uuid.NewV7())
 	tc := config.TierConfig{
-		ID:   tierID,
-		Name: "tier-" + vaultID.String()[:8],
-		Type: config.TierTypeMemory,
+		ID:      tierID,
+		Name:    "tier-" + vaultID.String()[:8],
+		Type:    config.TierTypeMemory,
+		VaultID: vaultID,
 	}
 	if loader != nil && loader.cfg != nil {
 		loader.cfg.Tiers = append(loader.cfg.Tiers, tc)
 	}
 	return config.VaultConfig{
-		ID:      vaultID,
-		TierIDs: []uuid.UUID{tierID},
+		ID: vaultID,
 	}
 }
 
@@ -1051,13 +1051,13 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
 		Tiers: []config.TierConfig{
-			{ID: tierID, Name: "tier", Type: config.TierTypeMemory, RetentionRules: []config.RetentionRule{{
+			{ID: tierID, Name: "tier", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []config.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
 				Action:            config.RetentionActionExpire,
 			}}},
 		},
 		Vaults: []config.VaultConfig{
-			{ID: vaultID, Name: "src", TierIDs: []uuid.UUID{tierID}},
+			{ID: vaultID, Name: "src"},
 		},
 	}}
 

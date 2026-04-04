@@ -676,11 +676,6 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
    */
   enabled = false;
 
-  /**
-   * @generated from field: repeated string tier_ids = 10;
-   */
-  tierIds: string[] = [];
-
   constructor(data?: PartialMessage<PutVaultCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -692,7 +687,6 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 10, name: "tier_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutVaultCommand {
@@ -2262,6 +2256,16 @@ export class PutTierCommand extends Message<PutTierCommand> {
    */
   placements: TierPlacementEntry[] = [];
 
+  /**
+   * @generated from field: string vault_id = 16;
+   */
+  vaultId = "";
+
+  /**
+   * @generated from field: uint32 position = 17;
+   */
+  position = 0;
+
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2283,6 +2287,8 @@ export class PutTierCommand extends Message<PutTierCommand> {
     { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "placements", kind: "message", T: TierPlacementEntry, repeated: true },
+    { no: 16, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {

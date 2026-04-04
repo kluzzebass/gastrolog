@@ -328,7 +328,6 @@ type VaultConfig struct {
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Name          string                 `protobuf:"bytes,8,opt,name=name,proto3" json:"name,omitempty"`
-	TierIds       []string               `protobuf:"bytes,11,rep,name=tier_ids,json=tierIds,proto3" json:"tier_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -382,13 +381,6 @@ func (x *VaultConfig) GetName() string {
 		return x.Name
 	}
 	return ""
-}
-
-func (x *VaultConfig) GetTierIds() []string {
-	if x != nil {
-		return x.TierIds
-	}
-	return nil
 }
 
 type RouteDestination struct {
@@ -5633,12 +5625,8 @@ func (x *NodeConfig) GetName() string {
 	return ""
 }
 
-// TierConfig defines a storage tier. A vault contains an ordered list
-// of tiers. Each tier is a full chunk manager with its own rotation
-// and retention policies. In the final model, tiers are placed on
-// nodes by election based on storage class availability. The node_id
-// field is a temporary stand-in until tier primary election is
-// implemented — it explicitly assigns a tier to a node.
+// TierConfig defines a storage tier owned by exactly one vault. Tiers are
+// ordered within a vault by their position field (0 = hottest / first).
 type TierConfig struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -5654,6 +5642,8 @@ type TierConfig struct {
 	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
 	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
 	Placements        []*TierPlacement       `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
+	VaultId           string                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                // owning vault — exactly one vault per tier
+	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`                                            // 0-based order within the vault's tier chain
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -5777,6 +5767,20 @@ func (x *TierConfig) GetPlacements() []*TierPlacement {
 		return x.Placements
 	}
 	return nil
+}
+
+func (x *TierConfig) GetVaultId() string {
+	if x != nil {
+		return x.VaultId
+	}
+	return ""
+}
+
+func (x *TierConfig) GetPosition() uint32 {
+	if x != nil {
+		return x.Position
+	}
+	return 0
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.
@@ -7396,14 +7400,11 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12%\n" +
 	"\x0edestination_id\x18\x03 \x01(\tR\rdestinationId\x12&\n" +
 	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\x122\n" +
-	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"\x90\x01\n" +
+	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"K\n" +
 	"\vVaultConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x12\x12\n" +
-	"\x04name\x18\b \x01(\tR\x04name\x12\x19\n" +
-	"\btier_ids\x18\v \x03(\tR\atierIdsJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04J\x04\b\x04\x10\x05J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\t\x10\n" +
-	"J\x04\b\n" +
-	"\x10\v\"-\n" +
+	"\x04name\x18\b \x01(\tR\x04name\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
 	"\bvault_id\x18\x01 \x01(\tR\avaultId\"\xef\x01\n" +
 	"\vRouteConfig\x12\x0e\n" +
@@ -7787,7 +7788,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xaa\x04\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xd5\x04\n" +
 	"\n" +
 	"TierConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -7806,7 +7807,9 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\x04path\x18\x0e \x01(\tR\x04path\x12;\n" +
 	"\n" +
 	"placements\x18\x0f \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
-	"placementsJ\x04\b\v\x10\fJ\x04\b\r\x10\x0e\"F\n" +
+	"placements\x12\x19\n" +
+	"\bvault_id\x18\x10 \x01(\tR\avaultId\x12\x1a\n" +
+	"\bposition\x18\x11 \x01(\rR\bposition\"F\n" +
 	"\rTierPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x16\n" +

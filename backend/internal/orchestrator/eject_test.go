@@ -756,18 +756,20 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	// Config store with source vault, destination vault, filter, and eject route.
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: srcVaultID, Name: "src", TierIDs: []uuid.UUID{srcTierID},
+		ID: srcVaultID, Name: "src",
 	})
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: dstVaultID, Name: "dst", TierIDs: []uuid.UUID{dstTierID},
+		ID: dstVaultID, Name: "dst",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: srcTierID, Name: "src-hot", Type: config.TierTypeFile,
 		Placements: syntheticPlacements(nodeID),
+		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: dstTierID, Name: "dst-hot", Type: config.TierTypeFile,
 		Placements: syntheticPlacements(nodeID),
+		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), config.FilterConfig{
 		ID: filterID, Name: "catch-all", Expression: "*",
@@ -912,18 +914,20 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: srcVaultID, Name: "src", TierIDs: []uuid.UUID{srcTierID},
+		ID: srcVaultID, Name: "src",
 	})
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: dstVaultID, Name: "dst", TierIDs: []uuid.UUID{dstTierID},
+		ID: dstVaultID, Name: "dst",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: srcTierID, Name: "src-hot", Type: config.TierTypeFile,
 		Placements: syntheticPlacements("node-A"),
+		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: dstTierID, Name: "dst-hot", Type: config.TierTypeFile,
 		Placements: syntheticPlacements("node-B"),
+		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), config.FilterConfig{
 		ID: filterID, Name: "catch-all", Expression: "*",

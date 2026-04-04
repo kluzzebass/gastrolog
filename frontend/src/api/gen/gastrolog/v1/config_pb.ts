@@ -272,11 +272,6 @@ export class VaultConfig extends Message<VaultConfig> {
    */
   name = "";
 
-  /**
-   * @generated from field: repeated string tier_ids = 11;
-   */
-  tierIds: string[] = [];
-
   constructor(data?: PartialMessage<VaultConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -288,7 +283,6 @@ export class VaultConfig extends Message<VaultConfig> {
     { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 11, name: "tier_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultConfig {
@@ -4727,12 +4721,8 @@ export class NodeConfig extends Message<NodeConfig> {
 }
 
 /**
- * TierConfig defines a storage tier. A vault contains an ordered list
- * of tiers. Each tier is a full chunk manager with its own rotation
- * and retention policies. In the final model, tiers are placed on
- * nodes by election based on storage class availability. The node_id
- * field is a temporary stand-in until tier primary election is
- * implemented — it explicitly assigns a tier to a node.
+ * TierConfig defines a storage tier owned by exactly one vault. Tiers are
+ * ordered within a vault by their position field (0 = hottest / first).
  *
  * @generated from message gastrolog.v1.TierConfig
  */
@@ -4808,6 +4798,20 @@ export class TierConfig extends Message<TierConfig> {
    */
   placements: TierPlacement[] = [];
 
+  /**
+   * owning vault — exactly one vault per tier
+   *
+   * @generated from field: string vault_id = 16;
+   */
+  vaultId = "";
+
+  /**
+   * 0-based order within the vault's tier chain
+   *
+   * @generated from field: uint32 position = 17;
+   */
+  position = 0;
+
   constructor(data?: PartialMessage<TierConfig>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4829,6 +4833,8 @@ export class TierConfig extends Message<TierConfig> {
     { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "placements", kind: "message", T: TierPlacement, repeated: true },
+    { no: 16, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 17, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierConfig {

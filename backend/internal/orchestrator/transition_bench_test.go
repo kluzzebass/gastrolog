@@ -101,12 +101,14 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 			tierCfgs[i] = config.TierConfig{
 				ID: tierIDs[i], Name: fmt.Sprintf("tier-%d", i),
 				Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+				VaultID: vaultID, Position: uint32(i),
 			}
 		} else {
 			tiers[i] = benchFileTier(b, tierIDs[i])
 			tierCfgs[i] = config.TierConfig{
 				ID: tierIDs[i], Name: fmt.Sprintf("tier-%d", i),
 				Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+				VaultID: vaultID, Position: uint32(i),
 			}
 		}
 	}
@@ -122,7 +124,7 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "bench", TierIDs: tierIDs,
+		ID: vaultID, Name: "bench",
 	})
 	for _, tc := range tierCfgs {
 		_ = store.PutTier(context.Background(), tc)

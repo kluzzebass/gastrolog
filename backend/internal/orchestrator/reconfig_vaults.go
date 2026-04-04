@@ -62,13 +62,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg config.VaultConfig
 		return fmt.Errorf("build tier instances for vault %s: %w", vaultCfg.ID, err)
 	}
 
-	// If all tiers are assigned to other nodes, skip this vault locally.
-	if len(tiers) == 0 {
-		o.logger.Info("vault has no local tiers, skipping AddVault", "id", vaultCfg.ID, "name", vaultCfg.Name)
-		return nil
-	}
-
-	// Register vault.
+	// Register vault (even with zero tiers — tiers arrive incrementally via handleTierPut).
 	vault := NewVault(vaultCfg.ID, tiers...)
 	vault.Name = vaultCfg.Name
 	o.vaults[vaultCfg.ID] = vault
@@ -113,8 +107,9 @@ func resolveRetentionRulesFromTier(cfg *config.Config, vaultCfg config.VaultConf
 	// Derive the retention action from the tier's position in the vault chain.
 	// The stored action on the tier config is ignored — position is the source
 	// of truth. This prevents stale actions when tiers are added/removed.
-	tierIndex := slices.Index(vaultCfg.TierIDs, tierCfg.ID)
-	isLastTier := tierIndex < 0 || tierIndex == len(vaultCfg.TierIDs)-1
+	tierIDs := config.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
+	tierIndex := slices.Index(tierIDs, tierCfg.ID)
+	isLastTier := tierIndex < 0 || tierIndex == len(tierIDs)-1
 
 	var rules []retentionRule
 	for _, b := range tierCfg.RetentionRules {
@@ -577,8 +572,9 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 // Tiers whose leader/follower storages don't resolve to the local node are skipped
 // (placement manager assigns storages via Raft).
 func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) ([]*TierInstance, error) {
-	if len(vaultCfg.TierIDs) == 0 {
-		return nil, fmt.Errorf("vault %s has no tier IDs", vaultCfg.ID)
+	tierIDs := config.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
+	if len(tierIDs) == 0 {
+		return nil, nil // vault has no tiers yet — tiers are added incrementally via handleTierPut
 	}
 
 	nscs := cfg.NodeStorageConfigs
@@ -589,8 +585,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		}
 	}
 
-	tiers := make([]*TierInstance, 0, len(vaultCfg.TierIDs))
-	for _, tierID := range vaultCfg.TierIDs {
+	tiers := make([]*TierInstance, 0, len(tierIDs))
+	for _, tierID := range tierIDs {
 		tierCfg := findTierConfig(cfg.Tiers, tierID)
 		if tierCfg == nil {
 			// Tier config was deleted (e.g. drain-delete) but the vault still

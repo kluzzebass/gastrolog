@@ -45,12 +45,19 @@ func newVaultListCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return p.json(resp.Msg.Vaults)
 			}
+			// Count tiers per vault from the tier configs.
+			tierCount := make(map[string]int)
+			for _, t := range resp.Msg.Tiers {
+				if t.VaultId != "" {
+					tierCount[t.VaultId]++
+				}
+			}
 			var rows [][]string
 			for _, v := range resp.Msg.Vaults {
 				rows = append(rows, []string{
 					v.Id, v.Name,
 					strconv.FormatBool(v.Enabled),
-					strconv.Itoa(len(v.TierIds)),
+					strconv.Itoa(tierCount[v.Id]),
 				})
 			}
 			p.table([]string{"ID", "NAME", "ENABLED", "TIERS"}, rows)
@@ -84,7 +91,7 @@ func newVaultGetCmd() *cobra.Command {
 					if outputFormat(cmd) == "json" {
 						return p.json(v)
 					}
-					p.kv(vaultDetailPairs(v))
+					p.kv(vaultDetailPairs(v, resp.Msg.Tiers))
 					return nil
 				}
 			}
@@ -94,14 +101,18 @@ func newVaultGetCmd() *cobra.Command {
 }
 
 // vaultDetailPairs builds the key-value pairs for vault detail rendering.
-func vaultDetailPairs(v *v1.VaultConfig) [][2]string {
+func vaultDetailPairs(v *v1.VaultConfig, allTiers []*v1.TierConfig) [][2]string {
 	pairs := [][2]string{
 		{"ID", v.Id},
 		{"Name", v.Name},
 		{"Enabled", strconv.FormatBool(v.Enabled)},
 	}
-	for i, tid := range v.TierIds {
-		pairs = append(pairs, [2]string{"Tier[" + strconv.Itoa(i) + "]", tid})
+	var idx int
+	for _, t := range allTiers {
+		if t.VaultId == v.Id {
+			pairs = append(pairs, [2]string{"Tier[" + strconv.Itoa(idx) + "]", t.Id})
+			idx++
+		}
 	}
 	return pairs
 }

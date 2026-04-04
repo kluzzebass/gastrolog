@@ -219,13 +219,6 @@ func protoToVaultConfig(p *apiv1.VaultConfig) (config.VaultConfig, error) {
 		Name:    p.Name,
 		Enabled: p.Enabled,
 	}
-	for _, tid := range p.TierIds {
-		tierID, err := uuid.Parse(tid)
-		if err != nil {
-			return config.VaultConfig{}, fmt.Errorf("invalid tier ID: %w", err)
-		}
-		cfg.TierIDs = append(cfg.TierIDs, tierID)
-	}
 	return cfg, nil
 }
 

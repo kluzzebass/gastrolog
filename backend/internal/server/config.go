@@ -149,15 +149,11 @@ func (s *ConfigServer) loadConfigVaults(ctx context.Context, resp *apiv1.GetConf
 }
 
 func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
-	vc := &apiv1.VaultConfig{
+	return &apiv1.VaultConfig{
 		Id:      vaultCfg.ID.String(),
 		Name:    vaultCfg.Name,
 		Enabled: vaultCfg.Enabled,
 	}
-	for _, tid := range vaultCfg.TierIDs {
-		vc.TierIds = append(vc.TierIds, tid.String())
-	}
-	return vc
 }
 
 func (s *ConfigServer) loadConfigIngesters(ctx context.Context, resp *apiv1.GetConfigResponse) {
@@ -315,6 +311,8 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 			ReplicationFactor: tier.ReplicationFactor,
 			Path:              tier.Path,
 			Placements:        placements,
+			VaultId:           tier.VaultID.String(),
+			Position:          tier.Position,
 		}
 		if tier.RotationPolicyID != nil {
 			tc.RotationPolicyId = tier.RotationPolicyID.String()

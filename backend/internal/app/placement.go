@@ -14,6 +14,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/orchestrator"
 
+	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -86,11 +87,6 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		pm.logger.Error("placement: list tiers", "error", err)
 		return
 	}
-	vaults, err := pm.cfgStore.ListVaults(ctx)
-	if err != nil {
-		pm.logger.Error("placement: list vaults", "error", err)
-		return
-	}
 	nscs, err := pm.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
 		pm.logger.Error("placement: list node storage configs", "error", err)
@@ -115,11 +111,11 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 	}
 
-	// Build set of tier IDs actually referenced by vaults.
+	// Build set of tier IDs actually referenced by vaults (tiers with a VaultID).
 	referencedTiers := make(map[string]bool)
-	for _, v := range vaults {
-		for _, tid := range v.TierIDs {
-			referencedTiers[tid.String()] = true
+	for _, t := range tiers {
+		if t.VaultID != (uuid.UUID{}) {
+			referencedTiers[t.ID.String()] = true
 		}
 	}
 

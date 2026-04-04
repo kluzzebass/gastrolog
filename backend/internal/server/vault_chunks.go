@@ -10,6 +10,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/config"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/orchestrator"
 )
@@ -77,8 +78,9 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 	if err != nil {
 		return nil
 	}
-	tierIDs := make(map[uuid.UUID]bool, len(vaultCfg.TierIDs))
-	for _, tid := range vaultCfg.TierIDs {
+	vaultTierIDs := config.VaultTierIDs(tiers, vaultID)
+	tierIDs := make(map[uuid.UUID]bool, len(vaultTierIDs))
+	for _, tid := range vaultTierIDs {
 		tierIDs[tid] = true
 	}
 	seen := make(map[string]bool)

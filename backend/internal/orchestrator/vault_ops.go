@@ -38,7 +38,11 @@ func (o *Orchestrator) vaultManagers(vaultID uuid.UUID) (chunk.ChunkManager, ind
 	if s == nil {
 		return nil, nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return s.ChunkManager(), s.IndexManager(), nil
+	cm, im := s.ChunkManager(), s.IndexManager()
+	if cm == nil {
+		return nil, nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
+	}
+	return cm, im, nil
 }
 
 // chunkManager looks up the chunk manager for a vault under RLock.
@@ -49,7 +53,11 @@ func (o *Orchestrator) chunkManager(vaultID uuid.UUID) (chunk.ChunkManager, erro
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return s.ChunkManager(), nil
+	cm := s.ChunkManager()
+	if cm == nil {
+		return nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
+	}
+	return cm, nil
 }
 
 // indexManager looks up the index manager for a vault under RLock.
@@ -60,7 +68,11 @@ func (o *Orchestrator) indexManager(vaultID uuid.UUID) (index.IndexManager, erro
 	if s == nil {
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return s.IndexManager(), nil
+	im := s.IndexManager()
+	if im == nil {
+		return nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
+	}
+	return im, nil
 }
 
 // findChunkManagerForChunk searches all tiers in a vault for the chunk manager
@@ -504,6 +516,9 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	}
 
 	cm := vault.ChunkManager()
+	if cm == nil {
+		return chunk.ChunkID{}, 0, nil, nil, fmt.Errorf("%w: %s (no tiers)", ErrVaultNotFound, vaultID)
+	}
 	activeBefore := cm.Active()
 	cid, pos, err := cm.Append(rec)
 	if err != nil {
@@ -519,7 +534,7 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	activeTier := vault.ActiveTier()
 	var task *replicationTask
 	var remotes []remoteForwardTarget
-	if activeTier.ShouldForwardToFollowers() {
+	if activeTier != nil && activeTier.ShouldForwardToFollowers() {
 		if rec.WaitForReplica {
 			activeNow := cm.Active()
 			var activeChunkID chunk.ChunkID
@@ -707,6 +722,9 @@ func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
 	}
 
 	cm := vault.ChunkManager()
+	if cm == nil {
+		return nil // no tiers
+	}
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
 		return nil

@@ -383,35 +383,48 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) config.Stor
 		}
 	})
 
-	t.Run("VaultTierIDs", func(t *testing.T) {
+	t.Run("TierOwnership", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		id := newID()
+		vaultID := newID()
 		tierID1 := newID()
 		tierID2 := newID()
 		v := config.VaultConfig{
-			ID:      id,
+			ID:      vaultID,
 			Name:    "main",
 			Enabled: true,
-			TierIDs: []uuid.UUID{tierID1, tierID2},
 		}
 		if err := s.PutVault(ctx, v); err != nil {
-			t.Fatalf("Put: %v", err)
+			t.Fatalf("PutVault: %v", err)
+		}
+		if err := s.PutTier(ctx, config.TierConfig{ID: tierID1, Name: "t1", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0}); err != nil {
+			t.Fatalf("PutTier t1: %v", err)
+		}
+		if err := s.PutTier(ctx, config.TierConfig{ID: tierID2, Name: "t2", Type: config.TierTypeFile, VaultID: vaultID, Position: 1}); err != nil {
+			t.Fatalf("PutTier t2: %v", err)
 		}
 
-		got, err := s.GetVault(ctx, id)
+		got1, err := s.GetTier(ctx, tierID1)
 		if err != nil {
-			t.Fatalf("Get: %v", err)
+			t.Fatalf("GetTier t1: %v", err)
 		}
-		if len(got.TierIDs) != 2 {
-			t.Fatalf("expected 2 tier IDs, got %d", len(got.TierIDs))
+		if got1.VaultID != vaultID {
+			t.Errorf("tier1 VaultID: got %s, want %s", got1.VaultID, vaultID)
 		}
-		if got.TierIDs[0] != tierID1 {
-			t.Errorf("tierIDs[0]: got %s, want %s", got.TierIDs[0], tierID1)
+		if got1.Position != 0 {
+			t.Errorf("tier1 Position: got %d, want 0", got1.Position)
 		}
-		if got.TierIDs[1] != tierID2 {
-			t.Errorf("tierIDs[1]: got %s, want %s", got.TierIDs[1], tierID2)
+
+		got2, err := s.GetTier(ctx, tierID2)
+		if err != nil {
+			t.Fatalf("GetTier t2: %v", err)
+		}
+		if got2.VaultID != vaultID {
+			t.Errorf("tier2 VaultID: got %s, want %s", got2.VaultID, vaultID)
+		}
+		if got2.Position != 1 {
+			t.Errorf("tier2 Position: got %d, want 1", got2.Position)
 		}
 	})
 }
@@ -422,12 +435,10 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		tierID := newID()
 		v := config.VaultConfig{
 			ID:      id,
 			Name:    "main",
 			Enabled: true,
-			TierIDs: []uuid.UUID{tierID},
 		}
 
 		if err := s.PutVault(ctx, v); err != nil {
@@ -450,9 +461,6 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if !got.Enabled {
 			t.Error("Enabled: expected true")
 		}
-		if len(got.TierIDs) != 1 || got.TierIDs[0] != tierID {
-			t.Errorf("TierIDs: expected [%s], got %v", tierID, got.TierIDs)
-		}
 	})
 
 	t.Run("PutVaultUpsert", func(t *testing.T) {
@@ -460,14 +468,12 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
-		tierID1 := newID()
-		tierID2 := newID()
-		v1 := config.VaultConfig{ID: id, Name: "s1", TierIDs: []uuid.UUID{tierID1}}
+		v1 := config.VaultConfig{ID: id, Name: "s1", Enabled: true}
 		if err := s.PutVault(ctx, v1); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 
-		v2 := config.VaultConfig{ID: id, Name: "s1", TierIDs: []uuid.UUID{tierID2}}
+		v2 := config.VaultConfig{ID: id, Name: "s1-updated", Enabled: false}
 		if err := s.PutVault(ctx, v2); err != nil {
 			t.Fatalf("Put upsert: %v", err)
 		}
@@ -476,8 +482,11 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if len(got.TierIDs) != 1 || got.TierIDs[0] != tierID2 {
-			t.Errorf("TierIDs after upsert: expected [%s], got %v", tierID2, got.TierIDs)
+		if got.Name != "s1-updated" {
+			t.Errorf("Name after upsert: expected %q, got %q", "s1-updated", got.Name)
+		}
+		if got.Enabled {
+			t.Error("Enabled after upsert: expected false")
 		}
 
 		all, err := s.ListVaults(ctx)
@@ -554,12 +563,12 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 	})
 
-	t.Run("NilVaultTierIDs", func(t *testing.T) {
+	t.Run("VaultMinimalFields", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
 
 		id := newID()
-		v := config.VaultConfig{ID: id, Name: "s1", TierIDs: nil}
+		v := config.VaultConfig{ID: id, Name: "s1"}
 		if err := s.PutVault(ctx, v); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
@@ -568,8 +577,8 @@ func testVaults(t *testing.T, newStore func(t *testing.T) config.Store) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.TierIDs != nil {
-			t.Errorf("expected nil TierIDs, got %v", got.TierIDs)
+		if got.Enabled {
+			t.Error("expected Enabled to be false (zero value)")
 		}
 	})
 }
@@ -1649,12 +1658,15 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		ctx := context.Background()
 
 		id := newID()
+		vaultID := newID()
 		rpID := newID()
 		csID := newID()
 		tier := config.TierConfig{
 			ID:                id,
 			Name:              "hot",
 			Type:              config.TierTypeFile,
+			VaultID:           vaultID,
+			Position:          1,
 			RotationPolicyID:  &rpID,
 			MemoryBudgetBytes: 256 * 1024 * 1024,
 			StorageClass:      1,
@@ -1678,6 +1690,12 @@ func testTiers(t *testing.T, newStore func(t *testing.T) config.Store) {
 		}
 		if got.Type != config.TierTypeFile {
 			t.Errorf("Type: expected %q, got %q", config.TierTypeFile, got.Type)
+		}
+		if got.VaultID != vaultID {
+			t.Errorf("VaultID: expected %s, got %s", vaultID, got.VaultID)
+		}
+		if got.Position != 1 {
+			t.Errorf("Position: expected 1, got %d", got.Position)
 		}
 		if got.RotationPolicyID == nil || *got.RotationPolicyID != rpID {
 			t.Errorf("RotationPolicyID: expected %s, got %v", rpID, got.RotationPolicyID)

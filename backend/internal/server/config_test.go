@@ -93,13 +93,14 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore config.Store
 	}
 }
 
-// ensureMemoryTier creates a memory tier in the config store and returns its ID
-// as a string, suitable for use in proto VaultConfig.TierIds.
-func ensureMemoryTier(t *testing.T, cfgStore config.Store) string {
+// ensureMemoryTier creates a memory tier in the config store linked to the
+// given vault, and returns the tier ID as a string.
+func ensureMemoryTier(t *testing.T, cfgStore config.Store, vaultID uuid.UUID) string {
 	t.Helper()
 	tierID := uuid.Must(uuid.NewV7())
 	if err := cfgStore.PutTier(context.Background(), config.TierConfig{
 		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: config.TierTypeMemory,
+		VaultID: vaultID, Position: 0,
 	}); err != nil {
 		t.Fatalf("ensureMemoryTier: %v", err)
 	}
@@ -147,7 +148,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tierID := ensureMemoryTier(t, cfgStore)
+	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// Create a filter first, then a vault that uses it.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
@@ -162,7 +163,6 @@ func TestDeleteVaultForce(t *testing.T) {
 			Id:      vaultID.String(),
 			Name:    "test-vault",
 			Enabled: true,
-			TierIds: []string{tierID},
 		},
 	}))
 	if err != nil {
@@ -240,7 +240,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tierID := ensureMemoryTier(t, cfgStore)
+	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// Create a filter and a vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
@@ -255,7 +255,6 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 			Id:      vaultID.String(),
 			Name:    "pause-vault",
 			Enabled: true,
-			TierIds: []string{tierID},
 		},
 	}))
 	if err != nil {
@@ -358,10 +357,10 @@ func TestResumeVaultNotFoundRPC(t *testing.T) {
 func TestPauseVaultPersistsToConfig(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
-	tierID := ensureMemoryTier(t, cfgStore)
 
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
+	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// Create a filter and vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
@@ -376,7 +375,6 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 			Id:      vaultID.String(),
 			Name:    "persist-vault",
 			Enabled: true,
-			TierIds: []string{tierID},
 		},
 	}))
 	if err != nil {

@@ -143,12 +143,23 @@ func (s *VaultServer) MigrateVault(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("read source config: %w", err))
 	}
 
-	// Phase 1: Create destination vault with inherited tiers.
+	// Phase 1: Clone source tiers to destination vault, then create vault.
+	// Tiers must exist before AddVault so buildTierInstances can find them.
 	dstCfg := config.VaultConfig{
 		ID:      uuid.Must(uuid.NewV7()),
 		Name:    req.Msg.Destination,
 		Enabled: true,
-		TierIDs: srcCfg.TierIDs,
+	}
+
+	if s.cfgStore != nil {
+		srcTiers, _ := s.cfgStore.ListTiers(ctx)
+		for _, t := range config.VaultTiers(srcTiers, srcID) {
+			t.ID = uuid.Must(uuid.NewV7())
+			t.VaultID = dstCfg.ID
+			if err := s.cfgStore.PutTier(ctx, t); err != nil {
+				return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("clone tier: %w", err))
+			}
+		}
 	}
 
 	if err := s.createVault(ctx, dstCfg); err != nil {
@@ -491,20 +502,14 @@ func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID uu
 		return nil
 	}
 	// Find vault → tiers → cloud service.
-	for _, v := range cfg.Vaults {
-		if v.ID != vaultID {
+	for i := range cfg.Tiers {
+		t := &cfg.Tiers[i]
+		if t.VaultID != vaultID || t.CloudServiceID == nil {
 			continue
 		}
-		for _, tierID := range v.TierIDs {
-			for i := range cfg.Tiers {
-				t := &cfg.Tiers[i]
-				if t.ID == tierID && t.CloudServiceID != nil {
-					for j := range cfg.CloudServices {
-						if cfg.CloudServices[j].ID == *t.CloudServiceID {
-							return &cfg.CloudServices[j]
-						}
-					}
-				}
+		for j := range cfg.CloudServices {
+			if cfg.CloudServices[j].ID == *t.CloudServiceID {
+				return &cfg.CloudServices[j]
 			}
 		}
 	}

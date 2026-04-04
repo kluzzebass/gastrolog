@@ -271,20 +271,25 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 	tier3ID := uuid.Must(uuid.NewV7())
 	policyID := uuid.Must(uuid.NewV7())
 
+	vaultID := uuid.Must(uuid.NewV7())
 	vaultCfg := config.VaultConfig{
-		ID:      uuid.Must(uuid.NewV7()),
-		TierIDs: []uuid.UUID{tier1ID, tier2ID, tier3ID},
+		ID: vaultID,
 	}
 
 	cfg := &config.Config{
 		RetentionPolicies: []config.RetentionPolicyConfig{
 			{ID: policyID, MaxAge: func() *string { s := "1s"; return &s }()},
 		},
+		Tiers: []config.TierConfig{
+			{ID: tier1ID, VaultID: vaultID, Position: 0},
+			{ID: tier2ID, VaultID: vaultID, Position: 1},
+			{ID: tier3ID, VaultID: vaultID, Position: 2},
+		},
 	}
 
 	// Tier at position 0 (not last) — should be transition.
 	tier1Cfg := &config.TierConfig{
-		ID: tier1ID,
+		ID: tier1ID, VaultID: vaultID, Position: 0,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: policyID, Action: config.RetentionActionExpire}, // stored as expire
 		},
@@ -302,7 +307,7 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 
 	// Tier at position 2 (last) — should be expire.
 	tier3Cfg := &config.TierConfig{
-		ID: tier3ID,
+		ID: tier3ID, VaultID: vaultID, Position: 2,
 		RetentionRules: []config.RetentionRule{
 			{RetentionPolicyID: policyID, Action: config.RetentionActionTransition}, // stored as transition
 		},
@@ -1163,14 +1168,16 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 	// Set up config loader.
 	store := cfgmem.NewStore()
 	_ = store.PutVault(context.Background(), config.VaultConfig{
-		ID: vaultID, Name: "stress-transition", TierIDs: []uuid.UUID{tier0ID, tier1ID},
+		ID: vaultID, Name: "stress-transition",
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory,
+		VaultID: vaultID, Position: 0,
 		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	_ = store.PutTier(context.Background(), config.TierConfig{
 		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory,
+		VaultID: vaultID, Position: 1,
 		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
