@@ -55,10 +55,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 
 	// Slow transferrer: ForwardTierAppend takes 200ms.
 	transferrer := &slowAckTransferrer{delay: 200 * time.Millisecond}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.transferrer = transferrer
 
 	// Create a vault with a follower target so ack-gated records trigger replication.
@@ -125,10 +122,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 func TestStopWaitsForAuxGoroutines(t *testing.T) {
 	t.Parallel()
 
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)

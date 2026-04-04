@@ -127,21 +127,15 @@ func (f *fakeIngester) Run(ctx context.Context, out chan<- IngestMessage) error 
 }
 
 func TestApplyConfigNil(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = orch.ApplyConfig(nil, Factories{})
+	orch := newTestOrch(t, Config{})
+	err := orch.ApplyConfig(nil, Factories{})
 	if err != nil {
 		t.Errorf("expected nil error for nil config, got %v", err)
 	}
 }
 
 func TestApplyConfigVaults(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -166,7 +160,7 @@ func TestApplyConfigVaults(t *testing.T) {
 		Tiers:  []config.TierConfig{tc1, tc2},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -188,10 +182,7 @@ func TestApplyConfigVaults(t *testing.T) {
 }
 
 func TestApplyConfigIngesters(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
@@ -210,7 +201,7 @@ func TestApplyConfigIngesters(t *testing.T) {
 		},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -221,10 +212,7 @@ func TestApplyConfigIngesters(t *testing.T) {
 }
 
 func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
 	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
@@ -234,7 +222,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
-	err = orch.ApplyConfig(cfg, Factories{
+	err := orch.ApplyConfig(cfg, Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{},
 		IndexManagers: map[string]index.ManagerFactory{},
 	})
@@ -247,10 +235,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 }
 
 func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
 	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
@@ -269,7 +254,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -279,10 +264,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 }
 
 func TestApplyConfigUnknownIngesterType(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	cfg := &config.Config{
 		Ingesters: []config.IngesterConfig{
@@ -290,7 +272,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 		},
 	}
 
-	err = orch.ApplyConfig(cfg, Factories{
+	err := orch.ApplyConfig(cfg, Factories{
 		IngesterTypes: map[string]IngesterRegistration{},
 	})
 	if err == nil {
@@ -299,10 +281,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 }
 
 func TestApplyConfigDuplicateVaultID(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -325,17 +304,14 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 		Tiers:  []config.TierConfig{tc1},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err == nil {
 		t.Error("expected error for duplicate vault ID")
 	}
 }
 
 func TestApplyConfigDuplicateIngesterID(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
@@ -353,17 +329,14 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 		},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err == nil {
 		t.Error("expected error for duplicate ingester ID")
 	}
 }
 
 func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
 	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
@@ -386,7 +359,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -396,10 +369,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 }
 
 func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
 	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
@@ -422,7 +392,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -432,10 +402,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 }
 
 func TestApplyConfigIngesterFactoryError(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
@@ -451,17 +418,14 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 		},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err == nil {
 		t.Error("expected error from ingester factory")
 	}
 }
 
 func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	var receivedParams map[string]string
 	factories := Factories{
@@ -482,7 +446,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 		},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -496,10 +460,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 }
 
 func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	var cmReceivedParams map[string]string
 	var imReceivedParams map[string]string
@@ -537,7 +498,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -553,10 +514,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 }
 
 func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
-	orch, err := New(Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{})
 
 	expectedCM := &fakeChunkManager{}
 	var receivedCM chunk.ChunkManager
@@ -582,7 +540,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 		Tiers:  []config.TierConfig{tc},
 	}
 
-	err = orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(cfg, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

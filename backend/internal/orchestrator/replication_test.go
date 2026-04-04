@@ -112,10 +112,7 @@ func testRecord(raw string) chunk.Record {
 
 func TestSealActiveTier(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -145,10 +142,7 @@ func TestSealActiveTier(t *testing.T) {
 
 func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -182,10 +176,7 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 
 func TestSealActiveTierTierNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -193,7 +184,7 @@ func TestSealActiveTierTierNotFound(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	wrongTierID := uuid.Must(uuid.NewV7())
-	err = orch.SealActiveTier(vaultID, wrongTierID, chunk.ChunkID{})
+	err := orch.SealActiveTier(vaultID, wrongTierID, chunk.ChunkID{})
 	if !errors.Is(err, ErrVaultNotFound) {
 		t.Errorf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -201,10 +192,7 @@ func TestSealActiveTierTierNotFound(t *testing.T) {
 
 func TestSealActiveTierNoActiveChunk(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -212,7 +200,7 @@ func TestSealActiveTierNoActiveChunk(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	// No records appended — no active chunk.
-	err = orch.SealActiveTier(vaultID, tierID, chunk.ChunkID{})
+	err := orch.SealActiveTier(vaultID, tierID, chunk.ChunkID{})
 	if err != nil {
 		t.Errorf("expected nil error for no active chunk, got %v", err)
 	}
@@ -224,10 +212,7 @@ func TestSealActiveTierNoActiveChunk(t *testing.T) {
 
 func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -239,7 +224,7 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	orch.transferrer = mock
 
 	// No sealed chunks — catchup should be a no-op.
-	err = orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
+	err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -247,10 +232,7 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 
 func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -258,7 +240,7 @@ func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, true, "node-2"))
 	orch.RegisterVault(vault)
 
-	err = orch.catchupFollower(context.Background(), vaultID, tierID, "node-3")
+	err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-3")
 	if err != nil {
 		t.Fatalf("expected nil (no-op) for follower, got %v", err)
 	}
@@ -266,10 +248,7 @@ func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 
 func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -277,7 +256,7 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	orch.RegisterVault(vault)
 	// No transferrer set.
 
-	err = orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
+	err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
 	if err == nil {
 		t.Fatal("expected error for missing transferrer")
 	}

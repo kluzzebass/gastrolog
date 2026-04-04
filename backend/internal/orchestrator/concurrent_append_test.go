@@ -41,10 +41,7 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	tier := &TierInstance{
 		TierID: tierID, Type: "file",
@@ -192,10 +189,7 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
 	})
 
-	orch, err := New(Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
 	// Stop scheduler — we drive transitions manually.
 	_ = orch.Scheduler().Stop()
 
@@ -379,10 +373,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	tier := &TierInstance{TierID: tierID, Type: "file", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}
 	orch.RegisterVault(NewVault(vaultID, tier))
@@ -496,10 +487,7 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
 	})
 
-	orch, err := New(Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	orch.RegisterVault(NewVault(vaultID, tier0, tier1))
@@ -673,10 +661,7 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 		ID: nextTierID, Name: "local", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 	})
 
-	orch, err := New(Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	orch.RegisterVault(NewVault(vaultID, cloudTier, nextTier))
@@ -751,10 +736,7 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
 	})
 
-	orch, err := New(Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	orch.RegisterVault(NewVault(vaultID, tier0, tier1))

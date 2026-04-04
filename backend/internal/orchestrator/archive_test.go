@@ -48,10 +48,7 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 		Placements: syntheticPlacements(nodeID),
 	})
 
-	orch, err := New(Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	tier := &TierInstance{TierID: tierID, Type: "cloud", Chunks: cm, Indexes: im, Query: query.New(cm, im, nil)}

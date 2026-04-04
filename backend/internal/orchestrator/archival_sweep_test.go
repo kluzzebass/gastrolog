@@ -64,13 +64,10 @@ func archivalTestSetup(t *testing.T, transitions []config.CloudStorageTransition
 		RestoreDays:  7,
 	})
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		LocalNodeID:  nodeID,
 		ConfigLoader: &transitionConfigLoader{store: store},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	_ = orch.Scheduler().Stop()
 
 	tier := &TierInstance{
@@ -596,13 +593,10 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 	nodes := make(map[string]*clusterTestNode)
 
 	for _, nid := range nodeIDs {
-		orch, err := New(Config{
+		orch := newTestOrch(t, Config{
 			LocalNodeID:  nid,
 			ConfigLoader: &transitionConfigLoader{store: store},
 		})
-		if err != nil {
-			t.Fatal(err)
-		}
 		_ = orch.Scheduler().Stop()
 		orchs[nid] = orch
 
@@ -1160,13 +1154,10 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		LocalNodeID:  nodeID,
 		ConfigLoader: &transitionConfigLoader{store: store},
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	_ = orch.Scheduler().Stop()
 
 	tier := &TierInstance{

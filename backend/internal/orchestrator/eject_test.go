@@ -224,13 +224,10 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 		},
 	}}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	dstCM := &ejectFakeChunkManager{
 		retentionFakeChunkManager: retentionFakeChunkManager{},
@@ -292,13 +289,10 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 
 	dstCM := &appendRecordingCM{}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Register destination vault locally.
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
@@ -366,13 +360,10 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 
 	dstCM := &appendRecordingCM{}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Register destination vault locally.
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
@@ -444,13 +435,10 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 	dstACM := &appendRecordingCM{}
 	dstBCM := &appendRecordingCM{}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Register destination vaults locally.
 	orch.RegisterVault(NewVaultFromComponents(dstA, dstACM, nil, nil))
 	orch.RegisterVault(NewVaultFromComponents(dstB, dstBCM, nil, nil))
@@ -512,13 +500,10 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 
 	mock := &ejectFakeTransferrer{failErr: errTest}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	orch.SetRemoteTransferrer(mock)
 
 	r := &retentionRunner{
@@ -572,13 +557,10 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 		},
 	}}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	r := &retentionRunner{
 		isLeader: true,
@@ -630,13 +612,10 @@ func TestEjectChunkNoFilter(t *testing.T) {
 
 	mock := &ejectFakeTransferrer{}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	orch.SetRemoteTransferrer(mock)
 
 	r := &retentionRunner{
@@ -700,13 +679,10 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 
 	dstCM := &appendRecordingCM{}
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: loader,
 		LocalNodeID:  "node-A",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 	// Register destination vault locally.
 	orch.RegisterVault(NewVaultFromComponents(dstVaultID, dstCM, nil, nil))
 
@@ -825,13 +801,10 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	}
 	dstIM := indexfile.NewManager(dstDir, nil, nil)
 
-	orch, err := New(Config{
+	orch := newTestOrch(t, Config{
 		ConfigLoader: &transitionConfigLoader{store: store},
 		LocalNodeID:  nodeID,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	srcTier := &TierInstance{TierID: srcTierID, Type: "file", Chunks: srcCM, Indexes: srcIM, Query: query.New(srcCM, srcIM, nil)}
 	dstTier := &TierInstance{TierID: dstTierID, Type: "file", Chunks: dstCM, Indexes: dstIM, Query: query.New(dstCM, dstIM, nil)}

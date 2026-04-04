@@ -52,6 +52,19 @@ func makeRecord(raw string) chunk.Record {
 	}
 }
 
+// newTestOrch creates an Orchestrator and registers t.Cleanup to stop the
+// scheduler. Without this, leaked gocron goroutines cause massive race
+// detector overhead (168 orchestrators × background cron jobs).
+func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
+	t.Helper()
+	orch, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(orch.Close)
+	return orch
+}
+
 func newMemoryTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
@@ -81,10 +94,7 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.
 	tier0 := newMemoryTierInstance(t, tier0ID)
 	tier1 := newMemoryTierInstance(t, tier1ID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier0, tier1)
 	vault.Name = "test-vault"
@@ -252,10 +262,7 @@ func TestTransitionTerminalTier(t *testing.T) {
 	nodeID := "test-node"
 
 	tier := newMemoryTierInstance(t, tierID)
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier) // single tier = terminal
 	vault.Name = "terminal"
@@ -484,10 +491,7 @@ func TestTransitionCrossNode(t *testing.T) {
 	remoteNode := "remote-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
-	orch, err := New(Config{LocalNodeID: localNode})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: localNode})
 
 	// Only tier 0 is local; tier 1 is on a remote node.
 	vault := NewVault(vaultID, tier0)
@@ -557,10 +561,7 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 	remoteNode := "remote-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
-	orch, err := New(Config{LocalNodeID: localNode})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: localNode})
 
 	vault := NewVault(vaultID, tier0)
 	vault.Name = "fail"
@@ -614,10 +615,7 @@ func TestTransitionNoTransferrer(t *testing.T) {
 	remoteNode := "remote-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
-	orch, err := New(Config{LocalNodeID: localNode})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: localNode})
 
 	vault := NewVault(vaultID, tier0)
 	vault.Name = "no-xfer"
@@ -723,10 +721,7 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, cloudTier, nextTier)
 	vault.Name = "ttl-cloud"
@@ -888,10 +883,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 		Logger:    slog.Default(),
 	}
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 	defer orch.Stop()
 
 	store := cfgmem.NewStore()
@@ -1210,10 +1202,7 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, cloudTier, nextTier)
 	vault.Name = "cloud-transition"
@@ -1323,10 +1312,7 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, cloudTier, nextTier)
 	vault.Name = "cloud-sweep"
@@ -1570,10 +1556,7 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 	tier1 := newMemoryTierInstance(t, tier1ID)
 	tier2 := newMemoryTierInstance(t, tier2ID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier0, tier1, tier2)
 	vault.Name = "three-tier"
@@ -1660,10 +1643,7 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 	tier1, tier1Dir := newFileTierInstance(t, tier1ID)
 	tier2, _ := newCloudFileTier(t, tier2ID, vaultID, cloudStore)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier0, tier1, tier2)
 	vault.Name = "file-file-cloud"
@@ -1855,10 +1835,7 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, cloudTier, nextTier)
 	vault.Name = "eventid-cloud"
@@ -1941,10 +1918,7 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 	tier0, tier0Dir := newFileTierInstance(t, tier0ID)
 	tier1, _ := newFileTierInstance(t, tier1ID)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier0, tier1)
 	vault.Name = "count-accuracy"
@@ -2032,10 +2006,7 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 	tier0 := newMemoryTierInstance(t, tier0ID)
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier0, cloudTier)
 	vault.Name = "cloud-search"
@@ -2115,10 +2086,7 @@ func TestTransitionCloudUploadOnlyOneBlob(t *testing.T) {
 	cloudStore := blobstore.NewMemory()
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, cloudStore)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, cloudTier)
 	vault.Name = "one-blob"
@@ -2419,10 +2387,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	nodes := make(map[string]*clusterTestNode)
 
 	for _, nid := range nodeIDs {
-		orch, err := New(Config{LocalNodeID: nid})
-		if err != nil {
-			t.Fatal(err)
-		}
+		orch := newTestOrch(t, Config{LocalNodeID: nid})
 		orch.cfgLoader = &transitionConfigLoader{store: store}
 		orchs[nid] = orch
 

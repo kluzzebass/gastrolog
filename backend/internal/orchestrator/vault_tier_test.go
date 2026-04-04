@@ -68,10 +68,7 @@ func smallRecords(n int) []chunk.Record {
 
 func TestImportToTierPreservesChunkID(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -81,7 +78,7 @@ func TestImportToTierPreservesChunkID(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	targetID := chunk.NewChunkID()
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, targetID, testIter(smallRecords(5)))
+	err := orch.ImportToTier(context.Background(), vaultID, tierID, targetID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,10 +103,7 @@ func TestImportToTierPreservesChunkID(t *testing.T) {
 
 func TestImportToTierConcurrentSafe(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -161,10 +155,7 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 
 func TestListAllChunkMetasIncludesAllTiers(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tier1ID := uuid.Must(uuid.NewV7())
 	tier2ID := uuid.Must(uuid.NewV7())
@@ -214,10 +205,7 @@ func TestListAllChunkMetasIncludesAllTiers(t *testing.T) {
 
 func TestLocalPrimaryTierIDsExcludesFollowers(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	primaryTierID := uuid.Must(uuid.NewV7())
 	followerTierID := uuid.Must(uuid.NewV7())
@@ -242,10 +230,7 @@ func TestLocalPrimaryTierIDsExcludesFollowers(t *testing.T) {
 
 func TestTierReplicationInfoSkipsFollowers(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	primaryTierID := uuid.Must(uuid.NewV7())
 	followerTierID := uuid.Must(uuid.NewV7())
@@ -338,10 +323,7 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 
 func TestImportToTierIdempotent(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -353,7 +335,7 @@ func TestImportToTierIdempotent(t *testing.T) {
 	chunkID := chunk.NewChunkID()
 
 	// First import — should succeed.
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -419,10 +401,7 @@ func (f *tierTestForwarder) getCalls() []tierForwardCall {
 func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -465,10 +444,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
-	orch, err := New(Config{LocalNodeID: "node-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -491,10 +467,7 @@ func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 
 func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -520,10 +493,7 @@ func TestAppendToTierSecondaryUsesChunkID(t *testing.T) {
 
 func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -577,10 +547,7 @@ func TestAppendToTierSecondarySkipsPostSeal(t *testing.T) {
 
 func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -606,7 +573,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 
 	// Primary seals and sends canonical version. ImportToTier should
 	// seal the active chunk and keep it (no delete-and-replace).
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatalf("ImportToTier: %v", err)
 	}
@@ -626,10 +593,7 @@ func TestImportToTierSecondarySealsActiveAndKeeps(t *testing.T) {
 
 func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -653,7 +617,7 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 	}
 
 	// ImportToTier should replace the forwarded version with canonical.
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
+	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, testIter(smallRecords(5)))
 	if err != nil {
 		t.Fatalf("ImportToTier: %v", err)
 	}
@@ -684,10 +648,7 @@ func TestImportToTierSecondaryKeepsSealedForwarded(t *testing.T) {
 
 func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	// No forwarder set — single-node mode.
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -714,15 +675,12 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 
 func TestAppendToTierVaultNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	bogusVaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
 
-	err = orch.AppendToTier(bogusVaultID, tierID, chunk.ChunkID{}, testRecord("data"))
+	err := orch.AppendToTier(bogusVaultID, tierID, chunk.ChunkID{}, testRecord("data"))
 	if err == nil {
 		t.Fatal("expected error for non-existent vault")
 	}
@@ -733,10 +691,7 @@ func TestAppendToTierVaultNotFound(t *testing.T) {
 
 func TestAppendToTierTierNotFound(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -746,7 +701,7 @@ func TestAppendToTierTierNotFound(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	bogusTierID := uuid.Must(uuid.NewV7())
-	err = orch.AppendToTier(vaultID, bogusTierID, chunk.ChunkID{}, testRecord("data"))
+	err := orch.AppendToTier(vaultID, bogusTierID, chunk.ChunkID{}, testRecord("data"))
 	if err == nil {
 		t.Fatal("expected error for non-existent tier")
 	}
@@ -757,10 +712,7 @@ func TestAppendToTierTierNotFound(t *testing.T) {
 
 func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -795,7 +747,7 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 		}, nil
 	}
 
-	err = orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, trackingIter)
+	err := orch.ImportToTier(context.Background(), vaultID, tierID, chunkID, trackingIter)
 	if err != nil {
 		t.Fatalf("ImportToTier: %v", err)
 	}
@@ -808,10 +760,7 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 func TestAppendToTierForwardLifecycle(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -903,10 +852,7 @@ func (m *ackTestTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid
 func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -949,10 +895,7 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -995,10 +938,7 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 func TestIngestReturnsReplicationTasks(t *testing.T) {
 	t.Parallel()
 	fwd := &tierTestForwarder{}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
@@ -1033,10 +973,7 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 func TestAckAfterReplicationSuccess(t *testing.T) {
 	t.Parallel()
 	mock := &ackTestTransferrer{}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.transferrer = mock
 
 	tasks := []replicationTask{
@@ -1070,10 +1007,7 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 	mock := &ackTestTransferrer{
 		tierAppendErr: errors.New("replication failed"),
 	}
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.transferrer = mock
 
 	tasks := []replicationTask{
@@ -1110,10 +1044,7 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 // drops) with the canonical version containing all records.
 func TestImportToTierReplacesIncompleteForwardedChunk(t *testing.T) {
 	t.Parallel()
-	orch, err := New(Config{LocalNodeID: "node-2"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -1223,10 +1154,7 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 		Query:   query.New(tier1cm, tier1im, nil),
 	}
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 
 	vault := NewVault(vaultID, tier0, tier1)
 	vault.Name = "stress-transition"
@@ -1341,10 +1269,7 @@ func TestTransitionLocalCursorErrorRetainsSource(t *testing.T) {
 	tier0 := newMemTier(t, tier0ID, false, nil)
 	tier1 := newMemTier(t, tier1ID, false, nil)
 
-	orch, err := New(Config{LocalNodeID: nodeID})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 	vault := NewVault(vaultID, tier0, tier1)
 	vault.Name = "cursor-error"
 	orch.RegisterVault(vault)
@@ -1418,10 +1343,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 		returnErr: errors.New("simulated network partition"),
 	}
 
-	orch, err := New(Config{LocalNodeID: "node-1"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetRecordForwarder(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
