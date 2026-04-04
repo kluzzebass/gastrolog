@@ -11,6 +11,7 @@ import (
 // Factory parameter keys.
 const (
 	ParamMaxRecords = "maxRecords"
+	ParamMaxBytes   = "maxBytes" // per-chunk byte limit (from MemoryBudgetBytes)
 )
 
 // Default values.
@@ -25,6 +26,8 @@ func NewFactory() chunk.ManagerFactory {
 			Logger: logger,
 		}
 
+		var policies []chunk.RotationPolicy
+
 		maxRecords := int64(DefaultMaxRecords)
 		if v, ok := params[ParamMaxRecords]; ok {
 			n, err := strconv.ParseInt(v, 10, 64)
@@ -36,7 +39,19 @@ func NewFactory() chunk.ManagerFactory {
 			}
 			maxRecords = n
 		}
-		cfg.RotationPolicy = chunk.NewRecordCountPolicy(uint64(maxRecords)) //nolint:gosec // G115: maxRecords validated > 0 above
+		policies = append(policies, chunk.NewRecordCountPolicy(uint64(maxRecords))) //nolint:gosec // G115: validated > 0
+
+		if v, ok := params[ParamMaxBytes]; ok {
+			n, err := strconv.ParseUint(v, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid %s: %w", ParamMaxBytes, err)
+			}
+			if n > 0 {
+				policies = append(policies, chunk.NewSizePolicy(n))
+			}
+		}
+
+		cfg.RotationPolicy = chunk.NewCompositePolicy(policies...)
 
 		return NewManager(cfg)
 	}

@@ -164,6 +164,20 @@ func (m *Manager) Active() *chunk.ChunkMeta {
 	return &meta
 }
 
+// TotalBytes returns the total memory used by all chunks (active + sealed).
+func (m *Manager) TotalBytes() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var total int64
+	if m.active != nil {
+		total += m.active.size
+	}
+	for _, s := range m.chunks {
+		total += s.size
+	}
+	return total
+}
+
 func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	state := m.findChunkLocked(id)
