@@ -45,6 +45,9 @@ func putTierCmd(tier config.TierConfig) *gastrologv1.PutTierCommand {
 		Placements:        placements,
 		VaultId:           tier.VaultID.String(),
 		Position:          tier.Position,
+		CacheEviction:     tier.CacheEviction,
+		CacheBudget:       tier.CacheBudget,
+		CacheTtl:          tier.CacheTTL,
 	}
 }
 
@@ -128,6 +131,9 @@ func ExtractPutTier(cmd *gastrologv1.PutTierCommand) (config.TierConfig, error) 
 		Placements:        placements,
 		VaultID:           vaultID,
 		Position:          cmd.GetPosition(),
+		CacheEviction:     cmd.GetCacheEviction(),
+		CacheBudget:       cmd.GetCacheBudget(),
+		CacheTTL:          cmd.GetCacheTtl(),
 	}, nil
 }
 

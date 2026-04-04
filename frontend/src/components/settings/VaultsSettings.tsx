@@ -30,6 +30,9 @@ export interface TierEntry {
   cloudServiceId: string;
   activeChunkClass: string;
   cacheClass: string;
+  cacheEviction: string;
+  cacheBudget: string;
+  cacheTTL: string;
   memoryBudget: string;
   rotationPolicyId: string;
   retentionPolicyId: string;
@@ -46,6 +49,9 @@ export function emptyTierEntry(type: TierTypeLabel): TierEntry {
     cloudServiceId: "",
     activeChunkClass: "",
     cacheClass: "",
+    cacheEviction: "lru",
+    cacheBudget: "",
+    cacheTTL: "",
     memoryBudget: "",
     rotationPolicyId: "",
     retentionPolicyId: "",
@@ -369,6 +375,43 @@ export function TierEntryCard({
               )}
             </FormField>
           </div>
+          {tier.cacheClass !== "" && tier.cacheClass !== "0" && (
+            <>
+              <FormField label="Cache Eviction" dark={dark}>
+                <SelectInput
+                  value={tier.cacheEviction || "lru"}
+                  onChange={(v) => onUpdate({ cacheEviction: v })}
+                  options={[
+                    { value: "lru", label: "LRU — evict oldest when over budget" },
+                    { value: "ttl", label: "TTL — evict after max age" },
+                  ]}
+                  dark={dark}
+                />
+              </FormField>
+              <FormField label="Cache Budget" dark={dark}>
+                <TextInput
+                  value={tier.cacheBudget}
+                  onChange={(v) => onUpdate({ cacheBudget: v })}
+                  placeholder="1GiB"
+                  dark={dark}
+                  mono
+                  examples={["500MB", "1GiB", "5GB", "10GB"]}
+                />
+              </FormField>
+              {(tier.cacheEviction === "ttl") && (
+                <FormField label="Cache TTL" dark={dark}>
+                  <TextInput
+                    value={tier.cacheTTL}
+                    onChange={(v) => onUpdate({ cacheTTL: v })}
+                    placeholder=""
+                    dark={dark}
+                    mono
+                    examples={["1h", "12h", "1d", "7d"]}
+                  />
+                </FormField>
+              )}
+            </>
+          )}
         </>
       )}
 
@@ -558,6 +601,9 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
         activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
         cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
+        cacheEviction: tier.type === "cloud" ? (tier.cacheEviction || "lru") : "",
+        cacheBudget: tier.type === "cloud" ? (tier.cacheBudget || "") : "",
+        cacheTtl: tier.type === "cloud" ? (tier.cacheTTL || "") : "",
         memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
         rotationPolicyId: tier.rotationPolicyId,
         retentionRules: tier.retentionPolicyId

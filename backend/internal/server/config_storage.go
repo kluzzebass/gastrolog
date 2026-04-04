@@ -405,6 +405,9 @@ func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
 		ReplicationFactor: p.ReplicationFactor,
 		Path:              p.Path,
 		Position:          p.Position,
+		CacheEviction:     p.CacheEviction,
+		CacheBudget:  p.CacheBudget,
+		CacheTTL:          p.CacheTtl,
 	}
 
 	if p.VaultId != "" {

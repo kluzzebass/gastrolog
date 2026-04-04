@@ -335,6 +335,9 @@ message PutTierCommand {
   repeated TierPlacementEntry placements = 15;
   string vault_id = 16;
   uint32 position = 17;
+  string cache_eviction = 18;
+  string cache_budget = 19;
+  string cache_ttl = 20;
 }
 
 message TierPlacementEntry {

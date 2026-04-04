@@ -5644,6 +5644,9 @@ type TierConfig struct {
 	Placements        []*TierPlacement       `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
 	VaultId           string                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                // owning vault — exactly one vault per tier
 	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`                                            // 0-based order within the vault's tier chain
+	CacheEviction     string                 `protobuf:"bytes,18,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`              // "lru" (default) or "ttl"
+	CacheBudget       string                 `protobuf:"bytes,19,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                    // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+	CacheTtl          string                 `protobuf:"bytes,20,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`                             // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -5781,6 +5784,27 @@ func (x *TierConfig) GetPosition() uint32 {
 		return x.Position
 	}
 	return 0
+}
+
+func (x *TierConfig) GetCacheEviction() string {
+	if x != nil {
+		return x.CacheEviction
+	}
+	return ""
+}
+
+func (x *TierConfig) GetCacheBudget() string {
+	if x != nil {
+		return x.CacheBudget
+	}
+	return ""
+}
+
+func (x *TierConfig) GetCacheTtl() string {
+	if x != nil {
+		return x.CacheTtl
+	}
+	return ""
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.
@@ -7788,7 +7812,7 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\"\xd5\x04\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\"\xbc\x05\n" +
 	"\n" +
 	"TierConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
@@ -7809,7 +7833,10 @@ const file_gastrolog_v1_config_proto_rawDesc = "" +
 	"placements\x18\x0f \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
 	"placements\x12\x19\n" +
 	"\bvault_id\x18\x10 \x01(\tR\avaultId\x12\x1a\n" +
-	"\bposition\x18\x11 \x01(\rR\bposition\"F\n" +
+	"\bposition\x18\x11 \x01(\rR\bposition\x12%\n" +
+	"\x0ecache_eviction\x18\x12 \x01(\tR\rcacheEviction\x12!\n" +
+	"\fcache_budget\x18\x13 \x01(\tR\vcacheBudget\x12\x1b\n" +
+	"\tcache_ttl\x18\x14 \x01(\tR\bcacheTtl\"F\n" +
 	"\rTierPlacement\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x16\n" +

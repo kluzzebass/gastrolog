@@ -723,6 +723,9 @@ message TierConfig {
   repeated TierPlacement placements = 15; // system-managed: file storage assignments by placement manager
   string vault_id = 16;                   // owning vault — exactly one vault per tier
   uint32 position = 17;                   // 0-based order within the vault's tier chain
+  string cache_eviction = 18;             // "lru" (default) or "ttl"
+  string cache_budget = 19;              // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
+  string cache_ttl = 20;                  // eviction TTL duration (e.g. "1h", "7d"); only for ttl mode
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.

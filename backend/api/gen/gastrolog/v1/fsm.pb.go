@@ -2962,6 +2962,9 @@ type PutTierCommand struct {
 	Placements        []*TierPlacementEntry  `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`
 	VaultId           string                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`
+	CacheEviction     string                 `protobuf:"bytes,18,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`
+	CacheBudget       string                 `protobuf:"bytes,19,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`
+	CacheTtl          string                 `protobuf:"bytes,20,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -3099,6 +3102,27 @@ func (x *PutTierCommand) GetPosition() uint32 {
 		return x.Position
 	}
 	return 0
+}
+
+func (x *PutTierCommand) GetCacheEviction() string {
+	if x != nil {
+		return x.CacheEviction
+	}
+	return ""
+}
+
+func (x *PutTierCommand) GetCacheBudget() string {
+	if x != nil {
+		return x.CacheBudget
+	}
+	return ""
+}
+
+func (x *PutTierCommand) GetCacheTtl() string {
+	if x != nil {
+		return x.CacheTtl
+	}
+	return ""
 }
 
 type TierPlacementEntry struct {
@@ -3608,7 +3632,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\xcb\x04\n" +
+	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\xb2\x05\n" +
 	"\x0ePutTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
@@ -3628,7 +3652,10 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"placements\x18\x0f \x03(\v2 .gastrolog.v1.TierPlacementEntryR\n" +
 	"placements\x12\x19\n" +
 	"\bvault_id\x18\x10 \x01(\tR\avaultId\x12\x1a\n" +
-	"\bposition\x18\x11 \x01(\rR\bposition\"M\n" +
+	"\bposition\x18\x11 \x01(\rR\bposition\x12%\n" +
+	"\x0ecache_eviction\x18\x12 \x01(\tR\rcacheEviction\x12!\n" +
+	"\fcache_budget\x18\x13 \x01(\tR\vcacheBudget\x12\x1b\n" +
+	"\tcache_ttl\x18\x14 \x01(\tR\bcacheTtl\"M\n" +
 	"\x12TierPlacementEntry\x12\x1d\n" +
 	"\n" +
 	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x18\n" +

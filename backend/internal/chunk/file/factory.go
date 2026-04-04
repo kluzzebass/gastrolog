@@ -77,6 +77,15 @@ func NewFactory() chunk.ManagerFactory {
 		if v := params["cache_dir"]; v != "" {
 			cfg.CacheDir = v
 		}
+		if v := params["cache_eviction"]; v != "" {
+			cfg.CacheEviction = v
+		}
+		if v := params["cache_budget"]; v != "" {
+			cfg.CacheBudget = v
+		}
+		if v := params["cache_ttl"]; v != "" {
+			cfg.CacheTTL = v
+		}
 
 		return NewManager(cfg)
 	}

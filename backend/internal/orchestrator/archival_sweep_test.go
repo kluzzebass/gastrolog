@@ -1247,3 +1247,97 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 		}
 	}
 }
+
+// --- Cache eviction orchestrator tests ---
+
+func TestCacheEvictionViaRetentionSweep(t *testing.T) {
+	t.Parallel()
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	csID := uuid.Must(uuid.NewV7())
+	nodeID := "leader"
+
+	cloudStore := blobstore.NewMemory()
+	cacheDir := t.TempDir()
+
+	store := cfgmem.NewStore()
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
+		VaultID: vaultID, Position: 0,
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "eviction-test",
+	})
+	_ = store.PutCloudService(context.Background(), config.CloudService{
+		ID: csID, Name: "test-cloud", Provider: "memory",
+	})
+
+	dir := t.TempDir()
+	cm, err := chunkfile.NewManager(chunkfile.Config{
+		Dir: dir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(50),
+		CloudStore: cloudStore, VaultID: vaultID,
+		CacheDir: cacheDir, CacheEviction: "lru", CacheBudget: "1", // tiny budget
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	im := indexfile.NewManager(dir, nil, nil)
+
+	orch := newTestOrch(t, Config{
+		LocalNodeID:  nodeID,
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+
+	tier := &TierInstance{
+		TierID: tierID, Type: "cloud",
+		Chunks: cm, Indexes: im, Query: query.New(cm, im, nil),
+	}
+	orch.RegisterVault(NewVault(vaultID, tier))
+
+	// Ingest, seal, upload — populates cache.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "evict-%d", i),
+		})
+	}
+	if active := cm.Active(); active != nil && active.RecordCount > 0 {
+		_ = cm.Seal()
+	}
+	metas, _ := cm.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = cm.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+
+	// Verify cache has files.
+	cacheEntries, _ := os.ReadDir(cacheDir)
+	var glcbBefore int
+	for _, e := range cacheEntries {
+		if filepath.Ext(e.Name()) == ".glcb" {
+			glcbBefore++
+		}
+	}
+	if glcbBefore == 0 {
+		t.Fatal("expected cache files after upload")
+	}
+
+	// Run retention sweep — triggers cache eviction.
+	orch.retentionSweepAll()
+
+	// With budget=1 byte, all cached files should be evicted.
+	cacheEntries, _ = os.ReadDir(cacheDir)
+	var glcbAfter int
+	for _, e := range cacheEntries {
+		if filepath.Ext(e.Name()) == ".glcb" {
+			glcbAfter++
+		}
+	}
+	if glcbAfter >= glcbBefore {
+		t.Errorf("expected eviction to reduce cache files: before=%d, after=%d", glcbBefore, glcbAfter)
+	}
+}

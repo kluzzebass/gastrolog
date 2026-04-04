@@ -178,6 +178,12 @@ type ChunkArchiver interface {
 	RestoreChunk(ctx context.Context, id ChunkID, tier string, days int) error
 }
 
+// ChunkCacheEvictor extends ChunkManager with cache eviction. The orchestrator
+// calls EvictCache periodically to enforce size/TTL limits on the warm cache.
+type ChunkCacheEvictor interface {
+	EvictCache()
+}
+
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {
 	Next() (Record, RecordRef, error)

@@ -126,6 +126,22 @@ func (o *Orchestrator) retentionSweepAll() {
 	for _, tier := range reconcileTiers {
 		o.reconcileFollower(tier)
 	}
+
+	// Cache eviction: collect evictors under lock, run outside.
+	// EvictCache does filesystem I/O — holding the lock would block Raft applies.
+	var evictors []chunk.ChunkCacheEvictor
+	o.mu.RLock()
+	for _, vault := range o.vaults {
+		for _, tier := range vault.Tiers {
+			if evictor, ok := tier.Chunks.(chunk.ChunkCacheEvictor); ok {
+				evictors = append(evictors, evictor)
+			}
+		}
+	}
+	o.mu.RUnlock()
+	for _, evictor := range evictors {
+		evictor.EvictCache()
+	}
 }
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the

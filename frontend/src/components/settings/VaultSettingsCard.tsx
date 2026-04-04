@@ -147,6 +147,9 @@ export function VaultSettingsCard({
     tierStorageClass: Record<string, string>; // tierId → storageClass (string during editing)
     tierActiveChunkClass: Record<string, string>;
     tierCacheClass: Record<string, string>;
+    tierCacheEviction: Record<string, string>;   // tierId → "lru" or "ttl"
+    tierCacheBudget: Record<string, string>;      // tierId → bytes as string
+    tierCacheTTL: Record<string, string>;         // tierId → duration string
   }
 
   const vaultTierConfigs = tiers.filter((t) => t.vaultId === vault.id);
@@ -173,6 +176,15 @@ export function VaultSettingsCard({
     ),
     tierCacheClass: Object.fromEntries(
       vaultTierConfigs.map((t) => [t.id, String(t.cacheClass || 0)]),
+    ),
+    tierCacheEviction: Object.fromEntries(
+      vaultTierConfigs.map((t) => [t.id, t.cacheEviction || "lru"]),
+    ),
+    tierCacheBudget: Object.fromEntries(
+      vaultTierConfigs.map((t) => [t.id, t.cacheBudget || ""]),
+    ),
+    tierCacheTTL: Object.fromEntries(
+      vaultTierConfigs.map((t) => [t.id, t.cacheTtl || ""]),
     ),
   });
 
@@ -206,6 +218,12 @@ export function VaultSettingsCard({
     setEditState((prev) => ({ ...prev, tierActiveChunkClass: { ...prev.tierActiveChunkClass, [tierId]: value } }));
   const setTierCacheClass = (tierId: string, value: string) =>
     setEditState((prev) => ({ ...prev, tierCacheClass: { ...prev.tierCacheClass, [tierId]: value } }));
+  const setTierCacheEviction = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierCacheEviction: { ...prev.tierCacheEviction, [tierId]: value } }));
+  const setTierCacheBudget = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierCacheBudget: { ...prev.tierCacheBudget, [tierId]: value } }));
+  const setTierCacheTTL = (tierId: string, value: string) =>
+    setEditState((prev) => ({ ...prev, tierCacheTTL: { ...prev.tierCacheTTL, [tierId]: value } }));
 
   const anyDirty = JSON.stringify(edit) !== initialJson || newTier !== null;
 
@@ -269,6 +287,9 @@ export function VaultSettingsCard({
         cloudServiceId: newTier.type === "cloud" ? newTier.cloudServiceId : "",
         activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
         cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
+        cacheEviction: newTier.type === "cloud" ? (newTier.cacheEviction || "lru") : "",
+        cacheBudget: newTier.type === "cloud" ? (newTier.cacheBudget || "") : "",
+        cacheTtl: newTier.type === "cloud" ? (newTier.cacheTTL || "") : "",
         memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
         rotationPolicyId: newTier.rotationPolicyId,
         retentionRules: newTier.retentionPolicyId
@@ -309,6 +330,9 @@ export function VaultSettingsCard({
       const acc = parseInt(accStr, 10) || 0;
       const ccStr = edit.tierCacheClass[tierId] ?? String(tier.cacheClass || 0);
       const cc = parseInt(ccStr, 10) || 0;
+      const ceStr = edit.tierCacheEviction[tierId] ?? (tier.cacheEviction || "lru");
+      const cbStr = edit.tierCacheBudget[tierId] ?? (tier.cacheBudget || "");
+      const ctStr = edit.tierCacheTTL[tierId] ?? (tier.cacheTtl || "");
 
       const expectedAction = retentionActionForPosition(tierIndex, newTierIds.length);
       const currentAction = tier.retentionRules[0]?.action;
@@ -320,10 +344,13 @@ export function VaultSettingsCard({
       const scChanged = sc !== (tier.storageClass || 0);
       const accChanged = acc !== (tier.activeChunkClass || 0);
       const ccChanged = cc !== (tier.cacheClass || 0);
+      const ceChanged = ceStr !== (tier.cacheEviction || "lru");
+      const cbChanged = cbStr !== (tier.cacheBudget || "");
+      const ctChanged = ctStr !== (tier.cacheTtl || "");
       const posChanged = tier.position !== tierIndex;
       const vaultIdChanged = tier.vaultId !== vault.id;
 
-      if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged && !posChanged && !vaultIdChanged) continue;
+      if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged && !ceChanged && !cbChanged && !ctChanged && !posChanged && !vaultIdChanged) continue;
 
       const updated = tier.clone();
       if (rotChanged) updated.rotationPolicyId = rpId;
@@ -331,6 +358,9 @@ export function VaultSettingsCard({
       if (scChanged) updated.storageClass = sc;
       if (accChanged) updated.activeChunkClass = acc;
       if (ccChanged) updated.cacheClass = cc;
+      if (ceChanged) updated.cacheEviction = ceStr;
+      if (cbChanged) updated.cacheBudget = cbStr || "";
+      if (ctChanged) updated.cacheTtl = ctStr;
       updated.vaultId = vault.id;
       updated.position = tierIndex;
       updated.retentionRules = retPolicyId
@@ -735,6 +765,43 @@ export function VaultSettingsCard({
                             />
                           </FormField>
                         </div>
+                      )}
+                      {tier.type === TierType.CLOUD && parseInt(edit.tierCacheClass[tier.id] ?? String(tier.cacheClass || 0), 10) > 0 && (
+                        <>
+                          <FormField label="Cache Eviction" dark={dark}>
+                            <SelectInput
+                              value={edit.tierCacheEviction[tier.id] ?? (tier.cacheEviction || "lru")}
+                              onChange={(v) => setTierCacheEviction(tier.id, v)}
+                              options={[
+                                { value: "lru", label: "LRU — evict oldest when over budget" },
+                                { value: "ttl", label: "TTL — evict after max age" },
+                              ]}
+                              dark={dark}
+                            />
+                          </FormField>
+                          <FormField label="Cache Budget" dark={dark}>
+                            <TextInput
+                              value={edit.tierCacheBudget[tier.id] ?? (tier.cacheBudget || "")}
+                              onChange={(v) => setTierCacheBudget(tier.id, v)}
+                              placeholder="1GiB"
+                              dark={dark}
+                              mono
+                              examples={["500MB", "1GiB", "5GB", "10GB"]}
+                            />
+                          </FormField>
+                          {(edit.tierCacheEviction[tier.id] ?? (tier.cacheEviction || "lru")) === "ttl" && (
+                            <FormField label="Cache TTL" dark={dark}>
+                              <TextInput
+                                value={edit.tierCacheTTL[tier.id] ?? (tier.cacheTtl || "")}
+                                onChange={(v) => setTierCacheTTL(tier.id, v)}
+                                placeholder=""
+                                dark={dark}
+                                mono
+                                examples={["1h", "12h", "1d", "7d"]}
+                              />
+                            </FormField>
+                          )}
+                        </>
                       )}
                       {tier.type !== TierType.JSONL && (
                         <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">

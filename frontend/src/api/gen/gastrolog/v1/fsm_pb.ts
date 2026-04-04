@@ -2266,6 +2266,21 @@ export class PutTierCommand extends Message<PutTierCommand> {
    */
   position = 0;
 
+  /**
+   * @generated from field: string cache_eviction = 18;
+   */
+  cacheEviction = "";
+
+  /**
+   * @generated from field: string cache_budget = 19;
+   */
+  cacheBudget = "";
+
+  /**
+   * @generated from field: string cache_ttl = 20;
+   */
+  cacheTtl = "";
+
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2289,6 +2304,9 @@ export class PutTierCommand extends Message<PutTierCommand> {
     { no: 15, name: "placements", kind: "message", T: TierPlacementEntry, repeated: true },
     { no: 16, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 17, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
+    { no: 18, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 19, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 20, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {

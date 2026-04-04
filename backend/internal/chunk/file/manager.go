@@ -73,8 +73,16 @@ type Config struct {
 
 	// CacheDir, when non-empty, enables local caching of cloud GLCB blobs.
 	// Cloud chunks are cached after upload and on first read, avoiding
-	// range-request round-trips. Eviction is managed externally.
+	// range-request round-trips.
 	CacheDir string
+
+	// CacheEviction selects the eviction policy: "lru" (default) or "ttl".
+	CacheEviction string
+	// CacheBudget is the max cache size as a human-readable string (e.g. "1GB", "500MB").
+	// Parsed via config.ParseSize. Default 1 GiB.
+	CacheBudget string
+	// CacheTTL is the max age of cached blobs (TTL mode only). Parsed via config.ParseDuration.
+	CacheTTL string
 
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.

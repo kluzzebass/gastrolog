@@ -126,6 +126,9 @@ func newTierCreateCmd() *cobra.Command {
 	cmd.Flags().String("cloud-service", "", "cloud service name or ID (required for cloud tiers)")
 	cmd.Flags().Uint32("active-chunk-class", 0, "storage class for cloud tier active chunks")
 	cmd.Flags().Uint32("cache-class", 0, "storage class for cloud tier read cache")
+	cmd.Flags().String("cache-eviction", "lru", "cache eviction strategy: lru or ttl")
+	cmd.Flags().String("cache-budget", "", "max cache size (e.g. 1GB, 500MB, 1GiB)")
+	cmd.Flags().String("cache-ttl", "", "cache TTL duration for ttl eviction mode (e.g. 1h, 7d)")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
@@ -151,6 +154,15 @@ func applyTierFlags(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	}
 	if cmd.Flags().Changed("cache-class") {
 		cfg.CacheClass, _ = cmd.Flags().GetUint32("cache-class")
+	}
+	if cmd.Flags().Changed("cache-eviction") {
+		cfg.CacheEviction, _ = cmd.Flags().GetString("cache-eviction")
+	}
+	if cmd.Flags().Changed("cache-budget") {
+		cfg.CacheBudget, _ = cmd.Flags().GetString("cache-budget")
+	}
+	if cmd.Flags().Changed("cache-ttl") {
+		cfg.CacheTtl, _ = cmd.Flags().GetString("cache-ttl")
 	}
 	if cmd.Flags().Changed("cloud-service") {
 		if err := resolveCloudService(ctx, cmd, client, cfg); err != nil {

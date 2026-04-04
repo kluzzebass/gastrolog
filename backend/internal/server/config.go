@@ -313,6 +313,9 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 			Placements:        placements,
 			VaultId:           tier.VaultID.String(),
 			Position:          tier.Position,
+			CacheEviction:     tier.CacheEviction,
+			CacheBudget:  tier.CacheBudget,
+			CacheTtl:          tier.CacheTTL,
 		}
 		if tier.RotationPolicyID != nil {
 			tc.RotationPolicyId = tier.RotationPolicyID.String()

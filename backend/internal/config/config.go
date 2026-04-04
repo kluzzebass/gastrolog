@@ -719,6 +719,9 @@ type TierConfig struct {
 	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
 	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
 	Placements        []TierPlacement `json:"placements,omitempty"`        // system-managed: storage assignments
+	CacheEviction string `json:"cacheEviction,omitempty"` // "lru" (default) or "ttl"
+	CacheBudget   string `json:"cacheBudget,omitempty"`   // max cache size (e.g. "1GB", "500MB", default: "1GiB")
+	CacheTTL      string `json:"cacheTtl,omitempty"`      // duration for TTL mode (e.g. "1h", "7d")
 }
 
 // TierPlacement assigns one replica of a tier to a specific file storage.

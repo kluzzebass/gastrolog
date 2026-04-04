@@ -1099,6 +1099,15 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.CacheClass); fs != nil {
 			params["cache_dir"] = filepath.Join(fs.Path, "cache", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
+		if tierCfg.CacheEviction != "" {
+			params["cache_eviction"] = tierCfg.CacheEviction
+		}
+		if tierCfg.CacheBudget != "" {
+			params["cache_budget"] = tierCfg.CacheBudget
+		}
+		if tierCfg.CacheTTL != "" {
+			params["cache_ttl"] = tierCfg.CacheTTL
+		}
 	}
 
 	return params
