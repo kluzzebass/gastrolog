@@ -20,6 +20,11 @@ type Config struct {
 	Now       func() time.Time
 	MetaStore chunk.MetaStore
 
+	// BudgetBytes is the total memory budget for this tier. When TotalBytes
+	// exceeds this, the orchestrator should accelerate transitions to the
+	// next tier. Zero means unlimited.
+	BudgetBytes uint64
+
 	// Logger for structured logging. If nil, logging is disabled.
 	// The manager scopes this logger with component="chunk-manager".
 	Logger *slog.Logger
@@ -162,6 +167,34 @@ func (m *Manager) Active() *chunk.ChunkMeta {
 	}
 	meta := m.active.meta
 	return &meta
+}
+
+// TotalBytes returns the total memory used by all chunks (active + sealed).
+func (m *Manager) TotalBytes() int64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var total int64
+	if m.active != nil {
+		total += m.active.size
+	}
+	for _, s := range m.chunks {
+		total += s.size
+	}
+	return total
+}
+
+// BudgetExceeded returns the number of bytes over budget, or 0 if within budget.
+// Returns 0 when no budget is configured.
+func (m *Manager) BudgetExceeded() int64 {
+	if m.cfg.BudgetBytes == 0 {
+		return 0
+	}
+	total := m.TotalBytes()
+	budget := int64(m.cfg.BudgetBytes) //nolint:gosec // G115: budget is always within int64 range for practical memory sizes
+	if total > budget {
+		return total - budget
+	}
+	return 0
 }
 
 func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {

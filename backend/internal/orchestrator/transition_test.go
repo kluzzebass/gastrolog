@@ -3086,3 +3086,259 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 		t.Errorf("node-A: %d chunk directories still on disk after drain: %v", len(chunkDirs), chunkDirs)
 	}
 }
+
+// --- Memory budget enforcement ---
+
+func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	// Memory tier with 500-byte budget. Each record is ~100 bytes.
+	// With budget/10 = 50 bytes per chunk, each chunk holds ~1 record.
+	memCM, _ := chunkmem.NewFactory()(map[string]string{"budgetBytes": "500"}, nil)
+	memIM, _ := indexmem.NewFactory()(nil, memCM, nil)
+
+	// File tier as destination.
+	dir := t.TempDir()
+	fileCM, err := chunkfile.NewManager(chunkfile.Config{Dir: dir, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(1000)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileIM := indexfile.NewManager(dir, nil, nil)
+
+	store := cfgmem.NewStore()
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "mem", Type: config.TierTypeMemory,
+		Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "file", Type: config.TierTypeFile,
+		Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 1,
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "budget-test",
+	})
+
+	orch := newTestOrch(t, Config{
+		LocalNodeID:  nodeID,
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+
+	memTier := &TierInstance{
+		TierID: tier0ID, Type: "memory",
+		Chunks: memCM, Indexes: memIM, Query: query.New(memCM, memIM, nil),
+	}
+	fileTier := &TierInstance{
+		TierID: tier1ID, Type: "file",
+		Chunks: fileCM, Indexes: fileIM, Query: query.New(fileCM, fileIM, nil),
+	}
+	orch.RegisterVault(NewVault(vaultID, memTier, fileTier))
+
+	// Ingest records until well over budget.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 50 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = orch.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: make([]byte, 100),
+		})
+	}
+
+	// Seal any active chunk.
+	if active := memCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = memCM.Seal()
+	}
+
+	memBefore := memCM.(*chunkmem.Manager).TotalBytes()
+	if memBefore <= 500 {
+		t.Fatalf("expected memory tier to exceed 500-byte budget, got %d", memBefore)
+	}
+
+	// Run retention sweep — should enforce budget and transition excess.
+	orch.retentionSweepAll()
+
+	memAfter := memCM.(*chunkmem.Manager).TotalBytes()
+	if memAfter >= memBefore {
+		t.Errorf("expected budget enforcement to reduce memory usage: before=%d, after=%d", memBefore, memAfter)
+	}
+
+	// Verify records arrived at the file tier.
+	fileMetas, _ := fileCM.List()
+	fileActive := fileCM.Active()
+	var fileRecords int64
+	for _, m := range fileMetas {
+		fileRecords += m.RecordCount
+	}
+	if fileActive != nil {
+		fileRecords += fileActive.RecordCount
+	}
+	if fileRecords == 0 {
+		t.Error("expected records to transition to file tier")
+	}
+}
+
+func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	nodeID := "test-node"
+
+	// Memory tier with tiny budget, NO next tier. Budget enforcement
+	// should not panic or lose data — chunks stay even if over budget.
+	memCM, _ := chunkmem.NewFactory()(map[string]string{"budgetBytes": "100"}, nil)
+	memIM, _ := indexmem.NewFactory()(nil, memCM, nil)
+
+	store := cfgmem.NewStore()
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tierID, Name: "mem-terminal", Type: config.TierTypeMemory,
+		Placements: syntheticPlacements(nodeID),
+		VaultID: vaultID, Position: 0,
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "terminal-budget",
+	})
+
+	orch := newTestOrch(t, Config{
+		LocalNodeID:  nodeID,
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+
+	tier := &TierInstance{
+		TierID: tierID, Type: "memory",
+		Chunks: memCM, Indexes: memIM, Query: query.New(memCM, memIM, nil),
+	}
+	orch.RegisterVault(NewVault(vaultID, tier))
+
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 20 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: make([]byte, 50),
+		})
+	}
+	if active := memCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = memCM.Seal()
+	}
+
+	beforeMetas, _ := memCM.List()
+	beforeCount := len(beforeMetas)
+
+	// Run retention sweep — budget enforcement tries to transition but
+	// there's no next tier. Chunks should survive (logged as warning, not lost).
+	orch.retentionSweepAll()
+
+	afterMetas, _ := memCM.List()
+	if len(afterMetas) != beforeCount {
+		t.Errorf("terminal tier: chunks should survive when no next tier exists: before=%d, after=%d",
+			beforeCount, len(afterMetas))
+	}
+}
+
+func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
+	t.Parallel()
+	vaultID := uuid.Must(uuid.NewV7())
+	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
+	leaderNode := "leader"
+	followerNode := "follower"
+
+	// Create two orchestrators: leader and follower.
+	// Only the leader should enforce the budget.
+	memCMLeader, _ := chunkmem.NewFactory()(map[string]string{"budgetBytes": "100"}, nil)
+	memIMLeader, _ := indexmem.NewFactory()(nil, memCMLeader, nil)
+	memCMFollower, _ := chunkmem.NewFactory()(map[string]string{"budgetBytes": "100"}, nil)
+	memIMFollower, _ := indexmem.NewFactory()(nil, memCMFollower, nil)
+
+	fileDirLeader := t.TempDir()
+	fileCMLeader, _ := chunkfile.NewManager(chunkfile.Config{Dir: fileDirLeader, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(1000)})
+	fileIMLeader := indexfile.NewManager(fileDirLeader, nil, nil)
+
+	fileDirFollower := t.TempDir()
+	fileCMFollower, _ := chunkfile.NewManager(chunkfile.Config{Dir: fileDirFollower, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(1000)})
+	fileIMFollower := indexfile.NewManager(fileDirFollower, nil, nil)
+
+	store := cfgmem.NewStore()
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier0ID, Name: "mem", Type: config.TierTypeMemory,
+		Placements: []config.TierPlacement{
+			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
+			{StorageID: config.SyntheticStorageID(followerNode)},
+		},
+		VaultID: vaultID, Position: 0,
+	})
+	_ = store.PutTier(context.Background(), config.TierConfig{
+		ID: tier1ID, Name: "file", Type: config.TierTypeFile,
+		Placements: syntheticPlacements(leaderNode),
+		VaultID: vaultID, Position: 1,
+	})
+	_ = store.PutVault(context.Background(), config.VaultConfig{
+		ID: vaultID, Name: "budget-leader-only",
+	})
+
+	orchLeader := newTestOrch(t, Config{
+		LocalNodeID:  leaderNode,
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+	orchFollower := newTestOrch(t, Config{
+		LocalNodeID:  followerNode,
+		ConfigLoader: &transitionConfigLoader{store: store},
+	})
+
+	leaderMemTier := &TierInstance{
+		TierID: tier0ID, Type: "memory",
+		Chunks: memCMLeader, Indexes: memIMLeader, Query: query.New(memCMLeader, memIMLeader, nil),
+	}
+	leaderFileTier := &TierInstance{
+		TierID: tier1ID, Type: "file",
+		Chunks: fileCMLeader, Indexes: fileIMLeader, Query: query.New(fileCMLeader, fileIMLeader, nil),
+	}
+	orchLeader.RegisterVault(NewVault(vaultID, leaderMemTier, leaderFileTier))
+
+	followerMemTier := &TierInstance{
+		TierID: tier0ID, Type: "memory", IsFollower: true, LeaderNodeID: leaderNode,
+		Chunks: memCMFollower, Indexes: memIMFollower, Query: query.New(memCMFollower, memIMFollower, nil),
+	}
+	followerFileTier := &TierInstance{
+		TierID: tier1ID, Type: "file", IsFollower: true, LeaderNodeID: leaderNode,
+		Chunks: fileCMFollower, Indexes: fileIMFollower, Query: query.New(fileCMFollower, fileIMFollower, nil),
+	}
+	orchFollower.RegisterVault(NewVault(vaultID, followerMemTier, followerFileTier))
+
+	// Ingest on both — both exceed budget.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 20 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		rec := chunk.Record{IngestTS: ts, WriteTS: ts, Raw: make([]byte, 50)}
+		_ = orchLeader.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, rec)
+		_ = orchFollower.AppendToTier(vaultID, tier0ID, chunk.ChunkID{}, rec)
+	}
+	if active := memCMLeader.Active(); active != nil && active.RecordCount > 0 {
+		_ = memCMLeader.Seal()
+	}
+	if active := memCMFollower.Active(); active != nil && active.RecordCount > 0 {
+		_ = memCMFollower.Seal()
+	}
+
+	leaderBefore := memCMLeader.(*chunkmem.Manager).TotalBytes()
+	followerBefore := memCMFollower.(*chunkmem.Manager).TotalBytes()
+
+	// Run sweep on both.
+	orchLeader.retentionSweepAll()
+	orchFollower.retentionSweepAll()
+
+	leaderAfter := memCMLeader.(*chunkmem.Manager).TotalBytes()
+	followerAfter := memCMFollower.(*chunkmem.Manager).TotalBytes()
+
+	// Leader should have drained excess.
+	if leaderAfter >= leaderBefore {
+		t.Errorf("leader should enforce budget: before=%d, after=%d", leaderBefore, leaderAfter)
+	}
+	// Follower should NOT drain (not leader).
+	if followerAfter != followerBefore {
+		t.Errorf("follower should not enforce budget: before=%d, after=%d", followerBefore, followerAfter)
+	}
+}
