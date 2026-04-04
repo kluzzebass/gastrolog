@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -127,6 +128,9 @@ func (o *Orchestrator) retentionSweepAll() {
 		o.reconcileFollower(tier)
 	}
 
+	// Memory budget enforcement: transition oldest chunks when over budget.
+	o.enforceMemoryBudgets(cfg)
+
 	// Cache eviction: collect evictors under lock, run outside.
 	// EvictCache does filesystem I/O — holding the lock would block Raft applies.
 	var evictors []chunk.ChunkCacheEvictor
@@ -141,6 +145,110 @@ func (o *Orchestrator) retentionSweepAll() {
 	o.mu.RUnlock()
 	for _, evictor := range evictors {
 		evictor.EvictCache()
+	}
+}
+
+// enforceMemoryBudgets checks memory tiers for budget overruns and transitions
+// the oldest sealed chunks to the next tier. Only runs on leaders.
+func (o *Orchestrator) enforceMemoryBudgets(cfg *config.Config) {
+	if cfg == nil {
+		return
+	}
+	type budgetTarget struct {
+		vaultID uuid.UUID
+		tierID  uuid.UUID
+		cm      chunk.ChunkManager
+		excess  int64
+	}
+
+	var targets []budgetTarget
+	o.mu.RLock()
+	for _, vaultCfg := range cfg.Vaults {
+		vault := o.vaults[vaultCfg.ID]
+		if vault == nil {
+			continue
+		}
+		for _, tier := range vault.Tiers {
+			if !tier.IsLeader() {
+				continue
+			}
+			if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
+				continue
+			}
+			monitor, ok := tier.Chunks.(chunk.ChunkBudgetMonitor)
+			if !ok {
+				continue
+			}
+			if excess := monitor.BudgetExceeded(); excess > 0 {
+				targets = append(targets, budgetTarget{
+					vaultID: vaultCfg.ID,
+					tierID:  tier.TierID,
+					cm:      tier.Chunks,
+					excess:  excess,
+				})
+			}
+		}
+	}
+	o.mu.RUnlock()
+
+	for _, t := range targets {
+		o.drainExcessChunks(cfg, t.vaultID, t.tierID, t.cm, t.excess)
+	}
+}
+
+// drainExcessChunks transitions the oldest sealed chunks from a memory tier
+// until the excess bytes are reclaimed (or no more sealed chunks remain).
+func (o *Orchestrator) drainExcessChunks(cfg *config.Config, vaultID, tierID uuid.UUID, cm chunk.ChunkManager, excess int64) {
+	metas, err := cm.List()
+	if err != nil {
+		return
+	}
+
+	// Sort oldest first (by WriteStart).
+	slices.SortFunc(metas, func(a, b chunk.ChunkMeta) int {
+		return a.WriteStart.Compare(b.WriteStart)
+	})
+
+	// Find the index manager for this tier.
+	var im index.IndexManager
+	o.mu.RLock()
+	if vault := o.vaults[vaultID]; vault != nil {
+		for _, tier := range vault.Tiers {
+			if tier.TierID == tierID {
+				im = tier.Indexes
+				break
+			}
+		}
+	}
+	o.mu.RUnlock()
+
+	var reclaimed int64
+	for _, m := range metas {
+		if reclaimed >= excess {
+			break
+		}
+		if !m.Sealed {
+			continue
+		}
+
+		runner := &retentionRunner{
+			isLeader: true,
+			vaultID:  vaultID,
+			tierID:   tierID,
+			cm:       cm,
+			im:       im,
+			orch:     o,
+			now:      o.now,
+			logger:   o.logger,
+		}
+		runner.transitionChunk(m.ID)
+		reclaimed += m.Bytes
+	}
+
+	if reclaimed > 0 {
+		o.logger.Info("memory budget enforcement: transitioned chunks",
+			"vault", vaultID, "tier", tierID,
+			"excess", excess, "reclaimed", reclaimed)
 	}
 }
 

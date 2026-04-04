@@ -178,6 +178,13 @@ type ChunkArchiver interface {
 	RestoreChunk(ctx context.Context, id ChunkID, tier string, days int) error
 }
 
+// ChunkBudgetMonitor extends ChunkManager with memory budget awareness.
+// The orchestrator checks BudgetExceeded during retention sweeps to force
+// early transitions when a memory tier is over budget.
+type ChunkBudgetMonitor interface {
+	BudgetExceeded() int64 // bytes over budget, 0 = within budget or no budget
+}
+
 // ChunkCacheEvictor extends ChunkManager with cache eviction. The orchestrator
 // calls EvictCache periodically to enforce size/TTL limits on the warm cache.
 type ChunkCacheEvictor interface {

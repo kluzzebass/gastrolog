@@ -1048,14 +1048,7 @@ func buildTierParams(cfg *config.Config, vaultCfg config.VaultConfig, tierCfg co
 	switch tierCfg.Type {
 	case config.TierTypeMemory:
 		if tierCfg.MemoryBudgetBytes > 0 {
-			// Estimate ~1KB per record to derive maxRecords from budget.
-			maxRecords := tierCfg.MemoryBudgetBytes / 1024
-			if maxRecords == 0 {
-				maxRecords = 10000
-			}
-			params["maxRecords"] = strconv.FormatUint(maxRecords, 10)
-		} else {
-			params["maxRecords"] = "10000"
+			params["budgetBytes"] = strconv.FormatUint(tierCfg.MemoryBudgetBytes, 10)
 		}
 
 	case config.TierTypeFile:
