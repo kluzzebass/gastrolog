@@ -451,7 +451,7 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 
 	s.jobs[name] = j
 	s.schedules[name] = "once"
-	s.logger.Info("one-time job scheduled", "name", name)
+	s.logger.Debug("one-time job scheduled", "name", name)
 	return nil
 }
 

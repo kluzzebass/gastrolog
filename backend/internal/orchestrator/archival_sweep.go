@@ -15,7 +15,7 @@ import (
 
 const (
 	archivalSweepJobName     = "archival-sweep"
-	archivalSweepSchedule    = "0 * * * *" // every hour, at minute 0
+	archivalSweepSchedule    = "* * * * *" // every minute
 	reconcileSweepJobName    = "cloud-reconcile"
 	defaultReconcileSchedule = "0 3 * * *" // daily at 3 AM
 	defaultSuspectGraceDays  = 7
@@ -96,6 +96,9 @@ func (o *Orchestrator) archivalSweepAll() {
 			if !tier.IsLeader() {
 				continue
 			}
+			if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
+				continue
+			}
 			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 			if tierCfg == nil || tierCfg.CloudServiceID == nil {
 				continue
@@ -149,8 +152,8 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 			continue
 		}
 
-		// Skip if already archived to this class or higher.
-		if m.Archived {
+		// Skip if already at the target class.
+		if m.StorageClass == target.StorageClass {
 			continue
 		}
 
@@ -158,7 +161,7 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 			o.logger.Warn("archival sweep: archive failed",
 				"chunk", m.ID.String(), "class", target.StorageClass, "error", err)
 		} else {
-			o.logger.Info("archival sweep: archived chunk",
+			o.logger.Debug("archival sweep: archived chunk",
 				"chunk", m.ID.String(), "class", target.StorageClass, "age", age)
 		}
 	}
@@ -210,6 +213,9 @@ func (o *Orchestrator) reconcileSweepAll() {
 		}
 		for _, tier := range vault.Tiers {
 			if !tier.IsLeader() {
+				continue
+			}
+			if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
 				continue
 			}
 			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)

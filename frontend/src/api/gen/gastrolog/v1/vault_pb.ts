@@ -409,6 +409,13 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   retentionPending = false;
 
+  /**
+   * current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+   *
+   * @generated from field: string storage_class = 17;
+   */
+  storageClass = "";
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -433,6 +440,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 14, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 17, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {
@@ -1954,9 +1962,9 @@ export class SealVaultResponse extends Message<SealVaultResponse> {
  */
 export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: string vault = 1;
    */
-  vaultId = "";
+  vault = "";
 
   /**
    * @generated from field: string chunk_id = 2;
@@ -1978,7 +1986,7 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ArchiveChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
@@ -2036,9 +2044,9 @@ export class ArchiveChunkResponse extends Message<ArchiveChunkResponse> {
  */
 export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: string vault = 1;
    */
-  vaultId = "";
+  vault = "";
 
   /**
    * @generated from field: string chunk_id = 2;
@@ -2067,7 +2075,7 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RestoreChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "restore_days", kind: "scalar", T: 5 /* ScalarType.INT32 */ },

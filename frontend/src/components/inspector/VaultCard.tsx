@@ -453,13 +453,7 @@ function ChunkRow({
               <Badge variant="muted" dark={dark}>cloud</Badge>
             )}
             {chunk.archived && (
-              <Badge variant="warn" dark={dark}>archived</Badge>
-            )}
-            {chunk.cloudBacked && chunk.sealed && !chunk.archived && (
-              <ArchiveButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
-            )}
-            {chunk.archived && (
-              <RestoreButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+              <Badge variant="warn" dark={dark}>{chunk.storageClass || "archived"}</Badge>
             )}
             {chunk.retentionPending && (
               <Badge variant="warn" dark={dark}>exp</Badge>
@@ -638,6 +632,18 @@ function ChunkDetail({
                 {Number(chunk.recordCount).toLocaleString()} entries
               </span>
             </div>
+            <div className={`flex items-center gap-3 text-[0.85em]`}>
+              <span className={`font-mono w-20 ${c("text-text-bright", "text-light-text-bright")}`}>class</span>
+              <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
+                {chunk.storageClass || "standard"}
+              </span>
+              {!chunk.archived && (
+                <ArchiveButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+              )}
+              {chunk.archived && (
+                <RestoreButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+              )}
+            </div>
           </div>
         </>
       )}
@@ -712,7 +718,7 @@ function ArchiveButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; c
       onClick={(e) => {
         e.stopPropagation();
         archive.mutate(
-          { vaultId, chunkId, storageClass: "GLACIER" },
+          { vaultId, chunkId },
           {
             onSuccess: () => addToast("Chunk archived to Glacier", "info"),
             onError: (err) => addToast(err instanceof Error ? err.message : "Archive failed", "error"),
@@ -720,13 +726,13 @@ function ArchiveButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; c
         );
       }}
       disabled={archive.isPending}
-      title="Archive to Glacier"
-      className={`px-1.5 py-0.5 text-[0.65em] rounded transition-colors ${c(
-        "text-text-ghost hover:text-copper hover:bg-ink-hover",
-        "text-light-text-ghost hover:text-copper hover:bg-light-hover",
+      title="Archive chunk to offline storage"
+      className={`px-2 py-0.5 text-[0.8em] rounded border transition-colors ${c(
+        "border-ink-border text-text-muted hover:text-copper hover:border-copper/40 hover:bg-ink-hover",
+        "border-light-border text-light-text-muted hover:text-copper hover:border-copper/40 hover:bg-light-hover",
       )}`}
     >
-      {archive.isPending ? "..." : "Archive"}
+      {archive.isPending ? "Archiving..." : "Archive"}
     </button>
   );
 }
@@ -748,13 +754,13 @@ function RestoreButton({ vaultId, chunkId, dark }: Readonly<{ vaultId: string; c
         );
       }}
       disabled={restore.isPending}
-      title="Restore from archive"
-      className={`px-1.5 py-0.5 text-[0.65em] rounded transition-colors ${c(
-        "text-severity-warn hover:text-copper hover:bg-ink-hover",
-        "text-severity-warn hover:text-copper hover:bg-light-hover",
+      title="Restore chunk from offline storage"
+      className={`px-2 py-0.5 text-[0.8em] rounded border transition-colors ${c(
+        "border-ink-border text-severity-warn hover:text-copper hover:border-copper/40 hover:bg-ink-hover",
+        "border-light-border text-severity-warn hover:text-copper hover:border-copper/40 hover:bg-light-hover",
       )}`}
     >
-      {restore.isPending ? "..." : "Restore"}
+      {restore.isPending ? "Restoring..." : "Restore"}
     </button>
   );
 }

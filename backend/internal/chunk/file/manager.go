@@ -108,6 +108,7 @@ type Manager struct {
 	cloudIdxMu    sync.Mutex              // serializes cloudIdx Insert/Delete/Sync (B+ tree is not thread-safe)
 	indexBuilders  []chunk.ChunkIndexBuilder // injected post-construction via SetIndexBuilders
 	cloudListCache []chunk.ChunkMeta        // cached List() result for cloud chunks; nil = stale
+	storageClasses map[chunk.ChunkID]string  // in-memory cache of cloud storage class per chunk
 	nextChunkID    *chunk.ChunkID           // if set, used instead of NewChunkID() on next open
 
 	postSealActive sync.Map // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
@@ -237,11 +238,12 @@ func NewManager(cfg Config) (*Manager, error) {
 	}
 
 	manager := &Manager{
-		cfg:      cfg,
-		lockFile: lockFile,
-		metas:    make(map[chunk.ChunkID]*chunkMeta),
-		zstdEnc:  zstdEnc,
-		logger:   logger,
+		cfg:            cfg,
+		lockFile:       lockFile,
+		metas:          make(map[chunk.ChunkID]*chunkMeta),
+		storageClasses: make(map[chunk.ChunkID]string),
+		zstdEnc:        zstdEnc,
+		logger:         logger,
 	}
 	if err := manager.loadExisting(); err != nil {
 		_ = lockFile.Close()
@@ -383,7 +385,7 @@ func (m *Manager) rotateIfNeeded(record chunk.Record, attrBytes []byte, newKeys 
 		return attrBytes, newKeys, nil
 	}
 
-	m.logger.Info("rotating chunk",
+	m.logger.Debug("rotating chunk",
 		"trigger", *trigger,
 		"chunk", state.ChunkID.String(),
 		"bytes", state.Bytes,
@@ -2194,7 +2196,8 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 		}
 	}
 
-	delete(m.metas, id) // no-op for cloud chunks (not in metas)
+	delete(m.metas, id)          // no-op for cloud chunks (not in metas)
+	delete(m.storageClasses, id) // clean up storage class cache
 	m.mu.Unlock()
 
 	if m.cfg.Announcer != nil {
@@ -2449,9 +2452,9 @@ func (m *Manager) ArchiveChunk(ctx context.Context, id chunk.ChunkID, storageCla
 		return fmt.Errorf("archive blob %s: %w", key, err)
 	}
 
-	m.setArchivedFlag(id, true)
+	m.setArchivedFlag(id, true, storageClass)
 
-	m.logger.Info("chunk archived",
+	m.logger.Debug("chunk archived",
 		"chunk", id.String(), "storageClass", storageClass)
 	return nil
 }
@@ -2481,7 +2484,7 @@ func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, tier strin
 		return fmt.Errorf("restore blob %s: %w", key, err)
 	}
 
-	m.setArchivedFlag(id, false)
+	m.setArchivedFlag(id, false, "")
 
 	m.logger.Info("chunk restore initiated", "chunk", id.String())
 	return nil
@@ -2490,9 +2493,16 @@ func (m *Manager) RestoreChunk(ctx context.Context, id chunk.ChunkID, tier strin
 // setArchivedFlag updates the archived state for a chunk in both the local
 // metas map and the cloud B+ tree index. For cloud-backed chunks, this
 // re-inserts the entry with the updated flag.
-func (m *Manager) setArchivedFlag(id chunk.ChunkID, archived bool) {
+func (m *Manager) setArchivedFlag(id chunk.ChunkID, archived bool, storageClass string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Track the storage class in the side map (not in the B+ tree — fixed-size value).
+	if storageClass != "" {
+		m.storageClasses[id] = storageClass
+	} else {
+		delete(m.storageClasses, id)
+	}
 
 	// Local metas (non-cloud chunks or chunks still in both).
 	if meta, ok := m.metas[id]; ok {
@@ -2553,7 +2563,7 @@ func (m *Manager) CheckRotation() *string {
 		return nil
 	}
 
-	m.logger.Info("rotating chunk",
+	m.logger.Debug("rotating chunk",
 		"trigger", *trigger,
 		"chunk", state.ChunkID.String(),
 		"bytes", state.Bytes,
@@ -2667,7 +2677,9 @@ func (m *Manager) rebuildCloudListCache() {
 	var cache []chunk.ChunkMeta
 	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
 		if _, exists := m.metas[id]; !exists {
-			cache = append(cache, meta.toChunkMeta())
+			cm := meta.toChunkMeta()
+			cm.StorageClass = m.storageClasses[id]
+			cache = append(cache, cm)
 		}
 		return true
 	})
@@ -2798,7 +2810,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 			meta.numFrames)
 	}
 
-	m.logger.Info("chunk uploaded to cloud",
+	m.logger.Debug("chunk uploaded to cloud",
 		"chunk", id,
 		"bytes", blobSize,
 	)
@@ -3024,6 +3036,11 @@ func (m *Manager) loadCloudChunksFromStore() error {
 			sourceEnd:   cm.SourceEnd,
 			cloudBacked: true,
 			archived:    blob.IsArchived(),
+		}
+
+		// Cache the storage class for the sweep and UI.
+		if blob.StorageClass != "" {
+			m.storageClasses[id] = blob.StorageClass
 		}
 
 		// Populate the local B+ tree index.

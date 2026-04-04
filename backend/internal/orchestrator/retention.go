@@ -154,6 +154,10 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 		return nil
 	}
+	// Only the Raft leader should evaluate retention — non-leaders can't Apply.
+	if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
+		return nil
+	}
 	tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 	if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
 		return nil
@@ -393,6 +397,6 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 		}
 	}
 
-	r.logger.Info("retention: deleted chunk",
+	r.logger.Debug("retention: deleted chunk",
 		"vault", r.vaultID, "chunk", id.String())
 }

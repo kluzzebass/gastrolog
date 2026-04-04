@@ -107,7 +107,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uu
 				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
 				"chunk", chunkID.String(), "error", err)
 		} else {
-			o.logger.Info("replication: local copy done",
+			o.logger.Debug("replication: local copy done",
 				"vault", vaultID, "tier", tierID, "storage", tgt.StorageID,
 				"chunk", chunkID.String())
 		}
@@ -118,7 +118,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uu
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
 			"chunk", chunkID.String(), "error", err)
 	} else {
-		o.logger.Info("replication: sealed chunk sent",
+		o.logger.Debug("replication: sealed chunk sent",
 			"node", tgt.NodeID, "vault", vaultID, "tier", tierID,
 			"chunk", chunkID.String())
 	}

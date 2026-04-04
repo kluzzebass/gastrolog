@@ -209,9 +209,9 @@ export function useArchiveChunk() {
   return useMutation({
     mutationFn: async (args: { vaultId: string; chunkId: string; storageClass?: string }) => {
       await vaultClient.archiveChunk({
-        vaultId: args.vaultId,
+        vault: args.vaultId,
         chunkId: args.chunkId,
-        storageClass: args.storageClass ?? "GLACIER",
+        storageClass: args.storageClass ?? "",
       });
     },
     onSuccess: () => {
@@ -225,7 +225,7 @@ export function useRestoreChunk() {
   return useMutation({
     mutationFn: async (args: { vaultId: string; chunkId: string; restoreTier?: string; restoreDays?: number }) => {
       await vaultClient.restoreChunk({
-        vaultId: args.vaultId,
+        vault: args.vaultId,
         chunkId: args.chunkId,
         restoreTier: args.restoreTier ?? "Standard",
         restoreDays: args.restoreDays ?? 7,

@@ -404,6 +404,7 @@ type ChunkMeta struct {
 	TierId           string                 `protobuf:"bytes,14,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`                                // which tier this chunk belongs to
 	TierType         string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud"
 	RetentionPending bool                   `protobuf:"varint,16,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
+	StorageClass     string                 `protobuf:"bytes,17,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -548,6 +549,13 @@ func (x *ChunkMeta) GetRetentionPending() bool {
 		return x.RetentionPending
 	}
 	return false
+}
+
+func (x *ChunkMeta) GetStorageClass() string {
+	if x != nil {
+		return x.StorageClass
+	}
+	return ""
 }
 
 type GetChunkRequest struct {
@@ -2330,7 +2338,7 @@ func (*SealVaultResponse) Descriptor() ([]byte, []int) {
 
 type ArchiveChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	StorageClass  string                 `protobuf:"bytes,3,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"` // Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
 	unknownFields protoimpl.UnknownFields
@@ -2367,9 +2375,9 @@ func (*ArchiveChunkRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_vault_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *ArchiveChunkRequest) GetVaultId() string {
+func (x *ArchiveChunkRequest) GetVault() string {
 	if x != nil {
-		return x.VaultId
+		return x.Vault
 	}
 	return ""
 }
@@ -2426,7 +2434,7 @@ func (*ArchiveChunkResponse) Descriptor() ([]byte, []int) {
 
 type RestoreChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
 	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	RestoreTier   string                 `protobuf:"bytes,3,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`  // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
 	RestoreDays   int32                  `protobuf:"varint,4,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"` // How long restored copy stays readable (S3 only, 0 = provider default)
@@ -2464,9 +2472,9 @@ func (*RestoreChunkRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_vault_proto_rawDescGZIP(), []int{39}
 }
 
-func (x *RestoreChunkRequest) GetVaultId() string {
+func (x *RestoreChunkRequest) GetVault() string {
 	if x != nil {
-		return x.VaultId
+		return x.Vault
 	}
 	return ""
 }
@@ -2554,7 +2562,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xdc\x04\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x81\x05\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2578,7 +2586,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"num_frames\x18\r \x01(\x05R\tnumFrames\x12\x17\n" +
 	"\atier_id\x18\x0e \x01(\tR\x06tierId\x12\x1b\n" +
 	"\ttier_type\x18\x0f \x01(\tR\btierType\x12+\n" +
-	"\x11retention_pending\x18\x10 \x01(\bR\x10retentionPending\"B\n" +
+	"\x11retention_pending\x18\x10 \x01(\bR\x10retentionPending\x12#\n" +
+	"\rstorage_class\x18\x11 \x01(\tR\fstorageClass\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +
@@ -2721,14 +2730,14 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x06job_id\x18\x03 \x01(\tR\x05jobId\"(\n" +
 	"\x10SealVaultRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"\x13\n" +
-	"\x11SealVaultResponse\"p\n" +
-	"\x13ArchiveChunkRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
+	"\x11SealVaultResponse\"k\n" +
+	"\x13ArchiveChunkRequest\x12\x14\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12#\n" +
 	"\rstorage_class\x18\x03 \x01(\tR\fstorageClass\"\x16\n" +
-	"\x14ArchiveChunkResponse\"\x91\x01\n" +
-	"\x13RestoreChunkRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
+	"\x14ArchiveChunkResponse\"\x8c\x01\n" +
+	"\x13RestoreChunkRequest\x12\x14\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12!\n" +
 	"\frestore_tier\x18\x03 \x01(\tR\vrestoreTier\x12!\n" +
 	"\frestore_days\x18\x04 \x01(\x05R\vrestoreDays\"\x16\n" +

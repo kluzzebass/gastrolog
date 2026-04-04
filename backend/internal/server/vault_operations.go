@@ -414,7 +414,7 @@ func (s *VaultServer) ArchiveChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.ArchiveChunkRequest],
 ) (*connect.Response[apiv1.ArchiveChunkResponse], error) {
-	vaultID, connErr := parseUUID(req.Msg.VaultId)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -424,7 +424,13 @@ func (s *VaultServer) ArchiveChunk(
 	}
 	storageClass := req.Msg.StorageClass
 	if storageClass == "" {
-		storageClass = "GLACIER"
+		// Resolve from the cloud service's first transition.
+		if cs := s.lookupCloudServiceForChunk(ctx, vaultID, chunkID); cs != nil && len(cs.Transitions) > 0 {
+			storageClass = cs.Transitions[0].StorageClass
+		}
+	}
+	if storageClass == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("storage_class is required (no default transition configured)"))
 	}
 
 	if err := s.orch.ArchiveChunk(ctx, vaultID, chunkID, storageClass); err != nil {
@@ -439,7 +445,7 @@ func (s *VaultServer) RestoreChunk(
 	ctx context.Context,
 	req *connect.Request[apiv1.RestoreChunkRequest],
 ) (*connect.Response[apiv1.RestoreChunkResponse], error) {
-	vaultID, connErr := parseUUID(req.Msg.VaultId)
+	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
 		return nil, connErr
 	}

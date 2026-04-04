@@ -73,7 +73,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	}
 
 	r.expireChunk(id)
-	r.logger.Info("transition: completed",
+	r.logger.Debug("transition: completed",
 		"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 		"next_tier", nextTierID, "remote", remote)
 }

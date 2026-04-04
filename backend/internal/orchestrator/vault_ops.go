@@ -630,7 +630,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 
 	// Leader: idempotent skip — canonical version is already here.
 	if chunkExists && !ref.isFollower {
-		o.logger.Info("replication: chunk already exists, skipping import",
+		o.logger.Debug("replication: chunk already exists, skipping import",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
 		drainIterator(next)
 		return nil
@@ -643,7 +643,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 			drainIterator(next)
 			return err
 		}
-		o.logger.Info("replication: replacing forwarded chunk with canonical version",
+		o.logger.Debug("replication: replacing forwarded chunk with canonical version",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
 	}
 
@@ -652,7 +652,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	if err != nil {
 		return fmt.Errorf("import to tier %s: %w", tierID, err)
 	}
-	o.logger.Info("replication: sealed chunk imported",
+	o.logger.Debug("replication: sealed chunk imported",
 		"vault", vaultID, "tier", tierID,
 		"chunk", meta.ID.String(), "records", meta.RecordCount)
 

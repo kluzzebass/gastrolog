@@ -149,9 +149,10 @@ type ChunkMeta struct {
 	IngestEnd   time.Time // max IngestTS in chunk
 	SourceStart time.Time // min SourceTS (excluding zero)
 	SourceEnd   time.Time // max SourceTS in chunk
-	CloudBacked bool  // true = chunk lives in cloud storage, not local disk
-	Archived    bool  // true = chunk is in an offline storage tier (Glacier, Azure Archive)
-	NumFrames   int32 // seekable zstd frame count (cloud chunks only, 0 = unknown)
+	CloudBacked  bool   // true = chunk lives in cloud storage, not local disk
+	Archived     bool   // true = chunk is in an offline storage tier (Glacier, Azure Archive)
+	StorageClass string // cloud storage class (e.g. "GLACIER", "cold", "Archive"); empty = standard
+	NumFrames    int32  // seekable zstd frame count (cloud chunks only, 0 = unknown)
 }
 
 // EventID uniquely identifies a record across the cluster.

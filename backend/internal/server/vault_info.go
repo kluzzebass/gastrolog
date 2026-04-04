@@ -400,9 +400,10 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 		Bytes:       meta.Bytes,
 		Compressed:  meta.Compressed,
 		DiskBytes:   meta.DiskBytes,
-		CloudBacked: meta.CloudBacked,
-		Archived:    meta.Archived,
-		NumFrames:   meta.NumFrames,
+		CloudBacked:  meta.CloudBacked,
+		Archived:     meta.Archived,
+		StorageClass: meta.StorageClass,
+		NumFrames:    meta.NumFrames,
 	}
 	if !meta.IngestStart.IsZero() {
 		pb.IngestStart = timestamppb.New(meta.IngestStart)

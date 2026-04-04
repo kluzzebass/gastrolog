@@ -130,5 +130,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.VaultServiceImportRecordsProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ImportRecordsResponse]()},
 		gastrologv1connect.VaultServiceMigrateVaultProcedure:  {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.MigrateVaultResponse]()},
 		gastrologv1connect.VaultServiceMergeVaultsProcedure:   {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.MergeVaultsResponse]()},
+		gastrologv1connect.VaultServiceArchiveChunkProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.ArchiveChunkResponse]()},
+		gastrologv1connect.VaultServiceRestoreChunkProcedure: {Strategy: RouteTargeted, WrapResponse: NewRespWrapper[apiv1.RestoreChunkResponse]()},
 	}
 }
