@@ -70,7 +70,7 @@ func NewFactory() chunk.ManagerFactory {
 
 		// Sealed backing: when set to a cloud provider, sealed chunks
 		// are uploaded to cloud storage after compression.
-		if err := configureSealedBacking(&cfg, params, logger); err != nil {
+		if err := configureSealedBacking(&cfg, params); err != nil {
 			return nil, err
 		}
 
@@ -93,7 +93,7 @@ func NewFactory() chunk.ManagerFactory {
 
 // configureSealedBacking sets up cloud store configuration when a sealed
 // backing provider is specified.
-func configureSealedBacking(cfg *Config, params map[string]string, logger *slog.Logger) error {
+func configureSealedBacking(cfg *Config, params map[string]string) error {
 	backing := params[ParamSealedBacking]
 	if backing == "" || backing == "local" {
 		return nil

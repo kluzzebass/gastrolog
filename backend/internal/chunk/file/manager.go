@@ -763,70 +763,78 @@ func (m *Manager) sealChunkOnDisk(id chunk.ChunkID) error {
 }
 
 // openActiveChunk opens an unsealed chunk as the active chunk, with crash recovery.
-func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
-	meta := m.metas[id]
+// chunkFiles holds the four files that make up an active chunk.
+// On error paths, closeAll releases all file handles.
+type chunkFiles struct {
+	raw, idx, attr, dict *os.File
+}
 
+func (cf *chunkFiles) closeAll(logger *slog.Logger) {
+	for _, f := range []*os.File{cf.raw, cf.idx, cf.attr, cf.dict} {
+		if err := f.Close(); err != nil {
+			logger.Warn("close chunk file failed", "file", f.Name(), "error", err)
+		}
+	}
+}
+
+// openChunkFiles opens all four chunk files (raw, idx, attr, dict).
+// On partial failure, already-opened files are closed before returning.
+func (m *Manager) openChunkFiles(id chunk.ChunkID) (*chunkFiles, error) {
 	rawFile, err := m.openRawFile(id)
 	if err != nil {
-		return fmt.Errorf("open raw.log for chunk %s: %w", id, err)
+		return nil, fmt.Errorf("open raw.log for chunk %s: %w", id, err)
 	}
 	idxFile, err := m.openIdxFile(id)
 	if err != nil {
 		_ = rawFile.Close()
-		return fmt.Errorf("open idx.log for chunk %s: %w", id, err)
+		return nil, fmt.Errorf("open idx.log for chunk %s: %w", id, err)
 	}
 	attrFile, err := m.openAttrFile(id)
 	if err != nil {
 		_ = rawFile.Close()
 		_ = idxFile.Close()
-		return fmt.Errorf("open attr.log for chunk %s: %w", id, err)
+		return nil, fmt.Errorf("open attr.log for chunk %s: %w", id, err)
 	}
 	dictFile, err := m.openDictFile(id)
 	if err != nil {
 		_ = rawFile.Close()
 		_ = idxFile.Close()
 		_ = attrFile.Close()
-		return fmt.Errorf("open attr_dict.log for chunk %s: %w", id, err)
+		return nil, fmt.Errorf("open attr_dict.log for chunk %s: %w", id, err)
 	}
+	return &chunkFiles{raw: rawFile, idx: idxFile, attr: attrFile, dict: dictFile}, nil
+}
 
-	closeAll := func() {
-		_ = rawFile.Close()
-		_ = idxFile.Close()
-		_ = attrFile.Close()
-		_ = dictFile.Close()
-	}
-
+// validateAndTruncate reads the idx.log header, computes the record count,
+// and truncates raw.log/attr.log if they have crash-orphaned data beyond
+// what the index accounts for.
+func (m *Manager) validateAndTruncate(id chunk.ChunkID, cf *chunkFiles) (recordCount uint64, rawOffset, attrOffset uint64, createdAt time.Time, err error) {
 	// Read idx.log header including createdAt timestamp.
 	var headerBuf [IdxHeaderSize]byte
-	if _, err := idxFile.ReadAt(headerBuf[:], 0); err != nil {
-		closeAll()
-		return fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
+	if _, err = cf.idx.ReadAt(headerBuf[:], 0); err != nil {
+		return 0, 0, 0, time.Time{}, fmt.Errorf("read idx.log header for chunk %s: %w", id, err)
 	}
-	if _, err := format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion); err != nil {
-		closeAll()
-		return fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
+	if _, err = format.DecodeAndValidate(headerBuf[:format.HeaderSize], format.TypeIdxLog, IdxLogVersion); err != nil {
+		return 0, 0, 0, time.Time{}, fmt.Errorf("invalid idx.log header for chunk %s: %w", id, err)
 	}
 	createdAtNanos := binary.LittleEndian.Uint64(headerBuf[format.HeaderSize:])
-	createdAt := time.Unix(0, int64(createdAtNanos)) //nolint:gosec // G115: nanosecond timestamp fits in int64
+	createdAt = time.Unix(0, int64(createdAtNanos)) //nolint:gosec // G115: nanosecond timestamp fits in int64
 
 	// Compute record count from idx.log file size.
-	idxInfo, err := idxFile.Stat()
+	idxInfo, err := cf.idx.Stat()
 	if err != nil {
-		closeAll()
-		return fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
+		return 0, 0, 0, time.Time{}, fmt.Errorf("stat idx.log for chunk %s: %w", id, err)
 	}
-	recordCount := RecordCount(idxInfo.Size())
+	recordCount = RecordCount(idxInfo.Size())
 
 	// Compute expected raw.log and attr.log sizes from idx.log.
 	// If files have extra data (crash between writes), truncate them.
 	var expectedRawSize, expectedAttrSize int64
 	if recordCount > 0 {
-		// Read last idx.log entry to get expected end positions.
 		lastOffset := IdxFileOffset(recordCount - 1)
 		var entryBuf [IdxEntrySize]byte
-		if _, err := idxFile.ReadAt(entryBuf[:], lastOffset); err != nil {
-			closeAll()
-			return fmt.Errorf("read last idx entry for chunk %s: %w", id, err)
+		if _, err = cf.idx.ReadAt(entryBuf[:], lastOffset); err != nil {
+			return 0, 0, 0, time.Time{}, fmt.Errorf("read last idx entry for chunk %s: %w", id, err)
 		}
 		lastEntry := DecodeIdxEntry(entryBuf[:])
 		expectedRawSize = int64(format.HeaderSize) + int64(lastEntry.RawOffset) + int64(lastEntry.RawSize)
@@ -836,82 +844,104 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		expectedAttrSize = int64(format.HeaderSize)
 	}
 
-	// Truncate raw.log if needed.
-	rawInfo, err := rawFile.Stat()
+	if err = m.truncateIfNeeded(cf.raw, "raw.log", id, expectedRawSize); err != nil {
+		return 0, 0, 0, time.Time{}, err
+	}
+	if err = m.truncateIfNeeded(cf.attr, "attr.log", id, expectedAttrSize); err != nil {
+		return 0, 0, 0, time.Time{}, err
+	}
+
+	rawOffset = uint64(expectedRawSize) - uint64(format.HeaderSize)
+	attrOffset = uint64(expectedAttrSize) - uint64(format.HeaderSize)
+	return recordCount, rawOffset, attrOffset, createdAt, nil
+}
+
+// truncateIfNeeded truncates a file to expectedSize if it has crash-orphaned
+// data beyond what the index accounts for.
+func (m *Manager) truncateIfNeeded(f *os.File, name string, id chunk.ChunkID, expectedSize int64) error {
+	info, err := f.Stat()
 	if err != nil {
-		closeAll()
-		return fmt.Errorf("stat raw.log for chunk %s: %w", id, err)
+		return fmt.Errorf("stat %s for chunk %s: %w", name, id, err)
 	}
-	if rawInfo.Size() > expectedRawSize {
-		if err := rawFile.Truncate(expectedRawSize); err != nil {
-			closeAll()
-			return fmt.Errorf("truncate raw.log for chunk %s: %w", id, err)
+	if info.Size() > expectedSize {
+		if err := f.Truncate(expectedSize); err != nil {
+			return fmt.Errorf("truncate %s for chunk %s: %w", name, id, err)
 		}
-		m.logger.Info("truncated orphaned raw.log data",
+		m.logger.Info("truncated orphaned "+name+" data",
 			"chunk", id.String(),
-			"expected", expectedRawSize,
-			"actual", rawInfo.Size())
+			"expected", expectedSize,
+			"actual", info.Size())
 	}
+	return nil
+}
 
-	// Truncate attr.log if needed.
-	attrInfo, err := attrFile.Stat()
-	if err != nil {
-		closeAll()
-		return fmt.Errorf("stat attr.log for chunk %s: %w", id, err)
-	}
-	if attrInfo.Size() > expectedAttrSize {
-		if err := attrFile.Truncate(expectedAttrSize); err != nil {
-			closeAll()
-			return fmt.Errorf("truncate attr.log for chunk %s: %w", id, err)
-		}
-		m.logger.Info("truncated orphaned attr.log data",
-			"chunk", id.String(),
-			"expected", expectedAttrSize,
-			"actual", attrInfo.Size())
-	}
-
-	rawOffset := uint64(expectedRawSize) - uint64(format.HeaderSize)
-	attrOffset := uint64(expectedAttrSize) - uint64(format.HeaderSize)
-
-	// Load key dictionary from attr_dict.log.
+// loadDictionary reads and decodes the key dictionary from attr_dict.log.
+// Uses mmap for the read to avoid heap-allocating the entire file.
+func (m *Manager) loadDictionary(id chunk.ChunkID, dictFile *os.File) (*chunk.StringDict, error) {
 	dictInfo, err := dictFile.Stat()
 	if err != nil {
-		closeAll()
-		return fmt.Errorf("stat attr_dict.log for chunk %s: %w", id, err)
+		return nil, fmt.Errorf("stat attr_dict.log for chunk %s: %w", id, err)
 	}
-	var dict *chunk.StringDict
-	if dictInfo.Size() <= int64(format.HeaderSize) {
-		dict = chunk.NewStringDict()
-	} else {
-		dictData := make([]byte, dictInfo.Size()-int64(format.HeaderSize))
-		if _, err := dictFile.ReadAt(dictData, int64(format.HeaderSize)); err != nil {
-			closeAll()
-			return fmt.Errorf("read attr_dict.log for chunk %s: %w", id, err)
+	fileSize := dictInfo.Size()
+	if fileSize <= int64(format.HeaderSize) {
+		return chunk.NewStringDict(), nil
+	}
+	// mmap the entire file read-only; DecodeDictData copies strings so the
+	// mapping can be released immediately after decoding.
+	data, err := syscall.Mmap(int(dictFile.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	if err != nil {
+		return nil, fmt.Errorf("mmap attr_dict.log for chunk %s: %w", id, err)
+	}
+	dict, decErr := chunk.DecodeDictData(data[format.HeaderSize:])
+	if munmapErr := syscall.Munmap(data); munmapErr != nil {
+		m.logger.Warn("munmap attr_dict.log failed", "chunk", id.String(), "error", munmapErr)
+	}
+	if decErr != nil {
+		return nil, fmt.Errorf("decode attr_dict.log for chunk %s: %w", id, decErr)
+	}
+	return dict, nil
+}
+
+func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
+	meta := m.metas[id]
+
+	cf, err := m.openChunkFiles(id)
+	if err != nil {
+		return err
+	}
+	// Close all files on any error; on success, ownership transfers to chunkState.
+	success := false
+	defer func() {
+		if !success {
+			cf.closeAll(m.logger)
 		}
-		dict, err = chunk.DecodeDictData(dictData)
-		if err != nil {
-			closeAll()
-			return fmt.Errorf("decode attr_dict.log for chunk %s: %w", id, err)
-		}
+	}()
+
+	recordCount, rawOffset, attrOffset, createdAt, err := m.validateAndTruncate(id, cf)
+	if err != nil {
+		return err
+	}
+
+	dict, err := m.loadDictionary(id, cf.dict)
+	if err != nil {
+		return err
 	}
 
 	dataBytes := int64(rawOffset + attrOffset + recordCount*IdxEntrySize) //nolint:gosec // G115: data bytes bounded by rotation policy
 	meta.logicalDataBytes = dataBytes
 	meta.bytes = dataBytes
 
-	// Rebuild B+ tree indexes from idx.log entries.
-	ingestBT, sourceBT, err := m.rebuildBTrees(id, idxFile, recordCount)
+	ingestBT, sourceBT, err := m.rebuildBTrees(id, cf.idx, recordCount)
 	if err != nil {
-		closeAll()
 		return fmt.Errorf("rebuild btrees for chunk %s: %w", id, err)
 	}
 
 	m.active = &chunkState{
 		meta:        meta,
-		rawFile:     rawFile,
-		idxFile:     idxFile,
-		attrFile:    attrFile,
-		dictFile:    dictFile,
+		rawFile:     cf.raw,
+		idxFile:     cf.idx,
+		attrFile:    cf.attr,
+		dictFile:    cf.dict,
 		dict:        dict,
 		ingestBT:    ingestBT,
 		sourceBT:    sourceBT,
@@ -921,6 +951,7 @@ func (m *Manager) openActiveChunk(id chunk.ChunkID) error {
 		createdAt:   createdAt,
 	}
 
+	success = true
 	return nil
 }
 

@@ -1753,3 +1753,235 @@ func TestDeleteDuringPostSealOtherChunk(t *testing.T) {
 		t.Fatalf("chunk B directory should exist: %v", err)
 	}
 }
+
+// ── openActiveChunk / crash recovery tests ──────────────────────────
+
+// appendAndClose creates a manager, appends records, and closes without sealing.
+// Returns the directory and the chunk ID for reopening.
+func appendAndClose(t *testing.T, records []chunk.Record) (string, chunk.ChunkID) {
+	t.Helper()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	var id chunk.ChunkID
+	for _, rec := range records {
+		id, _, err = mgr.Append(rec)
+		if err != nil {
+			t.Fatalf("append: %v", err)
+		}
+	}
+	if err := mgr.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	return dir, id
+}
+
+func TestOpenActiveChunkHappyPath(t *testing.T) {
+	t.Parallel()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), SourceTS: time.UnixMicro(50), Attrs: chunk.Attributes{"src": "a"}, Raw: []byte("hello")},
+		{IngestTS: time.UnixMicro(200), SourceTS: time.UnixMicro(150), Attrs: chunk.Attributes{"src": "b"}, Raw: []byte("world")},
+	}
+	dir, chunkID := appendAndClose(t, records)
+
+	// Reopen — openActiveChunk runs during NewManager.
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer mgr.Close()
+
+	active := mgr.Active()
+	if active == nil {
+		t.Fatal("expected active chunk after reopen")
+	}
+	if active.ID != chunkID {
+		t.Fatalf("chunk ID mismatch: want %s, got %s", chunkID, active.ID)
+	}
+	if active.RecordCount != 2 {
+		t.Fatalf("record count: want 2, got %d", active.RecordCount)
+	}
+
+	// Verify records are readable.
+	cursor, err := mgr.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+	rec, _, err := cursor.Next()
+	if err != nil {
+		t.Fatalf("next: %v", err)
+	}
+	if string(rec.Raw) != "hello" {
+		t.Fatalf("first record: want %q, got %q", "hello", string(rec.Raw))
+	}
+}
+
+func TestOpenActiveChunkCrashTruncation(t *testing.T) {
+	t.Parallel()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), Attrs: chunk.Attributes{"src": "a"}, Raw: []byte("rec1")},
+		{IngestTS: time.UnixMicro(200), Attrs: chunk.Attributes{"src": "b"}, Raw: []byte("rec2")},
+	}
+	dir, chunkID := appendAndClose(t, records)
+
+	// Simulate a crash: append garbage to raw.log and attr.log beyond what
+	// idx.log accounts for.
+	chunkDir := filepath.Join(dir, chunkID.String())
+	for _, name := range []string{rawLogFileName, attrLogFileName} {
+		path := filepath.Join(chunkDir, name)
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			t.Fatalf("open %s: %v", name, err)
+		}
+		if _, err := f.Write([]byte("ORPHANED-CRASH-DATA")); err != nil {
+			t.Fatalf("write orphan data to %s: %v", name, err)
+		}
+		f.Close()
+	}
+
+	// Reopen — should truncate the orphaned data.
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("reopen with orphaned data: %v", err)
+	}
+	defer mgr.Close()
+
+	active := mgr.Active()
+	if active == nil {
+		t.Fatal("expected active chunk after reopen")
+	}
+	if active.RecordCount != 2 {
+		t.Fatalf("record count: want 2, got %d", active.RecordCount)
+	}
+
+	// Verify original records survived truncation.
+	cursor, err := mgr.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+	for i, want := range []string{"rec1", "rec2"} {
+		rec, _, err := cursor.Next()
+		if err != nil {
+			t.Fatalf("next[%d]: %v", i, err)
+		}
+		if string(rec.Raw) != want {
+			t.Fatalf("record[%d]: want %q, got %q", i, want, string(rec.Raw))
+		}
+	}
+}
+
+func TestOpenActiveChunkEmptyChunk(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("new manager: %v", err)
+	}
+	// Force-create an active chunk by appending then deleting the record's
+	// chunk won't work — instead, just close an empty manager and verify
+	// that reopening an empty directory is fine.
+	mgr.Close()
+
+	mgr, err = NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("reopen empty: %v", err)
+	}
+	defer mgr.Close()
+
+	if active := mgr.Active(); active != nil {
+		t.Fatal("expected no active chunk in empty manager")
+	}
+}
+
+func TestOpenActiveChunkCorruptIdxHeader(t *testing.T) {
+	t.Parallel()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), Attrs: chunk.Attributes{"src": "a"}, Raw: []byte("rec")},
+	}
+	dir, chunkID := appendAndClose(t, records)
+
+	// Corrupt the idx.log header.
+	idxPath := filepath.Join(dir, chunkID.String(), idxLogFileName)
+	if err := os.WriteFile(idxPath, []byte("BADHDR"), 0o644); err != nil {
+		t.Fatalf("corrupt idx.log: %v", err)
+	}
+
+	// Reopen should fail with a descriptive error.
+	_, err := NewManager(Config{Dir: dir})
+	if err == nil {
+		t.Fatal("expected error when reopening with corrupt idx.log header")
+	}
+}
+
+func TestOpenActiveChunkMissingFile(t *testing.T) {
+	t.Parallel()
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), Attrs: chunk.Attributes{"src": "a"}, Raw: []byte("rec")},
+	}
+	dir, chunkID := appendAndClose(t, records)
+
+	// Delete raw.log — openChunkFiles should fail.
+	rawPath := filepath.Join(dir, chunkID.String(), rawLogFileName)
+	os.Remove(rawPath)
+
+	_, err := NewManager(Config{Dir: dir})
+	if err == nil {
+		t.Fatal("expected error when reopening with missing raw.log")
+	}
+}
+
+func TestOpenActiveChunkDictRecovery(t *testing.T) {
+	t.Parallel()
+	// Append records with distinct attribute keys to populate the dictionary.
+	records := []chunk.Record{
+		{IngestTS: time.UnixMicro(100), Attrs: chunk.Attributes{"host": "web-1", "env": "prod"}, Raw: []byte("r1")},
+		{IngestTS: time.UnixMicro(200), Attrs: chunk.Attributes{"host": "web-2", "env": "staging"}, Raw: []byte("r2")},
+	}
+	dir, chunkID := appendAndClose(t, records)
+
+	// Reopen and verify dictionary survived.
+	mgr, err := NewManager(Config{Dir: dir})
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer mgr.Close()
+
+	// Append a new record with the same keys — should reuse dict entries.
+	rec := chunk.Record{
+		IngestTS: time.UnixMicro(300),
+		Attrs:    chunk.Attributes{"host": "web-3", "env": "dev"},
+		Raw:      []byte("r3"),
+	}
+	_, _, err = mgr.Append(rec)
+	if err != nil {
+		t.Fatalf("append after reopen: %v", err)
+	}
+
+	active := mgr.Active()
+	if active.RecordCount != 3 {
+		t.Fatalf("record count: want 3, got %d", active.RecordCount)
+	}
+
+	// Verify all 3 records are readable with correct attrs.
+	cursor, err := mgr.OpenCursor(chunkID)
+	if err != nil {
+		t.Fatalf("open cursor: %v", err)
+	}
+	defer cursor.Close()
+	for i, wantRaw := range []string{"r1", "r2", "r3"} {
+		rec, _, err := cursor.Next()
+		if err != nil {
+			t.Fatalf("next[%d]: %v", i, err)
+		}
+		if string(rec.Raw) != wantRaw {
+			t.Fatalf("record[%d]: want %q, got %q", i, wantRaw, string(rec.Raw))
+		}
+		if rec.Attrs["host"] == "" {
+			t.Fatalf("record[%d]: missing 'host' attr", i)
+		}
+	}
+}
