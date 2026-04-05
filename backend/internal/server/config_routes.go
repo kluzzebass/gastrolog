@@ -95,7 +95,7 @@ func (s *ConfigServer) PutRoute(
 		Name:         req.Msg.Config.Name,
 		FilterID:     filterID,
 		Destinations: destinations,
-		Distribution: distribution,
+		Distribution: config.DistributionMode(distribution),
 		Enabled:      req.Msg.Config.Enabled,
 		EjectOnly:    req.Msg.Config.EjectOnly,
 	}

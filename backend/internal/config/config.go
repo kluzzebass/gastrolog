@@ -572,6 +572,18 @@ func VaultTiers(tiers []TierConfig, vaultID uuid.UUID) []TierConfig {
 	return matched
 }
 
+// DistributionMode controls how messages are distributed across route destinations.
+type DistributionMode string
+
+const (
+	// DistributionFanout sends every message to all destinations.
+	DistributionFanout DistributionMode = "fanout"
+	// DistributionRoundRobin rotates messages across destinations one at a time.
+	DistributionRoundRobin DistributionMode = "round-robin"
+	// DistributionFailover sends to the first healthy destination only.
+	DistributionFailover DistributionMode = "failover"
+)
+
 // RouteConfig defines a named routing rule that connects a filter to one or more
 // destination vaults. Routes decouple log routing from storage, enabling
 // multi-destination routing with distribution modes.
@@ -592,7 +604,7 @@ type RouteConfig struct {
 	// Distribution controls how messages are distributed to destinations.
 	// "fanout" (default): send to all destinations.
 	// "round-robin": send to one destination at a time, rotating.
-	Distribution string `json:"distribution,omitempty"`
+	Distribution DistributionMode `json:"distribution,omitempty"`
 
 	// Enabled controls whether this route is active.
 	Enabled bool `json:"enabled,omitempty"`

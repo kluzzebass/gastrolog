@@ -57,7 +57,7 @@ func DefaultConfig() *Config {
 				Name:         "default",
 				FilterID:     new(filterID),
 				Destinations: []uuid.UUID{vaultID},
-				Distribution: "fanout",
+				Distribution: DistributionFanout,
 				Enabled:      true,
 			},
 		},

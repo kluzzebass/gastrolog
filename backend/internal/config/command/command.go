@@ -315,7 +315,7 @@ func putRouteCmd(cfg config.RouteConfig) *gastrologv1.PutRouteCommand {
 		Name:           cfg.Name,
 		FilterId:       uuidPtrToString(cfg.FilterID),
 		DestinationIds: dests,
-		Distribution:   cfg.Distribution,
+		Distribution:   string(cfg.Distribution),
 		Enabled:        cfg.Enabled,
 		EjectOnly:      cfg.EjectOnly,
 	}
@@ -360,7 +360,7 @@ func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (config.RouteConfig, erro
 		Name:         cmd.GetName(),
 		FilterID:     filterID,
 		Destinations: dests,
-		Distribution: cmd.GetDistribution(),
+		Distribution: config.DistributionMode(cmd.GetDistribution()),
 		Enabled:      cmd.GetEnabled(),
 		EjectOnly:    cmd.GetEjectOnly(),
 	}, nil

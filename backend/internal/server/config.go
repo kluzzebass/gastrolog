@@ -235,7 +235,7 @@ func (s *ConfigServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetConf
 		prt := &apiv1.RouteConfig{
 			Id:           rt.ID.String(),
 			Name:         rt.Name,
-			Distribution: rt.Distribution,
+			Distribution: string(rt.Distribution),
 			Enabled:      rt.Enabled,
 			EjectOnly:    rt.EjectOnly,
 		}
