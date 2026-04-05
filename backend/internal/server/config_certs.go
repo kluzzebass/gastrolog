@@ -123,7 +123,10 @@ func (s *ConfigServer) PutCertificate(
 		return nil, err
 	}
 
-	certID := resolveCertID(existing.ID, req.Msg.Id)
+	certID, err := resolveCertID(existing.ID, req.Msg.Id)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 
 	// Reject duplicate names.
 	certs, err := s.cfgStore.ListCertificates(ctx)
@@ -219,15 +222,18 @@ func validateCertMaterial(msg *apiv1.PutCertificateRequest, keyPEM string, exist
 	return nil
 }
 
-func resolveCertID(existingID uuid.UUID, reqID string) uuid.UUID {
+func resolveCertID(existingID uuid.UUID, reqID string) (uuid.UUID, error) {
 	if existingID != uuid.Nil {
-		return existingID
+		return existingID, nil
 	}
 	if reqID != "" {
-		id, _ := uuid.Parse(reqID)
-		return id
+		id, err := uuid.Parse(reqID)
+		if err != nil {
+			return uuid.Nil, fmt.Errorf("invalid certificate id %q: %w", reqID, err)
+		}
+		return id, nil
 	}
-	return uuid.Must(uuid.NewV7())
+	return uuid.Must(uuid.NewV7()), nil
 }
 
 func (s *ConfigServer) setDefaultCert(ctx context.Context, name string) error {
