@@ -16,8 +16,7 @@ import (
 func TestBufferOverflow(t *testing.T) {
 	t.Parallel()
 	nf := &nodeForwarder{
-		ch:   make(chan forwardEntry, forwardChanCap),
-		done: make(chan struct{}),
+		ch: make(chan forwardEntry, forwardChanCap),
 	}
 
 	vaultID := uuid.Must(uuid.NewV7())
@@ -42,8 +41,7 @@ func TestBufferOverflow(t *testing.T) {
 func TestChannelDrain(t *testing.T) {
 	t.Parallel()
 	nf := &nodeForwarder{
-		ch:   make(chan forwardEntry, forwardChanCap),
-		done: make(chan struct{}),
+		ch: make(chan forwardEntry, forwardChanCap),
 	}
 
 	vaultID := uuid.Must(uuid.NewV7())

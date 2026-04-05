@@ -100,7 +100,7 @@ func (tr *TierReplicator) getOrOpen(tierID uuid.UUID, nodeID string) (*tierStrea
 
 // send sends a command on the stream and waits for the ack. On stream
 // failure, marks the stream as closed so the next call reopens it.
-func (tr *TierReplicator) send(vaultID, tierID uuid.UUID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
+func (tr *TierReplicator) send(_, tierID uuid.UUID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
 	ts, err := tr.getOrOpen(tierID, nodeID)
 	if err != nil {
 		return err

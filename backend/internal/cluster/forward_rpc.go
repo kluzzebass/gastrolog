@@ -90,7 +90,7 @@ func unaryResponseFrame(stream grpc.ServerStream, body io.Reader) error {
 
 // sendErrorFrame extracts a Connect error from the HTTP response and sends
 // it as a ForwardRPCFrame with the error code.
-func sendErrorFrame(stream grpc.ServerStream, resp *http.Response, ct string) error {
+func sendErrorFrame(stream grpc.ServerStream, resp *http.Response, _ string) error {
 	// Read error body into a fixed 4KB stack buffer — error messages are short.
 	var buf [4 << 10]byte
 	n, _ := io.ReadFull(resp.Body, buf[:])

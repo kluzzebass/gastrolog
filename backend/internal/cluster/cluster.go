@@ -221,7 +221,7 @@ func (s *Server) Transport() hraft.Transport {
 		creds = insecure.NewCredentials()
 	}
 
-	s.tm = multiraft.New[string](
+	s.tm = multiraft.New(
 		hraft.ServerAddress(s.localAddr),
 		[]grpc.DialOption{
 			grpc.WithTransportCredentials(creds),

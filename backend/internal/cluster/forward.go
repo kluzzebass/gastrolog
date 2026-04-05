@@ -95,6 +95,32 @@ type ManagedFileReader func(fileID string) (name string, rc io.ReadCloser, sha25
 // ManagedFileIDsLister returns the IDs of managed files present on this node's disk.
 type ManagedFileIDsLister func() []string
 
+// ── ID parse helpers ────────────────────────────────────────────────
+
+func parseVaultID(raw string) (uuid.UUID, error) {
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+	}
+	return id, nil
+}
+
+func parseTierID(raw string) (uuid.UUID, error) {
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+	}
+	return id, nil
+}
+
+func parseChunkID(raw string) (chunk.ChunkID, error) {
+	id, err := chunk.ParseChunkID(raw)
+	if err != nil {
+		return chunk.ChunkID{}, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+	}
+	return id, nil
+}
+
 // SetRecordAppender injects the callback for writing forwarded records.
 // Must be called before the cluster server receives ForwardRecords RPCs.
 func (s *Server) SetRecordAppender(fn RecordAppender) {
@@ -199,18 +225,18 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 	if s.recordAppender == nil {
 		return nil, status.Error(codes.Unavailable, "record appender not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
 
 	// Tier-targeted append for inter-tier transition / active-chunk replication.
 	var tierID uuid.UUID
 	var primaryChunkID chunk.ChunkID
 	if req.GetTierId() != "" {
-		tierID, err = uuid.Parse(req.GetTierId())
+		tierID, err = parseTierID(req.GetTierId())
 		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+			return nil, err
 		}
 		if s.recordTierAppender == nil {
 			return nil, status.Error(codes.Unavailable, "tier appender not configured")
@@ -275,9 +301,9 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 		var tierID uuid.UUID
 		var primaryChunkID chunk.ChunkID
 		if msg.GetTierId() != "" {
-			tierID, err = uuid.Parse(msg.GetTierId())
+			tierID, err = parseTierID(msg.GetTierId())
 			if err != nil {
-				return status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+				return err
 			}
 		}
 		if msg.GetChunkId() != "" {
@@ -346,24 +372,24 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		}
 		return status.Errorf(codes.InvalidArgument, "receive first message: %v", err)
 	}
-	vaultID, err := uuid.Parse(first.GetVaultId())
+	vaultID, err := parseVaultID(first.GetVaultId())
 	if err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return err
 	}
 
 	// Tier-targeted import for sealed-chunk replication.
 	var tierID uuid.UUID
 	var replicaChunkID chunk.ChunkID
 	if first.GetTierId() != "" {
-		tierID, err = uuid.Parse(first.GetTierId())
+		tierID, err = parseTierID(first.GetTierId())
 		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+			return err
 		}
 	}
 	if first.GetChunkId() != "" {
-		replicaChunkID, err = chunk.ParseChunkID(first.GetChunkId())
+		replicaChunkID, err = parseChunkID(first.GetChunkId())
 		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+			return err
 		}
 	}
 
@@ -467,9 +493,9 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
 	}
 
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return err
 	}
 
 	searchIter, getToken, tableResult, histogram, err := s.searchExecutor(stream.Context(), vaultID, req.GetQuery(), req.GetResumeToken())
@@ -535,13 +561,13 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 	if s.contextExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "context executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	chunkID, err := parseChunkID(req.GetChunkId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+		return nil, err
 	}
 
 	before, anchor, after, err := s.contextExecutor(ctx, vaultID, chunkID, req.GetPos(), int(req.GetBefore()), int(req.GetAfter()))
@@ -597,9 +623,9 @@ func (s *Server) forwardListChunks(ctx context.Context, req *gastrologv1.Forward
 	if s.listChunksExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "list chunks executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
 	chunks, err := s.listChunksExecutor(ctx, vaultID)
 	if err != nil {
@@ -614,13 +640,13 @@ func (s *Server) forwardGetIndexes(ctx context.Context, req *gastrologv1.Forward
 	if s.getIndexesExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "get indexes executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	chunkID, err := parseChunkID(req.GetChunkId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+		return nil, err
 	}
 	resp, err := s.getIndexesExecutor(ctx, vaultID, chunkID)
 	if err != nil {
@@ -638,9 +664,9 @@ func (s *Server) forwardValidateVault(ctx context.Context, req *gastrologv1.Forw
 	if s.validateVaultExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "validate vault executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
 	resp, err := s.validateVaultExecutor(ctx, vaultID)
 	if err != nil {
@@ -658,13 +684,13 @@ func (s *Server) forwardGetChunk(ctx context.Context, req *gastrologv1.ForwardGe
 	if s.getChunkExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "get chunk executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	chunkID, err := parseChunkID(req.GetChunkId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+		return nil, err
 	}
 	meta, err := s.getChunkExecutor(ctx, vaultID, chunkID)
 	if err != nil {
@@ -679,9 +705,9 @@ func (s *Server) forwardAnalyzeChunk(ctx context.Context, req *gastrologv1.Forwa
 	if s.analyzeChunkExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "analyze chunk executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
 	analyses, err := s.analyzeChunkExecutor(ctx, vaultID, req.GetChunkId())
 	if err != nil {
@@ -696,9 +722,9 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 	if s.sealVaultExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "seal vault executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
 	if err := s.sealVaultExecutor(ctx, vaultID); err != nil {
 		return nil, status.Errorf(codes.Internal, "seal vault: %v", err)
@@ -726,17 +752,17 @@ func (s *Server) forwardDeleteChunk(ctx context.Context, req *gastrologv1.Forwar
 	if s.deleteChunkExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "delete chunk executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
-	tierID, err := uuid.Parse(req.GetTierId())
+	tierID, err := parseTierID(req.GetTierId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+		return nil, err
 	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	chunkID, err := parseChunkID(req.GetChunkId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+		return nil, err
 	}
 	if err := s.deleteChunkExecutor(ctx, vaultID, tierID, chunkID); err != nil {
 		return nil, status.Errorf(codes.Internal, "delete chunk: %v", err)
@@ -750,17 +776,17 @@ func (s *Server) forwardSealTier(ctx context.Context, req *gastrologv1.ForwardSe
 	if s.sealTierExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "seal tier executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
-	tierID, err := uuid.Parse(req.GetTierId())
+	tierID, err := parseTierID(req.GetTierId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+		return nil, err
 	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
+	chunkID, err := parseChunkID(req.GetChunkId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+		return nil, err
 	}
 	if err := s.sealTierExecutor(ctx, vaultID, tierID, chunkID); err != nil {
 		return nil, status.Errorf(codes.Internal, "seal tier: %v", err)
@@ -774,9 +800,9 @@ func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.Forwa
 	if s.reindexVaultExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "reindex vault executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := parseVaultID(req.GetVaultId())
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return nil, err
 	}
 	jobID, err := s.reindexVaultExecutor(ctx, vaultID)
 	if err != nil {
