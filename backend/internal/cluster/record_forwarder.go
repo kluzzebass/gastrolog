@@ -64,10 +64,11 @@ var streamForwardRecordsDesc = &grpc.StreamDesc{
 // RecordForwarder implements orchestrator.RecordForwarder with per-node
 // buffered channels and client-streaming RPCs.
 type RecordForwarder struct {
-	peers  *PeerConns
-	logger *slog.Logger
-	cw     *chanwatch.Watcher
-	alerts *alert.Collector // optional alert collector
+	peers   *PeerConns
+	logger  *slog.Logger
+	cw      *chanwatch.Watcher
+	alerts  *alert.Collector // optional alert collector
+	chanCap int              // per-node channel capacity; 0 = default (16384)
 
 	sent atomic.Int64 // records successfully sent
 
@@ -83,13 +84,18 @@ type RecordForwarder struct {
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
-func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Collector) *RecordForwarder {
+// chanCap sets the per-node channel capacity; 0 uses the default (16384).
+func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Collector, chanCap int) *RecordForwarder {
 	stopCtx, stopCancel := context.WithCancel(context.Background())
 	cwCtx, cwCancel := context.WithCancel(context.Background())
+	if chanCap <= 0 {
+		chanCap = forwardChanCap
+	}
 	rf := &RecordForwarder{
 		peers:      peers,
 		logger:     logger,
 		alerts:     alerts,
+		chanCap:    chanCap,
 		cw:         chanwatch.New(logger, 1*time.Second),
 		nodes:      make(map[string]*nodeForwarder),
 		stop:       make(chan struct{}),
@@ -169,7 +175,7 @@ func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vault
 // Must be called with rf.mu held.
 func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
 	nf := &nodeForwarder{
-		ch:   make(chan forwardEntry, forwardChanCap),
+		ch:   make(chan forwardEntry, rf.chanCap),
 		done: make(chan struct{}),
 	}
 	rf.nodes[nodeID] = nf
