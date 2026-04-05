@@ -106,6 +106,17 @@ export function tierTypeEnum(t: TierTypeLabel): TierType {
   }
 }
 
+/** Map a TierType proto enum to its display label. */
+export function tierTypeLabel(type: TierType): string {
+  switch (type) {
+    case TierType.MEMORY: return "memory";
+    case TierType.FILE: return "file";
+    case TierType.CLOUD: return "cloud";
+    case TierType.JSONL: return "jsonl";
+    default: return "unknown";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Tier completeness check
 // ---------------------------------------------------------------------------
@@ -193,16 +204,6 @@ function addFormReducer(state: AddFormState, action: AddFormAction): AddFormStat
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tier type badge label
-// ---------------------------------------------------------------------------
-
-const tierTypeLabels: Record<TierTypeLabel, string> = {
-  memory: "Memory",
-  file: "File",
-  cloud: "Cloud",
-  jsonl: "jsonl",
-};
 
 // ---------------------------------------------------------------------------
 // Tier entry card
@@ -256,7 +257,7 @@ export function TierEntryCard({
               "bg-copper/15 text-copper",
             )}`}
           >
-            {tierTypeLabels[tier.type]}
+            {tierTypeLabel(tierTypeEnum(tier.type))}
           </span>
           {index === 0 && (
             <span

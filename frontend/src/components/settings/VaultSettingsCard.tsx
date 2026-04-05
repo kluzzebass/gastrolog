@@ -28,20 +28,12 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
 import { formatBytes } from "../../utils/units";
 
-function tierTypeLabel(type: TierType): string {
-  switch (type) {
-    case TierType.MEMORY: return "memory";
-    case TierType.FILE: return "file";
-    case TierType.CLOUD: return "cloud";
-    case TierType.JSONL: return "jsonl";
-    default: return "unknown";
-  }
-}
 
 import {
   TierEntryCard,
   emptyTierEntry,
   tierTypeEnum,
+  tierTypeLabel,
   parseMemoryBudget,
   isTierComplete,
   type TierEntry,
