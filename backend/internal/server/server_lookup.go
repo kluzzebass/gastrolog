@@ -21,6 +21,7 @@ func (s *Server) loadInitialLookupConfig(registry lookup.Registry) {
 	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
+		s.logger.Warn("failed to load lookup config at startup", "error", err)
 		return
 	}
 	s.applyLookupConfig(ss.Lookup, ss.MaxMind, registry)
@@ -100,7 +101,9 @@ func (s *Server) registerMMDBLookups(cfg config.LookupConfig, registry lookup.Re
 				s.logger.Warn("failed to load MMDB", "name", mcfg.Name, "path", mmdbPath, "error", err)
 			} else {
 				s.logger.Info("loaded MMDB lookup", "name", mcfg.Name, "type", info.DatabaseType, "build", info.BuildTime.Format("2006-01-02"))
-				_ = m.WatchFile(mmdbPath)
+				if err := m.WatchFile(mmdbPath); err != nil {
+					s.logger.Warn("failed to watch MMDB file", "name", mcfg.Name, "path", mmdbPath, "error", err)
+				}
 			}
 		}
 		registry[mcfg.Name] = m
@@ -210,7 +213,9 @@ func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry looku
 			s.logger.Warn("failed to load JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)
 			continue
 		}
-		_ = jf.WatchFile(filePath)
+		if err := jf.WatchFile(filePath); err != nil {
+			s.logger.Warn("failed to watch JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)
+		}
 
 		registry[jcfg.Name] = jf
 		s.logger.Info("registered JSON file lookup table", "name", jcfg.Name, "path", filePath)
@@ -266,7 +271,9 @@ func (s *Server) registerCSVLookups(cfg config.LookupConfig, registry lookup.Reg
 			s.logger.Warn("failed to load CSV lookup file", "name", ccfg.Name, "path", filePath, "error", err)
 			continue
 		}
-		_ = ct.WatchFile(filePath)
+		if err := ct.WatchFile(filePath); err != nil {
+			s.logger.Warn("failed to watch CSV lookup file", "name", ccfg.Name, "path", filePath, "error", err)
+		}
 
 		registry[ccfg.Name] = ct
 		s.logger.Info("registered CSV lookup table", "name", ccfg.Name, "path", filePath)
