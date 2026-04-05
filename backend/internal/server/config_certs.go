@@ -158,7 +158,11 @@ func (s *ConfigServer) PutCertificate(
 	if s.onTLSConfigChange != nil {
 		s.onTLSConfigChange()
 	}
-	return connect.NewResponse(&apiv1.PutCertificateResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutCertificateResponse{Config: cfg}), nil
 }
 
 func (s *ConfigServer) loadExistingCert(ctx context.Context, id, name string) (config.CertPEM, error) {
@@ -283,5 +287,9 @@ func (s *ConfigServer) DeleteCertificate(
 	if s.onTLSConfigChange != nil {
 		s.onTLSConfigChange()
 	}
-	return connect.NewResponse(&apiv1.DeleteCertificateResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteCertificateResponse{Config: cfg}), nil
 }

@@ -378,7 +378,11 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 	}
 	for _, tgt := range targets {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_ = o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID)
+		if err := o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
+			o.logger.Warn("replication: failed to seal remote follower",
+				"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
+				"chunk", chunkID.String(), "error", err)
+		}
 		cancel()
 	}
 }
@@ -390,12 +394,17 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 	}
 	for _, tgt := range targets {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		var err error
 		if o.tierReplicator != nil {
-			_ = o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+			err = o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 		} else if o.forwarder != nil {
-			_ = o.forwarder.ForwardToTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
+			err = o.forwarder.ForwardToTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 		}
 		cancel()
+		if err != nil {
+			o.logger.Warn("replication: failed to forward record to follower",
+				"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID, "error", err)
+		}
 	}
 }
 
@@ -403,14 +412,20 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 // identified by storageID. Called under o.mu.RLock — vault is already resolved.
 func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID uuid.UUID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && t.StorageID == storageID && t.IsFollower {
+		if t.TierID == tierID && t.StorageID == storageID && t.IsFollower { //nolint:nestif // error handling adds nesting
 			if primaryChunkID != (chunk.ChunkID{}) {
 				if active := t.Chunks.Active(); active != nil && active.ID != primaryChunkID {
-					_ = t.Chunks.Seal()
+					if err := t.Chunks.Seal(); err != nil {
+						o.logger.Warn("replication: local follower seal failed",
+							"tier", tierID, "storage", storageID, "error", err)
+					}
 				}
 				t.Chunks.SetNextChunkID(primaryChunkID)
 			}
-			_, _, _ = t.Chunks.Append(rec)
+			if _, _, err := t.Chunks.Append(rec); err != nil {
+				o.logger.Warn("replication: local follower append failed",
+					"tier", tierID, "storage", storageID, "error", err)
+			}
 			return
 		}
 	}

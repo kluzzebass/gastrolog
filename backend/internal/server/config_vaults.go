@@ -63,7 +63,11 @@ func (s *ConfigServer) PutVault(
 		s.placementReconcile(ctx)
 	}
 
-	return connect.NewResponse(&apiv1.PutVaultResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutVaultResponse{Config: cfg}), nil
 }
 
 // DeleteVault removes a vault. If force is false, the vault must be empty.
@@ -115,7 +119,11 @@ func (s *ConfigServer) DeleteVault(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteVaultResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteVaultResponse{Config: cfg}), nil
 }
 
 func (s *ConfigServer) forceDeleteVault(id uuid.UUID) error {
@@ -172,7 +180,11 @@ func (s *ConfigServer) PauseVault(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-	return connect.NewResponse(&apiv1.PauseVaultResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PauseVaultResponse{Config: cfg}), nil
 }
 
 // ResumeVault enables ingestion for a vault.
@@ -205,7 +217,11 @@ func (s *ConfigServer) ResumeVault(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
-	return connect.NewResponse(&apiv1.ResumeVaultResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.ResumeVaultResponse{Config: cfg}), nil
 }
 
 // protoToVaultConfig converts a proto VaultConfig to a config.VaultConfig.

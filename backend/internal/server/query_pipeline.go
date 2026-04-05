@@ -36,7 +36,7 @@ func (s *QueryServer) searchPipeline(
 		return connect.NewError(connect.CodeInternal, err)
 	}
 	// Compute local histogram to include alongside pipeline results.
-	histogram := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
+	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
 
 	if result.Table != nil {
 		// Fan out to remote nodes and merge table results.
@@ -98,7 +98,7 @@ func (s *QueryServer) searchPipelineGlobal(
 	}
 
 	// Compute and merge histogram.
-	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
+	localHist := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
 	histogram := mergeHistogramBuckets(localHist, remoteHist)
 
 	if result.Table != nil {

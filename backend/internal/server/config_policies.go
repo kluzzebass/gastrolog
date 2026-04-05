@@ -60,7 +60,11 @@ func (s *ConfigServer) PutRotationPolicy(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRotationPolicyPut, ID: id})
 
-	return connect.NewResponse(&apiv1.PutRotationPolicyResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutRotationPolicyResponse{Config: fullCfg}), nil
 }
 
 // DeleteRotationPolicy removes a rotation policy.
@@ -95,7 +99,11 @@ func (s *ConfigServer) DeleteRotationPolicy(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteRotationPolicyResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteRotationPolicyResponse{Config: cfg}), nil
 }
 
 // PutRetentionPolicy creates or updates a retention policy.
@@ -141,7 +149,11 @@ func (s *ConfigServer) PutRetentionPolicy(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRetentionPolicyPut, ID: id})
 
-	return connect.NewResponse(&apiv1.PutRetentionPolicyResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutRetentionPolicyResponse{Config: fullCfg}), nil
 }
 
 // DeleteRetentionPolicy removes a retention policy.
@@ -185,7 +197,11 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{Config: cfg}), nil
 }
 
 // --- Proto <-> Config conversion helpers for policies ---

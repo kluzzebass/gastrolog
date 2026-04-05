@@ -104,7 +104,11 @@ func (s *ConfigServer) PutRoute(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRoutePut, ID: id})
 
-	return connect.NewResponse(&apiv1.PutRouteResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutRouteResponse{Config: fullCfg}), nil
 }
 
 // DeleteRoute removes a route.
@@ -142,7 +146,11 @@ func (s *ConfigServer) DeleteRoute(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRouteDeleted, ID: id})
 
-	return connect.NewResponse(&apiv1.DeleteRouteResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteRouteResponse{Config: cfg}), nil
 }
 
 // vaultReferencedByRoute checks if a vault ID is used as a destination in any route.

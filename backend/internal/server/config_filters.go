@@ -54,7 +54,11 @@ func (s *ConfigServer) PutFilter(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyFilterPut, ID: id})
 
-	return connect.NewResponse(&apiv1.PutFilterResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutFilterResponse{Config: fullCfg}), nil
 }
 
 // DeleteFilter removes a filter.
@@ -87,5 +91,9 @@ func (s *ConfigServer) DeleteFilter(
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
-	return connect.NewResponse(&apiv1.DeleteFilterResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteFilterResponse{Config: cfg}), nil
 }

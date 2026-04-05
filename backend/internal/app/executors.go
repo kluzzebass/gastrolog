@@ -142,7 +142,7 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 		}
 
 		// Compute volume histogram across all primary tiers in this vault.
-		histogram := histogramBucketsToProto(eng.ComputeHistogram(ctx, q, 50))
+		histogram := server.HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
 
 		// Pipeline query: run aggregation locally and return table result.
 		if pipeline != nil && len(pipeline.Pipes) > 0 && !query.CanStreamPipeline(pipeline) {
@@ -185,22 +185,6 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 	}
 }
 
-// histogramBucketsToProto converts internal histogram buckets to proto type.
-func histogramBucketsToProto(buckets []query.HistogramBucket) []*gastrologv1.HistogramBucket {
-	if len(buckets) == 0 {
-		return nil
-	}
-	out := make([]*gastrologv1.HistogramBucket, len(buckets))
-	for i, b := range buckets {
-		out[i] = &gastrologv1.HistogramBucket{
-			TimestampMs:       b.TimestampMs,
-			Count:             b.Count,
-			GroupCounts:       b.GroupCounts,
-			HasCloudData: b.HasCloudData,
-		}
-	}
-	return out
-}
 
 // newExplainExecutor creates a cluster.ExplainExecutor that runs explain on
 // local vaults for ForwardExplain RPCs received from peer nodes. Scopes the

@@ -110,42 +110,51 @@ func (s *ConfigServer) GetConfig(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetConfigRequest],
 ) (*connect.Response[apiv1.GetConfigResponse], error) {
-	return connect.NewResponse(s.buildFullConfig(ctx)), nil
+	resp, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("load config: %w", err))
+	}
+	return connect.NewResponse(resp), nil
 }
 
 // buildFullConfig assembles a complete GetConfigResponse from the config store.
 // Used by GetConfig and by mutation handlers to return the updated config inline.
-// Includes the current config version from the signal so the frontend can track
-// cache freshness without timers.
-func (s *ConfigServer) buildFullConfig(ctx context.Context) *apiv1.GetConfigResponse {
+// Returns an error if any config section fails to load — never returns partial data.
+func (s *ConfigServer) buildFullConfig(ctx context.Context) (*apiv1.GetConfigResponse, error) {
 	resp := &apiv1.GetConfigResponse{}
 	if s.cfgStore != nil {
-		s.loadConfigVaults(ctx, resp)
-		s.loadConfigIngesters(ctx, resp)
-		s.loadConfigFilters(ctx, resp)
-		s.loadConfigRotationPolicies(ctx, resp)
-		s.loadConfigRetentionPolicies(ctx, resp)
-		s.loadConfigRoutes(ctx, resp)
-		s.loadConfigNodeConfigs(ctx, resp)
-		s.loadConfigManagedFiles(ctx, resp)
-		s.loadConfigCloudServices(ctx, resp)
-		s.loadConfigTiers(ctx, resp)
-		s.loadConfigNodeStorageConfigs(ctx, resp)
+		err := errors.Join(
+			s.loadConfigVaults(ctx, resp),
+			s.loadConfigIngesters(ctx, resp),
+			s.loadConfigFilters(ctx, resp),
+			s.loadConfigRotationPolicies(ctx, resp),
+			s.loadConfigRetentionPolicies(ctx, resp),
+			s.loadConfigRoutes(ctx, resp),
+			s.loadConfigNodeConfigs(ctx, resp),
+			s.loadConfigManagedFiles(ctx, resp),
+			s.loadConfigCloudServices(ctx, resp),
+			s.loadConfigTiers(ctx, resp),
+			s.loadConfigNodeStorageConfigs(ctx, resp),
+		)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if s.configSignal != nil {
 		resp.ConfigVersion = s.configSignal.Version()
 	}
-	return resp
+	return resp, nil
 }
 
-func (s *ConfigServer) loadConfigVaults(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigVaults(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	cfgStores, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list vaults: %w", err)
 	}
 	for _, vaultCfg := range cfgStores {
 		resp.Vaults = append(resp.Vaults, vaultConfigToProto(vaultCfg))
 	}
+	return nil
 }
 
 func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
@@ -156,10 +165,10 @@ func vaultConfigToProto(vaultCfg config.VaultConfig) *apiv1.VaultConfig {
 	}
 }
 
-func (s *ConfigServer) loadConfigIngesters(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigIngesters(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	ingesters, err := s.cfgStore.ListIngesters(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list ingesters: %w", err)
 	}
 	for _, ing := range ingesters {
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
@@ -171,12 +180,13 @@ func (s *ConfigServer) loadConfigIngesters(ctx context.Context, resp *apiv1.GetC
 			NodeId:  ing.NodeID,
 		})
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigFilters(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigFilters(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	filters, err := s.cfgStore.ListFilters(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list filters: %w", err)
 	}
 	for _, fc := range filters {
 		resp.Filters = append(resp.Filters, &apiv1.FilterConfig{
@@ -185,12 +195,13 @@ func (s *ConfigServer) loadConfigFilters(ctx context.Context, resp *apiv1.GetCon
 			Expression: fc.Expression,
 		})
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigRotationPolicies(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigRotationPolicies(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	policies, err := s.cfgStore.ListRotationPolicies(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list rotation policies: %w", err)
 	}
 	for _, pol := range policies {
 		p := rotationPolicyToProto(pol)
@@ -198,12 +209,13 @@ func (s *ConfigServer) loadConfigRotationPolicies(ctx context.Context, resp *api
 		p.Name = pol.Name
 		resp.RotationPolicies = append(resp.RotationPolicies, p)
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigRetentionPolicies(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigRetentionPolicies(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	retPolicies, err := s.cfgStore.ListRetentionPolicies(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list retention policies: %w", err)
 	}
 	for _, pol := range retPolicies {
 		p := retentionPolicyToProto(pol)
@@ -211,12 +223,13 @@ func (s *ConfigServer) loadConfigRetentionPolicies(ctx context.Context, resp *ap
 		p.Name = pol.Name
 		resp.RetentionPolicies = append(resp.RetentionPolicies, p)
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	routes, err := s.cfgStore.ListRoutes(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list routes: %w", err)
 	}
 	for _, rt := range routes {
 		prt := &apiv1.RouteConfig{
@@ -236,12 +249,13 @@ func (s *ConfigServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetConf
 		}
 		resp.Routes = append(resp.Routes, prt)
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	nodes, err := s.cfgStore.ListNodes(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list nodes: %w", err)
 	}
 	for _, n := range nodes {
 		resp.NodeConfigs = append(resp.NodeConfigs, &apiv1.NodeConfig{
@@ -249,12 +263,13 @@ func (s *ConfigServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 			Name: n.Name,
 		})
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	services, err := s.cfgStore.ListCloudServices(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list cloud services: %w", err)
 	}
 	for _, cs := range services {
 		transitions := make([]*apiv1.CloudStorageTransition, len(cs.Transitions))
@@ -285,12 +300,13 @@ func (s *ConfigServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			ReconcileSchedule: cs.ReconcileSchedule,
 		})
 	}
+	return nil
 }
 
-func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list tiers: %w", err)
 	}
 	for _, tier := range tiers {
 		var placements []*apiv1.TierPlacement
@@ -335,6 +351,7 @@ func (s *ConfigServer) loadConfigTiers(ctx context.Context, resp *apiv1.GetConfi
 		}
 		resp.Tiers = append(resp.Tiers, tc)
 	}
+	return nil
 }
 
 func tierTypeToProto(t config.TierType) apiv1.TierType {
@@ -352,10 +369,10 @@ func tierTypeToProto(t config.TierType) apiv1.TierType {
 	}
 }
 
-func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	configs, err := s.cfgStore.ListNodeStorageConfigs(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list node storage configs: %w", err)
 	}
 	for _, nsc := range configs {
 		storages := make([]*apiv1.FileStorage, len(nsc.FileStorages))
@@ -373,6 +390,7 @@ func (s *ConfigServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 			FileStorages:  storages,
 		})
 	}
+	return nil
 }
 
 // GetSettings returns the server-level configuration.
@@ -596,7 +614,11 @@ func (s *ConfigServer) PutNodeConfig(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("put node config: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.PutNodeConfigResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutNodeConfigResponse{Config: fullCfg}), nil
 }
 
 // GenerateName returns a random petname for use as a default entity name.

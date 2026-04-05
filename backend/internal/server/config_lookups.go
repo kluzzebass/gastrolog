@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
@@ -58,10 +59,10 @@ func (s *ConfigServer) DeleteManagedFile(
 	return connect.NewResponse(&apiv1.DeleteManagedFileResponse{}), nil
 }
 
-func (s *ConfigServer) loadConfigManagedFiles(ctx context.Context, resp *apiv1.GetConfigResponse) {
+func (s *ConfigServer) loadConfigManagedFiles(ctx context.Context, resp *apiv1.GetConfigResponse) error {
 	files, err := s.cfgStore.ListManagedFiles(ctx)
 	if err != nil {
-		return
+		return fmt.Errorf("list managed files: %w", err)
 	}
 	for _, f := range files {
 		resp.ManagedFiles = append(resp.ManagedFiles, &apiv1.ManagedFileInfo{
@@ -72,4 +73,5 @@ func (s *ConfigServer) loadConfigManagedFiles(ctx context.Context, resp *apiv1.G
 			UploadedAt: f.UploadedAt.Format(time.RFC3339),
 		})
 	}
+	return nil
 }

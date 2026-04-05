@@ -194,8 +194,8 @@ func mergeHistogramBuckets(a, b []*apiv1.HistogramBucket) []*apiv1.HistogramBuck
 	return a
 }
 
-// histogramToProto converts internal histogram buckets to the proto type.
-func histogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket {
+// HistogramToProto converts internal histogram buckets to the proto type.
+func HistogramToProto(buckets []query.HistogramBucket) []*apiv1.HistogramBucket {
 	if len(buckets) == 0 {
 		return nil
 	}

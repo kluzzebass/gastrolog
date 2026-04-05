@@ -156,7 +156,7 @@ func (s *QueryServer) searchDirect(
 	remoteIter, remoteHist, getRemoteTokens := s.collectRemote(ctx, q, remoteTokens)
 
 	// Compute local histogram and merge with remote.
-	localHist := histogramToProto(eng.ComputeHistogram(ctx, q, 50))
+	localHist := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
 	histogram := mergeHistogramBuckets(localHist, remoteHist)
 
 	localIter, getLocalToken := eng.Search(ctx, q, localResume)

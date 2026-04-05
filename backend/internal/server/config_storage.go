@@ -52,7 +52,11 @@ func (s *ConfigServer) PutCloudService(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: id})
 
-	return connect.NewResponse(&apiv1.PutCloudServiceResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutCloudServiceResponse{Config: fullCfg}), nil
 }
 
 // DeleteCloudService removes a cloud service.
@@ -94,7 +98,11 @@ func (s *ConfigServer) DeleteCloudService(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyCloudServiceDeleted, ID: id})
 
-	return connect.NewResponse(&apiv1.DeleteCloudServiceResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteCloudServiceResponse{Config: cfg}), nil
 }
 
 // --- Node Storage ---
@@ -125,7 +133,11 @@ func (s *ConfigServer) SetNodeStorageConfig(
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyNodeStorageConfigSet})
 
-	return connect.NewResponse(&apiv1.SetNodeStorageConfigResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.SetNodeStorageConfigResponse{Config: fullCfg}), nil
 }
 
 // --- Tiers ---
@@ -201,7 +213,11 @@ func (s *ConfigServer) PutTier(
 		s.placementReconcile(ctx)
 	}
 
-	return connect.NewResponse(&apiv1.PutTierResponse{Config: s.buildFullConfig(ctx)}), nil
+	fullCfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.PutTierResponse{Config: fullCfg}), nil
 }
 
 // DeleteTier removes a tier.
@@ -238,7 +254,11 @@ func (s *ConfigServer) DeleteTier(
 
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: id, Drain: drain})
 
-	return connect.NewResponse(&apiv1.DeleteTierResponse{Config: s.buildFullConfig(ctx)}), nil
+	cfg, err := s.buildFullConfig(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	return connect.NewResponse(&apiv1.DeleteTierResponse{Config: cfg}), nil
 }
 
 // --- Proto <-> Config conversion helpers for storage ---
