@@ -21,15 +21,23 @@ import (
 
 // testNode bundles a cluster server, raft instance, and config store for testing.
 type testNode struct {
-	srv   *cluster.Server
-	raft  *hraft.Raft
-	store *raftstore.Store
-	fsm   *raftfsm.FSM
+	srv    *cluster.Server
+	raft   *hraft.Raft
+	store  *raftstore.Store
+	fsm    *raftfsm.FSM
+	closed bool
 }
 
 func (n *testNode) close() {
-	n.srv.Stop()
+	if n.closed {
+		return
+	}
+	n.closed = true
+	// Shut down Raft first — stops replication goroutines so they don't hold
+	// open gRPC streams during server stop. Then stop the server, which closes
+	// the transport (unblocking any remaining handlers) and the gRPC server.
 	_ = n.raft.Shutdown().Error()
+	n.srv.Stop()
 }
 
 // newTestNode creates a cluster node listening on a random port.
