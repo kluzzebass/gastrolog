@@ -1,5 +1,6 @@
 import { useReducer, useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
+import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import {
   useConfig,
   usePutCloudService,
@@ -107,8 +108,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const effectiveName = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
   const nameConflict = existingNames.has(effectiveName);
 
-  const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
-  const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
+  const nodeNameMap = buildNodeNameMap(nodeConfigs);
 
   const handleCreate = async () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
@@ -307,7 +307,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
             nsc.fileStorages.map(( fs) => ({
               fs,
               nodeId: nsc.nodeId,
-              nodeName: resolveNodeName(nsc.nodeId),
+              nodeName: resolveNodeName(nodeNameMap, nsc.nodeId),
             })),
           ).sort((a, b) => (a.fs.name || a.fs.id).localeCompare(b.fs.name || b.fs.id));
 

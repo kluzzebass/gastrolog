@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
 import { useToast } from "../Toast";
+import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
@@ -186,7 +187,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   }
 
   // Node name resolution — used by both local and remote tier headers.
-  const nodeNameMap = new Map((config?.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
+  const nodeNameMap = buildNodeNameMap(config?.nodeConfigs ?? []);
 
   // Identify remote tiers (in vault config but no local chunks).
   const remoteTierInfo = (() => {
@@ -202,7 +203,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
           id: tc.id,
           pos: tierPositions.get(tc.id) ?? 0,
           type: tierTypeMap[tc.type] ?? "unknown",
-          nodeName: pnId ? (nodeNameMap.get(pnId) ?? pnId) : "",
+          nodeName: pnId ? resolveNodeName(nodeNameMap, pnId) : "",
           rf: tc.replicationFactor || 1,
           followerNodeIds: followerNodeIds(tc, nscs),
           storageClass: tc.storageClass,
@@ -244,7 +245,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 <span>
                   {"\u2192 "}
                   {remote.followerNodeIds.map((id, si) => {
-                    const name = nodeNameMap.get(id) ?? id;
+                    const name = resolveNodeName(nodeNameMap, id);
                     let fallbackClass = 0;
                     if (remote.storageClass > 0) {
                       const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
@@ -277,7 +278,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         const rf = tierCfg?.replicationFactor || 1;
         const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
         const pnId = tierCfg ? leaderNodeId(tierCfg, nscs) : "";
-        const nodeName = pnId ? (nodeNameMap.get(pnId) ?? pnId) : "";
+        const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : "";
         return (
         <div key={tierId}>
           <div
@@ -298,7 +299,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
               <span>
                 {"\u2192 "}
                 {secondaries.map((id, si) => {
-                  const name = nodeNameMap.get(id) ?? id;
+                  const name = resolveNodeName(nodeNameMap, id);
                   const requiredClass = tierCfg?.storageClass ?? 0;
                   let fallbackClass = 0;
                   if (requiredClass > 0) {
@@ -358,7 +359,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     c={c}
                     replicas={replicas}
                     rf={rf}
-                    replicaNodes={tierCfg ? [pnId, ...secondaries].filter(Boolean).map((id) => nodeNameMap.get(id) ?? id) : []}
+                    replicaNodes={tierCfg ? [pnId, ...secondaries].filter(Boolean).map((id) => resolveNodeName(nodeNameMap, id)) : []}
                   />
                 );
               })}

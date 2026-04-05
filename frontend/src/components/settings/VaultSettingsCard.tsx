@@ -26,6 +26,7 @@ import { JobProgress } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
+import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
 import { formatBytes } from "../../utils/units";
 
 
@@ -215,8 +216,7 @@ export function VaultSettingsCard({
   const vaultTiers = localTierIds.map((id) => tierMap.get(id)).filter((t): t is TierConfig => !!t);
 
   // Node name resolution for tier placement display.
-  const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
-  const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
+  const nodeNameMap = buildNodeNameMap(nodeConfigs);
 
   // Check if a node has a specific storage class; returns the fallback class if not.
   const nodeStorageClass = (nodeId: string, requiredClass: number): { exact: boolean; actualClass: number } => {
@@ -540,7 +540,7 @@ export function VaultSettingsCard({
             <div className="flex flex-col gap-1.5">
               {vaultTiers.map((tier, i) => {
                 const pnId = leaderNodeId(tier, nodeStorageConfigs);
-                const nodeName = pnId ? resolveNodeName(pnId) : null;
+                const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : null;
                 const csName = tier.cloudServiceId
                   ? cloudServiceOptions.find((cs) => cs.value === tier.cloudServiceId)?.label || tier.cloudServiceId
                   : null;
@@ -671,7 +671,7 @@ export function VaultSettingsCard({
                       {followerNodeIds(tier, nodeStorageConfigs).length > 0 && (
                         <span>
                           {followerNodeIds(tier, nodeStorageConfigs).map((id: string, si: number) => {
-                            const name = resolveNodeName(id);
+                            const name = resolveNodeName(nodeNameMap, id);
                             const sc = tier.storageClass > 0 ? nodeStorageClass(id, tier.storageClass) : null;
                             const fallback = sc && !sc.exact && sc.actualClass > 0;
                             return (
