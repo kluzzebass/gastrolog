@@ -12,6 +12,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/units"
 )
 
 // PutRotationPolicy creates or updates a rotation policy.
@@ -211,7 +212,7 @@ func protoToRotationPolicy(p *apiv1.RotationPolicyConfig) config.RotationPolicyC
 	var cfg config.RotationPolicyConfig
 
 	if p.MaxBytes > 0 {
-		s := formatBytes(uint64(p.MaxBytes))
+		s := units.FormatBytesCompact(uint64(p.MaxBytes))
 		cfg.MaxBytes = &s
 	}
 	if p.MaxAgeSeconds > 0 {
@@ -262,7 +263,7 @@ func protoToRetentionPolicy(p *apiv1.RetentionPolicyConfig) config.RetentionPoli
 		cfg.MaxAge = &s
 	}
 	if p.MaxBytes > 0 {
-		s := formatBytes(uint64(p.MaxBytes))
+		s := units.FormatBytesCompact(uint64(p.MaxBytes))
 		cfg.MaxBytes = &s
 	}
 	if p.MaxChunks > 0 {

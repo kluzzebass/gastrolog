@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatDateTimestamp } from "../../utils/temporal";
+import { formatBytes } from "../../utils/units";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig } from "../../api/hooks/useConfig";
 import { useSettings } from "../../api/hooks/useSettings";
@@ -280,10 +281,4 @@ function VersionRow({
       )}
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

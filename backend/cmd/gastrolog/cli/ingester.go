@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/units"
 )
 
 func newIngesterCmd() *cobra.Command {
@@ -224,7 +225,7 @@ func newIngesterStatusCmd() *cobra.Command {
 				{"Type", resp.Msg.Type},
 				{"Running", strconv.FormatBool(resp.Msg.Running)},
 				{"Messages Ingested", strconv.FormatInt(resp.Msg.MessagesIngested, 10)},
-				{"Bytes Ingested", formatBytesStr(resp.Msg.BytesIngested)},
+				{"Bytes Ingested", units.FormatBytesDisplay(resp.Msg.BytesIngested)},
 				{"Errors", strconv.FormatInt(resp.Msg.Errors, 10)},
 			})
 			return nil

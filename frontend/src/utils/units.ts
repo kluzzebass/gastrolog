@@ -1,13 +1,14 @@
 /** Shared unit formatting and parsing utilities. */
 
-/** Format a number of bytes to a human-readable string (e.g. "1.5 MB"). */
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+/** Format a byte count to a human-readable string (e.g. "1.5 MB"). Accepts number or bigint. */
+export function formatBytes(b: bigint | number): string {
+  const n = typeof b === "bigint" ? Number(b) : b;
+  if (n === 0) return "0 B";
+  if (n >= 1024 ** 4) return `${(n / 1024 ** 4).toFixed(1)} TB`;
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${n} B`;
 }
 
 /** Format a bigint byte count to a compact string (e.g. "64MB"). */

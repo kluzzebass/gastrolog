@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatDateOnly } from "../../utils/temporal";
+import { formatBytes } from "../../utils/units";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
 import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/config_pb";
 import type { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
@@ -161,10 +162,4 @@ export function FileDropZone({
       )}
     </div>
   );
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

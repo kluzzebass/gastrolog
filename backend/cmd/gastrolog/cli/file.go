@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/units"
 )
 
 func newFileCmd() *cobra.Command {
@@ -46,7 +47,7 @@ func newFileListCmd() *cobra.Command {
 			var rows [][]string
 			for _, f := range resp.Msg.Files {
 				rows = append(rows, []string{
-					f.Id, f.Name, formatBytesStr(f.Size), f.Sha256[:12], f.UploadedAt,
+					f.Id, f.Name, units.FormatBytesDisplay(f.Size), f.Sha256[:12], f.UploadedAt,
 				})
 			}
 			p.table([]string{"ID", "NAME", "SIZE", "SHA256", "UPLOADED"}, rows)
@@ -134,12 +135,3 @@ func newFileDeleteCmd() *cobra.Command {
 	}
 }
 
-func formatBytesStr(bytes int64) string {
-	if bytes < 1024 {
-		return fmt.Sprintf("%d B", bytes)
-	}
-	if bytes < 1024*1024 {
-		return fmt.Sprintf("%.1f KB", float64(bytes)/1024)
-	}
-	return fmt.Sprintf("%.1f MB", float64(bytes)/(1024*1024))
-}

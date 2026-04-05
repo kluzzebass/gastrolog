@@ -1169,16 +1169,3 @@ func checkNameConflict[S ~[]E, E any](entityType string, id uuid.UUID, name stri
 	return nil
 }
 
-// formatBytes formats a byte count as a human-readable string.
-func formatBytes(b uint64) string {
-	switch {
-	case b >= 1024*1024*1024 && b%(1024*1024*1024) == 0:
-		return fmt.Sprintf("%dGB", b/(1024*1024*1024))
-	case b >= 1024*1024 && b%(1024*1024) == 0:
-		return fmt.Sprintf("%dMB", b/(1024*1024))
-	case b >= 1024 && b%1024 == 0:
-		return fmt.Sprintf("%dKB", b/1024)
-	default:
-		return fmt.Sprintf("%dB", b)
-	}
-}
