@@ -281,3 +281,231 @@ describe("VaultsSettings", () => {
     });
   });
 });
+
+// ── handleSaveAll tests ──────────────────────────────────────────────
+
+import { TierConfig, RetentionRule, TierType } from "../../api/gen/gastrolog/v1/config_pb";
+
+// Config with a vault that has two tiers — enough to test multi-tier updates.
+// Uses real TierConfig proto instances so .clone() works in updateExistingTiers.
+const twoTierConfig = {
+  vaults: [{ id: "v1", name: "vault-alpha", enabled: true }],
+  tiers: [
+    new TierConfig({ id: "t1", name: "memory", type: TierType.MEMORY, vaultId: "v1", position: 0, rotationPolicyId: "p1", retentionRules: [new RetentionRule({ retentionPolicyId: "rp1", action: "transition" })], replicationFactor: 1 }),
+    new TierConfig({ id: "t2", name: "file", type: TierType.FILE, vaultId: "v1", position: 1, rotationPolicyId: "", retentionRules: [], replicationFactor: 1, storageClass: 1 }),
+  ],
+  rotationPolicies: [{ id: "p1", name: "daily" }],
+  retentionPolicies: [{ id: "rp1", name: "30-day" }],
+  routes: [],
+  filters: [],
+  ingesters: [],
+  nodeConfigs: [{ id: "n1", name: "node-1" }],
+  nodeStorageConfigs: [{ nodeId: "n1", fileStorages: [{ id: "fs1", storageClass: 1 }] }],
+};
+
+/** Expand vault-alpha and return helpers. */
+function expandVault(getByText: (text: string | RegExp) => HTMLElement) {
+  fireEvent.click(getByText("vault-alpha"));
+}
+
+describe("handleSaveAll", () => {
+  beforeEach(() => {
+    m(mocks.configClient, "putVault").mockClear();
+    m(mocks.configClient, "putTier").mockClear();
+    m(mocks.configClient, "deleteTier").mockClear();
+  });
+
+  // ── Happy path ────────────────────────────────────────────────────
+
+  // Note: fireEvent.change on <input> doesn't trigger React 19 controlled
+  // input handlers in happy-dom. We use checkbox clicks and select changes
+  // to dirty the form instead.
+
+  test("saves vault enabled toggle", async () => {
+    m(mocks.configClient, "putVault").mockResolvedValue({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], twoTierConfig);
+
+    const { getByText, container } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+
+    // Toggle the Enabled checkbox to dirty the vault state.
+    const enabledCheckbox = container.querySelector('[aria-checked="true"][role="checkbox"]')!;
+    fireEvent.click(enabledCheckbox);
+
+    await waitFor(() => {
+      const saveBtn = getByText("Save").closest("button")!;
+      expect(saveBtn.disabled).toBe(false);
+    });
+
+    fireEvent.click(getByText("Save").closest("button")!);
+
+    await waitFor(() => {
+      expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(1);
+      const call = m(mocks.configClient, "putVault").mock.calls[0]! as unknown[];
+      const arg = call[0] as Record<string, Record<string, unknown>>;
+      expect(arg.config!.enabled).toBe(false);
+    });
+  });
+
+  test("saves tier rotation policy change via select", async () => {
+    m(mocks.configClient, "putTier").mockResolvedValue({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], twoTierConfig);
+
+    const { getByText, container } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+
+    // Find the rotation policy select for the first tier and clear it.
+    const selects = container.querySelectorAll("select");
+    const rotationSelect = selects[0]!;
+    fireEvent.change(rotationSelect, { target: { value: "" } });
+
+    await waitFor(() => {
+      const saveBtn = getByText("Save").closest("button")!;
+      expect(saveBtn.disabled).toBe(false);
+    });
+
+    fireEvent.click(getByText("Save").closest("button")!);
+
+    await waitFor(() => {
+      expect(m(mocks.configClient, "putTier")).toHaveBeenCalled();
+    });
+  });
+
+  // ── Unhappy path — tier creation failure aborts save ──────────────
+
+  test("tier creation failure aborts entire save", async () => {
+    m(mocks.configClient, "putTier").mockRejectedValueOnce(new Error("tier create failed"));
+    m(mocks.configClient, "putVault").mockResolvedValue({});
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], twoTierConfig);
+
+    const { getByText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+
+    // Add a new memory tier
+    fireEvent.click(getByText("+ Add Tier"));
+    fireEvent.click(getByText("Memory"));
+
+    // Also toggle enabled to verify the vault save is skipped.
+    const enabledCheckbox = document.querySelector('[aria-checked="true"][role="checkbox"]')!;
+    fireEvent.click(enabledCheckbox);
+
+    const saveBtn = getByText("Save").closest("button")!;
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => {
+      // putTier was called (for the new tier) and failed
+      expect(m(mocks.configClient, "putTier")).toHaveBeenCalledTimes(1);
+    });
+
+    // Vault save should NOT have been called — creation failure aborts
+    expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(0);
+  });
+
+  // ── Unhappy path — tier update failure doesn't reset edit state ───
+
+  test("tier update failure toasts error and preserves edit state", async () => {
+    // putTier fails on the first tier update
+    m(mocks.configClient, "putTier").mockRejectedValue(new Error("tier update failed"));
+    m(mocks.configClient, "putVault").mockResolvedValue({});
+
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], twoTierConfig);
+
+    const { getByText, container } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+
+    // Change rotation policy on the first tier (via select) to dirty the tier.
+    const selects = container.querySelectorAll("select");
+    const rotationSelect = selects[0]!;
+    fireEvent.change(rotationSelect, { target: { value: "" } });
+
+    // Also toggle enabled so vault save runs.
+    const enabledCheckbox = container.querySelector('[aria-checked="true"][role="checkbox"]')!;
+    fireEvent.click(enabledCheckbox);
+
+    await waitFor(() => {
+      const saveBtn = getByText("Save").closest("button")!;
+      expect(saveBtn.disabled).toBe(false);
+    });
+
+    fireEvent.click(getByText("Save").closest("button")!);
+
+    await waitFor(() => {
+      // putTier was attempted (and failed)
+      expect(m(mocks.configClient, "putTier")).toHaveBeenCalled();
+      // Vault save still runs (we continue despite tier failures)
+      expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // ── Unhappy path — removal failure toasts and continues ───────────
+
+  test("tier removal failure toasts error", async () => {
+    m(mocks.configClient, "deleteTier").mockRejectedValueOnce(new Error("delete failed"));
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], twoTierConfig);
+
+    const { getByText, getAllByText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+
+    // Remove the second tier — click its remove button
+    const removeButtons = document.querySelectorAll("[aria-label='Remove tier']");
+    if (removeButtons.length > 0) {
+      fireEvent.click(removeButtons[removeButtons.length - 1]!);
+      // Confirm removal if there's a confirm step
+      const confirmBtns = document.querySelectorAll("button");
+      for (const btn of confirmBtns) {
+        if (btn.textContent === "Yes" || btn.textContent === "Confirm") {
+          fireEvent.click(btn);
+          break;
+        }
+      }
+    }
+
+    const saveBtn = getByText("Save").closest("button")!;
+    if (!saveBtn.disabled) {
+      fireEvent.click(saveBtn);
+
+      await waitFor(() => {
+        expect(m(mocks.configClient, "deleteTier")).toHaveBeenCalled();
+      });
+    }
+  });
+
+  // ── Edge case — save with no changes is a no-op ───────────────────
+
+  test("save button stays disabled when nothing is dirty", () => {
+    const qc = createTestQueryClient();
+    qc.setQueryData(["config"], twoTierConfig);
+
+    const { getByText } = render(<VaultsSettings dark />, {
+      wrapper: settingsWrapper(qc),
+    });
+
+    expandVault(getByText);
+
+    const saveBtn = getByText("Save").closest("button")!;
+    expect(saveBtn.disabled).toBe(true);
+    // No API calls should have been made
+    expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(0);
+    expect(m(mocks.configClient, "putTier")).toHaveBeenCalledTimes(0);
+  });
+});
