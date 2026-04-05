@@ -170,7 +170,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then(setNamePlaceholder);
+          generateName.mutateAsync().then(setNamePlaceholder).catch(() => {});
         } else {
           setNamePlaceholder("");
         }

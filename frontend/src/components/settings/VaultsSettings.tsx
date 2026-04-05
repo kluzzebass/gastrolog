@@ -629,7 +629,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
       onToggleAdd={() => {
         if (!addForm.adding) {
           dispatchAdd({ type: "open" });
-          generateName.mutateAsync().then((n) => dispatchAdd({ type: "set", patch: { namePlaceholder: n } }));
+          generateName.mutateAsync().then((n) => dispatchAdd({ type: "set", patch: { namePlaceholder: n } })).catch(() => {});
         } else {
           dispatchAdd({ type: "close" });
         }

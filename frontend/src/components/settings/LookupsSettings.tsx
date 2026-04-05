@@ -73,7 +73,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const handleAddSelect = (type: string) => {
     setAddingType(type);
     if (type !== "mmdb") {
-      generateName.mutateAsync().then(setNamePlaceholder);
+      generateName.mutateAsync().then(setNamePlaceholder).catch(() => {});
     }
   };
 

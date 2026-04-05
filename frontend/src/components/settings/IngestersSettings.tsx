@@ -168,7 +168,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
       }}
       addOptions={ingesterTypes}
       onAddSelect={(type) => {
-        generateName.mutateAsync().then(setNamePlaceholder);
+        generateName.mutateAsync().then(setNamePlaceholder).catch(() => {});
         dispatchAdd({ type: "startAdd", ingesterType: type });
       }}
       isLoading={isLoading}

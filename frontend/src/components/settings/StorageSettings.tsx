@@ -188,7 +188,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const openStorageForm = () => {
     setAddingStorage(true);
     setStorageNodeId(localNodeId);
-    generateName.mutateAsync().then(setStorageNamePlaceholder);
+    generateName.mutateAsync().then(setStorageNamePlaceholder).catch(() => {});
   };
   const resetStorageForm = () => {
     setAddingStorage(false);
@@ -357,7 +357,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           onToggleAdd={() => {
             if (!addForm.adding) {
               dispatchAdd({ type: "open" });
-              generateName.mutateAsync().then((n) => dispatchAdd({ type: "set", patch: { namePlaceholder: n } }));
+              generateName.mutateAsync().then((n) => dispatchAdd({ type: "set", patch: { namePlaceholder: n } })).catch(() => {});
             } else {
               dispatchAdd({ type: "close" });
             }

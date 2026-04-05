@@ -123,7 +123,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       adding={adding}
       onToggleAdd={() => {
         if (!adding) {
-          generateName.mutateAsync().then(setNamePlaceholder);
+          generateName.mutateAsync().then(setNamePlaceholder).catch(() => {});
         } else {
           setNamePlaceholder("");
         }
