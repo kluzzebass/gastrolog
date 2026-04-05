@@ -66,7 +66,7 @@ func (m *Manager) EvictCache() {
 	}
 
 	if evicted > 0 {
-		m.logger.Info("cache eviction completed",
+		m.logger.Debug("cache eviction completed",
 			"evicted", evicted, "policy", eviction)
 	}
 }

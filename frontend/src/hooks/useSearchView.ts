@@ -18,15 +18,10 @@ import { Record as ProtoRecord } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
 import { timeRangeMs, sameRecord } from "../utils";
-import { protoToInstant, instantToISO, instantToMs } from "../utils/temporal";
+import { protoToInstant, instantToISO } from "../utils/temporal";
 import {
   stripTimeRange,
-  stripChunk,
-  stripPos,
-  stripSeverity,
   injectTimeRange,
-  injectVault,
-  buildSeverityExpr,
   resolveQueryEffectAction,
 } from "../utils/queryHelpers";
 import { normalizeTimeDirectives } from "../utils/normalizeTimeDirectives";
@@ -43,7 +38,6 @@ import {
   useDeleteSavedQuery,
 } from "../api/hooks/useSavedQueries";
 import { hasPipeOutsideQuotes } from "../lib/hasPipeOutsideQuotes";
-import { SEVERITY_LEVELS } from "../lib/severity";
 import type { SyntaxSets } from "../lib/syntaxSets";
 import { useAutocomplete } from "./useAutocomplete";
 import { useConfig } from "../api/hooks/useConfig";
@@ -53,6 +47,10 @@ import { useValidation } from "./useValidation";
 import { usePipelineFields } from "./usePipelineFields";
 import { useFields } from "./useFields";
 import { useExportToVault } from "../api/hooks";
+import { useQueryHandlers } from "./useQueryHandlers";
+import { useHistogramHandlers } from "./useHistogramHandlers";
+import { useRecordNavigation } from "./useRecordNavigation";
+import { useScrollEffects } from "./useScrollEffects";
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -179,9 +177,6 @@ export function useSearchView() {
   const [showExportToVault, setShowExportToVault] = useState(false);
   const exportToVault = useExportToVault();
 
-  const [selectedRecord, setSelectedRecord] = useState<ProtoRecord | null>(null);
-  const selectedRecordRef = useRef<ProtoRecord | null>(null);
-  selectedRecordRef.current = selectedRecord;
   const { theme, setTheme, dark, highlightMode, setHighlightMode, palette, setPalette } = useThemeSync();
 
   const {
@@ -191,81 +186,16 @@ export function useSearchView() {
     detailResizeProps, resizing,
   } = usePanelLayout();
 
-  // Auto-expand detail panel, fetch context, and scroll into view when a record is selected.
-  useEffect(() => {
-    if (selectedRecord && detailCollapsed) setDetailCollapsed(false);
-    if (!selectedRecord && !detailPinned) setDetailCollapsed(true);
-    if (selectedRecord?.ref) {
-      fetchContext(selectedRecord.ref);
-    } else {
-      resetContext();
-    }
-    if (selectedRecord) {
-      requestAnimationFrame(() => {
-        selectedRowRef.current?.scrollIntoView({ block: "nearest" });
-      });
-    }
-  }, [selectedRecord]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Global keyboard shortcuts: Escape to deselect, Arrow keys to navigate records.
-  useEffect(() => {
-    const navigateRecords = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement).tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-      const list = isFollowMode ? followRecordsRef.current : recordsRef.current;
-      if (list.length === 0) return;
-
-      e.preventDefault();
-      const dir = e.key === "ArrowUp" ? -1 : 1;
-      const sel = selectedRecordRef.current;
-      if (!sel) {
-        setSelectedRecord(dir === 1 ? list[0]! : list.at(-1)!);
-        return;
-      }
-      const idx = list.findIndex((r) => sameRecord(r, sel));
-      if (idx === -1) {
-        setSelectedRecord(dir === 1 ? list[0]! : list.at(-1)!);
-        return;
-      }
-      const next = idx + dir;
-      if (next >= 0 && next < list.length) {
-        setSelectedRecord(list[next]!);
-      }
-    };
-
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (showPlan) {
-          setShowPlan(false);
-          return;
-        }
-        setSelectedRecord(null);
-        if (!detailPinned) setDetailCollapsed(true);
-        return;
-      }
-
-      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-        navigateRecords(e);
-      }
-    };
-    globalThis.addEventListener("keydown", handler);
-    return () => globalThis.removeEventListener("keydown", handler);
-  }, [detailPinned, showPlan, isFollowMode, setDetailCollapsed, setShowPlan]);
-
   const queryHistory = useQueryHistory();
   const savedQueries = useSavedQueries();
   const putSavedQuery = usePutSavedQuery();
   const deleteSavedQuery = useDeleteSavedQuery();
 
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
-  const sentinelRef = useRef<HTMLDivElement>(null);
-  const logScrollRef = useRef<HTMLDivElement>(null);
-  const selectedRowRef = useRef<HTMLElement>(null);
   const expressionRef = useRef("");
   const skipNextSearchRef = useRef(false);
-  const loadMoreGateRef = useRef(false);
-  const [isScrolledDown, setIsScrolledDown] = useState(false);
+
+  // ── API hooks ─────────────────────────────────────────────────────────
 
   const { addToast } = useToast();
   const toastError = (err: Error) => addToast(err.message, "error");
@@ -324,6 +254,41 @@ export function useSearchView() {
   const syntax: SyntaxSets | undefined = syntaxQuery.data;
   const validation = useValidation(deferredDraft);
 
+  // ── Extracted hooks ───────────────────────────────────────────────────
+
+  // Shared ref for the currently-selected DOM row — used by both navigation and scroll hooks.
+  const selectedRowRef = useRef<HTMLElement>(null);
+
+  const { selectedRecord, setSelectedRecord, selectedRecordRef } = useRecordNavigation({
+    isFollowMode,
+    recordsRef,
+    followRecordsRef,
+    selectedRowRef,
+    detailCollapsed, setDetailCollapsed, detailPinned,
+    showPlan, setShowPlan,
+    fetchContext, resetContext,
+  });
+
+  // Ref-stabilize loadMore and resetFollowNewCount so effects don't churn.
+  const loadMoreRef = useRef(loadMore);
+  loadMoreRef.current = loadMore;
+  const resetFollowNewCountRef = useRef(resetFollowNewCount);
+  resetFollowNewCountRef.current = resetFollowNewCount;
+
+  const scrollEffects = useScrollEffects({
+    isFollowMode,
+    isSearching,
+    hasMore,
+    selectedRecord,
+    recordsLength: records.length,
+    loadMoreRef,
+    resetFollowNewCountRef,
+    expressionRef,
+    selectedRowRef,
+  });
+
+  // ── Query handlers ────────────────────────────────────────────────────
+
   // Navigate to a new query — pushes browser history, preserving current route.
   const setUrlQuery = (newQ: string) => {
     navigate({
@@ -332,6 +297,21 @@ export function useSearchView() {
       replace: false,
     });
   };
+
+  const [followReversed, setFollowReversed] = useState(true);
+
+  const queryHandlers = useQueryHandlers({
+    q, setUrlQuery, navigate: navigate as any,
+    selectedVault, setSelectedVault,
+    isFollowMode, isReversed, timeRange, followReversed, setFollowReversed,
+    draft, setDraft, cursorRef, queryInputRef,
+  });
+
+  const histogramHandlers = useHistogramHandlers({
+    q, isReversed, setUrlQuery, navigate: navigate as any,
+    rangeStart, rangeEnd, setTimeRange, setRangeStart, setRangeEnd,
+    selectedRecord, setSelectedRecord,
+  });
 
   // Auto-refresh polling for both pipeline and filter results.
   const [pollInterval, setPollInterval] = useState<number | null>(null);
@@ -345,7 +325,7 @@ export function useSearchView() {
   }
 
   // Fire search or follow depending on the current route.
-   
+
   useEffect(() => {
     expressionRef.current = q;
     queryHistory.add(q);
@@ -398,10 +378,8 @@ export function useSearchView() {
           stopFollow();
         }
         resetFollow();
-        loadMoreGateRef.current = false;
+        scrollEffects.resetScroll();
         setSelectedRecord(null);
-        scrollToSelectedRef.current = false;
-        logScrollRef.current?.scrollTo(0, 0);
         search(q, false, !hasPipeOutsideQuotes(q));
         if (showPlan) explain(q);
         return;
@@ -423,88 +401,6 @@ export function useSearchView() {
       navigate({ search: (prev) => ({ ...prev, q: initial }), replace: true });
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Ref-stabilize loadMore and resetFollowNewCount so effects don't churn.
-  const loadMoreRef = useRef(loadMore);
-  loadMoreRef.current = loadMore;
-  const resetFollowNewCountRef = useRef(resetFollowNewCount);
-  resetFollowNewCountRef.current = resetFollowNewCount;
-
-  // Infinite scroll: observe a sentinel div at the bottom of the results.
-  useEffect(() => {
-    const sentinel = sentinelRef.current;
-    const scrollEl = logScrollRef.current;
-    if (!sentinel) return;
-
-    const openGate = () => { loadMoreGateRef.current = true; };
-    scrollEl?.addEventListener("scroll", openGate, { passive: true, once: true });
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (
-          entries[0]?.isIntersecting &&
-          hasMore &&
-          !isSearching &&
-          loadMoreGateRef.current &&
-          document.visibilityState === "visible"
-        ) {
-          loadMoreGateRef.current = false;
-          loadMoreRef.current(expressionRef.current);
-        }
-      },
-      { root: scrollEl, rootMargin: "0px 0px 200px 0px" },
-    );
-    observer.observe(sentinel);
-    return () => {
-      observer.disconnect();
-      scrollEl?.removeEventListener("scroll", openGate);
-    };
-  }, [hasMore, isSearching]);
-
-  // Follow mode: track scroll position and auto-reset new-record counter.
-  useEffect(() => {
-    const el = logScrollRef.current;
-    if (!el || !isFollowMode) {
-      setIsScrolledDown(false);
-      return;
-    }
-    const onScroll = () => {
-      const scrolled = el.scrollTop > 50;
-      setIsScrolledDown(scrolled);
-      if (!scrolled) resetFollowNewCountRef.current();
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [isFollowMode]);
-
-  // After search completes, scroll the selected row into view.
-  const prevSearchingRef = useRef(false);
-  const scrollToSelectedRef = useRef(false);
-  useEffect(() => {
-    if (prevSearchingRef.current && !isSearching) {
-      if (selectedRowRef.current) {
-        selectedRowRef.current.scrollIntoView({ block: "center" });
-        scrollToSelectedRef.current = false;
-      } else if (selectedRecord && hasMore) {
-        scrollToSelectedRef.current = true;
-        loadMore(expressionRef.current);
-      }
-    }
-    prevSearchingRef.current = isSearching;
-  }, [isSearching]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // When new records arrive during auto-pagination, check if selected row appeared.
-  useEffect(() => {
-    if (!scrollToSelectedRef.current || isSearching) return;
-    if (selectedRowRef.current) {
-      selectedRowRef.current.scrollIntoView({ block: "center" });
-      scrollToSelectedRef.current = false;
-    } else if (hasMore) {
-      loadMore(expressionRef.current);
-    } else {
-      scrollToSelectedRef.current = false;
-    }
-  }, [records.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const executeQuery = () => {
     setShowHistory(false);
@@ -531,8 +427,7 @@ export function useSearchView() {
 
     if (normalized === q && !isFollowMode) {
       setSelectedRecord(null);
-      scrollToSelectedRef.current = false;
-      logScrollRef.current?.scrollTo(0, 0);
+      scrollEffects.resetScroll();
       search(q, false, !hasPipeOutsideQuotes(q));
       if (showPlan) explain(q);
     } else {
@@ -567,105 +462,6 @@ export function useSearchView() {
     const next = !showPlan;
     setShowPlan(next);
     if (next) explain(q);
-  };
-
-  const allSeverities = SEVERITY_LEVELS;
-
-  const activeSeverities = allSeverities.filter((s) =>
-    q.includes(`level=${s}`),
-  );
-
-  const toggleSeverity = (level: string) => {
-    const current = allSeverities.filter((s) => q.includes(`level=${s}`));
-    const next: string[] = current.includes(level as typeof current[number])
-      ? current.filter((s) => s !== level)
-      : [...current, level];
-    const base = stripSeverity(q);
-    const sevExpr = buildSeverityExpr(next);
-    const newQuery = sevExpr ? `${base} ${sevExpr}`.trim() : base;
-    setUrlQuery(newQuery);
-  };
-
-  const handleSegmentClick = (level: string) => {
-    if (level === "other") {
-      const hasNoLevel = /\bnot\s+level=\*\b/i.test(q);
-      const base = stripSeverity(q);
-      const newQuery = hasNoLevel ? base : `${base} not level=*`.trim();
-      setUrlQuery(newQuery);
-    } else {
-      toggleSeverity(level);
-    }
-  };
-
-  const [followReversed, setFollowReversed] = useState(true);
-
-  const toggleReverse = () => {
-    if (isFollowMode) {
-      setFollowReversed((prev) => !prev);
-    } else {
-      const hasExplicitStartEnd =
-        /\bstart=/.test(q) || /\bend=/.test(q);
-      if (hasExplicitStartEnd) {
-        const stripped = q
-          .replace(/\breverse=\S+/g, "")
-          .replace(/\s+/g, " ")
-          .trim();
-        const rev = `reverse=${!isReversed}`;
-        setUrlQuery(stripped ? `${rev} ${stripped}` : rev);
-      } else {
-        const newQuery = injectTimeRange(q, timeRange, !isReversed);
-        setUrlQuery(newQuery);
-      }
-    }
-  };
-
-  const handleVaultSelect = (vaultId: string) => {
-    const next = selectedVault === vaultId ? "all" : vaultId;
-    setSelectedVault(next);
-    const newQuery = injectVault(q, next);
-    setUrlQuery(newQuery);
-  };
-
-  const handleChunkSelect = (chunkId: string) => {
-    const token = `chunk=${chunkId}`;
-    if (q.includes(token)) {
-      setUrlQuery(stripChunk(q));
-    } else {
-      const base = stripChunk(q);
-      setUrlQuery(base ? `${token} ${base}` : token);
-    }
-  };
-
-  const handlePosSelect = (chunkId: string, pos: string) => {
-    const posToken = `pos=${pos}`;
-    const chunkToken = `chunk=${chunkId}`;
-    if (q.includes(posToken)) {
-      setUrlQuery(stripPos(stripChunk(q)));
-    } else {
-      const base = stripPos(stripChunk(q));
-      const tokens = `${chunkToken} ${posToken}`;
-      setUrlQuery(base ? `${tokens} ${base}` : tokens);
-    }
-  };
-
-  const handleContextRecordSelect = (rec: ProtoRecord) => {
-    const tsMs = rec.writeTs ? instantToMs(protoToInstant(rec.writeTs)) : 0;
-    if (tsMs) {
-      const start = new Date(tsMs - 30_000);
-      const end = new Date(tsMs + 30_000);
-      const newQuery = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
-      setTimeRange("custom");
-      setRangeStart(start);
-      setRangeEnd(end);
-      setSelectedRecord(rec);
-      navigate({
-        to: "/search",
-        search: (prev) => ({ ...prev, q: newQuery }),
-        replace: false,
-      });
-    } else {
-      setSelectedRecord(rec);
-    }
   };
 
   const histogramData = histogram
@@ -720,120 +516,6 @@ export function useSearchView() {
   const pipeFields = usePipelineFields(deferredDraft, cursorRef.current, baseFieldNames);
   const autocomplete = useAutocomplete(deferredDraft, cursorRef.current, allFields, syntax, pipeFields.fields, pipeFields.completions);
 
-  const handleFieldSelect = (key: string, value: string) => {
-    const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
-    const token = needsQuotes ? `${key}="${value}"` : `${key}=${value}`;
-    if (q.includes(token)) {
-      const newQuery = q.replace(token, "").replace(/\s+/g, " ").trim();
-      setUrlQuery(newQuery);
-    } else {
-      const newQuery = q.trim() ? `${q.trim()} ${token}` : token;
-      setUrlQuery(newQuery);
-    }
-  };
-
-  const handleMultiFieldSelect = (fields: [string, string][]) => {
-    const tokens = fields.map(([key, value]) => {
-      const needsQuotes = /[^a-zA-Z0-9_\-.]/.test(value);
-      return needsQuotes ? `${key}="${value}"` : `${key}=${value}`;
-    });
-    // Add any tokens not already present.
-    let current = q.trim();
-    for (const token of tokens) {
-      if (!current.includes(token)) {
-        current = current ? `${current} ${token}` : token;
-      }
-    }
-    setUrlQuery(current);
-  };
-
-  const handleSpanClick = (value: string) => {
-    const text = draft;
-    const pos = cursorRef.current;
-
-    // Insert at cursor position with surrounding spaces
-    const before = text.slice(0, pos);
-    const after = text.slice(pos);
-    const needSpaceBefore = before.length > 0 && !before.endsWith(" ") && !before.endsWith("(");
-    const needSpaceAfter = after.length > 0 && !after.startsWith(" ") && !after.startsWith(")");
-    const inserted = `${needSpaceBefore ? " " : ""}${value}${needSpaceAfter ? " " : ""}`;
-    const newDraft = before + inserted + after;
-    const newCursor = before.length + inserted.length;
-
-    setDraft(newDraft);
-    cursorRef.current = newCursor;
-    requestAnimationFrame(() => {
-      const ta = queryInputRef.current;
-      if (ta) {
-        ta.focus();
-        ta.selectionStart = newCursor;
-        ta.selectionEnd = newCursor;
-      }
-    });
-  };
-
-  const handleTokenToggle = (token: string) => {
-    if (q.includes(token)) {
-      const newQuery = q.replace(token, "").replace(/\s+/g, " ").trim();
-      setUrlQuery(newQuery);
-    } else {
-      const newQuery = q.trim() ? `${q.trim()} ${token}` : token;
-      setUrlQuery(newQuery);
-    }
-  };
-
-  // Consolidated brush select: sets custom time range and navigates.
-  const handleBrushSelect = (start: Date, end: Date) => {
-    setRangeStart(start);
-    setRangeEnd(end);
-    setTimeRange("custom");
-    const rangeTokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=${isReversed}`;
-    const base = stripTimeRange(q);
-    const newQuery = base ? `${rangeTokens} ${base}` : rangeTokens;
-    setUrlQuery(newQuery);
-  };
-
-  // Follow-mode brush: same as handleBrushSelect but navigates to /search with reverse=true.
-  const handleFollowBrushSelect = (start: Date, end: Date) => {
-    setRangeStart(start);
-    setRangeEnd(end);
-    setTimeRange("custom");
-    const rangeTokens = `start=${start.toISOString()} end=${end.toISOString()} reverse=true`;
-    const base = stripTimeRange(q);
-    const newQuery = base ? `${rangeTokens} ${base}` : rangeTokens;
-    navigate({
-      to: "/search",
-      search: (prev) => ({ ...prev, q: newQuery }),
-      replace: false,
-    });
-  };
-
-  // Pan handler — identical to search-mode brush.
-  const handlePan = (start: Date, end: Date) => {
-    handleBrushSelect(start, end);
-  };
-
-  // Zoom out from selected record: doubles the visible time span.
-  const handleZoomOut = () => {
-    const anchorMs = selectedRecord?.writeTs ? instantToMs(protoToInstant(selectedRecord.writeTs)) : 0;
-    if (!anchorMs) return;
-    const curStart = rangeStart?.getTime() ?? anchorMs - 30_000;
-    const curEnd = rangeEnd?.getTime() ?? anchorMs + 30_000;
-    const span = curEnd - curStart;
-    const mid = anchorMs;
-    const newStart = new Date(mid - span);
-    const newEnd = new Date(mid + span);
-    setTimeRange("custom");
-    setRangeStart(newStart);
-    setRangeEnd(newEnd);
-    const newQuery = `start=${newStart.toISOString()} end=${newEnd.toISOString()} reverse=${isReversed}`;
-    navigate({
-      to: "/search",
-      search: (prev) => ({ ...prev, q: newQuery }),
-      replace: false,
-    });
-  };
-
   const cpuPercent = stats?.processCpuPercent ?? 0;
   const memoryBytes = stats?.processMemoryBytes ?? BigInt(0);
   const totalBytes = stats?.totalBytes ?? BigInt(0);
@@ -877,7 +559,9 @@ export function useSearchView() {
     search, cancelSearch,
     tokens, displayRecords,
     selectedRecord, setSelectedRecord,
-    selectedRowRef, logScrollRef, sentinelRef,
+    selectedRowRef,
+    logScrollRef: scrollEffects.logScrollRef,
+    sentinelRef: scrollEffects.sentinelRef,
     executeQuery,
 
     // Follow
@@ -885,26 +569,22 @@ export function useSearchView() {
     followNewCount, resetFollowNewCount,
     followBufferSize, handleFollowBufferSizeChange,
     followReversed, isReversed,
-    isScrolledDown,
+    isScrolledDown: scrollEffects.isScrolledDown,
     startFollow, stopFollowMode,
 
     // Histogram
     histogramData,
     searchElapsedMs: elapsedMs,
     liveHistogramData,
-    handleBrushSelect, handleFollowBrushSelect, handlePan,
-    handleSegmentClick,
+    ...histogramHandlers,
 
     // Handlers
-    toggleReverse, handleShowPlan, handleZoomOut,
-    handleVaultSelect, handleChunkSelect, handlePosSelect,
-    handleContextRecordSelect, handleFieldSelect,
-    handleSpanClick, handleMultiFieldSelect, handleTokenToggle,
-    toggleSeverity,
+    ...queryHandlers,
+    handleShowPlan,
 
     // Sidebar data
     vaults, vaultsLoading, statsLoading,
-    selectedVault, activeSeverities,
+    selectedVault,
     attrFields, kvFields, totalRecords,
     cpuPercent, memoryBytes, totalBytes,
 
