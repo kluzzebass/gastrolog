@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 
 	"github.com/google/uuid"
@@ -134,7 +134,7 @@ func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) (*replic
 // Uses a tight timeout to prevent a slow peer from blocking the orchestrator
 // lock (held by the caller during ingestion).
 func (o *Orchestrator) forwardRemote(t MatchResult, rec chunk.Record) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 	defer cancel()
 	if err := o.forwarder.Forward(ctx, t.NodeID, t.VaultID, []chunk.Record{rec}); err != nil {
 		o.logger.Warn("forward record failed", "node", t.NodeID, "vault", t.VaultID, "error", err)

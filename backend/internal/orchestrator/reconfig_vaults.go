@@ -8,9 +8,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/multiraft"
 	"gastrolog/internal/query"
@@ -465,7 +465,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
 			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-			raftCB := o.wireTierRaftGroup(t.Chunks, *tierCfg, nscs, factories, true)
+			raftCB := o.wireTierRaftGroup(t.Chunks, *tierCfg, nscs, factories)
 			t.HasRaftLeader = raftCB.hasLeader
 			t.IsRaftLeader = raftCB.isLeader
 			t.ApplyRaftDelete = raftCB.applyDelete
@@ -635,7 +635,7 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				// Create the tier Raft group (non-bootstrapped) so this
 				// node accepts AppendEntries from the leader.
-				raftCB := o.wireTierRaftGroup(sti.Chunks, *tierCfg, nscs, factories, true)
+				raftCB := o.wireTierRaftGroup(sti.Chunks, *tierCfg, nscs, factories)
 				sti.HasRaftLeader = raftCB.hasLeader
 				sti.IsRaftLeader = raftCB.isLeader
 				sti.ApplyRaftDelete = raftCB.applyDelete
@@ -663,7 +663,7 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg con
 		ti.StorageID = storageID
 		// Wire tier Raft group for the leader — buildTierInstanceForStorage
 		// doesn't call wireTierRaftGroup itself.
-		raftCB := o.wireTierRaftGroup(ti.Chunks, *tierCfg, cfg.NodeStorageConfigs, factories, false)
+		raftCB := o.wireTierRaftGroup(ti.Chunks, *tierCfg, cfg.NodeStorageConfigs, factories)
 		ti.HasRaftLeader = raftCB.hasLeader
 		ti.IsRaftLeader = raftCB.isLeader
 		ti.ApplyRaftDelete = raftCB.applyDelete
@@ -740,7 +740,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}
 
 	// Wire Raft-backed metadata announcer if a GroupManager is available.
-	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories, isFollower)
+	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories)
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
@@ -869,7 +869,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		if g := factories.GroupManager.GetGroup(tierCfg.ID.String()); g != nil {
 			r := g.Raft
 			fsm, _ := g.FSM.(*multiraft.ChunkFSM)
-			timeout := 10 * time.Second
+			timeout := cluster.ReplicationTimeout
 			raftCB = tierRaftCallbacks{
 				hasLeader: func() bool { return r.Leader() != "" },
 		isLeader:  func() bool { return r.State() == hraft.Leader },
@@ -897,6 +897,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		Chunks:          cm,
 		Indexes:         im,
 		Query:           qe,
+		IsRaftLeader:              raftCB.isLeader,
 		HasRaftLeader:             raftCB.hasLeader,
 		ApplyRaftDelete:           raftCB.applyDelete,
 		ListManifest:             raftCB.listChunks,
@@ -930,7 +931,7 @@ type tierRaftCallbacks struct {
 	listRetPending  func() []chunk.ChunkID
 }
 
-func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories, isFollower bool) tierRaftCallbacks {
+func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) tierRaftCallbacks {
 	if factories.GroupManager == nil {
 		return tierRaftCallbacks{}
 	}
@@ -958,11 +959,11 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 			return tierRaftCallbacks{}
 		}
 	}
-	setter.SetAnnouncer(multiraft.NewRaftAnnouncer(g.Raft, 10*time.Second, o.logger))
+	setter.SetAnnouncer(multiraft.NewRaftAnnouncer(g.Raft, cluster.ReplicationTimeout, o.logger))
 
 	r := g.Raft
 	fsm, _ := g.FSM.(*multiraft.ChunkFSM)
-	timeout := 10 * time.Second
+	timeout := cluster.ReplicationTimeout
 	return tierRaftCallbacks{
 		hasLeader: func() bool { return r.Leader() != "" },
 		isLeader:  func() bool { return r.State() == hraft.Leader },

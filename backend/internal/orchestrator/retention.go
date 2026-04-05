@@ -192,13 +192,13 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *config.Config) {
 	o.mu.RUnlock()
 
 	for _, t := range targets {
-		o.drainExcessChunks(cfg, t.vaultID, t.tierID, t.cm, t.excess)
+		o.drainExcessChunks(t.vaultID, t.tierID, t.cm, t.excess)
 	}
 }
 
 // drainExcessChunks transitions the oldest sealed chunks from a memory tier
 // until the excess bytes are reclaimed (or no more sealed chunks remain).
-func (o *Orchestrator) drainExcessChunks(cfg *config.Config, vaultID, tierID uuid.UUID, cm chunk.ChunkManager, excess int64) {
+func (o *Orchestrator) drainExcessChunks(vaultID, tierID uuid.UUID, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
 		return

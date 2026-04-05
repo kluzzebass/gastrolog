@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 
 	"github.com/google/uuid"
 )
@@ -33,14 +33,15 @@ func (o *Orchestrator) scheduleCatchup(vaultID, tierID uuid.UUID, newFollowers [
 	for _, nodeID := range newFollowers {
 		name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
 		node := nodeID // capture for closure
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		if err := o.scheduler.RunOnce(name, func() {
+			// Created inside the closure so the timeout starts when the job
+			// executes, not when it's scheduled.
+			ctx, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
 			defer cancel()
 			if err := o.catchupFollower(ctx, vaultID, tierID, node); err != nil {
 				o.logger.Warn("catchup failed", "vault", vaultID, "tier", tierID, "node", node, "error", err)
 			}
 		}); err != nil {
-			cancel()
 			o.logger.Warn("failed to schedule replication catchup", "name", name, "error", err)
 		}
 		o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])

@@ -98,7 +98,7 @@ func (r *retentionRunner) resolveEjectRoutes(cfg *config.Config, id chunk.ChunkI
 			continue
 		}
 
-		resolved := r.resolveOneRoute(cfg, id, routeID, route)
+		resolved := r.resolveOneRoute(cfg, routeID, route)
 		if resolved == nil {
 			return nil // compile error, logged inside
 		}
@@ -120,7 +120,7 @@ func (r *retentionRunner) resolveEjectRoutes(cfg *config.Config, id chunk.ChunkI
 
 // resolveOneRoute compiles a single route's filter and resolves its destinations.
 // Returns nil on compile error (logged).
-func (r *retentionRunner) resolveOneRoute(cfg *config.Config, id chunk.ChunkID, routeID uuid.UUID, route *config.RouteConfig) *resolvedRoute {
+func (r *retentionRunner) resolveOneRoute(cfg *config.Config, routeID uuid.UUID, route *config.RouteConfig) *resolvedRoute {
 	var cf *CompiledFilter
 	if route.FilterID != nil {
 		filterExpr := resolveFilterExpr(cfg, *route.FilterID)

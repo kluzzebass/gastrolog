@@ -108,7 +108,7 @@ func newFileUploadCmd() *cobra.Command {
 			}
 			defer resp.Body.Close() //nolint:errcheck
 			if resp.StatusCode != http.StatusCreated {
-				body, _ := io.ReadAll(resp.Body)
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 				return fmt.Errorf("upload failed (%d): %s", resp.StatusCode, string(body))
 			}
 

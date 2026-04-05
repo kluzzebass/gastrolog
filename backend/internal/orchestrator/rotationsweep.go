@@ -65,7 +65,7 @@ func (o *Orchestrator) rotationSweep() {
 			// Check for time-based rotation triggers.
 			activeBefore := tier.Chunks.Active()
 			if trigger := tier.Chunks.CheckRotation(); trigger != nil {
-				o.logger.Info("background rotation triggered",
+				o.logger.Debug("rotation triggered",
 					"vault", vaultID,
 					"name", vault.Name,
 					"tier", tier.TierID,

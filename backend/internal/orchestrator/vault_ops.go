@@ -5,11 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/google/uuid"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
@@ -377,7 +377,7 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 		return
 	}
 	for _, tgt := range targets {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 		if err := o.tierReplicator.SealTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, chunkID); err != nil {
 			o.logger.Warn("replication: failed to seal remote follower",
 				"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID,
@@ -393,7 +393,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		return
 	}
 	for _, tgt := range targets {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 		var err error
 		if o.tierReplicator != nil {
 			err = o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})

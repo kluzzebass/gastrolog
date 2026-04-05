@@ -4,9 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 
 	"github.com/google/uuid"
@@ -44,7 +44,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replication
 		ack <- nil
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cluster.ReplicationTimeout)
 	defer cancel()
 	for _, t := range tasks {
 		for _, tgt := range t.targets {
@@ -65,11 +65,9 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 	}
 	name := fmt.Sprintf("replicate:%s:%s", vaultID, chunkID)
 	if err := o.scheduler.RunOnce(name, func() {
-		// 10s network deadline per chunk — enough for any healthy transfer,
-		// short enough to release the gRPC connection when a follower is down.
 		// Created inside the closure so the timeout starts when the job executes,
 		// not when it's scheduled.
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), cluster.ReplicationTimeout)
 		defer cancel()
 		o.replicateSealedChunk(ctx, vaultID, tierID, chunkID, targets)
 	}); err != nil {
