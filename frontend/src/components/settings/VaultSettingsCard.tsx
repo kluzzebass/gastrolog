@@ -129,20 +129,36 @@ export function VaultSettingsCard({
     drain: boolean; // true = drain to next tier, false = delete data immediately
   }
 
+  interface TierEditState {
+    rotationPolicyId: string;
+    retentionPolicyId: string;
+    replicationFactor: string;
+    storageClass: string;
+    activeChunkClass: string;
+    cacheClass: string;
+    cacheEviction: string;
+    cacheBudget: string;
+    cacheTTL: string;
+  }
+
+  const emptyTierEdit: TierEditState = {
+    rotationPolicyId: "",
+    retentionPolicyId: "",
+    replicationFactor: "1",
+    storageClass: "0",
+    activeChunkClass: "0",
+    cacheClass: "0",
+    cacheEviction: "lru",
+    cacheBudget: "",
+    cacheTTL: "",
+  };
+
   interface VaultEdit {
     name: string;
     enabled: boolean;
     tierIds: string[];
-    tierRemovals: TierRemoval[];             // staged tier removals (executed on save)
-    tierRotation: Record<string, string>;    // tierId → rotationPolicyId
-    tierRetention: Record<string, string>;   // tierId → retentionPolicyId
-    tierRF: Record<string, string>;          // tierId → replicationFactor (string during editing)
-    tierStorageClass: Record<string, string>; // tierId → storageClass (string during editing)
-    tierActiveChunkClass: Record<string, string>;
-    tierCacheClass: Record<string, string>;
-    tierCacheEviction: Record<string, string>;   // tierId → "lru" or "ttl"
-    tierCacheBudget: Record<string, string>;      // tierId → bytes as string
-    tierCacheTTL: Record<string, string>;         // tierId → duration string
+    tierRemovals: TierRemoval[];
+    tierEdits: Record<string, TierEditState>;
   }
 
   const vaultTierConfigs = tiers.filter((t) => t.vaultId === vault.id);
@@ -152,32 +168,18 @@ export function VaultSettingsCard({
     enabled: vault.enabled,
     tierIds: [...derivedVaultTierIds],
     tierRemovals: [],
-    tierRotation: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, t.rotationPolicyId]),
-    ),
-    tierRetention: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, t.retentionRules[0]?.retentionPolicyId ?? ""]),
-    ),
-    tierRF: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, String(t.replicationFactor || 1)]),
-    ),
-    tierStorageClass: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, String(t.storageClass || 0)]),
-    ),
-    tierActiveChunkClass: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, String(t.activeChunkClass || 0)]),
-    ),
-    tierCacheClass: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, String(t.cacheClass || 0)]),
-    ),
-    tierCacheEviction: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, t.cacheEviction || "lru"]),
-    ),
-    tierCacheBudget: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, t.cacheBudget || ""]),
-    ),
-    tierCacheTTL: Object.fromEntries(
-      vaultTierConfigs.map((t) => [t.id, t.cacheTtl || ""]),
+    tierEdits: Object.fromEntries(
+      vaultTierConfigs.map((t) => [t.id, {
+        rotationPolicyId: t.rotationPolicyId,
+        retentionPolicyId: t.retentionRules[0]?.retentionPolicyId ?? "",
+        replicationFactor: String(t.replicationFactor || 1),
+        storageClass: String(t.storageClass || 0),
+        activeChunkClass: String(t.activeChunkClass || 0),
+        cacheClass: String(t.cacheClass || 0),
+        cacheEviction: t.cacheEviction || "lru",
+        cacheBudget: t.cacheBudget || "",
+        cacheTTL: t.cacheTtl || "",
+      } satisfies TierEditState]),
     ),
   });
 
@@ -199,32 +201,22 @@ export function VaultSettingsCard({
   }
 
   const setEdit = (patch: Partial<VaultEdit>) => setEditState((prev) => ({ ...prev, ...patch }));
-  const setTierRotationPolicy = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierRotation: { ...prev.tierRotation, [tierId]: value } }));
-  const setTierRetentionPolicyId = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierRetention: { ...prev.tierRetention, [tierId]: value } }));
-  const setTierRF = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierRF: { ...prev.tierRF, [tierId]: value } }));
-  const setTierStorageClass = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierStorageClass: { ...prev.tierStorageClass, [tierId]: value } }));
-  const setTierActiveChunkClass = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierActiveChunkClass: { ...prev.tierActiveChunkClass, [tierId]: value } }));
-  const setTierCacheClass = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierCacheClass: { ...prev.tierCacheClass, [tierId]: value } }));
-  const setTierCacheEviction = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierCacheEviction: { ...prev.tierCacheEviction, [tierId]: value } }));
-  const setTierCacheBudget = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierCacheBudget: { ...prev.tierCacheBudget, [tierId]: value } }));
-  const setTierCacheTTL = (tierId: string, value: string) =>
-    setEditState((prev) => ({ ...prev, tierCacheTTL: { ...prev.tierCacheTTL, [tierId]: value } }));
+  const setTierField = (tierId: string, field: keyof TierEditState, value: string) =>
+    setEditState((prev) => ({
+      ...prev,
+      tierEdits: {
+        ...prev.tierEdits,
+        [tierId]: { ...emptyTierEdit, ...prev.tierEdits[tierId], [field]: value },
+      },
+    }));
 
   const anyDirty = JSON.stringify(edit) !== initialJson || newTier !== null;
 
   // Aliases for backward compat with the rest of the component.
   const localTierIds = edit.tierIds;
   const setLocalTierIds = (ids: string[]) => setEdit({ tierIds: ids });
-  const getTierRotationPolicy = (tierId: string): string => edit.tierRotation[tierId] ?? "";
-  const getTierRetentionPolicyId = (tierId: string): string => edit.tierRetention[tierId] ?? "";
+  const getTierRotationPolicy = (tierId: string): string => edit.tierEdits[tierId]?.rotationPolicyId ?? "";
+  const getTierRetentionPolicyId = (tierId: string): string => edit.tierEdits[tierId]?.retentionPolicyId ?? "";
 
   // Resolve vault's tiers from local state (reflects unsaved reorder/remove).
   const tierMap = new Map(tiers.map((t) => [t.id, t]));
@@ -311,19 +303,19 @@ export function VaultSettingsCard({
       const tier = tiers.find((t) => t.id === tierId);
       if (!tier) continue;
 
-      const rpId = edit.tierRotation[tierId] ?? tier.rotationPolicyId;
-      const retPolicyId = edit.tierRetention[tierId] ?? (tier.retentionRules[0]?.retentionPolicyId ?? "");
-      const rfStr = edit.tierRF[tierId] ?? String(tier.replicationFactor || 1);
+      const rpId = edit.tierEdits[tierId]?.rotationPolicyId ?? tier.rotationPolicyId;
+      const retPolicyId = edit.tierEdits[tierId]?.retentionPolicyId ?? (tier.retentionRules[0]?.retentionPolicyId ?? "");
+      const rfStr = edit.tierEdits[tierId]?.replicationFactor ?? String(tier.replicationFactor || 1);
       const rf = parseInt(rfStr, 10) || 1;
-      const scStr = edit.tierStorageClass[tierId] ?? String(tier.storageClass || 0);
+      const scStr = edit.tierEdits[tierId]?.storageClass ?? String(tier.storageClass || 0);
       const sc = parseInt(scStr, 10) || 0;
-      const accStr = edit.tierActiveChunkClass[tierId] ?? String(tier.activeChunkClass || 0);
+      const accStr = edit.tierEdits[tierId]?.activeChunkClass ?? String(tier.activeChunkClass || 0);
       const acc = parseInt(accStr, 10) || 0;
-      const ccStr = edit.tierCacheClass[tierId] ?? String(tier.cacheClass || 0);
+      const ccStr = edit.tierEdits[tierId]?.cacheClass ?? String(tier.cacheClass || 0);
       const cc = parseInt(ccStr, 10) || 0;
-      const ceStr = edit.tierCacheEviction[tierId] ?? (tier.cacheEviction || "lru");
-      const cbStr = edit.tierCacheBudget[tierId] ?? (tier.cacheBudget || "");
-      const ctStr = edit.tierCacheTTL[tierId] ?? (tier.cacheTtl || "");
+      const ceStr = edit.tierEdits[tierId]?.cacheEviction ?? (tier.cacheEviction || "lru");
+      const cbStr = edit.tierEdits[tierId]?.cacheBudget ?? (tier.cacheBudget || "");
+      const ctStr = edit.tierEdits[tierId]?.cacheTTL ?? (tier.cacheTtl || "");
 
       const expectedAction = retentionActionForPosition(tierIndex, tierIds.length);
       const currentAction = tier.retentionRules[0]?.action;
@@ -713,7 +705,7 @@ export function VaultSettingsCard({
                         <FormField label="Rotation Policy" dark={dark}>
                           <SelectInput
                             value={getTierRotationPolicy(tier.id)}
-                            onChange={(v) => setTierRotationPolicy(tier.id, v)}
+                            onChange={(v) => setTierField(tier.id, "rotationPolicyId", v)}
                             options={[
                               { value: "", label: "None" },
                               ...rotationPolicyOptions,
@@ -727,7 +719,7 @@ export function VaultSettingsCard({
                           <FormField label="Retention Policy" dark={dark}>
                             <SelectInput
                               value={getTierRetentionPolicyId(tier.id)}
-                              onChange={(v) => setTierRetentionPolicyId(tier.id, v)}
+                              onChange={(v) => setTierField(tier.id, "retentionPolicyId", v)}
                               options={[
                                 { value: "", label: "None" },
                                 ...retentionPolicyOptions,
@@ -740,8 +732,8 @@ export function VaultSettingsCard({
                       {tier.type === TierType.FILE && storageClassOptions.length > 0 && (
                         <FormField label="Storage Class" dark={dark}>
                           <SelectInput
-                            value={edit.tierStorageClass[tier.id] ?? String(tier.storageClass || 0)}
-                            onChange={(v) => setTierStorageClass(tier.id, v)}
+                            value={edit.tierEdits[tier.id]?.storageClass ?? String(tier.storageClass || 0)}
+                            onChange={(v) => setTierField(tier.id, "storageClass", v)}
                             options={storageClassOptions}
                             dark={dark}
                           />
@@ -751,28 +743,28 @@ export function VaultSettingsCard({
                         <div className="grid grid-cols-2 gap-2">
                           <FormField label="Active Chunk Class" dark={dark}>
                             <SelectInput
-                              value={edit.tierActiveChunkClass[tier.id] ?? String(tier.activeChunkClass || 0)}
-                              onChange={(v) => setTierActiveChunkClass(tier.id, v)}
+                              value={edit.tierEdits[tier.id]?.activeChunkClass ?? String(tier.activeChunkClass || 0)}
+                              onChange={(v) => setTierField(tier.id, "activeChunkClass", v)}
                               options={[{ value: "0", label: "None" }, ...storageClassOptions]}
                               dark={dark}
                             />
                           </FormField>
                           <FormField label="Cache Class" dark={dark}>
                             <SelectInput
-                              value={edit.tierCacheClass[tier.id] ?? String(tier.cacheClass || 0)}
-                              onChange={(v) => setTierCacheClass(tier.id, v)}
+                              value={edit.tierEdits[tier.id]?.cacheClass ?? String(tier.cacheClass || 0)}
+                              onChange={(v) => setTierField(tier.id, "cacheClass", v)}
                               options={[{ value: "0", label: "None" }, ...storageClassOptions]}
                               dark={dark}
                             />
                           </FormField>
                         </div>
                       )}
-                      {tier.type === TierType.CLOUD && parseInt(edit.tierCacheClass[tier.id] ?? String(tier.cacheClass || 0), 10) > 0 && (
+                      {tier.type === TierType.CLOUD && parseInt(edit.tierEdits[tier.id]?.cacheClass ?? String(tier.cacheClass || 0), 10) > 0 && (
                         <>
                           <FormField label="Cache Eviction" dark={dark}>
                             <SelectInput
-                              value={edit.tierCacheEviction[tier.id] ?? (tier.cacheEviction || "lru")}
-                              onChange={(v) => setTierCacheEviction(tier.id, v)}
+                              value={edit.tierEdits[tier.id]?.cacheEviction ?? (tier.cacheEviction || "lru")}
+                              onChange={(v) => setTierField(tier.id, "cacheEviction", v)}
                               options={[
                                 { value: "lru", label: "LRU — evict oldest when over budget" },
                                 { value: "ttl", label: "TTL — evict after max age" },
@@ -782,19 +774,19 @@ export function VaultSettingsCard({
                           </FormField>
                           <FormField label="Cache Budget" dark={dark}>
                             <TextInput
-                              value={edit.tierCacheBudget[tier.id] ?? (tier.cacheBudget || "")}
-                              onChange={(v) => setTierCacheBudget(tier.id, v)}
+                              value={edit.tierEdits[tier.id]?.cacheBudget ?? (tier.cacheBudget || "")}
+                              onChange={(v) => setTierField(tier.id, "cacheBudget", v)}
                               placeholder="1GiB"
                               dark={dark}
                               mono
                               examples={["500MB", "1GiB", "5GB", "10GB"]}
                             />
                           </FormField>
-                          {(edit.tierCacheEviction[tier.id] ?? (tier.cacheEviction || "lru")) === "ttl" && (
+                          {(edit.tierEdits[tier.id]?.cacheEviction ?? (tier.cacheEviction || "lru")) === "ttl" && (
                             <FormField label="Cache TTL" dark={dark}>
                               <TextInput
-                                value={edit.tierCacheTTL[tier.id] ?? (tier.cacheTtl || "")}
-                                onChange={(v) => setTierCacheTTL(tier.id, v)}
+                                value={edit.tierEdits[tier.id]?.cacheTTL ?? (tier.cacheTtl || "")}
+                                onChange={(v) => setTierField(tier.id, "cacheTTL", v)}
                                 placeholder=""
                                 dark={dark}
                                 mono
@@ -807,14 +799,14 @@ export function VaultSettingsCard({
                       {tier.type !== TierType.JSONL && (
                         <FormField label="Replication Factor" dark={dark} description="1 = none, 2 = redundant, 3+ = fault tolerant">
                           <SpinnerInput
-                            value={edit.tierRF[tier.id] ?? String(tier.replicationFactor || 1)}
-                            onChange={(v) => setTierRF(tier.id, v)}
+                            value={edit.tierEdits[tier.id]?.replicationFactor ?? String(tier.replicationFactor || 1)}
+                            onChange={(v) => setTierField(tier.id, "replicationFactor", v)}
                             dark={dark}
                             min={1}
                             max={maxRFForTier({
                               type: tier.type,
-                              storageClass: parseInt(edit.tierStorageClass[tier.id] ?? String(tier.storageClass || 0), 10) || 0,
-                              activeChunkClass: parseInt(edit.tierActiveChunkClass[tier.id] ?? String(tier.activeChunkClass || 0), 10) || 0,
+                              storageClass: parseInt(edit.tierEdits[tier.id]?.storageClass ?? String(tier.storageClass || 0), 10) || 0,
+                              activeChunkClass: parseInt(edit.tierEdits[tier.id]?.activeChunkClass ?? String(tier.activeChunkClass || 0), 10) || 0,
                             })}
                           />
                         </FormField>
