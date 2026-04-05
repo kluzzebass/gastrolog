@@ -21,6 +21,20 @@ import (
 // byte order equals creation order.
 func cmpUUID(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) }
 
+// collectAndSort copies values from a map, applies a per-element transform,
+// and sorts the result. Used by Load to deep-copy + sort each config entity type.
+func collectAndSort[K comparable, V any](m map[K]V, transform func(V) V, less func(V, V) int) []V {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]V, 0, len(m))
+	for _, v := range m {
+		out = append(out, transform(v))
+	}
+	slices.SortFunc(out, less)
+	return out
+}
+
 // serverSettings holds the typed server-level config fields.
 type serverSettings struct {
 	ss                config.ServerSettings
@@ -82,7 +96,7 @@ func (s *Store) isEmpty() bool {
 
 // Load returns the full configuration.
 // Returns nil if no entities exist.
-func (s *Store) Load(ctx context.Context) (*config.Config, error) { //nolint:gocognit // flat field aggregation, grows linearly with entity count
+func (s *Store) Load(ctx context.Context) (*config.Config, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -92,103 +106,18 @@ func (s *Store) Load(ctx context.Context) (*config.Config, error) { //nolint:goc
 
 	cfg := &config.Config{}
 
-	if len(s.filters) > 0 {
-		cfg.Filters = make([]config.FilterConfig, 0, len(s.filters))
-		for _, fc := range s.filters {
-			cfg.Filters = append(cfg.Filters, copyFilterConfig(fc))
-		}
-		slices.SortFunc(cfg.Filters, func(a, b config.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.rotationPolicies) > 0 {
-		cfg.RotationPolicies = make([]config.RotationPolicyConfig, 0, len(s.rotationPolicies))
-		for _, rp := range s.rotationPolicies {
-			cfg.RotationPolicies = append(cfg.RotationPolicies, copyRotationPolicy(rp))
-		}
-		slices.SortFunc(cfg.RotationPolicies, func(a, b config.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.retentionPolicies) > 0 {
-		cfg.RetentionPolicies = make([]config.RetentionPolicyConfig, 0, len(s.retentionPolicies))
-		for _, rp := range s.retentionPolicies {
-			cfg.RetentionPolicies = append(cfg.RetentionPolicies, copyRetentionPolicy(rp))
-		}
-		slices.SortFunc(cfg.RetentionPolicies, func(a, b config.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.vaults) > 0 {
-		cfg.Vaults = make([]config.VaultConfig, 0, len(s.vaults))
-		for _, st := range s.vaults {
-			cfg.Vaults = append(cfg.Vaults, copyVaultConfig(st))
-		}
-		slices.SortFunc(cfg.Vaults, func(a, b config.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.ingesters) > 0 {
-		cfg.Ingesters = make([]config.IngesterConfig, 0, len(s.ingesters))
-		for _, ing := range s.ingesters {
-			cfg.Ingesters = append(cfg.Ingesters, copyIngesterConfig(ing))
-		}
-		slices.SortFunc(cfg.Ingesters, func(a, b config.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.routes) > 0 {
-		cfg.Routes = make([]config.RouteConfig, 0, len(s.routes))
-		for _, rt := range s.routes {
-			cfg.Routes = append(cfg.Routes, copyRouteConfig(rt))
-		}
-		slices.SortFunc(cfg.Routes, func(a, b config.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.managedFiles) > 0 {
-		cfg.ManagedFiles = make([]config.ManagedFileConfig, 0, len(s.managedFiles))
-		for _, lf := range s.managedFiles {
-			cfg.ManagedFiles = append(cfg.ManagedFiles, lf)
-		}
-		slices.SortFunc(cfg.ManagedFiles, func(a, b config.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.cloudServices) > 0 {
-		cfg.CloudServices = make([]config.CloudService, 0, len(s.cloudServices))
-		for _, cs := range s.cloudServices {
-			cfg.CloudServices = append(cfg.CloudServices, cs)
-		}
-		slices.SortFunc(cfg.CloudServices, func(a, b config.CloudService) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.tiers) > 0 {
-		cfg.Tiers = make([]config.TierConfig, 0, len(s.tiers))
-		for _, tier := range s.tiers {
-			cfg.Tiers = append(cfg.Tiers, tier)
-		}
-		slices.SortFunc(cfg.Tiers, func(a, b config.TierConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.nodeStorageConfigs) > 0 {
-		cfg.NodeStorageConfigs = make([]config.NodeStorageConfig, 0, len(s.nodeStorageConfigs))
-		for _, nsc := range s.nodeStorageConfigs {
-			cfg.NodeStorageConfigs = append(cfg.NodeStorageConfigs, copyNodeStorageConfig(nsc))
-		}
-		slices.SortFunc(cfg.NodeStorageConfigs, func(a, b config.NodeStorageConfig) int {
-			return cmp.Compare(a.NodeID, b.NodeID)
-		})
-	}
-
-	if len(s.certs) > 0 {
-		cfg.Certs = make([]config.CertPEM, 0, len(s.certs))
-		for _, cert := range s.certs {
-			cfg.Certs = append(cfg.Certs, copyCertPEM(cert))
-		}
-		slices.SortFunc(cfg.Certs, func(a, b config.CertPEM) int { return cmpUUID(a.ID, b.ID) })
-	}
-
-	if len(s.nodes) > 0 {
-		cfg.Nodes = make([]config.NodeConfig, 0, len(s.nodes))
-		for _, n := range s.nodes {
-			cfg.Nodes = append(cfg.Nodes, n)
-		}
-		slices.SortFunc(cfg.Nodes, func(a, b config.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
-	}
+	cfg.Filters = collectAndSort(s.filters, copyFilterConfig, func(a, b config.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.RotationPolicies = collectAndSort(s.rotationPolicies, copyRotationPolicy, func(a, b config.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.RetentionPolicies = collectAndSort(s.retentionPolicies, copyRetentionPolicy, func(a, b config.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.Vaults = collectAndSort(s.vaults, copyVaultConfig, func(a, b config.VaultConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.Ingesters = collectAndSort(s.ingesters, copyIngesterConfig, func(a, b config.IngesterConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.Routes = collectAndSort(s.routes, copyRouteConfig, func(a, b config.RouteConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.ManagedFiles = collectAndSort(s.managedFiles, func(v config.ManagedFileConfig) config.ManagedFileConfig { return v }, func(a, b config.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.CloudServices = collectAndSort(s.cloudServices, copyCloudService, func(a, b config.CloudService) int { return cmpUUID(a.ID, b.ID) })
+	cfg.Tiers = collectAndSort(s.tiers, copyTierConfig, func(a, b config.TierConfig) int { return cmpUUID(a.ID, b.ID) })
+	cfg.NodeStorageConfigs = collectAndSort(s.nodeStorageConfigs, copyNodeStorageConfig, func(a, b config.NodeStorageConfig) int { return cmp.Compare(a.NodeID, b.NodeID) })
+	cfg.Certs = collectAndSort(s.certs, copyCertPEM, func(a, b config.CertPEM) int { return cmpUUID(a.ID, b.ID) })
+	cfg.Nodes = collectAndSort(s.nodes, func(v config.NodeConfig) config.NodeConfig { return v }, func(a, b config.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
 
 	// Populate server settings on Config.
 	if s.ss.hasServerSettings {
@@ -1052,6 +981,36 @@ func copyNodeStorageConfig(nsc config.NodeStorageConfig) config.NodeStorageConfi
 	if len(nsc.FileStorages) > 0 {
 		c.FileStorages = make([]config.FileStorage, len(nsc.FileStorages))
 		copy(c.FileStorages, nsc.FileStorages)
+	}
+	return c
+}
+
+func copyTierConfig(tc config.TierConfig) config.TierConfig {
+	c := tc
+	if tc.RotationPolicyID != nil {
+		id := *tc.RotationPolicyID
+		c.RotationPolicyID = &id
+	}
+	if tc.CloudServiceID != nil {
+		id := *tc.CloudServiceID
+		c.CloudServiceID = &id
+	}
+	if len(tc.RetentionRules) > 0 {
+		c.RetentionRules = make([]config.RetentionRule, len(tc.RetentionRules))
+		copy(c.RetentionRules, tc.RetentionRules)
+	}
+	if len(tc.Placements) > 0 {
+		c.Placements = make([]config.TierPlacement, len(tc.Placements))
+		copy(c.Placements, tc.Placements)
+	}
+	return c
+}
+
+func copyCloudService(cs config.CloudService) config.CloudService {
+	c := cs
+	if len(cs.Transitions) > 0 {
+		c.Transitions = make([]config.CloudStorageTransition, len(cs.Transitions))
+		copy(c.Transitions, cs.Transitions)
 	}
 	return c
 }
