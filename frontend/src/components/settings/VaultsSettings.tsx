@@ -1,7 +1,6 @@
 import { useReducer, useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
-import { buildNodeNameMap } from "../../utils/nodeNames";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import {
   useConfig,
@@ -511,7 +510,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const routes = config?.routes ?? [];
 
   // Derive storage class options with node availability.
-  const nodeNameMap = buildNodeNameMap(config?.nodeConfigs ?? []);
+  const nodeNameMap = new Map((config?.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
   const storageClassOptions = (() => {
     const classNodes = new Map<number, string[]>();
     for (const nsc of config?.nodeStorageConfigs ?? []) {
