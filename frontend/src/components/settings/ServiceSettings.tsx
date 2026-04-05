@@ -10,6 +10,7 @@ import { Checkbox } from "./Checkbox";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { extractMessage } from "../../utils/errors";
+import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/config_pb";
 
 // ── Form reducer ─────────────────────────────────────────────────────
 
@@ -35,11 +36,11 @@ interface ServiceFormState {
 }
 
 type ServiceFormAction =
-  | { type: "init"; data: any }
-  | { type: "reset"; data: any }
+  | { type: "init"; data: GetSettingsResponse }
+  | { type: "reset"; data: GetSettingsResponse }
   | { type: "set"; field: keyof ServiceFormState; value: string | boolean };
 
-function fieldsFromData(data: any): ServiceFormState {
+function fieldsFromData(data: GetSettingsResponse): ServiceFormState {
   const auth = data.auth;
   const pp = auth?.passwordPolicy;
   const query = data.query;
