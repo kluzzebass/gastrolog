@@ -1,20 +1,20 @@
 import { useToast } from "../components/Toast";
 
-interface CrudOptions<TEdit> {
-  mutation: { mutateAsync: (args: any) => Promise<any>; isPending: boolean };
+interface CrudOptions<TEdit, TSaveArgs, TDeleteArgs = string> {
+  mutation: { mutateAsync: (args: TSaveArgs) => Promise<unknown>; isPending: boolean };
   deleteMutation: {
-    mutateAsync: (args: any) => Promise<any>;
+    mutateAsync: (args: TDeleteArgs) => Promise<unknown>;
     isPending: boolean;
   };
   label: string;
-  onSaveTransform: (id: string, edit: TEdit) => any;
-  onDeleteTransform?: (id: string) => any;
+  onSaveTransform: (id: string, edit: TEdit) => TSaveArgs;
+  onDeleteTransform?: (id: string) => TDeleteArgs;
   onDeleteCheck?: (id: string) => string | null;
   onDeleteSuccess?: (id: string) => void;
   clearEdit?: (id: string) => void;
 }
 
-export function useCrudHandlers<TEdit>({
+export function useCrudHandlers<TEdit, TSaveArgs, TDeleteArgs = string>({
   mutation,
   deleteMutation,
   label,
@@ -23,7 +23,7 @@ export function useCrudHandlers<TEdit>({
   onDeleteCheck,
   onDeleteSuccess,
   clearEdit,
-}: CrudOptions<TEdit>) {
+}: CrudOptions<TEdit, TSaveArgs, TDeleteArgs>) {
   const { addToast } = useToast();
 
   const handleSave = async (id: string, edit: TEdit) => {
@@ -46,7 +46,7 @@ export function useCrudHandlers<TEdit>({
       }
     }
     try {
-      const deleteArgs = onDeleteTransform ? onDeleteTransform(id) : id;
+      const deleteArgs = onDeleteTransform ? onDeleteTransform(id) : (id as TDeleteArgs);
       await deleteMutation.mutateAsync(deleteArgs);
       if (onDeleteSuccess) {
         onDeleteSuccess(id);
