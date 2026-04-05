@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
+import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
@@ -311,40 +312,11 @@ export function CsvCards({
   onDelete: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
-  const putConfig = usePutSettings();
+  const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
+    lookups, savedLookups, serialize: serializeCsvLookups, equal: csvLookupEqual,
+    lookupKey: "csvLookups", typeLabel: "CSV", getName: (cv) => cv.name, onDelete,
+  });
   const { isExpanded, toggle } = useExpandedCards();
-  const [justSaved, setJustSaved] = useState(false);
-
-  const isDirty = (i: number) => {
-    if (justSaved) return false;
-    const saved = savedLookups[i];
-    if (!saved) return true;
-    return !csvLookupEqual(lookups[i]!, saved);
-  };
-
-  const save = async (i: number) => {
-    const draft = lookups[i]!;
-    try {
-      await putConfig.mutateAsync({ lookup: { csvLookups: serializeCsvLookups(lookups) } });
-      setJustSaved(true);
-      requestAnimationFrame(() => setJustSaved(false));
-      addToast(`CSV lookup "${draft.name}" saved`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to save CSV lookup", "error");
-    }
-  };
-
-  const handleDelete = async (i: number) => {
-    const name = lookups[i]?.name || `CSV Lookup ${i + 1}`;
-    const remaining = lookups.filter((_, j) => j !== i);
-    try {
-      await putConfig.mutateAsync({ lookup: { csvLookups: serializeCsvLookups(remaining) } });
-      onDelete(i);
-      addToast(`"${name}" deleted`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to delete CSV lookup", "error");
-    }
-  };
 
   return (
     <>

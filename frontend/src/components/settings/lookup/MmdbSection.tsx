@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
+import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
@@ -9,6 +10,16 @@ import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbLookupEqual } from "./types";
 import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+
+function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
+  return lookups
+    .filter((m) => m.name)
+    .map((m) => ({
+      name: m.name,
+      dbType: m.dbType,
+      fileId: m.fileId || undefined,
+    }));
+}
 
 export function MmdbAddForm({
   dark,
@@ -31,15 +42,7 @@ export function MmdbAddForm({
     if (!final.name) return;
     const updated = [...existingLookups, final];
     try {
-      await putConfig.mutateAsync({
-        lookup: {
-          mmdbLookups: updated.filter((m) => m.name).map((m) => ({
-            name: m.name,
-            dbType: m.dbType,
-            fileId: m.fileId || undefined,
-          })),
-        },
-      });
+      await putConfig.mutateAsync({ lookup: { mmdbLookups: serializeMmdbLookups(updated) } });
       onCreated(final);
       addToast(`MMDB lookup "${final.name}" created`, "info");
     } catch (err: unknown) {
@@ -93,60 +96,11 @@ export function MmdbCards({
   onDelete: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
-  const putConfig = usePutSettings();
+  const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
+    lookups, savedLookups, serialize: serializeMmdbLookups, equal: mmdbLookupEqual,
+    lookupKey: "mmdbLookups", typeLabel: "MMDB", getName: (m) => m.name, onDelete,
+  });
   const { isExpanded, toggle } = useExpandedCards();
-  const [justSaved, setJustSaved] = useState(false);
-
-  const isDirty = (i: number) => {
-    if (justSaved) return false;
-    const saved = savedLookups[i];
-    if (!saved) return true;
-    return !mmdbLookupEqual(lookups[i]!, saved);
-  };
-
-  const save = async (i: number) => {
-    const draft = lookups[i]!;
-    try {
-      await putConfig.mutateAsync({
-        lookup: {
-          mmdbLookups: lookups
-            .filter((m) => m.name)
-            .map((m) => ({
-              name: m.name,
-              dbType: m.dbType,
-              fileId: m.fileId || undefined,
-            })),
-        },
-      });
-      setJustSaved(true);
-      requestAnimationFrame(() => setJustSaved(false));
-      addToast(`MMDB lookup "${draft.name}" saved`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to save MMDB lookup", "error");
-    }
-  };
-
-  const handleDelete = async (i: number) => {
-    const name = lookups[i]?.name || `MMDB Lookup ${i + 1}`;
-    const remaining = lookups.filter((_, j) => j !== i);
-    try {
-      await putConfig.mutateAsync({
-        lookup: {
-          mmdbLookups: remaining
-            .filter((m) => m.name)
-            .map((m) => ({
-              name: m.name,
-              dbType: m.dbType,
-              fileId: m.fileId || undefined,
-            })),
-        },
-      });
-      onDelete(i);
-      addToast(`"${name}" deleted`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to delete MMDB lookup", "error");
-    }
-  };
 
   return (
     <>

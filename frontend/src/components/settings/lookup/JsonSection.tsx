@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
+import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
@@ -106,40 +107,11 @@ export function JsonCards({
   onDelete: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
-  const putConfig = usePutSettings();
+  const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
+    lookups, savedLookups, serialize: serializeJsonLookups, equal: jsonFileLookupEqual,
+    lookupKey: "jsonFileLookups", typeLabel: "JSON", getName: (j) => j.name, onDelete,
+  });
   const { isExpanded, toggle } = useExpandedCards();
-  const [justSaved, setJustSaved] = useState(false);
-
-  const isDirty = (i: number) => {
-    if (justSaved) return false;
-    const saved = savedLookups[i];
-    if (!saved) return true;
-    return !jsonFileLookupEqual(lookups[i]!, saved);
-  };
-
-  const save = async (i: number) => {
-    const draft = lookups[i]!;
-    try {
-      await putConfig.mutateAsync({ lookup: { jsonFileLookups: serializeJsonLookups(lookups) } });
-      setJustSaved(true);
-      requestAnimationFrame(() => setJustSaved(false));
-      addToast(`JSON lookup "${draft.name}" saved`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to save JSON lookup", "error");
-    }
-  };
-
-  const handleDelete = async (i: number) => {
-    const name = lookups[i]?.name || `JSON Lookup ${i + 1}`;
-    const remaining = lookups.filter((_, j) => j !== i);
-    try {
-      await putConfig.mutateAsync({ lookup: { jsonFileLookups: serializeJsonLookups(remaining) } });
-      onDelete(i);
-      addToast(`"${name}" deleted`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to delete JSON lookup", "error");
-    }
-  };
 
   return (
     <>

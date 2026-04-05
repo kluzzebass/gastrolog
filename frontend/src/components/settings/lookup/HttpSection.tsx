@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, useTestHTTPLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
+import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput, ParamsEditor } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
@@ -97,45 +98,16 @@ export function HttpCards({
   onDelete: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
-  const putConfig = usePutSettings();
+  const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
+    lookups, savedLookups, serialize: serializeHttpLookups, equal: httpLookupEqual,
+    lookupKey: "httpLookups", typeLabel: "HTTP", getName: (h) => h.name, onDelete,
+  });
   const testLookup = useTestHTTPLookup();
   const { isExpanded, toggle } = useExpandedCards();
-  const [justSaved, setJustSaved] = useState(false);
   const [testValues, setTestValues] = useState<Record<number, Record<string, string>>>({});
   const [testResults, setTestResults] = useState<
     Record<number, { success: boolean; error?: string; results?: { label: string; value: string; fields: Record<string, string> }[] }>
   >({});
-
-  const isDirty = (i: number) => {
-    if (justSaved) return false;
-    const saved = savedLookups[i];
-    if (!saved) return true;
-    return !httpLookupEqual(lookups[i]!, saved);
-  };
-
-  const save = async (i: number) => {
-    const draft = lookups[i]!;
-    try {
-      await putConfig.mutateAsync({ lookup: { httpLookups: serializeHttpLookups(lookups) } });
-      setJustSaved(true);
-      requestAnimationFrame(() => setJustSaved(false));
-      addToast(`HTTP lookup "${draft.name}" saved`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to save HTTP lookup", "error");
-    }
-  };
-
-  const handleDelete = async (i: number) => {
-    const name = lookups[i]?.name || `HTTP Lookup ${i + 1}`;
-    const remaining = lookups.filter((_, j) => j !== i);
-    try {
-      await putConfig.mutateAsync({ lookup: { httpLookups: serializeHttpLookups(remaining) } });
-      onDelete(i);
-      addToast(`"${name}" deleted`, "info");
-    } catch (err: unknown) {
-      addToast(err instanceof Error ? err.message : "Failed to delete HTTP lookup", "error");
-    }
-  };
 
   return (
     <>
