@@ -1,5 +1,6 @@
 import { useReducer, useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
+import { buildNodeNameMap } from "../../utils/nodeNames";
 import {
   useConfig,
   usePutCloudService,
@@ -107,7 +108,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const effectiveName = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
   const nameConflict = existingNames.has(effectiveName);
 
-  const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
+  const nodeNameMap = buildNodeNameMap(nodeConfigs);
   const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
 
   const handleCreate = async () => {

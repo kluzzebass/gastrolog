@@ -3,6 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
 import { useChunks, useIndexes, useValidateVault, useConfig, useArchiveChunk, useRestoreChunk } from "../../api/hooks";
 import { useToast } from "../Toast";
+import { buildNodeNameMap } from "../../utils/nodeNames";
 import type { VaultInfo, ChunkMeta } from "../../api/gen/gastrolog/v1/vault_pb";
 import { protoToInstant, instantToMs, instantToDate, formatDateTimeShort } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
@@ -186,7 +187,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   }
 
   // Node name resolution — used by both local and remote tier headers.
-  const nodeNameMap = new Map((config?.nodeConfigs ?? []).map((n) => [n.id, n.name || n.id]));
+  const nodeNameMap = buildNodeNameMap(config?.nodeConfigs ?? []);
 
   // Identify remote tiers (in vault config but no local chunks).
   const remoteTierInfo = (() => {

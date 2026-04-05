@@ -26,6 +26,7 @@ import { JobProgress } from "./VaultHelpers";
 import { MigrateVaultForm, MergeVaultForm } from "./VaultMigrateForms";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { leaderNodeId, followerNodeIds } from "../../utils/tierPlacement";
+import { buildNodeNameMap } from "../../utils/nodeNames";
 import { formatBytes } from "../../utils/units";
 
 
@@ -215,7 +216,7 @@ export function VaultSettingsCard({
   const vaultTiers = localTierIds.map((id) => tierMap.get(id)).filter((t): t is TierConfig => !!t);
 
   // Node name resolution for tier placement display.
-  const nodeNameMap = new Map(nodeConfigs.map((n) => [n.id, n.name || n.id]));
+  const nodeNameMap = buildNodeNameMap(nodeConfigs);
   const resolveNodeName = (nodeId: string) => nodeNameMap.get(nodeId) || nodeId;
 
   // Check if a node has a specific storage class; returns the fallback class if not.
