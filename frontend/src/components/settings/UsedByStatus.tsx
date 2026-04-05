@@ -1,10 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 
-interface Vault {
-  id: string;
-  [key: string]: any;
-}
-
 interface UsedByStatusProps {
   dark: boolean;
   refs: string[];
@@ -45,14 +40,6 @@ export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusPr
   );
 }
 
-export function refsFor(
-  vaults: Vault[],
-  field: string,
-  id: string,
-): string[] {
-  return vaults.filter((s) => s[field] === id).map((s) => s.name || s.id);
-}
-
 interface Route {
   id: string;
   name: string;
@@ -67,20 +54,6 @@ export function routeRefsForFilter(
   return routes
     .filter((r) => r.filterId === filterId)
     .map((r) => r.name || r.id);
-}
-
-export function ruleRefsFor(
-  vaults: Vault[],
-  retentionPolicyId: string,
-): string[] {
-  return vaults
-    .filter((s) =>
-      (s.retentionRules ?? []).some(
-        (b: { retentionPolicyId: string }) =>
-          b.retentionPolicyId === retentionPolicyId,
-      ),
-    )
-    .map((s) => s.name || s.id);
 }
 
 interface Tier {
