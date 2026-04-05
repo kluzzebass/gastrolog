@@ -176,7 +176,6 @@ type ServerSettings struct {
 // ClusterConfig holds cluster-wide settings.
 type ClusterConfig struct {
 	BroadcastInterval string `json:"broadcast_interval,omitempty"` // Go duration string, e.g. "5s"
-	ForwardChannelCap int    `json:"forward_channel_cap,omitempty"` // per-node forwarding buffer; 0 = default (16384)
 }
 
 // ---------------------------------------------------------------------------

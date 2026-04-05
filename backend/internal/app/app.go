@@ -185,7 +185,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	var recordForwarder *cluster.RecordForwarder
 	var routingForwarder *routing.Forwarder
 	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
-		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector, 0)
+		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
 		routingForwarder = routing.NewForwarder(clusterSrv.PeerConns())
 	}
 
@@ -317,14 +317,13 @@ func makeTierDrainCompleteHandler(cfgStore config.Store, logger *slog.Logger, fa
 // wireClusterForwarding sets up cross-node record, search, context, vault,
 // and explain forwarding on the cluster server. Returns the search forwarder
 // for the HTTP server to use.
-func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector, forwardChanCap int) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
+func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, orchReady <-chan struct{}, nodeID string, logger *slog.Logger, alerts *alert.Collector) (*cluster.SearchForwarder, *cluster.RecordForwarder) {
 	peerConns := clusterSrv.PeerConns()
 
 	recordForwarder := cluster.NewRecordForwarder(
 		peerConns,
 		logger.With("component", "record-forwarder"),
 		alerts,
-		forwardChanCap,
 	)
 	orch.SetRecordForwarder(recordForwarder)
 	// NOTE: recordForwarder.Close() is not deferred here because the caller
