@@ -146,7 +146,7 @@ func TestTransitionSameNodeTwoTiers(t *testing.T) {
 	tier0CM := vault.Tiers[0].Chunks
 
 	// Ingest records into tier 0.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if _, _, err := tier0CM.Append(makeRecord("record-" + string(rune('A'+i)))); err != nil {
 			t.Fatal(err)
 		}
@@ -361,8 +361,8 @@ func TestTransitionMultipleChunks(t *testing.T) {
 	tier0CM := vault.Tiers[0].Chunks
 
 	// Create 3 sealed chunks.
-	for c := 0; c < 3; c++ {
-		for i := 0; i < 2; i++ {
+	for range 3 {
+		for range 2 {
 			if _, _, err := tier0CM.Append(makeRecord("batch")); err != nil {
 				t.Fatal(err)
 			}
@@ -517,7 +517,7 @@ func TestTransitionCrossNode(t *testing.T) {
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
 	// Ingest and seal.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		if _, _, err := tier0.Chunks.Append(makeRecord("remote")); err != nil {
 			t.Fatal(err)
 		}
@@ -750,7 +750,7 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 
 	// Ingest, seal, and upload to cloud.
 	const recordCount = 10
-	for i := 0; i < recordCount; i++ {
+	for range recordCount {
 		if _, _, err := cloudTier.Chunks.Append(makeRecord("ttl-cloud")); err != nil {
 			t.Fatal(err)
 		}
@@ -920,7 +920,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 
 	// Ingest records, seal, and run PostSealProcess.
 	const recordCount = 10
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		if _, _, err := cloudTier.Chunks.Append(makeRecord(fmt.Sprintf("cloud-leader-%d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -1036,7 +1036,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 
 	// Ingest records on leader, seal, and upload to cloud.
 	const recordCount = 20
-	for i := 0; i < recordCount; i++ {
+	for range recordCount {
 		if _, _, err := primaryTier.Chunks.Append(makeRecord("primary-rec")); err != nil {
 			t.Fatal(err)
 		}
@@ -1236,7 +1236,7 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 
 	// Ingest records into the cloud tier.
 	const recordCount = 10
-	for i := 0; i < recordCount; i++ {
+	for range recordCount {
 		if _, _, err := cloudTier.Chunks.Append(makeRecord("cloud-rec")); err != nil {
 			t.Fatal(err)
 		}
@@ -1348,7 +1348,7 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 
 	// Ingest, seal, and upload to cloud.
 	const recordCount = 10
-	for i := 0; i < recordCount; i++ {
+	for range recordCount {
 		if _, _, err := cloudTier.Chunks.Append(makeRecord("sweep-cloud")); err != nil {
 			t.Fatal(err)
 		}
@@ -1597,7 +1597,7 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
 	const recordCount = 50
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("chain-%d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -1688,7 +1688,7 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 
 	// Ingest records into tier 0 (hot file tier).
 	const recordCount = 30
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("ffc-%d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -1804,7 +1804,7 @@ func TestTransitionEventIDPreserved(t *testing.T) {
 		ingestSeq  uint32
 	}
 	originals := make([]eventSnapshot, recordCount)
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		rec := makeRecordWithEventID(fmt.Sprintf("eid-%d", i), ingesterID, uint32(i))
 		originals[i] = eventSnapshot{
 			raw:        fmt.Sprintf("eid-%d", i),
@@ -1885,7 +1885,7 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 		ingestSeq uint32
 	}
 	originals := make([]snapshot, recordCount)
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		raw := fmt.Sprintf("cloud-eid-%d", i)
 		rec := makeRecordWithEventID(raw, ingesterID, uint32(i))
 		originals[i] = snapshot{raw: raw, ingestSeq: uint32(i)}
@@ -1963,7 +1963,7 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
 	const recordCount = 100
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("acc-%d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -2054,7 +2054,7 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 
 	// Ingest distinct records.
 	const recordCount = 20
-	for i := 0; i < recordCount; i++ {
+	for i := range recordCount {
 		if _, _, err := tier0.Chunks.Append(makeRecord(fmt.Sprintf("searchable-%d", i))); err != nil {
 			t.Fatal(err)
 		}
@@ -2124,7 +2124,7 @@ func TestTransitionCloudUploadOnlyOneBlob(t *testing.T) {
 	const recordsPerChunk = 25
 	const numChunks = 3
 	for c := 0; c < numChunks; c++ {
-		for i := 0; i < recordsPerChunk; i++ {
+		for i := range recordsPerChunk {
 			if _, _, err := cloudTier.Chunks.Append(makeRecord(fmt.Sprintf("blob-%d-%d", c, i))); err != nil {
 				t.Fatal(err)
 			}
@@ -3340,5 +3340,107 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	// Follower should NOT drain (not leader).
 	if followerAfter != followerBefore {
 		t.Errorf("follower should not enforce budget: before=%d, after=%d", followerBefore, followerAfter)
+	}
+}
+
+// TestExplicitStorageLeaderGetsRotationPolicy verifies that a tier built via
+// buildTierInstanceForStorage (explicit placement path) applies the rotation
+// policy from config. Regression test for a gap where applyRotationPolicy was
+// only called in buildTierInstance but not buildTierInstanceForStorage.
+func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
+	t.Parallel()
+	nodeID := "test-node"
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	fsID := uuid.Must(uuid.NewV7())
+	policyID := uuid.Must(uuid.NewV7())
+
+	storageDir := t.TempDir()
+	tierDir := filepath.Join(storageDir, "vaults", vaultID.String(), tierID.String())
+	if err := os.MkdirAll(tierDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+
+	maxRecords := int64(3)
+	cfg := &config.Config{
+		Vaults: []config.VaultConfig{{
+			ID:   vaultID,
+			Name: "rotation-test",
+		}},
+		Tiers: []config.TierConfig{{
+			VaultID:          vaultID,
+			Position:         0,
+			ID:               tierID,
+			Name:             "file",
+			Type:             config.TierTypeFile,
+			RotationPolicyID: &policyID,
+			Placements: []config.TierPlacement{
+				{StorageID: fsID.String(), Leader: true},
+			},
+		}},
+		RotationPolicies: []config.RotationPolicyConfig{{
+			ID:         policyID,
+			Name:       "3-records",
+			MaxRecords: &maxRecords,
+		}},
+		NodeStorageConfigs: []config.NodeStorageConfig{{
+			NodeID: nodeID,
+			FileStorages: []config.FileStorage{{
+				ID:           fsID,
+				StorageClass: 1,
+				Name:         "disk-1",
+				Path:         storageDir,
+			}},
+		}},
+	}
+
+	factories := Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"file": chunkfile.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"file": indexfile.NewFactory(),
+		},
+		VaultsDir: storageDir,
+		Logger:    slog.Default(),
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
+	defer orch.Stop()
+
+	store := cfgmem.NewStore()
+	orch.cfgLoader = &transitionConfigLoader{store: store}
+
+	if err := orch.ApplyConfig(cfg, factories); err != nil {
+		t.Fatalf("ApplyConfig failed: %v", err)
+	}
+
+	orch.mu.RLock()
+	vault := orch.vaults[vaultID]
+	orch.mu.RUnlock()
+	if vault == nil {
+		t.Fatal("vault not created")
+	}
+	if len(vault.Tiers) != 1 {
+		t.Fatalf("expected 1 tier, got %d", len(vault.Tiers))
+	}
+
+	tier := vault.Tiers[0]
+
+	// Ingest enough records to trigger rotation (maxRecords=3).
+	for i := range 5 {
+		if _, _, err := tier.Chunks.Append(makeRecord(fmt.Sprintf("rot-%d", i))); err != nil {
+			t.Fatalf("append[%d]: %v", i, err)
+		}
+	}
+
+	// If the rotation policy was applied, we should have at least 2 chunks
+	// (3 records in the first, 2 in the second).
+	metas, err := tier.Chunks.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) < 2 {
+		t.Fatalf("expected at least 2 chunks from rotation (maxRecords=3, 5 appended), got %d — rotation policy not applied via buildTierInstanceForStorage", len(metas))
 	}
 }

@@ -466,12 +466,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 			t.StorageID = tgt.StorageID
 			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 			raftCB := o.wireTierRaftGroup(t.Chunks, *tierCfg, nscs, factories)
-			t.HasRaftLeader = raftCB.hasLeader
-			t.IsRaftLeader = raftCB.isLeader
-			t.ApplyRaftDelete = raftCB.applyDelete
-			t.ListManifest = raftCB.listChunks
-			t.ApplyRaftRetentionPending = raftCB.applyRetPending
-			t.ListRetentionPending = raftCB.listRetPending
+			t.applyRaftCallbacks(raftCB)
 			ti = t
 			break
 		}
@@ -633,15 +628,6 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				sti.LeaderNodeID = leaderNodeID
 				sti.StorageID = tgt.StorageID
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-				// Create the tier Raft group (non-bootstrapped) so this
-				// node accepts AppendEntries from the leader.
-				raftCB := o.wireTierRaftGroup(sti.Chunks, *tierCfg, nscs, factories)
-				sti.HasRaftLeader = raftCB.hasLeader
-				sti.IsRaftLeader = raftCB.isLeader
-				sti.ApplyRaftDelete = raftCB.applyDelete
-				sti.ListManifest = raftCB.listChunks
-				sti.ApplyRaftRetentionPending = raftCB.applyRetPending
-				sti.ListRetentionPending = raftCB.listRetPending
 				tiers = append(tiers, sti)
 				break // 1:1:1: one store per tier per node
 			}
@@ -661,15 +647,6 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *config.Config, vaultCfg con
 			return nil, err
 		}
 		ti.StorageID = storageID
-		// Wire tier Raft group for the leader — buildTierInstanceForStorage
-		// doesn't call wireTierRaftGroup itself.
-		raftCB := o.wireTierRaftGroup(ti.Chunks, *tierCfg, cfg.NodeStorageConfigs, factories)
-		ti.HasRaftLeader = raftCB.hasLeader
-		ti.IsRaftLeader = raftCB.isLeader
-		ti.ApplyRaftDelete = raftCB.applyDelete
-		ti.ListManifest = raftCB.listChunks
-		ti.ApplyRaftRetentionPending = raftCB.applyRetPending
-		ti.ListRetentionPending = raftCB.listRetPending
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
@@ -725,18 +702,9 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}
 
 	// Apply rotation policy from tier.
-	if tierCfg.RotationPolicyID != nil { //nolint:nestif // policy resolution
-		policyCfg := findRotationPolicy(cfg.RotationPolicies, *tierCfg.RotationPolicyID)
-		if policyCfg != nil {
-			policy, pErr := policyCfg.ToRotationPolicy()
-			if pErr != nil {
-				_ = cm.Close()
-				return nil, fmt.Errorf("invalid rotation policy %s: %w", *tierCfg.RotationPolicyID, pErr)
-			}
-			if policy != nil {
-				cm.SetRotationPolicy(policy)
-			}
-		}
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, tierCfg.RotationPolicyID); err != nil {
+		_ = cm.Close()
+		return nil, err
 	}
 
 	// Wire Raft-backed metadata announcer if a GroupManager is available.
@@ -744,17 +712,13 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
-		return &TierInstance{
-			TierID:          tierCfg.ID,
-			Type:            string(tierCfg.Type),
-			Chunks:          cm,
-			HasRaftLeader:   raftCB.hasLeader,
-			IsRaftLeader:    raftCB.isLeader,
-			ApplyRaftDelete:           raftCB.applyDelete,
-			ListManifest:             raftCB.listChunks,
-			ApplyRaftRetentionPending: raftCB.applyRetPending,
-			ListRetentionPending:     raftCB.listRetPending,
-		}, nil
+		ti := &TierInstance{
+			TierID: tierCfg.ID,
+			Type:   string(tierCfg.Type),
+			Chunks: cm,
+		}
+		ti.applyRaftCallbacks(raftCB)
+		return ti, nil
 	}
 
 	imFactory, ok := factories.IndexManagers[factoryName]
@@ -783,18 +747,15 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 
-	return &TierInstance{
-		TierID:          tierCfg.ID,
-		Type:            string(tierCfg.Type),
-		Chunks:          cm,
-		Indexes:         im,
-		Query:           qe,
-		HasRaftLeader:             raftCB.hasLeader,
-		ApplyRaftDelete:           raftCB.applyDelete,
-		ListManifest:             raftCB.listChunks,
-		ApplyRaftRetentionPending: raftCB.applyRetPending,
-		ListRetentionPending:     raftCB.listRetPending,
-	}, nil
+	ti := &TierInstance{
+		TierID:  tierCfg.ID,
+		Type:    string(tierCfg.Type),
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
+	}
+	ti.applyRaftCallbacks(raftCB)
+	return ti, nil
 }
 
 // buildTierInstanceForStorage creates a TierInstance whose data directory is
@@ -836,6 +797,11 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		return nil, fmt.Errorf("create chunk manager: %w", err)
 	}
 
+	if err := applyRotationPolicy(cm, cfg.RotationPolicies, tierCfg.RotationPolicyID); err != nil {
+		_ = cm.Close()
+		return nil, err
+	}
+
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
@@ -864,46 +830,17 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 
 	// Same-node secondaries share the primary's tier Raft group.
 	// Wire the manifest callbacks so they reconcile like any other follower.
-	var raftCB tierRaftCallbacks
-	if factories.GroupManager != nil {
-		if g := factories.GroupManager.GetGroup(tierCfg.ID.String()); g != nil {
-			r := g.Raft
-			fsm, _ := g.FSM.(*multiraft.ChunkFSM)
-			timeout := cluster.ReplicationTimeout
-			raftCB = tierRaftCallbacks{
-				hasLeader: func() bool { return r.Leader() != "" },
-		isLeader:  func() bool { return r.State() == hraft.Leader },
-				applyDelete: func(id chunk.ChunkID) error {
-					return r.Apply(multiraft.MarshalDeleteChunk(id), timeout).Error()
-				},
-				listChunks: func() []chunk.ChunkID {
-					if fsm == nil {
-						return nil
-					}
-					entries := fsm.List()
-					ids := make([]chunk.ChunkID, len(entries))
-					for i := range entries {
-						ids[i] = entries[i].ID
-					}
-					return ids
-				},
-			}
-		}
-	}
+	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories)
 
-	return &TierInstance{
-		TierID:          tierCfg.ID,
-		Type:            string(tierCfg.Type),
-		Chunks:          cm,
-		Indexes:         im,
-		Query:           qe,
-		IsRaftLeader:              raftCB.isLeader,
-		HasRaftLeader:             raftCB.hasLeader,
-		ApplyRaftDelete:           raftCB.applyDelete,
-		ListManifest:             raftCB.listChunks,
-		ApplyRaftRetentionPending: raftCB.applyRetPending,
-		ListRetentionPending:     raftCB.listRetPending,
-	}, nil
+	ti := &TierInstance{
+		TierID:  tierCfg.ID,
+		Type:    string(tierCfg.Type),
+		Chunks:  cm,
+		Indexes: im,
+		Query:   qe,
+	}
+	ti.applyRaftCallbacks(raftCB)
+	return ti, nil
 }
 
 // findFileStorageByID resolves a file storage ID to its config across all nodes.
@@ -914,6 +851,25 @@ func findFileStorageByID(cfg *config.Config, storageID string) *config.FileStora
 				return &nsc.FileStorages[i]
 			}
 		}
+	}
+	return nil
+}
+
+// applyRotationPolicy resolves and applies a rotation policy to a chunk manager.
+func applyRotationPolicy(cm chunk.ChunkManager, policies []config.RotationPolicyConfig, policyID *uuid.UUID) error {
+	if policyID == nil {
+		return nil
+	}
+	policyCfg := findRotationPolicy(policies, *policyID)
+	if policyCfg == nil {
+		return nil
+	}
+	policy, err := policyCfg.ToRotationPolicy()
+	if err != nil {
+		return fmt.Errorf("invalid rotation policy %s: %w", *policyID, err)
+	}
+	if policy != nil {
+		cm.SetRotationPolicy(policy)
 	}
 	return nil
 }

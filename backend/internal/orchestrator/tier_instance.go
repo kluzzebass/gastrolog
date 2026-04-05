@@ -52,6 +52,16 @@ type TierInstance struct {
 	ListManifest func() []chunk.ChunkID
 }
 
+// applyRaftCallbacks wires raft-backed metadata operations from a tierRaftCallbacks.
+func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
+	t.HasRaftLeader = cb.hasLeader
+	t.IsRaftLeader = cb.isLeader
+	t.ApplyRaftDelete = cb.applyDelete
+	t.ListManifest = cb.listChunks
+	t.ApplyRaftRetentionPending = cb.applyRetPending
+	t.ListRetentionPending = cb.listRetPending
+}
+
 // IsLeader returns true if this node is the leader for this tier.
 func (t *TierInstance) IsLeader() bool { return !t.IsFollower }
 

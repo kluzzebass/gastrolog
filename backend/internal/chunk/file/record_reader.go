@@ -18,12 +18,29 @@ var (
 	ErrMmapEmpty = errors.New("cannot mmap empty file")
 )
 
-// loadDict reads attr_dict.log, validates its header, and returns a StringDict.
+// loadDict reads attr_dict.log via mmap, validates its header, and returns a StringDict.
+// DecodeDictData copies strings so the mmap region is released immediately after decoding.
 func loadDict(dictPath string) (*chunk.StringDict, error) {
-	data, err := os.ReadFile(filepath.Clean(dictPath))
+	f, err := os.Open(filepath.Clean(dictPath))
 	if err != nil {
-		return nil, fmt.Errorf("read attr_dict %s: %w", dictPath, err)
+		return nil, fmt.Errorf("open attr_dict %s: %w", dictPath, err)
 	}
+	defer func() { _ = f.Close() }()
+
+	info, err := f.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat attr_dict %s: %w", dictPath, err)
+	}
+	fileSize := info.Size()
+	if fileSize < int64(format.HeaderSize) {
+		return nil, fmt.Errorf("attr_dict %s too small (%d bytes)", dictPath, fileSize)
+	}
+	data, err := syscall.Mmap(int(f.Fd()), 0, int(fileSize), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	if err != nil {
+		return nil, fmt.Errorf("mmap attr_dict %s: %w", dictPath, err)
+	}
+	defer func() { _ = syscall.Munmap(data) }()
+
 	if _, err := format.DecodeAndValidate(data[:format.HeaderSize], format.TypeAttrDict, AttrDictVersion); err != nil {
 		return nil, fmt.Errorf("invalid attr_dict header in %s: %w", dictPath, err)
 	}
@@ -205,7 +222,8 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 		rawStart := int(entry.RawOffset)
 		rawEnd := rawStart + int(entry.RawSize)
 		if rawEnd > len(c.rawData) {
-			return chunk.Record{}, ErrInvalidEntry
+			return chunk.Record{}, fmt.Errorf("%w: chunk %s record %d: raw range [%d:%d] exceeds mmap size %d",
+				ErrInvalidEntry, c.chunkID, c.fwdIndex, rawStart, rawEnd, len(c.rawData))
 		}
 		raw = c.rawData[rawStart:rawEnd]
 	}
@@ -221,7 +239,8 @@ func (c *mmapCursor) readRecord(index uint64) (chunk.Record, error) {
 		attrStart := int(entry.AttrOffset)
 		attrEnd := attrStart + int(entry.AttrSize)
 		if attrEnd > len(c.attrData) {
-			return chunk.Record{}, ErrInvalidEntry
+			return chunk.Record{}, fmt.Errorf("%w: chunk %s record %d: attr range [%d:%d] exceeds mmap size %d",
+				ErrInvalidEntry, c.chunkID, c.fwdIndex, attrStart, attrEnd, len(c.attrData))
 		}
 		attrBuf = c.attrData[attrStart:attrEnd]
 	}
