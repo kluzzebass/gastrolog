@@ -37,6 +37,10 @@ import (
 // Prevents indefinite hangs if the Raft FSM or underlying store is slow.
 const configLoadTimeout = 5 * time.Second
 
+// readHeaderTimeout is the maximum time to read HTTP request headers.
+// Shared by HTTP, HTTPS, and Unix socket servers.
+const readHeaderTimeout = 10 * time.Second
+
 // Config holds server configuration.
 type Config struct {
 	// Logger for structured logging.
@@ -535,7 +539,7 @@ func (s *Server) Serve(listener net.Listener) error {
 	redirectHandler := s.redirectMiddleware(s.handler)
 	s.server = &http.Server{
 		Handler:           h2c.NewHandler(redirectHandler, &http2.Server{}),
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
 	// Initial TLS config: start HTTPS if enabled

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"strconv"
-	"time"
 
 	"connectrpc.com/connect"
 
@@ -78,7 +77,7 @@ func (s *Server) reconfigureTLS() {
 	s.httpsListener = tlsLn
 	s.httpsServer = &http.Server{
 		Handler:           s.handler,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	s.logger.Info("HTTPS listener started", "addr", httpsAddr)
 
@@ -147,7 +146,7 @@ func (s *Server) ListenUnix(path string) error {
 	s.unixPath = path
 	s.unixServer = &http.Server{
 		Handler:           handler,
-		ReadHeaderTimeout: 10 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 	}
 	s.mu.Unlock()
 
