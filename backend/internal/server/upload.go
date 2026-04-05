@@ -81,7 +81,10 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "write upload: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = tmp.Close()
+	if err := tmp.Close(); err != nil {
+		http.Error(w, "flush upload: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	// User-supplied filename is metadata only — the file on disk is always "data".
 	displayName := filepath.Base(header.Filename) // sanitize: strip directory components
