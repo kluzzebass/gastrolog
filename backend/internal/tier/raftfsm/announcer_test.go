@@ -114,8 +114,9 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		t.Fatal("no leader found")
 	}
 
-	// Create a file.Manager with a Announcer on the leader node.
-	announcer := NewAnnouncer(leaderGroup.Raft, 5*time.Second, nil)
+	// Create a file.Manager with an Announcer on the leader node.
+	applier := &testApplier{raft: leaderGroup.Raft, timeout: 5 * time.Second}
+	announcer := NewAnnouncer(applier, nil)
 	dir := t.TempDir()
 	mgr, err := chunkfile.NewManager(chunkfile.Config{
 		Dir:       dir,
@@ -210,6 +211,17 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 			t.Errorf("node %d: chunk should be deleted from FSM", i)
 		}
 	}
+}
+
+// testApplier applies directly via raft.Apply — used in tests where the
+// node calling Apply is always the Raft leader.
+type testApplier struct {
+	raft    *hraft.Raft
+	timeout time.Duration
+}
+
+func (a *testApplier) Apply(data []byte) error {
+	return a.raft.Apply(data, a.timeout).Error()
 }
 
 func waitForLeader(t *testing.T, g *raftgroup.Group, timeout time.Duration) {

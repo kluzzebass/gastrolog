@@ -864,6 +864,19 @@ func (s *Server) forwardApply(ctx context.Context, req *gastrologv1.ForwardApply
 	return &gastrologv1.ForwardApplyResponse{}, nil
 }
 
+// forwardTierApply handles the ForwardTierApply RPC on the tier Raft leader.
+// Config placement leaders call this to proxy tier FSM commands when they
+// aren't the tier Raft leader.
+func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardTierApplyRequest) (*gastrologv1.ForwardTierApplyResponse, error) {
+	if s.tierApplyFn == nil {
+		return nil, status.Error(codes.Unavailable, "tier apply function not configured")
+	}
+	if err := s.tierApplyFn(ctx, req.GetGroupId(), req.GetCommand()); err != nil {
+		return nil, status.Errorf(codes.Internal, "tier apply: %v", err)
+	}
+	return &gastrologv1.ForwardTierApplyResponse{}, nil
+}
+
 // forwardRemoveNode handles the ForwardRemoveNode RPC on the leader.
 // Followers call this to proxy node removal through the leader.
 func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.ForwardRemoveNodeRequest) (*gastrologv1.ForwardRemoveNodeResponse, error) {
@@ -1044,6 +1057,10 @@ var clusterServiceDesc = grpc.ServiceDesc{
 			MethodName: "ListPeerManagedFiles",
 			Handler:    listPeerManagedFilesHandler,
 		},
+		{
+			MethodName: "ForwardTierApply",
+			Handler:    forwardTierApplyHandler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1123,6 +1140,25 @@ func forwardApplyHandler(srv any, ctx context.Context, dec func(any) error, inte
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardApply(ctx, req.(*gastrologv1.ForwardApplyRequest))
+	}
+	return interceptor(ctx, req, info, handler)
+}
+
+func forwardTierApplyHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
+	req := &gastrologv1.ForwardTierApplyRequest{}
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	s := srv.(*Server)
+	if interceptor == nil {
+		return s.forwardTierApply(ctx, req)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/gastrolog.v1.ClusterService/ForwardTierApply",
+	}
+	handler := func(ctx context.Context, req any) (any, error) {
+		return s.forwardTierApply(ctx, req.(*gastrologv1.ForwardTierApplyRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

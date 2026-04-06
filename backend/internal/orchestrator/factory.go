@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
@@ -78,6 +79,12 @@ type Factories struct {
 	// Used to build tier Raft group membership from tier config's node assignments.
 	// When nil, tier groups bootstrap as single-node (no cross-node replication).
 	NodeAddressResolver func(nodeID string) (string, bool)
+
+	// PeerConns provides cached gRPC connections to cluster peers.
+	// Used by the tier apply forwarder to forward Raft applies when
+	// the config placement leader is not the tier Raft leader.
+	// Nil in single-node mode.
+	PeerConns *cluster.PeerConns
 
 	// Note: No QueryEngineFactory is needed because QueryEngine construction
 	// is trivial and uniform (query.New(cm, im, logger)). If QueryEngine ever

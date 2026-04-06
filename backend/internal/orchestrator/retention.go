@@ -172,9 +172,6 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *config.Config) {
 			if !tier.IsLeader() {
 				continue
 			}
-			if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
-				continue
-			}
 			monitor, ok := tier.Chunks.(chunk.ChunkBudgetMonitor)
 			if !ok {
 				continue
@@ -278,10 +275,9 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 		return nil
 	}
-	// Only the Raft leader should evaluate retention — non-leaders can't Apply.
-	if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
-		return nil
-	}
+	// IsRaftLeader check removed: the tier apply forwarder transparently
+	// routes applies to the tier Raft leader. The config placement leader
+	// always runs retention regardless of tier Raft leadership.
 	tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 	if tierCfg == nil || len(tierCfg.RetentionRules) == 0 {
 		return nil

@@ -176,6 +176,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	groupMgr, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver)
+	if clusterSrv != nil {
+		factories.PeerConns = clusterSrv.PeerConns()
+	}
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	// orchReady is closed after startOrchestrator completes so that forwarded
@@ -203,6 +206,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 	close(orchReady)
+
+	// Wire the ForwardTierApply handler so other nodes can forward tier
+	// Raft applies to us when we're the tier Raft leader.
+	if clusterSrv != nil && groupMgr != nil {
+		clusterSrv.SetTierApplyFn(func(ctx context.Context, groupID string, data []byte) error {
+			g := groupMgr.GetGroup(groupID)
+			if g == nil {
+				return fmt.Errorf("tier raft group %s not found", groupID)
+			}
+			return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		})
+	}
 
 	// Reconcile tier Raft group membership after all vaults/tiers are
 	// registered. On snapshot restore, individual NotifyTierPut events

@@ -5,23 +5,27 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-
-	hraft "github.com/hashicorp/raft"
 )
 
+// Applier applies pre-marshaled tier FSM commands. Implementations handle
+// local application and forwarding to the tier Raft leader as needed.
+type Applier interface {
+	Apply(data []byte) error
+}
+
 // Announcer implements chunk.MetadataAnnouncer by applying commands to
-// a tier's Raft group. Only the tier leader can apply — non-leaders skip
-// silently. All methods are best-effort.
+// a tier's Raft group via an Applier. The Applier handles leader routing —
+// the Announcer doesn't need to know which node is the Raft leader.
+// All methods are best-effort: errors are logged but not propagated.
 type Announcer struct {
-	raft    *hraft.Raft
-	timeout time.Duration
+	applier Applier
 	logger  *slog.Logger
 }
 
 // NewAnnouncer creates an announcer that applies chunk metadata commands
-// to the given Raft instance.
-func NewAnnouncer(r *hraft.Raft, timeout time.Duration, logger *slog.Logger) *Announcer {
-	return &Announcer{raft: r, timeout: timeout, logger: logger}
+// via the given Applier.
+func NewAnnouncer(applier Applier, logger *slog.Logger) *Announcer {
+	return &Announcer{applier: applier, logger: logger}
 }
 
 var _ chunk.MetadataAnnouncer = (*Announcer)(nil)
@@ -47,11 +51,7 @@ func (a *Announcer) AnnounceDelete(id chunk.ChunkID) {
 }
 
 func (a *Announcer) apply(op string, id chunk.ChunkID, data []byte) {
-	if a.raft.State() != hraft.Leader {
-		return
-	}
-	f := a.raft.Apply(data, a.timeout)
-	if err := f.Error(); err != nil {
+	if err := a.applier.Apply(data); err != nil {
 		if a.logger != nil {
 			a.logger.Warn("chunk metadata announce failed",
 				"op", op, "chunk", id.String(), "error", err)

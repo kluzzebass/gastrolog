@@ -96,9 +96,6 @@ func (o *Orchestrator) archivalSweepAll() {
 			if !tier.IsLeader() {
 				continue
 			}
-			if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
-				continue
-			}
 			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
 			if tierCfg == nil || tierCfg.CloudServiceID == nil {
 				continue
@@ -213,9 +210,6 @@ func (o *Orchestrator) reconcileSweepAll() {
 		}
 		for _, tier := range vault.Tiers {
 			if !tier.IsLeader() {
-				continue
-			}
-			if tier.IsRaftLeader != nil && !tier.IsRaftLeader() {
 				continue
 			}
 			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)

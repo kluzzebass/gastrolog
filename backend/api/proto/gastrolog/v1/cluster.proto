@@ -177,6 +177,16 @@ message ForwardDeleteChunkRequest {
 
 message ForwardDeleteChunkResponse {}
 
+// ForwardTierApplyRequest carries a pre-marshaled tier FSM command for the
+// tier Raft leader to apply. Used when the config placement leader (which
+// runs retention and chunk lifecycle) is not the tier Raft leader.
+message ForwardTierApplyRequest {
+  string group_id = 1; // tier Raft group ID (= tier UUID)
+  bytes command = 2;   // pre-marshaled tier FSM command
+}
+
+message ForwardTierApplyResponse {}
+
 // --- Tier Replication Protocol ---
 //
 // A single ordered bidirectional stream per tier per follower. Replaces
