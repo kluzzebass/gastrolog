@@ -1,44 +1,15 @@
-import { useState, useReducer, useRef, useEffect } from "react";
+import { useState, useReducer, useRef } from "react";
 import ReactEChartsCore from "echarts-for-react/esm/core";
 import { echarts } from "./charts/echartsSetup";
 import { useThemeClass } from "../hooks/useThemeClass";
 import type { HistogramData } from "../utils/histogramData";
-import { formatDateShort, formatTimeHM, formatTimeOnly } from "../utils/temporal";
-import { SEVERITY_COLOR_MAP, GROUP_PALETTE, resolveColor } from "./charts/chartColors";
-import type { EChartsOption } from "echarts";
-
-/**
- * Builds an ordered color map for all group values found in the data.
- * Severity levels get their theme colors; everything else gets palette colors.
- */
-function buildColorMap(data: HistogramData): Map<string, string> {
-  const seen = new Set<string>();
-  for (const b of data.buckets) {
-    for (const key of Object.keys(b.groupCounts)) {
-      seen.add(key);
-    }
-  }
-
-  const colorMap = new Map<string, string>();
-  let paletteIdx = 0;
-  const severityOrder = ["error", "warn", "info", "debug", "trace"];
-  for (const key of severityOrder) {
-    if (seen.has(key)) {
-      colorMap.set(key, SEVERITY_COLOR_MAP[key]!);
-      seen.delete(key);
-    }
-  }
-  // "other" represents records without a level — use the copper theme color.
-  if (seen.has("other")) {
-    colorMap.set("other", "var(--color-copper)");
-    seen.delete("other");
-  }
-  for (const key of [...seen].sort()) {
-    colorMap.set(key, GROUP_PALETTE[paletteIdx % GROUP_PALETTE.length]!);
-    paletteIdx++;
-  }
-  return colorMap;
-}
+import { resolveColor } from "./charts/chartColors";
+import { buildColorMap, useHistogramOption } from "../hooks/useHistogramOption";
+import {
+  chartReducer,
+  CHART_INITIAL,
+  useHistogramInteraction,
+} from "../hooks/useHistogramInteraction";
 
 function HistogramLegend({
   legendKeys,
@@ -92,64 +63,6 @@ function formatElapsed(ms: number): string {
   return `${ms}ms`;
 }
 
-/** Set grab cursor on document body for pan dragging. */
-function setGrabbingCursor() {
-  document.body.style.cursor = "grabbing";
-  document.body.style.userSelect = "none";
-}
-
-/** Reset document body cursor after pan dragging. */
-function clearGrabbingCursor() {
-  document.body.style.cursor = "";
-  document.body.style.userSelect = "";
-}
-
-// ── Interaction state reducer ─────────────────────────────────────────
-
-interface ChartInteraction {
-  hoveredGroup: string | null;
-  hoveredBar: number | null;
-  brushStart: number | null;
-  brushEnd: number | null;
-  panAxisWidth: number;
-  panOffset: number;
-}
-
-type ChartAction =
-  | { type: "hover"; group: string | null; bar: number | null }
-  | { type: "brushStart"; idx: number }
-  | { type: "brushMove"; idx: number }
-  | { type: "brushEnd" }
-  | { type: "panStart"; axisWidth: number }
-  | { type: "panMove"; offset: number }
-  | { type: "panEnd" };
-
-const CHART_INITIAL: ChartInteraction = {
-  hoveredGroup: null, hoveredBar: null,
-  brushStart: null, brushEnd: null,
-  panAxisWidth: 1, panOffset: 0,
-};
-
-function chartReducer(state: ChartInteraction, action: ChartAction): ChartInteraction {
-  switch (action.type) {
-    case "hover":
-      return { ...state, hoveredGroup: action.group, hoveredBar: action.bar };
-    case "brushStart":
-      return { ...state, brushStart: action.idx, brushEnd: action.idx };
-    case "brushMove":
-      return { ...state, brushEnd: action.idx };
-    case "brushEnd":
-      return { ...state, brushStart: null, brushEnd: null };
-    case "panStart":
-      return { ...state, panAxisWidth: action.axisWidth };
-    case "panMove":
-      return { ...state, panOffset: action.offset };
-    case "panEnd":
-      return { ...state, panOffset: 0 };
-  }
-}
-
-// eslint-disable-next-line sonarjs/cognitive-complexity -- chart component with many interactive features (brush, pan, tooltip, legend)
 export function HistogramChart({
   data,
   dark,
@@ -176,7 +89,6 @@ export function HistogramChart({
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
   const [ix, dix] = useReducer(chartReducer, CHART_INITIAL);
-  const brushingRef = useRef(false);
 
   // Stable tooltip formatter ref: echarts-for-react uses fast-deep-equal to
   // compare the option prop. Function references always fail === comparison,
@@ -186,10 +98,7 @@ export function HistogramChart({
   const formatterImplRef = useRef<(params: any) => string>(() => "");
   const [stableFormatter] = useState(() => (params: any) => formatterImplRef.current(params));
 
-  // Pan state refs.
   const axisRef = useRef<HTMLDivElement>(null);
-  const panStartX = useRef<number>(0);
-  const panningRef = useRef(false);
 
   // --- Data derived from buckets (safe for empty arrays) ---
   const colorMap = buckets.length > 0 ? buildColorMap(data) : new Map<string, string>();
@@ -213,353 +122,49 @@ export function HistogramChart({
   // ECharts canvas can't resolve CSS variables — compute copper once.
   const copperColor = resolveColor("var(--color-copper)");
 
-  // Build ECharts series: one bar series per stack key.
-  // Opacity is baked per-item so we can brighten the hovered column.
-  const stackKeys = hasGroups ? [...groupKeys, "__other"] : ["__total"];
-  const categories = buckets.map((_, i) => String(i));
-
-  // Compute per-bucket values for each stack key to determine the topmost segment.
-  const valueGrid = stackKeys.map((key) =>
-    buckets.map((b) => {
-      if (key === "__total") return b.count;
-      if (key === "__other") {
-        const groupSum = Object.values(b.groupCounts).reduce((a, v) => a + v, 0);
-        return Math.max(0, b.count - groupSum);
-      }
-      return b.groupCounts[key] ?? 0;
-    }),
-  );
-
-  // For each bucket, find the topmost series (last with value > 0).
-  const topSeriesPerBucket = buckets.map((_, i) => {
-    for (let s = stackKeys.length - 1; s >= 0; s--) {
-      if (valueGrid[s]![i]! > 0) return s;
-    }
-    return -1;
+  // Hook 1: ECharts option computation.
+  const { option, formatTime } = useHistogramOption({
+    buckets,
+    dark,
+    colorMap,
+    groupKeys,
+    copperColor,
+    baseOpacity,
+    hasCloud,
+    hasGroups,
+    hoveredBar: ix.hoveredBar,
+    hoveredGroup: ix.hoveredGroup,
+    onSegmentClick,
+    stableFormatter,
+    formatterImplRef,
   });
 
-  const seriesData = stackKeys.map((key, seriesIdx) => {
-    const isOther = key === "__other";
-    const isTotal = key === "__total";
-    let displayName: string;
-    if (isTotal) displayName = "count";
-    else if (isOther) displayName = "other";
-    else displayName = key;
-    const color = isTotal || isOther
-      ? copperColor
-      : resolveColor(colorMap.get(key) ?? copperColor);
-
-    return {
-      name: displayName,
-      type: "bar" as const,
-      stack: "total",
-      data: buckets.map((b, i) => {
-        // For cloud buckets, subtract the cloud portion from this series —
-        // it will be rendered by the separate hatched cloud series below.
-        const fullValue = valueGrid[seriesIdx]![i]!;
-        const localValue = b.cloudCount > 0 && b.count > 0
-          ? Math.max(0, Math.round(fullValue * (1 - b.cloudCount / b.count)))
-          : fullValue;
-        return {
-          value: localValue,
-          itemStyle: {
-            color,
-            opacity: ix.hoveredBar === i ? 1 : baseOpacity,
-            borderRadius: topSeriesPerBucket[i] === seriesIdx && b.cloudCount === 0 ? [2, 2, 0, 0] : 0,
-          },
-        };
-      }),
-      emphasis: { disabled: true },
-      barCategoryGap: "8%",
-      cursor: onSegmentClick && !isTotal ? "pointer" : "crosshair",
-    };
-  });
-
-  // Add hatched cloud data series on top of existing bars.
-  if (hasCloud) {
-    seriesData.push({
-      name: "cloud",
-      type: "bar" as const,
-      stack: "total",
-      data: buckets.map((b, i) => {
-        const isHovered = ix.hoveredBar === i;
-        const hoveredOpacity = isHovered ? 0.8 : baseOpacity;
-        const cloudOpacity = b.cloudCount > 0 ? hoveredOpacity : 0;
-        return {
-          value: Math.max(b.cloudCount, 0),
-          itemStyle: {
-            color: copperColor,
-            opacity: cloudOpacity,
-            borderRadius: b.cloudCount > 0 ? [2, 2, 0, 0] as number | number[] : 0,
-          },
-        };
-      }),
-      emphasis: { disabled: true },
-      barCategoryGap: "8%",
-      cursor: "crosshair",
-      itemStyle: {
-        decal: {
-          symbol: "rect",
-          symbolSize: 1,
-          dashArrayX: [1, 0],
-          dashArrayY: [4, 3],
-          rotation: -Math.PI / 4,
-          color: "rgba(255,255,255,0.3)",
-        },
-      },
-    } as any);
-  }
-
-  // Time formatting.
-  const rangeMs = firstBucket && lastBucket
-    ? lastBucket.ts.getTime() - firstBucket.ts.getTime()
-    : 0;
-
-  const formatTime = (d: Date) => {
-    if (rangeMs > 24 * 60 * 60 * 1000) return formatDateShort(d);
-    if (rangeMs < 60 * 60 * 1000) return formatTimeOnly(d);
-    return formatTimeHM(d);
-  };
-
-  // Build a single tooltip line with a colored dot, label, and count.
-  const tooltipLine = (color: string, label: string, count: number, isBold: boolean): string => {
-    const dot = `<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:${color};margin-right:5px;"></span>`;
-    let style: string;
-    if (isBold) style = "font-weight:bold";
-    else if (ix.hoveredGroup) style = "opacity:0.5";
-    else style = "opacity:0.7";
-    const valueStyle = isBold ? "font-weight:bold" : "";
-    return `${dot}<span style="${style}">${label}</span> <span style="${valueStyle}">${count.toLocaleString()}</span>`;
-  };
-
-  // Build tooltip HTML for a bucket index.
-  const tooltipFormatter = (params: any) => {
-    const items: any[] = Array.isArray(params) ? params : [params];
-    if (items.length === 0) return "";
-    const bucketIdx = items[0].dataIndex as number;
-    const bucket = buckets[bucketIdx];
-    if (!bucket) return "";
-
-    const lines: string[] = [];
-    if (hasGroups) {
-      const groupSum = Object.values(bucket.groupCounts).reduce((a, b) => a + b, 0);
-      const other = bucket.count - groupSum;
-      if (other > 0) {
-        lines.push(tooltipLine(copperColor, "other", other, ix.hoveredGroup === "other"));
-      }
-      for (const key of groupKeys.toReversed()) {
-        const count = bucket.groupCounts[key];
-        if (count && count > 0) {
-          lines.push(tooltipLine(resolveColor(colorMap.get(key) ?? copperColor), key, count, ix.hoveredGroup === key));
-        }
-      }
-    }
-
-    const header = `<div style="opacity:0.7">${bucket.count.toLocaleString()} \u00B7 ${formatTime(bucket.ts)}</div>`;
-    if (bucket.hasCloudData) {
-      lines.push(`<div style="opacity:0.5;font-size:0.85em;margin-top:2px">includes interpolated cloud data</div>`);
-    }
-    return header + lines.join("<br/>");
-  };
-
-  // Sync formatter ref — must be above the early return so the hook is
-  // called unconditionally on every render.
-  useEffect(() => {
-    formatterImplRef.current = tooltipFormatter;
+  // Hook 2: Interaction handlers (brush, pan, events).
+  const {
+    onEvents,
+    handleMouseDown,
+    brushLo,
+    brushHi,
+    handlePanStep,
+    handleAxisMouseDown,
+    labelCount,
+    labelStep,
+    panDeltaMs,
+    formatDuration,
+  } = useHistogramInteraction({
+    buckets,
+    firstBucket,
+    lastBucket,
+    chartContainerRef,
+    axisRef,
+    ix,
+    dix,
+    onBrushSelect,
+    onPan,
+    onSegmentClick,
   });
 
   if (buckets.length === 0) return null;
-
-  const tooltipBg = dark
-    ? resolveColor("var(--color-ink-surface)")
-    : resolveColor("var(--color-light-surface)");
-  const tooltipBorder = dark
-    ? resolveColor("var(--color-ink-border-subtle)")
-    : resolveColor("var(--color-light-border-subtle)");
-  const tooltipText = dark
-    ? resolveColor("var(--color-text-bright)")
-    : resolveColor("var(--color-light-text-bright)");
-
-  const option: EChartsOption = {
-    aria: { decal: { show: true } },
-    animation: true,
-    animationDuration: 400,
-    animationDurationUpdate: 300,
-    animationEasing: "cubicInOut",
-    animationEasingUpdate: "cubicInOut",
-    grid: {
-      top: 4,
-      right: 0,
-      bottom: 0,
-      left: 0,
-    },
-    xAxis: {
-      type: "category",
-      data: categories,
-      show: false,
-    },
-    yAxis: {
-      type: "value",
-      show: false,
-      min: 0,
-    },
-    tooltip: {
-      trigger: "axis",
-      axisPointer: { type: "none" },
-      backgroundColor: tooltipBg,
-      borderColor: tooltipBorder,
-      textStyle: {
-        fontFamily: "'IBM Plex Mono', monospace",
-        fontSize: 12,
-        color: tooltipText,
-      },
-      padding: [4, 8],
-      extraCssText: "border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.3);",
-      formatter: stableFormatter,
-    },
-    series: seriesData,
-  };
-
-  // ECharts event handlers for hover highlighting and segment click.
-  const onEvents = {
-    mouseover: (params: any) => {
-      const name = params.seriesName as string;
-      const group = name === "count" ? null : name;
-      dix({ type: "hover", group, bar: params.dataIndex as number });
-    },
-    mouseout: () => {
-      dix({ type: "hover", group: null, bar: null });
-    },
-    click: (params: any) => {
-      if (!onSegmentClick) return;
-      const name = params.seriesName as string;
-      if (name !== "count") {
-        onSegmentClick(name);
-      }
-    },
-  };
-
-  // Brush helpers — use the chart container div for hit-testing.
-  const getBucketIndex = (clientX: number): number => {
-    const el = chartContainerRef.current;
-    if (!el) return 0;
-    const rect = el.getBoundingClientRect();
-    const x = clientX - rect.left;
-    const idx = Math.floor((x / rect.width) * buckets.length);
-    return Math.max(0, Math.min(buckets.length - 1, idx));
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!onBrushSelect) return;
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const idx = getBucketIndex(e.clientX);
-    dix({ type: "brushStart", idx });
-    brushingRef.current = true;
-
-    const onMouseMove = (ev: MouseEvent) => {
-      if (!brushingRef.current) return;
-      dix({ type: "brushMove", idx: getBucketIndex(ev.clientX) });
-    };
-    const onMouseUp = (ev: MouseEvent) => {
-      if (!brushingRef.current) return;
-      brushingRef.current = false;
-      const endIdx = getBucketIndex(ev.clientX);
-      const lo = Math.min(idx, endIdx);
-      const hi = Math.max(idx, endIdx);
-      if (lo !== hi) {
-        onBrushSelect(buckets[lo]!.ts, buckets[hi]!.ts);
-      }
-      dix({ type: "brushEnd" });
-      globalThis.removeEventListener("mousemove", onMouseMove);
-      globalThis.removeEventListener("mouseup", onMouseUp);
-    };
-    globalThis.addEventListener("mousemove", onMouseMove, { passive: true });
-    globalThis.addEventListener("mouseup", onMouseUp);
-  };
-
-  const brushLo =
-    ix.brushStart !== null && ix.brushEnd !== null
-      ? Math.min(ix.brushStart, ix.brushEnd)
-      : null;
-  const brushHi =
-    ix.brushStart !== null && ix.brushEnd !== null
-      ? Math.max(ix.brushStart, ix.brushEnd)
-      : null;
-
-  // Pan handlers.
-  const handlePanStep = (direction: -1 | 1) => {
-    if (!onPan || buckets.length < 2) return;
-    const windowMs = lastBucket!.ts.getTime() - firstBucket!.ts.getTime();
-    const stepMs = windowMs / 2;
-    const first = firstBucket!.ts.getTime();
-    const last = lastBucket!.ts.getTime();
-    onPan(
-      new Date(first + direction * stepMs),
-      new Date(last + direction * stepMs),
-    );
-  };
-
-  const handleAxisMouseDown = (e: React.MouseEvent) => {
-    if (!onPan || buckets.length < 2) return;
-    e.preventDefault();
-    panStartX.current = e.clientX;
-    dix({ type: "panStart", axisWidth: axisRef.current?.getBoundingClientRect().width || 1 });
-    panningRef.current = true;
-    setGrabbingCursor();
-
-    const onMouseMove = (ev: MouseEvent) => {
-      dix({ type: "panMove", offset: ev.clientX - panStartX.current });
-    };
-    const onMouseUp = (ev: MouseEvent) => {
-      panningRef.current = false;
-      clearGrabbingCursor();
-      dix({ type: "panEnd" });
-      globalThis.removeEventListener("mousemove", onMouseMove);
-      globalThis.removeEventListener("mouseup", onMouseUp);
-
-      const el = axisRef.current;
-      if (!el) return;
-      const deltaX = panStartX.current - ev.clientX;
-      const axisWidth = el.getBoundingClientRect().width;
-      if (Math.abs(deltaX) < 3) return;
-      const windowMs = lastBucket!.ts.getTime() - firstBucket!.ts.getTime();
-      const deltaMs = (deltaX / axisWidth) * windowMs;
-      const first = firstBucket!.ts.getTime();
-      const last = lastBucket!.ts.getTime();
-      onPan(new Date(first + deltaMs), new Date(last + deltaMs));
-    };
-    globalThis.addEventListener("mousemove", onMouseMove, { passive: true });
-    globalThis.addEventListener("mouseup", onMouseUp);
-  };
-
-  const labelCount = Math.min(5, buckets.length);
-  const labelStep = Math.max(1, Math.floor(buckets.length / labelCount));
-
-  const windowMs =
-    buckets.length > 1 ? lastBucket!.ts.getTime() - firstBucket!.ts.getTime() : 0;
-  const panDeltaMs =
-    ix.panOffset !== 0 ? -((ix.panOffset / ix.panAxisWidth) * windowMs) : 0;
-
-  const formatDuration = (ms: number): string => {
-    const abs = Math.abs(ms);
-    const sign = ms < 0 ? "-" : "+";
-    if (abs < 1000) return `${sign}${Math.round(abs)}ms`;
-    if (abs < 60_000) return `${sign}${(abs / 1000).toFixed(1)}s`;
-    if (abs < 3_600_000) {
-      const m = Math.floor(abs / 60_000);
-      const s = Math.round((abs % 60_000) / 1000);
-      return s > 0 ? `${sign}${m}m ${s}s` : `${sign}${m}m`;
-    }
-    if (abs < 86_400_000) {
-      const h = Math.floor(abs / 3_600_000);
-      const m = Math.round((abs % 3_600_000) / 60_000);
-      return m > 0 ? `${sign}${h}h ${m}m` : `${sign}${h}h`;
-    }
-    const d = Math.floor(abs / 86_400_000);
-    const h = Math.round((abs % 86_400_000) / 3_600_000);
-    return h > 0 ? `${sign}${d}d ${h}h` : `${sign}${d}d`;
-  };
 
   let countTitle: string | undefined;
   if (truncated) countTitle = "Approximate — scan limit reached";
