@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -10,9 +11,9 @@ import (
 	"strings"
 
 	"gastrolog/internal/chunk"
+	chunkraftfsm "gastrolog/internal/chunk/raftfsm"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
-	chunkraftfsm "gastrolog/internal/chunk/raftfsm"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/query"
 
@@ -466,8 +467,6 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
 			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-			raftCB := o.wireTierRaftGroup(t.Chunks, *tierCfg, nscs, factories)
-			t.applyRaftCallbacks(raftCB)
 			ti = t
 			break
 		}
@@ -669,6 +668,12 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	// Map TierConfig.Type to factory name.
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 
+	// Create the tier Raft group BEFORE the chunk manager. Group creation is
+	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
+	// existing chunks). Starting the Raft group early gives it time to elect
+	// a leader and catch up while the chunk manager is loading.
+	g, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+
 	// Build params from tier config.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
 
@@ -708,8 +713,8 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		return nil, err
 	}
 
-	// Wire Raft-backed metadata announcer if a GroupManager is available.
-	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories)
+	// Wire the Raft announcer now that both the group and chunk manager exist.
+	setTierRaftAnnouncer(cm, g, o.logger)
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
@@ -768,6 +773,10 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		return nil, fmt.Errorf("file storage %s not found", storageID)
 	}
 
+	// Create the tier Raft group BEFORE the chunk manager — same rationale
+	// as buildTierInstance: start elections while chunk loading is in progress.
+	g, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
 	// Followers must NOT upload to cloud storage — the leader owns the cloud
@@ -803,6 +812,9 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		return nil, err
 	}
 
+	// Wire Raft announcer now that chunk manager exists.
+	setTierRaftAnnouncer(cm, g, o.logger)
+
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
@@ -828,10 +840,6 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 	if processor, ok := cm.(chunk.ChunkPostSealProcessor); ok {
 		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
-
-	// Same-node secondaries share the primary's tier Raft group.
-	// Wire the manifest callbacks so they reconcile like any other follower.
-	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories)
 
 	ti := &TierInstance{
 		TierID:  tierCfg.ID,
@@ -875,10 +883,7 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []config.RotationPolicy
 	return nil
 }
 
-// mapTierTypeToFactory maps a TierType to the factory name used in Factories maps.
-// wireTierRaftGroup creates a tier Raft group (or reuses existing) and injects
-// a RaftAnnouncer into the chunk manager so chunk lifecycle events replicate to
-// all nodes via consensus.
+// tierRaftCallbacks holds the callbacks returned by createTierRaftGroup.
 type tierRaftCallbacks struct {
 	hasLeader       func() bool
 	isLeader        func() bool
@@ -888,13 +893,13 @@ type tierRaftCallbacks struct {
 	listRetPending  func() []chunk.ChunkID
 }
 
-func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) tierRaftCallbacks {
+// createTierRaftGroup creates or retrieves the tier Raft group for a tier.
+// This is independent of the chunk manager — it only needs the tier config
+// and group manager. Call this BEFORE creating the chunk manager so the Raft
+// group starts elections early (while chunk loading is still in progress).
+func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) (*raftgroup.Group, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
-		return tierRaftCallbacks{}
-	}
-	setter, ok := cm.(chunk.AnnouncerSetter)
-	if !ok {
-		return tierRaftCallbacks{}
+		return nil, tierRaftCallbacks{}
 	}
 
 	groupID := tierCfg.ID.String()
@@ -913,15 +918,14 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 		if err != nil {
 			o.logger.Warn("failed to create tier raft group",
 				"tier", tierCfg.ID, "error", err)
-			return tierRaftCallbacks{}
+			return nil, tierRaftCallbacks{}
 		}
 	}
-	setter.SetAnnouncer(chunkraftfsm.NewAnnouncer(g.Raft, cluster.ReplicationTimeout, o.logger))
 
 	r := g.Raft
 	fsm, _ := g.FSM.(*chunkraftfsm.ChunkFSM)
 	timeout := cluster.ReplicationTimeout
-	return tierRaftCallbacks{
+	return g, tierRaftCallbacks{
 		hasLeader: func() bool { return r.Leader() != "" },
 		isLeader:  func() bool { return r.State() == hraft.Leader },
 		applyDelete: func(id chunk.ChunkID) error {
@@ -955,6 +959,19 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 			return ids
 		},
 	}
+}
+
+// setTierRaftAnnouncer wires the Raft announcer to a chunk manager after both
+// the Raft group and chunk manager have been created.
+func setTierRaftAnnouncer(cm chunk.ChunkManager, g *raftgroup.Group, logger *slog.Logger) {
+	if g == nil {
+		return
+	}
+	setter, ok := cm.(chunk.AnnouncerSetter)
+	if !ok {
+		return
+	}
+	setter.SetAnnouncer(chunkraftfsm.NewAnnouncer(g.Raft, cluster.ReplicationTimeout, logger))
 }
 
 // buildTierRaftMembers builds the Raft member list from tier placement.
