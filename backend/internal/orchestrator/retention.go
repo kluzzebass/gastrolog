@@ -322,17 +322,13 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 // fallback for cases where OnDelete didn't fire (snapshot restore, startup,
 // Raft connectivity gaps).
 func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
-	// Don't reconcile until the tier Raft group has a leader. Without a leader,
-	// the local FSM may be restored from a stale snapshot and hasn't caught up
-	// with recent log entries. Deleting chunks against a stale manifest causes
-	// permanent data loss — no mechanism re-transfers them.
-	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
+	// Don't reconcile until the tier FSM has applied at least one log entry
+	// or restored from a snapshot. Before that, the manifest is incomplete —
+	// deleting chunks against it causes permanent data loss.
+	if tier.IsFSMReady != nil && !tier.IsFSMReady() {
 		return
 	}
 	manifestIDs := tier.ListManifest()
-	if len(manifestIDs) == 0 {
-		return // manifest not yet populated — don't delete anything
-	}
 	manifest := make(map[chunk.ChunkID]bool, len(manifestIDs))
 	for _, id := range manifestIDs {
 		manifest[id] = true
@@ -362,9 +358,10 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 
 // sweep evaluates retention rules on a primary and applies expire/eject/transition.
 func (r *retentionRunner) sweep(rules []retentionRule) {
-	// Only the tier Raft leader runs retention. Followers must not
-	// independently evaluate and transition chunks — that causes N×
-	// duplication (every node transitions the same chunks).
+	// Only the config placement leader runs retention. Raft applies are
+	// forwarded transparently to the tier Raft leader via TierApplyForwarder.
+	// Config followers must not independently evaluate and transition chunks —
+	// that causes N× duplication.
 	if !r.isLeader {
 		return
 	}

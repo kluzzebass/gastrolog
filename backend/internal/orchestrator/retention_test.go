@@ -618,7 +618,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 
 // ---------- reconcileFollower tests ----------
 
-func TestReconcileFollowerSkipsWhenNoRaftLeader(t *testing.T) {
+func TestReconcileFollowerSkipsWhenFSMNotReady(t *testing.T) {
 	t.Parallel()
 
 	orphanID := chunk.NewChunkID()
@@ -632,12 +632,12 @@ func TestReconcileFollowerSkipsWhenNoRaftLeader(t *testing.T) {
 	}
 
 	tier := &TierInstance{
-		TierID:  uuid.Must(uuid.NewV7()),
-		Chunks:  cm,
-		Indexes: &retentionFakeIndexManager{},
-		// No Raft leader — stale manifest, unsafe to reconcile.
-		HasRaftLeader: func() bool { return false },
-		ListManifest:  func() []chunk.ChunkID { return []chunk.ChunkID{manifestID} },
+		TierID:     uuid.Must(uuid.NewV7()),
+		Chunks:     cm,
+		Indexes:    &retentionFakeIndexManager{},
+		// FSM not ready — manifest incomplete, unsafe to reconcile.
+		IsFSMReady:   func() bool { return false },
+		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{manifestID} },
 	}
 
 	orch, err := New(Config{Logger: slog.Default()})
@@ -649,7 +649,7 @@ func TestReconcileFollowerSkipsWhenNoRaftLeader(t *testing.T) {
 	orch.reconcileFollower(tier)
 
 	if len(cm.deleted) != 0 {
-		t.Errorf("expected no deletions without Raft leader, got %d", len(cm.deleted))
+		t.Errorf("expected no deletions when FSM not ready, got %d", len(cm.deleted))
 	}
 }
 
@@ -670,11 +670,11 @@ func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	tier := &TierInstance{
-		TierID:        uuid.Must(uuid.NewV7()),
-		Chunks:        cm,
-		Indexes:       im,
-		HasRaftLeader: func() bool { return true },
-		ListManifest:  func() []chunk.ChunkID { return []chunk.ChunkID{keptID} },
+		TierID:       uuid.Must(uuid.NewV7()),
+		Chunks:       cm,
+		Indexes:      im,
+		IsFSMReady:   func() bool { return true },
+		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{keptID} },
 	}
 
 	orch, err := New(Config{Logger: slog.Default()})
@@ -693,20 +693,24 @@ func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 	}
 }
 
-func TestReconcileFollowerSkipsWhenManifestEmpty(t *testing.T) {
+func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
 	t.Parallel()
 
+	orphanID := chunk.NewChunkID()
 	cm := &retentionFakeChunkManager{
 		chunks: []chunk.ChunkMeta{
-			{ID: chunk.NewChunkID(), Sealed: true},
+			{ID: orphanID, Sealed: true},
 		},
 	}
+	im := &retentionFakeIndexManager{}
 
+	// FSM is ready but manifest is empty — all sealed chunks are orphans.
 	tier := &TierInstance{
-		TierID:        uuid.Must(uuid.NewV7()),
-		Chunks:        cm,
-		HasRaftLeader: func() bool { return true },
-		ListManifest:  func() []chunk.ChunkID { return nil },
+		TierID:       uuid.Must(uuid.NewV7()),
+		Chunks:       cm,
+		Indexes:      im,
+		IsFSMReady:   func() bool { return true },
+		ListManifest: func() []chunk.ChunkID { return nil },
 	}
 
 	orch, err := New(Config{Logger: slog.Default()})
@@ -717,8 +721,8 @@ func TestReconcileFollowerSkipsWhenManifestEmpty(t *testing.T) {
 
 	orch.reconcileFollower(tier)
 
-	if len(cm.deleted) != 0 {
-		t.Errorf("expected no deletions with empty manifest, got %d", len(cm.deleted))
+	if len(cm.deleted) != 1 || cm.deleted[0] != orphanID {
+		t.Errorf("expected orphan deleted when manifest empty but FSM ready, got %v", cm.deleted)
 	}
 }
 
@@ -731,7 +735,8 @@ func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
 		},
 	}
 
-	// HasRaftLeader is nil — single-node/memory mode, no Raft group.
+	// IsFSMReady is nil — single-node/memory mode, no Raft group.
+	// Reconciliation should proceed (manifest is always authoritative locally).
 	tier := &TierInstance{
 		TierID:       uuid.Must(uuid.NewV7()),
 		Chunks:       cm,

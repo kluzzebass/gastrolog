@@ -80,6 +80,7 @@ func (e *Entry) ToChunkMeta() chunk.ChunkMeta {
 type FSM struct {
 	mu     sync.RWMutex
 	chunks map[chunk.ChunkID]*Entry
+	ready  bool // true after first Apply or Restore
 }
 
 // New creates an empty chunk metadata FSM.
@@ -90,6 +91,16 @@ func New() *FSM {
 }
 
 var _ hraft.FSM = (*FSM)(nil)
+
+// Ready returns true after the FSM has applied at least one log entry or
+// restored from a snapshot. Before that, the FSM state may be incomplete
+// and should not be used for authoritative decisions (e.g. follower
+// reconciliation should not delete chunks based on a not-yet-ready manifest).
+func (f *FSM) Ready() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.ready
+}
 
 // ---------- Reads (local, no Raft) ----------
 
@@ -136,6 +147,7 @@ func (f *FSM) Apply(log *hraft.Log) any {
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.ready = true
 
 	switch cmd {
 	case CmdCreateChunk:
@@ -181,6 +193,7 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	for i := range entries {
 		f.chunks[entries[i].ID] = &entries[i]
 	}
+	f.ready = true
 	return nil
 }
 
