@@ -911,7 +911,7 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 		var err error
 		g, err = factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
 			GroupID:   groupID,
-			FSM:       tierfsm.NewChunkFSM(),
+			FSM:       tierfsm.New(),
 			Bootstrap: isLeader,
 			Members:   members,
 		})
@@ -923,7 +923,7 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 	}
 
 	r := g.Raft
-	fsm, _ := g.FSM.(*tierfsm.ChunkFSM)
+	fsm, _ := g.FSM.(*tierfsm.FSM)
 	timeout := cluster.ReplicationTimeout
 	return g, tierRaftCallbacks{
 		hasLeader: func() bool { return r.Leader() != "" },

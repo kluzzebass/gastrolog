@@ -17,7 +17,7 @@ func testChunkID(b byte) chunk.ChunkID {
 	return id
 }
 
-func applyCmd(t *testing.T, fsm *ChunkFSM, data []byte) {
+func applyCmd(t *testing.T, fsm *FSM, data []byte) {
 	t.Helper()
 	result := fsm.Apply(&hraft.Log{Data: data})
 	if err, ok := result.(error); ok && err != nil {
@@ -25,9 +25,9 @@ func applyCmd(t *testing.T, fsm *ChunkFSM, data []byte) {
 	}
 }
 
-func TestChunkFSMCreateAndGet(t *testing.T) {
+func TestFSMCreateAndGet(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	id := testChunkID(1)
 	now := time.Now().Truncate(time.Nanosecond)
@@ -51,9 +51,9 @@ func TestChunkFSMCreateAndGet(t *testing.T) {
 	}
 }
 
-func TestChunkFSMSeal(t *testing.T) {
+func TestFSMSeal(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	id := testChunkID(2)
 	now := time.Now().Truncate(time.Nanosecond)
@@ -77,9 +77,9 @@ func TestChunkFSMSeal(t *testing.T) {
 	}
 }
 
-func TestChunkFSMCompress(t *testing.T) {
+func TestFSMCompress(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	id := testChunkID(3)
 	now := time.Now().Truncate(time.Nanosecond)
@@ -97,9 +97,9 @@ func TestChunkFSMCompress(t *testing.T) {
 	}
 }
 
-func TestChunkFSMUpload(t *testing.T) {
+func TestFSMUpload(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	id := testChunkID(4)
 	now := time.Now().Truncate(time.Nanosecond)
@@ -133,9 +133,9 @@ func TestChunkFSMUpload(t *testing.T) {
 	}
 }
 
-func TestChunkFSMDelete(t *testing.T) {
+func TestFSMDelete(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	id := testChunkID(5)
 	now := time.Now().Truncate(time.Nanosecond)
@@ -154,9 +154,9 @@ func TestChunkFSMDelete(t *testing.T) {
 	}
 }
 
-func TestChunkFSMSnapshotRestore(t *testing.T) {
+func TestFSMSnapshotRestore(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	now := time.Now().Truncate(time.Nanosecond)
 
@@ -185,7 +185,7 @@ func TestChunkFSMSnapshotRestore(t *testing.T) {
 	}
 
 	// Restore into a fresh FSM.
-	fsm2 := NewChunkFSM()
+	fsm2 := New()
 	if err := fsm2.Restore(io.NopCloser(&buf)); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
@@ -217,9 +217,9 @@ func TestChunkFSMSnapshotRestore(t *testing.T) {
 	}
 }
 
-func TestChunkFSMToChunkMeta(t *testing.T) {
+func TestFSMToChunkMeta(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	id := testChunkID(99)
 	now := time.Now().Truncate(time.Nanosecond)
@@ -241,9 +241,9 @@ func TestChunkFSMToChunkMeta(t *testing.T) {
 	}
 }
 
-func TestChunkFSMListReturnsAll(t *testing.T) {
+func TestFSMListReturnsAll(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	now := time.Now().Truncate(time.Nanosecond)
 	for i := range byte(5) {
@@ -256,9 +256,9 @@ func TestChunkFSMListReturnsAll(t *testing.T) {
 	}
 }
 
-func TestChunkFSMSealNonexistentReturnsError(t *testing.T) {
+func TestFSMSealNonexistentReturnsError(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
-	fsm := NewChunkFSM()
+	fsm := New()
 
 	now := time.Now()
 	result := fsm.Apply(&hraft.Log{Data: MarshalSealChunk(testChunkID(0xFF), now, 0, 0, now, now)})

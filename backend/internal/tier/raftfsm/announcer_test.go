@@ -20,7 +20,7 @@ import (
 const bufSize = 1 << 20
 
 // TestAnnouncerReplicatesMetadata verifies the full loop:
-// file.Manager (with Announcer) → Raft.Apply → ChunkFSM on all nodes.
+// file.Manager (with Announcer) → Raft.Apply → FSM on all nodes.
 func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	// Not parallel — Raft instances need clean sequential lifecycle.
 
@@ -33,7 +33,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		server    *grpc.Server
 		lis       *bufconn.Listener
 		manager   *raftgroup.GroupManager
-		fsm       *ChunkFSM
+		fsm       *FSM
 	}
 	nodes := make([]testNode, nodeCount)
 
@@ -66,7 +66,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		})
 	}
 
-	// Create group managers and a 3-node Raft group with ChunkFSM.
+	// Create group managers and a 3-node Raft group with FSM.
 	members := make([]hraft.Server, nodeCount)
 	for i := range nodeCount {
 		members[i] = hraft.Server{
@@ -81,7 +81,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 			NodeID:    nodeIDs[i],
 			BaseDir:   t.TempDir(),
 		})
-		nodes[i].fsm = NewChunkFSM()
+		nodes[i].fsm = New()
 		_, err := nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
 			GroupID:   "tier-test",
 			FSM:       nodes[i].fsm,
