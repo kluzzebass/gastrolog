@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"gastrolog/internal/chunk"
-	chunkraftfsm "gastrolog/internal/chunk/raftfsm"
+	tierfsm "gastrolog/internal/tier/raftfsm"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/raftgroup"
@@ -911,7 +911,7 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 		var err error
 		g, err = factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
 			GroupID:   groupID,
-			FSM:       chunkraftfsm.NewChunkFSM(),
+			FSM:       tierfsm.NewChunkFSM(),
 			Bootstrap: isLeader,
 			Members:   members,
 		})
@@ -923,17 +923,17 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 	}
 
 	r := g.Raft
-	fsm, _ := g.FSM.(*chunkraftfsm.ChunkFSM)
+	fsm, _ := g.FSM.(*tierfsm.ChunkFSM)
 	timeout := cluster.ReplicationTimeout
 	return g, tierRaftCallbacks{
 		hasLeader: func() bool { return r.Leader() != "" },
 		isLeader:  func() bool { return r.State() == hraft.Leader },
 		applyDelete: func(id chunk.ChunkID) error {
-			f := r.Apply(chunkraftfsm.MarshalDeleteChunk(id), timeout)
+			f := r.Apply(tierfsm.MarshalDeleteChunk(id), timeout)
 			return f.Error()
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
-			return r.Apply(chunkraftfsm.MarshalRetentionPending(id), timeout).Error()
+			return r.Apply(tierfsm.MarshalRetentionPending(id), timeout).Error()
 		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {
@@ -971,7 +971,7 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, g *raftgroup.Group, logger *slo
 	if !ok {
 		return
 	}
-	setter.SetAnnouncer(chunkraftfsm.NewAnnouncer(g.Raft, cluster.ReplicationTimeout, logger))
+	setter.SetAnnouncer(tierfsm.NewAnnouncer(g.Raft, cluster.ReplicationTimeout, logger))
 }
 
 // buildTierRaftMembers builds the Raft member list from tier placement.
