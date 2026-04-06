@@ -326,6 +326,13 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 // fallback for cases where OnDelete didn't fire (snapshot restore, startup,
 // Raft connectivity gaps).
 func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
+	// Don't reconcile until the tier Raft group has a leader. Without a leader,
+	// the local FSM may be restored from a stale snapshot and hasn't caught up
+	// with recent log entries. Deleting chunks against a stale manifest causes
+	// permanent data loss — no mechanism re-transfers them.
+	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
+		return
+	}
 	manifestIDs := tier.ListManifest()
 	if len(manifestIDs) == 0 {
 		return // manifest not yet populated — don't delete anything
