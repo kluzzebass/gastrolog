@@ -51,7 +51,7 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
-	"gastrolog/internal/multiraft"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -121,7 +121,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// All consumers hold a reference to proxy; on join, only the inner changes.
 	proxy := config.NewStoreProxy(rawStore)
 	cfgStore := config.Store(proxy)
-	var groupMgr *multiraft.GroupManager // set later if cluster mode
+	var groupMgr *raftgroup.GroupManager // set later if cluster mode
 
 	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
 		_ = proxy.Close()
@@ -828,7 +828,7 @@ type serverDeps struct {
 	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
-	GroupMgr            *multiraft.GroupManager
+	GroupMgr            *raftgroup.GroupManager
 	ConfigStore         io.Closer // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 }
@@ -932,7 +932,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 // setupMultiRaft creates the GroupManager and node address resolver for tier
 // Raft groups. Returns (nil, nil) in single-node / non-raft mode.
-func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, homeDir string, logger *slog.Logger) (*multiraft.GroupManager, func(string) (string, bool)) {
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, func(string) (string, bool)) {
 	if clusterSrv == nil {
 		return nil, nil
 	}
@@ -941,11 +941,12 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, h
 		return nil, nil
 	}
 
-	groupMgr := multiraft.NewGroupManager(multiraft.GroupManagerConfig{
-		Transport: mrt,
-		NodeID:    nodeID,
-		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
-		Logger:    logger,
+	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
+		Transport:    mrt,
+		NodeID:       nodeID,
+		BaseDir:      filepath.Join(homeDir, "raft", "groups"),
+		ShutdownLast: "config",
+		Logger:       logger,
 	})
 
 	var resolver func(string) (string, bool)
@@ -967,7 +968,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, h
 	return groupMgr, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *multiraft.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}

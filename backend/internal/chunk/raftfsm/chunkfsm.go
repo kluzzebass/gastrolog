@@ -1,4 +1,4 @@
-package multiraft
+package raftfsm
 
 import (
 	"encoding/binary"

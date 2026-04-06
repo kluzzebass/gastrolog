@@ -12,7 +12,8 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
-	"gastrolog/internal/multiraft"
+	chunkraftfsm "gastrolog/internal/chunk/raftfsm"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
@@ -903,9 +904,9 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 		leaderNodeID := tierCfg.LeaderNodeID(nscs)
 		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		var err error
-		g, err = factories.GroupManager.CreateGroup(multiraft.GroupConfig{
+		g, err = factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
 			GroupID:   groupID,
-			FSM:       multiraft.NewChunkFSM(),
+			FSM:       chunkraftfsm.NewChunkFSM(),
 			Bootstrap: isLeader,
 			Members:   members,
 		})
@@ -915,20 +916,20 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 			return tierRaftCallbacks{}
 		}
 	}
-	setter.SetAnnouncer(multiraft.NewRaftAnnouncer(g.Raft, cluster.ReplicationTimeout, o.logger))
+	setter.SetAnnouncer(chunkraftfsm.NewAnnouncer(g.Raft, cluster.ReplicationTimeout, o.logger))
 
 	r := g.Raft
-	fsm, _ := g.FSM.(*multiraft.ChunkFSM)
+	fsm, _ := g.FSM.(*chunkraftfsm.ChunkFSM)
 	timeout := cluster.ReplicationTimeout
 	return tierRaftCallbacks{
 		hasLeader: func() bool { return r.Leader() != "" },
 		isLeader:  func() bool { return r.State() == hraft.Leader },
 		applyDelete: func(id chunk.ChunkID) error {
-			f := r.Apply(multiraft.MarshalDeleteChunk(id), timeout)
+			f := r.Apply(chunkraftfsm.MarshalDeleteChunk(id), timeout)
 			return f.Error()
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
-			return r.Apply(multiraft.MarshalRetentionPending(id), timeout).Error()
+			return r.Apply(chunkraftfsm.MarshalRetentionPending(id), timeout).Error()
 		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {

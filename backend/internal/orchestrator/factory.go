@@ -10,7 +10,7 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
-	"gastrolog/internal/multiraft"
+	"gastrolog/internal/raftgroup"
 
 	"github.com/google/uuid"
 )
@@ -72,7 +72,7 @@ type Factories struct {
 	// GroupManager, when non-nil, manages tier Raft groups for chunk metadata
 	// replication. buildTierInstance creates a Raft group per tier and wires
 	// a RaftAnnouncer to the chunk manager.
-	GroupManager *multiraft.GroupManager
+	GroupManager *raftgroup.GroupManager
 
 	// NodeAddressResolver maps a node ID to its Raft server address.
 	// Used to build tier Raft group membership from tier config's node assignments.

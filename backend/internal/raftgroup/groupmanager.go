@@ -1,4 +1,4 @@
-package multiraft
+package raftgroup
 
 import (
 	"errors"
@@ -11,10 +11,16 @@ import (
 	"time"
 
 	"gastrolog/internal/logging"
+	"gastrolog/internal/multiraft"
 
 	hraft "github.com/hashicorp/raft"
 	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 )
+
+// ErrGroupNotFound is returned when an operation targets a group that doesn't exist.
+var ErrGroupNotFound = errors.New("group not found")
+
+func groupNotFound(id string) error { return fmt.Errorf("%w: %s", ErrGroupNotFound, id) }
 
 // GroupConfig describes a Raft group to create or join.
 type GroupConfig struct {
@@ -60,16 +66,17 @@ type GroupManager struct {
 	mu     sync.RWMutex
 	groups map[string]*Group
 
-	transport *Transport[string]
-	nodeID    string
-	baseDir   string // <home>/raft/groups/
-	logger    *slog.Logger
+	transport    *multiraft.Transport[string]
+	nodeID       string
+	baseDir      string // <home>/raft/groups/
+	shutdownLast string // group ID to shut down last (e.g. config group)
+	logger       *slog.Logger
 }
 
 // GroupManagerConfig holds configuration for creating a GroupManager.
 type GroupManagerConfig struct {
 	// Transport is the multi-raft transport shared by all groups.
-	Transport *Transport[string]
+	Transport *multiraft.Transport[string]
 
 	// NodeID is this node's unique identifier.
 	NodeID string
@@ -80,16 +87,22 @@ type GroupManagerConfig struct {
 
 	// Logger for structured logging.
 	Logger *slog.Logger
+
+	// ShutdownLast is a group ID that should be shut down after all others.
+	// Typically the config group — it must remain available while tier groups
+	// are shutting down so they can still replicate final state.
+	ShutdownLast string
 }
 
 // NewGroupManager creates a manager for Raft group lifecycle.
 func NewGroupManager(cfg GroupManagerConfig) *GroupManager {
 	return &GroupManager{
-		groups:    make(map[string]*Group),
-		transport: cfg.Transport,
-		nodeID:    cfg.NodeID,
-		baseDir:   cfg.BaseDir,
-		logger:    logging.Default(cfg.Logger).With("component", "raft-group-manager"),
+		groups:       make(map[string]*Group),
+		transport:    cfg.Transport,
+		nodeID:       cfg.NodeID,
+		baseDir:      cfg.BaseDir,
+		shutdownLast: cfg.ShutdownLast,
+		logger:       logging.Default(cfg.Logger).With("component", "raft-group-manager"),
 	}
 }
 
@@ -169,7 +182,7 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 	g, exists := m.groups[groupID]
 	if !exists {
 		m.mu.Unlock()
-		return fmt.Errorf("group %q not found", groupID)
+		return groupNotFound(groupID)
 	}
 	delete(m.groups, groupID)
 	m.mu.Unlock()
@@ -204,7 +217,7 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 func (m *GroupManager) AddMember(groupID string, serverID hraft.ServerID, serverAddr hraft.ServerAddress) error {
 	g := m.GetGroup(groupID)
 	if g == nil {
-		return fmt.Errorf("group %q not found", groupID)
+		return groupNotFound(groupID)
 	}
 	if m.shouldBeVoter(g) {
 		return g.Raft.AddVoter(serverID, serverAddr, 0, 10*time.Second).Error()
@@ -228,22 +241,23 @@ func (m *GroupManager) shouldBeVoter(g *Group) bool {
 func (m *GroupManager) RemoveMember(groupID string, serverID hraft.ServerID) error {
 	g := m.GetGroup(groupID)
 	if g == nil {
-		return fmt.Errorf("group %q not found", groupID)
+		return groupNotFound(groupID)
 	}
 	return g.Raft.RemoveServer(serverID, 0, 10*time.Second).Error()
 }
 
 // Shutdown gracefully stops all groups, tier groups first, config last.
 // Tier groups are shut down concurrently to avoid sequential election
-// timeout delays on follower nodes.
+// timeout delays on follower nodes. The shutdownLast group (if set) is
+// shut down after all others complete.
 func (m *GroupManager) Shutdown() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	// Shut down non-config groups concurrently.
+	// Shut down all groups except shutdownLast concurrently.
 	var wg sync.WaitGroup
 	for id, g := range m.groups {
-		if id == "config" {
+		if id == m.shutdownLast {
 			continue
 		}
 		wg.Add(1)
@@ -254,9 +268,11 @@ func (m *GroupManager) Shutdown() {
 	}
 	wg.Wait()
 
-	// Config group last.
-	if g, ok := m.groups["config"]; ok {
-		m.shutdownGroup("config", g)
+	// Shut down the designated-last group.
+	if m.shutdownLast != "" {
+		if g, ok := m.groups[m.shutdownLast]; ok {
+			m.shutdownGroup(m.shutdownLast, g)
+		}
 	}
 
 	m.groups = make(map[string]*Group)
@@ -328,8 +344,17 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 	}
 
 	conf.HeartbeatTimeout = 1000 * time.Millisecond
-	conf.ElectionTimeout = 1000 * time.Millisecond
 	conf.LeaderLeaseTimeout = 500 * time.Millisecond
+
+	// Bootstrap nodes (config placement leaders) get a shorter election timeout
+	// so they win the first election after a full cluster restart. Non-bootstrap
+	// nodes get a longer timeout — they can still elect if the leader dies, but
+	// won't race the bootstrap node on startup.
+	if cfg.Bootstrap {
+		conf.ElectionTimeout = 1000 * time.Millisecond
+	} else {
+		conf.ElectionTimeout = 3000 * time.Millisecond
+	}
 
 	return conf
 }

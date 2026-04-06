@@ -1,4 +1,4 @@
-package multiraft
+package raftgroup
 
 import (
 	"context"
@@ -8,11 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"gastrolog/internal/multiraft"
+
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/test/bufconn"
 )
+
+const bufSize = 1 << 20
 
 // counterFSM is a minimal FSM that counts applied commands.
 type counterFSM struct {
@@ -60,7 +64,7 @@ func (s *counterSnapshot) Release() {}
 // managerTestNode holds a transport + gRPC server for one test node.
 type managerTestNode struct {
 	manager   *GroupManager
-	transport *Transport[string]
+	transport *multiraft.Transport[string]
 	server    *grpc.Server
 	lis       *bufconn.Listener
 }
@@ -75,7 +79,7 @@ func makeManagerCluster(t *testing.T, nodeIDs []string) []*managerTestNode {
 		srv := grpc.NewServer()
 		// bufconn listeners all return "bufconn" as their address, so use
 		// the node ID as the Raft address to ensure uniqueness.
-		tp := New[string](
+		tp := multiraft.New(
 			hraft.ServerAddress(nodeIDs[i]),
 			[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 			func(s string) []byte { return []byte(s) },
@@ -365,7 +369,7 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 
 	lis := bufconn.Listen(bufSize)
 	srv := grpc.NewServer()
-	tp := New[string](
+	tp := multiraft.New(
 		hraft.ServerAddress(stableAddr),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
@@ -409,7 +413,7 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	// Restart with fresh transport + server but same baseDir and stableAddr.
 	lis2 := bufconn.Listen(bufSize)
 	srv2 := grpc.NewServer()
-	tp2 := New[string](
+	tp2 := multiraft.New(
 		hraft.ServerAddress(stableAddr),
 		[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 		func(s string) []byte { return []byte(s) },
