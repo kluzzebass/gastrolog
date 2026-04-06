@@ -147,6 +147,11 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 	if maxConcurrent <= 0 {
 		maxConcurrent = 4
 	}
+	// Two-level concurrency control:
+	//   Global: LimitConcurrentJobs caps total goroutines across ALL jobs (LimitModeWait
+	//           queues excess jobs — we want one-time tasks to wait, not be dropped).
+	//   Per-job: WithSingletonMode on each cron job prevents self-overlap (LimitModeReschedule
+	//           skips missed ticks — we want slow sweeps to finish, not queue a backlog).
 	s, err := gocron.NewScheduler(
 		gocron.WithLimitConcurrentJobs(uint(maxConcurrent), gocron.LimitModeWait),
 	)
@@ -202,7 +207,8 @@ func (s *Scheduler) Rebuild(maxConcurrent int) error {
 		s.logger.Warn("error shutting down old scheduler during rebuild", "error", err)
 	}
 
-	// Create new scheduler with updated limit.
+	// Create new scheduler with updated limit. See newScheduler for the
+	// two-level concurrency rationale (global Wait + per-job Reschedule).
 	gs, err := gocron.NewScheduler(
 		gocron.WithLimitConcurrentJobs(uint(maxConcurrent), gocron.LimitModeWait),
 	)
@@ -223,6 +229,7 @@ func (s *Scheduler) Rebuild(maxConcurrent int) error {
 			gocron.CronJob(entry.cron, true),
 			gocron.NewTask(entry.taskFn, entry.args...),
 			gocron.WithName(entry.name),
+			gocron.WithSingletonMode(gocron.LimitModeReschedule),
 		)
 		if err != nil {
 			s.logger.Error("failed to re-register job during rebuild", "name", entry.name, "error", err)
@@ -254,6 +261,7 @@ func (s *Scheduler) AddJob(name, cronExpr string, taskFn any, args ...any) error
 		gocron.CronJob(cronExpr, true),
 		gocron.NewTask(taskFn, args...),
 		gocron.WithName(name),
+		gocron.WithSingletonMode(gocron.LimitModeReschedule),
 	)
 	if err != nil {
 		return fmt.Errorf("create scheduled job %s: %w", name, err)

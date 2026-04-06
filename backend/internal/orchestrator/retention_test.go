@@ -534,3 +534,84 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	// ---- Verify: no chunk directories on disk on ANY node ----
 	h.assertTierDirEmpty(t, 0)
 }
+
+// TestRetentionTargetRefreshesCmOnExistingRunner verifies that
+// retentionTargetForTier updates cm and im on an existing runner
+// when the tier's chunk manager changes (e.g., after vault rebuild).
+func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
+	t.Parallel()
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	policyID := uuid.Must(uuid.NewV7())
+
+	cm1 := &retentionFakeChunkManager{}
+	im1 := &retentionFakeIndexManager{}
+	cm2 := &retentionFakeChunkManager{}
+	im2 := &retentionFakeIndexManager{}
+
+	cfg := &config.Config{
+		Vaults: []config.VaultConfig{{ID: vaultID, Enabled: true}},
+		Tiers: []config.TierConfig{{
+			ID:      tierID,
+			VaultID: vaultID,
+			RetentionRules: []config.RetentionRule{{
+				RetentionPolicyID: policyID,
+			}},
+		}},
+		RetentionPolicies: []config.RetentionPolicyConfig{{
+			ID:     policyID,
+			MaxAge: strPtr("1h"),
+		}},
+	}
+
+	orch, err := New(Config{
+		ConfigLoader: testConfigLoader{cfg: cfg},
+		Logger:       slog.Default(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	// First call: creates a new runner with cm1/im1.
+	tier1 := &TierInstance{
+		TierID:  tierID,
+		Chunks:  cm1,
+		Indexes: im1,
+	}
+	active := make(map[string]bool)
+	vaultCfg := cfg.Vaults[0]
+	target1 := orch.retentionTargetForTier(cfg, vaultCfg, tier1, active)
+	if target1 == nil {
+		t.Fatal("expected non-nil sweep target")
+	}
+	if target1.runner.cm != cm1 {
+		t.Error("expected runner.cm == cm1 on first call")
+	}
+	if target1.runner.im != im1 {
+		t.Error("expected runner.im == im1 on first call")
+	}
+
+	// Second call with different chunk manager: runner is reused, cm/im refreshed.
+	tier2 := &TierInstance{
+		TierID:  tierID,
+		Chunks:  cm2,
+		Indexes: im2,
+	}
+	active2 := make(map[string]bool)
+	target2 := orch.retentionTargetForTier(cfg, vaultCfg, tier2, active2)
+	if target2 == nil {
+		t.Fatal("expected non-nil sweep target on second call")
+	}
+	if target2.runner.cm != cm2 {
+		t.Error("expected runner.cm refreshed to cm2 on second call")
+	}
+	if target2.runner.im != im2 {
+		t.Error("expected runner.im refreshed to im2 on second call")
+	}
+	// Same runner object — reused, not recreated.
+	if target1.runner != target2.runner {
+		t.Error("expected same runner instance across calls")
+	}
+}

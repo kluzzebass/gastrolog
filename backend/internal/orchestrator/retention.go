@@ -312,6 +312,8 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 		}
 		o.retention[key] = runner
 	}
+	runner.cm = tier.Chunks
+	runner.im = tier.Indexes
 	runner.applyRaftDelete = tier.ApplyRaftDelete
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
 	runner.isLeader = tier.IsLeader()
