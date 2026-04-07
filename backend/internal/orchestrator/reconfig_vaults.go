@@ -908,14 +908,28 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 	g := factories.GroupManager.GetGroup(groupID)
 	if g == nil {
 		members := o.buildTierRaftMembers(tierCfg, nscs, factories)
-		leaderNodeID := tierCfg.LeaderNodeID(nscs)
-		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
+		// Only assigned members participate in the tier Raft group. If this
+		// node isn't in the member list, skip group creation entirely.
+		isMember := false
+		for _, srv := range members {
+			if string(srv.ID) == o.localNodeID {
+				isMember = true
+				break
+			}
+		}
+		if !isMember {
+			return nil, nil, tierRaftCallbacks{}
+		}
+		// Symmetric seeding: every assigned node calls CreateGroup with the
+		// same member list. Raft elects a leader through normal election. No
+		// node holds a special "bootstrap" role. The seed list is only used
+		// when the local boltdb log is empty (first start of a brand-new tier);
+		// on restart, the existing log already contains the configuration.
 		var err error
 		g, err = factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
-			GroupID:   groupID,
-			FSM:       tierfsm.New(),
-			Bootstrap: isLeader,
-			Members:   members,
+			GroupID:     groupID,
+			FSM:         tierfsm.New(),
+			SeedMembers: members,
 		})
 		if err != nil {
 			o.logger.Warn("failed to create tier raft group",

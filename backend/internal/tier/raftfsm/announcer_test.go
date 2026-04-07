@@ -82,11 +82,12 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 			BaseDir:   t.TempDir(),
 		})
 		nodes[i].fsm = New()
+		// Symmetric seeding: every node passes the same member list. Raft
+		// elects a leader through normal election. No node has a special role.
 		_, err := nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
-			GroupID:   "tier-test",
-			FSM:       nodes[i].fsm,
-			Bootstrap: i == 0,
-			Members:   members,
+			GroupID:     "tier-test",
+			FSM:         nodes[i].fsm,
+			SeedMembers: members,
 		})
 		if err != nil {
 			t.Fatalf("node %d CreateGroup: %v", i, err)

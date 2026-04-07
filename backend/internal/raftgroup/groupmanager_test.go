@@ -123,6 +123,16 @@ func makeManagerCluster(t *testing.T, nodeIDs []string) []*managerTestNode {
 	return nodes
 }
 
+// selfSeed returns a single-element SeedMembers list for the given test node.
+// Used by single-node tests that want to start a group containing only the
+// local node.
+func selfSeed(n *managerTestNode) []hraft.Server {
+	return []hraft.Server{{
+		ID:      hraft.ServerID(n.manager.nodeID),
+		Address: n.transport.LocalAddr(),
+	}}
+}
+
 // waitForLeader polls until the group has a leader.
 func waitForLeader(t *testing.T, g *Group, timeout time.Duration) {
 	t.Helper()
@@ -142,9 +152,9 @@ func TestCreateGroupSingleNode(t *testing.T) {
 
 	fsm := &counterFSM{}
 	g, err := nodes[0].manager.CreateGroup(GroupConfig{
-		GroupID:   "test",
-		FSM:       fsm,
-		Bootstrap: true,
+		GroupID:     "test",
+		FSM:         fsm,
+		SeedMembers: selfSeed(nodes[0]),
 	})
 	if err != nil {
 		t.Fatalf("CreateGroup: %v", err)
@@ -178,11 +188,12 @@ func TestCreateGroupThreeNode(t *testing.T) {
 	groups := make([]*Group, len(nodes))
 	for i, n := range nodes {
 		fsms[i] = &counterFSM{}
+		// Symmetric seeding: every node passes the same member list. Raft
+		// elects a leader through normal election. No node has a special role.
 		g, err := n.manager.CreateGroup(GroupConfig{
-			GroupID:   "replicated",
-			FSM:       fsms[i],
-			Bootstrap: i == 0,
-			Members:   members,
+			GroupID:     "replicated",
+			FSM:         fsms[i],
+			SeedMembers: members,
 		})
 		if err != nil {
 			t.Fatalf("node %d CreateGroup: %v", i, err)
@@ -238,11 +249,11 @@ func TestMultipleGroupsSameNode(t *testing.T) {
 	fsmA := &counterFSM{}
 	fsmB := &counterFSM{}
 
-	gA, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "group-a", FSM: fsmA, Bootstrap: true})
+	gA, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "group-a", FSM: fsmA, SeedMembers: selfSeed(nodes[0])})
 	if err != nil {
 		t.Fatalf("CreateGroup A: %v", err)
 	}
-	gB, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "group-b", FSM: fsmB, Bootstrap: true})
+	gB, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "group-b", FSM: fsmB, SeedMembers: selfSeed(nodes[0])})
 	if err != nil {
 		t.Fatalf("CreateGroup B: %v", err)
 	}
@@ -276,7 +287,7 @@ func TestDestroyGroup(t *testing.T) {
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
 	fsm := &counterFSM{}
-	_, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "ephemeral", FSM: fsm, Bootstrap: true})
+	_, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "ephemeral", FSM: fsm, SeedMembers: selfSeed(nodes[0])})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,12 +312,12 @@ func TestDuplicateGroupReturnsError(t *testing.T) {
 	// Not parallel — Raft instances + gRPC servers need clean sequential lifecycle.
 	nodes := makeManagerCluster(t, []string{"node-1"})
 
-	_, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "dup", FSM: &counterFSM{}, Bootstrap: true})
+	_, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "dup", FSM: &counterFSM{}, SeedMembers: selfSeed(nodes[0])})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = nodes[0].manager.CreateGroup(GroupConfig{GroupID: "dup", FSM: &counterFSM{}, Bootstrap: true})
+	_, err = nodes[0].manager.CreateGroup(GroupConfig{GroupID: "dup", FSM: &counterFSM{}, SeedMembers: selfSeed(nodes[0])})
 	if err == nil {
 		t.Fatal("expected error for duplicate group")
 	}
@@ -317,7 +328,7 @@ func TestVoterNonvoterAutoEnforcement(t *testing.T) {
 	nodes := makeManagerCluster(t, []string{"node-1", "node-2", "node-3"})
 
 	fsm1 := &counterFSM{}
-	g1, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "voter-test", FSM: fsm1, Bootstrap: true})
+	g1, err := nodes[0].manager.CreateGroup(GroupConfig{GroupID: "voter-test", FSM: fsm1, SeedMembers: selfSeed(nodes[0])})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +401,11 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 
 	// Create group and apply some commands.
 	fsm1 := &counterFSM{}
-	g, err := mgr.CreateGroup(GroupConfig{GroupID: "persistent", FSM: fsm1, Bootstrap: true})
+	g, err := mgr.CreateGroup(GroupConfig{
+		GroupID:     "persistent",
+		FSM:         fsm1,
+		SeedMembers: []hraft.Server{{ID: hraft.ServerID("node-1"), Address: hraft.ServerAddress(stableAddr)}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +448,14 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	})
 
 	fsm2 := &counterFSM{}
-	g2, err := mgr2.CreateGroup(GroupConfig{GroupID: "persistent", FSM: fsm2, Bootstrap: true})
+	// On restart, SeedMembers is ignored because the existing log already
+	// contains a configuration. Pass it anyway to keep parity with the
+	// initial start above.
+	g2, err := mgr2.CreateGroup(GroupConfig{
+		GroupID:     "persistent",
+		FSM:         fsm2,
+		SeedMembers: []hraft.Server{{ID: hraft.ServerID("node-1"), Address: hraft.ServerAddress(stableAddr)}},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

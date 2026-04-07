@@ -22,7 +22,7 @@ var ErrGroupNotFound = errors.New("group not found")
 
 func groupNotFound(id string) error { return fmt.Errorf("%w: %s", ErrGroupNotFound, id) }
 
-// GroupConfig describes a Raft group to create or join.
+// GroupConfig describes a Raft group to create.
 type GroupConfig struct {
 	// GroupID is the unique identifier for this group, used for transport routing.
 	GroupID string
@@ -30,13 +30,26 @@ type GroupConfig struct {
 	// FSM is the finite state machine for this group.
 	FSM hraft.FSM
 
-	// Bootstrap indicates this group should bootstrap as a single-node cluster.
-	// Only one node in the group should set this to true.
-	Bootstrap bool
-
-	// Members lists the initial cluster members as (ServerID, ServerAddress) pairs.
-	// Used for bootstrapping multi-node groups. Ignored when Bootstrap is false.
-	Members []hraft.Server
+	// SeedMembers, when non-empty, gives a fresh Raft instance its initial
+	// member configuration via hraft.BootstrapCluster. This is the only API
+	// hraft exposes for seeding an empty Raft instance with a member list.
+	//
+	// Pass a single-element slice for a single-node group; pass the full
+	// member list for a multi-node group. In a multi-node group, every
+	// participating node should pass the SAME list — symmetric seeding lets
+	// the nodes elect a leader through normal Raft election without any
+	// node holding a special "bootstrap" role.
+	//
+	// Leave nil/empty when restarting an existing group: the persisted log
+	// already contains a configuration, so no seeding is needed. (If a
+	// non-empty SeedMembers is supplied for a group whose log is non-empty,
+	// it is ignored — the existing log wins.)
+	//
+	// This is "Raft group seeding", not "cluster bootstrap". The cluster as
+	// a whole is bootstrapped exactly once, via cmd/gastrolog --bootstrap on
+	// the very first node. Per-group seeding happens whenever a new Raft
+	// group needs to come into existence, throughout the cluster's lifetime.
+	SeedMembers []hraft.Server
 
 	// SnapshotThreshold is the number of log entries before a snapshot is taken.
 	// Defaults to 4 if zero (matches config Raft behavior).
@@ -144,11 +157,11 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 		return nil, fmt.Errorf("create raft for group %q: %w", cfg.GroupID, err)
 	}
 
-	if cfg.Bootstrap {
-		if err := m.bootstrap(r, cfg); err != nil {
+	if len(cfg.SeedMembers) > 0 {
+		if err := m.seedGroup(r, cfg.SeedMembers); err != nil {
 			_ = r.Shutdown().Error()
 			_ = boltStore.Close()
-			return nil, fmt.Errorf("bootstrap group %q: %w", cfg.GroupID, err)
+			return nil, fmt.Errorf("seed group %q: %w", cfg.GroupID, err)
 		}
 	}
 
@@ -162,7 +175,7 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 
 	m.logger.Info("raft group created",
 		"group", cfg.GroupID,
-		"bootstrap", cfg.Bootstrap,
+		"seed_members", len(cfg.SeedMembers),
 		"dir", groupDir)
 
 	return g, nil
@@ -344,42 +357,29 @@ func (m *GroupManager) newRaftConfig(cfg GroupConfig) *hraft.Config {
 	}
 
 	conf.HeartbeatTimeout = 1000 * time.Millisecond
+	conf.ElectionTimeout = 1000 * time.Millisecond
 	conf.LeaderLeaseTimeout = 500 * time.Millisecond
-
-	// Bootstrap nodes (config placement leaders) get a shorter election timeout
-	// so they win the first election after a full cluster restart. Non-bootstrap
-	// nodes get a longer timeout — they can still elect if the leader dies, but
-	// won't race the bootstrap node on startup.
-	if cfg.Bootstrap {
-		conf.ElectionTimeout = 1000 * time.Millisecond
-	} else {
-		conf.ElectionTimeout = 3000 * time.Millisecond
-	}
 
 	return conf
 }
 
-// bootstrap performs state-based bootstrapping. Only bootstraps if the Raft
-// log is empty (first start). If Members is empty, bootstraps as single-node.
-func (m *GroupManager) bootstrap(r *hraft.Raft, cfg GroupConfig) error {
+// seedGroup gives a fresh Raft instance its initial member configuration via
+// hraft.BootstrapCluster. This is the only API hraft exposes for seeding an
+// empty Raft instance with a member list. If the group's log is non-empty
+// (restart case), seedGroup is a no-op — the existing log already contains
+// the configuration.
+//
+// In a multi-node group, every participating node calls seedGroup with the
+// same member list. The nodes then elect a leader through normal Raft election.
+// No node holds a special "bootstrap" role.
+func (m *GroupManager) seedGroup(r *hraft.Raft, members []hraft.Server) error {
 	existing := r.GetConfiguration()
 	if err := existing.Error(); err != nil {
 		return fmt.Errorf("get configuration: %w", err)
 	}
 	if len(existing.Configuration().Servers) > 0 {
-		return nil // already bootstrapped (restart)
+		return nil // already seeded (restart)
 	}
-
-	var servers []hraft.Server
-	if len(cfg.Members) > 0 {
-		servers = cfg.Members
-	} else {
-		servers = []hraft.Server{
-			{ID: hraft.ServerID(m.nodeID), Address: m.transport.LocalAddr()},
-		}
-	}
-
-	boot := hraft.Configuration{Servers: servers}
-	return r.BootstrapCluster(boot).Error()
+	return r.BootstrapCluster(hraft.Configuration{Servers: members}).Error()
 }
 
