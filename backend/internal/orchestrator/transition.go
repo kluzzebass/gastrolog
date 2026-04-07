@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 
 	"github.com/google/uuid"
@@ -68,7 +69,15 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		r.logger.Error("transition: stream failed",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID, "remote", remote, "error", streamErr)
-		r.markUnreadable(id, streamErr)
+		// Only mark the chunk unreadable if the error came from the
+		// source cursor's record iterator (ErrSourceRead). Transient
+		// destination errors — network blips, peer timeouts, gRPC
+		// Unavailable, cluster forwarder per-call timeouts (see
+		// gastrolog-4rp6i) — must NOT permanently retire the chunk;
+		// the next retention sweep will retry. See gastrolog-50271.
+		if errors.Is(streamErr, cluster.ErrSourceRead) {
+			r.markUnreadable(id, streamErr)
+		}
 		return
 	}
 

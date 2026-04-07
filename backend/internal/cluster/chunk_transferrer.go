@@ -35,6 +35,15 @@ const (
 	streamCallTimeout = 15 * time.Second
 )
 
+// ErrSourceRead marks errors that originated from reading the source
+// chunk's record iterator (cursor.Next) rather than from the network /
+// destination peer. Callers that distinguish "transient destination
+// failure" from "source chunk corruption" can check `errors.Is(err,
+// ErrSourceRead)` to tell them apart — e.g. transition.transitionChunk
+// uses this to decide whether to mark the source chunk unreadable.
+// See gastrolog-50271.
+var ErrSourceRead = errors.New("source chunk read failed")
+
 // ChunkTransferrer sends chunk records to a remote node for cross-node chunk
 // migration. Uses client-streaming gRPC so records flow one-at-a-time from
 // cursor through the network to disk on the destination — at most one
@@ -79,7 +88,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 			break
 		}
 		if iterErr != nil {
-			return fmt.Errorf("read records for transfer: %w", iterErr)
+			return fmt.Errorf("%w: transfer: %w", ErrSourceRead, iterErr)
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
@@ -177,7 +186,7 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 			break
 		}
 		if iterErr != nil {
-			return fmt.Errorf("read records for replication: %w", iterErr)
+			return fmt.Errorf("%w: replication: %w", ErrSourceRead, iterErr)
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
@@ -243,7 +252,7 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 			break
 		}
 		if iterErr != nil {
-			return fmt.Errorf("read records for transition: %w", iterErr)
+			return fmt.Errorf("%w: transition: %w", ErrSourceRead, iterErr)
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
