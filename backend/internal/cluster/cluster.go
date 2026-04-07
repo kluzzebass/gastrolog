@@ -76,6 +76,10 @@ type Server struct {
 	// applyFn applies a pre-marshaled ConfigCommand on the leader.
 	applyFn func(ctx context.Context, data []byte) error
 
+	// tierApplyFn applies a pre-marshaled tier FSM command on this node's
+	// tier Raft leader. Keyed by group ID (= tier UUID).
+	tierApplyFn func(ctx context.Context, groupID string, data []byte) error
+
 	// enrollHandler handles the Enroll RPC for joining nodes.
 	enrollHandler EnrollHandler
 
@@ -330,6 +334,12 @@ func (s *Server) SetInternalHandler(h http.Handler) {
 // commands on the leader node.
 func (s *Server) SetApplyFn(fn func(ctx context.Context, data []byte) error) {
 	s.applyFn = fn
+}
+
+// SetTierApplyFn sets the function used by the ForwardTierApply handler to
+// apply tier FSM commands on the tier Raft leader node.
+func (s *Server) SetTierApplyFn(fn func(ctx context.Context, groupID string, data []byte) error) {
+	s.tierApplyFn = fn
 }
 
 // SetEvictionHandler registers the callback invoked when this node receives

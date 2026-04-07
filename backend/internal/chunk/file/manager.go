@@ -122,9 +122,44 @@ type Manager struct {
 	postSealActive sync.Map // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
 
+	// pendingAnnouncements accumulates closures that fire metadata announcer
+	// calls. The fields are protected by mu. Locked code paths (openLocked,
+	// sealLocked, etc.) APPEND closures here instead of calling the announcer
+	// directly. The top-level public methods (Append, Seal, CheckRotation)
+	// drain this slice via takePendingAnnouncements AFTER releasing mu, then
+	// invoke each closure outside the lock.
+	//
+	// Why: announcer calls go through the tier Raft via the apply forwarder
+	// and BLOCK waiting for a Raft commit. The Raft FSM apply path on the
+	// same node fires our OnDelete callback which acquires this manager's
+	// mu. Holding mu while waiting for Raft creates a circular wait → deadlock.
+	// Deferring announces until after the unlock breaks the cycle.
+	pendingAnnouncements []func()
+
 	// Logger for this manager instance.
 	// Scoped with component="chunk-manager", type="file" at construction time.
 	logger *slog.Logger
+}
+
+// takePendingAnnouncements drains the queue of deferred announcer calls.
+// Must be called with m.mu held; the returned slice can then be invoked
+// after releasing the mutex via runPendingAnnouncements.
+func (m *Manager) takePendingAnnouncements() []func() {
+	if len(m.pendingAnnouncements) == 0 {
+		return nil
+	}
+	out := m.pendingAnnouncements
+	m.pendingAnnouncements = nil
+	return out
+}
+
+// runPendingAnnouncements invokes each deferred announcer closure. Must be
+// called WITHOUT m.mu held — the closures issue announcer calls that may
+// block on a Raft round-trip whose FSM apply path needs to acquire m.mu.
+func runPendingAnnouncements(announces []func()) {
+	for _, fn := range announces {
+		fn()
+	}
 }
 
 // chunkMeta holds in-memory metadata derived from idx.log.
@@ -352,7 +387,13 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 
 	// Track this writer so seal/close can wait for completion.
 	active.inflight.Add(1)
+	pendingAnnounces := m.takePendingAnnouncements()
 	m.mu.Unlock()
+
+	// Fire deferred announcer calls (queued by openLocked / sealLocked
+	// during rotation) outside the lock to avoid the FSM-apply-vs-mu
+	// deadlock. See pendingAnnouncements field doc for details.
+	runPendingAnnouncements(pendingAnnounces)
 
 	// ── Phase 2: I/O without metadata lock ──
 	// writeMu serializes disk writes so that records land in reservation
@@ -484,18 +525,24 @@ func (m *Manager) activeChunkState() chunk.ActiveChunkState {
 
 func (m *Manager) Seal() error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.closed {
+		m.mu.Unlock()
 		return ErrManagerClosed
 	}
 
 	if m.active == nil {
 		if err := m.openLocked(); err != nil {
+			m.mu.Unlock()
 			return err
 		}
 	}
-	return m.sealLocked()
+	err := m.sealLocked()
+	pending := m.takePendingAnnouncements()
+	m.mu.Unlock()
+
+	// Fire deferred announcer calls outside the lock.
+	runPendingAnnouncements(pending)
+	return err
 }
 
 func (m *Manager) Active() *chunk.ChunkMeta {
@@ -1233,7 +1280,10 @@ func (m *Manager) openLocked() error {
 	m.metas[id] = meta
 
 	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceCreate(id, createdAt, createdAt, createdAt)
+		ann := m.cfg.Announcer
+		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
+			ann.AnnounceCreate(id, createdAt, createdAt, createdAt)
+		})
 	}
 	return nil
 }
@@ -1406,7 +1456,17 @@ func (m *Manager) sealLocked() error {
 	meta.diskBytes = m.computeDiskBytes(id)
 
 	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceSeal(id, meta.writeEnd, meta.recordCount, meta.bytes, meta.ingestEnd, meta.sourceEnd)
+		ann := m.cfg.Announcer
+		// Capture the metadata snapshot now (it's mutable; m.active will
+		// be cleared below). The closure runs after the caller releases mu.
+		writeEnd := meta.writeEnd
+		recordCount := meta.recordCount
+		bytes := meta.bytes
+		ingestEnd := meta.ingestEnd
+		sourceEnd := meta.sourceEnd
+		m.pendingAnnouncements = append(m.pendingAnnouncements, func() {
+			ann.AnnounceSeal(id, writeEnd, recordCount, bytes, ingestEnd, sourceEnd)
+		})
 	}
 
 	m.active = nil
@@ -2186,6 +2246,24 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 // Returns ErrActiveChunk if the chunk is the current active chunk.
 // Returns ErrChunkNotFound if the chunk does not exist.
 func (m *Manager) Delete(id chunk.ChunkID) error {
+	if err := m.deleteInternal(id); err != nil {
+		return err
+	}
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceDelete(id)
+	}
+	return nil
+}
+
+// DeleteSilent removes the chunk's local files and metadata without firing
+// the metadata announcer. Used by the tier Raft FSM apply path when a delete
+// originating from any node propagates via Raft — re-announcing would create
+// an infinite feedback loop.
+func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
+	return m.deleteInternal(id)
+}
+
+func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 	m.mu.Lock()
 
 	if m.closed {
@@ -2238,10 +2316,6 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 	delete(m.metas, id)          // no-op for cloud chunks (not in metas)
 	delete(m.storageClasses, id) // clean up storage class cache
 	m.mu.Unlock()
-
-	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceDelete(id)
-	}
 	return nil
 }
 
@@ -2289,15 +2363,28 @@ func (m *Manager) CompressChunk(id chunk.ChunkID) error {
 	m.zstdEncMu.Unlock()
 
 	// Update in-memory meta to reflect compressed state and refresh sizes.
+	// Capture the announcement data under the lock, but fire AnnounceCompress
+	// AFTER releasing — same deadlock-avoidance reasoning as Seal/Append.
+	var (
+		ann       chunk.MetadataAnnouncer
+		diskBytes int64
+		announce  bool
+	)
 	m.mu.Lock()
 	if meta := m.metas[id]; meta != nil {
 		// meta.compressed already set above; refresh disk sizes.
 		meta.diskBytes = m.computeDiskBytes(id)
 		if m.cfg.Announcer != nil {
-			m.cfg.Announcer.AnnounceCompress(id, meta.diskBytes)
+			ann = m.cfg.Announcer
+			diskBytes = meta.diskBytes
+			announce = true
 		}
 	}
 	m.mu.Unlock()
+
+	if announce {
+		ann.AnnounceCompress(id, diskBytes)
+	}
 	return nil
 }
 
@@ -2585,20 +2672,21 @@ func (m *Manager) GetAnnouncer() chunk.MetadataAnnouncer {
 
 func (m *Manager) CheckRotation() *string {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	if m.closed || m.active == nil {
+		m.mu.Unlock()
 		return nil
 	}
 
 	state := m.activeChunkState()
 	if state.Records == 0 {
+		m.mu.Unlock()
 		return nil
 	}
 
 	var zeroRecord chunk.Record
 	trigger := m.cfg.RotationPolicy.ShouldRotate(state, zeroRecord)
 	if trigger == nil {
+		m.mu.Unlock()
 		return nil
 	}
 
@@ -2612,8 +2700,14 @@ func (m *Manager) CheckRotation() *string {
 	if err := m.sealLocked(); err != nil {
 		m.logger.Error("failed to seal chunk during background rotation check",
 			"chunk", state.ChunkID.String(), "error", err)
+		m.mu.Unlock()
 		return nil
 	}
+	pending := m.takePendingAnnouncements()
+	m.mu.Unlock()
+
+	// Fire deferred announcer calls outside the lock.
+	runPendingAnnouncements(pending)
 	return trigger
 }
 

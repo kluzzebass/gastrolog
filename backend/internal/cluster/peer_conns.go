@@ -8,9 +8,19 @@ import (
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 )
+
+// invalidateGracePeriod is how long Invalidate/Reset wait before closing a
+// dropped connection. This grace period gives concurrent goroutines that
+// already retrieved the *ClientConn from the cache time to finish their
+// in-flight RPCs before the underlying transport is torn down. Without it,
+// goroutine A's failure (which calls Invalidate) would synchronously close
+// the conn that goroutines B/C/D are still using, causing them to fail with
+// "client connection is closing" mid-RPC and lose work.
+const invalidateGracePeriod = 5 * time.Second
 
 // PeerConns manages a shared pool of gRPC connections to cluster peers.
 // All cluster components (Broadcaster, RecordForwarder, SearchForwarder)
@@ -36,12 +46,21 @@ func NewPeerConns(r *hraft.Raft, clusterTLS *ClusterTLS, nodeID string) *PeerCon
 }
 
 // Conn returns a cached or newly dialed gRPC connection for the given node.
+//
+// If a cached conn is in connectivity.Shutdown state, it is discarded and
+// re-dialed. Shutdown is terminal — gRPC enters it only when something has
+// called Close() on the conn — so handing it back guarantees the next RPC
+// fails with "client connection is closing". The state check is a safety net
+// for any caller that beats the Invalidate grace period.
 func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	if conn, ok := p.conns[nodeID]; ok {
-		return conn, nil
+		if conn.GetState() != connectivity.Shutdown {
+			return conn, nil
+		}
+		delete(p.conns, nodeID)
 	}
 
 	addr, err := p.resolveAddr(nodeID)
@@ -74,15 +93,31 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 	return conn, nil
 }
 
-// Invalidate closes and removes the cached connection for a node,
-// forcing a fresh dial on the next Conn call.
+// Invalidate removes the cached connection for a node so the next Conn call
+// re-dials. The actual Close() is deferred by invalidateGracePeriod so that
+// concurrent goroutines holding the same *ClientConn can finish their
+// in-flight RPCs before the underlying transport is torn down.
+//
+// Synchronously closing a shared conn was the source of "client connection
+// is closing" cascades: per-RPC error handlers across the cluster forwarders
+// (chunk_transferrer, search_forwarder, record_forwarder, …) all call this
+// on any failure, and ~50 such call sites racing against each other meant a
+// single network blip would propagate as a flurry of mid-RPC closures.
 func (p *PeerConns) Invalidate(nodeID string) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if conn, ok := p.conns[nodeID]; ok {
-		_ = conn.Close()
+	conn, ok := p.conns[nodeID]
+	if ok {
 		delete(p.conns, nodeID)
 	}
+	p.mu.Unlock()
+
+	if !ok {
+		return
+	}
+	go func() {
+		time.Sleep(invalidateGracePeriod)
+		_ = conn.Close()
+	}()
 }
 
 // Peers returns all Raft servers except self.
@@ -113,18 +148,32 @@ func (p *PeerConns) PeerIDs() []string {
 	return ids
 }
 
-// Reset swaps the raft pointer and closes all cached connections,
-// forcing fresh dials on the next Conn call. Components holding a *PeerConns
-// reference (Broadcaster, RecordForwarder, SearchForwarder) automatically
-// use the new Raft instance without recreation.
+// Reset swaps the raft pointer and drops all cached connections, forcing
+// fresh dials on the next Conn call. The actual Close() of the dropped
+// connections is deferred by invalidateGracePeriod so concurrent in-flight
+// RPCs can drain — same rationale as Invalidate.
+//
+// Components holding a *PeerConns reference (Broadcaster, RecordForwarder,
+// SearchForwarder) automatically use the new Raft instance without recreation.
 func (p *PeerConns) Reset(r *hraft.Raft) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.raft = r
+	dropped := make([]*grpc.ClientConn, 0, len(p.conns))
 	for id, conn := range p.conns {
-		_ = conn.Close()
+		dropped = append(dropped, conn)
 		delete(p.conns, id)
 	}
+	p.mu.Unlock()
+
+	if len(dropped) == 0 {
+		return
+	}
+	go func() {
+		time.Sleep(invalidateGracePeriod)
+		for _, conn := range dropped {
+			_ = conn.Close()
+		}
+	}()
 }
 
 // Close tears down all cached connections.

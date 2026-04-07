@@ -458,15 +458,20 @@ func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID uuid.UUID, chunkID ch
 // replaceForwardedChunk seals (if active) and deletes a forwarded chunk
 // to make room for the canonical sealed version from the leader. Retries
 // if a concurrent Append reopens the active chunk between seal and delete.
+//
+// Uses DeleteNoAnnounce: this is a LOCAL cleanup operation on a single
+// follower. It must NOT propagate the delete via tier Raft — the canonical
+// sealed chunk is about to replace it locally via ImportRecords, which will
+// fire its own AnnounceCreate/AnnounceSeal for the replacement.
 func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActive bool) error {
 	if isActive {
 		if err := cm.Seal(); err != nil {
 			return fmt.Errorf("seal forwarded chunk %s: %w", chunkID, err)
 		}
 	}
-	if err := cm.Delete(chunkID); errors.Is(err, chunk.ErrActiveChunk) {
+	if err := chunk.DeleteNoAnnounce(cm, chunkID); errors.Is(err, chunk.ErrActiveChunk) {
 		_ = cm.Seal()
-		if err = cm.Delete(chunkID); err != nil {
+		if err = chunk.DeleteNoAnnounce(cm, chunkID); err != nil {
 			return fmt.Errorf("delete forwarded chunk %s (after re-seal): %w", chunkID, err)
 		}
 	} else if err != nil {
@@ -475,6 +480,10 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 	return nil
 }
 
+// deleteFromFollowers removes a chunk from same-node follower tier instances.
+// Called from retention's expireChunk after applyRaftDelete has already fired
+// the global CmdDeleteChunk. Uses DeleteNoAnnounce to avoid a redundant
+// second Raft-wide announce (the first one already propagated via OnDelete).
 func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
@@ -484,7 +493,7 @@ func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, 
 	}
 	for _, t := range vault.Tiers {
 		if t.TierID == tierID && t.IsFollower {
-			_ = t.Chunks.Delete(chunkID)
+			_ = chunk.DeleteNoAnnounce(t.Chunks, chunkID)
 		}
 	}
 }

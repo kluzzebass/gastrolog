@@ -51,7 +51,7 @@ import (
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
-	"gastrolog/internal/multiraft"
+	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -121,7 +121,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	// All consumers hold a reference to proxy; on join, only the inner changes.
 	proxy := config.NewStoreProxy(rawStore)
 	cfgStore := config.Store(proxy)
-	var groupMgr *multiraft.GroupManager // set later if cluster mode
+	var groupMgr *raftgroup.GroupManager // set later if cluster mode
 
 	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
 		_ = proxy.Close()
@@ -176,6 +176,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	groupMgr, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver)
+	if clusterSrv != nil {
+		factories.PeerConns = clusterSrv.PeerConns()
+	}
 
 	// Wire cross-node record forwarding and search forwarding in cluster mode.
 	// orchReady is closed after startOrchestrator completes so that forwarded
@@ -204,10 +207,22 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 	close(orchReady)
 
-	// Reconcile tier Raft group membership after all vaults/tiers are
-	// registered. On snapshot restore, individual NotifyTierPut events
-	// don't fire, so the primary may not have added secondaries yet.
-	disp.reconcileAllTierRaftGroups(ctx)
+	// Wire the ForwardTierApply handler so other nodes can forward tier
+	// Raft applies to us when we're the tier Raft leader.
+	if clusterSrv != nil && groupMgr != nil {
+		clusterSrv.SetTierApplyFn(func(ctx context.Context, groupID string, data []byte) error {
+			g := groupMgr.GetGroup(groupID)
+			if g == nil {
+				return fmt.Errorf("tier raft group %s not found", groupID)
+			}
+			return g.Raft.Apply(data, cluster.ReplicationTimeout).Error()
+		})
+	}
+
+	// Tier Raft group membership is reconciled by per-tier leader loops
+	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
+	// restore the loops fire as soon as elections complete and reconcile
+	// from inside the leader epoch.
 
 	// Monitor slog capture channel pressure.
 	if cfg.SlogCapture != nil {
@@ -555,17 +570,23 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	}
 
 	if cfg.ConfigType == "raft" {
+		// Wait for a leader AND for the local FSM to catch up to the cluster's
+		// latest committed state before reading anything from it. hraft's
+		// NewRaft returns with the FSM at the snapshot level; post-snapshot
+		// committed entries (tier placements, NSCs, etc.) only become visible
+		// after either a Barrier on the leader or a few AppendEntries rounds
+		// on a follower. Without this wait, the orchestrator reads stale
+		// state and creates tier Raft groups with incomplete member lists.
+		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
+			return nil, false, err
+		}
+		if err := waitForFSMCatchup(ctx, cfgStore, 10*time.Second, logger); err != nil {
+			return nil, false, err
+		}
 		localCfg, _ := cfgStore.Load(ctx)
 		ss, _ := cfgStore.LoadServerSettings(ctx)
 		if localCfg != nil && ss.Auth.JWTSecret != "" {
 			return localCfg, true, nil
-		}
-		// Settings not in local FSM — need a Raft write, which requires a leader.
-		// Wait for leader election before proceeding. On a fresh single-node
-		// bootstrap the leader is already elected; on multi-node restart the
-		// election needs time to complete.
-		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
-			return nil, false, err
 		}
 	}
 
@@ -718,6 +739,25 @@ func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logg
 	return nil
 }
 
+// waitForFSMCatchup blocks until the local config FSM reflects the cluster's
+// committed state. No-op for non-raft stores.
+func waitForFSMCatchup(ctx context.Context, cfgStore config.Store, timeout time.Duration, logger *slog.Logger) error {
+	inner := cfgStore
+	if p, ok := cfgStore.(*config.StoreProxy); ok {
+		inner = p.Inner()
+	}
+	rcs, ok := inner.(*raftConfigStore)
+	if !ok {
+		return nil
+	}
+	logger.Info("waiting for config FSM to catch up to committed state")
+	if err := rcs.WaitForFSMCatchup(ctx, timeout, logger); err != nil {
+		return fmt.Errorf("wait for FSM catchup: %w", err)
+	}
+	logger.Info("config FSM caught up")
+	return nil
+}
+
 func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, configType, preferredName string, hd home.Dir, logger *slog.Logger) {
 	if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 		return
@@ -828,7 +868,7 @@ type serverDeps struct {
 	RemoveNodeFunc      func(ctx context.Context, nodeID string) error
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
-	GroupMgr            *multiraft.GroupManager
+	GroupMgr            *raftgroup.GroupManager
 	ConfigStore         io.Closer // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 }
@@ -932,7 +972,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 // setupMultiRaft creates the GroupManager and node address resolver for tier
 // Raft groups. Returns (nil, nil) in single-node / non-raft mode.
-func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, homeDir string, logger *slog.Logger) (*multiraft.GroupManager, func(string) (string, bool)) {
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, func(string) (string, bool)) {
 	if clusterSrv == nil {
 		return nil, nil
 	}
@@ -941,11 +981,12 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, h
 		return nil, nil
 	}
 
-	groupMgr := multiraft.NewGroupManager(multiraft.GroupManagerConfig{
-		Transport: mrt,
-		NodeID:    nodeID,
-		BaseDir:   filepath.Join(homeDir, "raft", "groups"),
-		Logger:    logger,
+	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
+		Transport:    mrt,
+		NodeID:       nodeID,
+		BaseDir:      filepath.Join(homeDir, "raft", "groups"),
+		ShutdownLast: "config",
+		Logger:       logger,
 	})
 
 	var resolver func(string) (string, bool)
@@ -967,7 +1008,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, h
 	return groupMgr, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *multiraft.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}

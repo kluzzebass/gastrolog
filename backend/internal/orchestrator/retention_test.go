@@ -534,3 +534,226 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 	// ---- Verify: no chunk directories on disk on ANY node ----
 	h.assertTierDirEmpty(t, 0)
 }
+
+// TestRetentionTargetRefreshesCmOnExistingRunner verifies that
+// retentionTargetForTier updates cm and im on an existing runner
+// when the tier's chunk manager changes (e.g., after vault rebuild).
+func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
+	t.Parallel()
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	policyID := uuid.Must(uuid.NewV7())
+
+	cm1 := &retentionFakeChunkManager{}
+	im1 := &retentionFakeIndexManager{}
+	cm2 := &retentionFakeChunkManager{}
+	im2 := &retentionFakeIndexManager{}
+
+	cfg := &config.Config{
+		Vaults: []config.VaultConfig{{ID: vaultID, Enabled: true}},
+		Tiers: []config.TierConfig{{
+			ID:      tierID,
+			VaultID: vaultID,
+			RetentionRules: []config.RetentionRule{{
+				RetentionPolicyID: policyID,
+			}},
+		}},
+		RetentionPolicies: []config.RetentionPolicyConfig{{
+			ID:     policyID,
+			MaxAge: strPtr("1h"),
+		}},
+	}
+
+	orch, err := New(Config{
+		ConfigLoader: testConfigLoader{cfg: cfg},
+		Logger:       slog.Default(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	// First call: creates a new runner with cm1/im1.
+	tier1 := &TierInstance{
+		TierID:  tierID,
+		Chunks:  cm1,
+		Indexes: im1,
+	}
+	active := make(map[string]bool)
+	vaultCfg := cfg.Vaults[0]
+	target1 := orch.retentionTargetForTier(cfg, vaultCfg, tier1, active)
+	if target1 == nil {
+		t.Fatal("expected non-nil sweep target")
+	}
+	if target1.runner.cm != cm1 {
+		t.Error("expected runner.cm == cm1 on first call")
+	}
+	if target1.runner.im != im1 {
+		t.Error("expected runner.im == im1 on first call")
+	}
+
+	// Second call with different chunk manager: runner is reused, cm/im refreshed.
+	tier2 := &TierInstance{
+		TierID:  tierID,
+		Chunks:  cm2,
+		Indexes: im2,
+	}
+	active2 := make(map[string]bool)
+	target2 := orch.retentionTargetForTier(cfg, vaultCfg, tier2, active2)
+	if target2 == nil {
+		t.Fatal("expected non-nil sweep target on second call")
+	}
+	if target2.runner.cm != cm2 {
+		t.Error("expected runner.cm refreshed to cm2 on second call")
+	}
+	if target2.runner.im != im2 {
+		t.Error("expected runner.im refreshed to im2 on second call")
+	}
+	// Same runner object — reused, not recreated.
+	if target1.runner != target2.runner {
+		t.Error("expected same runner instance across calls")
+	}
+}
+
+// ---------- reconcileFollower tests ----------
+
+func TestReconcileFollowerSkipsWhenFSMNotReady(t *testing.T) {
+	t.Parallel()
+
+	orphanID := chunk.NewChunkID()
+	manifestID := chunk.NewChunkID()
+
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: orphanID, Sealed: true},
+			{ID: manifestID, Sealed: true},
+		},
+	}
+
+	tier := &TierInstance{
+		TierID:     uuid.Must(uuid.NewV7()),
+		Chunks:     cm,
+		Indexes:    &retentionFakeIndexManager{},
+		// FSM not ready — manifest incomplete, unsafe to reconcile.
+		IsFSMReady:   func() bool { return false },
+		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{manifestID} },
+	}
+
+	orch, err := New(Config{Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	orch.reconcileFollower(tier)
+
+	if len(cm.deleted) != 0 {
+		t.Errorf("expected no deletions when FSM not ready, got %d", len(cm.deleted))
+	}
+}
+
+func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
+	t.Parallel()
+
+	orphanID := chunk.NewChunkID()
+	keptID := chunk.NewChunkID()
+	activeID := chunk.NewChunkID()
+
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: orphanID, Sealed: true},              // sealed, not in manifest → delete
+			{ID: keptID, Sealed: true},                // sealed, in manifest → keep
+			{ID: activeID, Sealed: false},             // unsealed → keep regardless
+		},
+	}
+	im := &retentionFakeIndexManager{}
+
+	tier := &TierInstance{
+		TierID:       uuid.Must(uuid.NewV7()),
+		Chunks:       cm,
+		Indexes:      im,
+		IsFSMReady:   func() bool { return true },
+		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{keptID} },
+	}
+
+	orch, err := New(Config{Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	orch.reconcileFollower(tier)
+
+	if len(cm.deleted) != 1 || cm.deleted[0] != orphanID {
+		t.Errorf("expected orphanID deleted, got %v", cm.deleted)
+	}
+	if len(im.deleted) != 1 || im.deleted[0] != orphanID {
+		t.Errorf("expected orphan indexes deleted, got %v", im.deleted)
+	}
+}
+
+func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
+	t.Parallel()
+
+	orphanID := chunk.NewChunkID()
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: orphanID, Sealed: true},
+		},
+	}
+	im := &retentionFakeIndexManager{}
+
+	// FSM is ready but manifest is empty — all sealed chunks are orphans.
+	tier := &TierInstance{
+		TierID:       uuid.Must(uuid.NewV7()),
+		Chunks:       cm,
+		Indexes:      im,
+		IsFSMReady:   func() bool { return true },
+		ListManifest: func() []chunk.ChunkID { return nil },
+	}
+
+	orch, err := New(Config{Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	orch.reconcileFollower(tier)
+
+	if len(cm.deleted) != 1 || cm.deleted[0] != orphanID {
+		t.Errorf("expected orphan deleted when manifest empty but FSM ready, got %v", cm.deleted)
+	}
+}
+
+func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
+	t.Parallel()
+
+	cm := &retentionFakeChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: chunk.NewChunkID(), Sealed: true},
+		},
+	}
+
+	// IsFSMReady is nil — single-node/memory mode, no Raft group.
+	// Reconciliation should proceed (manifest is always authoritative locally).
+	tier := &TierInstance{
+		TierID:       uuid.Must(uuid.NewV7()),
+		Chunks:       cm,
+		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{chunk.NewChunkID()} },
+	}
+
+	orch, err := New(Config{Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer orch.Stop()
+
+	orch.reconcileFollower(tier)
+
+	// Nil HasRaftLeader means no Raft group — reconciliation should proceed
+	// (single-node mode, manifest is always authoritative).
+	if len(cm.deleted) != 1 {
+		t.Errorf("expected 1 deletion in single-node mode, got %d", len(cm.deleted))
+	}
+}

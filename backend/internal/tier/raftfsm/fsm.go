@@ -1,4 +1,4 @@
-package multiraft
+package raftfsm
 
 import (
 	"encoding/binary"
@@ -13,21 +13,21 @@ import (
 	hraft "github.com/hashicorp/raft"
 )
 
-// ChunkCommand identifies the type of chunk metadata mutation.
-type ChunkCommand byte
+// Command identifies the type of chunk metadata mutation.
+type Command byte
 
 const (
-	CmdCreateChunk   ChunkCommand = 1
-	CmdSealChunk     ChunkCommand = 2
-	CmdCompressChunk ChunkCommand = 3
-	CmdUploadChunk   ChunkCommand = 4
-	CmdDeleteChunk      ChunkCommand = 5
-	CmdRetentionPending ChunkCommand = 6
+	CmdCreateChunk   Command = 1
+	CmdSealChunk     Command = 2
+	CmdCompressChunk Command = 3
+	CmdUploadChunk   Command = 4
+	CmdDeleteChunk      Command = 5
+	CmdRetentionPending Command = 6
 )
 
-// ChunkEntry holds the full metadata for one chunk in the FSM.
+// Entry holds the full metadata for one chunk in the FSM.
 // This is the Raft-replicated equivalent of file.Manager.chunkMeta + cloudIdx entries.
-type ChunkEntry struct {
+type Entry struct {
 	ID          chunk.ChunkID
 	WriteStart  time.Time
 	WriteEnd    time.Time
@@ -55,7 +55,7 @@ type ChunkEntry struct {
 }
 
 // ToChunkMeta converts to the public chunk.ChunkMeta type.
-func (e *ChunkEntry) ToChunkMeta() chunk.ChunkMeta {
+func (e *Entry) ToChunkMeta() chunk.ChunkMeta {
 	return chunk.ChunkMeta{
 		ID:          e.ID,
 		WriteStart:  e.WriteStart,
@@ -75,26 +75,57 @@ func (e *ChunkEntry) ToChunkMeta() chunk.ChunkMeta {
 	}
 }
 
-// ChunkFSM is a Raft FSM that maintains chunk metadata for a single tier.
+// FSM is a Raft FSM that maintains chunk metadata for a single tier.
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
-type ChunkFSM struct {
-	mu     sync.RWMutex
-	chunks map[chunk.ChunkID]*ChunkEntry
+type FSM struct {
+	mu       sync.RWMutex
+	chunks   map[chunk.ChunkID]*Entry
+	ready    bool // true after first Apply or Restore
+	onDelete func(chunk.ChunkID)
 }
 
-// NewChunkFSM creates an empty chunk metadata FSM.
-func NewChunkFSM() *ChunkFSM {
-	return &ChunkFSM{
-		chunks: make(map[chunk.ChunkID]*ChunkEntry),
+// New creates an empty chunk metadata FSM.
+func New() *FSM {
+	return &FSM{
+		chunks: make(map[chunk.ChunkID]*Entry),
 	}
 }
 
-var _ hraft.FSM = (*ChunkFSM)(nil)
+var _ hraft.FSM = (*FSM)(nil)
+
+// Ready returns true after the FSM has applied at least one log entry or
+// restored from a snapshot. Before that, the FSM state may be incomplete
+// and should not be used for authoritative decisions (e.g. follower
+// reconciliation should not delete chunks based on a not-yet-ready manifest).
+func (f *FSM) Ready() bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.ready
+}
+
+// SetOnDelete registers a callback that fires after CmdDeleteChunk is
+// applied to this FSM and the chunk is removed from the in-memory map.
+// The callback runs OUTSIDE the FSM mutex so it can perform slow operations
+// (filesystem deletes, index removal) without blocking other Apply calls.
+//
+// The callback is fired exactly once per actual deletion — if the same
+// CmdDeleteChunk applies twice (e.g. log replay), the second call is a
+// no-op because the entry is already gone, and the callback is not fired.
+//
+// Used by the orchestrator to delete local chunk files when a delete
+// originating from any node propagates via Raft. The callback is expected
+// to use a path that does NOT re-announce the delete (e.g. SilentDeleter)
+// to avoid an infinite feedback loop.
+func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onDelete = fn
+}
 
 // ---------- Reads (local, no Raft) ----------
 
 // Get returns a copy of a chunk's metadata, or nil if not found.
-func (f *ChunkFSM) Get(id chunk.ChunkID) *ChunkEntry {
+func (f *FSM) Get(id chunk.ChunkID) *Entry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	e := f.chunks[id]
@@ -106,10 +137,10 @@ func (f *ChunkFSM) Get(id chunk.ChunkID) *ChunkEntry {
 }
 
 // List returns all chunk metadata, sorted by WriteStart ascending.
-func (f *ChunkFSM) List() []ChunkEntry {
+func (f *FSM) List() []Entry {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	out := make([]ChunkEntry, 0, len(f.chunks))
+	out := make([]Entry, 0, len(f.chunks))
 	for _, e := range f.chunks {
 		out = append(out, *e)
 	}
@@ -117,7 +148,7 @@ func (f *ChunkFSM) List() []ChunkEntry {
 }
 
 // Count returns the number of chunks.
-func (f *ChunkFSM) Count() int {
+func (f *FSM) Count() int {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return len(f.chunks)
@@ -127,67 +158,85 @@ func (f *ChunkFSM) Count() int {
 
 // Apply handles a Raft log entry. The log data is a command byte followed
 // by the command-specific payload.
-func (f *ChunkFSM) Apply(log *hraft.Log) any {
+//
+// The OnDelete callback (set via SetOnDelete) is invoked OUTSIDE the FSM
+// mutex so that potentially-slow filesystem operations don't block other
+// Apply calls. The callback fires exactly once per actual deletion.
+func (f *FSM) Apply(log *hraft.Log) any {
 	if len(log.Data) == 0 {
 		return errors.New("empty chunk FSM command")
 	}
-	cmd := ChunkCommand(log.Data[0])
+	cmd := Command(log.Data[0])
 	payload := log.Data[1:]
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	var (
+		result        any
+		deletedID     *chunk.ChunkID
+		onDeleteLocal func(chunk.ChunkID)
+	)
 
+	f.mu.Lock()
+	f.ready = true
 	switch cmd {
 	case CmdCreateChunk:
-		return f.applyCreate(payload)
+		result = f.applyCreate(payload)
 	case CmdSealChunk:
-		return f.applySeal(payload)
+		result = f.applySeal(payload)
 	case CmdCompressChunk:
-		return f.applyCompress(payload)
+		result = f.applyCompress(payload)
 	case CmdUploadChunk:
-		return f.applyUpload(payload)
+		result = f.applyUpload(payload)
 	case CmdDeleteChunk:
-		return f.applyDelete(payload)
+		deletedID, result = f.applyDelete(payload)
 	case CmdRetentionPending:
-		return f.applyRetentionPending(payload)
+		result = f.applyRetentionPending(payload)
 	default:
-		return fmt.Errorf("unknown chunk FSM command: %d", cmd)
+		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
+	onDeleteLocal = f.onDelete
+	f.mu.Unlock()
+
+	if deletedID != nil && onDeleteLocal != nil {
+		onDeleteLocal(*deletedID)
+	}
+
+	return result
 }
 
 // Snapshot returns a point-in-time snapshot of all chunk metadata.
-func (f *ChunkFSM) Snapshot() (hraft.FSMSnapshot, error) {
+func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	entries := make([]ChunkEntry, 0, len(f.chunks))
+	entries := make([]Entry, 0, len(f.chunks))
 	for _, e := range f.chunks {
 		entries = append(entries, *e)
 	}
-	return &chunkSnapshot{entries: entries}, nil
+	return &fsmSnapshot{entries: entries}, nil
 }
 
 // Restore replaces FSM state from a snapshot.
-func (f *ChunkFSM) Restore(rc io.ReadCloser) error {
+func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	entries, err := decodeChunkSnapshot(rc)
+	entries, err := decodeSnapshot(rc)
 	if err != nil {
 		return fmt.Errorf("restore chunk FSM: %w", err)
 	}
 
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.chunks = make(map[chunk.ChunkID]*ChunkEntry, len(entries))
+	f.chunks = make(map[chunk.ChunkID]*Entry, len(entries))
 	for i := range entries {
 		f.chunks[entries[i].ID] = &entries[i]
 	}
+	f.ready = true
 	return nil
 }
 
 // ---------- Command application ----------
 
 // CreateChunk: [16 bytes ChunkID][8 bytes WriteStart nanos][8 bytes IngestStart nanos][8 bytes SourceStart nanos]
-func (f *ChunkFSM) applyCreate(data []byte) error {
+func (f *FSM) applyCreate(data []byte) error {
 	if len(data) < 40 {
 		return fmt.Errorf("create chunk: payload too short (%d bytes)", len(data))
 	}
@@ -197,7 +246,7 @@ func (f *ChunkFSM) applyCreate(data []byte) error {
 	ingestStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[24:32]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 	sourceStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[32:40]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 
-	f.chunks[id] = &ChunkEntry{
+	f.chunks[id] = &Entry{
 		ID:          id,
 		WriteStart:  writeStart,
 		IngestStart: ingestStart,
@@ -207,7 +256,7 @@ func (f *ChunkFSM) applyCreate(data []byte) error {
 }
 
 // SealChunk: [16 bytes ChunkID][8 WriteEnd][8 RecordCount][8 Bytes][8 IngestEnd][8 SourceEnd]
-func (f *ChunkFSM) applySeal(data []byte) error {
+func (f *FSM) applySeal(data []byte) error {
 	if len(data) < 56 {
 		return fmt.Errorf("seal chunk: payload too short (%d bytes)", len(data))
 	}
@@ -228,7 +277,7 @@ func (f *ChunkFSM) applySeal(data []byte) error {
 }
 
 // CompressChunk: [16 bytes ChunkID][8 DiskBytes]
-func (f *ChunkFSM) applyCompress(data []byte) error {
+func (f *FSM) applyCompress(data []byte) error {
 	if len(data) < 24 {
 		return fmt.Errorf("compress chunk: payload too short (%d bytes)", len(data))
 	}
@@ -245,7 +294,7 @@ func (f *ChunkFSM) applyCompress(data []byte) error {
 }
 
 // UploadChunk: [16 ChunkID][8 DiskBytes][8 IngestIdxOff][8 IngestIdxSize][8 SourceIdxOff][8 SourceIdxSize][4 NumFrames]
-func (f *ChunkFSM) applyUpload(data []byte) error {
+func (f *FSM) applyUpload(data []byte) error {
 	if len(data) < 60 {
 		return fmt.Errorf("upload chunk: payload too short (%d bytes)", len(data))
 	}
@@ -266,19 +315,24 @@ func (f *ChunkFSM) applyUpload(data []byte) error {
 	return nil
 }
 
-// DeleteChunk: [16 bytes ChunkID]
-func (f *ChunkFSM) applyDelete(data []byte) error {
+// DeleteChunk: [16 bytes ChunkID]. Returns the deleted ID (or nil if the
+// chunk wasn't present, e.g. on a replayed delete) so Apply can fire the
+// onDelete callback exactly once per actual deletion.
+func (f *FSM) applyDelete(data []byte) (*chunk.ChunkID, error) {
 	if len(data) < 16 {
-		return fmt.Errorf("delete chunk: payload too short (%d bytes)", len(data))
+		return nil, fmt.Errorf("delete chunk: payload too short (%d bytes)", len(data))
 	}
 	var id chunk.ChunkID
 	copy(id[:], data[:16])
+	if _, existed := f.chunks[id]; !existed {
+		return nil, nil
+	}
 	delete(f.chunks, id)
-	return nil
+	return &id, nil
 }
 
 // RetentionPending: [16 bytes ChunkID]
-func (f *ChunkFSM) applyRetentionPending(data []byte) error {
+func (f *FSM) applyRetentionPending(data []byte) error {
 	if len(data) < 16 {
 		return fmt.Errorf("retention pending: payload too short (%d bytes)", len(data))
 	}
@@ -357,13 +411,13 @@ func MarshalRetentionPending(id chunk.ChunkID) []byte {
 
 // ---------- Snapshot ----------
 
-type chunkSnapshot struct {
-	entries []ChunkEntry
+type fsmSnapshot struct {
+	entries []Entry
 }
 
-func (s *chunkSnapshot) Persist(sink hraft.SnapshotSink) error {
+func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 	for i := range s.entries {
-		if err := encodeChunkEntry(sink, &s.entries[i]); err != nil {
+		if err := encodeEntry(sink, &s.entries[i]); err != nil {
 			_ = sink.Cancel()
 			return err
 		}
@@ -371,7 +425,7 @@ func (s *chunkSnapshot) Persist(sink hraft.SnapshotSink) error {
 	return sink.Close()
 }
 
-func (s *chunkSnapshot) Release() {}
+func (s *fsmSnapshot) Release() {}
 
 // Snapshot encoding: each entry is a fixed-size binary record.
 // Layout per entry (168 bytes):
@@ -393,10 +447,10 @@ func (s *chunkSnapshot) Release() {}
 //   2   Flags (bit 0=sealed, 1=compressed, 2=cloudBacked, 3=archived)
 // Total: 126 bytes (keeping it compact)
 
-const chunkEntrySize = 126
+const entrySize = 126
 
-func encodeChunkEntry(w io.Writer, e *ChunkEntry) error {
-	var buf [chunkEntrySize]byte
+func encodeEntry(w io.Writer, e *Entry) error {
+	var buf [entrySize]byte
 	copy(buf[0:16], e.ID[:])
 	binary.BigEndian.PutUint64(buf[16:24], uint64(e.WriteStart.UnixNano()))
 	binary.BigEndian.PutUint64(buf[24:32], uint64(e.WriteEnd.UnixNano()))
@@ -433,9 +487,9 @@ func encodeChunkEntry(w io.Writer, e *ChunkEntry) error {
 	return err
 }
 
-func decodeChunkSnapshot(r io.Reader) ([]ChunkEntry, error) {
-	var entries []ChunkEntry
-	var buf [chunkEntrySize]byte
+func decodeSnapshot(r io.Reader) ([]Entry, error) {
+	var entries []Entry
+	var buf [entrySize]byte
 	for {
 		_, err := io.ReadFull(r, buf[:])
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
@@ -447,7 +501,7 @@ func decodeChunkSnapshot(r io.Reader) ([]ChunkEntry, error) {
 		var id chunk.ChunkID
 		copy(id[:], buf[0:16])
 		flags := binary.BigEndian.Uint16(buf[124:126])
-		entries = append(entries, ChunkEntry{
+		entries = append(entries, Entry{
 			ID:              id,
 			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))), //nolint:gosec // G115: round-trip
 			WriteEnd:        time.Unix(0, int64(binary.BigEndian.Uint64(buf[24:32]))), //nolint:gosec // G115: round-trip

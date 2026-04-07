@@ -2,18 +2,23 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
-	"gastrolog/internal/multiraft"
+	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/raftgroup"
+	tierfsm "gastrolog/internal/tier/raftfsm"
 
 	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
@@ -386,6 +391,9 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)
 
+	// Stop the per-tier leader loop and clear its desired-members entry.
+	o.tierLeaders.Stop(tier.TierID)
+
 	// Remove tier from vault's tier list.
 	vault.Tiers = append(vault.Tiers[:idx], vault.Tiers[idx+1:]...)
 
@@ -465,8 +473,6 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
 			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
-			raftCB := o.wireTierRaftGroup(t.Chunks, *tierCfg, nscs, factories)
-			t.applyRaftCallbacks(raftCB)
 			ti = t
 			break
 		}
@@ -668,6 +674,12 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	// Map TierConfig.Type to factory name.
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 
+	// Create the tier Raft group BEFORE the chunk manager. Group creation is
+	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
+	// existing chunks). Starting the Raft group early gives it time to elect
+	// a leader and catch up while the chunk manager is loading.
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+
 	// Build params from tier config.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
 
@@ -707,8 +719,8 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		return nil, err
 	}
 
-	// Wire Raft-backed metadata announcer if a GroupManager is available.
-	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories)
+	// Wire the Raft announcer now that both the group and chunk manager exist.
+	setTierRaftAnnouncer(cm, applier, o.logger)
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
@@ -718,6 +730,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 			Chunks: cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
+		wireTierFSMOnDelete(tierGroup, cm, nil, o.logger)
 		return ti, nil
 	}
 
@@ -755,6 +768,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
+	wireTierFSMOnDelete(tierGroup, cm, im, o.logger)
 	return ti, nil
 }
 
@@ -766,6 +780,10 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 	if fs == nil {
 		return nil, fmt.Errorf("file storage %s not found", storageID)
 	}
+
+	// Create the tier Raft group BEFORE the chunk manager — same rationale
+	// as buildTierInstance: start elections while chunk loading is in progress.
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
@@ -802,6 +820,9 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		return nil, err
 	}
 
+	// Wire Raft announcer now that chunk manager exists.
+	setTierRaftAnnouncer(cm, applier, o.logger)
+
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
 	if !ok {
@@ -828,10 +849,6 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		processor.SetIndexBuilders([]chunk.ChunkIndexBuilder{im.BuildAdapter()})
 	}
 
-	// Same-node secondaries share the primary's tier Raft group.
-	// Wire the manifest callbacks so they reconcile like any other follower.
-	raftCB := o.wireTierRaftGroup(cm, tierCfg, cfg.NodeStorageConfigs, factories)
-
 	ti := &TierInstance{
 		TierID:  tierCfg.ID,
 		Type:    string(tierCfg.Type),
@@ -840,6 +857,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
+	wireTierFSMOnDelete(tierGroup, cm, im, o.logger)
 	return ti, nil
 }
 
@@ -874,61 +892,114 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []config.RotationPolicy
 	return nil
 }
 
-// mapTierTypeToFactory maps a TierType to the factory name used in Factories maps.
-// wireTierRaftGroup creates a tier Raft group (or reuses existing) and injects
-// a RaftAnnouncer into the chunk manager so chunk lifecycle events replicate to
-// all nodes via consensus.
+// tierRaftCallbacks holds the callbacks returned by createTierRaftGroup.
 type tierRaftCallbacks struct {
 	hasLeader       func() bool
 	isLeader        func() bool
+	isFSMReady      func() bool
 	applyDelete     func(id chunk.ChunkID) error
 	applyRetPending func(id chunk.ChunkID) error
 	listChunks      func() []chunk.ChunkID
 	listRetPending  func() []chunk.ChunkID
 }
 
-func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) tierRaftCallbacks {
+// createTierRaftGroup creates or retrieves the tier Raft group for a tier.
+// This is independent of the chunk manager — it only needs the tier config
+// and group manager. Call this BEFORE creating the chunk manager so the Raft
+// group starts elections early (while chunk loading is still in progress).
+func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
-		return tierRaftCallbacks{}
-	}
-	setter, ok := cm.(chunk.AnnouncerSetter)
-	if !ok {
-		return tierRaftCallbacks{}
+		return nil, nil, tierRaftCallbacks{}
 	}
 
 	groupID := tierCfg.ID.String()
+	members := o.buildTierRaftMembers(tierCfg, nscs, factories)
+	// Do not create the tier Raft group until placements are COMPLETE.
+	// A partial member list poisons the group's boltdb with a wrong-size
+	// initial configuration, and we can't recover from that on restart
+	// without losing data. If placements are incomplete, return now and
+	// wait for a subsequent handleTierPut to fire once placements finish.
+	//
+	// We gate on len(members) >= ReplicationFactor rather than just
+	// "local node is in members" because even a correct local view isn't
+	// enough — all assigned members must be present in the seed list
+	// for symmetric seeding to produce a consistent initial configuration
+	// across every node.
+	expectedMembers := int(tierCfg.ReplicationFactor)
+	if expectedMembers <= 0 {
+		expectedMembers = 1
+	}
+	if len(members) < expectedMembers {
+		o.logger.Debug("tier raft group: placements incomplete, deferring creation",
+			"tier", tierCfg.ID,
+			"have", len(members),
+			"want", expectedMembers)
+		return nil, nil, tierRaftCallbacks{}
+	}
+	// Only assigned members participate in the tier Raft group. If this
+	// node isn't in the (complete) member list, skip group creation entirely.
+	isMember := false
+	for _, srv := range members {
+		if string(srv.ID) == o.localNodeID {
+			isMember = true
+			break
+		}
+	}
+	if !isMember {
+		return nil, nil, tierRaftCallbacks{}
+	}
+
 	g := factories.GroupManager.GetGroup(groupID)
 	if g == nil {
-		members := o.buildTierRaftMembers(tierCfg, nscs, factories)
-		leaderNodeID := tierCfg.LeaderNodeID(nscs)
-		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
+		// Symmetric seeding: every assigned node calls CreateGroup with the
+		// same member list. Raft elects a leader through normal election. No
+		// node holds a special "bootstrap" role. The seed list is only used
+		// when the local boltdb log is empty (first start of a brand-new tier);
+		// on restart, the existing log already contains the configuration.
 		var err error
-		g, err = factories.GroupManager.CreateGroup(multiraft.GroupConfig{
-			GroupID:   groupID,
-			FSM:       multiraft.NewChunkFSM(),
-			Bootstrap: isLeader,
-			Members:   members,
+		g, err = factories.GroupManager.CreateGroup(raftgroup.GroupConfig{
+			GroupID:     groupID,
+			FSM:         tierfsm.New(),
+			SeedMembers: members,
 		})
 		if err != nil {
 			o.logger.Warn("failed to create tier raft group",
 				"tier", tierCfg.ID, "error", err)
-			return tierRaftCallbacks{}
+			return nil, nil, tierRaftCallbacks{}
 		}
 	}
-	setter.SetAnnouncer(multiraft.NewRaftAnnouncer(g.Raft, cluster.ReplicationTimeout, o.logger))
+
+	// Update the desired-members view and ensure a leader loop is running
+	// for this tier. The loop runs on every assigned node, but only the
+	// node currently holding tier-Raft leadership runs the reconcile
+	// callback (after raft.Barrier returns). Idempotent on re-call.
+	o.tierLeaders.SetDesiredMembers(tierCfg.ID, members)
+	o.tierLeaders.Start(tierCfg.ID, g)
 
 	r := g.Raft
-	fsm, _ := g.FSM.(*multiraft.ChunkFSM)
+	fsm, _ := g.FSM.(*tierfsm.FSM)
 	timeout := cluster.ReplicationTimeout
-	return tierRaftCallbacks{
-		hasLeader: func() bool { return r.Leader() != "" },
-		isLeader:  func() bool { return r.State() == hraft.Leader },
+
+	// Create a forwarder that applies locally or forwards to the tier Raft
+	// leader. This decouples the config placement leader from the tier Raft
+	// leader — they may be on different nodes after a cluster restart.
+	var applier tierfsm.Applier
+	if factories.PeerConns != nil {
+		applier = cluster.NewTierApplyForwarder(r, groupID, factories.PeerConns, timeout)
+	} else {
+		// Single-node mode: apply directly, no forwarding.
+		applier = &directApplier{raft: r, timeout: timeout}
+	}
+
+	return g, applier, tierRaftCallbacks{
+		hasLeader:  func() bool { return r.Leader() != "" },
+		isLeader:   func() bool { return r.State() == hraft.Leader },
+		isFSMReady: func() bool { return fsm != nil && fsm.Ready() },
 		applyDelete: func(id chunk.ChunkID) error {
-			f := r.Apply(multiraft.MarshalDeleteChunk(id), timeout)
-			return f.Error()
+			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
-			return r.Apply(multiraft.MarshalRetentionPending(id), timeout).Error()
+			return applier.Apply(tierfsm.MarshalRetentionPending(id))
 		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {
@@ -956,19 +1027,104 @@ func (o *Orchestrator) wireTierRaftGroup(cm chunk.ChunkManager, tierCfg config.T
 	}
 }
 
+// setTierRaftAnnouncer wires the Raft announcer to a chunk manager after both
+// the Raft group and chunk manager have been created. The applier handles
+// routing to the tier Raft leader transparently.
+func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, logger *slog.Logger) {
+	if applier == nil {
+		return
+	}
+	setter, ok := cm.(chunk.AnnouncerSetter)
+	if !ok {
+		return
+	}
+	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, logger))
+}
+
+// wireTierFSMOnDelete sets up the tier FSM's OnDelete callback so that
+// CmdDeleteChunk applied via Raft on this node deletes the local chunk
+// files (and indexes if available). The callback uses chunk.SilentDeleter
+// to avoid the announcer feedback loop — re-announcing the delete that
+// just arrived from Raft would cause infinite re-application.
+//
+// Safe to call with nil group, nil cm, or a chunk manager that doesn't
+// implement SilentDeleter (e.g. memory tiers): the callback is simply not
+// wired in those cases.
+//
+// IMPORTANT: this callback acquires the chunk manager's m.mu via
+// DeleteSilent. For the FSM apply goroutine to do this safely, no other
+// goroutine may hold m.mu while waiting for a Raft round-trip (e.g. via
+// the Announcer). The chunk.file.Manager's Seal/Append/Compress paths
+// enforce this by releasing m.mu before calling the announcer; if a new
+// path is added that holds the mutex during an announcer call, this
+// callback will deadlock with it.
+func wireTierFSMOnDelete(g *raftgroup.Group, cm chunk.ChunkManager, im index.IndexManager, logger *slog.Logger) {
+	if g == nil || cm == nil {
+		return
+	}
+	fsm, ok := g.FSM.(*tierfsm.FSM)
+	if !ok {
+		return
+	}
+	silent, ok := cm.(chunk.SilentDeleter)
+	if !ok {
+		return
+	}
+	fsm.SetOnDelete(func(id chunk.ChunkID) {
+		// Delete indexes first (they're metadata about the chunk).
+		// ErrChunkNotFound-equivalent errors are expected during log replay
+		// on a node that doesn't have the chunk locally — log at debug only.
+		if im != nil {
+			if err := im.DeleteIndexes(id); err != nil && logger != nil {
+				logger.Debug("FSM onDelete: DeleteIndexes failed",
+					"chunk", id, "error", err)
+			}
+		}
+		// Then delete the chunk files. DeleteSilent skips the announcer.
+		// ErrChunkNotFound / ErrActiveChunk are benign "nothing to delete"
+		// cases (log replay on a node without the chunk, or a forwarded
+		// chunk still being written). Debug-level only.
+		if err := silent.DeleteSilent(id); err != nil && logger != nil {
+			if errors.Is(err, chunk.ErrChunkNotFound) || errors.Is(err, chunk.ErrActiveChunk) {
+				logger.Debug("FSM onDelete: DeleteSilent skipped",
+					"chunk", id, "reason", err)
+			} else {
+				logger.Warn("FSM onDelete: DeleteSilent failed",
+					"chunk", id, "error", err)
+			}
+		}
+	})
+}
+
+// directApplier applies tier FSM commands locally via raft.Apply. Used in
+// single-node mode where no forwarding is needed.
+type directApplier struct {
+	raft    *hraft.Raft
+	timeout time.Duration
+}
+
+func (a *directApplier) Apply(data []byte) error {
+	return a.raft.Apply(data, a.timeout).Error()
+}
+
 // buildTierRaftMembers builds the Raft member list from tier placement.
+// Returns nil if the tier has no placement leader assigned yet — callers
+// must treat an empty result as "not ready to create the tier Raft group",
+// NOT as "single-member group with the local node". Falling back to the
+// local node when placements are incomplete is the bug that poisoned the
+// tier Raft boltdbs with single-member seeds during earlier iterations.
 func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil {
 		return nil
 	}
-	var members []hraft.Server
-	nodeID := tierCfg.LeaderNodeID(nscs)
-	if nodeID == "" {
-		nodeID = o.localNodeID
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	if leaderNodeID == "" {
+		return nil // tier has no placement leader yet
 	}
-	if addr, ok := factories.NodeAddressResolver(nodeID); ok {
+	var members []hraft.Server
+	if addr, ok := factories.NodeAddressResolver(leaderNodeID); ok {
 		members = append(members, hraft.Server{
-			ID:      hraft.ServerID(nodeID),
+			ID:      hraft.ServerID(leaderNodeID),
 			Address: hraft.ServerAddress(addr),
 		})
 	}

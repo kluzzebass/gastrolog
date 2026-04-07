@@ -1,4 +1,4 @@
-package multiraft
+package raftfsm
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/multiraft"
+	"gastrolog/internal/raftgroup"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -15,8 +17,10 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+const bufSize = 1 << 20
+
 // TestAnnouncerReplicatesMetadata verifies the full loop:
-// file.Manager (with Announcer) → Raft.Apply → ChunkFSM on all nodes.
+// file.Manager (with Announcer) → Raft.Apply → FSM on all nodes.
 func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	// Not parallel — Raft instances need clean sequential lifecycle.
 
@@ -25,18 +29,18 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 
 	// Set up transport + gRPC for each node.
 	type testNode struct {
-		transport *Transport[string]
+		transport *multiraft.Transport[string]
 		server    *grpc.Server
 		lis       *bufconn.Listener
-		manager   *GroupManager
-		fsm       *ChunkFSM
+		manager   *raftgroup.GroupManager
+		fsm       *FSM
 	}
 	nodes := make([]testNode, nodeCount)
 
 	for i := range nodeCount {
 		lis := bufconn.Listen(bufSize)
 		srv := grpc.NewServer()
-		tp := New[string](
+		tp := multiraft.New(
 			hraft.ServerAddress(nodeIDs[i]),
 			[]grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())},
 			func(s string) []byte { return []byte(s) },
@@ -62,7 +66,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		})
 	}
 
-	// Create group managers and a 3-node Raft group with ChunkFSM.
+	// Create group managers and a 3-node Raft group with FSM.
 	members := make([]hraft.Server, nodeCount)
 	for i := range nodeCount {
 		members[i] = hraft.Server{
@@ -72,17 +76,18 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	}
 
 	for i := range nodeCount {
-		nodes[i].manager = NewGroupManager(GroupManagerConfig{
+		nodes[i].manager = raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
 			Transport: nodes[i].transport,
 			NodeID:    nodeIDs[i],
 			BaseDir:   t.TempDir(),
 		})
-		nodes[i].fsm = NewChunkFSM()
-		_, err := nodes[i].manager.CreateGroup(GroupConfig{
-			GroupID:   "tier-test",
-			FSM:       nodes[i].fsm,
-			Bootstrap: i == 0,
-			Members:   members,
+		nodes[i].fsm = New()
+		// Symmetric seeding: every node passes the same member list. Raft
+		// elects a leader through normal election. No node has a special role.
+		_, err := nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
+			GroupID:     "tier-test",
+			FSM:         nodes[i].fsm,
+			SeedMembers: members,
 		})
 		if err != nil {
 			t.Fatalf("node %d CreateGroup: %v", i, err)
@@ -98,7 +103,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	})
 
 	// Wait for leader.
-	var leaderGroup *Group
+	var leaderGroup *raftgroup.Group
 	for _, n := range nodes {
 		g := n.manager.GetGroup("tier-test")
 		waitForLeader(t, g, 5*time.Second)
@@ -110,8 +115,9 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 		t.Fatal("no leader found")
 	}
 
-	// Create a file.Manager with a RaftAnnouncer on the leader node.
-	announcer := NewRaftAnnouncer(leaderGroup.Raft, 5*time.Second, nil)
+	// Create a file.Manager with an Announcer on the leader node.
+	applier := &testApplier{raft: leaderGroup.Raft, timeout: 5 * time.Second}
+	announcer := NewAnnouncer(applier, nil)
 	dir := t.TempDir()
 	mgr, err := chunkfile.NewManager(chunkfile.Config{
 		Dir:       dir,
@@ -206,4 +212,27 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 			t.Errorf("node %d: chunk should be deleted from FSM", i)
 		}
 	}
+}
+
+// testApplier applies directly via raft.Apply — used in tests where the
+// node calling Apply is always the Raft leader.
+type testApplier struct {
+	raft    *hraft.Raft
+	timeout time.Duration
+}
+
+func (a *testApplier) Apply(data []byte) error {
+	return a.raft.Apply(data, a.timeout).Error()
+}
+
+func waitForLeader(t *testing.T, g *raftgroup.Group, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if addr, _ := g.Raft.LeaderWithID(); addr != "" {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for leader")
 }
