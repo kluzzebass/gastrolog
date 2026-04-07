@@ -4,12 +4,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
+	"gastrolog/internal/index/idxmmap"
 )
 
 const (
@@ -304,14 +304,25 @@ func readPositions(data []byte, blobBase, blobOff, count uint32) []uint64 {
 
 // Load functions
 
-// LoadIndex loads the JSON index from disk.
+// loadResult bundles the multi-value return from decodeIndex so it can flow
+// through the single-value generic in idxmmap.Load.
+type loadResult struct {
+	pathEntries []index.JSONPathIndexEntry
+	pvEntries   []index.JSONPVIndexEntry
+	status      index.JSONIndexStatus
+}
+
+// LoadIndex loads the JSON index from disk via mmap. The decoder copies
+// strings via `string(data[a:b])` and primitive values via
+// binary.LittleEndian.*, so the mmap region is safe to release immediately
+// on return — no heap allocation for the raw file bytes.
+// See gastrolog-3rvws.
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.JSONPathIndexEntry, []index.JSONPVIndexEntry, index.JSONIndexStatus, error) {
-	path := IndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, nil, index.JSONComplete, fmt.Errorf("read json index: %w", err)
-	}
-	return decodeIndex(data)
+	res, err := idxmmap.Load(IndexPath(dir, chunkID), func(data []byte) (loadResult, error) {
+		p, pv, s, derr := decodeIndex(data)
+		return loadResult{pathEntries: p, pvEntries: pv, status: s}, derr
+	})
+	return res.pathEntries, res.pvEntries, res.status, err
 }
 
 // Path helpers

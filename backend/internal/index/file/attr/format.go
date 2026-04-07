@@ -3,13 +3,13 @@ package attr
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
+	"gastrolog/internal/index/idxmmap"
 	"gastrolog/internal/index/inverted"
 )
 
@@ -105,33 +105,22 @@ func decodeKVIndex(data []byte) ([]index.AttrKVIndexEntry, error) {
 	})
 }
 
-// Load functions
+// Load functions — all use idxmmap.Load to avoid slurping the index file
+// into a heap-allocated []byte. The decoders create strings via
+// `string(data[a:b])` (which copies) and primitive values via
+// binary.LittleEndian.* (which copies), so the mmap region is safe to
+// release immediately on return. See gastrolog-3rvws.
 
 func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrKeyIndexEntry, error) {
-	path := KeyIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read attr key index: %w", err)
-	}
-	return decodeKeyIndex(data)
+	return idxmmap.Load(KeyIndexPath(dir, chunkID), decodeKeyIndex)
 }
 
 func LoadValueIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrValueIndexEntry, error) {
-	path := ValueIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read attr value index: %w", err)
-	}
-	return decodeValueIndex(data)
+	return idxmmap.Load(ValueIndexPath(dir, chunkID), decodeValueIndex)
 }
 
 func LoadKVIndex(dir string, chunkID chunk.ChunkID) ([]index.AttrKVIndexEntry, error) {
-	path := KVIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read attr kv index: %w", err)
-	}
-	return decodeKVIndex(data)
+	return idxmmap.Load(KVIndexPath(dir, chunkID), decodeKVIndex)
 }
 
 // Path helpers

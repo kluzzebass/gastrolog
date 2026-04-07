@@ -3,12 +3,12 @@ package kv
 import (
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
+	"gastrolog/internal/index/idxmmap"
 	"gastrolog/internal/index/inverted"
 )
 
@@ -181,33 +181,39 @@ func decodeStatus(b byte) (index.KVIndexStatus, error) {
 	}
 }
 
-// Load functions
+// Load functions — all use idxmmap.Load to avoid slurping the index file
+// into a heap-allocated []byte. The decoders return a 3-tuple (entries,
+// status, error); the status is captured via closure since the generic
+// helper only handles single-value returns. See gastrolog-3rvws.
 
 func LoadKeyIndex(dir string, chunkID chunk.ChunkID) ([]index.KVKeyIndexEntry, index.KVIndexStatus, error) {
-	path := KeyIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, index.KVComplete, fmt.Errorf("read kv key index: %w", err)
-	}
-	return decodeKeyIndex(data)
+	status := index.KVComplete
+	entries, err := idxmmap.Load(KeyIndexPath(dir, chunkID), func(data []byte) ([]index.KVKeyIndexEntry, error) {
+		e, s, err := decodeKeyIndex(data)
+		status = s
+		return e, err
+	})
+	return entries, status, err
 }
 
 func LoadValueIndex(dir string, chunkID chunk.ChunkID) ([]index.KVValueIndexEntry, index.KVIndexStatus, error) {
-	path := ValueIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, index.KVComplete, fmt.Errorf("read kv value index: %w", err)
-	}
-	return decodeValueIndex(data)
+	status := index.KVComplete
+	entries, err := idxmmap.Load(ValueIndexPath(dir, chunkID), func(data []byte) ([]index.KVValueIndexEntry, error) {
+		e, s, err := decodeValueIndex(data)
+		status = s
+		return e, err
+	})
+	return entries, status, err
 }
 
 func LoadKVIndex(dir string, chunkID chunk.ChunkID) ([]index.KVIndexEntry, index.KVIndexStatus, error) {
-	path := KVIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, index.KVComplete, fmt.Errorf("read kv index: %w", err)
-	}
-	return decodeKVIndex(data)
+	status := index.KVComplete
+	entries, err := idxmmap.Load(KVIndexPath(dir, chunkID), func(data []byte) ([]index.KVIndexEntry, error) {
+		e, s, err := decodeKVIndex(data)
+		status = s
+		return e, err
+	})
+	return entries, status, err
 }
 
 // Path helpers
