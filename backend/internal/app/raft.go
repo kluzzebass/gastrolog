@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"gastrolog/internal/cluster"
@@ -63,6 +64,51 @@ func (s *raftConfigStore) WaitForLeader(ctx context.Context, logger *slog.Logger
 			logger.Info("still waiting for cluster quorum (start 2+ nodes)")
 		case <-ticker.C:
 			if addr, _ := s.raft.LeaderWithID(); addr != "" {
+				return nil
+			}
+		}
+	}
+}
+
+// WaitForFSMCatchup blocks until the local config FSM reflects the cluster's
+// latest committed state. This is a prerequisite for reading tier placements
+// from the FSM at startup — without it, hraft.NewRaft leaves the FSM at the
+// snapshot level, and post-snapshot committed entries (e.g. placement
+// assignments) are not yet applied.
+//
+// Behaviour by role:
+//   - Leader: calls raft.Barrier(), which appends a no-op log entry and
+//     waits for it to commit + apply locally. Guarantees the leader's FSM
+//     is current to its own last-committed index at the moment of the call.
+//   - Follower: polls applied_index vs commit_index from Stats() until
+//     they match. Commit index advances as the leader sends AppendEntries,
+//     so we're effectively waiting for the next few heartbeats to arrive.
+//
+// Assumes a leader has already been elected (call WaitForLeader first).
+func (s *raftConfigStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
+	if s.raft.State() == hraft.Leader {
+		return s.raft.Barrier(timeout).Error()
+	}
+
+	deadline := time.Now().Add(timeout)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+			if time.Now().After(deadline) {
+				return errors.New("timed out waiting for FSM catchup")
+			}
+			stats := s.raft.Stats()
+			commit, err1 := strconv.ParseUint(stats["commit_index"], 10, 64)
+			applied, err2 := strconv.ParseUint(stats["applied_index"], 10, 64)
+			if err1 != nil || err2 != nil {
+				continue
+			}
+			if applied >= commit && commit > 0 {
+				logger.Debug("fsm caught up", "applied", applied, "commit", commit)
 				return nil
 			}
 		}

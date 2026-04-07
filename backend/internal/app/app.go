@@ -570,17 +570,23 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	}
 
 	if cfg.ConfigType == "raft" {
+		// Wait for a leader AND for the local FSM to catch up to the cluster's
+		// latest committed state before reading anything from it. hraft's
+		// NewRaft returns with the FSM at the snapshot level; post-snapshot
+		// committed entries (tier placements, NSCs, etc.) only become visible
+		// after either a Barrier on the leader or a few AppendEntries rounds
+		// on a follower. Without this wait, the orchestrator reads stale
+		// state and creates tier Raft groups with incomplete member lists.
+		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
+			return nil, false, err
+		}
+		if err := waitForFSMCatchup(ctx, cfgStore, 10*time.Second, logger); err != nil {
+			return nil, false, err
+		}
 		localCfg, _ := cfgStore.Load(ctx)
 		ss, _ := cfgStore.LoadServerSettings(ctx)
 		if localCfg != nil && ss.Auth.JWTSecret != "" {
 			return localCfg, true, nil
-		}
-		// Settings not in local FSM — need a Raft write, which requires a leader.
-		// Wait for leader election before proceeding. On a fresh single-node
-		// bootstrap the leader is already elected; on multi-node restart the
-		// election needs time to complete.
-		if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
-			return nil, false, err
 		}
 	}
 
@@ -730,6 +736,25 @@ func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logg
 		return err
 	}
 	logger.Info("cluster leader found")
+	return nil
+}
+
+// waitForFSMCatchup blocks until the local config FSM reflects the cluster's
+// committed state. No-op for non-raft stores.
+func waitForFSMCatchup(ctx context.Context, cfgStore config.Store, timeout time.Duration, logger *slog.Logger) error {
+	inner := cfgStore
+	if p, ok := cfgStore.(*config.StoreProxy); ok {
+		inner = p.Inner()
+	}
+	rcs, ok := inner.(*raftConfigStore)
+	if !ok {
+		return nil
+	}
+	logger.Info("waiting for config FSM to catch up to committed state")
+	if err := rcs.WaitForFSMCatchup(ctx, timeout, logger); err != nil {
+		return fmt.Errorf("wait for FSM catchup: %w", err)
+	}
+	logger.Info("config FSM caught up")
 	return nil
 }
 

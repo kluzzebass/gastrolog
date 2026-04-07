@@ -913,8 +913,30 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 
 	groupID := tierCfg.ID.String()
 	members := o.buildTierRaftMembers(tierCfg, nscs, factories)
+	// Do not create the tier Raft group until placements are COMPLETE.
+	// A partial member list poisons the group's boltdb with a wrong-size
+	// initial configuration, and we can't recover from that on restart
+	// without losing data. If placements are incomplete, return now and
+	// wait for a subsequent handleTierPut to fire once placements finish.
+	//
+	// We gate on len(members) >= ReplicationFactor rather than just
+	// "local node is in members" because even a correct local view isn't
+	// enough — all assigned members must be present in the seed list
+	// for symmetric seeding to produce a consistent initial configuration
+	// across every node.
+	expectedMembers := int(tierCfg.ReplicationFactor)
+	if expectedMembers <= 0 {
+		expectedMembers = 1
+	}
+	if len(members) < expectedMembers {
+		o.logger.Debug("tier raft group: placements incomplete, deferring creation",
+			"tier", tierCfg.ID,
+			"have", len(members),
+			"want", expectedMembers)
+		return nil, nil, tierRaftCallbacks{}
+	}
 	// Only assigned members participate in the tier Raft group. If this
-	// node isn't in the member list, skip group creation entirely.
+	// node isn't in the (complete) member list, skip group creation entirely.
 	isMember := false
 	for _, srv := range members {
 		if string(srv.ID) == o.localNodeID {
@@ -1071,18 +1093,23 @@ func (a *directApplier) Apply(data []byte) error {
 }
 
 // buildTierRaftMembers builds the Raft member list from tier placement.
+// Returns nil if the tier has no placement leader assigned yet — callers
+// must treat an empty result as "not ready to create the tier Raft group",
+// NOT as "single-member group with the local node". Falling back to the
+// local node when placements are incomplete is the bug that poisoned the
+// tier Raft boltdbs with single-member seeds during earlier iterations.
 func (o *Orchestrator) buildTierRaftMembers(tierCfg config.TierConfig, nscs []config.NodeStorageConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil {
 		return nil
 	}
-	var members []hraft.Server
-	nodeID := tierCfg.LeaderNodeID(nscs)
-	if nodeID == "" {
-		nodeID = o.localNodeID
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	if leaderNodeID == "" {
+		return nil // tier has no placement leader yet
 	}
-	if addr, ok := factories.NodeAddressResolver(nodeID); ok {
+	var members []hraft.Server
+	if addr, ok := factories.NodeAddressResolver(leaderNodeID); ok {
 		members = append(members, hraft.Server{
-			ID:      hraft.ServerID(nodeID),
+			ID:      hraft.ServerID(leaderNodeID),
 			Address: hraft.ServerAddress(addr),
 		})
 	}
