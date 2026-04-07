@@ -381,15 +381,6 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		return
 	}
 
-	leaderNodeID := tierCfg.LeaderNodeID(nscs)
-	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
-
-	// Only react to placement changes. If the tier belongs here and the vault
-	// is already registered, or if the tier doesn't belong here and the vault
-	// isn't registered, there's nothing to do. The key question is: did this
-	// tier JUST arrive or JUST leave this node?
-	tierBelongsHere := leaderNodeID == "" || leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
-
 	// Each tier owns its vault reference directly.
 	if tierCfg.VaultID == (uuid.UUID{}) {
 		return // tier not assigned to a vault
@@ -400,18 +391,20 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		return
 	}
 
-	if tierBelongsHere {
-		d.rebuildVaultIfTierMissing(ctx, *v, tierID)
-	} else if len(tierCfg.Placements) >= int(tierCfg.ReplicationFactor) {
-		// Only remove when placements are fully assigned. During initial
-		// setup, the placement manager assigns leader first, then followers
-		// in a second PutTier. We must not remove a tier instance based on
-		// a partially-assigned placement state.
-		existing := d.orch.FindLocalTierExported(v.ID, tierID)
-		if existing != nil {
-			d.orch.RemoveTierFromVault(v.ID, tierID)
-		}
-	}
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+
+	// Only act on tier membership once placements are fully assigned. During
+	// cluster-init the placement manager assigns placements one-at-a-time,
+	// each firing its own CmdPutTier. Building the tier locally on a partial
+	// placement state is wrong for two reasons: (1) we can't reliably answer
+	// "does this tier belong here" with incomplete placements, and (2) it
+	// would create the chunk manager (and tier Raft group) with a wrong-size
+	// member list, which then persists in boltdb.
+	//
+	// Policy reloads (rotation/retention) still run below because they are
+	// independent of placement state.
+	d.applyTierMembershipChange(ctx, tierCfg, *v, tierID, leaderNodeID, followerNodeIDs)
 
 	// Tier Raft group membership is handled by the per-group leader loop
 	// (see raftgroup.LeaderLoop). The placement leader does not push
@@ -434,6 +427,33 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	// without waiting for the 15-second ticker.
 	if d.placementTrigger != nil {
 		d.placementTrigger()
+	}
+}
+
+// applyTierMembershipChange decides whether the tier belongs here based on
+// the (complete) placement state, and either adds/rebuilds it locally or
+// removes it if it no longer belongs. Deferred entirely when placements are
+// incomplete — the next CmdPutTier from the placement manager will retry.
+func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *config.TierConfig, v config.VaultConfig, tierID uuid.UUID, leaderNodeID string, followerNodeIDs []string) {
+	expected := int(tierCfg.ReplicationFactor)
+	placementsComplete := expected <= 0 || len(tierCfg.Placements) >= expected
+	if !placementsComplete {
+		d.logger.Debug("dispatch: tier placements incomplete, deferring rebuild",
+			"tier", tierID,
+			"have", len(tierCfg.Placements),
+			"want", expected)
+		return
+	}
+
+	tierBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
+	if tierBelongsHere {
+		d.rebuildVaultIfTierMissing(ctx, v, tierID)
+		return
+	}
+
+	existing := d.orch.FindLocalTierExported(v.ID, tierID)
+	if existing != nil {
+		d.orch.RemoveTierFromVault(v.ID, tierID)
 	}
 }
 
