@@ -30,12 +30,39 @@ import (
 
 // File names within a chunk directory.
 const (
-	rawLogFileName      = "raw.log"
-	idxLogFileName      = "idx.log"
-	attrLogFileName     = "attr.log"
-	attrDictFileName    = "attr_dict.log"
-	ingestBTFileName    = "ingest.bt"
-	sourceBTFileName    = "source.bt"
+	rawLogFileName   = "raw.log"
+	idxLogFileName   = "idx.log"
+	attrLogFileName  = "attr.log"
+	attrDictFileName = "attr_dict.log"
+	ingestBTFileName = "ingest.bt"
+	sourceBTFileName = "source.bt"
+)
+
+// Per-call timeouts on cloud storage operations that run on the post-seal
+// pipeline or hold the chunk-manager mutex. Without these, a slow or
+// unresponsive S3 can block the post-seal pipeline indefinitely, causing
+// ingest backpressure that cascades up through the ingester. See
+// gastrolog-21xs8. The S3 client's own retry logic compounds delays
+// rather than capping them, so we need explicit per-call deadlines.
+//
+// Declared as vars (not consts) so tests can monkey-patch shorter values
+// for deterministic timeout-regression tests without burning 60+ seconds
+// per test run.
+//
+// Tunings:
+//
+//	cloudHeadTimeout    — tiny round-trip, any SLA-compliant S3 hits
+//	                      this in well under a second; 10s accommodates
+//	                      high-latency remotes with retries
+//	cloudUploadTimeout  — chunk blobs are typically <10 MiB; 60s
+//	                      handles slow networks (≈150 KiB/s floor)
+//	cloudDownloadTimeout — TOC reads are 48 bytes; 10s is generous
+//	cloudDeleteTimeout  — simple metadata op; 15s
+var (
+	cloudHeadTimeout     = 10 * time.Second
+	cloudUploadTimeout   = 60 * time.Second
+	cloudDownloadTimeout = 10 * time.Second
+	cloudDeleteTimeout   = 15 * time.Second
 )
 
 var (
@@ -2284,10 +2311,14 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 
 	if meta.cloudBacked { //nolint:nestif // cloud vs local branch is inherently nested
 		// Release the lock before the S3 API call — cloud deletes can take
-		// hundreds of milliseconds and would block all Appends.
+		// hundreds of milliseconds and would block all Appends. Bound the
+		// call so an unresponsive S3 can't hold the mu re-acquisition
+		// indefinitely. See gastrolog-21xs8.
 		key := m.blobKey(id)
 		m.mu.Unlock()
-		err := m.cfg.CloudStore.Delete(context.Background(), key)
+		ctx, cancel := context.WithTimeout(context.Background(), cloudDeleteTimeout)
+		err := m.cfg.CloudStore.Delete(ctx, key)
+		cancel()
 		m.mu.Lock()
 		if err != nil {
 			m.mu.Unlock()
@@ -2850,7 +2881,9 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	// multiple nodes from overwriting each other's uploads with slightly
 	// different compressed output, which causes InvalidRange errors when
 	// a node tries to read using its own (now stale) blob size.
-	existing, err := m.cfg.CloudStore.Head(context.Background(), key)
+	headCtx, headCancel := context.WithTimeout(context.Background(), cloudHeadTimeout)
+	existing, err := m.cfg.CloudStore.Head(headCtx, key)
+	headCancel()
 	if err == nil && existing.Size > 0 {
 		m.logger.Debug("cloud blob already exists, skipping upload", "chunk", id, "bytes", existing.Size)
 		return m.adoptCloudBlob(id, existing.Size)
@@ -2885,12 +2918,15 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	}
 
 	bm := w.Meta()
-	if err := m.cfg.CloudStore.Upload(
-		context.Background(),
+	uploadCtx, uploadCancel := context.WithTimeout(context.Background(), cloudUploadTimeout)
+	err = m.cfg.CloudStore.Upload(
+		uploadCtx,
 		key,
 		bytes.NewReader(buf.Bytes()),
 		chunkcloud.ObjectMetadata(bm),
-	); err != nil {
+	)
+	uploadCancel()
+	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
 	}
 
@@ -2958,8 +2994,10 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	key := m.blobKey(id)
 
 	// Read TOC from end of blob to get TS index offsets.
+	tocCtx, tocCancel := context.WithTimeout(context.Background(), cloudDownloadTimeout)
 	tocBuf, err := m.cfg.CloudStore.DownloadRange(
-		context.Background(), key, blobSize-chunkcloud.TOCSize, chunkcloud.TOCSize)
+		tocCtx, key, blobSize-chunkcloud.TOCSize, chunkcloud.TOCSize)
+	tocCancel()
 	if err != nil {
 		return fmt.Errorf("read TOC from existing blob: %w", err)
 	}
