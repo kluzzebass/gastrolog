@@ -901,6 +901,7 @@ type tierRaftCallbacks struct {
 	applyRetPending func(id chunk.ChunkID) error
 	listChunks      func() []chunk.ChunkID
 	listRetPending  func() []chunk.ChunkID
+	overlayFromFSM  func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
 // createTierRaftGroup creates or retrieves the tier Raft group for a tier.
@@ -1023,6 +1024,26 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 				}
 			}
 			return ids
+		},
+		// Override fields whose authoritative source is the cluster-wide
+		// FSM rather than this node's local chunk manager. The local
+		// chunk manager only has CloudBacked=true on the leader (which
+		// uploaded the blob); followers strip sealed_backing and never
+		// see the cloud state. The FSM has the cluster-wide truth via
+		// the replicated CmdUploadChunk / CmdArchiveChunk commands.
+		// See gastrolog-asg4l.
+		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
+			if fsm == nil {
+				return m
+			}
+			e := fsm.Get(m.ID)
+			if e == nil {
+				return m
+			}
+			m.CloudBacked = e.CloudBacked
+			m.Archived = e.Archived
+			m.NumFrames = e.NumFrames
+			return m
 		},
 	}
 }
