@@ -100,6 +100,7 @@ enroll_nodes() {
     rm -rf "$(node_dir "$i")"
   done
   rm -f "${DATA_DIR}/cluster-token"
+  rm -f "${DATA_DIR}"/init-*.log
   mkdir -p "${DATA_DIR}"
 
   if [[ "$NODES" -eq 1 ]]; then
@@ -109,7 +110,7 @@ enroll_nodes() {
       --name "node-1" \
       --home "$(node_dir 1)" \
       --listen ":$(http_port 1)" \
-      --cluster-addr ":$(cluster_port 1)" > /dev/null 2>&1 &
+      --cluster-addr ":$(cluster_port 1)" > "${DATA_DIR}/init-1.log" 2>&1 &
     PIDS+=($!)
 
     for _ in $(seq 1 60); do
@@ -119,13 +120,14 @@ enroll_nodes() {
     return
   fi
 
-  # Start node 1 and extract join token.
+  # Start node 1 and extract join token. tee duplicates the output so we
+  # can both log it to init-1.log and scan for the token line.
   echo ">>> Starting node 1..."
   $GLOG server \
     --name "node-1" \
     --home "$(node_dir 1)" \
     --listen ":$(http_port 1)" \
-    --cluster-addr ":$(cluster_port 1)" 2>&1 | while IFS= read -r line; do
+    --cluster-addr ":$(cluster_port 1)" 2>&1 | tee "${DATA_DIR}/init-1.log" | while IFS= read -r line; do
       if [[ "$line" == *"cluster join token"*"token="* ]]; then
         token="${line##*token=}"
         token="${token%% *}"
@@ -164,7 +166,7 @@ enroll_nodes() {
       --cluster-addr ":$(cluster_port "$i")" \
       --join-addr "localhost:$(cluster_port 1)" \
       --join-token "$TOKEN" \
-      $extra > /dev/null 2>&1 &
+      $extra > "${DATA_DIR}/init-${i}.log" 2>&1 &
     PIDS+=($!)
   done
 

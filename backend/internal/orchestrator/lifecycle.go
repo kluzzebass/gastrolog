@@ -133,6 +133,10 @@ func (o *Orchestrator) Stop() error {
 	// cron rotation, retention) to finish.
 	_ = o.scheduler.Stop()
 
+	// Stop all per-tier leader loops (after the scheduler so reconcile
+	// passes don't fight retention deletes during shutdown).
+	o.tierLeaders.StopAll()
+
 	o.mu.Lock()
 	o.running = false
 	o.cancel = nil

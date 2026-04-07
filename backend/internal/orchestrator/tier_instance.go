@@ -50,6 +50,11 @@ type TierInstance struct {
 	// ListManifest returns all chunk IDs in the tier Raft FSM — the authoritative
 	// set of chunks that should exist. Nil when no Raft group exists.
 	ListManifest func() []chunk.ChunkID
+
+	// IsFSMReady returns true after the tier FSM has applied at least one log
+	// entry or restored from a snapshot. Before that, the manifest is incomplete
+	// and must not be used for reconciliation decisions.
+	IsFSMReady func() bool
 }
 
 // applyRaftCallbacks wires raft-backed metadata operations from a tierRaftCallbacks.
@@ -60,6 +65,7 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
 	t.ListRetentionPending = cb.listRetPending
+	t.IsFSMReady = cb.isFSMReady
 }
 
 // IsLeader returns true if this node is the leader for this tier.
