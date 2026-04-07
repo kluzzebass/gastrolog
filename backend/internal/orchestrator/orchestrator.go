@@ -261,6 +261,13 @@ type Orchestrator struct {
 	// Suspect tracker for cloud chunks that returned 404.
 	suspects *suspectTracker
 
+	// Per-tier leader loop manager. Each tier Raft group gets a leader
+	// loop whose OnLead callback reconciles membership against the
+	// orchestrator's view of the desired member list. Membership
+	// reconciliation runs ONLY on the tier Raft leader, from inside the
+	// leader epoch (after raft.Barrier returns).
+	tierLeaders *tierLeaderManager
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -350,6 +357,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingestSeqs:      make(map[string]uint32),
 		alerts:          cfg.Alerts,
 		suspects:        newSuspectTracker(),
+		tierLeaders:     newTierLeaderManager(logger),
 		now:             cfg.Now,
 		logger:          logger,
 	}

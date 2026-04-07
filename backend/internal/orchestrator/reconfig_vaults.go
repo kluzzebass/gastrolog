@@ -389,6 +389,9 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)
 
+	// Stop the per-tier leader loop and clear its desired-members entry.
+	o.tierLeaders.Stop(tier.TierID)
+
 	// Remove tier from vault's tier list.
 	vault.Tiers = append(vault.Tiers[:idx], vault.Tiers[idx+1:]...)
 
@@ -905,21 +908,22 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 	}
 
 	groupID := tierCfg.ID.String()
+	members := o.buildTierRaftMembers(tierCfg, nscs, factories)
+	// Only assigned members participate in the tier Raft group. If this
+	// node isn't in the member list, skip group creation entirely.
+	isMember := false
+	for _, srv := range members {
+		if string(srv.ID) == o.localNodeID {
+			isMember = true
+			break
+		}
+	}
+	if !isMember {
+		return nil, nil, tierRaftCallbacks{}
+	}
+
 	g := factories.GroupManager.GetGroup(groupID)
 	if g == nil {
-		members := o.buildTierRaftMembers(tierCfg, nscs, factories)
-		// Only assigned members participate in the tier Raft group. If this
-		// node isn't in the member list, skip group creation entirely.
-		isMember := false
-		for _, srv := range members {
-			if string(srv.ID) == o.localNodeID {
-				isMember = true
-				break
-			}
-		}
-		if !isMember {
-			return nil, nil, tierRaftCallbacks{}
-		}
 		// Symmetric seeding: every assigned node calls CreateGroup with the
 		// same member list. Raft elects a leader through normal election. No
 		// node holds a special "bootstrap" role. The seed list is only used
@@ -937,6 +941,13 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 			return nil, nil, tierRaftCallbacks{}
 		}
 	}
+
+	// Update the desired-members view and ensure a leader loop is running
+	// for this tier. The loop runs on every assigned node, but only the
+	// node currently holding tier-Raft leadership runs the reconcile
+	// callback (after raft.Barrier returns). Idempotent on re-call.
+	o.tierLeaders.SetDesiredMembers(tierCfg.ID, members)
+	o.tierLeaders.Start(tierCfg.ID, g)
 
 	r := g.Raft
 	fsm, _ := g.FSM.(*tierfsm.FSM)
