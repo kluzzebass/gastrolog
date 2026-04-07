@@ -77,12 +77,29 @@ func (s *raftConfigStore) WaitForLeader(ctx context.Context, logger *slog.Logger
 // assignments) are not yet applied.
 //
 // Behaviour by role:
+//
 //   - Leader: calls raft.Barrier(), which appends a no-op log entry and
 //     waits for it to commit + apply locally. Guarantees the leader's FSM
 //     is current to its own last-committed index at the moment of the call.
-//   - Follower: polls applied_index vs commit_index from Stats() until
-//     they match. Commit index advances as the leader sends AppendEntries,
-//     so we're effectively waiting for the next few heartbeats to arrive.
+//
+//   - Follower: this is the tricky case. On a fresh restart, both
+//     applied_index and commit_index are at the *snapshot's* index — they
+//     appear "equal" before the follower has received a single byte from
+//     the new leader. We can't just wait for `applied >= commit` because
+//     it's already true at startup against stale state.
+//
+//     The correct check is "wait for the local log to grow past the
+//     snapshot via AppendEntries from the leader, then for applied to
+//     catch up to that". We use a stability window: poll last_log_index
+//     until it has been STABLE (unchanged) for at least stabilityWindow.
+//     If new entries are still arriving, we keep waiting. Once stable AND
+//     applied_index has caught up to last_log_index, we're done.
+//
+//     Edge case: an idle cluster with no new entries since the snapshot.
+//     The first heartbeat from the leader will advance commit_index to
+//     match the leader's, even if no new log entries arrive. We bootstrap
+//     stability tracking from `last_log_index` (which equals commit_index
+//     in steady state) and accept any value as long as it's stable.
 //
 // Assumes a leader has already been elected (call WaitForLeader first).
 func (s *raftConfigStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
@@ -90,9 +107,18 @@ func (s *raftConfigStore) WaitForFSMCatchup(ctx context.Context, timeout time.Du
 		return s.raft.Barrier(timeout).Error()
 	}
 
+	const (
+		pollInterval    = 50 * time.Millisecond
+		stabilityWindow = 1 * time.Second
+	)
+
 	deadline := time.Now().Add(timeout)
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
+
+	var lastSeenLogIndex uint64
+	stableSince := time.Time{}
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -102,13 +128,36 @@ func (s *raftConfigStore) WaitForFSMCatchup(ctx context.Context, timeout time.Du
 				return errors.New("timed out waiting for FSM catchup")
 			}
 			stats := s.raft.Stats()
-			commit, err1 := strconv.ParseUint(stats["commit_index"], 10, 64)
-			applied, err2 := strconv.ParseUint(stats["applied_index"], 10, 64)
+			lastLogIdx, err1 := strconv.ParseUint(stats["last_log_index"], 10, 64)
+			appliedIdx, err2 := strconv.ParseUint(stats["applied_index"], 10, 64)
 			if err1 != nil || err2 != nil {
 				continue
 			}
-			if applied >= commit && commit > 0 {
-				logger.Debug("fsm caught up", "applied", applied, "commit", commit)
+
+			// If last_log_index changed, the local log is still growing
+			// (the leader is sending us entries). Reset stability tracking.
+			if lastLogIdx != lastSeenLogIndex {
+				lastSeenLogIndex = lastLogIdx
+				stableSince = time.Now()
+				logger.Debug("fsm catchup: log advancing",
+					"last_log_index", lastLogIdx, "applied_index", appliedIdx)
+				continue
+			}
+
+			// Log is stable. Wait for applied to catch up.
+			if appliedIdx < lastLogIdx {
+				logger.Debug("fsm catchup: applying log entries",
+					"last_log_index", lastLogIdx, "applied_index", appliedIdx)
+				continue
+			}
+
+			// Log is stable AND applied has caught up. Wait for the
+			// stability window before declaring success — this gives
+			// time for any in-flight heartbeats to bring more entries
+			// or for the leader's commit_index to propagate.
+			if time.Since(stableSince) >= stabilityWindow {
+				logger.Debug("fsm caught up",
+					"last_log_index", lastLogIdx, "applied_index", appliedIdx)
 				return nil
 			}
 		}
