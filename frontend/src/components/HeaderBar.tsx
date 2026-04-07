@@ -33,7 +33,9 @@ export function HeaderBar({
 }: Readonly<HeaderBarProps>) {
   const c = useThemeClass(dark);
   const { data: cluster, isLoading } = useClusterStatus();
-  const nodes = cluster?.nodes ?? [];
+  const nodes = (cluster?.nodes ?? []).toSorted((a, b) =>
+    (a.name || a.id).localeCompare(b.name || b.id),
+  );
 
   // Inspector glow: briefly flash when system status data arrives.
   // Triggered by cluster data changes (pushed via WatchSystemStatus stream).
