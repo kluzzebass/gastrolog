@@ -15,8 +15,6 @@ import (
 	"gastrolog/internal/config/raftfsm"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
-
-	hraft "github.com/hashicorp/raft"
 )
 
 // orchActions is the subset of orchestrator.Orchestrator methods used by the
@@ -415,12 +413,12 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		}
 	}
 
-	// Reconcile tier Raft group membership. When followers are assigned
-	// (a separate PutTier after initial creation), the group needs new members.
-	// Only the leader (Raft leader) can add members.
-	if d.factories.GroupManager != nil && leaderNodeID == d.localNodeID {
-		d.reconcileTierRaftGroup(tierID, tierCfg, nscs)
-	}
+	// Tier Raft group membership is handled by the per-group leader loop
+	// (see raftgroup.LeaderLoop). The placement leader does not push
+	// membership changes — the tier Raft leader (whoever currently holds
+	// leadership in the group) does, from inside its leader epoch after
+	// raft.Barrier() returns. This avoids the divergence problem where the
+	// placement leader and the tier Raft leader live on different nodes.
 
 	// Reload rotation and retention policies — tier config may have changed
 	// policy references (rotation_policy_id, retention_rules).
@@ -489,92 +487,6 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.
-// reconcileAllTierRaftGroups reconciles membership for all tier Raft groups.
-// Called once on startup after all vaults are registered, to handle the case
-// where the FSM was restored from a snapshot (no individual NotifyTierPut).
-func (d *configDispatcher) reconcileAllTierRaftGroups(ctx context.Context) {
-	if d.factories.GroupManager == nil {
-		return
-	}
-	tiers, err := d.cfgStore.ListTiers(ctx)
-	if err != nil {
-		d.logger.Error("dispatch: list tiers for raft reconciliation", "error", err)
-		return
-	}
-	nscs, err := d.cfgStore.ListNodeStorageConfigs(ctx)
-	if err != nil {
-		d.logger.Error("dispatch: list node storage configs for raft reconciliation", "error", err)
-		return
-	}
-	for _, tier := range tiers {
-		leaderNodeID := tier.LeaderNodeID(nscs)
-		if leaderNodeID == d.localNodeID {
-			d.logger.Info("dispatch: reconciling tier raft group on startup",
-				"tier", tier.ID, "leader", leaderNodeID)
-			d.reconcileTierRaftGroup(tier.ID, &tier, nscs)
-		}
-
-	}
-}
-
-// reconcileTierRaftGroup ensures the tier's Raft group membership matches the
-// tier config's node assignments (leader + followers). Only called on the
-// leader node (which is the Raft leader for the group).
-func (d *configDispatcher) reconcileTierRaftGroup(tierID uuid.UUID, tierCfg *config.TierConfig, nscs []config.NodeStorageConfig) {
-	gm := d.factories.GroupManager
-	groupID := tierID.String()
-	g := gm.GetGroup(groupID)
-	if g == nil {
-		return // group doesn't exist yet — will be created in buildTierInstance
-	}
-
-	// Build the expected member set from tier config.
-	expected := make(map[string]string) // nodeID → address
-	if d.factories.NodeAddressResolver != nil {
-		leader := tierCfg.LeaderNodeID(nscs)
-		if leader == "" {
-			leader = d.localNodeID
-		}
-		if addr, ok := d.factories.NodeAddressResolver(leader); ok {
-			expected[leader] = addr
-		}
-		for _, secID := range tierCfg.FollowerNodeIDs(nscs) {
-			if addr, ok := d.factories.NodeAddressResolver(secID); ok {
-				expected[secID] = addr
-			}
-		}
-	}
-	if len(expected) == 0 {
-		d.logger.Warn("dispatch: no expected members resolved for tier raft group",
-			"tier", tierID)
-		return
-	}
-
-	// Get current Raft group members.
-	future := g.Raft.GetConfiguration()
-	if future.Error() != nil {
-		return
-	}
-	current := make(map[string]bool)
-	for _, srv := range future.Configuration().Servers {
-		current[string(srv.ID)] = true
-	}
-
-	// Add missing members.
-	for nodeID, addr := range expected {
-		if current[nodeID] {
-			continue
-		}
-		if err := gm.AddMember(groupID, hraft.ServerID(nodeID), hraft.ServerAddress(addr)); err != nil {
-			d.logger.Warn("dispatch: failed to add member to tier raft group",
-				"tier", tierID, "node", nodeID, "error", err)
-		} else {
-			d.logger.Info("dispatch: added member to tier raft group",
-				"tier", tierID, "node", nodeID, "addr", addr)
-		}
-	}
-}
-
 func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UUID, drain bool) {
 	d.logger.Info("dispatch: handleTierDeleted", "tier", tierID, "drain", drain)
 

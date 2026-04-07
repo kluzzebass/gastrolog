@@ -219,10 +219,10 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		})
 	}
 
-	// Reconcile tier Raft group membership after all vaults/tiers are
-	// registered. On snapshot restore, individual NotifyTierPut events
-	// don't fire, so the primary may not have added secondaries yet.
-	disp.reconcileAllTierRaftGroups(ctx)
+	// Tier Raft group membership is reconciled by per-tier leader loops
+	// (raftgroup.LeaderLoop) wired by reconfig_vaults.go. On snapshot
+	// restore the loops fire as soon as elections complete and reconcile
+	// from inside the leader epoch.
 
 	// Monitor slog capture channel pressure.
 	if cfg.SlogCapture != nil {
