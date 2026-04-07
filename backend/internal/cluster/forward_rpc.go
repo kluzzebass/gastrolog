@@ -142,6 +142,12 @@ func httpStatusToConnectCode(httpStatus int) uint32 {
 // For unary RPCs, returns a single payload. For server-streaming RPCs,
 // the caller should use ForwardRPCStream instead.
 func ForwardRPC(ctx context.Context, peers *PeerConns, nodeID, procedure string, reqPayload []byte) ([]byte, uint32, string, error) {
+	// Bound the call so a paused remote (SIGSTOP, GC stall, …) can't wedge
+	// the caller forever. Forwarded unary RPCs are small request/response
+	// pairs; unaryCallTimeout is plenty of headroom. See gastrolog-4rp6i.
+	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
+	defer cancel()
+
 	conn, err := peers.Conn(nodeID)
 	if err != nil {
 		return nil, 14, "", fmt.Errorf("dial node %s: %w", nodeID, err)
