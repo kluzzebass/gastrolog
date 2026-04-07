@@ -2,14 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"time"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
@@ -1063,17 +1064,23 @@ func wireTierFSMOnDelete(g *raftgroup.Group, cm chunk.ChunkManager, im index.Ind
 	}
 	fsm.SetOnDelete(func(id chunk.ChunkID) {
 		// Delete indexes first (they're metadata about the chunk).
+		// ErrChunkNotFound-equivalent errors are expected during log replay
+		// on a node that doesn't have the chunk locally — log at debug only.
 		if im != nil {
-			if err := im.DeleteIndexes(id); err != nil {
-				if logger != nil {
-					logger.Warn("FSM onDelete: DeleteIndexes failed",
-						"chunk", id, "error", err)
-				}
+			if err := im.DeleteIndexes(id); err != nil && logger != nil {
+				logger.Debug("FSM onDelete: DeleteIndexes failed",
+					"chunk", id, "error", err)
 			}
 		}
 		// Then delete the chunk files. DeleteSilent skips the announcer.
-		if err := silent.DeleteSilent(id); err != nil {
-			if logger != nil {
+		// ErrChunkNotFound / ErrActiveChunk are benign "nothing to delete"
+		// cases (log replay on a node without the chunk, or a forwarded
+		// chunk still being written). Debug-level only.
+		if err := silent.DeleteSilent(id); err != nil && logger != nil {
+			if errors.Is(err, chunk.ErrChunkNotFound) || errors.Is(err, chunk.ErrActiveChunk) {
+				logger.Debug("FSM onDelete: DeleteSilent skipped",
+					"chunk", id, "reason", err)
+			} else {
 				logger.Warn("FSM onDelete: DeleteSilent failed",
 					"chunk", id, "error", err)
 			}

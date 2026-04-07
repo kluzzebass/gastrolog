@@ -2,9 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -473,11 +475,19 @@ func (r *retentionRunner) markUnreadable(id chunk.ChunkID, reason error) {
 	}
 }
 
-// expireChunk commits the deletion to the tier Raft manifest (so secondaries
-// learn about it via OnDelete), then deletes locally. If the Raft apply fails,
-// the local delete is skipped and retried next tick.
+// expireChunk commits the deletion to the tier Raft manifest (so followers
+// learn about it via OnDelete), then runs the legacy direct-delete paths
+// as a belt-and-braces fallback. The Phase 5 FSM OnDelete cascade already
+// deletes the chunk on every node; the direct paths here are redundant in
+// cluster mode but harmless — they just return ErrChunkNotFound for the
+// chunks OnDelete already deleted, which we treat as an expected "nothing
+// to do" signal rather than an error.
+//
+// Single-node mode (applyRaftDelete == nil) still requires the direct
+// paths because there's no Raft cascade to rely on.
 func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
-	if r.applyRaftDelete != nil {
+	clusterMode := r.applyRaftDelete != nil
+	if clusterMode {
 		if err := r.applyRaftDelete(id); err != nil {
 			r.logger.Warn("retention: raft delete failed, will retry",
 				"vault", r.vaultID, "chunk", id.String(), "error", err)
@@ -492,40 +502,66 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 	}
 
 	if err := r.cm.Delete(id); err != nil {
-		r.logger.Error("retention: failed to delete chunk",
-			"vault", r.vaultID, "chunk", id.String(), "error", err)
-		return
-	}
-
-	// Delete from same-node follower instances.
-	if r.orch != nil {
-		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
-	}
-
-	// Forward deletion to remote follower nodes.
-	if r.orch != nil {
-		for _, target := range r.followerTargets {
-			if target.NodeID == r.orch.localNodeID {
-				continue // already handled by deleteFromFollowers
-			}
-			var err error
-			if r.orch.tierReplicator != nil {
-				err = r.orch.tierReplicator.DeleteChunk(
-					context.Background(), target.NodeID, r.vaultID, r.tierID, id,
-				)
-			} else if r.orch.transferrer != nil {
-				err = r.orch.transferrer.ForwardDeleteChunk(
-					context.Background(), target.NodeID, r.vaultID, r.tierID, id,
-				)
-			}
-			if err != nil {
-				r.logger.Warn("retention: failed to forward chunk deletion to follower",
-					"vault", r.vaultID, "chunk", id.String(),
-					"follower", target.NodeID, "error", err)
-			}
+		// In cluster mode, the OnDelete cascade may have already deleted
+		// the chunk locally — ErrChunkNotFound is expected, not an error.
+		if clusterMode && errors.Is(err, chunk.ErrChunkNotFound) {
+			r.logger.Debug("retention: chunk already removed by OnDelete cascade",
+				"vault", r.vaultID, "chunk", id.String())
+		} else {
+			r.logger.Error("retention: failed to delete chunk",
+				"vault", r.vaultID, "chunk", id.String(), "error", err)
+			return
 		}
+	}
+
+	if r.orch != nil {
+		// Delete from same-node follower instances.
+		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
+		// Forward deletion to remote follower nodes.
+		r.forwardDeletionToFollowers(id, clusterMode)
 	}
 
 	r.logger.Debug("retention: deleted chunk",
 		"vault", r.vaultID, "chunk", id.String())
+}
+
+// forwardDeletionToFollowers sends an explicit delete RPC to each remote
+// follower. In cluster mode this is redundant with the FSM OnDelete cascade
+// (which already deleted the chunk everywhere), so "chunk not found" responses
+// are logged at debug only. In single-node / pre-cascade mode the forward is
+// the primary deletion mechanism for followers and any error is a real failure.
+func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, clusterMode bool) {
+	for _, target := range r.followerTargets {
+		if target.NodeID == r.orch.localNodeID {
+			continue // already handled by deleteFromFollowers
+		}
+		err := r.sendDeleteToFollower(target.NodeID, id)
+		if err == nil {
+			continue
+		}
+		if clusterMode && strings.Contains(err.Error(), "chunk not found") {
+			r.logger.Debug("retention: follower already removed chunk via OnDelete cascade",
+				"vault", r.vaultID, "chunk", id.String(), "follower", target.NodeID)
+			continue
+		}
+		r.logger.Warn("retention: failed to forward chunk deletion to follower",
+			"vault", r.vaultID, "chunk", id.String(),
+			"follower", target.NodeID, "error", err)
+	}
+}
+
+// sendDeleteToFollower issues a single chunk-delete RPC via whichever
+// cross-node mechanism is wired. Returns nil if neither is available.
+func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
+	if r.orch.tierReplicator != nil {
+		return r.orch.tierReplicator.DeleteChunk(
+			context.Background(), followerID, r.vaultID, r.tierID, id,
+		)
+	}
+	if r.orch.transferrer != nil {
+		return r.orch.transferrer.ForwardDeleteChunk(
+			context.Background(), followerID, r.vaultID, r.tierID, id,
+		)
+	}
+	return nil
 }
