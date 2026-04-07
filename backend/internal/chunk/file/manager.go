@@ -2186,6 +2186,24 @@ func (m *Manager) ReadWriteTimestamps(id chunk.ChunkID, positions []uint64) ([]t
 // Returns ErrActiveChunk if the chunk is the current active chunk.
 // Returns ErrChunkNotFound if the chunk does not exist.
 func (m *Manager) Delete(id chunk.ChunkID) error {
+	if err := m.deleteInternal(id); err != nil {
+		return err
+	}
+	if m.cfg.Announcer != nil {
+		m.cfg.Announcer.AnnounceDelete(id)
+	}
+	return nil
+}
+
+// DeleteSilent removes the chunk's local files and metadata without firing
+// the metadata announcer. Used by the tier Raft FSM apply path when a delete
+// originating from any node propagates via Raft — re-announcing would create
+// an infinite feedback loop.
+func (m *Manager) DeleteSilent(id chunk.ChunkID) error {
+	return m.deleteInternal(id)
+}
+
+func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 	m.mu.Lock()
 
 	if m.closed {
@@ -2238,10 +2256,6 @@ func (m *Manager) Delete(id chunk.ChunkID) error {
 	delete(m.metas, id)          // no-op for cloud chunks (not in metas)
 	delete(m.storageClasses, id) // clean up storage class cache
 	m.mu.Unlock()
-
-	if m.cfg.Announcer != nil {
-		m.cfg.Announcer.AnnounceDelete(id)
-	}
 	return nil
 }
 

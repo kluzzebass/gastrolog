@@ -78,9 +78,10 @@ func (e *Entry) ToChunkMeta() chunk.ChunkMeta {
 // FSM is a Raft FSM that maintains chunk metadata for a single tier.
 // All reads are local (no Raft round-trip). Writes go through Raft.Apply().
 type FSM struct {
-	mu     sync.RWMutex
-	chunks map[chunk.ChunkID]*Entry
-	ready  bool // true after first Apply or Restore
+	mu       sync.RWMutex
+	chunks   map[chunk.ChunkID]*Entry
+	ready    bool // true after first Apply or Restore
+	onDelete func(chunk.ChunkID)
 }
 
 // New creates an empty chunk metadata FSM.
@@ -100,6 +101,25 @@ func (f *FSM) Ready() bool {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.ready
+}
+
+// SetOnDelete registers a callback that fires after CmdDeleteChunk is
+// applied to this FSM and the chunk is removed from the in-memory map.
+// The callback runs OUTSIDE the FSM mutex so it can perform slow operations
+// (filesystem deletes, index removal) without blocking other Apply calls.
+//
+// The callback is fired exactly once per actual deletion — if the same
+// CmdDeleteChunk applies twice (e.g. log replay), the second call is a
+// no-op because the entry is already gone, and the callback is not fired.
+//
+// Used by the orchestrator to delete local chunk files when a delete
+// originating from any node propagates via Raft. The callback is expected
+// to use a path that does NOT re-announce the delete (e.g. SilentDeleter)
+// to avoid an infinite feedback loop.
+func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onDelete = fn
 }
 
 // ---------- Reads (local, no Raft) ----------
@@ -138,6 +158,10 @@ func (f *FSM) Count() int {
 
 // Apply handles a Raft log entry. The log data is a command byte followed
 // by the command-specific payload.
+//
+// The OnDelete callback (set via SetOnDelete) is invoked OUTSIDE the FSM
+// mutex so that potentially-slow filesystem operations don't block other
+// Apply calls. The callback fires exactly once per actual deletion.
 func (f *FSM) Apply(log *hraft.Log) any {
 	if len(log.Data) == 0 {
 		return errors.New("empty chunk FSM command")
@@ -145,26 +169,38 @@ func (f *FSM) Apply(log *hraft.Log) any {
 	cmd := Command(log.Data[0])
 	payload := log.Data[1:]
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.ready = true
+	var (
+		result        any
+		deletedID     *chunk.ChunkID
+		onDeleteLocal func(chunk.ChunkID)
+	)
 
+	f.mu.Lock()
+	f.ready = true
 	switch cmd {
 	case CmdCreateChunk:
-		return f.applyCreate(payload)
+		result = f.applyCreate(payload)
 	case CmdSealChunk:
-		return f.applySeal(payload)
+		result = f.applySeal(payload)
 	case CmdCompressChunk:
-		return f.applyCompress(payload)
+		result = f.applyCompress(payload)
 	case CmdUploadChunk:
-		return f.applyUpload(payload)
+		result = f.applyUpload(payload)
 	case CmdDeleteChunk:
-		return f.applyDelete(payload)
+		deletedID, result = f.applyDelete(payload)
 	case CmdRetentionPending:
-		return f.applyRetentionPending(payload)
+		result = f.applyRetentionPending(payload)
 	default:
-		return fmt.Errorf("unknown chunk FSM command: %d", cmd)
+		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
+	onDeleteLocal = f.onDelete
+	f.mu.Unlock()
+
+	if deletedID != nil && onDeleteLocal != nil {
+		onDeleteLocal(*deletedID)
+	}
+
+	return result
 }
 
 // Snapshot returns a point-in-time snapshot of all chunk metadata.
@@ -279,15 +315,20 @@ func (f *FSM) applyUpload(data []byte) error {
 	return nil
 }
 
-// DeleteChunk: [16 bytes ChunkID]
-func (f *FSM) applyDelete(data []byte) error {
+// DeleteChunk: [16 bytes ChunkID]. Returns the deleted ID (or nil if the
+// chunk wasn't present, e.g. on a replayed delete) so Apply can fire the
+// onDelete callback exactly once per actual deletion.
+func (f *FSM) applyDelete(data []byte) (*chunk.ChunkID, error) {
 	if len(data) < 16 {
-		return fmt.Errorf("delete chunk: payload too short (%d bytes)", len(data))
+		return nil, fmt.Errorf("delete chunk: payload too short (%d bytes)", len(data))
 	}
 	var id chunk.ChunkID
 	copy(id[:], data[:16])
+	if _, existed := f.chunks[id]; !existed {
+		return nil, nil
+	}
 	delete(f.chunks, id)
-	return nil
+	return &id, nil
 }
 
 // RetentionPending: [16 bytes ChunkID]

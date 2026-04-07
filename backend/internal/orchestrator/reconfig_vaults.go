@@ -12,11 +12,12 @@ import (
 	"strings"
 
 	"gastrolog/internal/chunk"
-	tierfsm "gastrolog/internal/tier/raftfsm"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
-	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/index"
 	"gastrolog/internal/query"
+	"gastrolog/internal/raftgroup"
+	tierfsm "gastrolog/internal/tier/raftfsm"
 
 	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
@@ -676,7 +677,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	_, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
 
 	// Build params from tier config.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
@@ -728,6 +729,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 			Chunks: cm,
 		}
 		ti.applyRaftCallbacks(raftCB)
+		wireTierFSMOnDelete(tierGroup, cm, nil, o.logger)
 		return ti, nil
 	}
 
@@ -765,6 +767,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
+	wireTierFSMOnDelete(tierGroup, cm, im, o.logger)
 	return ti, nil
 }
 
@@ -779,7 +782,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 
 	// Create the tier Raft group BEFORE the chunk manager — same rationale
 	// as buildTierInstance: start elections while chunk loading is in progress.
-	_, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
@@ -853,6 +856,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 		Query:   qe,
 	}
 	ti.applyRaftCallbacks(raftCB)
+	wireTierFSMOnDelete(tierGroup, cm, im, o.logger)
 	return ti, nil
 }
 
@@ -1012,6 +1016,47 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, logger
 		return
 	}
 	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, logger))
+}
+
+// wireTierFSMOnDelete sets up the tier FSM's OnDelete callback so that
+// CmdDeleteChunk applied via Raft on this node deletes the local chunk
+// files (and indexes if available). The callback uses chunk.SilentDeleter
+// to avoid the announcer feedback loop — re-announcing the delete that
+// just arrived from Raft would cause infinite re-application.
+//
+// Safe to call with nil group, nil cm, or a chunk manager that doesn't
+// implement SilentDeleter (e.g. memory tiers): the callback is simply not
+// wired in those cases.
+func wireTierFSMOnDelete(g *raftgroup.Group, cm chunk.ChunkManager, im index.IndexManager, logger *slog.Logger) {
+	if g == nil || cm == nil {
+		return
+	}
+	fsm, ok := g.FSM.(*tierfsm.FSM)
+	if !ok {
+		return
+	}
+	silent, ok := cm.(chunk.SilentDeleter)
+	if !ok {
+		return
+	}
+	fsm.SetOnDelete(func(id chunk.ChunkID) {
+		// Delete indexes first (they're metadata about the chunk).
+		if im != nil {
+			if err := im.DeleteIndexes(id); err != nil {
+				if logger != nil {
+					logger.Warn("FSM onDelete: DeleteIndexes failed",
+						"chunk", id, "error", err)
+				}
+			}
+		}
+		// Then delete the chunk files. DeleteSilent skips the announcer.
+		if err := silent.DeleteSilent(id); err != nil {
+			if logger != nil {
+				logger.Warn("FSM onDelete: DeleteSilent failed",
+					"chunk", id, "error", err)
+			}
+		}
+	})
 }
 
 // directApplier applies tier FSM commands locally via raft.Apply. Used in
