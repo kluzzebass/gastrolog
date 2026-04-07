@@ -346,7 +346,10 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 		if tier.Indexes != nil {
 			_ = tier.Indexes.DeleteIndexes(meta.ID)
 		}
-		if err := tier.Chunks.Delete(meta.ID); err != nil {
+		// Local cleanup — do not announce. The authoritative delete already
+		// happened elsewhere (retention on the leader) and we are just
+		// catching up the local store that missed the OnDelete callback.
+		if err := chunk.DeleteNoAnnounce(tier.Chunks, meta.ID); err != nil {
 			o.logger.Warn("reconcile: failed to delete orphaned chunk",
 				"tier", tier.TierID, "chunk", meta.ID, "error", err)
 			continue

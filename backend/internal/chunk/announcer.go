@@ -39,3 +39,19 @@ type AnnouncerGetter interface {
 type SilentDeleter interface {
 	DeleteSilent(id ChunkID) error
 }
+
+// DeleteNoAnnounce deletes a chunk from the local store without firing the
+// metadata announcer. Used by LOCAL cleanup paths (e.g. replacing a
+// forwarded-but-not-yet-canonical chunk, cleaning up orphaned follower
+// chunks) that must not propagate the delete via tier Raft.
+//
+// If the manager implements SilentDeleter, this calls DeleteSilent (the
+// common case — file.Manager supports it). Otherwise it falls back to
+// the regular Delete, which is safe for manager types that do not have
+// an announcer wired (e.g. memory, jsonl).
+func DeleteNoAnnounce(cm ChunkManager, id ChunkID) error {
+	if silent, ok := cm.(SilentDeleter); ok {
+		return silent.DeleteSilent(id)
+	}
+	return cm.Delete(id)
+}
