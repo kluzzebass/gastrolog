@@ -1050,6 +1050,14 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, logger
 // Safe to call with nil group, nil cm, or a chunk manager that doesn't
 // implement SilentDeleter (e.g. memory tiers): the callback is simply not
 // wired in those cases.
+//
+// IMPORTANT: this callback acquires the chunk manager's m.mu via
+// DeleteSilent. For the FSM apply goroutine to do this safely, no other
+// goroutine may hold m.mu while waiting for a Raft round-trip (e.g. via
+// the Announcer). The chunk.file.Manager's Seal/Append/Compress paths
+// enforce this by releasing m.mu before calling the announcer; if a new
+// path is added that holds the mutex during an announcer call, this
+// callback will deadlock with it.
 func wireTierFSMOnDelete(g *raftgroup.Group, cm chunk.ChunkManager, im index.IndexManager, logger *slog.Logger) {
 	if g == nil || cm == nil {
 		return
