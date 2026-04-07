@@ -158,14 +158,14 @@ func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig
 		return nil
 	}
 
-	// During ApplyConfig (startup), skip vaults with no local tiers.
-	// The filter set handles forwarding to the correct node.
-	// (The dispatch path in handleVaultPut registers zero-tier vaults
-	// so handleTierPut can add tiers incrementally.)
-	if len(tiers) == 0 {
-		return nil
-	}
-
+	// Register the vault even when it has zero local tiers, matching
+	// AddVault's runtime behaviour (see reconfig_vaults.go:65). Tiers arrive
+	// incrementally via handleTierPut, which requires the vault to already
+	// be in the orchestrator so AddTierToVault can find it. On a cluster
+	// restart from a snapshot no NotifyVaultPut fires for bulk-loaded state,
+	// so without this initVault must do the registration itself or the
+	// subsequent handleTierPut fires "vault not found" in an unrecoverable
+	// loop. See gastrolog-264pk.
 	vault := NewVault(vaultCfg.ID, tiers...)
 	vault.Name = vaultCfg.Name
 	vault.Enabled = vaultCfg.Enabled

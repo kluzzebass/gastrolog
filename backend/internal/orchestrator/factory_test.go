@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"testing"
 	"time"
 
@@ -131,6 +132,64 @@ func TestApplyConfigNil(t *testing.T) {
 	err := orch.ApplyConfig(nil, Factories{})
 	if err != nil {
 		t.Errorf("expected nil error for nil config, got %v", err)
+	}
+}
+
+// TestApplyConfigVaultWithNoLocalTiers is the regression test for
+// gastrolog-264pk. Before the fix, ApplyConfig (the startup path) would
+// silently skip registering any vault whose buildTierInstances returned
+// zero local tiers — which happens on a node that isn't a placement
+// target for any of the vault's tiers (e.g. a voteless node that joined
+// the cluster as a non-tier-member, or a snapshot-restored node where
+// placements are reapplied via post-snapshot log replay rather than the
+// initial ApplyConfig). The vault then never made it into the
+// orchestrator, and any subsequent NotifyTierPut firing handleTierPut
+// would fail with "vault not found" — and since handleVaultPut never
+// fires for snapshot-restored vaults, the cluster ends up in a permanent
+// stuck state. AddVault (the runtime path) registers empty vaults
+// correctly; initVault must do the same. This test asserts the parity.
+func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
+	t.Parallel()
+	// Local node is "node-1". Build a vault whose only tier is placed
+	// exclusively on "node-2" — buildTierInstances should return zero
+	// local tiers, but the vault must still be registered so a later
+	// AddTierToVault call can succeed.
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	factories := Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": func(_ map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
+				return &fakeChunkManager{}, nil
+			},
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": func(_ map[string]string, _ chunk.ChunkManager, _ *slog.Logger) (index.IndexManager, error) {
+				return &fakeIndexManager{}, nil
+			},
+		},
+	}
+
+	vaultID := uuid.Must(uuid.NewV7())
+	tierID := uuid.Must(uuid.NewV7())
+	cfg := &config.Config{
+		Vaults: []config.VaultConfig{{ID: vaultID, Enabled: true}},
+		Tiers: []config.TierConfig{{
+			ID:         tierID,
+			Name:       "remote-only",
+			Type:       config.TierTypeMemory,
+			VaultID:    vaultID,
+			Placements: syntheticPlacements("node-2"), // NOT node-1
+		}},
+	}
+
+	if err := orch.ApplyConfig(cfg, factories); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	// The vault MUST be registered, even though buildTierInstances
+	// returned zero local tiers for it.
+	if !slices.Contains(orch.ListVaults(), vaultID) {
+		t.Fatalf("vault %s should be registered after ApplyConfig even with zero local tiers", vaultID)
 	}
 }
 
