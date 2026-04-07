@@ -33,9 +33,10 @@ func (f *replicationFakeForwarder) ForwardToTier(_ context.Context, _ string, _ 
 // ---------- fake transferrer that records seal commands ----------
 
 type replicationFakeTransferrer struct {
-	sealCalls    []sealCall
-	sealErr      error
-	forwardCalls []transitionTransferCall
+	sealCalls        []sealCall
+	sealErr          error
+	forwardCalls     []transitionTransferCall
+	replicatedChunks []chunk.ChunkID
 }
 
 type sealCall struct {
@@ -67,7 +68,16 @@ func (m *replicationFakeTransferrer) ForwardSealTier(_ context.Context, nodeID s
 func (m *replicationFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *replicationFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
+func (m *replicationFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, chunkID chunk.ChunkID, iter chunk.RecordIterator) error {
+	// Drain the iterator to mirror real transferrer behaviour — production
+	// callers expect the iterator to be fully consumed before returning.
+	for {
+		_, err := iter()
+		if err != nil {
+			break
+		}
+	}
+	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
 }
 func (m *replicationFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
@@ -259,6 +269,143 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
 	if err == nil {
 		t.Fatal("expected error for missing transferrer")
+	}
+}
+
+// TestCatchupSkipsFSMRetiredChunks is the regression test for gastrolog-5grpa.
+// Before the fix, catchupFollower used the leader's on-disk chunk list as the
+// authoritative set, which could include chunks that the tier Raft FSM had
+// already retired (DeleteChunk applied) but whose local file hadn't been
+// unlinked yet. Catchup would ship those orphans to the follower, where the
+// follower's reconcile loop would then delete them within ~1 minute. Net
+// result: catchup work wasted, follower under-replicated, repeat forever.
+//
+// The fix filters the catchup list by tier.ListManifest() — the FSM's
+// authoritative view of what should exist. This test populates a tier with
+// 3 sealed chunks, configures ListManifest to return only 2 of them
+// (simulating the FSM having retired the third), and asserts that catchup
+// transferred only the 2 manifest-included chunks.
+func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	orch.logger = slog.Default()
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newReplicationTier(t, tierID, nil, false, "")
+	vault := NewVault(vaultID, tier)
+	orch.RegisterVault(vault)
+
+	mock := &replicationFakeTransferrer{}
+	orch.transferrer = mock
+
+	// Append + seal three chunks, capturing each chunk ID.
+	var ids []chunk.ChunkID
+	for i := 0; i < 3; i++ {
+		if _, _, err := orch.Append(vaultID, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		active := tier.Chunks.Active()
+		if active == nil {
+			t.Fatalf("chunk %d: no active chunk after append", i)
+		}
+		id := active.ID
+		if err := orch.SealActiveTier(vaultID, tierID, id); err != nil {
+			t.Fatalf("seal chunk %d: %v", i, err)
+		}
+		ids = append(ids, id)
+	}
+	if len(ids) != 3 {
+		t.Fatalf("expected 3 sealed chunks, got %d", len(ids))
+	}
+
+	// Confirm all 3 chunks are present on disk (the leader's local view).
+	metas, err := tier.Chunks.List()
+	if err != nil {
+		t.Fatalf("list chunks: %v", err)
+	}
+	sealedCount := 0
+	for _, m := range metas {
+		if m.Sealed {
+			sealedCount++
+		}
+	}
+	if sealedCount != 3 {
+		t.Fatalf("expected 3 sealed chunks on disk, got %d", sealedCount)
+	}
+
+	// Configure the FSM manifest to return only chunks 0 and 2, simulating
+	// chunk 1 being retired by the FSM (DeleteChunk applied) while still
+	// existing on disk in the brief window before unlink.
+	tier.ListManifest = func() []chunk.ChunkID {
+		return []chunk.ChunkID{ids[0], ids[2]}
+	}
+
+	if err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2"); err != nil {
+		t.Fatalf("catchupFollower: %v", err)
+	}
+
+	// Catchup must have transferred ONLY the 2 manifest-included chunks.
+	// The retired chunk (ids[1]) must NOT have been transferred — sending
+	// it would re-create the orphan-and-reconcile-delete cycle.
+	if len(mock.replicatedChunks) != 2 {
+		t.Fatalf("expected 2 chunks transferred, got %d (%v)",
+			len(mock.replicatedChunks), mock.replicatedChunks)
+	}
+	transferred := make(map[chunk.ChunkID]bool, len(mock.replicatedChunks))
+	for _, id := range mock.replicatedChunks {
+		transferred[id] = true
+	}
+	if !transferred[ids[0]] {
+		t.Errorf("chunk ids[0] %s should have been transferred (in manifest)", ids[0])
+	}
+	if transferred[ids[1]] {
+		t.Errorf("chunk ids[1] %s should NOT have been transferred (FSM-retired)", ids[1])
+	}
+	if !transferred[ids[2]] {
+		t.Errorf("chunk ids[2] %s should have been transferred (in manifest)", ids[2])
+	}
+}
+
+// TestCatchupNilManifestUsesAllChunks verifies that when ListManifest is nil
+// (e.g., a tier with no Raft group, or a memory tier without FSM tracking),
+// catchupFollower falls back to the leader's on-disk list — the pre-fix
+// behaviour. This is the backward-compatibility guarantee.
+func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+	orch.logger = slog.Default()
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+	tier := newReplicationTier(t, tierID, nil, false, "")
+	vault := NewVault(vaultID, tier)
+	orch.RegisterVault(vault)
+
+	mock := &replicationFakeTransferrer{}
+	orch.transferrer = mock
+
+	// Append + seal two chunks.
+	for i := 0; i < 2; i++ {
+		if _, _, err := orch.Append(vaultID, testRecord(fmt.Sprintf("rec-%d", i))); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+		active := tier.Chunks.Active()
+		if err := orch.SealActiveTier(vaultID, tierID, active.ID); err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+	}
+
+	// ListManifest is nil — catchup must fall back to disk list.
+	tier.ListManifest = nil
+
+	if err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2"); err != nil {
+		t.Fatalf("catchupFollower: %v", err)
+	}
+
+	if len(mock.replicatedChunks) != 2 {
+		t.Errorf("expected 2 chunks transferred (nil manifest = all sealed), got %d",
+			len(mock.replicatedChunks))
 	}
 }
 

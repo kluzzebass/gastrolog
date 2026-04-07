@@ -68,6 +68,23 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 		return fmt.Errorf("list chunks: %w", err)
 	}
 
+	// Snapshot the tier Raft FSM manifest at the start of the catchup pass.
+	// We use it to filter out chunks that have already been retired from the
+	// cluster's view of the data — there's a race window between the FSM
+	// applying a DeleteChunk and the leader's local file actually being
+	// unlinked, during which tier.Chunks.List() will still return the chunk.
+	// Sending such a chunk would be wasted work: the receiver would write it
+	// to disk and then immediately delete it via reconcileFollower, because
+	// reconcile uses the same FSM manifest as ground truth. See gastrolog-5grpa.
+	var manifestSet map[chunk.ChunkID]bool
+	if tier.ListManifest != nil {
+		ids := tier.ListManifest()
+		manifestSet = make(map[chunk.ChunkID]bool, len(ids))
+		for _, id := range ids {
+			manifestSet[id] = true
+		}
+	}
+
 	// Only replicate chunks where post-seal is complete. For file tiers,
 	// this means compressed — uncompressed sealed chunks are still in the
 	// post-seal pipeline (compress → index → replicate), which will handle
@@ -80,6 +97,9 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 		}
 		if isFileTier && !m.Compressed {
 			continue // post-seal pipeline will replicate after compression
+		}
+		if manifestSet != nil && !manifestSet[m.ID] {
+			continue // FSM has retired this chunk — don't ship orphans
 		}
 		sealed = append(sealed, m)
 	}
