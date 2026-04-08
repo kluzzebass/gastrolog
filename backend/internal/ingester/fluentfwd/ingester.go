@@ -464,14 +464,36 @@ func isCompressed(opt map[string]any) bool {
 	return ok && s == "gzip"
 }
 
-// gunzip decompresses gzip data.
+// maxDecompressedFluentBytes caps the size of a single fluent-forward
+// packed-forward batch after gzip decompression. Without this bound, an
+// attacker (or a misconfigured forwarder) can send a small gzipped payload
+// that decompresses to gigabytes, OOMing the ingester goroutine. 100 MiB
+// is well above any realistic batch size and well below any single-batch
+// memory budget. See gastrolog-e3qug.
+const maxDecompressedFluentBytes = 100 << 20
+
+// gunzip decompresses gzip data, capping the output at
+// maxDecompressedFluentBytes. Returns an error if the decompressed payload
+// would exceed the cap, so callers can drop the offending batch and log
+// rather than OOMing. We stream into a bytes.Buffer via io.Copy with an
+// io.LimitReader rather than reading the whole thing unbounded.
 func gunzip(data []byte) ([]byte, error) {
 	r, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = r.Close() }()
-	return io.ReadAll(r)
+
+	// Limit to cap+1 so we can distinguish "exactly at limit" from "exceeded".
+	limited := io.LimitReader(r, maxDecompressedFluentBytes+1)
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, limited); err != nil {
+		return nil, err
+	}
+	if int64(buf.Len()) > maxDecompressedFluentBytes {
+		return nil, fmt.Errorf("fluentfwd: decompressed payload exceeds %d bytes (gzip bomb?)", maxDecompressedFluentBytes)
+	}
+	return buf.Bytes(), nil
 }
 
 // isArrayCode returns true if the msgpack format code represents an array.

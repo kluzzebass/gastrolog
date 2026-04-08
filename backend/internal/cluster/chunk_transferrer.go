@@ -15,6 +15,35 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
+// Per-call timeouts protect every cluster forwarder against wedges where the
+// remote node's user-space process is paused (e.g. SIGSTOP, GC stall, debugger
+// attach) but its kernel TCP stack still acks packets. Without these, gRPC's
+// stream.RecvMsg blocks forever waiting for an application-level response that
+// will never come, holding pipeline channel slots indefinitely and silently
+// wedging the entire data plane. With these in place, the wedge is bounded
+// and surfaces as a logged error within seconds. See gastrolog-4rp6i.
+//
+// Tunings:
+//   - Unary RPCs (ForwardAppend, ForwardSealTier, ForwardDeleteChunk, …) are
+//     small request/response pairs. 5s is generous for round-trip + processing.
+//   - Streaming RPCs (TransferRecords, ReplicateSealedChunk, StreamToTier)
+//     transfer entire sealed chunks (typically <10MB). 15s allows for slow
+//     networks (1MB/s) plus margin without leaving the cluster wedged for
+//     too long when a peer becomes unresponsive.
+const (
+	unaryCallTimeout  = 5 * time.Second
+	streamCallTimeout = 15 * time.Second
+)
+
+// ErrSourceRead marks errors that originated from reading the source
+// chunk's record iterator (cursor.Next) rather than from the network /
+// destination peer. Callers that distinguish "transient destination
+// failure" from "source chunk corruption" can check `errors.Is(err,
+// ErrSourceRead)` to tell them apart — e.g. transition.transitionChunk
+// uses this to decide whether to mark the source chunk unreadable.
+// See gastrolog-50271.
+var ErrSourceRead = errors.New("source chunk read failed")
+
 // ChunkTransferrer sends chunk records to a remote node for cross-node chunk
 // migration. Uses client-streaming gRPC so records flow one-at-a-time from
 // cursor through the network to disk on the destination — at most one
@@ -34,6 +63,9 @@ func NewChunkTransferrer(peers *PeerConns) *ChunkTransferrer {
 // ForwardImportRecords RPC. Each record is sent as a separate message so the
 // entire chunk never materializes in memory.
 func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -56,7 +88,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 			break
 		}
 		if iterErr != nil {
-			return fmt.Errorf("read records for transfer: %w", iterErr)
+			return fmt.Errorf("%w: transfer: %w", ErrSourceRead, iterErr)
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
@@ -86,6 +118,9 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 // as live ingestion forwarding). Synchronous — blocks until the remote node
 // confirms the append. Used by retention eject for remote delivery.
 func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -116,6 +151,9 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 // ReplicateSealedChunk streams a sealed chunk's records to a secondary node's
 // specific tier, preserving the original chunk ID. Used for sealed-chunk replication.
 func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -148,7 +186,7 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 			break
 		}
 		if iterErr != nil {
-			return fmt.Errorf("read records for replication: %w", iterErr)
+			return fmt.Errorf("%w: replication: %w", ErrSourceRead, iterErr)
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
@@ -181,6 +219,9 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 // Used for remote tier transitions — same streaming as ReplicateSealedChunk
 // but without chunk ID (destination handles its own chunking).
 func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -211,7 +252,7 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 			break
 		}
 		if iterErr != nil {
-			return fmt.Errorf("read records for transition: %w", iterErr)
+			return fmt.Errorf("%w: transition: %w", ErrSourceRead, iterErr)
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
@@ -242,6 +283,9 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 // Same as ForwardAppend but sets TierId so the receiver targets that tier
 // instead of the vault's active tier. Used by inter-tier transition.
 func (ct *ChunkTransferrer) ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -273,6 +317,9 @@ func (ct *ChunkTransferrer) ForwardTierAppend(ctx context.Context, nodeID string
 // ForwardSealTier commands a secondary to seal its active chunk at the same
 // boundary as the primary. Used for seal synchronization during replication.
 func (ct *ChunkTransferrer) ForwardSealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -295,6 +342,9 @@ func (ct *ChunkTransferrer) ForwardSealTier(ctx context.Context, nodeID string, 
 // Sent by the leader after its retention sweep expires the chunk, so followers
 // don't hold orphaned replicas.
 func (ct *ChunkTransferrer) ForwardDeleteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
+	defer cancel()
+
 	conn, err := ct.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)

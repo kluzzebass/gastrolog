@@ -154,6 +154,13 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, 
 			return nil, fmt.Errorf("list chunks for tier %s: %w", tier.TierID, err)
 		}
 		for _, m := range metas {
+			// Override CloudBacked / Archived / NumFrames from the tier
+			// Raft FSM (the cluster-wide source of truth). Without this,
+			// follower nodes always report CloudBacked=false because their
+			// local chunk manager has CloudStore=nil. See gastrolog-asg4l.
+			if tier.OverlayFromFSM != nil {
+				m = tier.OverlayFromFSM(m)
+			}
 			result = append(result, TieredChunkMeta{
 				ChunkMeta: m,
 				TierID:    tier.TierID,
@@ -164,13 +171,28 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, 
 	return result, nil
 }
 
-// GetChunkMeta returns metadata for a specific chunk.
+// GetChunkMeta returns metadata for a specific chunk. The result is overlaid
+// from the tier Raft FSM if the chunk belongs to a tier with a Raft group, so
+// CloudBacked / Archived / NumFrames reflect the cluster-wide truth rather
+// than this node's local chunk-manager view. See gastrolog-asg4l.
 func (o *Orchestrator) GetChunkMeta(vaultID uuid.UUID, chunkID chunk.ChunkID) (chunk.ChunkMeta, error) {
-	cm, err := o.chunkManager(vaultID)
-	if err != nil {
-		return chunk.ChunkMeta{}, err
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return chunk.ChunkMeta{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
-	return cm.Meta(chunkID)
+	for _, tier := range vault.Tiers {
+		m, err := tier.Chunks.Meta(chunkID)
+		if err != nil {
+			continue // not in this tier, try the next
+		}
+		if tier.OverlayFromFSM != nil {
+			m = tier.OverlayFromFSM(m)
+		}
+		return m, nil
+	}
+	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 }
 
 // OpenCursor opens a record cursor for the given chunk.

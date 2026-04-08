@@ -4,12 +4,12 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
 	"gastrolog/internal/index"
+	"gastrolog/internal/index/idxmmap"
 )
 
 const (
@@ -99,13 +99,13 @@ func decodeIndex(data []byte) ([]index.TokenIndexEntry, error) {
 	return entries, nil
 }
 
+// LoadIndex loads the token index from disk via mmap. The decoder copies
+// strings via `string(data[a:b])` and primitive values via
+// binary.LittleEndian.*, so the mmap region is safe to release immediately
+// on return — no heap allocation for the raw file bytes.
+// See gastrolog-3rvws.
 func LoadIndex(dir string, chunkID chunk.ChunkID) ([]index.TokenIndexEntry, error) {
-	path := IndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read token index: %w", err)
-	}
-	return decodeIndex(data)
+	return idxmmap.Load(IndexPath(dir, chunkID), decodeIndex)
 }
 
 // IndexPath returns the path to the token index file for a chunk.

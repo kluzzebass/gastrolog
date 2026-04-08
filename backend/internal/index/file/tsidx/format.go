@@ -10,6 +10,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/format"
+	"gastrolog/internal/index/idxmmap"
 )
 
 const (
@@ -202,24 +203,29 @@ func SourceIndexPath(dir string, chunkID chunk.ChunkID) string {
 	return filepath.Join(dir, chunkID.String(), sourceFile)
 }
 
-// LoadIngestIndex loads the ingest index from disk.
+// LoadIngestIndex loads the ingest index from disk via mmap. The decoder
+// copies all field values out of the mmap region into the returned []Entry,
+// so the mmap is released immediately on return — no heap allocation for
+// the raw file bytes. See gastrolog-3rvws.
 func LoadIngestIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
-	path := IngestIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read ingest index: %w", err)
+	entries, err := idxmmap.Load(IngestIndexPath(dir, chunkID), func(data []byte) ([]Entry, error) {
+		return decodeIndex(data, format.TypeIngestIndex)
+	})
+	if errors.Is(err, idxmmap.ErrEmpty) {
+		return nil, ErrIndexTooSmall
 	}
-	return decodeIndex(data, format.TypeIngestIndex)
+	return entries, err
 }
 
-// LoadSourceIndex loads the source index from disk.
+// LoadSourceIndex loads the source index from disk via mmap. See LoadIngestIndex.
 func LoadSourceIndex(dir string, chunkID chunk.ChunkID) ([]Entry, error) {
-	path := SourceIndexPath(dir, chunkID)
-	data, err := os.ReadFile(filepath.Clean(path))
-	if err != nil {
-		return nil, fmt.Errorf("read source index: %w", err)
+	entries, err := idxmmap.Load(SourceIndexPath(dir, chunkID), func(data []byte) ([]Entry, error) {
+		return decodeIndex(data, format.TypeSourceIndex)
+	})
+	if errors.Is(err, idxmmap.ErrEmpty) {
+		return nil, ErrIndexTooSmall
 	}
-	return decodeIndex(data, format.TypeSourceIndex)
+	return entries, err
 }
 
 // IngestTempFilePattern returns the glob pattern for ingest index temp files.

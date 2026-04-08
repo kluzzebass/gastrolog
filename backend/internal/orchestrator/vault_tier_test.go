@@ -153,6 +153,125 @@ func TestImportToTierConcurrentSafe(t *testing.T) {
 
 // --- ListAllChunkMetas ---
 
+// TestListAllChunkMetasOverlaysFromFSM is the regression test for
+// gastrolog-asg4l. The local chunk manager only sets CloudBacked=true on the
+// node that actually uploaded the blob (the cold tier raft leader);
+// followers strip sealed_backing from their chunk-manager params and never
+// see the cloud state, so their local CloudBacked is permanently false. The
+// fix is to overlay the cluster-wide FSM view onto each chunk meta returned
+// from ListAllChunkMetas. Without the overlay the inspector showed "no cloud
+// badge" 75% of the time on a 4-node cluster (whichever 3 of 4 nodes the
+// query happened to land on were always followers).
+func TestListAllChunkMetasOverlaysFromFSM(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+
+	tier := newMemTier(t, tierID, false, nil)
+	// Simulate the follower scenario: the FSM has CloudBacked=true (because
+	// some other node — the leader — uploaded the blob) but the local chunk
+	// manager has no CloudStore so its local meta reports CloudBacked=false.
+	// The OverlayFromFSM callback closes the gap.
+	tier.OverlayFromFSM = func(m chunk.ChunkMeta) chunk.ChunkMeta {
+		m.CloudBacked = true
+		m.Archived = true
+		m.NumFrames = 7
+		return m
+	}
+
+	vault := NewVault(vaultID, tier)
+	vault.Name = "follower-with-fsm-overlay"
+	orch.RegisterVault(vault)
+
+	if _, _, err := tier.Chunks.Append(testRecord("payload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Sanity-check: the local chunk manager itself reports CloudBacked=false
+	// (because it has no CloudStore wired up). This is the bug condition we
+	// expect the overlay to correct.
+	rawMetas, err := tier.Chunks.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rawMetas) != 1 {
+		t.Fatalf("expected 1 raw meta, got %d", len(rawMetas))
+	}
+	if rawMetas[0].CloudBacked {
+		t.Fatal("test setup wrong: raw meta should have CloudBacked=false")
+	}
+
+	// The overlaid view from ListAllChunkMetas should have CloudBacked=true,
+	// Archived=true, NumFrames=7 — the cluster-wide truth from the FSM.
+	metas, err := orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(metas))
+	}
+	got := metas[0].ChunkMeta
+	if !got.CloudBacked {
+		t.Errorf("CloudBacked not overlaid from FSM: got %+v", got)
+	}
+	if !got.Archived {
+		t.Errorf("Archived not overlaid from FSM: got %+v", got)
+	}
+	if got.NumFrames != 7 {
+		t.Errorf("NumFrames not overlaid from FSM: got %d, want 7", got.NumFrames)
+	}
+
+	// GetChunkMeta should also apply the overlay.
+	chunkID := got.ID
+	single, err := orch.GetChunkMeta(vaultID, chunkID)
+	if err != nil {
+		t.Fatalf("GetChunkMeta: %v", err)
+	}
+	if !single.CloudBacked || !single.Archived || single.NumFrames != 7 {
+		t.Errorf("GetChunkMeta did not apply overlay: %+v", single)
+	}
+}
+
+// TestListAllChunkMetasNilOverlayPassthrough verifies that tiers without an
+// OverlayFromFSM callback (single-node mode, memory tiers) pass the local
+// chunk manager's view through unchanged. The overlay is opt-in.
+func TestListAllChunkMetasNilOverlayPassthrough(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+
+	tier := newMemTier(t, tierID, false, nil)
+	// Note: tier.OverlayFromFSM is nil, simulating a tier with no Raft group.
+
+	vault := NewVault(vaultID, tier)
+	orch.RegisterVault(vault)
+
+	if _, _, err := tier.Chunks.Append(testRecord("payload")); err != nil {
+		t.Fatal(err)
+	}
+	if err := tier.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, err := orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk, got %d", len(metas))
+	}
+	if metas[0].CloudBacked {
+		t.Errorf("nil overlay should not flip CloudBacked: got %+v", metas[0].ChunkMeta)
+	}
+}
+
 func TestListAllChunkMetasIncludesAllTiers(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
