@@ -282,12 +282,18 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 	var written int64
 	for {
 		var msg gastrologv1.ForwardRecordsRequest
-		if err := stream.RecvMsg(&msg); err != nil {
-			if errors.Is(err, io.EOF) {
-				return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{
-					RecordsWritten: written,
-				})
-			}
+		err := s.recvOrShutdown(stream, &msg)
+		if errors.Is(err, io.EOF) {
+			return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{
+				RecordsWritten: written,
+			})
+		}
+		// Cluster server is shutting down — return cleanly so GracefulStop
+		// can unblock. See gastrolog-1e5ke.
+		if errors.Is(err, errShuttingDown) {
+			return nil
+		}
+		if err != nil {
 			return err
 		}
 
@@ -365,11 +371,17 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 
 	// Read first message to get vault_id and optional tier_id/chunk_id.
 	first := &gastrologv1.ImportRecordMessage{}
-	if err := stream.RecvMsg(first); err != nil {
-		if errors.Is(err, io.EOF) {
-			// Empty stream — send zero-record response.
-			return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{})
-		}
+	err := s.recvOrShutdown(stream, first)
+	if errors.Is(err, io.EOF) {
+		// Empty stream — send zero-record response.
+		return stream.SendMsg(&gastrologv1.ForwardRecordsResponse{})
+	}
+	// Cluster server is shutting down — return cleanly. The iterator
+	// was never entered so no partial chunk state to worry about.
+	if errors.Is(err, errShuttingDown) {
+		return nil
+	}
+	if err != nil {
 		return status.Errorf(codes.InvalidArgument, "receive first message: %v", err)
 	}
 	vaultID, err := parseVaultID(first.GetVaultId())
@@ -397,18 +409,25 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	var count int64
 	firstConsumed := false
 	next := chunk.RecordIterator(func() (chunk.Record, error) {
-		var msg *gastrologv1.ImportRecordMessage
 		if !firstConsumed {
-			msg = first
 			firstConsumed = true
-		} else {
-			msg = &gastrologv1.ImportRecordMessage{}
-			if err := stream.RecvMsg(msg); err != nil {
-				if errors.Is(err, io.EOF) {
-					return chunk.Record{}, chunk.ErrNoMoreRecords
-				}
-				return chunk.Record{}, err
-			}
+			count++
+			return exportRecordToChunk(first.GetRecord()), nil
+		}
+		msg := &gastrologv1.ImportRecordMessage{}
+		recvErr := s.recvOrShutdown(stream, msg)
+		if errors.Is(recvErr, io.EOF) {
+			return chunk.Record{}, chunk.ErrNoMoreRecords
+		}
+		// Cluster server is shutting down — treat as end of iteration so
+		// the importer finalizes with the records received so far. The
+		// partial chunk is safe because ImportRecords has atomic-seal
+		// semantics. See gastrolog-1e5ke.
+		if errors.Is(recvErr, errShuttingDown) {
+			return chunk.Record{}, chunk.ErrNoMoreRecords
+		}
+		if recvErr != nil {
+			return chunk.Record{}, recvErr
 		}
 		count++
 		return exportRecordToChunk(msg.GetRecord()), nil

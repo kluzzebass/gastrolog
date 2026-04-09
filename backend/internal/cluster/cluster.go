@@ -70,6 +70,15 @@ type Server struct {
 	localAddr string // advertised address (may differ from listen addr)
 	logger    *slog.Logger
 
+	// stopCtx is cancelled by Stop() to signal long-running stream handlers
+	// that they should return cleanly. Handlers that block in
+	// stream.RecvMsg() — tier replication, stream forward records, forward
+	// import records — wrap their Recv in recvOrShutdown() so they observe
+	// this cancellation within a few milliseconds rather than waiting for
+	// grpcSrv.GracefulStop()'s transport-level drain. See gastrolog-1e5ke.
+	stopCtx    context.Context
+	stopCancel context.CancelFunc
+
 	// Set after Raft is created, before Start().
 	raft *hraft.Raft
 
@@ -203,12 +212,62 @@ func New(cfg Config) (*Server, error) {
 		localAddr = ln.Addr().String()
 	}
 
+	stopCtx, stopCancel := context.WithCancel(context.Background())
 	return &Server{
-		cfg:      cfg,
-		listener: ln,
-		logger:   logging.Default(cfg.Logger),
-		localAddr: localAddr,
+		cfg:        cfg,
+		listener:   ln,
+		logger:     logging.Default(cfg.Logger),
+		localAddr:  localAddr,
+		stopCtx:    stopCtx,
+		stopCancel: stopCancel,
 	}, nil
+}
+
+// errShuttingDown is returned by recvOrShutdown when the cluster server's
+// stopCtx is cancelled before RecvMsg completes. Handlers interpret this
+// as "return cleanly with no error" rather than logging the shutdown as
+// a failure.
+var errShuttingDown = errors.New("cluster server shutting down")
+
+// recvOrShutdown wraps grpc.ServerStream.RecvMsg so the caller can exit
+// cleanly when the cluster server starts shutting down, instead of
+// blocking in RecvMsg until grpcSrv.GracefulStop() closes the transport.
+//
+// Usage:
+//
+//	if err := s.recvOrShutdown(stream, msg); err != nil {
+//	    if errors.Is(err, io.EOF) || errors.Is(err, errShuttingDown) {
+//	        return nil
+//	    }
+//	    return err
+//	}
+//
+// Implementation spawns one goroutine per call that performs the actual
+// RecvMsg. If RecvMsg returns first, we return its result. If stopCtx
+// fires first, we return errShuttingDown and leave the goroutine
+// dangling — it will be unblocked moments later when grpcSrv.GracefulStop
+// (or Stop) closes the transport, at which point it drops the result on
+// the floor. This costs at most one goroutine per active stream during
+// the tiny shutdown window.
+//
+// Added for gastrolog-1e5ke.
+func (s *Server) recvOrShutdown(stream grpc.ServerStream, msg any) error {
+	// Fast path: already shutting down — do not even try to Recv.
+	if s.stopCtx.Err() != nil {
+		return errShuttingDown
+	}
+
+	recvErr := make(chan error, 1)
+	go func() {
+		recvErr <- stream.RecvMsg(msg)
+	}()
+
+	select {
+	case err := <-recvErr:
+		return err
+	case <-s.stopCtx.Done():
+		return errShuttingDown
+	}
 }
 
 // ConfigGroupID is the well-known group ID for the cluster config Raft group.
@@ -438,23 +497,55 @@ func requireClientCert(ctx context.Context, method string) error {
 	return nil
 }
 
-// Stop gracefully stops the cluster gRPC server with a 10-second deadline.
+// Stop gracefully stops the cluster gRPC server.
+//
+// The drain order matters:
+//
+//  1. stopCancel() fires the cluster server's shutdown context. Long-
+//     running stream handlers (tier replication, stream forward records,
+//     forward import records) that wrap their RecvMsg via recvOrShutdown
+//     observe this immediately and return errShuttingDown → no error →
+//     handler goroutine exits. Without this step those handlers block
+//     in stream.RecvMsg() until the peer closes the stream — which
+//     never happens during a planned cluster shutdown because peers are
+//     also shutting down — and GracefulStop() waits the full fallback
+//     timeout. See gastrolog-1e5ke.
+//
+//  2. tm.Close() closes the multiraft transport. This unblocks Raft
+//     handlers stuck in handleRPC waiting on rpcChan (by closing
+//     shutdownCh + the per-group channels).
+//
+//  3. peerConns.Close() tears down outbound peer connections.
+//
+//  4. grpcSrv.GracefulStop() should now return promptly because all
+//     long-running handlers have already exited and the multiraft
+//     consumers are drained.
+//
+// A 2-second fallback timeout remains as a last-resort safety net. If
+// it ever fires in production, that is a signal to investigate a
+// handler that doesn't observe stopCtx cancellation — the whole point
+// of this ordering is that GracefulStop completes in milliseconds.
 func (s *Server) Stop() {
 	if s.grpcSrv == nil {
 		return
 	}
 
-	// Close the transport FIRST — this unblocks any gRPC handlers stuck in
-	// handleRPC waiting on rpcChan (by closing shutdownCh + group channels).
-	// Without this, GracefulStop deadlocks: it waits for active RPCs to finish,
-	// but the RPCs can't finish because nothing drains their rpcChan.
+	// Step 1: signal long-running stream handlers to return cleanly.
+	if s.stopCancel != nil {
+		s.stopCancel()
+	}
+
+	// Step 2: close the multiraft transport.
 	if s.tm != nil {
 		_ = s.tm.Close()
 	}
+
+	// Step 3: close outbound peer connections.
 	if s.peerConns != nil {
 		_ = s.peerConns.Close()
 	}
 
+	// Step 4: graceful gRPC drain. Should return near-instantly.
 	done := make(chan struct{})
 	go func() {
 		s.grpcSrv.GracefulStop()
@@ -463,8 +554,8 @@ func (s *Server) Stop() {
 
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
-		s.logger.Debug("cluster gRPC graceful stop timed out, forcing")
+	case <-time.After(2 * time.Second):
+		s.logger.Warn("cluster gRPC graceful stop timed out, forcing — a handler is not observing stopCtx")
 		s.grpcSrv.Stop()
 	}
 }
