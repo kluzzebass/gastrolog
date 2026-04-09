@@ -15,6 +15,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
+	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 
 	"github.com/google/uuid"
@@ -268,9 +269,25 @@ type Orchestrator struct {
 	// leader epoch (after raft.Barrier returns).
 	tierLeaders *tierLeaderManager
 
+	// Shutdown phase (nil in tests / single-node setups without a
+	// Phase wired). When non-nil, hot-path replication helpers like
+	// fireAndForgetRemote and sealRemoteFollowers consult
+	// phase.ShuttingDown() and skip the remote call during drain, so
+	// the orchestrator's pipeline flush does not spam the log with
+	// "connection refused" warnings for peers that are going down
+	// alongside this node. See gastrolog-1e5ke.
+	phase *lifecycle.Phase
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
+}
+
+// shuttingDown reports whether the orchestrator has been told to drain.
+// Returns false when the phase is nil (tests / harnesses without a
+// wired phase), preserving the pre-gastrolog-1e5ke behaviour.
+func (o *Orchestrator) shuttingDown() bool {
+	return o.phase != nil && o.phase.ShuttingDown()
 }
 
 // ConfigLoader provides read access to the full configuration.
@@ -314,6 +331,13 @@ type Config struct {
 	// Alerts is an optional collector for runtime system alerts.
 	// Components call Set to raise alerts and Clear to resolve them.
 	Alerts AlertCollector
+
+	// Phase is the shared shutdown signal. When non-nil, the orchestrator
+	// consults phase.ShuttingDown() in hot-path replication helpers so that
+	// during the drain window (after BeginShutdown) remote forwards no-op
+	// instead of spamming "connection refused" against peers that are
+	// shutting down alongside this node. See gastrolog-1e5ke.
+	Phase *lifecycle.Phase
 }
 
 // AlertCollector is the interface for raising and clearing system alerts.
@@ -358,6 +382,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		alerts:          cfg.Alerts,
 		suspects:        newSuspectTracker(),
 		tierLeaders:     newTierLeaderManager(logger),
+		phase:           cfg.Phase,
 		now:             cfg.Now,
 		logger:          logger,
 	}

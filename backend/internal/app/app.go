@@ -50,6 +50,7 @@ import (
 	ingestsyslog "gastrolog/internal/ingester/syslog"
 	ingesttail "gastrolog/internal/ingester/tail"
 	"gastrolog/internal/chanwatch"
+	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/raftgroup"
 	"gastrolog/internal/notify"
@@ -150,12 +151,19 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	alertCollector := alert.New()
 
+	// Shared shutdown phase. Constructed once per process and threaded into
+	// every subsystem that needs to short-circuit work during drain — the
+	// orchestrator's replication fanout, the cluster server's stream
+	// handlers, the tier announcer, etc. See gastrolog-1e5ke.
+	shutdownPhase := lifecycle.New()
+
 	orch, err := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
 		ConfigLoader:      cfgStore,
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
+		Phase:             shutdownPhase,
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)
