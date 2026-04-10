@@ -195,6 +195,31 @@ func (o *Orchestrator) GetChunkMeta(vaultID uuid.UUID, chunkID chunk.ChunkID) (c
 	return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 }
 
+// GetTieredChunkMeta returns metadata for a specific chunk with tier info.
+func (o *Orchestrator) GetTieredChunkMeta(vaultID uuid.UUID, chunkID chunk.ChunkID) (TieredChunkMeta, error) {
+	o.mu.RLock()
+	vault := o.vaults[vaultID]
+	o.mu.RUnlock()
+	if vault == nil {
+		return TieredChunkMeta{}, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+	}
+	for _, tier := range vault.Tiers {
+		m, err := tier.Chunks.Meta(chunkID)
+		if err != nil {
+			continue
+		}
+		if tier.OverlayFromFSM != nil {
+			m = tier.OverlayFromFSM(m)
+		}
+		return TieredChunkMeta{
+			ChunkMeta: m,
+			TierID:    tier.TierID,
+			TierType:  tier.Type,
+		}, nil
+	}
+	return TieredChunkMeta{}, chunk.ErrChunkNotFound
+}
+
 // OpenCursor opens a record cursor for the given chunk.
 func (o *Orchestrator) OpenCursor(vaultID uuid.UUID, chunkID chunk.ChunkID) (chunk.RecordCursor, error) {
 	cm, err := o.chunkManager(vaultID)

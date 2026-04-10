@@ -128,6 +128,9 @@ func main() {
 		cli.NewLoginCommand(),
 		cli.NewRegisterCommand(),
 		cli.NewQueryCommand(),
+		cli.NewInspectCommand(),
+		cli.NewArchiveCommand(),
+		cli.NewRestoreCommand(),
 	)
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

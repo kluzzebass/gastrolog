@@ -125,13 +125,13 @@ func (s *VaultServer) GetChunk(
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
-	meta, err := s.orch.GetChunkMeta(vaultID, chunkID)
+	meta, err := s.orch.GetTieredChunkMeta(vaultID, chunkID)
 	if err != nil {
 		return nil, mapVaultError(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetChunkResponse{
-		Chunk: ChunkMetaToProto(meta),
+		Chunk: TieredChunkMetaToProto(meta),
 	}), nil
 }
 
