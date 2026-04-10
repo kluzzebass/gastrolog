@@ -16,6 +16,7 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
 	"gastrolog/internal/index"
+	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/query"
 	"gastrolog/internal/raftgroup"
 	tierfsm "gastrolog/internal/tier/raftfsm"
@@ -720,7 +721,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}
 
 	// Wire the Raft announcer now that both the group and chunk manager exist.
-	setTierRaftAnnouncer(cm, applier, o.logger)
+	setTierRaftAnnouncer(cm, applier, o.phase, o.logger)
 
 	// JSONL sinks are write-only — no query engine, no indexes.
 	if tierCfg.Type == config.TierTypeJSONL {
@@ -821,7 +822,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 	}
 
 	// Wire Raft announcer now that chunk manager exists.
-	setTierRaftAnnouncer(cm, applier, o.logger)
+	setTierRaftAnnouncer(cm, applier, o.phase, o.logger)
 
 	// Follower replicas need index builders for local queries.
 	imFactory, ok := factories.IndexManagers[factoryName]
@@ -1050,8 +1051,10 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 
 // setTierRaftAnnouncer wires the Raft announcer to a chunk manager after both
 // the Raft group and chunk manager have been created. The applier handles
-// routing to the tier Raft leader transparently.
-func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, logger *slog.Logger) {
+// routing to the tier Raft leader transparently. The phase parameter lets
+// the announcer short-circuit during shutdown so trailing applies don't
+// fire "raft is already shutdown" warnings (see gastrolog-1e5ke).
+func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, phase *lifecycle.Phase, logger *slog.Logger) {
 	if applier == nil {
 		return
 	}
@@ -1059,7 +1062,7 @@ func setTierRaftAnnouncer(cm chunk.ChunkManager, applier tierfsm.Applier, logger
 	if !ok {
 		return
 	}
-	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, logger))
+	setter.SetAnnouncer(tierfsm.NewAnnouncer(applier, phase, logger))
 }
 
 // wireTierFSMOnDelete sets up the tier FSM's OnDelete callback so that

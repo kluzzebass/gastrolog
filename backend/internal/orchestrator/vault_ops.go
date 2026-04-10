@@ -394,8 +394,14 @@ func (o *Orchestrator) forwardToFollowers(vault *Vault, vaultID uuid.UUID, tier 
 // sealRemoteFollowers sends seal commands to remote followers through the
 // tier replication stream, ensuring they seal at the same boundary as the
 // leader. Must be called BEFORE the next record's append to maintain ordering.
+//
+// During shutdown (o.shuttingDown()) this is a silent no-op: the local
+// chunk is already sealed on disk, peers are racing to shut down alongside
+// us, and their replication-catchup on next startup will reseal to the
+// same boundary. Trying to push the seal command now would just add noise
+// from peers that are unreachable. See gastrolog-1e5ke.
 func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkID chunk.ChunkID) {
-	if o.tierReplicator == nil || len(targets) == 0 {
+	if o.tierReplicator == nil || len(targets) == 0 || o.shuttingDown() {
 		return
 	}
 	for _, tgt := range targets {
@@ -410,8 +416,16 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 }
 
 // fireAndForgetRemote sends records to remote followers outside any lock.
+//
+// During shutdown (o.shuttingDown()) this is a silent no-op: the record
+// is already durable on the local leader's disk; peers that are also
+// shutting down will reconcile via replication-catchup on next startup.
+// Skipping the fanout avoids the log spam storm where each buffered
+// record in the drain pipeline tries to reach peers that are gone. This
+// is the single biggest source of shutdown noise before the fix —
+// see gastrolog-1e5ke.
 func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
-	if len(targets) == 0 {
+	if len(targets) == 0 || o.shuttingDown() {
 		return
 	}
 	for _, tgt := range targets {

@@ -8,6 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
+	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/multiraft"
 	"gastrolog/internal/raftgroup"
 
@@ -117,7 +118,7 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 
 	// Create a file.Manager with an Announcer on the leader node.
 	applier := &testApplier{raft: leaderGroup.Raft, timeout: 5 * time.Second}
-	announcer := NewAnnouncer(applier, nil)
+	announcer := NewAnnouncer(applier, nil, nil)
 	dir := t.TempDir()
 	mgr, err := chunkfile.NewManager(chunkfile.Config{
 		Dir:       dir,
@@ -223,6 +224,75 @@ type testApplier struct {
 
 func (a *testApplier) Apply(data []byte) error {
 	return a.raft.Apply(data, a.timeout).Error()
+}
+
+// recordingApplier counts Apply calls and records the last error returned.
+// Used to verify the announcer's short-circuit behaviour under shutdown.
+type recordingApplier struct {
+	calls int
+	err   error
+}
+
+func (a *recordingApplier) Apply(_ []byte) error {
+	a.calls++
+	return a.err
+}
+
+// TestAnnouncerShortCircuitsDuringShutdown is the regression test for the
+// announcer half of gastrolog-1e5ke. When the orchestrator's drain queues
+// a last-minute chunk event (seal, create, delete, etc.) after the local
+// tier Raft has already been shut down, the previous code would call
+// Applier.Apply, receive "raft is already shutdown", and log a WARN. This
+// fired 2-4 times per node shutdown and added noise without any value —
+// missed announces are reconciled on next startup from local chunk state.
+//
+// The fix: when phase.ShuttingDown() is true, the announcer returns
+// immediately without calling the Applier. This test constructs an
+// announcer with a recording Applier and a phase, issues one pre-shutdown
+// announce (which MUST reach the Applier), flips the phase, issues two
+// more announces (which MUST NOT reach the Applier), and asserts the
+// Apply count is exactly 1.
+func TestAnnouncerShortCircuitsDuringShutdown(t *testing.T) {
+	t.Parallel()
+
+	phase := lifecycle.New()
+	applier := &recordingApplier{}
+	ann := NewAnnouncer(applier, phase, nil)
+
+	id := chunk.ChunkID{}
+
+	// Pre-shutdown: announce hits the Applier.
+	ann.AnnounceCreate(id, time.Now(), time.Now(), time.Now())
+	if applier.calls != 1 {
+		t.Fatalf("pre-shutdown: calls = %d, want 1", applier.calls)
+	}
+
+	// Flip phase. Now every announce should be a silent no-op.
+	phase.BeginShutdown("test: draining")
+
+	ann.AnnounceSeal(id, time.Now(), 10, 512, time.Now(), time.Now())
+	ann.AnnounceDelete(id)
+	if applier.calls != 1 {
+		t.Errorf("post-shutdown: calls = %d, want 1 (expected zero new calls)", applier.calls)
+	}
+}
+
+// TestAnnouncerNilPhaseDoesNotPanic guards the single-node / test-harness
+// case where the announcer is constructed without a shared phase. Every
+// announce must still reach the Applier, preserving pre-gastrolog-1e5ke
+// behaviour.
+func TestAnnouncerNilPhaseDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	applier := &recordingApplier{}
+	ann := NewAnnouncer(applier, nil, nil)
+
+	id := chunk.ChunkID{}
+	ann.AnnounceCreate(id, time.Now(), time.Now(), time.Now())
+
+	if applier.calls != 1 {
+		t.Errorf("nil phase: calls = %d, want 1", applier.calls)
+	}
 }
 
 func waitForLeader(t *testing.T, g *raftgroup.Group, timeout time.Duration) {

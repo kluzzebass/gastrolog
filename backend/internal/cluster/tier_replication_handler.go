@@ -25,8 +25,10 @@ func tierReplicationStreamHandler(srv any, stream grpc.ServerStream) error {
 
 	for {
 		msg := &gastrologv1.TierReplicationCommand{}
-		if err := stream.RecvMsg(msg); err != nil {
-			if errors.Is(err, io.EOF) {
+		if err := s.recvOrShutdown(stream, msg); err != nil {
+			// EOF = peer closed the stream normally; errShuttingDown = we
+			// are tearing down the cluster server. Both are clean exits.
+			if errors.Is(err, io.EOF) || errors.Is(err, errShuttingDown) {
 				return nil
 			}
 			return err
