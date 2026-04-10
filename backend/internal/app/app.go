@@ -640,9 +640,7 @@ func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config
 			return "", "", fmt.Errorf("ensure node config: %w", err)
 		}
 		logNodeIdentity(logger, nodeID, nodeName)
-		if configType != "memory" {
-			_ = hd.WriteNodeName(nodeName)
-		}
+		persistNodeName(logger, configType, hd, nodeName)
 	}
 
 	homeDir := ""
@@ -775,8 +773,15 @@ func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, c
 		logger.Warn("ensure node config failed (will retry on next start)", "error", err)
 		return
 	}
-	if configType != "memory" {
-		_ = hd.WriteNodeName(nodeName)
+	persistNodeName(logger, configType, hd, nodeName)
+}
+
+func persistNodeName(logger *slog.Logger, configType string, hd home.Dir, nodeName string) {
+	if configType == "memory" {
+		return
+	}
+	if err := hd.WriteNodeName(nodeName); err != nil {
+		logger.Warn("failed to persist node name", "error", err)
 	}
 }
 

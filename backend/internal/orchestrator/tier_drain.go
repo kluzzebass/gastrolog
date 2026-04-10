@@ -183,7 +183,9 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 
 	// Final seal to catch any stragglers.
 	if active := tier.Chunks.Active(); active != nil {
-		_ = tier.Chunks.Seal()
+		if err := tier.Chunks.Seal(); err != nil {
+			o.logger.Warn("tier drain: final seal failed", "vault", vaultID, "tier", tierID, "error", err)
+		}
 		o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID)
 	}
 
@@ -239,7 +241,9 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *config.Config, va
 
 	// Delete source chunk.
 	if tier.Indexes != nil {
-		_ = tier.Indexes.DeleteIndexes(chunkID)
+		if err := tier.Indexes.DeleteIndexes(chunkID); err != nil {
+			o.logger.Warn("tier drain: delete source indexes failed", "vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+		}
 	}
 	if err := tier.Chunks.Delete(chunkID); err != nil {
 		return fmt.Errorf("delete source chunk: %w", err)

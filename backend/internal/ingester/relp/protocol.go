@@ -72,7 +72,9 @@ func (s *Session) ReceiveLog() (*Message, error) {
 	case "syslog":
 		return msg, nil
 	case "close":
-		_ = s.AnswerOk(msg)
+		// Best-effort ack — the connection is closing regardless of whether
+		// this write succeeds. The client treats silence as implicit close.
+		_ = s.AnswerOk(msg) // connection closing
 		return nil, io.EOF
 	default:
 		return nil, fmt.Errorf("relp: unexpected command %q", msg.Command)
@@ -178,6 +180,7 @@ func (s *Session) answerOpen(msg *Message) error {
 	// Accept version 0 or 1.
 	ver := offers["relp_version"]
 	if ver != "" && ver != "0" && ver != "1" {
+		// Best-effort error response — the protocol error is returned regardless.
 		_ = s.AnswerError(msg, "unsupported relp_version")
 		return fmt.Errorf("relp: unsupported version %q", ver)
 	}
@@ -188,6 +191,7 @@ func (s *Session) answerOpen(msg *Message) error {
 	// Check that the client supports syslog.
 	cmds := offers["commands"]
 	if !strings.Contains(cmds, "syslog") {
+		// Best-effort error response — the protocol error is returned regardless.
 		_ = s.AnswerError(msg, "syslog command required")
 		return errors.New("relp: client does not support syslog command")
 	}

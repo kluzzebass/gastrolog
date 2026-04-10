@@ -3,6 +3,7 @@ package server
 import (
 	"compress/gzip"
 	"io"
+	"log/slog"
 	"net/http"
 	"runtime"
 	"strings"
@@ -152,8 +153,13 @@ func (cw *compressWriter) Write(b []byte) (int, error) {
 func (cw *compressWriter) Flush() {
 	if cw.compressing {
 		// brotli.Writer implements Flush(); gzip.Writer implements Flush().
+		// Errors here mean compressed data may not have reached the
+		// response writer, but we can't change the HTTP status at this
+		// point — log and move on.
 		if f, ok := cw.writer.(interface{ Flush() error }); ok {
-			_ = f.Flush()
+			if err := f.Flush(); err != nil {
+				slog.Debug("compress: flush failed", "encoding", cw.encoding, "error", err)
+			}
 		}
 	}
 	if f, ok := cw.ResponseWriter.(http.Flusher); ok {
@@ -165,7 +171,9 @@ func (cw *compressWriter) Close() {
 	if !cw.compressing || cw.writer == nil {
 		return
 	}
-	_ = cw.writer.Close()
+	if err := cw.writer.Close(); err != nil {
+		slog.Debug("compress: close failed", "encoding", cw.encoding, "error", err)
+	}
 
 	// Return to pool.
 	switch cw.encoding {

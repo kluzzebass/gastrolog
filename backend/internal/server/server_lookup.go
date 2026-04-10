@@ -371,8 +371,13 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 
 	// Re-apply config to reload MMDB entries that use auto-downloaded databases.
 	reloadCtx, reloadCancel := context.WithTimeout(ctx, configLoadTimeout)
-	ss, _ = s.cfgStore.LoadServerSettings(reloadCtx)
+	var loadErr error
+	ss, loadErr = s.cfgStore.LoadServerSettings(reloadCtx)
 	reloadCancel()
+	if loadErr != nil {
+		s.logger.Error("maxmind update: reload settings failed", "error", loadErr)
+		return
+	}
 	s.registerMMDBLookups(ss.Lookup, registry)
 
 	// Update the last-update timestamp.

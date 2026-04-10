@@ -84,7 +84,11 @@ func (s *ConfigServer) GetIngesterStatus(
 	// Check config store for existence (cluster-wide).
 	var ingCfg *config.IngesterConfig
 	if s.cfgStore != nil {
-		ingCfg, _ = s.cfgStore.GetIngester(ctx, id)
+		var ingErr error
+		ingCfg, ingErr = s.cfgStore.GetIngester(ctx, id)
+		if ingErr != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get ingester config: %w", ingErr))
+		}
 	}
 	if ingCfg == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))

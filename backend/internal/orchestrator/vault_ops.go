@@ -482,7 +482,10 @@ func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID uuid.UUID, chunkID ch
 		if t.TierID == tierID {
 			o.mu.RUnlock()
 			if t.Indexes != nil {
-				_ = t.Indexes.DeleteIndexes(chunkID)
+				if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
+					o.logger.Warn("delete chunk: delete indexes failed",
+						"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+				}
 			}
 			return t.Chunks.Delete(chunkID)
 		}
@@ -506,7 +509,9 @@ func replaceForwardedChunk(cm chunk.ChunkManager, chunkID chunk.ChunkID, isActiv
 		}
 	}
 	if err := chunk.DeleteNoAnnounce(cm, chunkID); errors.Is(err, chunk.ErrActiveChunk) {
-		_ = cm.Seal()
+		if sealErr := cm.Seal(); sealErr != nil {
+			return fmt.Errorf("re-seal forwarded chunk %s: %w", chunkID, sealErr)
+		}
 		if err = chunk.DeleteNoAnnounce(cm, chunkID); err != nil {
 			return fmt.Errorf("delete forwarded chunk %s (after re-seal): %w", chunkID, err)
 		}
@@ -529,7 +534,10 @@ func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, 
 	}
 	for _, t := range vault.Tiers {
 		if t.TierID == tierID && t.IsFollower {
-			_ = chunk.DeleteNoAnnounce(t.Chunks, chunkID)
+			if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
+				o.logger.Warn("delete from followers: failed",
+					"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+			}
 		}
 	}
 }

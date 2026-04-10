@@ -287,7 +287,9 @@ func (s *AuthServer) RefreshToken(
 	// Check expiry.
 	if time.Now().UTC().After(stored.ExpiresAt) {
 		// Clean up the expired token.
-		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
+		if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
+			s.logger.Warn("failed to delete expired refresh token", "token_id", stored.ID, "err", err)
+		}
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("refresh token expired"))
 	}
 
@@ -297,13 +299,17 @@ func (s *AuthServer) RefreshToken(
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("get user: %w", err))
 	}
 	if user == nil {
-		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
+		if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
+			s.logger.Warn("failed to delete orphaned refresh token", "token_id", stored.ID, "err", err)
+		}
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("user no longer exists"))
 	}
 
 	// Check TokenInvalidatedAt — any refresh token issued before this is rejected.
 	if !user.TokenInvalidatedAt.IsZero() && stored.CreatedAt.Before(user.TokenInvalidatedAt) {
-		_ = s.cfgStore.DeleteRefreshToken(ctx, stored.ID)
+		if err := s.cfgStore.DeleteRefreshToken(ctx, stored.ID); err != nil {
+			s.logger.Warn("failed to delete revoked refresh token", "token_id", stored.ID, "err", err)
+		}
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("refresh token revoked"))
 	}
 

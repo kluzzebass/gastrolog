@@ -318,25 +318,38 @@ func (o *Orchestrator) DeleteTierData(tierID uuid.UUID) {
 			if tier.TierID != tierID {
 				continue
 			}
-			// Seal active chunk so we can delete it.
-			if active := tier.Chunks.Active(); active != nil {
-				_ = tier.Chunks.Seal()
-			}
-			metas, err := tier.Chunks.List()
-			if err != nil {
-				o.logger.Warn("delete tier data: list failed", "tier", tierID, "error", err)
-				return
-			}
-			for _, m := range metas {
-				if tier.Indexes != nil {
-					_ = tier.Indexes.DeleteIndexes(m.ID)
-				}
-				_ = tier.Chunks.Delete(m.ID)
-			}
-			o.logger.Info("tier data deleted", "tier", tierID, "chunks", len(metas))
+			n := o.sealAndDeleteAllChunks(tier, "delete tier data", tierID)
+			o.logger.Info("tier data deleted", "tier", tierID, "chunks", n)
 			return
 		}
 	}
+}
+
+// sealAndDeleteAllChunks seals the active chunk (if any), then deletes all
+// chunks and their indexes. Returns the number of chunks found. Errors are
+// logged with the given prefix but do not abort the cleanup.
+func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tierID uuid.UUID) int {
+	if active := tier.Chunks.Active(); active != nil {
+		if err := tier.Chunks.Seal(); err != nil {
+			o.logger.Warn(op+": seal failed", "tier", tierID, "error", err)
+		}
+	}
+	metas, err := tier.Chunks.List()
+	if err != nil {
+		o.logger.Warn(op+": list failed", "tier", tierID, "error", err)
+		return 0
+	}
+	for _, m := range metas {
+		if tier.Indexes != nil {
+			if err := tier.Indexes.DeleteIndexes(m.ID); err != nil {
+				o.logger.Warn(op+": delete indexes failed", "tier", tierID, "chunk", m.ID, "error", err)
+			}
+		}
+		if err := tier.Chunks.Delete(m.ID); err != nil {
+			o.logger.Warn(op+": delete chunk failed", "tier", tierID, "chunk", m.ID, "error", err)
+		}
+	}
+	return len(metas)
 }
 
 // RemoveTierFromVault removes a single tier instance from a vault, deletes its
@@ -372,21 +385,12 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 	o.scheduler.RemoveJobsByPrefix("index-build:" + prefix + ":" + tierID.String())
 
 	// Delete all chunk data and indexes.
-	if active := tier.Chunks.Active(); active != nil {
-		_ = tier.Chunks.Seal()
-	}
-	metas, err := tier.Chunks.List()
-	if err == nil {
-		for _, m := range metas {
-			if tier.Indexes != nil {
-				_ = tier.Indexes.DeleteIndexes(m.ID)
-			}
-			_ = tier.Chunks.Delete(m.ID)
-		}
-	}
+	o.sealAndDeleteAllChunks(tier, "remove tier", tierID)
 
 	// Close managers.
-	_ = tier.Chunks.Close()
+	if err := tier.Chunks.Close(); err != nil {
+		o.logger.Warn("remove tier: close chunk manager failed", "vault", vaultID, "tier", tierID, "error", err)
+	}
 
 	// Remove retention runner and cron rotation for this tier.
 	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))

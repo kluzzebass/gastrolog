@@ -253,9 +253,13 @@ func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uui
 		d.logger.Error("dispatch: reload retention policies", "error", err)
 	}
 	if !cfg.Enabled {
-		_ = d.orch.DisableVault(id)
+		if err := d.orch.DisableVault(id); err != nil {
+			d.logger.Error("dispatch: disable vault failed", "vault", id, "error", err)
+		}
 	} else {
-		_ = d.orch.EnableVault(id)
+		if err := d.orch.EnableVault(id); err != nil {
+			d.logger.Error("dispatch: enable vault failed", "vault", id, "error", err)
+		}
 	}
 }
 

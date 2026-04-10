@@ -346,7 +346,9 @@ func (o *Orchestrator) reconcileFollower(tier *TierInstance) {
 			continue
 		}
 		if tier.Indexes != nil {
-			_ = tier.Indexes.DeleteIndexes(meta.ID)
+			if err := tier.Indexes.DeleteIndexes(meta.ID); err != nil {
+				o.logger.Warn("reconcile: delete indexes failed", "tier", tier.TierID, "chunk", meta.ID, "error", err)
+			}
 		}
 		// Local cleanup — do not announce. The authoritative delete already
 		// happened elsewhere (retention on the leader) and we are just
@@ -410,45 +412,49 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	for _, b := range rules {
 		matched := b.policy.Apply(state)
-		if len(matched) == 0 {
-			continue
-		}
-
 		for _, id := range matched {
 			if processed[id] {
 				continue
 			}
 			processed[id] = true
+			r.tryRetainChunk(id, b)
+		}
+	}
+}
 
-			r.mu.Lock()
-			if r.inflight[id] {
-				r.mu.Unlock()
-				continue
-			}
-			r.inflight[id] = true
-			r.mu.Unlock()
+// tryRetainChunk attempts to apply a retention action to a single chunk.
+// Acquires the inflight lock, marks retention-pending via Raft, and
+// dispatches to the action handler.
+func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
+	r.mu.Lock()
+	if r.inflight[id] {
+		r.mu.Unlock()
+		return
+	}
+	r.inflight[id] = true
+	r.mu.Unlock()
 
-			// Mark as retention-pending in the tier Raft so all nodes see it.
-			if r.applyRaftRetentionPending != nil {
-				_ = r.applyRaftRetentionPending(id)
-			}
-
-			func() {
-				defer r.clearInflight(id)
-				switch b.action {
-				case config.RetentionActionExpire:
-					r.expireChunk(id)
-				case config.RetentionActionEject:
-					r.ejectChunk(id, b.ejectRouteIDs)
-				case config.RetentionActionTransition:
-					r.transitionChunk(id)
-				default:
-					r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
-				}
-			}()
+	// Mark as retention-pending in the tier Raft so all nodes see it.
+	if r.applyRaftRetentionPending != nil {
+		if err := r.applyRaftRetentionPending(id); err != nil {
+			r.logger.Error("retention: failed to apply raft retention-pending",
+				"vault", r.vaultID, "chunk", id, "error", err)
+			r.clearInflight(id)
+			return
 		}
 	}
 
+	defer r.clearInflight(id)
+	switch b.action {
+	case config.RetentionActionExpire:
+		r.expireChunk(id)
+	case config.RetentionActionEject:
+		r.ejectChunk(id, b.ejectRouteIDs)
+	case config.RetentionActionTransition:
+		r.transitionChunk(id)
+	default:
+		r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
+	}
 }
 
 // clearInflight removes a chunk from the in-flight set.

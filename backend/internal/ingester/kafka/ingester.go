@@ -94,7 +94,9 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 		fetches := client.PollFetches(ctx)
 		if ctx.Err() != nil {
 			ing.logger.Info("kafka ingester stopping")
-			_ = client.CommitUncommittedOffsets(context.Background())
+			if err := client.CommitUncommittedOffsets(context.Background()); err != nil {
+				ing.logger.Warn("kafka: failed to commit offsets on shutdown", "error", err)
+			}
 			return nil
 		}
 

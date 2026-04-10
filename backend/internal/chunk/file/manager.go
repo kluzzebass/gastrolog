@@ -2667,17 +2667,26 @@ func (m *Manager) setArchivedFlag(id chunk.ChunkID, archived bool, storageClass 
 	}
 
 	// Cloud B+ tree index — lookup, mutate, re-insert.
-	if m.cloudIdx != nil {
-		if meta, found := m.cloudIdx.Lookup(id); found {
-			meta.archived = archived
-			m.cloudIdxMu.Lock()
-			_, _ = m.cloudIdx.Delete(id)
-			_ = m.cloudIdx.Insert(id, meta)
-			_ = m.cloudIdx.Sync()
-			m.cloudIdxMu.Unlock()
-			m.cloudListCache = nil // invalidate cached List() results
-		}
+	if m.cloudIdx == nil {
+		return
 	}
+	meta, found := m.cloudIdx.Lookup(id)
+	if !found {
+		return
+	}
+	meta.archived = archived
+	m.cloudIdxMu.Lock()
+	if _, err := m.cloudIdx.Delete(id); err != nil {
+		m.logger.Warn("cloud index: delete failed", "chunk", id, "error", err)
+	}
+	if err := m.cloudIdx.Insert(id, meta); err != nil {
+		m.logger.Warn("cloud index: insert failed", "chunk", id, "error", err)
+	}
+	if err := m.cloudIdx.Sync(); err != nil {
+		m.logger.Warn("cloud index: sync failed", "error", err)
+	}
+	m.cloudIdxMu.Unlock()
+	m.cloudListCache = nil // invalidate cached List() results
 }
 
 func (m *Manager) SetRotationPolicy(policy chunk.RotationPolicy) {
@@ -2839,14 +2848,16 @@ func (m *Manager) removeFromCloudIndex(id chunk.ChunkID) {
 // Must be called with m.mu held.
 func (m *Manager) rebuildCloudListCache() {
 	var cache []chunk.ChunkMeta
-	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
 		if _, exists := m.metas[id]; !exists {
 			cm := meta.toChunkMeta()
 			cm.StorageClass = m.storageClasses[id]
 			cache = append(cache, cm)
 		}
 		return true
-	})
+	}); err != nil {
+		m.logger.Warn("cloud index: ForEach failed during cache rebuild", "error", err)
+	}
 	m.cloudListCache = cache
 }
 
@@ -3139,7 +3150,7 @@ func (m *Manager) backfillTSOffsets() {
 		return
 	}
 	var updated int
-	_ = m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
+	if err := m.cloudIdx.ForEach(func(id chunk.ChunkID, meta *chunkMeta) bool {
 		if meta.ingestIdxSize > 0 {
 			return true // already has offsets
 		}
@@ -3170,9 +3181,13 @@ func (m *Manager) backfillTSOffsets() {
 			updated++
 		}
 		return true
-	})
+	}); err != nil {
+		m.logger.Warn("cloud index: ForEach failed during TS offset backfill", "error", err)
+	}
 	if updated > 0 {
-		_ = m.cloudIdx.Sync()
+		if err := m.cloudIdx.Sync(); err != nil {
+			m.logger.Warn("cloud index: sync failed after TS offset backfill", "error", err)
+		}
 		m.cloudListCache = nil // invalidate
 		m.logger.Info("backfilled TS index offsets", "updated", updated)
 	}
