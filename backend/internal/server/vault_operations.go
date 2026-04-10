@@ -9,11 +9,11 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/uuid"
-	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -293,7 +293,7 @@ func (s *VaultServer) exportChunk(vaultID uuid.UUID, chunkID chunk.ChunkID, stre
 			return connect.NewError(connect.CodeInternal, fmt.Errorf("read chunk %s: %w", chunkID, err))
 		}
 
-		batch = append(batch, recordToExportProto(rec))
+		batch = append(batch, convert.RecordToExport(rec))
 
 		if len(batch) >= batchSize {
 			if err := stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true}); err != nil {
@@ -307,21 +307,6 @@ func (s *VaultServer) exportChunk(vaultID uuid.UUID, chunkID chunk.ChunkID, stre
 		return stream.Send(&apiv1.ExportVaultResponse{Records: batch, HasMore: true})
 	}
 	return nil
-}
-
-func recordToExportProto(rec chunk.Record) *apiv1.ExportRecord {
-	exportRec := &apiv1.ExportRecord{Raw: rec.Raw}
-	if !rec.SourceTS.IsZero() {
-		exportRec.SourceTs = timestamppb.New(rec.SourceTS)
-	}
-	if !rec.IngestTS.IsZero() {
-		exportRec.IngestTs = timestamppb.New(rec.IngestTS)
-	}
-	if len(rec.Attrs) > 0 {
-		exportRec.Attrs = make(map[string]string, len(rec.Attrs))
-		maps.Copy(exportRec.Attrs, rec.Attrs)
-	}
-	return exportRec
 }
 
 func (s *VaultServer) disableAndPersistVault(ctx context.Context, id uuid.UUID) error {

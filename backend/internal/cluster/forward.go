@@ -5,9 +5,9 @@ import (
 	"errors"
 	"io"
 	"iter"
-	"maps"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/convert"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
@@ -15,7 +15,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // RecordAppender appends a single record to a local vault.
@@ -250,7 +249,7 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 
 	var written int64
 	for _, exportRec := range req.GetRecords() {
-		rec := exportRecordToChunk(exportRec)
+		rec := convert.ExportToRecord(exportRec)
 		var appendErr error
 		if tierID != uuid.Nil {
 			appendErr = s.recordTierAppender(ctx, vaultID, tierID, primaryChunkID, rec)
@@ -318,7 +317,7 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			}
 		}
 		for _, exportRec := range msg.GetRecords() {
-			rec := exportRecordToChunk(exportRec)
+			rec := convert.ExportToRecord(exportRec)
 			var appendErr error
 			if tierID != uuid.Nil && s.recordTierAppender != nil {
 				appendErr = s.recordTierAppender(stream.Context(), vaultID, tierID, primaryChunkID, rec)
@@ -336,28 +335,6 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 	}
 }
 
-// exportRecordToChunk converts a proto ExportRecord to a chunk.Record.
-func exportRecordToChunk(er *gastrologv1.ExportRecord) chunk.Record {
-	rec := chunk.Record{Raw: er.GetRaw()}
-	if er.GetSourceTs() != nil {
-		rec.SourceTS = er.GetSourceTs().AsTime()
-	}
-	if er.GetIngestTs() != nil {
-		rec.IngestTS = er.GetIngestTs().AsTime()
-	}
-	// WriteTS is not read — the destination re-stamps at import time.
-	if len(er.GetAttrs()) > 0 {
-		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
-		maps.Copy(rec.Attrs, er.GetAttrs())
-	}
-	// Populate EventID from proto fields.
-	rec.EventID.IngestSeq = er.GetIngestSeq()
-	if len(er.GetIngesterId()) == 16 {
-		copy(rec.EventID.IngesterID[:], er.GetIngesterId())
-	}
-	rec.EventID.IngestTS = rec.IngestTS
-	return rec
-}
 
 // forwardImportRecordsStreamHandler handles the client-streaming
 // ForwardImportRecords RPC. Each message carries a single record; the server
@@ -412,7 +389,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		if !firstConsumed {
 			firstConsumed = true
 			count++
-			return exportRecordToChunk(first.GetRecord()), nil
+			return convert.ExportToRecord(first.GetRecord()), nil
 		}
 		msg := &gastrologv1.ImportRecordMessage{}
 		recvErr := s.recvOrShutdown(stream, msg)
@@ -430,7 +407,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 			return chunk.Record{}, recvErr
 		}
 		count++
-		return exportRecordToChunk(msg.GetRecord()), nil
+		return convert.ExportToRecord(msg.GetRecord()), nil
 	})
 
 	// Route based on tier_id and chunk_id:
@@ -488,7 +465,7 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 			return status.Errorf(codes.Internal, "follow record: %v", err)
 		}
 		resp := &gastrologv1.ForwardFollowResponse{
-			Records: []*gastrologv1.ExportRecord{RecordToExportRecord(rec)},
+			Records: []*gastrologv1.ExportRecord{convert.RecordToExport(rec)},
 		}
 		if err := stream.SendMsg(resp); err != nil {
 			return err
@@ -549,7 +526,7 @@ func forwardSearchStreamHandler(srv any, stream grpc.ServerStream) error {
 			}
 			return status.Errorf(codes.Internal, "search record: %v", iterErr)
 		}
-		batch = append(batch, RecordToExportRecord(rec))
+		batch = append(batch, convert.RecordToExport(rec))
 		if len(batch) >= batchSize {
 			resp := &gastrologv1.ForwardSearchResponse{Records: batch}
 			if first {
@@ -595,46 +572,19 @@ func (s *Server) forwardGetContext(ctx context.Context, req *gastrologv1.Forward
 	}
 
 	resp := &gastrologv1.ForwardGetContextResponse{
-		Anchor: RecordToExportRecord(anchor),
+		Anchor: convert.RecordToExport(anchor),
 		Before: make([]*gastrologv1.ExportRecord, len(before)),
 		After:  make([]*gastrologv1.ExportRecord, len(after)),
 	}
 	for i, rec := range before {
-		resp.Before[i] = RecordToExportRecord(rec)
+		resp.Before[i] = convert.RecordToExport(rec)
 	}
 	for i, rec := range after {
-		resp.After[i] = RecordToExportRecord(rec)
+		resp.After[i] = convert.RecordToExport(rec)
 	}
 	return resp, nil
 }
 
-// RecordToExportRecord converts a chunk.Record to an ExportRecord proto
-// with full ref fields. Used by the ForwardGetContext handler and the
-// search executor in main.go.
-func RecordToExportRecord(rec chunk.Record) *gastrologv1.ExportRecord {
-	er := &gastrologv1.ExportRecord{
-		Raw:        rec.Raw,
-		VaultId:    rec.VaultID.String(),
-		ChunkId:    rec.Ref.ChunkID.String(),
-		Pos:        rec.Ref.Pos,
-		IngestSeq:  rec.EventID.IngestSeq,
-		IngesterId: rec.EventID.IngesterID[:],
-	}
-	if !rec.SourceTS.IsZero() {
-		er.SourceTs = timestamppb.New(rec.SourceTS)
-	}
-	if !rec.IngestTS.IsZero() {
-		er.IngestTs = timestamppb.New(rec.IngestTS)
-	}
-	if !rec.WriteTS.IsZero() {
-		er.WriteTs = timestamppb.New(rec.WriteTS)
-	}
-	if len(rec.Attrs) > 0 {
-		er.Attrs = make(map[string]string, len(rec.Attrs))
-		maps.Copy(er.Attrs, rec.Attrs)
-	}
-	return er
-}
 
 // forwardListChunks handles the ForwardListChunks RPC. Lists chunks in a
 // local vault and returns them to the requesting node.

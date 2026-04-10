@@ -11,6 +11,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/convert"
 )
 
 // streamKey identifies a replication stream to a specific follower for a
@@ -147,7 +148,7 @@ func (tr *TierReplicator) closeStream(tierID uuid.UUID, nodeID string) {
 func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
-		exports[i] = chunkRecordToExport(rec)
+		exports[i] = convert.RecordToExport(rec)
 	}
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.String(),
@@ -178,7 +179,7 @@ func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, 
 func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
-		exports[i] = chunkRecordToExport(rec)
+		exports[i] = convert.RecordToExport(rec)
 	}
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.String(),

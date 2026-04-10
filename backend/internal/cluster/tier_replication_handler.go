@@ -10,6 +10,7 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/convert"
 )
 
 // tierReplicationStreamHandler processes a bidirectional TierReplication
@@ -78,7 +79,7 @@ func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID uu
 	}
 
 	for _, er := range cmd.GetRecords() {
-		rec := exportRecordToChunk(er)
+		rec := convert.ExportToRecord(er)
 		if err := s.recordTierAppender(ctx, vaultID, tierID, chunkID, rec); err != nil {
 			return &gastrologv1.TierReplicationAck{
 				Ok:      false,
@@ -126,7 +127,7 @@ func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID uu
 
 	records := make([]chunk.Record, 0, len(cmd.GetRecords()))
 	for _, er := range cmd.GetRecords() {
-		records = append(records, exportRecordToChunk(er))
+		records = append(records, convert.ExportToRecord(er))
 	}
 
 	idx := 0

@@ -4,15 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/convert"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Per-call timeouts protect every cluster forwarder against wedges where the
@@ -92,7 +91,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 		}
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
-			Record:  chunkRecordToExport(rec),
+			Record:  convert.RecordToExport(rec),
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			ct.peers.Invalidate(nodeID)
@@ -128,12 +127,7 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 
 	exportRecs := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
-		er := chunkRecordToExport(rec)
-		er.IngestSeq = rec.EventID.IngestSeq
-		if rec.EventID.IngesterID != ([16]byte{}) {
-			er.IngesterId = rec.EventID.IngesterID[:]
-		}
-		exportRecs[i] = er
+		exportRecs[i] = convert.RecordToExport(rec)
 	}
 
 	req := &gastrologv1.ForwardRecordsRequest{
@@ -192,7 +186,7 @@ func (ct *ChunkTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID str
 			VaultId: vid,
 			TierId:  tid,
 			ChunkId: cid,
-			Record:  chunkRecordToExport(rec),
+			Record:  convert.RecordToExport(rec),
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			ct.peers.Invalidate(nodeID)
@@ -257,7 +251,7 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 		msg := &gastrologv1.ImportRecordMessage{
 			VaultId: vid,
 			TierId:  tid,
-			Record:  chunkRecordToExport(rec),
+			Record:  convert.RecordToExport(rec),
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			ct.peers.Invalidate(nodeID)
@@ -293,12 +287,7 @@ func (ct *ChunkTransferrer) ForwardTierAppend(ctx context.Context, nodeID string
 
 	exportRecs := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
-		er := chunkRecordToExport(rec)
-		er.IngestSeq = rec.EventID.IngestSeq
-		if rec.EventID.IngesterID != ([16]byte{}) {
-			er.IngesterId = rec.EventID.IngesterID[:]
-		}
-		exportRecs[i] = er
+		exportRecs[i] = convert.RecordToExport(rec)
 	}
 
 	req := &gastrologv1.ForwardRecordsRequest{
@@ -391,21 +380,3 @@ func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, v
 	}
 }
 
-// chunkRecordToExport converts a chunk.Record to a proto ExportRecord.
-func chunkRecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
-	er := &gastrologv1.ExportRecord{Raw: rec.Raw}
-	if !rec.SourceTS.IsZero() {
-		er.SourceTs = timestamppb.New(rec.SourceTS)
-	}
-	if !rec.IngestTS.IsZero() {
-		er.IngestTs = timestamppb.New(rec.IngestTS)
-	}
-	// WriteTS is not sent — the destination re-stamps at import time.
-	if len(rec.Attrs) > 0 {
-		er.Attrs = make(map[string]string, len(rec.Attrs))
-		maps.Copy(er.Attrs, rec.Attrs)
-	}
-	er.IngestSeq = rec.EventID.IngestSeq
-	er.IngesterId = rec.EventID.IngesterID[:]
-	return er
-}

@@ -16,8 +16,8 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
+	"gastrolog/internal/convert"
 	cfgmem "gastrolog/internal/config/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
@@ -433,7 +433,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, cluster.RecordToExportRecord(rec))
+		records = append(records, convert.RecordToExport(rec))
 	}
 	return &gastrologv1.ForwardSearchResponse{
 		Records:   records,
@@ -523,7 +523,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 				errCh <- iterErr
 				return
 			}
-			batch = append(batch, cluster.RecordToExportRecord(rec))
+			batch = append(batch, convert.RecordToExport(rec))
 			if len(batch) >= batchSize {
 				select {
 				case recCh <- batch:
@@ -570,15 +570,15 @@ func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, re
 	}
 
 	resp := &gastrologv1.ForwardGetContextResponse{
-		Anchor: cluster.RecordToExportRecord(result.Anchor),
+		Anchor: convert.RecordToExport(result.Anchor),
 		Before: make([]*gastrologv1.ExportRecord, len(result.Before)),
 		After:  make([]*gastrologv1.ExportRecord, len(result.After)),
 	}
 	for i, rec := range result.Before {
-		resp.Before[i] = cluster.RecordToExportRecord(rec)
+		resp.Before[i] = convert.RecordToExport(rec)
 	}
 	for i, rec := range result.After {
-		resp.After[i] = cluster.RecordToExportRecord(rec)
+		resp.After[i] = convert.RecordToExport(rec)
 	}
 	return resp, nil
 }
@@ -699,7 +699,7 @@ func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *g
 				return
 			}
 			select {
-			case recCh <- cluster.RecordToExportRecord(rec):
+			case recCh <- convert.RecordToExport(rec):
 			case <-ctx.Done():
 				return
 			}

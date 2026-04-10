@@ -12,12 +12,12 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/convert"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -351,23 +351,12 @@ func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream gr
 	return nil
 }
 
-// forwardEntryToProto converts a forwardEntry to a proto ExportRecord
-// with vault_id and EventID fields populated.
+// forwardEntryToProto converts a forwardEntry to a proto ExportRecord.
+// Delegates to the canonical converter after setting VaultID on the record.
 func forwardEntryToProto(e forwardEntry) *gastrologv1.ExportRecord {
-	rec := &gastrologv1.ExportRecord{
-		VaultId:    e.vaultID.String(),
-		Raw:        e.record.Raw,
-		Attrs:      e.record.Attrs,
-		IngestSeq:  e.record.EventID.IngestSeq,
-		IngesterId: e.record.EventID.IngesterID[:],
-	}
-	if !e.record.SourceTS.IsZero() {
-		rec.SourceTs = timestamppb.New(e.record.SourceTS)
-	}
-	if !e.record.IngestTS.IsZero() {
-		rec.IngestTs = timestamppb.New(e.record.IngestTS)
-	}
-	return rec
+	rec := e.record
+	rec.VaultID = e.vaultID
+	return convert.RecordToExport(rec)
 }
 
 // bumpBackoff increases the backoff after a failure.

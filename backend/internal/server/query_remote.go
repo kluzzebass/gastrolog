@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"iter"
-	"maps"
 	"slices"
 	"sync"
 
@@ -13,6 +12,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
+	"gastrolog/internal/convert"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 )
@@ -218,7 +218,7 @@ func channelToIter(recCh <-chan []*apiv1.ExportRecord, errCh <-chan error) iter.
 	return func(yield func(chunk.Record, error) bool) {
 		for batch := range recCh {
 			for _, er := range batch {
-				rec := exportRecordToChunkRecord(er)
+				rec := convert.ExportToRecord(er)
 				if !yield(rec, nil) {
 					return
 				}
@@ -229,37 +229,6 @@ func channelToIter(recCh <-chan []*apiv1.ExportRecord, errCh <-chan error) iter.
 			yield(chunk.Record{}, err)
 		}
 	}
-}
-
-// exportRecordToChunkRecord converts a proto ExportRecord to a chunk.Record.
-func exportRecordToChunkRecord(er *apiv1.ExportRecord) chunk.Record {
-	rec := chunk.Record{Raw: er.GetRaw()}
-	if er.GetSourceTs() != nil {
-		rec.SourceTS = er.GetSourceTs().AsTime()
-	}
-	if er.GetIngestTs() != nil {
-		rec.IngestTS = er.GetIngestTs().AsTime()
-	}
-	if er.GetWriteTs() != nil {
-		rec.WriteTS = er.GetWriteTs().AsTime()
-	}
-	if len(er.GetAttrs()) > 0 {
-		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
-		maps.Copy(rec.Attrs, er.GetAttrs())
-	}
-	if er.GetVaultId() != "" {
-		rec.VaultID, _ = uuid.Parse(er.GetVaultId())
-	}
-	if er.GetChunkId() != "" {
-		rec.Ref.ChunkID, _ = chunk.ParseChunkID(er.GetChunkId())
-		rec.Ref.Pos = er.GetPos()
-	}
-	rec.EventID.IngestSeq = er.GetIngestSeq()
-	if len(er.GetIngesterId()) == 16 {
-		copy(rec.EventID.IngesterID[:], er.GetIngesterId())
-	}
-	rec.EventID.IngestTS = rec.IngestTS
-	return rec
 }
 
 // mergeEntry holds a record and the index of the source iterator it came from.
