@@ -53,7 +53,6 @@ type mergeState struct {
 	chunkPositions map[mergeKey]uint64
 	chunkResumeTS  map[mergeKey]time.Time // IngestTS-based resume for reordered chunks
 	lastRefs       *[]MultiVaultPosition
-	deferredChunks []vaultChunk // cloud chunks deferred until local results are exhausted
 }
 
 // cleanup stops all active scanners.
@@ -289,55 +288,21 @@ func (e *Engine) primeHeapWithResume(
 	resumeMap map[uuid.UUID]map[chunk.ChunkID]resumeInfo,
 	ms *mergeState,
 ) error {
-	// Prime local chunks first, defer cloud chunks.
-	var deferred []vaultChunk
 	for _, sc := range allChunks {
 		ri, exhausted := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
 		if exhausted {
 			continue
 		}
-		if sc.meta.CloudBacked {
-			deferred = append(deferred, sc)
-			continue
-		}
-		if err := e.primeChunkWithResume(ctx, q, sc, ri, ms); err != nil {
-			return err
-		}
-	}
-
-	// Skip cloud chunks if local chunks provide enough for the limit.
-	if ms.h.Len() > 0 && q.Limit > 0 {
-		ms.deferredChunks = deferred
-		return nil
-	}
-
-	// Log why we're priming cloud chunks — including local chunk breakdown
-	// to diagnose cases where the active chunk exists but produced no records.
-	if len(deferred) > 0 {
-		localCount := len(allChunks) - len(deferred)
-		e.logger.Debug("⚠️ priming cloud chunks",
-			"heapLen", ms.h.Len(), "limit", q.Limit,
-			"deferred", len(deferred), "localChunks", localCount,
-			"totalChunks", len(allChunks))
-	}
-
-	// No local records or unlimited query — prime cloud too.
-	for _, sc := range deferred {
-		ri, _ := lookupResumeInfo(resumeMap, sc, ms.chunkPositions)
 		err := e.primeChunkWithResume(ctx, q, sc, ri, ms)
 		if err == nil {
 			continue
 		}
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		var cre *chunkReadError
-		if errors.As(err, &cre) {
-			if e.logger != nil {
-				e.logger.Warn("search: skipping unreadable cloud chunk",
-					"vault", cre.vaultID, "chunk", cre.chunkID, "error", cre.err)
+		// Cloud chunks may be unreadable (corrupt blob, S3 error).
+		// Skip them with a warning rather than aborting the entire search.
+		if sc.meta.CloudBacked {
+			if err := e.handleCloudPrimeError(ctx, err, sc, ms); err != nil {
+				return err
 			}
-			ms.chunkPositions[mergeKey{vaultID: sc.vaultID, chunkID: sc.meta.ID}] = positionExhausted
 			continue
 		}
 		return err
@@ -369,29 +334,15 @@ func (e *Engine) primeHeap(
 	allChunks []vaultChunk,
 	ms *mergeState,
 ) error {
-	// Prime local chunks first. Cloud chunks are deferred — only primed
-	// if the local chunks don't have enough records for the page limit.
-	var deferred []vaultChunk
 	for _, sc := range allChunks {
 		if sc.meta.CloudBacked {
-			deferred = append(deferred, sc)
+			if err := e.primeCloudChunk(ctx, q, sc, ms); err != nil {
+				return err
+			}
 			continue
 		}
 		if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
 			return err
-		}
-	}
-	// If we already have records on the heap from local chunks, and
-	// the query has a limit, defer cloud chunks until the merge needs them.
-	// For unlimited queries or when no local records exist, prime cloud too.
-	if ms.h.Len() > 0 && q.Limit > 0 {
-		// Store deferred chunks for lazy priming during merge.
-		ms.deferredChunks = deferred
-		return nil
-	}
-	for _, sc := range deferred {
-		if err := e.primeCloudChunk(ctx, q, sc, ms); err != nil {
-			return err // context error — abort
 		}
 	}
 	return nil
@@ -401,15 +352,19 @@ func (e *Engine) primeHeap(
 // if the S3 blob is unreadable (corrupt, truncated, etc.). Context errors
 // still propagate.
 func (e *Engine) primeCloudChunk(ctx context.Context, q Query, sc vaultChunk, ms *mergeState) error {
-	err := e.openAndPrimeScanner(ctx, q, sc, nil, ms)
-	if err == nil {
-		return nil
+	if err := e.openAndPrimeScanner(ctx, q, sc, nil, ms); err != nil {
+		return e.handleCloudPrimeError(ctx, err, sc, ms)
 	}
-	// Context cancellation — abort.
+	return nil
+}
+
+// handleCloudPrimeError handles an error from priming a cloud-backed chunk.
+// Context errors propagate; chunkReadErrors mark the chunk as exhausted and
+// log a warning; all other errors propagate.
+func (e *Engine) handleCloudPrimeError(ctx context.Context, err error, sc vaultChunk, ms *mergeState) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	// Data access error — skip this chunk.
 	var cre *chunkReadError
 	if errors.As(err, &cre) {
 		if e.logger != nil {
