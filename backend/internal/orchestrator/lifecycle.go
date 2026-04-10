@@ -349,16 +349,6 @@ func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID uuid.UUID
 		if !meta.Sealed {
 			continue
 		}
-		// Cloud-backed chunks have no local index files by design — uploadToCloud
-		// removes the entire chunk dir after a successful upload, so the local
-		// indexes are intentionally absent. Their queries go through the cloud
-		// cursor path (openCloudCursor), which reads indexes from the GLCB blob.
-		// Skipping these here avoids spamming "rebuilding missing indexes" for
-		// every cloud chunk on every restart and avoids queuing scheduler jobs
-		// that would fail trying to read the deleted source files.
-		if meta.CloudBacked {
-			continue
-		}
 		complete, err := tier.Indexes.IndexesComplete(meta.ID)
 		if err != nil {
 			return err

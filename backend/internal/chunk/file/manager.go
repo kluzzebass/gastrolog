@@ -711,9 +711,15 @@ func (m *Manager) loadExisting() error {
 		meta, err := m.loadChunkMeta(id)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				// Leftover directory from a cloud upload that deleted the
-				// chunk's data files. Clean it up and move on.
-				m.logger.Info("removing leftover chunk directory", "chunk", id)
+				// No idx.log — this directory has no chunk data files.
+				// Two cases:
+				// 1. Cloud-backed chunk with preserved index files: keep it.
+				// 2. Truly empty leftover directory: safe to remove.
+				if chunkDirHasFiles(filepath.Join(m.cfg.Dir, entry.Name())) {
+					m.logger.Debug("skipping cloud-backed chunk index directory", "chunk", id)
+					continue
+				}
+				m.logger.Info("removing empty leftover chunk directory", "chunk", id)
 				_ = os.RemoveAll(filepath.Join(m.cfg.Dir, entry.Name()))
 				continue
 			}
@@ -1885,6 +1891,48 @@ func (m *Manager) sourceBTPath(id chunk.ChunkID) string {
 	return filepath.Join(m.chunkDir(id), sourceBTFileName)
 }
 
+// chunkDirHasFiles reports whether a chunk directory contains any regular files.
+// Called after cleanOrphanTempFiles, so any remaining files are index files
+// belonging to a cloud-backed chunk.
+func chunkDirHasFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			return true
+		}
+	}
+	return false
+}
+
+// dataFileNames lists the chunk data files that are redundant once a chunk is
+// cloud-backed. Index files (*.idx, *.tsidx) are NOT in this list — they are
+// preserved locally so queries can filter without downloading from S3.
+var dataFileNames = []string{
+	rawLogFileName,
+	idxLogFileName,
+	attrLogFileName,
+	attrDictFileName,
+	ingestBTFileName,
+	sourceBTFileName,
+}
+
+// removeLocalDataFiles deletes only the data files from a chunk directory,
+// preserving any index files. Returns an error if a file exists but cannot be
+// removed; missing files are silently ignored.
+func (m *Manager) removeLocalDataFiles(id chunk.ChunkID) error {
+	dir := m.chunkDir(id)
+	for _, name := range dataFileNames {
+		path := filepath.Join(dir, name)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove %s for chunk %s: %w", name, id, err)
+		}
+	}
+	return nil
+}
+
 // FindStartPosition binary searches idx.log for the record at or before the given timestamp.
 // Uses WriteTS for the search since it's monotonically increasing within a chunk.
 func (m *Manager) FindStartPosition(id chunk.ChunkID, ts time.Time) (uint64, bool, error) {
@@ -2948,9 +2996,9 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		m.writeBlobToCache(id, buf.Bytes())
 	}
 
-	// Delete local chunk directory.
-	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
-		return fmt.Errorf("remove local chunk dir after cloud upload: %w", err)
+	// Delete local data files but keep index files for fast queries.
+	if err := m.removeLocalDataFiles(id); err != nil {
+		return fmt.Errorf("remove local data files after cloud upload: %w", err)
 	}
 
 	// Move metadata from in-memory map to cloud B+ tree index.
@@ -3022,9 +3070,9 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		return fmt.Errorf("parse TOC from existing blob: %w", err)
 	}
 
-	// Delete local chunk directory.
-	if err := os.RemoveAll(m.chunkDir(id)); err != nil {
-		return fmt.Errorf("remove local chunk dir after cloud adopt: %w", err)
+	// Delete local data files but keep index files for fast queries.
+	if err := m.removeLocalDataFiles(id); err != nil {
+		return fmt.Errorf("remove local data files after cloud adopt: %w", err)
 	}
 
 	m.mu.Lock()
