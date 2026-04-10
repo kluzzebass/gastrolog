@@ -941,7 +941,18 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 	if srv != nil {
 		deps.Logger.Info("stopping server")
-		if err := srv.Stop(ctx); err != nil {
+		// The root ctx is already cancelled by the time we get here (that
+		// is how we woke up). Pass srv.Stop a FRESH context with a bounded
+		// drain budget so it can finish in-flight HTTP requests cleanly
+		// instead of returning context.Canceled immediately. See
+		// gastrolog-1e5ke.
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err := srv.Stop(stopCtx)
+		stopCancel()
+		// context.Canceled / DeadlineExceeded are expected outcomes when a
+		// peer holds a long-running request across shutdown — logged at
+		// Debug, not Error, so the shutdown trail stays clean.
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			deps.Logger.Error("server stop error", "error", err)
 		}
 		serverWg.Wait()
