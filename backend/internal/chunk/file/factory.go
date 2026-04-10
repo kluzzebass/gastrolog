@@ -73,6 +73,9 @@ func NewFactory() chunk.ManagerFactory {
 		if err := configureSealedBacking(&cfg, params); err != nil {
 			return nil, err
 		}
+		if params["_cloud_read_only"] == "true" {
+			cfg.CloudReadOnly = true
+		}
 
 		if v := params["cache_dir"]; v != "" {
 			cfg.CacheDir = v

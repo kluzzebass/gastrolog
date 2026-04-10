@@ -191,6 +191,34 @@ type ChunkCacheEvictor interface {
 	EvictCache()
 }
 
+// CloudChunkInfo carries the metadata needed to register a cloud-backed chunk
+// on a follower without streaming any records. All fields come from the tier
+// Raft FSM entry (populated by AnnounceSeal + AnnounceUpload on the leader).
+type CloudChunkInfo struct {
+	WriteStart      time.Time
+	WriteEnd        time.Time
+	IngestStart     time.Time
+	IngestEnd       time.Time
+	SourceStart     time.Time
+	SourceEnd       time.Time
+	RecordCount     int64
+	Bytes           int64
+	DiskBytes       int64
+	IngestIdxOffset int64
+	IngestIdxSize   int64
+	SourceIdxOffset int64
+	SourceIdxSize   int64
+	NumFrames       int32
+}
+
+// CloudChunkRegistrar extends ChunkManager with the ability to register a
+// cloud-backed chunk from metadata alone — no local files, no record streaming.
+// Used by follower nodes to adopt chunks from the shared S3 bucket after the
+// tier Raft FSM propagates the leader's AnnounceUpload.
+type CloudChunkRegistrar interface {
+	RegisterCloudChunk(id ChunkID, info CloudChunkInfo) error
+}
+
 // RecordCursor provides bidirectional iteration over records in a chunk.
 type RecordCursor interface {
 	Next() (Record, RecordRef, error)

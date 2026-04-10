@@ -82,6 +82,7 @@ type FSM struct {
 	chunks   map[chunk.ChunkID]*Entry
 	ready    bool // true after first Apply or Restore
 	onDelete func(chunk.ChunkID)
+	onUpload func(Entry) // called after CmdUploadChunk applies (outside lock)
 }
 
 // New creates an empty chunk metadata FSM.
@@ -120,6 +121,16 @@ func (f *FSM) SetOnDelete(fn func(chunk.ChunkID)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.onDelete = fn
+}
+
+// SetOnUpload registers a callback invoked (outside the FSM lock) after
+// CmdUploadChunk applies. The callback receives a copy of the uploaded
+// entry. Follower nodes use this to register cloud chunks in their local
+// chunk manager without streaming any records.
+func (f *FSM) SetOnUpload(fn func(Entry)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.onUpload = fn
 }
 
 // ---------- Reads (local, no Raft) ----------
@@ -172,7 +183,9 @@ func (f *FSM) Apply(log *hraft.Log) any {
 	var (
 		result        any
 		deletedID     *chunk.ChunkID
+		uploadedEntry *Entry
 		onDeleteLocal func(chunk.ChunkID)
+		onUploadLocal func(Entry)
 	)
 
 	f.mu.Lock()
@@ -186,6 +199,15 @@ func (f *FSM) Apply(log *hraft.Log) any {
 		result = f.applyCompress(payload)
 	case CmdUploadChunk:
 		result = f.applyUpload(payload)
+		// Capture the entry for the onUpload callback (copy while holding lock).
+		if result == nil && len(payload) >= 16 {
+			var id chunk.ChunkID
+			copy(id[:], payload[:16])
+			if e := f.chunks[id]; e != nil {
+				eCopy := *e
+				uploadedEntry = &eCopy
+			}
+		}
 	case CmdDeleteChunk:
 		deletedID, result = f.applyDelete(payload)
 	case CmdRetentionPending:
@@ -194,10 +216,14 @@ func (f *FSM) Apply(log *hraft.Log) any {
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
 	onDeleteLocal = f.onDelete
+	onUploadLocal = f.onUpload
 	f.mu.Unlock()
 
 	if deletedID != nil && onDeleteLocal != nil {
 		onDeleteLocal(*deletedID)
+	}
+	if uploadedEntry != nil && onUploadLocal != nil {
+		onUploadLocal(*uploadedEntry)
 	}
 
 	return result

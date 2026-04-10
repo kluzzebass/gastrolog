@@ -79,6 +79,10 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 // replicateSealedChunk copies a sealed chunk from the leader to all follower
 // targets. Each target is a (nodeID, storageID) pair — multiple targets on the
 // same node are distinct (different file storages for same-node replication).
+//
+// Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
+// need record streaming. The tier Raft FSM's OnUpload callback registers the
+// chunk in each follower's cloud index (see wireTierFSMOnUpload).
 func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []config.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
 		return
@@ -87,6 +91,16 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
 		o.logger.Warn("replication: tier not found for sealed chunk",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		return
+	}
+
+	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
+	// Followers learn about them via the tier Raft FSM's OnUpload callback
+	// and read directly from the bucket — no record streaming needed.
+	meta, err := tier.Chunks.Meta(chunkID)
+	if err == nil && meta.CloudBacked {
+		o.logger.Debug("replication: skipping cloud-backed chunk (shared bucket)",
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
 		return
 	}

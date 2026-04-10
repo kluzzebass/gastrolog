@@ -688,10 +688,11 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	// Build params from tier config.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
 
-	// Followers must NOT upload to cloud storage. The leader owns the
-	// cloud blob; the follower keeps a local compressed copy for queries.
+	// Followers keep cloud store access for reads (queries) but skip uploads.
+	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
+	// when the tier Raft FSM propagates the upload announcement.
 	if isFollower {
-		delete(params, "sealed_backing")
+		params["_cloud_read_only"] = "true"
 	}
 
 	cmFactory, ok := factories.ChunkManagers[factoryName]
@@ -774,6 +775,7 @@ func (o *Orchestrator) buildTierInstance(cfg *config.Config, vaultCfg config.Vau
 	}
 	ti.applyRaftCallbacks(raftCB)
 	wireTierFSMOnDelete(tierGroup, cm, im, o.logger)
+	wireTierFSMOnUpload(tierGroup, cm, o.logger)
 	return ti, nil
 }
 
@@ -792,11 +794,9 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
-	// Followers must NOT upload to cloud storage — the leader owns the cloud
-	// blob. If the follower also uploads, it overwrites the leader's blob with
-	// a different-sized version, corrupting diskBytes and breaking cloud reads.
+	// Followers keep cloud store access for reads but skip uploads.
 	if isFollower {
-		delete(params, "sealed_backing")
+		params["_cloud_read_only"] = "true"
 	}
 	params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 
@@ -863,6 +863,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *config.Config, vaultCfg 
 	}
 	ti.applyRaftCallbacks(raftCB)
 	wireTierFSMOnDelete(tierGroup, cm, im, o.logger)
+	wireTierFSMOnUpload(tierGroup, cm, o.logger)
 	return ti, nil
 }
 
@@ -1119,6 +1120,48 @@ func wireTierFSMOnDelete(g *raftgroup.Group, cm chunk.ChunkManager, im index.Ind
 			} else {
 				logger.Warn("FSM onDelete: DeleteSilent failed",
 					"chunk", id, "error", err)
+			}
+		}
+	})
+}
+
+// wireTierFSMOnUpload connects the tier Raft FSM's OnUpload callback to the
+// chunk manager's RegisterCloudChunk method. When the FSM applies CmdUploadChunk
+// (from the leader's AnnounceUpload), the follower's chunk manager registers
+// the cloud chunk from metadata alone — no record streaming or S3 download.
+func wireTierFSMOnUpload(g *raftgroup.Group, cm chunk.ChunkManager, logger *slog.Logger) {
+	if g == nil || cm == nil {
+		return
+	}
+	fsm, ok := g.FSM.(*tierfsm.FSM)
+	if !ok {
+		return
+	}
+	registrar, ok := cm.(chunk.CloudChunkRegistrar)
+	if !ok {
+		return
+	}
+	fsm.SetOnUpload(func(e tierfsm.Entry) {
+		info := chunk.CloudChunkInfo{
+			WriteStart:      e.WriteStart,
+			WriteEnd:        e.WriteEnd,
+			IngestStart:     e.IngestStart,
+			IngestEnd:       e.IngestEnd,
+			SourceStart:     e.SourceStart,
+			SourceEnd:       e.SourceEnd,
+			RecordCount:     e.RecordCount,
+			Bytes:           e.Bytes,
+			DiskBytes:       e.DiskBytes,
+			IngestIdxOffset: e.IngestIdxOffset,
+			IngestIdxSize:   e.IngestIdxSize,
+			SourceIdxOffset: e.SourceIdxOffset,
+			SourceIdxSize:   e.SourceIdxSize,
+			NumFrames:       e.NumFrames,
+		}
+		if err := registrar.RegisterCloudChunk(e.ID, info); err != nil {
+			if logger != nil {
+				logger.Debug("FSM onUpload: RegisterCloudChunk failed",
+					"chunk", e.ID, "error", err)
 			}
 		}
 	})

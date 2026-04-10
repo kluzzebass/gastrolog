@@ -111,6 +111,11 @@ type Config struct {
 	// CacheTTL is the max age of cached blobs (TTL mode only). Parsed via config.ParseDuration.
 	CacheTTL string
 
+	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)
+	// but skips uploads in PostSealProcess. Used by follower nodes that
+	// share the leader's S3 bucket for reads without owning the blobs.
+	CloudReadOnly bool
+
 	// Announcer, when non-nil, is called after each metadata state change
 	// (create, seal, compress, upload, delete) for cluster-wide visibility.
 	Announcer chunk.MetadataAnnouncer
@@ -2519,7 +2524,9 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	}
 
 	// 4. Upload to cloud and delete local if cloud-backed.
-	if m.cfg.CloudStore != nil {
+	// CloudReadOnly followers skip upload — they adopt the leader's blob
+	// via RegisterCloudChunk when the tier Raft FSM propagates the upload.
+	if m.cfg.CloudStore != nil && !m.cfg.CloudReadOnly {
 		if err := m.uploadToCloud(id); err != nil {
 			m.logger.Warn("cloud upload failed, keeping local", "chunk", id, "error", err)
 		}
@@ -3105,6 +3112,70 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		"chunk", id,
 		"bytes", blobSize,
 	)
+	return nil
+}
+
+// RegisterCloudChunk registers a cloud-backed chunk from metadata alone,
+// without streaming any records or downloading from S3. Creates a cloud
+// index entry so the chunk appears in List() and is queryable via
+// openCloudCursor. Used by follower nodes when the tier Raft FSM
+// propagates the leader's AnnounceUpload.
+//
+// Idempotent: if the chunk is already registered (in metas or cloudIdx),
+// this is a no-op.
+func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo) error {
+	if m.cloudIdx == nil {
+		return errors.New("cloud index not available (no cloud store configured)")
+	}
+
+	// Check if already known.
+	m.mu.Lock()
+	if _, ok := m.metas[id]; ok {
+		m.mu.Unlock()
+		return nil // already local
+	}
+	m.mu.Unlock()
+	if existing, _ := m.cloudIdx.Lookup(id); existing != nil {
+		return nil // already in cloud index
+	}
+
+	meta := &chunkMeta{
+		id:              id,
+		writeStart:      info.WriteStart,
+		writeEnd:        info.WriteEnd,
+		ingestStart:     info.IngestStart,
+		ingestEnd:       info.IngestEnd,
+		sourceStart:     info.SourceStart,
+		sourceEnd:       info.SourceEnd,
+		recordCount:     info.RecordCount,
+		bytes:           info.Bytes,
+		sealed:          true,
+		compressed:      true,
+		cloudBacked:     true,
+		diskBytes:       info.DiskBytes,
+		ingestIdxOffset: info.IngestIdxOffset,
+		ingestIdxSize:   info.IngestIdxSize,
+		sourceIdxOffset: info.SourceIdxOffset,
+		sourceIdxSize:   info.SourceIdxSize,
+		numFrames:       info.NumFrames,
+	}
+
+	m.cloudIdxMu.Lock()
+	if err := m.cloudIdx.Insert(id, meta); err != nil {
+		m.cloudIdxMu.Unlock()
+		return fmt.Errorf("insert cloud chunk %s: %w", id, err)
+	}
+	if err := m.cloudIdx.Sync(); err != nil {
+		m.cloudIdxMu.Unlock()
+		return fmt.Errorf("sync cloud index for %s: %w", id, err)
+	}
+	m.cloudIdxMu.Unlock()
+
+	m.mu.Lock()
+	m.cloudListCache = nil
+	m.mu.Unlock()
+
+	m.logger.Debug("registered cloud chunk from metadata", "chunk", id, "records", info.RecordCount)
 	return nil
 }
 

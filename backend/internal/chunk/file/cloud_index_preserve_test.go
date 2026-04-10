@@ -325,6 +325,156 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 	}
 }
 
+// TestRegisterCloudChunk verifies that RegisterCloudChunk creates a cloud
+// index entry from metadata alone, making the chunk visible in List().
+func TestRegisterCloudChunk(t *testing.T) {
+	t.Parallel()
+	cm, _, _ := newCloudManagerWithIndexes(t)
+
+	id := chunk.NewChunkID()
+	info := chunk.CloudChunkInfo{
+		WriteStart:  time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC),
+		WriteEnd:    time.Date(2025, 6, 1, 0, 1, 0, 0, time.UTC),
+		RecordCount: 100,
+		Bytes:       50000,
+		DiskBytes:   30000,
+		NumFrames:   2,
+	}
+
+	if err := cm.RegisterCloudChunk(id, info); err != nil {
+		t.Fatalf("RegisterCloudChunk: %v", err)
+	}
+
+	// Chunk should appear in List().
+	metas, err := cm.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	var found bool
+	for _, m := range metas {
+		if m.ID == id {
+			found = true
+			if !m.CloudBacked {
+				t.Error("expected CloudBacked=true")
+			}
+			if m.RecordCount != 100 {
+				t.Errorf("RecordCount = %d, want 100", m.RecordCount)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("registered cloud chunk not found in List()")
+	}
+}
+
+// TestRegisterCloudChunkIdempotent verifies that calling RegisterCloudChunk
+// twice for the same chunk ID is a no-op.
+func TestRegisterCloudChunkIdempotent(t *testing.T) {
+	t.Parallel()
+	cm, _, _ := newCloudManagerWithIndexes(t)
+
+	id := chunk.NewChunkID()
+	info := chunk.CloudChunkInfo{RecordCount: 50, Bytes: 1000, DiskBytes: 500}
+
+	if err := cm.RegisterCloudChunk(id, info); err != nil {
+		t.Fatalf("first RegisterCloudChunk: %v", err)
+	}
+	if err := cm.RegisterCloudChunk(id, info); err != nil {
+		t.Fatalf("second RegisterCloudChunk should be no-op: %v", err)
+	}
+}
+
+// TestRegisterCloudChunkRequiresCloudStore verifies that RegisterCloudChunk
+// fails if the manager has no cloud store configured.
+func TestRegisterCloudChunkRequiresCloudStore(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cm, err := NewManager(Config{Dir: dir, Now: time.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cm.Close() }()
+
+	id := chunk.NewChunkID()
+	info := chunk.CloudChunkInfo{RecordCount: 10}
+	if err := cm.RegisterCloudChunk(id, info); err == nil {
+		t.Error("expected error without cloud store, got nil")
+	}
+}
+
+// TestCloudReadOnlySkipsUpload verifies that PostSealProcess with CloudReadOnly
+// does NOT upload to cloud.
+func TestCloudReadOnlySkipsUpload(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	cacheDir := t.TempDir()
+	vaultID := uuid.Must(uuid.NewV7())
+	store := blobstore.NewMemory()
+
+	cm, err := NewManager(Config{
+		Dir:            dir,
+		Now:            time.Now,
+		RotationPolicy: chunk.NewRecordCountPolicy(10000),
+		CloudStore:     store,
+		VaultID:        vaultID,
+		CacheDir:       cacheDir,
+		CloudReadOnly:  true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cm.Close() }()
+
+	// Append, seal, post-seal.
+	ts := time.Now()
+	for i := range 10 {
+		if _, _, err := cm.Append(chunk.Record{
+			IngestTS: ts.Add(time.Duration(i) * time.Microsecond),
+			WriteTS:  ts.Add(time.Duration(i) * time.Microsecond),
+			Raw:      []byte("readonly-test"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cm.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	metas, _ := cm.List()
+	var sealedID chunk.ChunkID
+	for _, m := range metas {
+		if m.Sealed {
+			sealedID = m.ID
+			break
+		}
+	}
+	if err := cm.PostSealProcess(context.Background(), sealedID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	// Chunk should NOT be cloud-backed (upload was skipped).
+	meta, err := cm.Meta(sealedID)
+	if err != nil {
+		t.Fatalf("Meta: %v", err)
+	}
+	if meta.CloudBacked {
+		t.Error("CloudReadOnly manager should NOT upload — chunk should not be cloud-backed")
+	}
+
+	// Verify nothing was uploaded to the store.
+	var blobCount int
+	_ = store.List(context.Background(), "", func(_ blobstore.BlobInfo) error {
+		blobCount++
+		return nil
+	})
+	if blobCount > 0 {
+		t.Errorf("expected 0 blobs in store, got %d", blobCount)
+	}
+}
+
 // TestChunkDirHasFiles verifies the helper function.
 func TestChunkDirHasFiles(t *testing.T) {
 	t.Parallel()
