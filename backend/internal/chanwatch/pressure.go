@@ -173,9 +173,9 @@ func (g *PressureGate) Run(ctx context.Context, interval time.Duration) {
 func (g *PressureGate) tick() {
 	g.mu.Lock()
 	var (
-		maxLevel  PressureLevel = PressureNormal
-		maxCause  string
-		maxRatio  float64
+		maxLevel = PressureNormal
+		maxCause string
+		maxRatio float64
 	)
 	for i := range g.probes {
 		p := &g.probes[i]

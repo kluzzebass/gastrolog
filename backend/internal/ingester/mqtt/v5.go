@@ -53,10 +53,12 @@ func (ing *v5Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 					// Backpressure: block in the callback while pressure is
 					// elevated. Paho's inbound-packet handling then stalls,
 					// stopping reads from the broker — QoS 1/2 messages
-					// remain unACK'd, so nothing is lost.
+					// remain unACK'd, so nothing is lost. Wait only errors
+					// on ctx cancel; we check ctx afterward for clean exit.
 					if ing.pressureGate != nil {
-						if err := ing.pressureGate.Wait(ctx); err != nil {
-							return false, nil
+						_ = ing.pressureGate.Wait(ctx)
+						if ctx.Err() != nil {
+							return false, ctx.Err()
 						}
 					}
 					msg := orchestrator.IngestMessage{

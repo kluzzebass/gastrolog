@@ -160,10 +160,14 @@ func (r *Ingester) runUDP(ctx context.Context) error {
 
 		// Backpressure: pause reads while the pipeline is backed up. UDP has
 		// no flow control, so kernel-side packet loss is the expected outcome
-		// — it pushes the signal upstream to senders.
+		// — it pushes the signal upstream to senders. If Wait returned due
+		// to ctx cancel, exit cleanly without waiting for the next read.
 		if r.pressureGate != nil {
-			if err := r.pressureGate.Wait(ctx); err != nil {
+			_ = r.pressureGate.Wait(ctx)
+			select {
+			case <-ctx.Done():
 				return nil
+			default:
 			}
 		}
 

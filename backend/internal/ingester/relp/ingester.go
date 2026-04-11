@@ -167,70 +167,88 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 	r.logger.Debug("RELP session established", "remote", remoteIP)
 
 	for {
-		select {
-		case <-ctx.Done():
+		if ctx.Err() != nil {
 			return
-		default:
 		}
-
 		// Backpressure: pause reads while the pipeline is backed up. The
 		// TCP window closes, RELP senders back off at the transport layer
 		// instead of queuing on pending ACKs.
 		if r.pressureGate != nil {
-			if err := r.pressureGate.Wait(ctx); err != nil {
-				return
-			}
+			_ = r.pressureGate.Wait(ctx)
 		}
-
-		msg, err := session.ReceiveLog()
-		if err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
-				r.logger.Debug("RELP receive ended", "error", err, "remote", remoteIP)
-			}
+		if ctx.Err() != nil {
 			return
 		}
-
-		attrs, _ := syslogparse.ParseMessage(msg.Data, remoteIP)
-		attrs["ingester_type"] = "relp"
-
-		// Use ack channel for end-to-end delivery guarantee:
-		// the orchestrator sends nil/error after writing to chunk store.
-		ack := make(chan error, 1)
-
-		// SourceTS not set — syslog timestamps are unreliable.
-		// The timestamp digester extracts SourceTS during digestion.
-		ingestMsg := orchestrator.IngestMessage{
-			Attrs:      attrs,
-			Raw:        msg.Data,
-			IngestTS:   time.Now(),
-			IngesterID: r.id,
-			Ack:        ack,
-		}
-
-		select {
-		case out <- ingestMsg:
-		case <-ctx.Done():
-			return
-		}
-
-		// Wait for write confirmation before acknowledging to RELP sender.
-		select {
-		case writeErr := <-ack:
-			if writeErr != nil {
-				if err := session.AnswerError(msg, writeErr.Error()); err != nil {
-					r.logger.Debug("RELP answer error failed", "error", err)
-					return
-				}
-			} else {
-				if err := session.AnswerOk(msg); err != nil {
-					r.logger.Debug("RELP answer ok failed", "error", err)
-					return
-				}
-			}
-		case <-ctx.Done():
+		if !r.receiveAndForward(ctx, session, out, remoteIP) {
 			return
 		}
 	}
+}
+
+// receiveAndForward reads one RELP message, forwards it to the pipeline,
+// and sends the sender the ack/error reply. Returns false when the caller
+// should stop the connection loop (EOF, ctx cancel, or transport error).
+func (r *Ingester) receiveAndForward(
+	ctx context.Context,
+	session *Session,
+	out chan<- orchestrator.IngestMessage,
+	remoteIP string,
+) bool {
+	msg, err := session.ReceiveLog()
+	if err != nil {
+		if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+			r.logger.Debug("RELP receive ended", "error", err, "remote", remoteIP)
+		}
+		return false
+	}
+
+	attrs, _ := syslogparse.ParseMessage(msg.Data, remoteIP)
+	attrs["ingester_type"] = "relp"
+
+	// Use ack channel for end-to-end delivery guarantee:
+	// the orchestrator sends nil/error after writing to chunk store.
+	ack := make(chan error, 1)
+
+	// SourceTS not set — syslog timestamps are unreliable.
+	// The timestamp digester extracts SourceTS during digestion.
+	ingestMsg := orchestrator.IngestMessage{
+		Attrs:      attrs,
+		Raw:        msg.Data,
+		IngestTS:   time.Now(),
+		IngesterID: r.id,
+		Ack:        ack,
+	}
+
+	select {
+	case out <- ingestMsg:
+	case <-ctx.Done():
+		return false
+	}
+
+	// Wait for write confirmation before acknowledging to RELP sender.
+	select {
+	case writeErr := <-ack:
+		return r.sendAnswer(session, msg, writeErr)
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// sendAnswer delivers the appropriate RELP response to the sender.
+// Returns false if the answer transport fails (caller should exit loop).
+func (r *Ingester) sendAnswer(session *Session, msg *Message, writeErr error) bool {
+	if writeErr != nil {
+		if err := session.AnswerError(msg, writeErr.Error()); err != nil {
+			r.logger.Debug("RELP answer error failed", "error", err)
+			return false
+		}
+		return true
+	}
+	if err := session.AnswerOk(msg); err != nil {
+		r.logger.Debug("RELP answer ok failed", "error", err)
+		return false
+	}
+	return true
 }
 
 // BuildTLSConfig builds a *tls.Config from ingester parameters.
