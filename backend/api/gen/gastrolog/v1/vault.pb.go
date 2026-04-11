@@ -2259,6 +2259,7 @@ func (x *MergeVaultsResponse) GetJobId() string {
 type SealVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Vault         string                 `protobuf:"bytes,1,opt,name=vault,proto3" json:"vault,omitempty"`
+	Tier          string                 `protobuf:"bytes,2,opt,name=tier,proto3" json:"tier,omitempty"` // optional: seal only this tier (name or ID). Empty = all tiers.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2300,8 +2301,16 @@ func (x *SealVaultRequest) GetVault() string {
 	return ""
 }
 
+func (x *SealVaultRequest) GetTier() string {
+	if x != nil {
+		return x.Tier
+	}
+	return ""
+}
+
 type SealVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	SealedCount   int32                  `protobuf:"varint,1,opt,name=sealed_count,json=sealedCount,proto3" json:"sealed_count,omitempty"` // number of tiers whose active chunk was sealed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2334,6 +2343,13 @@ func (x *SealVaultResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SealVaultResponse.ProtoReflect.Descriptor instead.
 func (*SealVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_vault_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *SealVaultResponse) GetSealedCount() int32 {
+	if x != nil {
+		return x.SealedCount
+	}
+	return 0
 }
 
 type ArchiveChunkRequest struct {
@@ -2727,10 +2743,12 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x06source\x18\x01 \x01(\tR\x06source\x12 \n" +
 	"\vdestination\x18\x02 \x01(\tR\vdestination\",\n" +
 	"\x13MergeVaultsResponse\x12\x15\n" +
-	"\x06job_id\x18\x03 \x01(\tR\x05jobId\"(\n" +
+	"\x06job_id\x18\x03 \x01(\tR\x05jobId\"<\n" +
 	"\x10SealVaultRequest\x12\x14\n" +
-	"\x05vault\x18\x01 \x01(\tR\x05vault\"\x13\n" +
-	"\x11SealVaultResponse\"k\n" +
+	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x12\n" +
+	"\x04tier\x18\x02 \x01(\tR\x04tier\"6\n" +
+	"\x11SealVaultResponse\x12!\n" +
+	"\fsealed_count\x18\x01 \x01(\x05R\vsealedCount\"k\n" +
 	"\x13ArchiveChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12#\n" +

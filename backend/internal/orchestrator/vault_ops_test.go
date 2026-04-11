@@ -103,7 +103,7 @@ func TestSealActive(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 3)
 
-	if err := orch.SealActive(id); err != nil {
+	if _, err := orch.SealActive(id, uuid.Nil); err != nil {
 		t.Fatalf("SealActive: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestSealActive_Empty(t *testing.T) {
 	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	// No records appended — seal should be a no-op.
-	if err := orch.SealActive(id); err != nil {
+	if _, err := orch.SealActive(id, uuid.Nil); err != nil {
 		t.Fatalf("SealActive on empty vault: %v", err)
 	}
 }
@@ -138,7 +138,7 @@ func TestSealActive_UnknownVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = orch.SealActive(uuid.Must(uuid.NewV7()))
+	_, err = orch.SealActive(uuid.Must(uuid.NewV7()), uuid.Nil)
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}

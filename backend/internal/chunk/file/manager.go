@@ -2496,6 +2496,21 @@ func (m *Manager) HasIndexBuilders() bool {
 // compress → build indexes → refresh sizes → upload to cloud.
 // Safe to call concurrently — tracked per-chunk for Delete, globally for Close.
 func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
+	// Guard: reject unsealed chunks upfront. Without this, CompressChunk
+	// silently no-ops and the index builders fail with ErrChunkNotSealed,
+	// producing a spurious WARN on every call. See gastrolog-89k15.
+	m.mu.Lock()
+	meta, ok := m.metas[id]
+	if !ok {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotFound
+	}
+	if !meta.sealed {
+		m.mu.Unlock()
+		return chunk.ErrChunkNotSealed
+	}
+	m.mu.Unlock()
+
 	done := make(chan struct{})
 	m.postSealActive.Store(id, done)
 	m.postSealWg.Add(1)

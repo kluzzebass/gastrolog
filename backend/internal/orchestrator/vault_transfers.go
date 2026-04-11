@@ -225,7 +225,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, target
 	o.mu.Unlock()
 
 	// Seal active chunk outside the lock — flush any locally-buffered records.
-	if err := o.SealActive(vaultID); err != nil {
+	if _, err := o.SealActive(vaultID, uuid.Nil); err != nil {
 		o.logger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
 	}
 
@@ -272,7 +272,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID uuid.UUID, targe
 	// Final seal: catch any records that were appended between
 	// DrainVault's SealActive and the worker starting (e.g. from
 	// ForwardRecords RPCs from nodes with stale filter sets).
-	if err := o.SealActive(vaultID); err != nil {
+	if _, err := o.SealActive(vaultID, uuid.Nil); err != nil {
 		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)
 	}
 	if !o.drainSealed(ctx, vaultID, cm, targetNodeID, job) {
@@ -565,7 +565,7 @@ func (o *Orchestrator) MergeVaults(ctx context.Context, p TransferParams) string
 
 	jobName := "merge:" + p.SrcID.String() + "->" + p.DstID.String()
 	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
-		if err := o.SealActive(p.SrcID); err != nil {
+		if _, err := o.SealActive(p.SrcID, uuid.Nil); err != nil {
 			job.Fail(o.now(), fmt.Sprintf("seal source: %v", err))
 			return
 		}

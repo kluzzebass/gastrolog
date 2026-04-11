@@ -305,9 +305,12 @@ message MergeVaultsResponse {
 
 message SealVaultRequest {
   string vault = 1;
+  string tier = 2; // optional: seal only this tier (name or ID). Empty = all tiers.
 }
 
-message SealVaultResponse {}
+message SealVaultResponse {
+  int32 sealed_count = 1; // number of tiers whose active chunk was sealed
+}
 
 message ArchiveChunkRequest {
   string vault = 1;

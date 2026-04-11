@@ -53,11 +53,22 @@ func (s *VaultServer) SealVault(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 	}
 
-	if err := s.orch.SealActive(vaultID); err != nil {
+	// Resolve optional tier filter.
+	tierID := uuid.Nil
+	if req.Msg.Tier != "" {
+		tid, err := uuid.Parse(req.Msg.Tier)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid tier ID: %w", err))
+		}
+		tierID = tid
+	}
+
+	sealed, err := s.orch.SealActive(vaultID, tierID)
+	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal active chunk: %w", err))
 	}
 
-	return connect.NewResponse(&apiv1.SealVaultResponse{}), nil
+	return connect.NewResponse(&apiv1.SealVaultResponse{SealedCount: int32(sealed)}), nil //nolint:gosec // G115: tier count is always small
 }
 
 // ReindexVault rebuilds all indexes for sealed chunks in a vault.
@@ -178,7 +189,7 @@ func (s *VaultServer) MigrateVault(
 	}
 
 	// Seal source's active chunk so all data is in sealed chunks.
-	if err := s.orch.SealActive(srcID); err != nil {
+	if _, err := s.orch.SealActive(srcID, uuid.Nil); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("seal source: %w", err))
 	}
 

@@ -806,34 +806,35 @@ func drainIterator(next chunk.RecordIterator) {
 
 // SealActive seals the active chunk if it has records. No-op if empty or no active chunk.
 // After sealing, schedules compression and index builds (same as ingest-triggered seal).
-func (o *Orchestrator) SealActive(vaultID uuid.UUID) error {
+// SealActive seals the active chunk on matching tiers in the vault. If tierID
+// is uuid.Nil, all tiers are sealed. Returns the number of tiers sealed.
+func (o *Orchestrator) SealActive(vaultID uuid.UUID, tierID uuid.UUID) (int, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
 	o.mu.RUnlock()
 	if vault == nil {
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return 0, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
-	cm := vault.ChunkManager()
-	if cm == nil {
-		return nil // no tiers
+	var sealed int
+	for _, tier := range vault.Tiers {
+		if tierID != uuid.Nil && tier.TierID != tierID {
+			continue
+		}
+		active := tier.Chunks.Active()
+		if active == nil || active.RecordCount == 0 {
+			continue
+		}
+		chunkID := active.ID
+		if err := tier.Chunks.Seal(); err != nil {
+			return sealed, fmt.Errorf("seal tier %s: %w", tier.TierID, err)
+		}
+		sealed++
+		o.mu.RLock()
+		o.schedulePostSeal(vaultID, tier.Chunks, chunkID)
+		o.mu.RUnlock()
 	}
-	active := cm.Active()
-	if active == nil || active.RecordCount == 0 {
-		return nil
-	}
-	chunkID := active.ID
-
-	if err := cm.Seal(); err != nil {
-		return err
-	}
-
-	// Schedule post-seal pipeline (same as ingest onSeal callback).
-	o.mu.RLock()
-	o.schedulePostSeal(vaultID, cm, chunkID)
-	o.mu.RUnlock()
-
-	return nil
+	return sealed, nil
 }
 
 // --- Index ops ---

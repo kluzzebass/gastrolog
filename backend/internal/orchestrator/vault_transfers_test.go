@@ -141,7 +141,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUI
 			t.Fatalf("append: %v", err)
 		}
 	}
-	if err := orch.SealActive(vaultID); err != nil {
+	if _, err := orch.SealActive(vaultID, uuid.Nil); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	metas, err := orch.ListChunkMetas(vaultID)

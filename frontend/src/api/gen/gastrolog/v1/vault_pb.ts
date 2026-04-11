@@ -1898,6 +1898,13 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
    */
   vault = "";
 
+  /**
+   * optional: seal only this tier (name or ID). Empty = all tiers.
+   *
+   * @generated from field: string tier = 2;
+   */
+  tier = "";
+
   constructor(data?: PartialMessage<SealVaultRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1907,6 +1914,7 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
   static readonly typeName = "gastrolog.v1.SealVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealVaultRequest {
@@ -1930,6 +1938,13 @@ export class SealVaultRequest extends Message<SealVaultRequest> {
  * @generated from message gastrolog.v1.SealVaultResponse
  */
 export class SealVaultResponse extends Message<SealVaultResponse> {
+  /**
+   * number of tiers whose active chunk was sealed
+   *
+   * @generated from field: int32 sealed_count = 1;
+   */
+  sealedCount = 0;
+
   constructor(data?: PartialMessage<SealVaultResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -1938,6 +1953,7 @@ export class SealVaultResponse extends Message<SealVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SealVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "sealed_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SealVaultResponse {

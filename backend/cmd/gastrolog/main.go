@@ -131,6 +131,11 @@ func main() {
 		cli.NewInspectCommand(),
 		cli.NewArchiveCommand(),
 		cli.NewRestoreCommand(),
+		cli.NewSealCommand(),
+		cli.NewReindexCommand(),
+		cli.NewPauseCommand(),
+		cli.NewResumeCommand(),
+		cli.NewMigrateCommand(),
 	)
 
 	if err := rootCmd.ExecuteContext(ctx); err != nil {

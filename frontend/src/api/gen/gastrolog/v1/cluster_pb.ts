@@ -1069,6 +1069,88 @@ export class ForwardDeleteChunkResponse extends Message<ForwardDeleteChunkRespon
 }
 
 /**
+ * ForwardTierApplyRequest carries a pre-marshaled tier FSM command for the
+ * tier Raft leader to apply. Used when the config placement leader (which
+ * runs retention and chunk lifecycle) is not the tier Raft leader.
+ *
+ * @generated from message gastrolog.v1.ForwardTierApplyRequest
+ */
+export class ForwardTierApplyRequest extends Message<ForwardTierApplyRequest> {
+  /**
+   * tier Raft group ID (= tier UUID)
+   *
+   * @generated from field: string group_id = 1;
+   */
+  groupId = "";
+
+  /**
+   * pre-marshaled tier FSM command
+   *
+   * @generated from field: bytes command = 2;
+   */
+  command = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<ForwardTierApplyRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardTierApplyRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "group_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "command", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardTierApplyRequest {
+    return new ForwardTierApplyRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardTierApplyRequest {
+    return new ForwardTierApplyRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardTierApplyRequest {
+    return new ForwardTierApplyRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardTierApplyRequest | PlainMessage<ForwardTierApplyRequest> | undefined, b: ForwardTierApplyRequest | PlainMessage<ForwardTierApplyRequest> | undefined): boolean {
+    return proto3.util.equals(ForwardTierApplyRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.ForwardTierApplyResponse
+ */
+export class ForwardTierApplyResponse extends Message<ForwardTierApplyResponse> {
+  constructor(data?: PartialMessage<ForwardTierApplyResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.ForwardTierApplyResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardTierApplyResponse {
+    return new ForwardTierApplyResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardTierApplyResponse {
+    return new ForwardTierApplyResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardTierApplyResponse {
+    return new ForwardTierApplyResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: ForwardTierApplyResponse | PlainMessage<ForwardTierApplyResponse> | undefined, b: ForwardTierApplyResponse | PlainMessage<ForwardTierApplyResponse> | undefined): boolean {
+    return proto3.util.equals(ForwardTierApplyResponse, a, b);
+  }
+}
+
+/**
  * TierReplicationCommand is sent leader → follower. The vault_id and
  * tier_id identify the target tier; the oneof command determines the
  * operation. New command types can be added without changing framing.
