@@ -22,13 +22,19 @@ import (
 
 const (
 	// forwardChanCap is the per-node channel capacity for ingestion forwarding.
-	// When full, new records are dropped (best-effort delivery).
+	// When full, new records are dropped (best-effort delivery) via Forward,
+	// or ForwardSync blocks until space is available.
 	forwardChanCap = 16384
 
 	// streamBurstSize is the max records drained per burst on the stream.
 	// After one blocking read, up to streamBurstSize-1 more are drained
 	// non-blocking. gRPC's HTTP/2 transport coalesces the SendMsg calls.
 	streamBurstSize = 100
+
+	// probeNamePrefix is the chanwatch/pressure-gate probe name prefix
+	// for per-node forward channels — full probe IDs look like
+	// "forward:<nodeID>".
+	probeNamePrefix = "forward:"
 )
 
 // forwardEntry is a single record queued for forwarding to a remote node's
@@ -80,6 +86,15 @@ type RecordForwarder struct {
 	stopCtx    context.Context    // scoped to forwarder lifetime; used for gRPC streams
 	stopCancel context.CancelFunc // cancels stopCtx; called after goroutines exit
 	cwCancel   context.CancelFunc // cancels the chanwatch goroutine
+
+	// pressureGate (optional) is informed of every per-node forward
+	// channel so pipeline-wide pressure classification reflects the
+	// cross-node forward path, not just local ingest/digest buffers.
+	// Registered via RegisterPressureGate before or after nodes exist;
+	// existing nodes have their probes added immediately, and future
+	// startNode calls register theirs as they are created. See
+	// gastrolog-27zvt.
+	pressureGate *chanwatch.PressureGate
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
@@ -107,17 +122,13 @@ func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Col
 
 // Forward enqueues records for delivery to the given node. Non-blocking:
 // if the per-node buffer is full, records are dropped with a warning.
+// This is the fire-and-forget path — callers that require durable
+// delivery must use ForwardSync.
 func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
-	rf.mu.Lock()
-	if rf.closed {
-		rf.mu.Unlock()
-		return errors.New("forwarder closed")
+	nf, err := rf.nodeFor(nodeID)
+	if err != nil {
+		return err
 	}
-	nf, ok := rf.nodes[nodeID]
-	if !ok {
-		nf = rf.startNode(nodeID)
-	}
-	rf.mu.Unlock()
 
 	for _, rec := range records {
 		select {
@@ -139,6 +150,50 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 	return nil
 }
 
+// ForwardSync enqueues records for delivery to the given node, blocking
+// until each record is accepted by the per-node channel or ctx expires.
+// Unlike Forward, this path does NOT drop on a full buffer — the caller
+// gets an error via ctx.Err() and can propagate it to the ack channel
+// for ack-gated ingesters. See gastrolog-27zvt.
+//
+// Note that "accepted by the channel" is the durability boundary this
+// method guarantees; end-to-end remote ack (that the record actually
+// landed in the remote node's chunk store) is out of scope and would
+// require a bidirectional stream protocol.
+func (rf *RecordForwarder) ForwardSync(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+	nf, err := rf.nodeFor(nodeID)
+	if err != nil {
+		return err
+	}
+
+	for _, rec := range records {
+		select {
+		case nf.ch <- forwardEntry{vaultID: vaultID, record: rec}:
+		case <-ctx.Done():
+			return fmt.Errorf("forward to %s: %w", nodeID, ctx.Err())
+		case <-rf.stop:
+			return errors.New("forwarder closed")
+		}
+	}
+	return nil
+}
+
+// nodeFor returns (or lazily starts) the per-node forwarder for nodeID.
+// Extracted from Forward/ForwardSync so both entry points share the same
+// "look up, lazy-start, reject if closed" logic.
+func (rf *RecordForwarder) nodeFor(nodeID string) (*nodeForwarder, error) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.closed {
+		return nil, errors.New("forwarder closed")
+	}
+	nf, ok := rf.nodes[nodeID]
+	if !ok {
+		nf = rf.startNode(nodeID)
+	}
+	return nf, nil
+}
+
 // startNode creates and starts a per-node forwarder goroutine.
 // Must be called with rf.mu held.
 func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
@@ -147,12 +202,39 @@ func (rf *RecordForwarder) startNode(nodeID string) *nodeForwarder {
 		done: make(chan struct{}),
 	}
 	rf.nodes[nodeID] = nf
-	rf.cw.Watch("forward:"+nodeID, func() (int, int) {
+	probe := func() (int, int) {
 		return len(nf.ch), cap(nf.ch)
-	}, 0.9)
+	}
+	rf.cw.Watch(probeNamePrefix+nodeID, probe, 0.9)
+	if rf.pressureGate != nil {
+		rf.pressureGate.AddProbe(probeNamePrefix+nodeID, probe)
+	}
 	rf.wg.Add(1)
 	go rf.streamLoop(nodeID, nf)
 	return nf
+}
+
+// RegisterPressureGate registers the per-node forward channels as probes
+// on the given pressure gate so pipeline-wide backpressure classification
+// includes cross-node forwarding. Forward channels added later (as new
+// peers are discovered) are registered automatically via startNode. Safe
+// to call at most once; subsequent calls are ignored.
+func (rf *RecordForwarder) RegisterPressureGate(gate *chanwatch.PressureGate) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if rf.pressureGate != nil {
+		return
+	}
+	rf.pressureGate = gate
+	// Also register any nodes that already exist — common if the
+	// forwarder was used for fire-and-forget traffic before the gate
+	// was wired up at orchestrator start.
+	for nodeID, nf := range rf.nodes {
+		nfCopy := nf
+		gate.AddProbe(probeNamePrefix+nodeID, func() (int, int) {
+			return len(nfCopy.ch), cap(nfCopy.ch)
+		})
+	}
 }
 
 // streamLoop maintains a persistent client stream to a remote node.

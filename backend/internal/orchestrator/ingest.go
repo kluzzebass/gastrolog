@@ -34,9 +34,13 @@ func (o *Orchestrator) Ingest(rec chunk.Record) error {
 // ingest is the internal ingest implementation, called by processMessage.
 // Extracted from Ingest to allow both direct and channel-based ingestion.
 //
-// Returns replication tasks for ack-gated records that need sync forwarding
-// to secondaries AFTER the lock is released.
-func (o *Orchestrator) ingest(rec chunk.Record) ([]replicationTask, error) {
+// Returns pendingAcks bundling the sync work an ack-gated record triggers:
+// local tier replication to followers, plus cross-node forwarding of
+// records matched to remote vaults. Both task kinds must complete before
+// the ack is delivered to the ingester. For non-ack-gated records,
+// pendingAcks is always empty — remote forwarding runs fire-and-forget
+// through forwardRemote(). See gastrolog-27zvt.
+func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -60,10 +64,17 @@ func (o *Orchestrator) ingest(rec chunk.Record) ([]replicationTask, error) {
 
 	// Write records first, then update stats only on success.
 	routed := false
-	var tasks []replicationTask
+	var pa *pendingAcks
 	for _, t := range matches {
 		if t.NodeID != "" {
-			o.forwardRemote(t, rec)
+			// Remote vault match. Fire-and-forget for non-ack-gated;
+			// accumulate a forwardTask for ack-gated records so the ack
+			// waits for the forward channel to accept the record.
+			if rec.WaitForReplica {
+				pa = pa.addForward(forwardTask{nodeID: t.NodeID, vaultID: t.VaultID})
+			} else {
+				o.forwardRemote(t, rec)
+			}
 			vs := o.getOrCreateVaultRouteStats(t.VaultID)
 			vs.Matched.Add(1)
 			vs.Forwarded.Add(1)
@@ -80,10 +91,10 @@ func (o *Orchestrator) ingest(rec chunk.Record) ([]replicationTask, error) {
 			if errors.Is(err, ErrVaultDisabled) {
 				continue // Skip disabled vaults during ingestion.
 			}
-			return tasks, err
+			return pa, err
 		}
 		if task != nil {
-			tasks = append(tasks, *task)
+			pa = pa.addReplication(*task)
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
@@ -96,7 +107,49 @@ func (o *Orchestrator) ingest(rec chunk.Record) ([]replicationTask, error) {
 	if routed {
 		o.routeStats.Routed.Add(1)
 	}
-	return tasks, nil
+	return pa, nil
+}
+
+// pendingAcks bundles the sync work that an ack-gated record triggers —
+// local tier replication to followers and cross-node forwarding of
+// records matched to remote vaults. Both must complete before the ack
+// is delivered to the ingester.
+//
+// Nil receiver is treated as empty; addReplication/addForward lazy-init
+// so callers don't have to check before appending.
+type pendingAcks struct {
+	replication []replicationTask
+	forwards    []forwardTask
+}
+
+func (p *pendingAcks) addReplication(t replicationTask) *pendingAcks {
+	if p == nil {
+		p = &pendingAcks{}
+	}
+	p.replication = append(p.replication, t)
+	return p
+}
+
+func (p *pendingAcks) addForward(t forwardTask) *pendingAcks {
+	if p == nil {
+		p = &pendingAcks{}
+	}
+	p.forwards = append(p.forwards, t)
+	return p
+}
+
+// isEmpty reports whether there is any sync work to wait on before acking.
+func (p *pendingAcks) isEmpty() bool {
+	return p == nil || (len(p.replication) == 0 && len(p.forwards) == 0)
+}
+
+// forwardTask is a pending cross-node forward for an ack-gated record
+// that matched a filter targeting a vault on another node. Processed
+// synchronously by ackAfterReplication via RecordForwarder.ForwardSync
+// so the ack-gated durability guarantee extends to cross-node routes.
+type forwardTask struct {
+	nodeID  string
+	vaultID uuid.UUID
 }
 
 // getOrCreateVaultRouteStats returns the per-vault route stats, creating if needed.

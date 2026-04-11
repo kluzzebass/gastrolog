@@ -1161,15 +1161,18 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 	rec := testRecord("ingest-me")
 	rec.WaitForReplica = true
 
-	tasks, err := orch.ingest(rec)
+	pa, err := orch.ingest(rec)
 	if err != nil {
 		t.Fatalf("ingest: %v", err)
 	}
-	if len(tasks) == 0 {
-		t.Fatal("expected non-empty replication tasks for WaitForReplica=true")
+	if pa.isEmpty() {
+		t.Fatal("expected non-empty pendingAcks for WaitForReplica=true")
 	}
-	if tasks[0].vaultID != vaultID {
-		t.Errorf("task[0].vaultID = %s, want %s", tasks[0].vaultID, vaultID)
+	if len(pa.replication) == 0 {
+		t.Fatal("expected at least one replication task for WaitForReplica=true")
+	}
+	if pa.replication[0].vaultID != vaultID {
+		t.Errorf("task[0].vaultID = %s, want %s", pa.replication[0].vaultID, vaultID)
 	}
 }
 
@@ -1179,17 +1182,19 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetTierReplicator(mock)
 
-	tasks := []replicationTask{
-		{
-			vaultID: uuid.Must(uuid.NewV7()),
-			tierID:  uuid.Must(uuid.NewV7()),
-			chunkID: chunk.NewChunkID(),
-			targets: []config.ReplicationTarget{{NodeID: "node-2"}},
+	pa := &pendingAcks{
+		replication: []replicationTask{
+			{
+				vaultID: uuid.Must(uuid.NewV7()),
+				tierID:  uuid.Must(uuid.NewV7()),
+				chunkID: chunk.NewChunkID(),
+				targets: []config.ReplicationTarget{{NodeID: "node-2"}},
+			},
 		},
 	}
 
 	ack := make(chan error, 1)
-	orch.ackAfterReplication(ack, tasks, testRecord("ack-ok"))
+	orch.ackAfterReplication(ack, pa, testRecord("ack-ok"))
 
 	select {
 	case err := <-ack:
@@ -1213,17 +1218,19 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.SetTierReplicator(mock)
 
-	tasks := []replicationTask{
-		{
-			vaultID: uuid.Must(uuid.NewV7()),
-			tierID:  uuid.Must(uuid.NewV7()),
-			chunkID: chunk.NewChunkID(),
-			targets: []config.ReplicationTarget{{NodeID: "node-2"}},
+	pa := &pendingAcks{
+		replication: []replicationTask{
+			{
+				vaultID: uuid.Must(uuid.NewV7()),
+				tierID:  uuid.Must(uuid.NewV7()),
+				chunkID: chunk.NewChunkID(),
+				targets: []config.ReplicationTarget{{NodeID: "node-2"}},
+			},
 		},
 	}
 
 	ack := make(chan error, 1)
-	orch.ackAfterReplication(ack, tasks, testRecord("ack-fail"))
+	orch.ackAfterReplication(ack, pa, testRecord("ack-fail"))
 
 	select {
 	case err := <-ack:

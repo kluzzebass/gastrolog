@@ -79,10 +79,24 @@ type drainState struct {
 
 // RecordForwarder ships records to remote cluster nodes. The orchestrator
 // calls Forward() during ingestion for records that match routes targeting
-// vaults on other nodes. Implementations must be non-blocking (channel
-// enqueue) so they're safe to call under the orchestrator mutex.
+// vaults on other nodes.
+//
+// Forward is the fire-and-forget path — it must be non-blocking (channel
+// enqueue, drop on full) so it is safe to call under the orchestrator
+// mutex.
+//
+// ForwardSync is the ack-gated path — it blocks until each record is
+// accepted by the per-node channel or ctx expires. Callers invoke it
+// OUTSIDE any orchestrator lock, from the ack-after-replication goroutine,
+// so the block is scoped to the ack-gated caller only.
+//
+// RegisterPressureGate wires the per-node forward channels as probes on
+// the orchestrator's shared pressure gate so ingesters throttle upstream
+// when cross-node forwarding is backed up (gastrolog-27zvt).
 type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
+	ForwardSync(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
+	RegisterPressureGate(gate *chanwatch.PressureGate)
 }
 
 // TierReplicator sequences all replication commands for a tier on a single

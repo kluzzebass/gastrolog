@@ -92,6 +92,14 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// o.mu is already held by Start(); assign directly.
 	o.pressureGate = gate
 
+	// Include cross-node forward channels in pipeline-wide pressure
+	// classification so ingesters throttle when remote forwarding is
+	// backed up, not only when local ingest/digest buffers fill. See
+	// gastrolog-27zvt.
+	if o.forwarder != nil {
+		o.forwarder.RegisterPressureGate(gate)
+	}
+
 	// Launch ingester goroutines with per-ingester contexts. Inject the
 	// pressure gate into any ingester that implements PressureAware so it
 	// can throttle on backpressure.
@@ -326,7 +334,7 @@ func (o *Orchestrator) writeLoop() {
 
 	for dr := range o.digestedCh {
 		// Filter to chunk managers (reuses existing Ingest logic).
-		tasks, err := o.ingest(dr.rec)
+		pa, err := o.ingest(dr.rec)
 		if err != nil {
 			o.logger.Error("write failed", "error", err, "ingester", dr.ingesterID)
 		}
@@ -336,14 +344,15 @@ func (o *Orchestrator) writeLoop() {
 
 		// Send ack if requested.
 		if dr.ack != nil {
-			if err != nil || len(tasks) == 0 {
-				// Write failed or no secondaries — ack immediately.
+			if err != nil || pa.isEmpty() {
+				// Write failed or no sync work — ack immediately.
 				dr.ack <- err
 			} else {
-				// Ack-gated: sync forward to secondaries in a goroutine
+				// Ack-gated: run the sync work (local follower
+				// replication + cross-node forward) in a goroutine
 				// so the writeLoop isn't blocked by network round-trips.
 				o.ackWg.Go(func() {
-					o.ackAfterReplication(dr.ack, tasks, dr.rec)
+					o.ackAfterReplication(dr.ack, pa, dr.rec)
 				})
 			}
 		}

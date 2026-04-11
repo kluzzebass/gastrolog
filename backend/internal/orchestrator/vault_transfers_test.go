@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/chunk/memory"
@@ -357,6 +358,14 @@ func TestImportRecordsEmpty(t *testing.T) {
 type noopForwarder struct{}
 
 func (noopForwarder) Forward(context.Context, string, uuid.UUID, []chunk.Record) error { return nil }
+
+func (noopForwarder) ForwardSync(context.Context, string, uuid.UUID, []chunk.Record) error {
+	return nil
+}
+
+func (noopForwarder) RegisterPressureGate(*chanwatch.PressureGate) {
+	// No-op: these tests don't exercise forward-path pressure.
+}
 
 // waitForJob polls the scheduler until the job completes or the timeout expires.
 func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeout time.Duration) orchestrator.JobInfo {

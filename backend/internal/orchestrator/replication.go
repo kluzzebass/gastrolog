@@ -37,23 +37,50 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 	return nil
 }
 
-// ackAfterReplication does sync forwarding to followers for ack-gated records,
-// then sends the ack. Runs in a goroutine — doesn't block the writeLoop.
-func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replicationTask, rec chunk.Record) {
-	if o.tierReplicator == nil {
+// ackAfterReplication does sync forwarding to followers and sync
+// cross-node forwarding for ack-gated records, then sends the ack.
+// Runs in a goroutine — doesn't block the writeLoop.
+//
+// Two kinds of sync work are processed in sequence:
+//
+//  1. Local tier follower replication via TierReplicator. If nil
+//     (single-node mode) the replication step is skipped.
+//  2. Cross-node forwarding via RecordForwarder.ForwardSync for records
+//     that matched filters targeting vaults on other nodes. See
+//     gastrolog-27zvt: before this, ack-gated records routed to remote
+//     vaults were fire-and-forget forwarded, giving a durability
+//     guarantee that could be silently broken by a full forward buffer.
+//
+// The first error from either phase is sent to the ack channel and
+// remaining work is skipped.
+func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, rec chunk.Record) {
+	if pa == nil {
 		ack <- nil
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cluster.ReplicationTimeout)
 	defer cancel()
-	for _, t := range tasks {
-		for _, tgt := range t.targets {
-			if err := o.tierReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
-				ack <- fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
+
+	if o.tierReplicator != nil {
+		for _, t := range pa.replication {
+			for _, tgt := range t.targets {
+				if err := o.tierReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
+					ack <- fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
+					return
+				}
+			}
+		}
+	}
+
+	if o.forwarder != nil {
+		for _, f := range pa.forwards {
+			if err := o.forwarder.ForwardSync(ctx, f.nodeID, f.vaultID, []chunk.Record{rec}); err != nil {
+				ack <- fmt.Errorf("ack-gated forward to %s: %w", f.nodeID, err)
 				return
 			}
 		}
 	}
+
 	ack <- nil
 }
 
