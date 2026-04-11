@@ -3,12 +3,31 @@ package self
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
+)
+
+const (
+	// dropMonitorInterval is how often the self-ingester polls the
+	// capture handler's drop counter.
+	dropMonitorInterval = 5 * time.Second
+
+	// dropAlertClearAfter is how many consecutive ticks with zero new
+	// drops before the drop alert is cleared. At a 5s poll interval
+	// this is a 30-second dwell window — long enough that a momentary
+	// gap in drops doesn't flap the alert, short enough that an
+	// operator sees the clear shortly after the incident ends.
+	dropAlertClearAfter = 6
+
+	// dropAlertID is the stable alert identifier for the capture
+	// channel drop monitor.
+	dropAlertID = "self-ingester-drops"
 )
 
 type ingester struct {
@@ -23,6 +42,12 @@ type ingester struct {
 	// self-ingest rate without blocking. See gastrolog-4fguu.
 	capture   *logging.CaptureHandler
 	baseLevel slog.Level
+
+	// alerts is the AlertCollector used by the drop monitor to raise
+	// and clear the "self-ingester-drops" alert when records overflow
+	// the capture channel. Nil in tests that don't exercise alerting.
+	// See gastrolog-5d5a3.
+	alerts orchestrator.AlertCollector
 }
 
 // SetPressureGate registers a pressure transition callback that raises the
@@ -54,6 +79,23 @@ func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 
 func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
 	ing.logger.Info("started")
+
+	// Drop monitor state (only active when both capture and alerts
+	// are wired). Polls CaptureHandler.DroppedCount on every tick and
+	// raises/clears the "self-ingester-drops" alert as the counter
+	// advances or goes quiet. See gastrolog-5d5a3.
+	var tickCh <-chan time.Time
+	if ing.capture != nil && ing.alerts != nil {
+		ticker := time.NewTicker(dropMonitorInterval)
+		defer ticker.Stop()
+		tickCh = ticker.C
+	}
+	var (
+		lastSeen           int64
+		alertActive        bool
+		ticksSinceLastDrop int
+	)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -68,8 +110,42 @@ func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 			case <-ctx.Done():
 				return nil
 			}
+		case <-tickCh:
+			lastSeen, alertActive, ticksSinceLastDrop = ing.evaluateDrops(lastSeen, alertActive, ticksSinceLastDrop)
 		}
 	}
+}
+
+// evaluateDrops is one tick of the drop monitor state machine. It
+// reads the current drop counter, compares against lastSeen, and
+// raises or clears the "self-ingester-drops" alert. Returns updated
+// state to be reused on the next tick.
+func (ing *ingester) evaluateDrops(lastSeen int64, alertActive bool, ticksSinceLastDrop int) (int64, bool, int) {
+	cur := ing.capture.DroppedCount()
+	delta := cur - lastSeen
+
+	if delta > 0 {
+		ing.alerts.Set(
+			dropAlertID,
+			alert.Warning,
+			"self-ingester",
+			fmt.Sprintf(
+				"Self-ingester capture channel overflowing: %d new drops in last %s, %d total. "+
+					"System pressure is high enough that even internal diagnostic logs are being discarded.",
+				delta, dropMonitorInterval, cur,
+			),
+		)
+		return cur, true, 0
+	}
+
+	if alertActive {
+		ticksSinceLastDrop++
+		if ticksSinceLastDrop >= dropAlertClearAfter {
+			ing.alerts.Clear(dropAlertID)
+			return cur, false, 0
+		}
+	}
+	return cur, alertActive, ticksSinceLastDrop
 }
 
 // convert transforms a CapturedRecord into an IngestMessage with a JSON body.

@@ -13,8 +13,9 @@ import (
 func FuzzNewFactory(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	ch := make(chan logging.CapturedRecord, 1)
-	// nil CaptureHandler — SetMinCaptureLevel is guarded by nil check.
-	factory := NewFactory(ch, nil)
+	// nil CaptureHandler and nil AlertCollector — the factory and
+	// drop monitor are guarded by nil checks.
+	factory := NewFactory(ch, nil, nil)
 	id := uuid.New()
 
 	// Seed: valid params.

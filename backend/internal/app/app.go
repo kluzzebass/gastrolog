@@ -183,7 +183,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	groupMgr, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
-	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, groupMgr, nodeAddrResolver)
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver)
 	if clusterSrv != nil {
 		factories.PeerConns = clusterSrv.PeerConns()
 	}
@@ -1032,7 +1032,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, h
 	return groupMgr, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -1057,7 +1057,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore con
 		"tail":      reg(ingesttail.NewFactory(), ingesttail.ParamDefaults, nil),
 	}
 	if slogCh != nil {
-		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture), ingestself.ParamDefaults, nil)
+		ingesterTypes["self"] = reg(ingestself.NewFactory(slogCh, slogCapture, alertCollector), ingestself.ParamDefaults, nil)
 	}
 	return orchestrator.Factories{
 		IngesterTypes: ingesterTypes,

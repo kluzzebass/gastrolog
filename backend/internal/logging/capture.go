@@ -28,6 +28,14 @@ type CaptureHandler struct {
 	preAttrs []slog.Attr
 	skip     map[string]struct{}
 	minLevel *atomic.Int64 // minimum severity for capture (hot-reloadable)
+
+	// dropped counts records that tried to enter the capture channel but
+	// were rejected because the buffer was full. Shared across all
+	// WithAttrs/WithGroup clones via pointer semantics so every handler
+	// in the chain reports to the same counter. Polled externally by the
+	// self-ingester's drop monitor, which raises an alert when the
+	// counter advances — see gastrolog-5d5a3.
+	dropped *atomic.Int64
 }
 
 // NewCaptureHandler creates a handler that tees slog records to ch.
@@ -46,6 +54,7 @@ func NewCaptureHandler(inner slog.Handler, ch chan<- CapturedRecord, skipCompone
 		ch:       ch,
 		skip:     skip,
 		minLevel: lvl,
+		dropped:  &atomic.Int64{},
 	}
 }
 
@@ -79,15 +88,25 @@ func (h *CaptureHandler) Handle(ctx context.Context, r slog.Record) error {
 		return h.inner.Handle(ctx, r)
 	}
 
-	// Non-blocking send: drop if channel is full.
-	// Clone the record so the ingester gets a stable copy.
+	// Non-blocking send: drop if channel is full. Blocking here would
+	// freeze every goroutine in the application, which is worse than
+	// losing a record. The drop is counted so the self-ingester's drop
+	// monitor can surface it as an operator-visible alert.
 	clone := r.Clone()
 	select {
 	case h.ch <- CapturedRecord{Record: clone, PreAttrs: h.preAttrs}:
 	default:
+		h.dropped.Add(1)
 	}
 
 	return h.inner.Handle(ctx, r)
+}
+
+// DroppedCount returns the total number of records that have been
+// rejected because the capture channel was full. Monotonic; shared
+// across every handler in the WithAttrs/WithGroup chain.
+func (h *CaptureHandler) DroppedCount() int64 {
+	return h.dropped.Load()
 }
 
 func (h *CaptureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
@@ -104,6 +123,7 @@ func (h *CaptureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 		preAttrs: newPre,
 		skip:     h.skip,     // shared (read-only)
 		minLevel: h.minLevel, // shared (atomic)
+		dropped:  h.dropped,  // shared (atomic)
 	}
 }
 
@@ -117,6 +137,7 @@ func (h *CaptureHandler) WithGroup(name string) slog.Handler {
 		preAttrs: h.preAttrs,
 		skip:     h.skip,
 		minLevel: h.minLevel,
+		dropped:  h.dropped,
 	}
 }
 

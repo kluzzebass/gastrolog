@@ -14,7 +14,7 @@ func TestSelfIngesterEmit(t *testing.T) {
 	capture := logging.NewCaptureHandler(slog.Default().Handler(), ch, nil)
 	capture.SetMinCaptureLevel(slog.LevelInfo)
 
-	factory := NewFactory(ch, capture)
+	factory := NewFactory(ch, capture, nil)
 	ing, err := factory([16]byte{1}, nil, nil)
 	if err != nil {
 		t.Fatalf("factory: %v", err)

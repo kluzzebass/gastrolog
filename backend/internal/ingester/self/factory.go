@@ -22,8 +22,15 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for the self ingester.
 // The capture channel is created externally and shared with the CaptureHandler.
-// The CaptureHandler reference is used to apply the min_level param.
-func NewFactory(ch <-chan logging.CapturedRecord, capture *logging.CaptureHandler) orchestrator.IngesterFactory {
+// The CaptureHandler reference is used to apply the min_level param and, via
+// the drop monitor (gastrolog-5d5a3), to surface capture-channel overflow as
+// an operator-visible alert through the AlertCollector. The alerts parameter
+// may be nil for tests that don't exercise the monitor.
+func NewFactory(
+	ch <-chan logging.CapturedRecord,
+	capture *logging.CaptureHandler,
+	alerts orchestrator.AlertCollector,
+) orchestrator.IngesterFactory {
 	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		scopedLogger := logging.Default(logger).With(
 			"component", "ingester",
@@ -46,6 +53,7 @@ func NewFactory(ch <-chan logging.CapturedRecord, capture *logging.CaptureHandle
 			logger:    scopedLogger,
 			capture:   capture,
 			baseLevel: baseLevel,
+			alerts:    alerts,
 		}, nil
 	}
 }
