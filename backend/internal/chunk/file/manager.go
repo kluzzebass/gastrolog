@@ -1791,6 +1791,18 @@ func (m *Manager) Close() error {
 	return nil
 }
 
+// RemoveDir removes the manager's data directory from disk. Must be called
+// after Close() — the manager must not be used afterward. Used when a tier
+// is deleted, to clean up leftover files (.lock, cloud.idx) and the tier
+// directory itself so removed tiers don't accumulate as orphans.
+// See gastrolog-42j4n.
+func (m *Manager) RemoveDir() error {
+	if !m.closed {
+		return errors.New("manager must be closed before RemoveDir")
+	}
+	return os.RemoveAll(m.cfg.Dir)
+}
+
 // closeActiveFiles waits for inflight writers and closes all active chunk resources.
 func (m *Manager) closeActiveFiles() []error {
 	m.active.inflight.Wait()

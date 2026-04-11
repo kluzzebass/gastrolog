@@ -392,6 +392,15 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 		o.logger.Warn("remove tier: close chunk manager failed", "vault", vaultID, "tier", tierID, "error", err)
 	}
 
+	// Remove the tier's data directory entirely — not just its chunk subdirs.
+	// Without this, leftover files (.lock, cloud.idx) and the tier dir itself
+	// accumulate on disk forever. See gastrolog-42j4n.
+	if remover, ok := tier.Chunks.(chunk.DirRemover); ok {
+		if err := remover.RemoveDir(); err != nil {
+			o.logger.Warn("remove tier: remove data directory failed", "vault", vaultID, "tier", tierID, "error", err)
+		}
+	}
+
 	// Remove retention runner and cron rotation for this tier.
 	delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	o.cronRotation.removeAllForVault(vaultID)

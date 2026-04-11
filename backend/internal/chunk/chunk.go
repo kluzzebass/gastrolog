@@ -123,6 +123,15 @@ type ChunkMover interface {
 	ChunkDir(id ChunkID) string
 }
 
+// DirRemover extends ChunkManager with the ability to remove its entire
+// data directory. Called after Close() when a tier is deleted so that
+// leftover files (.lock, cloud.idx, etc.) and the directory itself are
+// cleaned up. Implementations should not attempt any operations after
+// RemoveDir returns.
+type DirRemover interface {
+	RemoveDir() error
+}
+
 // ChunkCompressor extends ChunkManager with post-seal compression.
 // Not all ChunkManager implementations support this (e.g. memory-based ones
 // have nothing to compress). Callers should type-assert to check availability.

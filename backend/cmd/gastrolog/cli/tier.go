@@ -289,7 +289,12 @@ func newTierDeleteCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <name-or-id>",
 		Short: "Delete a tier",
-		Args:  cobra.ExactArgs(1),
+		Long: `Delete a tier. By default this removes both the tier config AND its
+data directory (chunks, indexes, cloud index, lock file, everything).
+
+Use --drain to instead move chunks to the next tier in the vault's chain
+before deleting — no data is lost but the operation is asynchronous.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			drain, _ := cmd.Flags().GetBool("drain")
 			client := clientFromCmd(cmd)
@@ -311,12 +316,12 @@ func newTierDeleteCmd() *cobra.Command {
 			if drain {
 				fmt.Printf("Tier %s draining to next tier (will be removed after completion)\n", args[0])
 			} else {
-				fmt.Printf("Deleted tier %s\n", args[0])
+				fmt.Printf("Deleted tier %s (chunks and data directory removed)\n", args[0])
 			}
 			return nil
 		},
 	}
-	cmd.Flags().Bool("drain", false, "drain chunks to next tier before deleting")
+	cmd.Flags().Bool("drain", false, "drain chunks to next tier before deleting (default: delete data immediately)")
 	return cmd
 }
 
