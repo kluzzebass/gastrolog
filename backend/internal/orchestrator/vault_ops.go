@@ -471,17 +471,12 @@ func (o *Orchestrator) sealRemoteFollowers(targets []remoteForwardTarget, chunkI
 // is the single biggest source of shutdown noise before the fix —
 // see gastrolog-1e5ke.
 func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec chunk.Record) {
-	if len(targets) == 0 || o.shuttingDown() {
+	if len(targets) == 0 || o.shuttingDown() || o.tierReplicator == nil {
 		return
 	}
 	for _, tgt := range targets {
 		ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
-		var err error
-		if o.tierReplicator != nil {
-			err = o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
-		} else if o.forwarder != nil {
-			err = o.forwarder.ForwardToTier(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
-		}
+		err := o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 		cancel()
 		if err != nil {
 			o.logger.Warn("replication: failed to forward record to follower",

@@ -82,11 +82,6 @@ type drainState struct {
 // enqueue) so they're safe to call under the orchestrator mutex.
 type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
-	// ForwardToTier sends records to a specific tier on a follower for
-	// active-chunk durability. Records are appended to the follower's
-	// ChunkManager (real, queryable chunks). chunkID syncs the chunk ID.
-	// Fire-and-forget.
-	ForwardToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
 }
 
 // TierReplicator sequences all replication commands for a tier on a single

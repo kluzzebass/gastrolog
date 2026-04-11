@@ -301,32 +301,14 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			continue
 		}
 
-		// Route: tier_id = tier-targeted append (active-chunk replication or
-		// inter-tier transition). Otherwise, regular vault append.
-		var tierID uuid.UUID
-		var primaryChunkID chunk.ChunkID
-		if msg.GetTierId() != "" {
-			tierID, err = parseTierID(msg.GetTierId())
-			if err != nil {
-				return err
-			}
-		}
-		if msg.GetChunkId() != "" {
-			if parsed, parseErr := chunk.ParseChunkID(msg.GetChunkId()); parseErr == nil {
-				primaryChunkID = parsed
-			}
-		}
+		// StreamForwardRecords is exclusively the cross-node vault routing
+		// path since gastrolog-5c6fp — tier-targeted replication goes through
+		// TierReplication instead. Always append as a regular vault record.
 		for _, exportRec := range msg.GetRecords() {
 			rec := convert.ExportToRecord(exportRec)
-			var appendErr error
-			if tierID != uuid.Nil && s.recordTierAppender != nil {
-				appendErr = s.recordTierAppender(stream.Context(), vaultID, tierID, primaryChunkID, rec)
-			} else {
-				appendErr = s.recordAppender(stream.Context(), vaultID, rec)
-			}
-			if appendErr != nil {
+			if appendErr := s.recordAppender(stream.Context(), vaultID, rec); appendErr != nil {
 				s.logger.Warn("stream forward: append failed",
-					"vault", vaultID, "tier", tierID, "error", appendErr)
+					"vault", vaultID, "error", appendErr)
 				continue
 			}
 			written++

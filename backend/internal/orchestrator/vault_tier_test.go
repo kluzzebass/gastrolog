@@ -569,8 +569,9 @@ func TestImportToTierIdempotent(t *testing.T) {
 
 // --- AppendToTier ---
 
-// tierTestForwarder records ForwardToTier calls.
-type tierTestForwarder struct {
+// tierTestReplicator records AppendRecords calls on the TierReplicator interface.
+// Satisfies orchestrator.TierReplicator.
+type tierTestReplicator struct {
 	mu    sync.Mutex
 	calls []tierForwardCall
 }
@@ -583,31 +584,39 @@ type tierForwardCall struct {
 	Records []chunk.Record
 }
 
-func (f *tierTestForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-
-func (f *tierTestForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls = append(f.calls, tierForwardCall{
+func (r *tierTestReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, tierForwardCall{
 		NodeID: nodeID, VaultID: vaultID, TierID: tierID,
 		ChunkID: chunkID, Records: records,
 	})
 	return nil
 }
 
-func (f *tierTestForwarder) getCalls() []tierForwardCall {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]tierForwardCall(nil), f.calls...)
+func (r *tierTestReplicator) SealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+
+func (r *tierTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+	return nil
+}
+
+func (r *tierTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+
+func (r *tierTestReplicator) getCalls() []tierForwardCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]tierForwardCall(nil), r.calls...)
 }
 
 func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 	t.Parallel()
-	fwd := &tierTestForwarder{}
+	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -623,7 +632,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 
 	calls := fwd.getCalls()
 	if len(calls) != 2 {
-		t.Fatalf("expected 2 ForwardToTier calls (one per follower), got %d", len(calls))
+		t.Fatalf("expected 2 AppendRecords calls (one per follower), got %d", len(calls))
 	}
 	nodes := map[string]bool{}
 	for _, c := range calls {
@@ -648,9 +657,9 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 
 func TestAppendToTierSecondaryDoesNotForward(t *testing.T) {
 	t.Parallel()
-	fwd := &tierTestForwarder{}
+	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-2"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -964,9 +973,9 @@ func TestImportToTierDrainsIteratorOnSkip(t *testing.T) {
 
 func TestAppendToTierForwardLifecycle(t *testing.T) {
 	t.Parallel()
-	fwd := &tierTestForwarder{}
+	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -983,10 +992,10 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 		}
 	}
 
-	// Verify 3 ForwardToTier calls.
+	// Verify 3 AppendRecords calls.
 	calls := fwd.getCalls()
 	if len(calls) != 3 {
-		t.Fatalf("expected 3 ForwardToTier calls, got %d", len(calls))
+		t.Fatalf("expected 3 AppendRecords calls, got %d", len(calls))
 	}
 
 	// All calls should target the same vault, tier, and chunk ID.
@@ -1056,9 +1065,9 @@ func (m *ackTestTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid
 }
 func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 	t.Parallel()
-	fwd := &tierTestForwarder{}
+	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -1099,9 +1108,9 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 
 func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 	t.Parallel()
-	fwd := &tierTestForwarder{}
+	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -1142,9 +1151,9 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 
 func TestIngestReturnsReplicationTasks(t *testing.T) {
 	t.Parallel()
-	fwd := &tierTestForwarder{}
+	fwd := &tierTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -1513,23 +1522,32 @@ func TestTransitionLocalCursorErrorRetainsSource(t *testing.T) {
 	}
 }
 
-// failingForwarder is a RecordForwarder that records calls and returns
-// configurable errors. Used to verify fire-and-forget error handling.
+// failingForwarder is a TierReplicator that records AppendRecords calls and
+// returns configurable errors. Used to verify fire-and-forget error handling
+// on the replication path.
 type failingForwarder struct {
 	mu        sync.Mutex
 	calls     int
 	returnErr error
 }
 
-func (f *failingForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-
-func (f *failingForwarder) ForwardToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (f *failingForwarder) AppendRecords(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
 	return f.returnErr
+}
+
+func (f *failingForwarder) SealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
+}
+
+func (f *failingForwarder) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+	return nil
+}
+
+func (f *failingForwarder) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+	return nil
 }
 
 func (f *failingForwarder) callCount() int {
@@ -1551,7 +1569,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	}
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.SetRecordForwarder(fwd)
+	orch.SetTierReplicator(fwd)
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
@@ -1582,7 +1600,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 	// 200 records * 2 secondaries = 400 calls.
 	expectedCalls := total * 2
 	if got := fwd.callCount(); got != expectedCalls {
-		t.Errorf("expected %d ForwardToTier calls (records * secondaries), got %d", expectedCalls, got)
+		t.Errorf("expected %d AppendRecords calls (records * secondaries), got %d", expectedCalls, got)
 	}
 }
 

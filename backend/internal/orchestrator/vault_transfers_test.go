@@ -361,9 +361,6 @@ func TestImportRecordsEmpty(t *testing.T) {
 type noopForwarder struct{}
 
 func (noopForwarder) Forward(context.Context, string, uuid.UUID, []chunk.Record) error { return nil }
-func (noopForwarder) ForwardToTier(context.Context, string, uuid.UUID, uuid.UUID, chunk.ChunkID, []chunk.Record) error {
-	return nil
-}
 
 // waitForJob polls the scheduler until the job completes or the timeout expires.
 func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeout time.Duration) orchestrator.JobInfo {

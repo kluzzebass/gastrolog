@@ -31,11 +31,11 @@ const (
 	streamBurstSize = 100
 )
 
-// forwardEntry is a single record queued for forwarding.
+// forwardEntry is a single record queued for forwarding to a remote node's
+// vault. Used exclusively for cross-node vault routing — tier-targeted
+// follower replication now goes through TierReplicator (see gastrolog-5c6fp).
 type forwardEntry struct {
 	vaultID uuid.UUID
-	tierID  uuid.UUID      // non-zero = tier-targeted (secondary append)
-	chunkID chunk.ChunkID  // primary's active chunk ID for secondary ID sync
 	record  chunk.Record
 }
 
@@ -134,32 +134,6 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 					)
 				}
 			}
-		}
-	}
-	return nil
-}
-
-// ForwardToTier enqueues records for a specific tier on a secondary.
-// The tier_id + chunk_id distinguish these from regular vault appends.
-// Fire-and-forget — drops silently on full buffer.
-func (rf *RecordForwarder) ForwardToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
-	rf.mu.Lock()
-	if rf.closed {
-		rf.mu.Unlock()
-		return errors.New("forwarder closed")
-	}
-	nf, ok := rf.nodes[nodeID]
-	if !ok {
-		nf = rf.startNode(nodeID)
-	}
-	rf.mu.Unlock()
-
-	for _, rec := range records {
-		select {
-		case nf.ch <- forwardEntry{vaultID: vaultID, tierID: tierID, chunkID: chunkID, record: rec}:
-		default:
-			// Drop silently — the sealed-chunk replication will deliver
-			// the canonical version. Buffer drops don't lose data.
 		}
 	}
 	return nil
@@ -285,44 +259,30 @@ func (rf *RecordForwarder) flushRemaining(nodeID string, nf *nodeForwarder, stre
 	}
 }
 
-// forwardGroupKey groups entries by vault for batching.
-type forwardGroupKey struct {
-	vaultID uuid.UUID
-	tierID  uuid.UUID
-	chunkID chunk.ChunkID
-}
-
 // sendBurst groups entries by vault and sends one ForwardRecordsRequest per
 // vault on the stream. Returns nil on success.
 func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream grpc.ClientStream, entries []forwardEntry) error {
 	// Group by vault, preserving FIFO order within each group.
 	type groupData struct {
-		key     forwardGroupKey
+		vaultID uuid.UUID
 		records []*gastrologv1.ExportRecord
 	}
 	var groups []groupData
-	groupIdx := make(map[forwardGroupKey]int, 2)
+	groupIdx := make(map[uuid.UUID]int, 2)
 	for _, e := range entries {
-		k := forwardGroupKey{vaultID: e.vaultID, tierID: e.tierID, chunkID: e.chunkID}
-		idx, ok := groupIdx[k]
+		idx, ok := groupIdx[e.vaultID]
 		if !ok {
 			idx = len(groups)
-			groupIdx[k] = idx
-			groups = append(groups, groupData{key: k})
+			groupIdx[e.vaultID] = idx
+			groups = append(groups, groupData{vaultID: e.vaultID})
 		}
 		groups[idx].records = append(groups[idx].records, forwardEntryToProto(e))
 	}
 
 	for _, g := range groups {
 		msg := &gastrologv1.ForwardRecordsRequest{
-			VaultId: g.key.vaultID.String(),
+			VaultId: g.vaultID.String(),
 			Records: g.records,
-		}
-		if g.key.tierID != (uuid.UUID{}) {
-			msg.TierId = g.key.tierID.String()
-		}
-		if g.key.chunkID != (chunk.ChunkID{}) {
-			msg.ChunkId = g.key.chunkID.String()
 		}
 		if err := stream.SendMsg(msg); err != nil {
 			if !rf.stopping() {
