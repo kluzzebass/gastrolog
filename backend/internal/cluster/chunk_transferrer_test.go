@@ -117,33 +117,3 @@ func TestStreamToTierTimeoutOnHangingPeer(t *testing.T) {
 	}
 }
 
-// TestForwardSealTierTimeoutOnHangingPeer is the unary-RPC counterpart to
-// TestStreamToTierTimeoutOnHangingPeer. Verifies the unaryCallTimeout
-// applies to conn.Invoke calls in the same way.
-func TestForwardSealTierTimeoutOnHangingPeer(t *testing.T) {
-	t.Parallel()
-	conn, cleanup := hangingGRPCServer(t)
-	defer cleanup()
-
-	ct := &ChunkTransferrer{
-		peers: &PeerConns{conns: map[string]*grpc.ClientConn{"hung": conn}},
-	}
-
-	start := time.Now()
-	err := ct.ForwardSealTier(context.Background(), "hung", uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), chunk.ChunkID{})
-	elapsed := time.Since(start)
-
-	if err == nil {
-		t.Fatal("ForwardSealTier returned nil against a hanging server — should have timed out")
-	}
-	if !isDeadlineExceeded(err) {
-		t.Fatalf("ForwardSealTier returned %v (%T), want DeadlineExceeded", err, err)
-	}
-	if elapsed > unaryCallTimeout+2*time.Second {
-		t.Errorf("ForwardSealTier took %v, expected ≤ %v", elapsed, unaryCallTimeout+2*time.Second)
-	}
-	if elapsed < unaryCallTimeout-time.Second {
-		t.Errorf("ForwardSealTier returned suspiciously fast in %v (< %v) — was the timeout applied?",
-			elapsed, unaryCallTimeout-time.Second)
-	}
-}

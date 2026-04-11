@@ -142,40 +142,18 @@ message IngesterNodeStats {
 }
 
 // ForwardRecordsRequest ships a batch of records to the node that owns
-// the destination vault. Sent by the ingesting node when a route targets
-// a remote vault.
+// the destination vault. Sent by retention eject to route records to a
+// remote vault. Records are appended to the destination vault's active
+// chunk.
 message ForwardRecordsRequest {
   string vault_id = 1;
   repeated ExportRecord records = 2;
-  string tier_id = 3;  // optional: target specific tier for inter-tier transition; empty = active tier
-  string chunk_id = 4; // optional: primary's active chunk ID for replica ID synchronization
+  reserved 3, 4; // was tier_id, chunk_id (gastrolog-572d7)
 }
 
 message ForwardRecordsResponse {
   int64 records_written = 1;
 }
-
-// ForwardSealTierRequest commands a follower to seal its active chunk
-// at the same boundary as the leader. Used for seal synchronization
-// during record-level replication.
-message ForwardSealTierRequest {
-  string vault_id = 1;
-  string tier_id = 2;
-  string chunk_id = 3;  // expected active chunk ID (for validation)
-}
-
-message ForwardSealTierResponse {}
-
-// ForwardDeleteChunkRequest commands a follower to delete a specific
-// sealed chunk from a tier. Sent by the leader after its retention
-// sweep expires the chunk, so followers don't hold orphaned replicas.
-message ForwardDeleteChunkRequest {
-  string vault_id = 1;
-  string tier_id = 2;
-  string chunk_id = 3;
-}
-
-message ForwardDeleteChunkResponse {}
 
 // ForwardTierApplyRequest carries a pre-marshaled tier FSM command for the
 // tier Raft leader to apply. Used when the config placement leader (which

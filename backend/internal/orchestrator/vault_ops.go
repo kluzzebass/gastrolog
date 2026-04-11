@@ -510,29 +510,51 @@ func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID uuid.UUID, sto
 
 // deleteFromFollowers removes a chunk from all same-node follower instances
 // of a tier. Called by retention after deleting from the leader.
-// DeleteChunkFromTier deletes a specific sealed chunk from a tier.
-// Used by the ForwardDeleteChunk RPC handler on follower nodes.
+// DeleteChunkFromTier deletes a specific chunk from a tier. If the chunk is
+// currently the tier's active chunk, it is sealed first so the delete can
+// proceed. This handles the follower case where the leader has moved on to a
+// new active chunk but the follower still has the old ID as active (records
+// sync via TierReplicator.AppendRecords preserves the leader's chunk ID).
 func (o *Orchestrator) DeleteChunkFromTier(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	tier, err := o.findTierForDelete(vaultID, tierID)
+	if err != nil {
+		return err
+	}
+	return o.deleteChunkFromTierInstance(tier, vaultID, tierID, chunkID)
+}
+
+// findTierForDelete returns the matching tier instance or an error, releasing
+// the orchestrator read lock before returning.
+func (o *Orchestrator) findTierForDelete(vaultID, tierID uuid.UUID) (*TierInstance, error) {
 	o.mu.RLock()
+	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		o.mu.RUnlock()
-		return fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
+		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 	for _, t := range vault.Tiers {
 		if t.TierID == tierID {
-			o.mu.RUnlock()
-			if t.Indexes != nil {
-				if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
-					o.logger.Warn("delete chunk: delete indexes failed",
-						"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
-				}
-			}
-			return t.Chunks.Delete(chunkID)
+			return t, nil
 		}
 	}
-	o.mu.RUnlock()
-	return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+	return nil, fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
+}
+
+// deleteChunkFromTierInstance seals the active chunk if it matches, then
+// deletes the chunk's indexes and data files.
+func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	if active := t.Chunks.Active(); active != nil && active.ID == chunkID {
+		if err := t.Chunks.Seal(); err != nil {
+			return fmt.Errorf("seal active before delete: %w", err)
+		}
+	}
+	if t.Indexes != nil {
+		if err := t.Indexes.DeleteIndexes(chunkID); err != nil {
+			o.logger.Warn("delete chunk: delete indexes failed",
+				"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
+		}
+	}
+	return t.Chunks.Delete(chunkID)
 }
 
 // replaceForwardedChunk seals (if active) and deletes a forwarded chunk

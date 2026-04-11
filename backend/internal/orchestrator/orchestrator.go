@@ -111,26 +111,10 @@ type RemoteTransferrer interface {
 	// destination's normal rotation lifecycle.
 	ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 
-	// ForwardTierAppend sends records to a specific tier on a remote node.
-	// Used by ack-gated ingestion for sync follower confirmation.
-	ForwardTierAppend(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error
-
 	// StreamToTier opens a single streaming connection and pipes all records
 	// to a remote tier's active chunk. Used for tier transitions — one stream,
 	// no per-batch round trips.
 	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error
-
-	// ForwardSealTier commands a follower to seal its active chunk at the
-	// same boundary as the leader. Used for seal synchronization during replication.
-	ForwardSealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
-
-	// ReplicateSealedChunk streams a sealed chunk to a follower node's specific
-	// tier, preserving the original chunk ID. Used for sealed-chunk replication.
-	ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
-
-	// ForwardDeleteChunk commands a follower to delete a sealed chunk.
-	// Sent by the leader after retention expires the chunk.
-	ForwardDeleteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to

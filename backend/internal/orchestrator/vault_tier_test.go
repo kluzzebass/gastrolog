@@ -1032,35 +1032,24 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 // ACK-GATED INGESTION TESTS
 // ================================================================
 
-// ackTestTransferrer records ForwardTierAppend calls and returns a configurable error.
-type ackTestTransferrer struct {
+// ackTestReplicator records AppendRecords calls and returns a configurable error.
+// Implements orchestrator.TierReplicator.
+type ackTestReplicator struct {
 	tierAppendCalls int
 	tierAppendErr   error
 }
 
-func (m *ackTestTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
-	return nil
-}
-func (m *ackTestTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-func (m *ackTestTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
+func (m *ackTestReplicator) AppendRecords(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	m.tierAppendCalls++
 	return m.tierAppendErr
 }
-func (m *ackTestTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *ackTestReplicator) SealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *ackTestTransferrer) ForwardSealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+func (m *ackTestReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *ackTestTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *ackTestTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-func (m *ackTestTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *ackTestReplicator) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
 func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
@@ -1186,9 +1175,9 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 
 func TestAckAfterReplicationSuccess(t *testing.T) {
 	t.Parallel()
-	mock := &ackTestTransferrer{}
+	mock := &ackTestReplicator{}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.transferrer = mock
+	orch.SetTierReplicator(mock)
 
 	tasks := []replicationTask{
 		{
@@ -1212,17 +1201,17 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 	}
 
 	if mock.tierAppendCalls != 1 {
-		t.Errorf("expected 1 ForwardTierAppend call, got %d", mock.tierAppendCalls)
+		t.Errorf("expected 1 AppendRecords call, got %d", mock.tierAppendCalls)
 	}
 }
 
 func TestAckAfterReplicationFailure(t *testing.T) {
 	t.Parallel()
-	mock := &ackTestTransferrer{
+	mock := &ackTestReplicator{
 		tierAppendErr: errors.New("replication failed"),
 	}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.transferrer = mock
+	orch.SetTierReplicator(mock)
 
 	tasks := []replicationTask{
 		{

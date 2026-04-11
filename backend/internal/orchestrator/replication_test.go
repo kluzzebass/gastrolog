@@ -27,12 +27,11 @@ func (f *replicationFakeForwarder) Forward(_ context.Context, _ string, _ uuid.U
 	return nil
 }
 
-// ---------- fake transferrer that records seal commands ----------
+// ---------- fake tier replicator that records operations ----------
 
-type replicationFakeTransferrer struct {
+type replicationFakeReplicator struct {
 	sealCalls        []sealCall
 	sealErr          error
-	forwardCalls     []transitionTransferCall
 	replicatedChunks []chunk.ChunkID
 }
 
@@ -43,41 +42,21 @@ type sealCall struct {
 	chunkID chunk.ChunkID
 }
 
-func (m *replicationFakeTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *replicationFakeTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-func (m *replicationFakeTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-func (m *replicationFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
-	return nil
-}
-func (m *replicationFakeTransferrer) ForwardSealTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+func (m *replicationFakeReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
 	if m.sealErr != nil {
 		return m.sealErr
 	}
 	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, tierID: tierID, chunkID: chunkID})
 	return nil
 }
-func (m *replicationFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *replicationFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, chunkID chunk.ChunkID, iter chunk.RecordIterator) error {
-	// Drain the iterator to mirror real transferrer behaviour — production
-	// callers expect the iterator to be fully consumed before returning.
-	for {
-		_, err := iter()
-		if err != nil {
-			break
-		}
-	}
+func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, chunkID chunk.ChunkID, _ []chunk.Record) error {
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
 }
-func (m *replicationFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
 // ---------- helpers ----------
@@ -227,8 +206,8 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	orch.RegisterVault(vault)
 
-	mock := &replicationFakeTransferrer{}
-	orch.transferrer = mock
+	mock := &replicationFakeReplicator{}
+	orch.SetTierReplicator(mock)
 
 	// No sealed chunks — catchup should be a no-op.
 	err := orch.catchupFollower(context.Background(), vaultID, tierID, "node-2")
@@ -293,8 +272,8 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	vault := NewVault(vaultID, tier)
 	orch.RegisterVault(vault)
 
-	mock := &replicationFakeTransferrer{}
-	orch.transferrer = mock
+	mock := &replicationFakeReplicator{}
+	orch.SetTierReplicator(mock)
 
 	// Append + seal three chunks, capturing each chunk ID.
 	var ids []chunk.ChunkID
@@ -379,8 +358,8 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	vault := NewVault(vaultID, tier)
 	orch.RegisterVault(vault)
 
-	mock := &replicationFakeTransferrer{}
-	orch.transferrer = mock
+	mock := &replicationFakeReplicator{}
+	orch.SetTierReplicator(mock)
 
 	// Append + seal two chunks.
 	for i := 0; i < 2; i++ {
@@ -507,7 +486,9 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	leaderNode := h.nodes["leader"]
 	leaderTier := leaderNode.tiers[0]
 
-	// Ingest 50 records on leader.
+	// Ingest 50 records on leader. With tierReplicator wired, AppendToTier
+	// auto-forwards to followers via AppendRecords, so the followers end up
+	// with synchronized active chunk IDs and record counts.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range 50 {
 		ts := t0.Add(time.Duration(i) * time.Microsecond)
@@ -520,31 +501,11 @@ func TestClusterReplicationSealSync(t *testing.T) {
 		}
 	}
 
-	// Get leader's active chunk ID BEFORE appending on followers so we can
-	// sync it. In production, the leader's ForwardTierAppend sends the chunk ID
-	// and followers call SetNextChunkID.
 	leaderActive := leaderTier.Chunks.Active()
 	if leaderActive == nil {
 		t.Fatal("expected active chunk on leader after append")
 	}
 	leaderChunkID := leaderActive.ID
-
-	// Forward the same records to followers with synchronized chunk IDs.
-	// This mirrors the production ForwardTierAppend path which syncs the ID.
-	for _, fid := range []string{"f1", "f2"} {
-		followerCM := h.nodes[fid].tiers[0].Chunks
-		followerCM.SetNextChunkID(leaderChunkID)
-		for i := range 50 {
-			ts := t0.Add(time.Duration(i) * time.Microsecond)
-			if _, _, err := followerCM.Append(chunk.Record{
-				IngestTS: ts,
-				WriteTS:  ts,
-				Raw:      fmt.Appendf(nil, "seal-sync-%d", i),
-			}); err != nil {
-				t.Fatalf("append to %s record %d: %v", fid, i, err)
-			}
-		}
-	}
 
 	// Verify followers have the same active chunk ID as the leader.
 	for _, fid := range []string{"f1", "f2"} {
@@ -559,13 +520,13 @@ func TestClusterReplicationSealSync(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Forward seal to followers via the directTransferrer (uses SealActiveTier
+	// Forward seal to followers via the tier replicator (uses SealActiveTier
 	// which checks the expected chunk ID matches the follower's active chunk).
 	for _, fid := range []string{"f1", "f2"} {
-		if err := leaderNode.orch.transferrer.ForwardSealTier(
+		if err := leaderNode.orch.tierReplicator.SealTier(
 			context.Background(), fid, h.vaultID, h.tierIDs[0], leaderChunkID,
 		); err != nil {
-			t.Fatalf("ForwardSealTier to %s: %v", fid, err)
+			t.Fatalf("SealTier to %s: %v", fid, err)
 		}
 	}
 
@@ -651,10 +612,10 @@ func TestClusterReplicationDeletePropagation(t *testing.T) {
 		}
 		// Forward delete to each follower.
 		for _, fid := range []string{"f1", "f2", "f3"} {
-			if err := leaderNode.orch.transferrer.ForwardDeleteChunk(
+			if err := leaderNode.orch.tierReplicator.DeleteChunk(
 				ctx, fid, h.vaultID, h.tierIDs[0], m.ID,
 			); err != nil {
-				t.Errorf("ForwardDeleteChunk(%s, %s): %v", fid, m.ID, err)
+				t.Errorf("DeleteChunk(%s, %s): %v", fid, m.ID, err)
 			}
 		}
 	}

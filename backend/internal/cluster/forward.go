@@ -218,8 +218,9 @@ func (s *Server) SetManagedFileIDs(fn ManagedFileIDsLister) {
 	s.managedFileIDs = fn
 }
 
-// forwardRecords handles the unary ForwardRecords RPC. Converts proto
-// ExportRecords to chunk.Record and writes them via the RecordAppender callback.
+// forwardRecords handles the unary ForwardRecords RPC. Used by retention
+// eject to send records to the node owning the destination vault. Records
+// are appended to the vault's active chunk (no tier targeting).
 func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRecordsRequest) (*gastrologv1.ForwardRecordsResponse, error) {
 	if s.recordAppender == nil {
 		return nil, status.Error(codes.Unavailable, "record appender not configured")
@@ -229,34 +230,10 @@ func (s *Server) forwardRecords(ctx context.Context, req *gastrologv1.ForwardRec
 		return nil, err
 	}
 
-	// Tier-targeted append for inter-tier transition / active-chunk replication.
-	var tierID uuid.UUID
-	var primaryChunkID chunk.ChunkID
-	if req.GetTierId() != "" {
-		tierID, err = parseTierID(req.GetTierId())
-		if err != nil {
-			return nil, err
-		}
-		if s.recordTierAppender == nil {
-			return nil, status.Error(codes.Unavailable, "tier appender not configured")
-		}
-	}
-	if req.GetChunkId() != "" {
-		if parsed, parseErr := chunk.ParseChunkID(req.GetChunkId()); parseErr == nil {
-			primaryChunkID = parsed
-		}
-	}
-
 	var written int64
 	for _, exportRec := range req.GetRecords() {
 		rec := convert.ExportToRecord(exportRec)
-		var appendErr error
-		if tierID != uuid.Nil {
-			appendErr = s.recordTierAppender(ctx, vaultID, tierID, primaryChunkID, rec)
-		} else {
-			appendErr = s.recordAppender(ctx, vaultID, rec)
-		}
-		if appendErr != nil {
+		if appendErr := s.recordAppender(ctx, vaultID, rec); appendErr != nil {
 			s.cfg.Logger.Warn("forward: append failed",
 				"vault", vaultID, "error", appendErr)
 			return nil, status.Errorf(codes.Internal, "append record: %v", appendErr)
@@ -684,65 +661,21 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 }
 
 // SealTierExecutor seals a specific tier's active chunk on this node.
+// Invoked by the TierReplication stream handler.
 type SealTierExecutor func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
 
-// SetSealTierExecutor injects the callback for handling ForwardSealTier RPCs.
+// SetSealTierExecutor injects the callback for handling TierReplicationSeal commands.
 func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
 	s.sealTierExecutor = fn
 }
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.
+// Invoked by the TierReplication stream handler.
 type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
 
-// SetDeleteChunkExecutor injects the callback for handling ForwardDeleteChunk RPCs.
+// SetDeleteChunkExecutor injects the callback for handling TierReplicationDelete commands.
 func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
 	s.deleteChunkExecutor = fn
-}
-
-func (s *Server) forwardDeleteChunk(ctx context.Context, req *gastrologv1.ForwardDeleteChunkRequest) (*gastrologv1.ForwardDeleteChunkResponse, error) {
-	if s.deleteChunkExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "delete chunk executor not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	tierID, err := parseTierID(req.GetTierId())
-	if err != nil {
-		return nil, err
-	}
-	chunkID, err := parseChunkID(req.GetChunkId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.deleteChunkExecutor(ctx, vaultID, tierID, chunkID); err != nil {
-		return nil, status.Errorf(codes.Internal, "delete chunk: %v", err)
-	}
-	return &gastrologv1.ForwardDeleteChunkResponse{}, nil
-}
-
-// forwardSealTier handles the ForwardSealTier RPC. Seals the active chunk
-// of a specific tier on a secondary node at the same boundary as the primary.
-func (s *Server) forwardSealTier(ctx context.Context, req *gastrologv1.ForwardSealTierRequest) (*gastrologv1.ForwardSealTierResponse, error) {
-	if s.sealTierExecutor == nil {
-		return nil, status.Error(codes.Unavailable, "seal tier executor not configured")
-	}
-	vaultID, err := parseVaultID(req.GetVaultId())
-	if err != nil {
-		return nil, err
-	}
-	tierID, err := parseTierID(req.GetTierId())
-	if err != nil {
-		return nil, err
-	}
-	chunkID, err := parseChunkID(req.GetChunkId())
-	if err != nil {
-		return nil, err
-	}
-	if err := s.sealTierExecutor(ctx, vaultID, tierID, chunkID); err != nil {
-		return nil, status.Errorf(codes.Internal, "seal tier: %v", err)
-	}
-	return &gastrologv1.ForwardSealTierResponse{}, nil
 }
 
 // forwardReindexVault handles the ForwardReindexVault RPC. Rebuilds all indexes
@@ -987,14 +920,6 @@ var clusterServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ForwardSealVault",
 			Handler:    forwardSealVaultHandler,
-		},
-		{
-			MethodName: "ForwardSealTier",
-			Handler:    forwardSealTierHandler,
-		},
-		{
-			MethodName: "ForwardDeleteChunk",
-			Handler:    forwardDeleteChunkHandler,
 		},
 		{
 			MethodName: "ForwardReindexVault",
@@ -1319,44 +1244,6 @@ func forwardSealVaultHandler(srv any, ctx context.Context, dec func(any) error, 
 	}
 	handler := func(ctx context.Context, req any) (any, error) {
 		return s.forwardSealVault(ctx, req.(*gastrologv1.ForwardSealVaultRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardSealTierHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardSealTierRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardSealTier(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardSealTier",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardSealTier(ctx, req.(*gastrologv1.ForwardSealTierRequest))
-	}
-	return interceptor(ctx, req, info, handler)
-}
-
-func forwardDeleteChunkHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
-	req := &gastrologv1.ForwardDeleteChunkRequest{}
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-	s := srv.(*Server)
-	if interceptor == nil {
-		return s.forwardDeleteChunk(ctx, req)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/gastrolog.v1.ClusterService/ForwardDeleteChunk",
-	}
-	handler := func(ctx context.Context, req any) (any, error) {
-		return s.forwardDeleteChunk(ctx, req.(*gastrologv1.ForwardDeleteChunkRequest))
 	}
 	return interceptor(ctx, req, info, handler)
 }

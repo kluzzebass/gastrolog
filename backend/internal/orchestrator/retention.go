@@ -556,18 +556,13 @@ func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, clusterMo
 	}
 }
 
-// sendDeleteToFollower issues a single chunk-delete RPC via whichever
-// cross-node mechanism is wired. Returns nil if neither is available.
+// sendDeleteToFollower issues a single chunk-delete RPC via the tier
+// replicator. Returns nil when no replicator is configured (single-node mode).
 func (r *retentionRunner) sendDeleteToFollower(followerID string, id chunk.ChunkID) error {
-	if r.orch.tierReplicator != nil {
-		return r.orch.tierReplicator.DeleteChunk(
-			context.Background(), followerID, r.vaultID, r.tierID, id,
-		)
+	if r.orch.tierReplicator == nil {
+		return nil
 	}
-	if r.orch.transferrer != nil {
-		return r.orch.transferrer.ForwardDeleteChunk(
-			context.Background(), followerID, r.vaultID, r.tierID, id,
-		)
-	}
-	return nil
+	return r.orch.tierReplicator.DeleteChunk(
+		context.Background(), followerID, r.vaultID, r.tierID, id,
+	)
 }

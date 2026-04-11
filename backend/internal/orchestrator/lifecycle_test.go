@@ -15,48 +15,37 @@ import (
 	"github.com/google/uuid"
 )
 
-// slowAckTransferrer delays ForwardTierAppend so the ack goroutine is still
-// running when Stop() is called.
-type slowAckTransferrer struct {
+// slowAckReplicator delays AppendRecords so the ack goroutine is still
+// running when Stop() is called. Implements orchestrator.TierReplicator.
+type slowAckReplicator struct {
 	calls atomic.Int32
 	delay time.Duration
 }
 
-func (m *slowAckTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
-	return nil
-}
-func (m *slowAckTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-func (m *slowAckTransferrer) ForwardTierAppend(_ context.Context, _ string, _, _ uuid.UUID, _ []chunk.Record) error {
+func (m *slowAckReplicator) AppendRecords(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	time.Sleep(m.delay)
 	m.calls.Add(1)
 	return nil
 }
-func (m *slowAckTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *slowAckReplicator) SealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *slowAckTransferrer) ForwardSealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+func (m *slowAckReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *slowAckTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+func (m *slowAckReplicator) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
 	return nil
 }
-func (m *slowAckTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-func (m *slowAckTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
-	return nil
-}
+
 // TestStopWaitsForAckGoroutines verifies that Stop() blocks until all
 // in-flight ack-gated replication goroutines have completed.
 func TestStopWaitsForAckGoroutines(t *testing.T) {
 	t.Parallel()
 
-	// Slow transferrer: ForwardTierAppend takes 200ms.
-	transferrer := &slowAckTransferrer{delay: 200 * time.Millisecond}
+	// Slow replicator: AppendRecords takes 200ms.
+	replicator := &slowAckReplicator{delay: 200 * time.Millisecond}
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
-	orch.transferrer = transferrer
+	orch.SetTierReplicator(replicator)
 
 	// Create a vault with a follower target so ack-gated records trigger replication.
 	tierID := uuid.Must(uuid.NewV7())
@@ -102,8 +91,8 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 	}
 
 	// After Stop returns, the ack goroutine must have completed.
-	if transferrer.calls.Load() != 1 {
-		t.Errorf("expected 1 ForwardTierAppend call after Stop, got %d", transferrer.calls.Load())
+	if replicator.calls.Load() != 1 {
+		t.Errorf("expected 1 AppendRecords call after Stop, got %d", replicator.calls.Load())
 	}
 
 	// The ack channel must have been written to.

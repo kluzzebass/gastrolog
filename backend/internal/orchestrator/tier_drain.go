@@ -219,6 +219,23 @@ func (o *Orchestrator) drainTierChunks(ctx context.Context, cfg *config.Config, 
 	return true
 }
 
+// drainCursorToRecords consumes all records from a cursor into a slice.
+// Used to convert a chunk cursor to the record slice expected by
+// TierReplicator.ImportSealedChunk.
+func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
+	var records []chunk.Record
+	for {
+		rec, _, err := cursor.Next()
+		if errors.Is(err, chunk.ErrNoMoreRecords) {
+			return records, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, rec)
+	}
+}
+
 // drainOneChunk transfers a single chunk and deletes the source.
 func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
 	cursor, err := tier.Chunks.OpenCursor(chunkID)
@@ -234,7 +251,14 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *config.Config, va
 		}
 
 	case TierDrainRebalance:
-		if err := o.transferrer.ReplicateSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, chunk.CursorIterator(cursor)); err != nil {
+		if o.tierReplicator == nil {
+			return errors.New("tier drain rebalance: tier replicator not configured")
+		}
+		records, err := drainCursorToRecords(cursor)
+		if err != nil {
+			return fmt.Errorf("read chunk for rebalance: %w", err)
+		}
+		if err := o.tierReplicator.ImportSealedChunk(ctx, targetNodeID, vaultID, tierID, chunkID, records); err != nil {
 			return fmt.Errorf("replicate to target node: %w", err)
 		}
 	}

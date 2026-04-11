@@ -40,7 +40,7 @@ func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID
 // ackAfterReplication does sync forwarding to followers for ack-gated records,
 // then sends the ack. Runs in a goroutine — doesn't block the writeLoop.
 func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replicationTask, rec chunk.Record) {
-	if o.transferrer == nil {
+	if o.tierReplicator == nil {
 		ack <- nil
 		return
 	}
@@ -48,7 +48,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, tasks []replication
 	defer cancel()
 	for _, t := range tasks {
 		for _, tgt := range t.targets {
-			if err := o.transferrer.ForwardTierAppend(ctx, tgt.NodeID, t.vaultID, t.tierID, []chunk.Record{rec}); err != nil {
+			if err := o.tierReplicator.AppendRecords(ctx, tgt.NodeID, t.vaultID, t.tierID, t.chunkID, []chunk.Record{rec}); err != nil {
 				ack <- fmt.Errorf("ack-gated replication to %s: %w", tgt.NodeID, err)
 				return
 			}
@@ -154,6 +154,9 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID uui
 // Validates that the chunk is readable before opening the network stream —
 // corrupted chunks fail fast without touching the wire.
 func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
+	if o.tierReplicator == nil {
+		return errors.New("replicateToFollower: tier replicator not configured")
+	}
 	// Pre-flight: open and read the first record to confirm the chunk is intact.
 	// Corrupted compressed data fails here instantly — no network round-trip.
 	probe, err := cm.OpenCursor(chunkID)
@@ -173,22 +176,16 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 	}
 	defer func() { _ = cursor.Close() }()
 
-	// Prefer ordered tier replication stream over legacy separate-stream path.
-	if o.tierReplicator != nil {
-		var records []chunk.Record
-		for {
-			rec, _, recErr := cursor.Next()
-			if errors.Is(recErr, chunk.ErrNoMoreRecords) {
-				break
-			}
-			if recErr != nil {
-				return fmt.Errorf("read chunk: %w", recErr)
-			}
-			records = append(records, rec)
+	var records []chunk.Record
+	for {
+		rec, _, recErr := cursor.Next()
+		if errors.Is(recErr, chunk.ErrNoMoreRecords) {
+			break
 		}
-		return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
+		if recErr != nil {
+			return fmt.Errorf("read chunk: %w", recErr)
+		}
+		records = append(records, rec)
 	}
-
-	iter := chunk.CursorIterator(cursor)
-	return o.transferrer.ReplicateSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, iter)
+	return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
 }

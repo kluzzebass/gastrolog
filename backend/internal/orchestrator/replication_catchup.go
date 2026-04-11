@@ -59,8 +59,8 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 	if tier.IsFollower {
 		return nil // only leader initiates catchup
 	}
-	if o.transferrer == nil {
-		return errors.New("no remote transferrer configured")
+	if o.tierReplicator == nil {
+		return errors.New("no tier replicator configured")
 	}
 
 	metas, err := tier.Chunks.List()
