@@ -477,8 +477,8 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 	}
 }
 
-// TestClusterReplicationSealSync verifies that ForwardSealTier causes the
-// follower to seal its active chunk at the same boundary as the leader.
+// TestClusterReplicationSealSync verifies that TierReplicator.SealTier causes
+// the follower to seal its active chunk at the same boundary as the leader.
 func TestClusterReplicationSealSync(t *testing.T) {
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 10000) // high rotation so we control seal manually
@@ -541,7 +541,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 			}
 		}
 		if sealed == 0 {
-			t.Errorf("follower %s: expected at least 1 sealed chunk after ForwardSealTier, got 0", fid)
+			t.Errorf("follower %s: expected at least 1 sealed chunk after SealTier, got 0", fid)
 		}
 
 		// Verify follower records via cursor.
@@ -552,7 +552,7 @@ func TestClusterReplicationSealSync(t *testing.T) {
 	}
 }
 
-// TestClusterReplicationDeletePropagation verifies that ForwardDeleteChunk
+// TestClusterReplicationDeletePropagation verifies that TierReplicator.DeleteChunk
 // removes the chunk from the follower's chunk manager AND its filesystem
 // directory.
 func TestClusterReplicationDeletePropagation(t *testing.T) {

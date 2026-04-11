@@ -13,7 +13,7 @@ import (
 )
 
 // SealActiveTier seals the active chunk for a specific tier.
-// Used by the ForwardSealTier handler on follower nodes.
+// Used by the TierReplication seal command on follower nodes.
 func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {

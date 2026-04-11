@@ -23,12 +23,12 @@ import (
 // and surfaces as a logged error within seconds. See gastrolog-4rp6i.
 //
 // Tunings:
-//   - Unary RPCs (ForwardAppend, ForwardSealTier, ForwardDeleteChunk, …) are
-//     small request/response pairs. 5s is generous for round-trip + processing.
-//   - Streaming RPCs (TransferRecords, ReplicateSealedChunk, StreamToTier)
-//     transfer entire sealed chunks (typically <10MB). 15s allows for slow
-//     networks (1MB/s) plus margin without leaving the cluster wedged for
-//     too long when a peer becomes unresponsive.
+//   - Unary RPCs (ForwardAppend, …) are small request/response pairs. 5s is
+//     generous for round-trip + processing.
+//   - Streaming RPCs (TransferRecords, StreamToTier) transfer entire sealed
+//     chunks (typically <10MB). 15s allows for slow networks (1MB/s) plus
+//     margin without leaving the cluster wedged for too long when a peer
+//     becomes unresponsive.
 const (
 	unaryCallTimeout  = 5 * time.Second
 	streamCallTimeout = 15 * time.Second
@@ -144,8 +144,7 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 
 // StreamToTier opens a single gRPC stream and pipes all records from the
 // iterator to a remote tier's active chunk. The stream close is the ack.
-// Used for remote tier transitions — same streaming as ReplicateSealedChunk
-// but without chunk ID (destination handles its own chunking).
+// Used for remote tier transitions — destination handles its own chunking.
 func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
 	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
 	defer cancel()

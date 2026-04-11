@@ -557,9 +557,16 @@ func (o *Orchestrator) deleteChunkFromTierInstance(t *TierInstance, vaultID, tie
 	return t.Chunks.Delete(chunkID)
 }
 
-// replaceForwardedChunk seals (if active) and deletes a forwarded chunk
-// to make room for the canonical sealed version from the leader. Retries
-// if a concurrent Append reopens the active chunk between seal and delete.
+// replaceForwardedChunk seals (if active) and deletes a pre-existing chunk
+// on a follower to make room for the canonical sealed version from the leader.
+// The pre-existing chunk may come from:
+//   - TierReplicator.AppendRecords syncing records as the leader's active
+//     chunk fills up (and the follower may have missed some due to a brief
+//     network disruption, leaving its copy slightly behind the leader's)
+//   - a catchup path that fills follower state from scratch
+//
+// Retries if a concurrent Append reopens the active chunk between seal and
+// delete.
 //
 // Uses DeleteNoAnnounce: this is a LOCAL cleanup operation on a single
 // follower. It must NOT propagate the delete via tier Raft — the canonical

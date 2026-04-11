@@ -85,8 +85,7 @@ type RecordForwarder interface {
 }
 
 // TierReplicator sequences all replication commands for a tier on a single
-// ordered stream per follower. Replaces the separate ForwardRecords and
-// ReplicateSealedChunk streams. Nil in single-node mode.
+// ordered stream per follower. Nil in single-node mode.
 type TierReplicator interface {
 	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
 	SealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error

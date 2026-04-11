@@ -48,43 +48,6 @@ func (d *mnTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID
 	return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
 }
 
-func (d *mnTransferrer) ReplicateSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("unknown node %q", nodeID)
-	}
-	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
-}
-
-func (d *mnTransferrer) ForwardSealTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("unknown node %q", nodeID)
-	}
-	return orch.SealActiveTier(vaultID, tierID, chunkID)
-}
-
-func (d *mnTransferrer) ForwardDeleteChunk(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("unknown node %q", nodeID)
-	}
-	return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
-}
-
-func (d *mnTransferrer) ForwardTierAppend(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
-	orch, ok := d.nodes[nodeID]
-	if !ok {
-		return fmt.Errorf("unknown node %q", nodeID)
-	}
-	for _, rec := range records {
-		if err := orch.AppendToTier(vaultID, tierID, chunk.ChunkID{}, rec); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func (d *mnTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {

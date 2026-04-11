@@ -391,8 +391,8 @@ message ForwardFollowResponse {
 message ImportRecordMessage {
   string vault_id = 1;
   ExportRecord record = 2;
-  string tier_id = 3;   // optional: target specific tier (sealed-chunk replication)
-  string chunk_id = 4;  // optional: preserve primary's chunk ID on import
+  string tier_id = 3;   // optional: route to a specific tier's active chunk (StreamToTier)
+  reserved 4;           // was chunk_id (gastrolog-63rnl)
 }
 
 // --- Managed file distribution ---

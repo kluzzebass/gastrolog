@@ -88,10 +88,6 @@ func (m *ejectFakeTransferrer) ForwardAppend(_ context.Context, nodeID string, v
 	return nil
 }
 
-func (m *ejectFakeTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-
 func (m *ejectFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
@@ -718,15 +714,6 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 // errTest is a sentinel error for tests.
 var errTest = errors.New("test error")
 
-func (m *ejectFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *ejectFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *ejectFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
 func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
 	return nil
 }

@@ -469,19 +469,6 @@ func (m *transitionFakeTransferrer) ForwardAppend(_ context.Context, _ string, _
 func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
-func (m *transitionFakeTransferrer) ForwardTierAppend(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, records []chunk.Record) error {
-	if m.failErr != nil {
-		return m.failErr
-	}
-	copied := make([]chunk.Record, len(records))
-	for i, r := range records {
-		copied[i] = r.Copy()
-	}
-	m.calls = append(m.calls, transitionTransferCall{
-		nodeID: nodeID, vaultID: vaultID, tierID: tierID, records: copied,
-	})
-	return nil
-}
 
 func TestTransitionCrossNode(t *testing.T) {
 	t.Parallel()
@@ -1146,15 +1133,6 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 	return ids
 }
 
-func (m *transitionFakeTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *transitionFakeTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (m *transitionFakeTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
 func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
 	if m.failErr != nil {
 		return m.failErr

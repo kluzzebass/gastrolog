@@ -305,7 +305,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return status.Error(codes.Unavailable, "record importer not configured")
 	}
 
-	// Read first message to get vault_id and optional tier_id/chunk_id.
+	// Read first message to get vault_id and optional tier_id.
 	first := &gastrologv1.ImportRecordMessage{}
 	err := s.recvOrShutdown(stream, first)
 	if errors.Is(err, io.EOF) {
@@ -325,17 +325,13 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return err
 	}
 
-	// Tier-targeted import for sealed-chunk replication.
+	// tier_id routes the stream to a specific tier's active chunk (used by
+	// StreamToTier for tier transitions). Empty tier_id means the import
+	// creates a new sealed chunk in the vault (used by TransferRecords for
+	// cross-node chunk migration).
 	var tierID uuid.UUID
-	var replicaChunkID chunk.ChunkID
 	if first.GetTierId() != "" {
 		tierID, err = parseTierID(first.GetTierId())
-		if err != nil {
-			return err
-		}
-	}
-	if first.GetChunkId() != "" {
-		replicaChunkID, err = parseChunkID(first.GetChunkId())
 		if err != nil {
 			return err
 		}
@@ -369,20 +365,11 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return convert.ExportToRecord(msg.GetRecord()), nil
 	})
 
-	// Route based on tier_id and chunk_id:
-	// - tier_id + chunk_id → sealed-chunk replication (ImportToTier)
-	// - tier_id only       → tier transition stream (AppendToTier)
-	// - neither            → vault migration (ImportRecords)
-	switch {
-	case tierID != uuid.Nil && replicaChunkID != (chunk.ChunkID{}) && s.tierRecordImporter != nil:
-		if err := s.tierRecordImporter(stream.Context(), vaultID, tierID, replicaChunkID, next); err != nil {
-			return status.Errorf(codes.Internal, "tier import records: %v", err)
-		}
-	case tierID != uuid.Nil && s.tierStreamAppender != nil:
+	if tierID != uuid.Nil && s.tierStreamAppender != nil {
 		if err := s.tierStreamAppender(stream.Context(), vaultID, tierID, next); err != nil {
 			return status.Errorf(codes.Internal, "tier stream append: %v", err)
 		}
-	default:
+	} else {
 		if err := s.recordImporter(stream.Context(), vaultID, next); err != nil {
 			return status.Errorf(codes.Internal, "import records: %v", err)
 		}

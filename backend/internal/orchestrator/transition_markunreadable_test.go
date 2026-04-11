@@ -35,18 +35,6 @@ func (t *streamErrTransferrer) TransferRecords(_ context.Context, _ string, _ uu
 func (t *streamErrTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
 	return nil
 }
-func (t *streamErrTransferrer) ForwardTierAppend(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ []chunk.Record) error {
-	return nil
-}
-func (t *streamErrTransferrer) ForwardSealTier(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
-func (t *streamErrTransferrer) ReplicateSealedChunk(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID, _ chunk.ChunkID, _ chunk.RecordIterator) error {
-	return nil
-}
-func (t *streamErrTransferrer) ForwardDeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
-	return nil
-}
 func (t *streamErrTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
