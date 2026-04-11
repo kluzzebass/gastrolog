@@ -55,8 +55,50 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start shared scheduler (cron rotation, retention, and future scheduled tasks).
 	o.scheduler.Start()
 
-	// Launch ingester goroutines with per-ingester contexts.
+	// Probes for chanwatch and PressureGate.
+	ingestProbe := func() (int, int) {
+		return len(o.ingestCh), cap(o.ingestCh)
+	}
+	digestedProbe := func() (int, int) {
+		return len(o.digestedCh), cap(o.digestedCh)
+	}
+
+	// Pressure gate: ingesters consult this to throttle when the pipeline
+	// is backed up. Hysteresis thresholds: elevated at 80%, critical at 95%,
+	// release at 50%. Transitions are reported via alerts — NOT slog —
+	// to avoid a feedback loop where the self-ingester captures throttle
+	// messages and adds to the pressure.
+	gate := chanwatch.NewPressureGate(chanwatch.DefaultThresholds())
+	gate.AddProbe("ingestCh", ingestProbe)
+	gate.AddProbe("digestedCh", digestedProbe)
+	if ac, ok := o.alerts.(*alert.Collector); ok {
+		gate.AddOnChange(func(tr chanwatch.PressureTransition) {
+			if tr.To == chanwatch.PressureNormal {
+				ac.Clear("ingest-pressure")
+				return
+			}
+			sev := alert.Warning
+			if tr.To == chanwatch.PressureCritical {
+				sev = alert.Error
+			}
+			ac.Set(
+				"ingest-pressure",
+				sev, "orchestrator",
+				fmt.Sprintf("Ingest pipeline pressure %s (%s at %d%%)",
+					tr.To, tr.Cause, int(tr.Ratio*100)),
+			)
+		})
+	}
+	// o.mu is already held by Start(); assign directly.
+	o.pressureGate = gate
+
+	// Launch ingester goroutines with per-ingester contexts. Inject the
+	// pressure gate into any ingester that implements PressureAware so it
+	// can throttle on backpressure.
 	for id, r := range o.ingesters {
+		if pa, ok := r.(PressureAware); ok {
+			pa.SetPressureGate(gate)
+		}
 		recvCtx, recvCancel := context.WithCancel(ctx)
 		o.ingesterCancels[id] = recvCancel
 		meta := o.ingesterMeta[id]
@@ -68,18 +110,18 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	o.digestWg.Go(func() { o.digestLoop(ctx) })
 	o.writeWg.Go(func() { o.writeLoop() })
 
-	// Channel pressure watchdog.
+	// Channel pressure watchdog — kept for the slog-based alerts at 90%
+	// (separate codepath from the hysteresis gate used for throttling).
 	cw := chanwatch.New(o.logger, 1*time.Second)
 	if ac, ok := o.alerts.(*alert.Collector); ok {
 		cw.SetAlerts(ac)
 	}
-	cw.Watch("ingestCh", func() (int, int) {
-		return len(o.ingestCh), cap(o.ingestCh)
-	}, 0.9)
-	cw.Watch("digestedCh", func() (int, int) {
-		return len(o.digestedCh), cap(o.digestedCh)
-	}, 0.9)
+	cw.Watch("ingestCh", ingestProbe, 0.9)
+	cw.Watch("digestedCh", digestedProbe, 0.9)
 	o.auxWg.Go(func() { cw.Run(ctx) })
+
+	// Start the pressure gate after everything else is wired.
+	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
 	return nil
 }

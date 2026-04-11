@@ -13,6 +13,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -46,6 +47,18 @@ type ingester struct {
 
 	mu    sync.Mutex
 	files map[string]*tailedFile
+
+	// pressureGate throttles the Run event loop when the ingest pipeline is
+	// backed up. Tail's natural rate limiter is filesystem writes — pausing
+	// the event loop defers fsnotify/poll handling, which defers line reads
+	// and emission. Injected by the orchestrator. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	ing.pressureGate = gate
 }
 
 // Run implements orchestrator.Ingester.
@@ -99,6 +112,16 @@ func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	}
 
 	for {
+		// Backpressure: pause before processing the next fs event or tick.
+		// Queued fsnotify events will coalesce on the next iteration — we
+		// just re-scan the files that changed.
+		if ing.pressureGate != nil {
+			if err := ing.pressureGate.Wait(ctx); err != nil {
+				ing.saveAndCleanup(bm)
+				return nil
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			ing.saveAndCleanup(bm)

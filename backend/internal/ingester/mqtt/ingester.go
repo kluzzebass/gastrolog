@@ -5,9 +5,23 @@ package mqtt
 import (
 	"log/slog"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
+
+// pressureAware is the shared state for v3 and v5 MQTT ingesters to store
+// the pressure gate from the orchestrator. Both v3Ingester and v5Ingester
+// embed this.
+type pressureAware struct {
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (p *pressureAware) SetPressureGate(gate *chanwatch.PressureGate) {
+	p.pressureGate = gate
+}
 
 // Config holds MQTT ingester configuration.
 type Config struct {

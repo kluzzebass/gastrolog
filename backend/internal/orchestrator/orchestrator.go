@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gastrolog/internal/alert"
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/config"
 	"gastrolog/internal/lifecycle"
@@ -186,14 +187,15 @@ type Orchestrator struct {
 	tierReplicator TierReplicator
 
 	// Ingest channel and lifecycle.
-	ingestCh   chan IngestMessage
-	digestedCh chan digestedRecord
-	ingestSize int
-	cancel     context.CancelFunc
-	done       chan struct{}
-	running    bool
-	ingesterWg sync.WaitGroup // tracks ingester goroutines
-	digestWg   sync.WaitGroup // tracks digest goroutine
+	ingestCh       chan IngestMessage
+	digestedCh     chan digestedRecord
+	ingestSize     int
+	pressureGate   *chanwatch.PressureGate // shared signal for ingester throttling
+	cancel         context.CancelFunc
+	done           chan struct{}
+	running        bool
+	ingesterWg     sync.WaitGroup // tracks ingester goroutines
+	digestWg       sync.WaitGroup // tracks digest goroutine
 	writeWg    sync.WaitGroup // tracks write goroutine
 	ackWg      sync.WaitGroup // tracks in-flight ack-gated replication goroutines
 	auxWg      sync.WaitGroup // tracks auxiliary goroutines (watchdog, etc.)
@@ -490,6 +492,15 @@ func (o *Orchestrator) IngestQueueNearFull() bool {
 		return false
 	}
 	return len(o.ingestCh) >= c*9/10
+}
+
+// PressureGate exposes the ingest pipeline pressure signal for ingesters to
+// consult before emitting records. Returns nil if the orchestrator has not
+// been Started yet; ingesters should treat nil as "no throttling".
+func (o *Orchestrator) PressureGate() *chanwatch.PressureGate {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	return o.pressureGate
 }
 
 // VaultSnapshot is a point-in-time summary of a vault's state.

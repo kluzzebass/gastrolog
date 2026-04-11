@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -30,6 +31,17 @@ type Ingester struct {
 	trigger  chan struct{} // signaled by Trigger() for one-shot mode
 
 	seq atomic.Uint64 // monotonic sequence counter
+
+	// pressureGate throttles burst emission when the ingest pipeline is
+	// backed up. Injected by the orchestrator via SetPressureGate before
+	// Run. Nil means no throttling. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (s *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	s.pressureGate = gate
 }
 
 // Run emits records until ctx is cancelled.
@@ -71,6 +83,13 @@ func (s *Ingester) runOneShot(ctx context.Context, out chan<- orchestrator.Inges
 }
 
 func (s *Ingester) emitBurst(ctx context.Context, out chan<- orchestrator.IngestMessage) {
+	// Backpressure: pause before emitting if the pipeline is elevated/critical.
+	// Returns silently on ctx cancel so the caller's loop can exit.
+	if s.pressureGate != nil {
+		if err := s.pressureGate.Wait(ctx); err != nil {
+			return
+		}
+	}
 	for range s.burst {
 		msg := s.generate()
 		select {

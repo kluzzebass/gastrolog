@@ -6,6 +6,7 @@ import (
 	"maps"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -24,6 +25,8 @@ func containerAttrs(info containerInfo) map[string]string {
 // streamContainer runs a log stream for a single container, emitting messages
 // to the output channel. It blocks until the context is cancelled or the stream
 // ends. It handles reconnection with backoff on stream errors.
+//
+// gate may be nil to disable backpressure throttling.
 func streamContainer(
 	ctx context.Context,
 	client dockerClient,
@@ -34,6 +37,7 @@ func streamContainer(
 	logger *slog.Logger,
 	out chan<- orchestrator.IngestMessage,
 	onTimestamp func(containerID string, ts time.Time),
+	gate *chanwatch.PressureGate,
 ) {
 	logger = logger.With("container_id", info.ID[:12], "container_name", info.Name)
 	logger.Info("starting container log stream")
@@ -42,7 +46,7 @@ func streamContainer(
 	maxBackoff := 30 * time.Second
 
 	for {
-		err := streamOnce(ctx, client, info, since, stdout, stderr, ingesterID, logger, out, onTimestamp, &since)
+		err := streamOnce(ctx, client, info, since, stdout, stderr, ingesterID, logger, out, onTimestamp, &since, gate)
 		if ctx.Err() != nil {
 			logger.Info("container log stream stopped")
 			return
@@ -73,6 +77,7 @@ func streamOnce(
 	out chan<- orchestrator.IngestMessage,
 	onTimestamp func(containerID string, ts time.Time),
 	lastTS *time.Time,
+	gate *chanwatch.PressureGate,
 ) error {
 	body, isTTY, err := client.ContainerLogs(ctx, info.ID, since, true, stdout, stderr)
 	if err != nil {
@@ -100,6 +105,16 @@ func streamOnce(
 	}
 
 	for {
+		// Backpressure: pause before consuming the next entry from the
+		// local channel. When this blocks, readRaw/readMultiplexed block
+		// trying to push into `entries`, which stops reads from Docker's
+		// HTTP log body — the daemon's log driver handles buffering.
+		if gate != nil {
+			if err := gate.Wait(ctx); err != nil {
+				return err
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()

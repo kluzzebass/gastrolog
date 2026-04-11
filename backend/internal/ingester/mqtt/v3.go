@@ -15,6 +15,7 @@ import (
 
 // v3Ingester uses the paho.mqtt.golang v3.1.1 client.
 type v3Ingester struct {
+	pressureAware
 	cfg    Config
 	logger *slog.Logger
 }
@@ -40,6 +41,14 @@ func (ing *v3Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 	}
 
 	handler := func(_ pahov3.Client, m pahov3.Message) {
+		// Backpressure: block in the handler while pressure is elevated.
+		// Paho's in-flight limit then throttles reads from the broker, so
+		// QoS 1/2 messages stay unACK'd at the broker — lossless.
+		if ing.pressureGate != nil {
+			if err := ing.pressureGate.Wait(ctx); err != nil {
+				return
+			}
+		}
 		msg := orchestrator.IngestMessage{
 			Attrs: map[string]string{
 				"ingester_type":   "mqtt",

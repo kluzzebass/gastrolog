@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -43,6 +44,18 @@ type Ingester struct {
 	out      chan<- orchestrator.IngestMessage
 	logger   *slog.Logger
 	ready    chan struct{} // closed once listener is bound
+
+	// pressureGate is consulted non-blockingly by handlePush to decide
+	// whether to reject push requests with 429. Hysteresis in the gate
+	// prevents accept/reject flapping. Injected by the orchestrator.
+	// See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	r.pressureGate = gate
 }
 
 // Config holds HTTP ingester configuration.
@@ -140,7 +153,16 @@ type Value []json.RawMessage
 
 // handlePush handles POST /loki/api/v1/push requests.
 func (r *Ingester) handlePush(w http.ResponseWriter, req *http.Request) {
-	if c := cap(r.out); c > 0 && len(r.out) >= c*9/10 {
+	// Non-blocking backpressure check. With a pressure gate, use the
+	// hysteresis gate. Without one (standalone/test construction), fall
+	// back to an ad-hoc 90% fill check on the output channel.
+	var rejected bool
+	if r.pressureGate != nil {
+		rejected = !r.pressureGate.IsNormal()
+	} else if c := cap(r.out); c > 0 && len(r.out) >= c*9/10 {
+		rejected = true
+	}
+	if rejected {
 		w.Header().Set("Retry-After", "1")
 		http.Error(w, "queue full, retry later", http.StatusTooManyRequests)
 		return

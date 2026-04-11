@@ -32,16 +32,20 @@ func NewFactory(ch <-chan logging.CapturedRecord, capture *logging.CaptureHandle
 		)
 
 		// Apply min_level param to the capture handler.
+		baseLevel := slog.LevelWarn
+		if lvl, ok := params["min_level"]; ok {
+			baseLevel = parseLevel(lvl)
+		}
 		if capture != nil {
-			if lvl, ok := params["min_level"]; ok {
-				capture.SetMinCaptureLevel(parseLevel(lvl))
-			}
+			capture.SetMinCaptureLevel(baseLevel)
 		}
 
 		return &ingester{
-			id:     id.String(),
-			ch:     ch,
-			logger: scopedLogger,
+			id:        id.String(),
+			ch:        ch,
+			logger:    scopedLogger,
+			capture:   capture,
+			baseLevel: baseLevel,
 		}, nil
 	}
 }

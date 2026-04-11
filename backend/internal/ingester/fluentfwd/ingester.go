@@ -19,6 +19,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 	"github.com/vmihailenco/msgpack/v5/msgpcode"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -29,6 +30,18 @@ type Ingester struct {
 	addr   string
 	out    chan<- orchestrator.IngestMessage
 	logger *slog.Logger
+
+	// pressureGate throttles msgpack reads when the ingest pipeline is backed
+	// up. Pausing before DecodeArrayLen stops reads from the TCP socket, so
+	// the window closes and Fluent senders back off. Injected by the
+	// orchestrator; nil means no throttling. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	ing.pressureGate = gate
 }
 
 // Config holds Fluent Forward ingester configuration.
@@ -128,6 +141,15 @@ func (ing *Ingester) handleConn(ctx context.Context, conn net.Conn) {
 	for {
 		if ctx.Err() != nil {
 			return
+		}
+
+		// Backpressure: pause msgpack decoding while the pipeline is backed
+		// up. This stops the underlying TCP reads, closing the window so
+		// Fluent senders see transport-level backpressure.
+		if ing.pressureGate != nil {
+			if err := ing.pressureGate.Wait(ctx); err != nil {
+				return
+			}
 		}
 
 		option, ok := ing.handleOneMessage(ctx, dec, remote)

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
 )
@@ -31,6 +32,18 @@ type ingester struct {
 	mu         sync.Mutex
 	containers map[string]*trackedContainer
 	lastTS     map[string]time.Time // container ID -> last seen timestamp
+
+	// pressureGate throttles per-container log streaming when the ingest
+	// pipeline is backed up. Pausing emission makes the internal entries
+	// channel fill, blocking readRaw/readMultiplexed which in turn stops
+	// reading from Docker's HTTP log stream. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	ing.pressureGate = gate
 }
 
 // Run implements orchestrator.Ingester.
@@ -157,8 +170,9 @@ func (ing *ingester) startContainer(ctx context.Context, info containerInfo, out
 	ing.containers[info.ID] = tc
 
 	logger := ing.logger
+	gate := ing.pressureGate
 	wg.Go(func() {
-		streamContainer(cctx, ing.client, info, since, ing.stdout, ing.stderr, ing.id, logger, out, ing.updateTimestamp)
+		streamContainer(cctx, ing.client, info, since, ing.stdout, ing.stderr, ing.id, logger, out, ing.updateTimestamp, gate)
 		ing.mu.Lock()
 		delete(ing.containers, info.ID)
 		ing.mu.Unlock()

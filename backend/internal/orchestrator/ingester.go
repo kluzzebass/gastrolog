@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"time"
 
+	"gastrolog/internal/chanwatch"
+
 	"github.com/google/uuid"
 )
 
@@ -35,6 +37,17 @@ type Ingester interface {
 // burst via the UI without restarting the ingester.
 type Triggerable interface {
 	Trigger()
+}
+
+// PressureAware is an optional interface for ingesters that can throttle
+// themselves when the ingest pipeline is backed up. The orchestrator calls
+// SetPressureGate before starting the ingester; the ingester then consults
+// gate.Wait(ctx) before emitting each record (or each batch) to block while
+// pressure is elevated or critical. Ingesters that don't implement this
+// interface run at full rate — they inherit the previous (unthrottled)
+// behavior. See gastrolog-4fguu.
+type PressureAware interface {
+	SetPressureGate(gate *chanwatch.PressureGate)
 }
 
 // IngesterFactory creates a Ingester from configuration parameters.

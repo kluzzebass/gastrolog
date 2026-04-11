@@ -25,6 +25,7 @@ import (
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/bodyutil"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -37,6 +38,18 @@ type Ingester struct {
 	grpcAddr string
 	out      chan<- orchestrator.IngestMessage
 	logger   *slog.Logger
+
+	// pressureGate is consulted non-blockingly by processExportRequest to
+	// decide whether to reject incoming exports with 429 / ResourceExhausted.
+	// Hysteresis in the gate prevents flapping between accept/reject at the
+	// threshold. Injected by the orchestrator. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	ing.pressureGate = gate
 }
 
 // Config holds OTLP ingester configuration.
@@ -165,7 +178,16 @@ var errBackpressure = errors.New("backpressure: ingest queue near capacity")
 
 // processExportRequest converts OTLP log records to IngestMessages and sends them.
 func (ing *Ingester) processExportRequest(ctx context.Context, req *collogspb.ExportLogsServiceRequest) error {
-	if c := cap(ing.out); c > 0 && len(ing.out) >= c*9/10 {
+	// Non-blocking backpressure check. With a pressure gate (normal
+	// orchestrator-attached operation), use the hysteresis gate which
+	// prevents flapping at the threshold. Without a gate (standalone or
+	// test construction), fall back to an ad-hoc 90% fill check so we
+	// still reject when the output channel is nearly full.
+	if ing.pressureGate != nil {
+		if !ing.pressureGate.IsNormal() {
+			return errBackpressure
+		}
+	} else if c := cap(ing.out); c > 0 && len(ing.out) >= c*9/10 {
 		return errBackpressure
 	}
 

@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/sysmetrics"
 )
@@ -19,6 +20,17 @@ type ingester struct {
 	vaultInterval time.Duration
 	src           StatsSource
 	logger        *slog.Logger
+
+	// pressureGate throttles metric emission when the ingest pipeline is
+	// backed up. Emitting more queue-depth records while the queue is full
+	// is counterproductive. Injected by the orchestrator. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (m *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	m.pressureGate = gate
 }
 
 // Run emits system metrics on interval and vault metrics on vaultInterval
@@ -36,10 +48,16 @@ func (m *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		case <-ctx.Done():
 			return nil
 		case <-sysTicker.C:
+			if m.pressureGate != nil && !m.pressureGate.IsNormal() {
+				continue // skip this tick — emitting metrics into a full queue is noise
+			}
 			if !send(ctx, out, m.collectSystem()) {
 				return nil
 			}
 		case <-vaultTicker.C:
+			if m.pressureGate != nil && !m.pressureGate.IsNormal() {
+				continue
+			}
 			for _, msg := range m.collectVaults() {
 				if !send(ctx, out, msg) {
 					return nil

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -31,6 +32,18 @@ type Ingester struct {
 	mu          sync.Mutex
 	udpConn     *net.UDPConn
 	tcpListener net.Listener
+
+	// pressureGate throttles socket reads when the ingest pipeline is backed up.
+	// Pausing reads lets the kernel apply backpressure upstream: TCP senders
+	// block on a closed window, UDP senders see packet loss. Injected by the
+	// orchestrator before Run; nil means no throttling. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	r.pressureGate = gate
 }
 
 // Config holds syslog ingester configuration.
@@ -145,6 +158,15 @@ func (r *Ingester) runUDP(ctx context.Context) error {
 		default:
 		}
 
+		// Backpressure: pause reads while the pipeline is backed up. UDP has
+		// no flow control, so kernel-side packet loss is the expected outcome
+		// — it pushes the signal upstream to senders.
+		if r.pressureGate != nil {
+			if err := r.pressureGate.Wait(ctx); err != nil {
+				return nil
+			}
+		}
+
 		// Set read deadline to allow checking context.
 		_ = conn.SetReadDeadline(time.Now().Add(time.Second))
 
@@ -234,6 +256,14 @@ func (r *Ingester) handleTCPConn(ctx context.Context, conn net.Conn) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// Backpressure: pause reads while the pipeline is backed up. TCP's
+		// sliding window does the rest — senders block on a closed window.
+		if r.pressureGate != nil {
+			if err := r.pressureGate.Wait(ctx); err != nil {
+				return
+			}
 		}
 
 		_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))

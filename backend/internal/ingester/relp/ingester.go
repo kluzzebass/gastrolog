@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"gastrolog/internal/cert"
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/ingester/syslogparse"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -38,6 +39,18 @@ type Ingester struct {
 
 	mu       sync.Mutex
 	listener net.Listener
+
+	// pressureGate throttles socket reads when the ingest pipeline is backed up.
+	// The ack-gated message flow already provides indirect backpressure; this
+	// gate provides a faster signal via the TCP window before senders queue up
+	// on pending ACKs. Injected by the orchestrator. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	r.pressureGate = gate
 }
 
 // Config holds RELP ingester configuration.
@@ -158,6 +171,15 @@ func (r *Ingester) handleConn(ctx context.Context, conn net.Conn, out chan<- orc
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// Backpressure: pause reads while the pipeline is backed up. The
+		// TCP window closes, RELP senders back off at the transport layer
+		// instead of queuing on pending ACKs.
+		if r.pressureGate != nil {
+			if err := r.pressureGate.Wait(ctx); err != nil {
+				return
+			}
 		}
 
 		msg, err := session.ReceiveLog()

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -14,6 +15,41 @@ type ingester struct {
 	id     string
 	ch     <-chan logging.CapturedRecord
 	logger *slog.Logger
+
+	// capture is the slog tee handler whose minimum capture level we
+	// adjust in response to pressure transitions. When pressure is
+	// normal, capture.minLevel stays at baseLevel; when elevated or
+	// critical, we raise it so only errors get captured — reducing the
+	// self-ingest rate without blocking. See gastrolog-4fguu.
+	capture   *logging.CaptureHandler
+	baseLevel slog.Level
+}
+
+// SetPressureGate registers a pressure transition callback that raises the
+// capture handler's minimum level under load and restores it on recovery.
+// Implements orchestrator.PressureAware.
+//
+// The self ingester responds to pressure by *filtering* at the source
+// instead of blocking — blocking its own Run loop would cause captured
+// slog records to pile up in the capture channel and eventually drop,
+// which defeats the purpose. Raising the filter level reduces the rate
+// at which new records enter the capture channel.
+func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	if ing.capture == nil {
+		return
+	}
+	gate.AddOnChange(func(tr chanwatch.PressureTransition) {
+		switch tr.To {
+		case chanwatch.PressureNormal:
+			ing.capture.SetMinCaptureLevel(ing.baseLevel)
+		case chanwatch.PressureElevated, chanwatch.PressureCritical:
+			// Raise only if base is below error; don't regress a
+			// user-configured stricter setting.
+			if ing.baseLevel < slog.LevelError {
+				ing.capture.SetMinCaptureLevel(slog.LevelError)
+			}
+		}
+	})
 }
 
 func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {

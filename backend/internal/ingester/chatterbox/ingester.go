@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -37,6 +38,19 @@ type Ingester struct {
 	// Logger for this ingester instance.
 	// Scoped with component="ingester", type="chatterbox" at construction time.
 	logger *slog.Logger
+
+	// pressureGate throttles burst generation when the ingest pipeline is
+	// backed up. Injected by the orchestrator via SetPressureGate before Run.
+	// Nil means no throttling (e.g., in tests). See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware. The gate is consulted at the top of
+// every burst cycle in Run — if pressure is elevated or critical, the ingester
+// blocks until it returns to normal or ctx is cancelled.
+func (r *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	r.pressureGate = gate
 }
 
 // Run starts the ingester and emits messages to the output channel.
@@ -50,6 +64,14 @@ func (r *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessag
 		case <-ctx.Done():
 			return nil
 		case <-timer.C:
+		}
+
+		// Backpressure: if the pipeline is elevated/critical, pause until
+		// it returns to normal. On ctx cancel during wait, exit cleanly.
+		if r.pressureGate != nil {
+			if err := r.pressureGate.Wait(ctx); err != nil {
+				return nil
+			}
 		}
 
 		for _, msg := range r.generateMessages() {

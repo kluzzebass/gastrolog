@@ -14,6 +14,7 @@ import (
 	"github.com/twmb/franz-go/pkg/sasl/plain"
 	"github.com/twmb/franz-go/pkg/sasl/scram"
 
+	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -40,6 +41,18 @@ type Config struct {
 type Ingester struct {
 	cfg    Config
 	logger *slog.Logger
+
+	// pressureGate throttles PollFetches calls when the ingest pipeline is
+	// backed up. Kafka offset tracking makes pausing lossless — we resume
+	// from the same offset when pressure clears. Injected by the
+	// orchestrator; nil means no throttling. See gastrolog-4fguu.
+	pressureGate *chanwatch.PressureGate
+}
+
+// SetPressureGate wires the orchestrator's pressure gate into the ingester.
+// Implements orchestrator.PressureAware.
+func (ing *Ingester) SetPressureGate(gate *chanwatch.PressureGate) {
+	ing.pressureGate = gate
 }
 
 // New creates a new Kafka ingester.
@@ -91,6 +104,15 @@ func (ing *Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMess
 	backoff := backoffMin
 
 	for {
+		// Backpressure: pause polling while the pipeline is backed up.
+		// This is lossless — the consumer group offset stays put, so when
+		// we resume we pick up from the same record.
+		if ing.pressureGate != nil {
+			if err := ing.pressureGate.Wait(ctx); err != nil {
+				return nil
+			}
+		}
+
 		fetches := client.PollFetches(ctx)
 		if ctx.Err() != nil {
 			ing.logger.Info("kafka ingester stopping")

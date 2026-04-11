@@ -17,6 +17,7 @@ import (
 
 // v5Ingester uses the paho.golang autopaho v5 client.
 type v5Ingester struct {
+	pressureAware
 	cfg    Config
 	logger *slog.Logger
 }
@@ -49,6 +50,15 @@ func (ing *v5Ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMe
 			ClientID: ing.cfg.ClientID,
 			OnPublishReceived: []func(paho.PublishReceived) (bool, error){
 				func(pr paho.PublishReceived) (bool, error) {
+					// Backpressure: block in the callback while pressure is
+					// elevated. Paho's inbound-packet handling then stalls,
+					// stopping reads from the broker — QoS 1/2 messages
+					// remain unACK'd, so nothing is lost.
+					if ing.pressureGate != nil {
+						if err := ing.pressureGate.Wait(ctx); err != nil {
+							return false, nil
+						}
+					}
 					msg := orchestrator.IngestMessage{
 						Attrs: map[string]string{
 							"ingester_type":   "mqtt",
