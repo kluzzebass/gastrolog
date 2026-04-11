@@ -204,6 +204,7 @@ func buildChunkKV(c *v1.ChunkMeta, tierName string) [][2]string {
 		{"Records", strconv.FormatInt(c.RecordCount, 10)},
 		{"Logical Size", units.FormatBytesDisplay(c.Bytes)},
 		{"Disk Size", formatDiskSize(c)},
+		{"Replicas", strconv.Itoa(int(c.ReplicaCount))},
 	}
 
 	if c.CloudBacked && c.NumFrames > 0 {

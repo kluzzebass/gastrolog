@@ -320,6 +320,87 @@ func TestListAllChunkMetasIncludesAllTiers(t *testing.T) {
 	}
 }
 
+// TestListAllChunkMetasSkipsFollowerInstances is the regression test for
+// gastrolog-2rvak. When a vault has both a leader and a follower tier
+// instance for the same tier on the same node, ListAllChunkMetas must
+// return only the leader's chunks. Including the follower's view double-
+// counts records and produces non-authoritative counts in the Inspector.
+func TestListAllChunkMetasSkipsFollowerInstances(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	tierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+
+	// Leader tier instance with records.
+	leader := newMemTier(t, tierID, false, nil)
+	if _, _, err := leader.Chunks.Append(testRecord("leader-record")); err != nil {
+		t.Fatal(err)
+	}
+	if err := leader.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Follower tier instance for the SAME tier ID — simulates same-node replication.
+	follower := newMemTier(t, tierID, true, nil)
+	if _, _, err := follower.Chunks.Append(testRecord("follower-record")); err != nil {
+		t.Fatal(err)
+	}
+	if err := follower.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, leader, follower)
+	vault.Name = "leader-follower-test"
+	orch.RegisterVault(vault)
+
+	metas, err := orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk (leader only), got %d", len(metas))
+	}
+	// All returned chunks must come from a non-follower instance.
+	for _, m := range metas {
+		if m.TierID != tierID {
+			t.Errorf("unexpected tier ID: got %s, want %s", m.TierID, tierID)
+		}
+	}
+}
+
+// TestListAllChunkMetasIncludesFollowerOnlyTiers verifies that tiers where
+// this node is a follower-only (no leader instance locally) ARE included.
+// The leader node lives elsewhere, but this node's follower view is still
+// needed at the server layer to count replica presence.
+func TestListAllChunkMetasIncludesFollowerOnlyTiers(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
+
+	followerOnlyTierID := uuid.Must(uuid.NewV7())
+	vaultID := uuid.Must(uuid.NewV7())
+
+	followerOnly := newMemTier(t, followerOnlyTierID, true, nil)
+	if _, _, err := followerOnly.Chunks.Append(testRecord("follower-only")); err != nil {
+		t.Fatal(err)
+	}
+	if err := followerOnly.Chunks.Seal(); err != nil {
+		t.Fatal(err)
+	}
+
+	vault := NewVault(vaultID, followerOnly)
+	vault.Name = "follower-only"
+	orch.RegisterVault(vault)
+
+	metas, err := orch.ListAllChunkMetas(vaultID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("expected 1 chunk from follower-only tier, got %d", len(metas))
+	}
+}
+
 // --- LocalPrimaryTierIDs ---
 
 func TestLocalPrimaryTierIDsExcludesFollowers(t *testing.T) {

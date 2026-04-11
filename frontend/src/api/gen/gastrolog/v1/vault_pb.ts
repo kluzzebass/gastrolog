@@ -416,6 +416,13 @@ export class ChunkMeta extends Message<ChunkMeta> {
    */
   storageClass = "";
 
+  /**
+   * how many nodes currently have this chunk (leader + followers that have caught up)
+   *
+   * @generated from field: int32 replica_count = 18;
+   */
+  replicaCount = 0;
+
   constructor(data?: PartialMessage<ChunkMeta>) {
     super();
     proto3.util.initPartial(data, this);
@@ -441,6 +448,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 15, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 17, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 18, name: "replica_count", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkMeta {

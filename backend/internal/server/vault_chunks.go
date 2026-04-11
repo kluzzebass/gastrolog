@@ -44,7 +44,7 @@ func (s *VaultServer) ListChunks(
 		allChunks = append(allChunks, pb)
 	}
 
-	// Collect remote chunks from nodes that own other tiers.
+	// Collect remote chunks from all nodes hosting the vault's tiers.
 	if s.remoteChunkLister != nil {
 		remoteNodes := s.remoteTierNodes(ctx, vaultID)
 		for _, nodeID := range remoteNodes {
@@ -59,12 +59,57 @@ func (s *VaultServer) ListChunks(
 		}
 	}
 
-	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: allChunks}), nil
+	// Deduplicate by chunk ID. When a chunk is replicated to multiple nodes,
+	// the same chunk ID appears in the raw fan-out result multiple times.
+	// Keep the most authoritative version (sealed + compressed > not) and
+	// count how many nodes reported each chunk (replica_count).
+	return connect.NewResponse(&apiv1.ListChunksResponse{Chunks: dedupChunks(allChunks)}), nil
+}
+
+// dedupChunks collapses multiple entries for the same chunk ID into a single
+// authoritative entry. The most advanced version (sealed+compressed) wins, and
+// replica_count records how many distinct copies reported the chunk.
+func dedupChunks(chunks []*apiv1.ChunkMeta) []*apiv1.ChunkMeta {
+	best := make(map[string]*apiv1.ChunkMeta, len(chunks))
+	replicaCount := make(map[string]int32, len(chunks))
+	for _, c := range chunks {
+		replicaCount[c.Id]++
+		existing, ok := best[c.Id]
+		if !ok {
+			best[c.Id] = c
+			continue
+		}
+		// Prefer the more-advanced version: sealed + compressed > sealed > unsealed.
+		if moreAuthoritative(c, existing) {
+			best[c.Id] = c
+		}
+	}
+	out := make([]*apiv1.ChunkMeta, 0, len(best))
+	for _, c := range best {
+		c.ReplicaCount = replicaCount[c.Id]
+		out = append(out, c)
+	}
+	return out
+}
+
+// moreAuthoritative reports whether a is a more-advanced view of the same
+// chunk than b. Higher authority = later in the chunk lifecycle.
+func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
+	if a.Sealed && !b.Sealed {
+		return true
+	}
+	if !a.Sealed && b.Sealed {
+		return false
+	}
+	if a.Compressed && !b.Compressed {
+		return true
+	}
+	return false
 }
 
 // remoteTierNodes returns node IDs of ALL remote nodes that host tiers for a
-// vault — both primaries and secondaries. This ensures ListChunks collects
-// replica chunks for accurate replica counting.
+// vault — both leaders and followers. Leaders provide authoritative chunk
+// metadata; followers are queried to verify replica presence for the UI.
 func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []string {
 	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || vaultCfg == nil {
@@ -89,13 +134,11 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 		if !tierIDs[t.ID] {
 			continue
 		}
-		// Leader node.
 		leaderNodeID := t.LeaderNodeID(nscs)
 		if leaderNodeID != "" && leaderNodeID != s.localNodeID && !seen[leaderNodeID] {
 			seen[leaderNodeID] = true
 			nodes = append(nodes, leaderNodeID)
 		}
-		// Follower nodes.
 		for _, sid := range t.FollowerNodeIDs(nscs) {
 			if sid != s.localNodeID && !seen[sid] {
 				seen[sid] = true

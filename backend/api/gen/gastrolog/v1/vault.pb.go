@@ -405,6 +405,7 @@ type ChunkMeta struct {
 	TierType         string                 `protobuf:"bytes,15,opt,name=tier_type,json=tierType,proto3" json:"tier_type,omitempty"`                          // tier type: "memory", "file", "cloud"
 	RetentionPending bool                   `protobuf:"varint,16,opt,name=retention_pending,json=retentionPending,proto3" json:"retention_pending,omitempty"` // true = chunk is marked for retention processing
 	StorageClass     string                 `protobuf:"bytes,17,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`              // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
+	ReplicaCount     int32                  `protobuf:"varint,18,opt,name=replica_count,json=replicaCount,proto3" json:"replica_count,omitempty"`             // how many nodes currently have this chunk (leader + followers that have caught up)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -556,6 +557,13 @@ func (x *ChunkMeta) GetStorageClass() string {
 		return x.StorageClass
 	}
 	return ""
+}
+
+func (x *ChunkMeta) GetReplicaCount() int32 {
+	if x != nil {
+		return x.ReplicaCount
+	}
+	return 0
 }
 
 type GetChunkRequest struct {
@@ -2578,7 +2586,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x11ListChunksRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"E\n" +
 	"\x12ListChunksResponse\x12/\n" +
-	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\x81\x05\n" +
+	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"\xa6\x05\n" +
 	"\tChunkMeta\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12;\n" +
 	"\vwrite_start\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
@@ -2603,7 +2611,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\atier_id\x18\x0e \x01(\tR\x06tierId\x12\x1b\n" +
 	"\ttier_type\x18\x0f \x01(\tR\btierType\x12+\n" +
 	"\x11retention_pending\x18\x10 \x01(\bR\x10retentionPending\x12#\n" +
-	"\rstorage_class\x18\x11 \x01(\tR\fstorageClass\"B\n" +
+	"\rstorage_class\x18\x11 \x01(\tR\fstorageClass\x12#\n" +
+	"\rreplica_count\x18\x12 \x01(\x05R\freplicaCount\"B\n" +
 	"\x0fGetChunkRequest\x12\x14\n" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\x12\x19\n" +
 	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"A\n" +

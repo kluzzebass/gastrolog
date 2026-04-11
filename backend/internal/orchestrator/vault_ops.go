@@ -139,6 +139,13 @@ func (o *Orchestrator) ListChunkMetas(vaultID uuid.UUID) ([]chunk.ChunkMeta, err
 
 // ListAllChunkMetas returns chunk metadata from ALL local tiers of a vault,
 // each tagged with its tier ID and type.
+// ListAllChunkMetas returns chunk metadata from all local tier instances.
+// When a vault has multiple tier instances for the same tier on the same
+// node (leader + same-node follower storages), the leader's view is preferred
+// to avoid double-counting chunks. Follower-only tiers are still included
+// (the leader node is elsewhere; this node contributes replica presence).
+//
+// Caller-side deduplication across nodes happens in the server's ListChunks.
 func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, error) {
 	o.mu.RLock()
 	vault := o.vaults[vaultID]
@@ -147,8 +154,22 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, 
 		return nil, fmt.Errorf("%w: %s", ErrVaultNotFound, vaultID)
 	}
 
+	// If a tier has both a leader and follower instance on this node, prefer
+	// the leader. Same-node followers exist during tier draining or when
+	// replication factor requires multiple local storages.
+	hasLeader := make(map[uuid.UUID]bool)
+	for _, tier := range vault.Tiers {
+		if !tier.IsFollower {
+			hasLeader[tier.TierID] = true
+		}
+	}
+
 	var result []TieredChunkMeta
 	for _, tier := range vault.Tiers {
+		// Skip same-node follower if the leader instance is also here.
+		if tier.IsFollower && hasLeader[tier.TierID] {
+			continue
+		}
 		metas, err := tier.Chunks.List()
 		if err != nil {
 			return nil, fmt.Errorf("list chunks for tier %s: %w", tier.TierID, err)

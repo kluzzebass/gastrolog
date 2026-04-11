@@ -30,20 +30,11 @@ export function VaultCard({
   onToggle,
   onOpenSettings,
 }: Readonly<VaultCardProps>) {
-  // Use ListChunks data (fans out to all nodes) for accurate counts.
+  // Use ListChunks data (fans out to leader nodes, authoritative per chunk).
   // ListVaults stats rely on periodic peer broadcasts and flicker.
   const { data: chunks } = useChunks(vault.id);
-  const dedupedChunks = (() => {
-    if (!chunks) return [];
-    const seen = new Set<string>();
-    return chunks.filter((c) => {
-      if (seen.has(c.id)) return false;
-      seen.add(c.id);
-      return true;
-    });
-  })();
-  const chunkCount = dedupedChunks.length;
-  const recordCount = dedupedChunks.reduce((sum, c) => sum + Number(c.recordCount), 0);
+  const chunkCount = chunks?.length ?? 0;
+  const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
 
   return (
     <ExpandableCard
@@ -155,24 +146,9 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     );
   }
 
-  // Count replicas before dedup: how many nodes returned each chunk ID.
-  const replicaCount = new Map<string, number>();
-  for (const ch of chunks ?? []) {
-    replicaCount.set(ch.id, (replicaCount.get(ch.id) ?? 0) + 1);
-  }
-
-  // Deduplicate replicas: when RF > 1, the same chunk ID appears from
-  // multiple nodes. Keep the leader's version — it's compressed and
-  // indexed. Followers may briefly have uncompressed forwarded copies
-  // before ImportToTier replaces them with the canonical version.
-  const bestChunk = new Map<string, ChunkMeta>();
-  for (const ch of chunks ?? []) {
-    const existing = bestChunk.get(ch.id);
-    if (!existing || (!existing.compressed && ch.compressed) || (!existing.sealed && ch.sealed)) {
-      bestChunk.set(ch.id, ch);
-    }
-  }
-  const dedupedChunks = [...bestChunk.values()];
+  // Backend already deduplicates chunks and populates replica_count. Each
+  // chunk appears exactly once with authoritative metadata from the leader.
+  const dedupedChunks = chunks ?? [];
 
   // Group chunks by tier, then sort within each tier by time (newest first).
   const tierGroups = new Map<string, { tierType: string; chunks: ChunkMeta[] }>();
@@ -345,7 +321,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 const end = endTs ? instantToDate(protoToInstant(endTs)) : undefined;
                 const isExpanded = expandedChunk === chunk.id;
 
-                const replicas = replicaCount.get(chunk.id) ?? 1;
+                const replicas = chunk.replicaCount || 1;
                 return (
                   <ChunkRow
                     key={chunk.id}
