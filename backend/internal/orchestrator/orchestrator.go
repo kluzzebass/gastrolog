@@ -223,6 +223,13 @@ type Orchestrator struct {
 	// Cron rotation lifecycle.
 	cronRotation *cronRotationManager
 
+	// Per-tier rate alerters that surface pathological rotation or
+	// retention configurations as operator-visible alerts. See
+	// gastrolog-47qyw. Both are initialized in New() and evaluated by
+	// a periodic goroutine in Start().
+	rotationRates  *RateAlerter
+	retentionRates *RateAlerter
+
 	// Clock for testing.
 	now func() time.Time
 
@@ -268,6 +275,24 @@ type Orchestrator struct {
 // wired phase), preserving the pre-gastrolog-1e5ke behaviour.
 func (o *Orchestrator) shuttingDown() bool {
 	return o.phase != nil && o.phase.ShuttingDown()
+}
+
+// tierLabel returns the operator-friendly name for a tier as configured,
+// or "" if the tier or config is unknown. Used by RateAlerter to build
+// alert messages that say "tier ssd-hot" instead of just a UUID. Safe to
+// call from any goroutine — it acquires the orchestrator read lock.
+func (o *Orchestrator) tierLabel(tierID uuid.UUID) string {
+	if o.cfgLoader == nil {
+		return ""
+	}
+	cfg, err := o.cfgLoader.Load(context.Background())
+	if err != nil || cfg == nil {
+		return ""
+	}
+	if tierCfg := findTierConfig(cfg.Tiers, tierID); tierCfg != nil {
+		return tierCfg.Name
+	}
+	return ""
 }
 
 // ConfigLoader provides read access to the full configuration.
@@ -370,6 +395,38 @@ func New(cfg Config) (*Orchestrator, error) {
 	// Wire up post-seal callback for cron rotation so sealed chunks
 	// get compressed and indexed (same pipeline as ingest-triggered seals).
 	o.cronRotation.onSeal = o.postSealWork
+
+	// Per-tier rate alerters. Thresholds are taken from gastrolog-47qyw:
+	//   rotation: warn at >1/sec, error at >5/sec, sustained over 30s
+	//   retention: warn at >10/sec sustained over 30s
+	// The orchestrator's tierName closure looks up the human label from
+	// the current vault registry; "" is returned if the tier is unknown.
+	o.rotationRates = newRateAlerter(rateAlerterConfig{
+		Window:    30 * time.Second,
+		Kind:      "rotation",
+		Source:    "rotation",
+		WarningAt: 1.0,
+		ErrorAt:   5.0,
+		Alerts:    o.alerts,
+		TierName:  o.tierLabel,
+	})
+	o.retentionRates = newRateAlerter(rateAlerterConfig{
+		Window:    30 * time.Second,
+		Kind:      "retention",
+		Source:    "retention",
+		WarningAt: 10.0,
+		ErrorAt:   0, // no error escalation per issue scope
+		Alerts:    o.alerts,
+		TierName:  o.tierLabel,
+	})
+
+	// Cron rotation completes its work outside the post-seal pipeline,
+	// so the rotation rate counter must be hooked from the cron manager
+	// directly. The age-based rotationsweep path increments the counter
+	// inline at its seal-trigger site.
+	o.cronRotation.onRotation = func(_, tierID uuid.UUID) {
+		o.rotationRates.Record(tierID, o.now())
+	}
 
 	// Register the single retention sweep that discovers all tier instances
 	// each tick. No per-tier lifecycle management needed.

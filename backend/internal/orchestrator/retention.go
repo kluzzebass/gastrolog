@@ -521,6 +521,12 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 	}
 
 	if r.orch != nil {
+		// Record the successful retention deletion for the per-tier rate
+		// alerter. Only counted on the leader path (this function only
+		// runs on tier leaders) so the rate reflects active expiration
+		// decisions, not follower OnDelete cascades. See gastrolog-47qyw.
+		r.orch.retentionRates.Record(r.tierID, r.orch.now())
+
 		// Delete from same-node follower instances.
 		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
 		// Forward deletion to remote follower nodes.

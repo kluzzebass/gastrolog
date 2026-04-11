@@ -691,8 +691,16 @@ func (o *Orchestrator) appendRecord(vaultID uuid.UUID, rec chunk.Record) (chunk.
 	}
 
 	// Detect seal: if Active() changed, the previous chunk was sealed.
+	// This fires for rotations the chunk manager decided internally during
+	// Append (record-count, size, or age policies that trip mid-write) —
+	// the hot path for high-rate rotation misconfigurations. Count the
+	// rotation for the per-tier rate alerter so the operator sees an alert
+	// before the pipeline collapses. See gastrolog-47qyw.
 	activeAfter := cm.Active()
 	if activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID) {
+		if activeTier != nil {
+			o.rotationRates.Record(activeTier.TierID, o.now())
+		}
 		o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 	}
 

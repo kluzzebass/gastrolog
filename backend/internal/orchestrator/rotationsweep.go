@@ -73,6 +73,11 @@ func (o *Orchestrator) rotationSweep() {
 				)
 				if activeBefore != nil {
 					seals = append(seals, sealEvent{vaultID: vaultID, cm: tier.Chunks, chunkID: activeBefore.ID})
+					// Record the rotation event for the per-tier rate
+					// alerter. We do this here (under the read lock) so
+					// the count reflects every triggered rotation, not
+					// only those whose post-seal pipeline is scheduled.
+					o.rotationRates.Record(tier.TierID, o.now())
 				}
 			}
 		}

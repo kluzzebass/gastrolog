@@ -123,7 +123,29 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// Start the pressure gate after everything else is wired.
 	o.auxWg.Go(func() { gate.Run(ctx, 200*time.Millisecond) })
 
+	// Periodic per-tier rate alert evaluator (gastrolog-47qyw). Evaluates
+	// rotation and retention rates against thresholds every 5 seconds and
+	// raises/clears alerts as needed.
+	o.auxWg.Go(func() { o.runRateAlertEvaluator(ctx, 5*time.Second) })
+
 	return nil
+}
+
+// runRateAlertEvaluator periodically evaluates rotation and retention rate
+// alerters. Exits when ctx is cancelled.
+func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := o.now()
+			o.rotationRates.Evaluate(now)
+			o.retentionRates.Evaluate(now)
+		}
+	}
 }
 
 // Stop cancels all ingesters, the digest/write pipeline, and in-flight index

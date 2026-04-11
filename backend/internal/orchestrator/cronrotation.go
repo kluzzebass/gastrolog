@@ -16,10 +16,11 @@ func cronJobName(vaultID, tierID uuid.UUID) string {
 
 // cronRotationManager manages cron-based chunk rotation jobs on the shared scheduler.
 type cronRotationManager struct {
-	scheduler *Scheduler
-	schedules map[string]string // jobName → cronExpr (tracks current schedule to avoid unnecessary updates)
-	onSeal    func(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
-	logger    *slog.Logger
+	scheduler  *Scheduler
+	schedules  map[string]string // jobName → cronExpr (tracks current schedule to avoid unnecessary updates)
+	onSeal     func(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
+	onRotation func(vaultID, tierID uuid.UUID) // optional: called once per successful rotation
+	logger     *slog.Logger
 }
 
 func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRotationManager {
@@ -40,7 +41,7 @@ func (m *cronRotationManager) ensure(vaultID, tierID uuid.UUID, vaultName, cronE
 	if _, ok := m.schedules[name]; ok {
 		m.scheduler.RemoveJob(name)
 	}
-	if err := m.scheduler.AddJob(name, cronExpr, m.rotateVault, vaultID, vaultName, cm); err != nil {
+	if err := m.scheduler.AddJob(name, cronExpr, m.rotateVault, vaultID, tierID, vaultName, cm); err != nil {
 		m.logger.Error("cron rotation: failed to add job",
 			"vault", vaultID, "tier", tierID, "cron", cronExpr, "error", err)
 		return
@@ -70,8 +71,8 @@ func (m *cronRotationManager) removeAllForVault(vaultID uuid.UUID) {
 	}
 }
 
-// rotateVault seals the active chunk for a vault if it has records.
-func (m *cronRotationManager) rotateVault(vaultID uuid.UUID, vaultName string, cm chunk.ChunkManager) {
+// rotateVault seals the active chunk for a vault tier if it has records.
+func (m *cronRotationManager) rotateVault(vaultID, tierID uuid.UUID, vaultName string, cm chunk.ChunkManager) {
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
 		m.logger.Debug("cron rotation: skipping empty chunk",
@@ -89,12 +90,16 @@ func (m *cronRotationManager) rotateVault(vaultID uuid.UUID, vaultName string, c
 	m.logger.Info("rotating chunk",
 		"trigger", "cron",
 		"vault", vaultID,
+		"tier", tierID,
 		"name", vaultName,
 		"chunk", sealedID.String(),
 		"bytes", active.Bytes,
 		"records", active.RecordCount,
 	)
 
+	if m.onRotation != nil {
+		m.onRotation(vaultID, tierID)
+	}
 	if m.onSeal != nil {
 		m.onSeal(vaultID, cm, sealedID)
 	}
