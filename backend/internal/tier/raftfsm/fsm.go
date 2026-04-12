@@ -24,6 +24,7 @@ const (
 	CmdDeleteChunk      Command = 5
 	CmdRetentionPending    Command = 6
 	CmdTransitionStreamed  Command = 7
+	CmdTransitionReceived Command = 8 // destination tier records receipt of a source chunk
 )
 
 // Entry holds the full metadata for one chunk in the FSM.
@@ -85,12 +86,20 @@ type FSM struct {
 	ready    bool // true after first Apply or Restore
 	onDelete func(chunk.ChunkID)
 	onUpload func(Entry) // called after CmdUploadChunk applies (outside lock)
+
+	// transitionReceipts tracks source chunk IDs whose records have been
+	// imported into this tier. The source tier checks this set to confirm
+	// that the destination (this tier) has durably committed the data
+	// before expiring the source chunk. Keyed by source chunk ID.
+	// See gastrolog-4913n.
+	transitionReceipts map[chunk.ChunkID]bool
 }
 
 // New creates an empty chunk metadata FSM.
 func New() *FSM {
 	return &FSM{
-		chunks: make(map[chunk.ChunkID]*Entry),
+		chunks:             make(map[chunk.ChunkID]*Entry),
+		transitionReceipts: make(map[chunk.ChunkID]bool),
 	}
 }
 
@@ -216,6 +225,8 @@ func (f *FSM) Apply(log *hraft.Log) any {
 		result = f.applyRetentionPending(payload)
 	case CmdTransitionStreamed:
 		result = f.applyTransitionStreamed(payload)
+	case CmdTransitionReceived:
+		result = f.applyTransitionReceived(payload)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -241,14 +252,18 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	for _, e := range f.chunks {
 		entries = append(entries, *e)
 	}
-	return &fsmSnapshot{entries: entries}, nil
+	receipts := make([]chunk.ChunkID, 0, len(f.transitionReceipts))
+	for id := range f.transitionReceipts {
+		receipts = append(receipts, id)
+	}
+	return &fsmSnapshot{entries: entries, receipts: receipts}, nil
 }
 
 // Restore replaces FSM state from a snapshot.
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	entries, err := decodeSnapshot(rc)
+	entries, receipts, err := decodeSnapshot(rc)
 	if err != nil {
 		return fmt.Errorf("restore chunk FSM: %w", err)
 	}
@@ -258,6 +273,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.chunks = make(map[chunk.ChunkID]*Entry, len(entries))
 	for i := range entries {
 		f.chunks[entries[i].ID] = &entries[i]
+	}
+	f.transitionReceipts = make(map[chunk.ChunkID]bool, len(receipts))
+	for _, id := range receipts {
+		f.transitionReceipts[id] = true
 	}
 	f.ready = true
 	return nil
@@ -452,6 +471,34 @@ func MarshalRetentionPending(id chunk.ChunkID) []byte {
 	return buf
 }
 
+// TransitionReceived: [16 bytes source ChunkID]
+func (f *FSM) applyTransitionReceived(data []byte) error {
+	if len(data) < 16 {
+		return fmt.Errorf("transition received: payload too short (%d bytes)", len(data))
+	}
+	var id chunk.ChunkID
+	copy(id[:], data[:16])
+	f.transitionReceipts[id] = true
+	return nil
+}
+
+// HasTransitionReceipt returns true if this tier has committed a receipt
+// for the given source chunk ID. Called by the source tier's confirmation
+// sweep to verify the destination has durably received the records.
+func (f *FSM) HasTransitionReceipt(sourceChunkID chunk.ChunkID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.transitionReceipts[sourceChunkID]
+}
+
+// MarshalTransitionReceived builds the Raft log data for a TransitionReceived command.
+func MarshalTransitionReceived(sourceChunkID chunk.ChunkID) []byte {
+	buf := make([]byte, 1+16)
+	buf[0] = byte(CmdTransitionReceived)
+	copy(buf[1:17], sourceChunkID[:])
+	return buf
+}
+
 // MarshalTransitionStreamed builds the Raft log data for a TransitionStreamed command.
 func MarshalTransitionStreamed(id chunk.ChunkID) []byte {
 	buf := make([]byte, 1+16)
@@ -462,8 +509,15 @@ func MarshalTransitionStreamed(id chunk.ChunkID) []byte {
 
 // ---------- Snapshot ----------
 
+// receiptMagic is a 16-byte sentinel written after all chunk entries in a
+// snapshot to mark the start of the transition receipts section. Chosen to
+// be an invalid ChunkID so old decoders (which read fixed-size entries
+// until EOF) stop at this point with a short-read/EOF — safe degradation.
+var receiptMagic = [16]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}
+
 type fsmSnapshot struct {
-	entries []Entry
+	entries  []Entry
+	receipts []chunk.ChunkID
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
@@ -471,6 +525,25 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 		if err := encodeEntry(sink, &s.entries[i]); err != nil {
 			_ = sink.Cancel()
 			return err
+		}
+	}
+	// Write receipt section: magic sentinel + 4-byte count + N×16-byte IDs.
+	if len(s.receipts) > 0 {
+		if _, err := sink.Write(receiptMagic[:]); err != nil {
+			_ = sink.Cancel()
+			return err
+		}
+		var countBuf [4]byte
+		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.receipts))) //nolint:gosec // G115: receipt count fits uint32
+		if _, err := sink.Write(countBuf[:]); err != nil {
+			_ = sink.Cancel()
+			return err
+		}
+		for _, id := range s.receipts {
+			if _, err := sink.Write(id[:]); err != nil {
+				_ = sink.Cancel()
+				return err
+			}
 		}
 	}
 	return sink.Close()
@@ -541,19 +614,69 @@ func encodeEntry(w io.Writer, e *Entry) error {
 	return err
 }
 
-func decodeSnapshot(r io.Reader) ([]Entry, error) {
+func decodeSnapshot(r io.Reader) ([]Entry, []chunk.ChunkID, error) {
 	var entries []Entry
+	var receipts []chunk.ChunkID
 	var buf [entrySize]byte
 	for {
 		_, err := io.ReadFull(r, buf[:])
 		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			break
+			return entries, receipts, nil
 		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
+
+		// Check for the receipt section sentinel. The first 16 bytes of
+		// each entry are the ChunkID; if they match the magic marker,
+		// this is the start of the receipts section, not a chunk entry.
 		var id chunk.ChunkID
 		copy(id[:], buf[0:16])
+		if id == chunk.ChunkID(receiptMagic) {
+			// The rest of buf contains the tail of the last entry-sized
+			// read, but we only need the 4-byte count that follows the
+			// 16-byte magic. The magic consumed 16 bytes of this read;
+			// the count is at buf[16:20] — BUT the magic was at the
+			// start of a new entrySize block, so the count is actually
+			// in the NEXT read, not this one. Re-read just the count.
+			var countBuf [4]byte
+			// The magic consumed 16 of the entrySize bytes we just read.
+			// The count is somewhere in the remaining bytes. Rather than
+			// parse the partial block, just read the count fresh — the
+			// magic was written as 16 standalone bytes, followed by 4
+			// count bytes, followed by N×16 receipt IDs.
+			//
+			// But we already consumed entrySize bytes that started with
+			// the magic. So: count starts at buf[16:20] only if the
+			// Persist wrote magic as part of the entry stream. Let's
+			// check — Persist writes magic (16 bytes) + count (4 bytes)
+			// + IDs (N×16) as separate Write calls AFTER all entries.
+			// The decoder reads entrySize (126) bytes at a time. If the
+			// magic (16 bytes) is read as the first 16 bytes of a 126-
+			// byte block, the remaining 110 bytes contain: count (4) +
+			// up to 6 receipt IDs (6×16=96) + partial next ID (10).
+			//
+			// This is getting complicated. Simpler: re-read from the
+			// underlying reader since we know the format after the magic.
+			// But we already consumed bytes. Let's extract what we can
+			// from buf and then read more.
+			//
+			// Actually, the magic was written separately. The io.ReadFull
+			// reads 126 bytes which starts with the 16-byte magic. So
+			// buf[16:20] contains the 4-byte count IF the magic+count
+			// were written contiguously. They were: Persist writes
+			// magic (16) then countBuf (4) sequentially to the sink.
+			copy(countBuf[:], buf[16:20])
+			count := binary.BigEndian.Uint32(countBuf[:])
+
+			// We've consumed 20 bytes of useful data from this 126-byte
+			// block. The remaining 106 bytes contain receipt IDs (each
+			// 16 bytes). Read what's in the buffer first, then read more.
+			remaining := buf[20:entrySize]
+			receipts = decodeReceiptIDs(remaining, count, r)
+			return entries, receipts, nil
+		}
+
 		flags := binary.BigEndian.Uint16(buf[124:126])
 		entries = append(entries, Entry{
 			ID:              id,
@@ -579,5 +702,31 @@ func decodeSnapshot(r io.Reader) ([]Entry, error) {
 			TransitionStreamed: flags&(1<<5) != 0,
 		})
 	}
-	return entries, nil
+}
+
+// decodeReceiptIDs reads receipt chunk IDs from a mix of an already-read
+// buffer tail and the underlying reader. The first `remaining` bytes may
+// contain partial IDs; additional IDs are read from r.
+func decodeReceiptIDs(remaining []byte, count uint32, r io.Reader) []chunk.ChunkID {
+	if count == 0 {
+		return nil
+	}
+	// Collect all receipt bytes: what's left in the buffer + whatever
+	// is needed from the reader.
+	totalBytes := int(count) * 16
+	if totalBytes <= len(remaining) {
+		remaining = remaining[:totalBytes]
+	} else {
+		extra := make([]byte, totalBytes-len(remaining))
+		n, _ := io.ReadFull(r, extra)
+		remaining = append(remaining, extra[:n]...)
+	}
+	ids := make([]chunk.ChunkID, 0, count)
+	for len(remaining) >= 16 {
+		var id chunk.ChunkID
+		copy(id[:], remaining[:16])
+		ids = append(ids, id)
+		remaining = remaining[16:]
+	}
+	return ids
 }

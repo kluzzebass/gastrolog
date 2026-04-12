@@ -34,12 +34,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 
 	nextTierID, nextTierCfg := r.resolveNextTier(cfg)
 	if nextTierCfg == nil {
-		// Terminal tier: no next tier to transition to. Fall back to
-		// expire — the chunk has reached the end of its tier chain.
-		r.expireChunk(id)
-		r.logger.Debug("transition: expired on terminal tier (no next tier)",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
-		return
+		return // logged inside resolveNextTier
 	}
 
 	cursor, err := r.cm.OpenCursor(id)
@@ -86,11 +81,23 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		return
 	}
 
+	// Write a receipt to the DESTINATION tier's Raft confirming it has
+	// received the records from this source chunk. The Raft commit gives
+	// majority-durable confirmation across the destination's nodes.
+	destTier := r.findDestTierInstance(nextTierID)
+	if destTier != nil && destTier.ApplyRaftTransitionReceived != nil {
+		if err := destTier.ApplyRaftTransitionReceived(id); err != nil {
+			r.logger.Warn("transition: failed to write receipt to destination",
+				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+				"dest_tier", nextTierID, "error", err)
+			// Fall through — mark as streamed and let the confirmation
+			// sweep retry the receipt check.
+		}
+	}
+
 	// Mark the chunk as streamed rather than deleting it immediately.
 	// The retention sweep will check whether the destination tier has
-	// durably replicated the chunk before expiring the source copy.
-	// This prevents data loss if the destination leader dies before
-	// replication to its followers completes. See gastrolog-4913n.
+	// the receipt before expiring the source copy. See gastrolog-4913n.
 	//
 	// In single-node mode (no tier Raft), fall back to immediate expire
 	// since there are no followers to wait for.
@@ -98,20 +105,34 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		if err := r.applyRaftTransitionStreamed(id); err != nil {
 			r.logger.Error("transition: failed to mark as streamed",
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
-			// Don't expire — the chunk is in an ambiguous state. The next
-			// sweep will re-attempt the transition.
 			return
 		}
-		r.logger.Debug("transition: streamed, awaiting destination replication",
+		r.logger.Debug("transition: streamed, awaiting destination receipt",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID, "remote", remote)
 	} else {
-		// No tier Raft — single-node mode. Expire immediately.
 		r.expireChunk(id)
 		r.logger.Debug("transition: completed (single-node, immediate expire)",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
 			"next_tier", nextTierID)
 	}
+}
+
+// findDestTierInstance looks up the destination tier in the orchestrator's vault registry.
+func (r *retentionRunner) findDestTierInstance(destTierID uuid.UUID) *TierInstance {
+	if r.orch == nil {
+		return nil
+	}
+	vault := r.orch.vaults[r.vaultID]
+	if vault == nil {
+		return nil
+	}
+	for _, t := range vault.Tiers {
+		if t.TierID == destTierID {
+			return t
+		}
+	}
+	return nil
 }
 
 // resolveNextTier delegates to resolveNextTierInChain.
@@ -187,23 +208,29 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *config.Config) {
 		return
 	}
 
-	// Expire all streamed chunks. The stream already succeeded (the
-	// destination leader has the data on disk), which is the strongest
-	// guarantee we can make without tracking source→destination chunk
-	// ID mappings. The destination creates a NEW chunk ID during import,
-	// so we can't check the destination's manifest for the source ID.
-	//
-	// The two-phase flow (mark streamed → confirm → expire) still
-	// provides value: it prevents the source from deleting a chunk
-	// BEFORE the stream completes, which was the original data-loss
-	// window. Future work could track the mapping for full follower-
-	// replication confirmation.
+	destTier := r.findDestTierInstance(nextTierID)
+
 	for _, id := range streamed {
-		r.expireChunk(id)
-		r.logger.Debug("transition: streamed chunk expired",
-			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
-			"dest_tier", nextTierID)
+		if r.isReceiptConfirmed(destTier, id) {
+			r.expireChunk(id)
+			r.logger.Debug("transition: receipt confirmed, expired",
+				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+				"dest_tier", nextTierID)
+		}
 	}
+}
+
+// isReceiptConfirmed checks whether the destination tier has committed a
+// transition receipt for the given source chunk ID. If the destination has
+// no local tier instance or no Raft, falls back to true — the stream
+// succeeded and we can't check further from this node.
+func (r *retentionRunner) isReceiptConfirmed(destTier *TierInstance, sourceChunkID chunk.ChunkID) bool {
+	if destTier == nil || destTier.HasTransitionReceipt == nil {
+		// No local destination instance or no Raft — accept stream
+		// success as confirmation (remote-only destination).
+		return true
+	}
+	return destTier.HasTransitionReceipt(sourceChunkID)
 }
 
 // findTierInstance looks up this runner's tier in the orchestrator's vault registry.

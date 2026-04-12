@@ -469,17 +469,45 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
 		}
 	}
 
-	defer r.clearInflight(id)
 	switch b.action {
 	case config.RetentionActionExpire:
+		defer r.clearInflight(id)
 		r.expireChunk(id)
 	case config.RetentionActionEject:
+		defer r.clearInflight(id)
 		r.ejectChunk(id, b.ejectRouteIDs)
 	case config.RetentionActionTransition:
-		r.transitionChunk(id)
+		// Transitions can be slow (streaming large chunks to slow tiers).
+		// Run as a one-shot scheduler job so the sweep isn't blocked.
+		// The inflight guard stays set until the job completes — the
+		// sweep won't re-schedule the same chunk.
+		r.scheduleTransition(id)
 	default:
+		r.clearInflight(id)
 		r.logger.Error("retention: unknown action", "vault", r.vaultID, "action", b.action)
 	}
+}
+
+// scheduleTransition dispatches a tier transition as a one-shot scheduler job
+// so that slow transitions don't block the retention sweep from processing
+// other chunks. The inflight guard is cleared when the job completes.
+func (r *retentionRunner) scheduleTransition(id chunk.ChunkID) {
+	if r.orch == nil {
+		// No orchestrator (test mode) — run inline.
+		defer r.clearInflight(id)
+		r.transitionChunk(id)
+		return
+	}
+	name := fmt.Sprintf("transition:%s:%s:%s", r.vaultID, r.tierID, id)
+	if err := r.orch.scheduler.RunOnce(name, func() {
+		defer r.clearInflight(id)
+		r.transitionChunk(id)
+	}); err != nil {
+		r.clearInflight(id)
+		r.logger.Warn("retention: failed to schedule transition",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
+	}
+	r.orch.scheduler.Describe(name, fmt.Sprintf("Transition chunk %s to next tier", id))
 }
 
 // clearInflight removes a chunk from the in-flight set.

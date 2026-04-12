@@ -914,8 +914,10 @@ type tierRaftCallbacks struct {
 	isFSMReady             func() bool
 	applyDelete            func(id chunk.ChunkID) error
 	applyRetPending        func(id chunk.ChunkID) error
-	applyTransitionStreamed func(id chunk.ChunkID) error
-	listChunks             func() []chunk.ChunkID
+	applyTransitionStreamed  func(id chunk.ChunkID) error
+	applyTransitionReceived func(sourceChunkID chunk.ChunkID) error
+	hasTransitionReceipt    func(sourceChunkID chunk.ChunkID) bool
+	listChunks              func() []chunk.ChunkID
 	listRetPending         func() []chunk.ChunkID
 	listTransitionStreamed  func() []chunk.ChunkID
 	overlayFromFSM         func(chunk.ChunkMeta) chunk.ChunkMeta
@@ -1028,6 +1030,15 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 		},
 		applyTransitionStreamed: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalTransitionStreamed(id))
+		},
+		applyTransitionReceived: func(sourceChunkID chunk.ChunkID) error {
+			return applier.Apply(tierfsm.MarshalTransitionReceived(sourceChunkID))
+		},
+		hasTransitionReceipt: func(sourceChunkID chunk.ChunkID) bool {
+			if fsm == nil {
+				return false
+			}
+			return fsm.HasTransitionReceipt(sourceChunkID)
 		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {

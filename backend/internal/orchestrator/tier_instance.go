@@ -50,6 +50,16 @@ type TierInstance struct {
 	// ListTransitionStreamed returns chunk IDs with TransitionStreamed=true in the FSM.
 	ListTransitionStreamed func() []chunk.ChunkID
 
+	// ApplyRaftTransitionReceived writes a receipt confirming that records
+	// from the given source chunk have been imported into this tier. Called
+	// by the source tier after streaming completes. The Raft commit gives
+	// majority-durable confirmation. See gastrolog-4913n.
+	ApplyRaftTransitionReceived func(sourceChunkID chunk.ChunkID) error
+
+	// HasTransitionReceipt returns true if the FSM has a receipt for the
+	// given source chunk ID, meaning this tier has durably received its records.
+	HasTransitionReceipt func(sourceChunkID chunk.ChunkID) bool
+
 	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
 	// until committed. Returns an error if not leader or timeout. Nil when no
 	// Raft group exists.
@@ -90,6 +100,8 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ListRetentionPending = cb.listRetPending
 	t.ApplyRaftTransitionStreamed = cb.applyTransitionStreamed
 	t.ListTransitionStreamed = cb.listTransitionStreamed
+	t.ApplyRaftTransitionReceived = cb.applyTransitionReceived
+	t.HasTransitionReceipt = cb.hasTransitionReceipt
 	t.IsFSMReady = cb.isFSMReady
 	t.OverlayFromFSM = cb.overlayFromFSM
 }

@@ -177,6 +177,22 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 }
 
 // MaxConcurrent returns the current concurrency limit.
+// HasPendingPrefix returns true if any active (not yet completed) job
+// has a name starting with prefix. Used by tests to wait for async
+// transitions to finish.
+func (s *Scheduler) HasPendingPrefix(prefix string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for name := range s.jobs {
+		if strings.HasPrefix(name, prefix) {
+			if _, done := s.completed[name]; !done {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (s *Scheduler) MaxConcurrent() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

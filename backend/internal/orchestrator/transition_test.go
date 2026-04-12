@@ -686,6 +686,7 @@ func TestTransitionSweepDispatch(t *testing.T) {
 	}
 
 	runner.sweep(rules)
+	waitForTransitions(t, orch, 2*time.Second)
 
 	// Verify: source chunk deleted (transition happened via sweep dispatch).
 	metasAfter, _ := tier0CM.List()
@@ -777,6 +778,9 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	}
 
 	runner.sweep(rules)
+
+	// Transition runs as a one-shot scheduler job — wait for completion.
+	waitForTransitions(t, orch, 2*time.Second)
 
 	// Verify: cloud chunk deleted from source tier.
 	metasFinal, _ := cloudTier.Chunks.List()
@@ -1374,6 +1378,7 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	// Run the sweep — this should find the cloud-backed chunk, open a cloud
 	// cursor, stream records to the next tier, and delete the source.
 	runner.sweep(rules)
+	waitForTransitions(t, orch, 2*time.Second)
 
 	// Verify: cloud chunk deleted.
 	metasFinal, _ := cloudTier.Chunks.List()
@@ -3437,4 +3442,19 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	if len(metas) < 2 {
 		t.Fatalf("expected at least 2 chunks from rotation (maxRecords=3, 5 appended), got %d — rotation policy not applied via buildTierInstanceForStorage", len(metas))
 	}
+}
+
+// waitForTransitions polls until all transition:* jobs in the scheduler
+// have completed. Transitions run as one-shot scheduler jobs since
+// gastrolog-4913n, so tests that call sweep() need to wait.
+func waitForTransitions(t *testing.T, orch *Orchestrator, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !orch.scheduler.HasPendingPrefix("transition:") {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("transition jobs did not complete within timeout")
 }
