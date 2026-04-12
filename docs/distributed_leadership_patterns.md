@@ -4,7 +4,9 @@ Research compiled 2026-04-12 for gastrolog-1s3mf (unify tier leadership).
 
 ## The Core Problem
 
-GastroLog has per-tier Raft groups where the **config placement leader** (who receives ingested records) can diverge from the **tier Raft leader** (who won the election). This "dual leadership" problem causes cascading failures: records land on a node without write authority, post-seal/compression/replication stops, transitions fail.
+GastroLog has per-tier Raft groups where the **tier leader** (the node designated `Leader: true` in the tier's placement config — receives ingested records, runs retention, replicates to followers) can diverge from the **tier Raft leader** (the node that won the tier's Raft group election). This "dual leadership" problem causes cascading failures: records land on a node without write authority, post-seal/compression/replication stops, transitions fail.
+
+Note: GastroLog also has a separate **cluster Raft** group for config consensus. This document is exclusively about **tier Raft** leadership.
 
 Every major distributed system using per-shard Raft groups has solved this. Here's how.
 
@@ -125,19 +127,19 @@ Sources: [Redpanda Architecture](https://docs.redpanda.com/current/get-started/a
 
 Raft has a built-in `TransferLeadership` mechanism: the current leader sends `MsgTimeoutNow` to the target follower, which immediately starts an election. TiKV and CockroachDB both use this extensively. The transfer requires the target to be up-to-date on the log.
 
-**Application to GastroLog**: When the config placement says "node1 should lead tier X," proactively transfer Raft leadership to node1. If node1 is behind, wait for log catchup first.
+**Application to GastroLog**: When the config says "node1 should lead tier X," proactively transfer tier Raft leadership to node1. If node1 is behind, wait for log catchup first.
 
 ### Pattern 2: Lease-Based Authority
 
 CockroachDB uses a lease (Raft-replicated) to determine who serves reads/writes. The lease holder is the write authority. Raft leadership follows the lease. This decouples "who the cluster elected" from "who serves traffic" — the lease is the tiebreaker.
 
-**Application to GastroLog**: A "tier lease" could replace the static IsFollower flag. The lease is proposed via Raft, so all nodes agree. Leadership transfer then aligns Raft leadership with the lease holder.
+**Application to GastroLog**: A "tier lease" could replace the static IsFollower flag. The lease is proposed via the tier Raft group, so all nodes agree. Leadership transfer then aligns the tier Raft leader with the lease holder.
 
 ### Pattern 3: Follower Forwarding
 
 When a client hits a non-leader, two options: **redirect** (return leader address, client retries) or **forward** (follower proxies to leader). ZippyDB and Consul use forwarding.
 
-**Application to GastroLog**: The ingester node forwards records to the tier Raft leader. This is what we attempted in gastrolog-1s3mf but broke because the forwarding target resolution used the config leader instead of the Raft leader.
+**Application to GastroLog**: The ingester node forwards records to the tier Raft leader. This is what we attempted in gastrolog-1s3mf but broke because the forwarding target resolution used the tier leader instead of the tier Raft leader.
 
 ### Pattern 4: Preferred Leader Placement
 
@@ -152,13 +154,13 @@ TiKV PD and CockroachDB both support placement rules declaring preferred leader 
 ### Immediate (gastrolog-1s3mf retry)
 
 1. **Keep `IsLeader() = !IsFollower`** for now. Don't derive from Raft.
-2. **Add `TransferLeadership`** to the tier Raft group API. After tier Raft election, the leader loop should check if the elected leader matches the config placement. If not, transfer leadership to the config leader.
-3. **This makes the dual leadership problem disappear**: the Raft leader IS the config leader because we proactively transfer. No need to rewire the data pipeline.
+2. **Add `TransferLeadership`** to the tier Raft group API. After a tier Raft election, the tier leader loop should check if the elected tier Raft leader matches the tier leader. If not, transfer tier Raft leadership to the tier leader.
+3. **This makes the dual leadership problem disappear**: the tier Raft leader IS the tier leader because we proactively transfer. No need to rewire the data pipeline.
 
 ### Medium-term (gastrolog-10h56)
 
 4. **Non-voting members**: Replace `--voteless` with hashicorp/raft `AddNonvoter`. Nodes that should receive data but not affect quorum are learners, not voters with a flag.
-5. **Follower forwarding**: If a non-leader node receives a write (e.g., during the brief window after an election before transfer completes), forward to the Raft leader instead of rejecting.
+5. **Follower forwarding**: If a non-leader node receives a write (e.g., during the brief window after an election before transfer completes), forward to the tier Raft leader instead of rejecting.
 6. **Replication backoff**: Circuit breaker for forwarding to dead peers (gastrolog-2b1xp).
 
 ### Long-term (scale)
