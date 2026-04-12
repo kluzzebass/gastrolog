@@ -193,6 +193,28 @@ func (s *Scheduler) HasPendingPrefix(prefix string) bool {
 	return false
 }
 
+// WaitIdle blocks until all one-time jobs (RunOnce / Submit) have completed.
+// Used in tests to drain async post-seal / replication work before asserting.
+func (s *Scheduler) WaitIdle(timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		s.mu.Lock()
+		pending := 0
+		for name := range s.jobs {
+			if _, done := s.completed[name]; !done {
+				if sched, ok := s.schedules[name]; ok && sched == "once" {
+					pending++
+				}
+			}
+		}
+		s.mu.Unlock()
+		if pending == 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func (s *Scheduler) MaxConcurrent() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()

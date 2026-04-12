@@ -2590,6 +2590,9 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 		t.Fatalf("tier 0 leader: expected %d records, got %d", totalRecords, tier0LeaderCount)
 	}
 
+	// Drain async post-seal jobs before transitioning (see WaitIdle doc).
+	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
+
 	// Transition ALL sealed chunks from tier 0 → tier 1.
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0)
 	for _, m := range metas0 {
@@ -2656,6 +2659,9 @@ func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
 		}
 	}
 
+	// Drain async post-seal jobs before transitioning (see WaitIdle doc).
+	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
+
 	// Seal and transition tier 0 → tier 1.
 	if active := tier0.Chunks.Active(); active != nil && active.RecordCount > 0 {
 		_ = tier0.Chunks.Seal()
@@ -2673,6 +2679,9 @@ func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
 	}
 
 	// Tier 1 should have all records. Seal and transition tier 1 → tier 2.
+	// Drain again — tier 1 got new chunks from the tier 0 transition.
+	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
+
 	tier1 := leaderNode.tiers[1]
 	tier1Count := cursorCountRecords(t, tier1.Chunks)
 	if tier1Count != totalRecords {
@@ -2827,6 +2836,11 @@ func TestClusterTransitionLargeBurst(t *testing.T) {
 
 	metas0, _ := tier0.Chunks.List()
 	t.Logf("tier 0: %d sealed chunks from concurrent burst", len(metas0))
+
+	// Drain async post-seal jobs (compression + replication) before
+	// transitioning. Without this, a late replication import can
+	// re-create a chunk on a follower after the transition deletes it.
+	leaderNode.orch.Scheduler().WaitIdle(30 * time.Second)
 
 	// Transition all chunks.
 	runner := newClusterRetentionRunner(leaderNode.orch, h.vaultID, h.tierIDs[0], tier0)
