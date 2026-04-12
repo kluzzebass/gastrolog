@@ -519,7 +519,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Per-tier leader election | Done | Tier Raft groups with leader/follower election per tier |
 | Inter-tier record streaming | Done | Sealed chunks stream records to the next tier via transitions |
 | Replication | Done | Leader replicates to followers via TierReplicator; ack-gated durability |
-| Durability handoff | Not started | No durable ack protocol between tiers (leader→next-tier guarantee) |
+| Durability handoff | Partial | Two-phase: source marks TransitionStreamed, expires on next sweep after stream success. Full follower-replication confirmation deferred (needs chunk ID mapping) |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
 | Cloud chunk caching | Partial | Cloud index exists; cache eviction (LRU/TTL) not implemented |
 | Memory tier budget enforcement | Done | Total budget with drain to next tier on overflow |
