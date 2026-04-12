@@ -511,17 +511,18 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 |---|---|---|
 | Memory chunk manager | Done | In-memory chunks with rotation/retention |
 | File chunk manager | Done | Local SSD, mmap'd reads, sealed chunk compression |
-| Cloud chunk manager | Done | S3/GCS for sealed chunks and indexes |
-| FileStorage model | Not started | Per-node local storage declarations with storage classes |
-| CloudService model | Not started | Cluster-wide cloud service definitions |
-| Three tier types (memory/local/cloud) | Not started | Tiers reference storage classes and cloud services |
-| Vault as logical container | Not started | Vault type is still coupled to a single backend |
-| Per-tier leader election | Not started | Vaults have a single owner node |
-| Inter-tier record streaming | Not started | No record-level streaming between tiers |
-| Durability handoff | Not started | No durable ack protocol between tiers |
+| Cloud chunk manager | Done | S3/GCS/Azure for sealed chunks and indexes |
+| FileStorage model | Done | Per-node local storage declarations with storage classes |
+| CloudService model | Done | Cluster-wide cloud service definitions with archival lifecycle |
+| Three tier types (memory/local/cloud) | Done | Memory, file, cloud — each a full chunk manager. JSONL also supported |
+| Vault as logical container | Done | Vault owns an ordered tier chain; vault type decoupled from storage |
+| Per-tier leader election | Done | Tier Raft groups with leader/follower election per tier |
+| Inter-tier record streaming | Done | Sealed chunks stream records to the next tier via transitions |
+| Replication | Done | Leader replicates to followers via TierReplicator; ack-gated durability |
+| Durability handoff | Not started | No durable ack protocol between tiers (leader→next-tier guarantee) |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
-| Cloud chunk caching | Not started | No local LRU/TTL cache for cloud-stored chunks |
-| Memory tier budget enforcement | Not started | No per-node memory budget |
+| Cloud chunk caching | Partial | Cloud index exists; cache eviction (LRU/TTL) not implemented |
+| Memory tier budget enforcement | Done | Total budget with drain to next tier on overflow |
 
 ### Anomaly Detection
 
@@ -564,9 +565,13 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Raft consensus | Done | Config replication, leader election |
-| Cross-node query fan-out | Done | ForwardSearch, collectRemote |
-| Config push (WatchConfig) | Done | Real-time config propagation |
+| Raft consensus | Done | Config Raft + per-tier Raft groups |
+| Cross-node query fan-out | Done | ForwardSearch, collectRemote, GetFields, GetContext |
+| Config push (WatchConfig) | Done | Real-time config propagation via server stream |
+| Chunk push (WatchChunks) | Done | Real-time chunk metadata notifications via server stream |
+| Ingest pipeline backpressure | Done | PressureGate with hysteresis, per-ingester throttling |
+| Forward backpressure | Done | ForwardSync for ack-gated records, PressureGate probes on forward channels |
+| Operational alerting | Done | Rotation/retention rate alerts, self-ingester drop visibility, ingest pressure |
 | Automatic vault rebalancing | Not started | Vaults stay on their assigned node |
 | Storage pressure management | Not started | No automatic tier demotion under pressure |
 | Graceful degradation | Partial | Queries fan out but don't indicate missing data |
@@ -576,7 +581,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 
 | Capability | Status | Notes |
 |---|---|---|
-| Retention policies | Done | Per-vault time/count/size-based with expire or eject |
+| Retention policies | Done | Per-tier time/count/size-based with expire, eject, transition, or archive actions |
 | Right to erasure | Not started | No purge command |
 | Sensitive field masking | Not started | Role-based display masking, not encryption. Redact stage for irreversible removal |
 | Access auditing | Not started | No audit vault |
@@ -601,4 +606,5 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | Streaming results | Done | Server-streaming RPC, incremental rendering |
 | Follow mode latency | Done | Sub-second ingestion to screen |
 | Mmap reads | Done | Zero-copy for sealed file chunks |
+| Seekable zstd compression | Done | Random-access reads on compressed sealed chunks |
 | Startup time | Not measured | No benchmark target enforced |
