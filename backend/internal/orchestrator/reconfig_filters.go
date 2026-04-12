@@ -32,6 +32,15 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 	return nil
 }
 
+// isActiveTierLeader returns true if this node is the Raft leader for the
+// vault's active (first) tier. Must be called with o.mu held.
+func (o *Orchestrator) isActiveTierLeader(v *Vault) bool {
+	if len(v.Tiers) == 0 {
+		return true // no tiers — treat as local
+	}
+	return v.Tiers[0].IsLeader()
+}
+
 // resolveVaultNodeID finds the node that owns the vault's first (active) tier.
 // Returns empty string if the vault has no tiers or the active tier is unassigned.
 func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
@@ -102,9 +111,13 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 			case o.draining[destID] != nil:
 				nodeID = o.draining[destID].TargetNodeID
 			case hotTierNode == "" || hotTierNode == o.localNodeID:
-				// Hot tier is local (or unassigned) — append locally if registered.
-				if _, ok := o.vaults[destID]; !ok {
+				// Config says local — but check if this node is actually
+				// the tier leader (Raft). If not, forward to the config
+				// leader so records reach the node with write authority.
+				if v, ok := o.vaults[destID]; !ok {
 					continue // not registered locally
+				} else if !o.isActiveTierLeader(v) && hotTierNode != "" && o.forwarder != nil {
+					nodeID = hotTierNode
 				}
 			case o.forwarder != nil:
 				// Hot tier is on a remote node — forward.
