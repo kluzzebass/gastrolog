@@ -3020,7 +3020,9 @@ func (m *Manager) chunkIDFromBlobKey(key string) (chunk.ChunkID, bool) {
 
 // cloudIdxHas reports whether a chunk is already tracked in the cloud index.
 func (m *Manager) cloudIdxHas(id chunk.ChunkID) bool {
+	m.cloudIdxMu.Lock()
 	_, found := m.cloudIdx.Lookup(id)
+	m.cloudIdxMu.Unlock()
 	return found
 }
 
@@ -3265,7 +3267,9 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	if m.cfg.Announcer != nil {
 		am := meta
 		if am == nil && m.cloudIdx != nil {
+			m.cloudIdxMu.Lock()
 			am, _ = m.cloudIdx.Lookup(id)
+			m.cloudIdxMu.Unlock()
 		}
 		if am != nil {
 			m.cfg.Announcer.AnnounceCreate(id, am.writeStart, am.ingestStart, am.sourceStart)
