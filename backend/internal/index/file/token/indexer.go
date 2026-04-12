@@ -61,6 +61,9 @@ func (t *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
 	}
+	if meta.CloudBacked {
+		return nil // cloud-backed chunks have indexes embedded in the GLCB blob
+	}
 	if !meta.Sealed {
 		return chunk.ErrChunkNotSealed
 	}
@@ -404,7 +407,11 @@ func (t *Indexer) fillPostingsToFile(ctx context.Context, chunkID chunk.ChunkID,
 			// Write position directly to mmap'd memory.
 			idx := writeIdx[tok]
 			offset := fileOffset[tok] + idx*positionSize
-			binary.LittleEndian.PutUint32(data[offset:], uint32(ref.Pos)) //nolint:gosec // G115: record positions are bounded by chunk record count (< 2^32)
+			end := offset + positionSize
+			if int(end) > len(data) {
+				return true // bounds exceeded — pass 1/2 cursor diverged
+			}
+			binary.LittleEndian.PutUint32(data[offset:end], uint32(ref.Pos)) //nolint:gosec // G115: record positions are bounded by chunk record count (< 2^32)
 			writeIdx[tok] = idx + 1
 			return true
 		})

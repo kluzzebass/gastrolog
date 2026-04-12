@@ -138,6 +138,9 @@ func (idx *Indexer) Build(ctx context.Context, chunkID chunk.ChunkID) error {
 	if err != nil {
 		return fmt.Errorf("get chunk meta: %w", err)
 	}
+	if meta.CloudBacked {
+		return nil // cloud-backed chunks have indexes embedded in the GLCB blob
+	}
 	if !meta.Sealed {
 		return chunk.ErrChunkNotSealed
 	}
