@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/config"
@@ -594,12 +595,6 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 
 	nscs := cfg.NodeStorageConfigs
 
-	closeTiers := func(ts []*TierInstance) {
-		for _, t := range ts {
-			_ = t.Chunks.Close()
-		}
-	}
-
 	tiers := make([]*TierInstance, 0, len(tierIDs))
 	for _, tierID := range tierIDs {
 		tierCfg := findTierConfig(cfg.Tiers, tierID)
@@ -624,8 +619,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		if isLeader {
 			ti, err := o.buildPrimaryTierInstance(cfg, vaultCfg, tierCfg, factories)
 			if err != nil {
-				closeTiers(tiers)
-				return nil, fmt.Errorf("build tier %s: %w", tierID, err)
+				o.alertTierInitFailed(tierID, tierCfg.Name, err)
+				continue
 			}
 			ti.FollowerTargets = tierCfg.FollowerTargets(nscs)
 			tiers = append(tiers, ti)
@@ -641,8 +636,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 				}
 				sti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
 				if err != nil {
-					closeTiers(tiers)
-					return nil, fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
+					o.alertTierInitFailed(tierID, tierCfg.Name, err)
+					break
 				}
 				sti.IsFollower = true
 				sti.LeaderNodeID = leaderNodeID
@@ -654,6 +649,22 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 		}
 	}
 	return tiers, nil
+}
+
+// alertTierInitFailed logs a warning and raises an alert for a tier that
+// failed to initialize during vault build. The tier is skipped but the
+// vault continues with its remaining tiers. The failed tier will be
+// retried on the next reconfig cycle. See gastrolog-68fqk.
+func (o *Orchestrator) alertTierInitFailed(tierID uuid.UUID, tierName string, err error) {
+	o.logger.Warn("buildTierInstances: tier init failed, skipping",
+		"tier", tierID, "name", tierName, "error", err)
+	if o.alerts != nil {
+		o.alerts.Set(
+			fmt.Sprintf("tier-init:%s", tierID),
+			alert.Error, "orchestrator",
+			fmt.Sprintf("Tier %q failed to initialize: %v", tierName, err),
+		)
+	}
 }
 
 // buildPrimaryTierInstance creates the leader TierInstance using the placement's

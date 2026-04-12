@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -154,6 +155,13 @@ type Manager struct {
 	postSealActive sync.Map // chunk.ChunkID → chan struct{} — closed when PostSealProcess finishes
 	postSealWg     sync.WaitGroup // tracks in-flight PostSealProcess calls (for Close only)
 
+	// cloudDegraded tracks whether the cloud store is currently unreachable.
+	// Set on any failed cloud operation (init, upload, download, list);
+	// cleared on any successful one. The orchestrator polls this to raise
+	// or clear an operator-visible alert. See gastrolog-68fqk.
+	cloudDegraded     atomic.Bool
+	cloudDegradedErr  atomic.Value // stores the last cloud error (string) for alert messages
+
 	// pendingAnnouncements accumulates closures that fire metadata announcer
 	// calls. The fields are protected by mu. Locked code paths (openLocked,
 	// sealLocked, etc.) APPEND closures here instead of calling the announcer
@@ -233,7 +241,7 @@ func (m *chunkMeta) toChunkMeta() chunk.ChunkMeta {
 		RecordCount: m.recordCount,
 		Bytes:       m.bytes,
 		Sealed:      m.sealed,
-		Compressed:  m.compressed,
+		Compressed:  m.compressed || m.cloudBacked, // GLCB blobs are always zstd-compressed
 		DiskBytes:   m.diskBytes,
 		IngestStart: m.ingestStart,
 		IngestEnd:   m.ingestEnd,
@@ -334,9 +342,15 @@ func NewManager(cfg Config) (*Manager, error) {
 		}
 		manager.cloudIdx = cidx
 		if err := manager.loadCloudChunks(); err != nil {
-			_ = cidx.Close()
-			_ = lockFile.Close()
-			return nil, fmt.Errorf("load cloud chunks: %w", err)
+			// S3 may be unreachable at startup (e.g. MinIO not started yet).
+			// The cloud index stays empty — the active chunk on local disk
+			// works independently. Existing cloud chunks will be discovered
+			// on the next reconciliation sweep when S3 comes online. This
+			// prevents the entire vault from being permanently skipped on
+			// this node. See gastrolog-68fqk.
+			logger.Warn("cloud chunk discovery failed, continuing without cloud index",
+				"error", err)
+			manager.cloudDegraded.Store(true)
 		}
 	}
 
@@ -613,17 +627,31 @@ func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]chunk.ChunkMeta, 0, len(m.metas))
-	for _, meta := range m.metas {
-		out = append(out, meta.toChunkMeta())
-	}
 
-	// Append cloud chunks. The list is cached and rebuilt only when the
-	// cloud index changes (upload or delete).
+	// Append cloud chunks first so we can deduplicate local metas that
+	// are also in the cloud index (e.g. during upload or if adoptCloudBlob
+	// hasn't completed yet). The cloud version is authoritative.
+	var cloudIDs map[chunk.ChunkID]struct{}
 	if m.cloudIdx != nil {
 		if m.cloudListCache == nil {
 			m.rebuildCloudListCache()
 		}
+		cloudIDs = make(map[chunk.ChunkID]struct{}, len(m.cloudListCache))
+		for i := range m.cloudListCache {
+			cloudIDs[m.cloudListCache[i].ID] = struct{}{}
+		}
+	}
+
+	out := make([]chunk.ChunkMeta, 0, len(m.metas))
+	for _, meta := range m.metas {
+		if cloudIDs != nil {
+			if _, dup := cloudIDs[meta.id]; dup {
+				continue // cloud version takes precedence
+			}
+		}
+		out = append(out, meta.toChunkMeta())
+	}
+	if m.cloudIdx != nil {
 		out = append(out, m.cloudListCache...)
 	}
 
@@ -1735,6 +1763,32 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 
 // Close closes the active chunk files without sealing.
 // The manager should not be used after Close is called.
+// trackCloudResult updates the degraded flag based on a cloud operation result.
+// Every cloud operation (upload, download, list, archive, restore) should call
+// this after completion. Failed → set degraded + store error. Succeeded → clear.
+func (m *Manager) trackCloudResult(err error) {
+	if err != nil {
+		m.cloudDegraded.Store(true)
+		m.cloudDegradedErr.Store(err.Error())
+	} else {
+		m.cloudDegraded.Store(false)
+	}
+}
+
+// CloudDegraded returns true if the cloud store is currently unreachable.
+// The orchestrator polls this to raise/clear alerts.
+func (m *Manager) CloudDegraded() bool {
+	return m.cloudDegraded.Load()
+}
+
+// CloudDegradedError returns the last cloud error message, or "" if healthy.
+func (m *Manager) CloudDegradedError() string {
+	if v := m.cloudDegradedErr.Load(); v != nil {
+		return v.(string)
+	}
+	return ""
+}
+
 func (m *Manager) Close() error {
 	// Mark as closed under the lock so new CompressChunk calls bail out.
 	m.mu.Lock()
@@ -2631,6 +2685,7 @@ func (m *Manager) openCachedCursor(id chunk.ChunkID) (chunk.RecordCursor, error)
 // to the cache directory, and opens a local cursor. Blocking on first access.
 func (m *Manager) downloadAndCacheCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	rc, err := m.cfg.CloudStore.Download(context.Background(), m.blobKey(id))
+	m.trackCloudResult(err)
 	if err != nil {
 		return nil, err
 	}
@@ -2963,9 +3018,62 @@ func (m *Manager) chunkIDFromBlobKey(key string) (chunk.ChunkID, bool) {
 	return id, true
 }
 
+// cloudIdxHas reports whether a chunk is already tracked in the cloud index.
+func (m *Manager) cloudIdxHas(id chunk.ChunkID) bool {
+	_, found := m.cloudIdx.Lookup(id)
+	return found
+}
+
 // uploadToCloud converts a sealed, compressed chunk to GLCB format, uploads it
 // to the cloud store, and deletes the local files. The chunk metadata is
 // updated to reflect cloud-backed status.
+// SetCloudStore injects (or replaces) the cloud store on a running Manager.
+// Used for lazy initialization when S3 was unreachable at construction time
+// but becomes available later. Also re-runs cloud chunk discovery if the
+// cloud index is empty. Safe for concurrent use. See gastrolog-68fqk.
+func (m *Manager) SetCloudStore(store blobstore.Store) {
+	m.mu.Lock()
+	m.cfg.CloudStore = store
+	m.mu.Unlock()
+
+	// Try to populate the cloud index now that we have a connection.
+	if m.cloudIdx != nil {
+		if err := m.loadCloudChunks(); err != nil {
+			m.logger.Warn("cloud chunk discovery failed after SetCloudStore", "error", err)
+			m.trackCloudResult(err)
+		} else {
+			m.trackCloudResult(nil)
+		}
+	}
+}
+
+// UploadToCloud uploads a sealed chunk to the configured cloud store.
+// Implements chunk.ChunkCloudUploader. Returns an error if the upload fails
+// (unlike PostSealProcess which swallows upload errors to avoid blocking
+// replication). Used by the cloud backfill path. See gastrolog-68fqk.
+func (m *Manager) UploadToCloud(id chunk.ChunkID) error {
+	if m.cfg.CloudStore == nil {
+		return errors.New("cloud store not configured")
+	}
+
+	// Ensure the chunk exists in the tier Raft FSM. Chunks sealed during
+	// degraded startup (S3 down, Raft not ready) may be missing from the
+	// manifest. Without Create+Seal in the FSM, the subsequent Upload
+	// announce has nothing to update. Idempotent — if already present,
+	// the FSM ignores the duplicate. See gastrolog-68fqk.
+	if m.cfg.Announcer != nil {
+		m.mu.Lock()
+		meta := m.metas[id]
+		m.mu.Unlock()
+		if meta != nil && meta.sealed {
+			m.cfg.Announcer.AnnounceCreate(id, meta.writeStart, meta.ingestStart, meta.sourceStart)
+			m.cfg.Announcer.AnnounceSeal(id, meta.writeEnd, meta.recordCount, meta.bytes, meta.ingestEnd, meta.sourceEnd)
+		}
+	}
+
+	return m.uploadToCloud(id)
+}
+
 func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 	key := m.blobKey(id)
 
@@ -3019,6 +3127,7 @@ func (m *Manager) uploadToCloud(id chunk.ChunkID) error {
 		chunkcloud.ObjectMetadata(bm),
 	)
 	uploadCancel()
+	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("upload GLCB: %w", err)
 	}
@@ -3113,6 +3222,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 	meta := m.metas[id]
 	if meta != nil {
 		meta.cloudBacked = true
+		meta.compressed = true // GLCB blobs are always zstd-compressed
 		meta.diskBytes = blobSize
 		meta.ingestIdxOffset = toc.IngestIdxOffset
 		meta.ingestIdxSize = toc.IngestIdxSize
@@ -3133,6 +3243,29 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		m.mu.Lock()
 		m.cloudListCache = nil
 		m.mu.Unlock()
+	}
+
+	// Announce to tier Raft so all nodes learn this chunk is cloud-backed.
+	// Without this, the FSM overlay keeps returning CloudBacked=false and
+	// the backfill re-adopts on every cycle. See gastrolog-68fqk.
+	//
+	// When meta is nil (chunk already adopted in a prior cycle — no longer
+	// in metas), fall back to the cloud index. The FSM requires a Create
+	// entry before Upload can set CloudBacked, so announce Create+Seal
+	// first (idempotent if already present).
+	if m.cfg.Announcer != nil {
+		am := meta
+		if am == nil && m.cloudIdx != nil {
+			am, _ = m.cloudIdx.Lookup(id)
+		}
+		if am != nil {
+			m.cfg.Announcer.AnnounceCreate(id, am.writeStart, am.ingestStart, am.sourceStart)
+			m.cfg.Announcer.AnnounceSeal(id, am.writeEnd, am.recordCount, am.bytes, am.ingestEnd, am.sourceEnd)
+			m.cfg.Announcer.AnnounceUpload(id, blobSize,
+				toc.IngestIdxOffset, toc.IngestIdxSize,
+				toc.SourceIdxOffset, toc.SourceIdxSize,
+				am.numFrames)
+		}
 	}
 
 	m.logger.Info("chunk adopted from cloud",
@@ -3280,12 +3413,25 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 // it stays in the B+ tree and is served on demand via lookupMeta/ForEach.
 // After loading, pre-warms the TS index cache so the first query doesn't spike.
 func (m *Manager) loadCloudChunks() error {
-	if m.cloudIdx != nil && m.cloudIdx.Count() > 0 {
-		m.logger.Info("cloud index ready", "count", m.cloudIdx.Count())
-		m.backfillTSOffsets()
-		return nil
+	var prevCount uint64
+	if m.cloudIdx != nil {
+		prevCount = m.cloudIdx.Count()
 	}
-	return m.loadCloudChunksFromStore()
+	if err := m.loadCloudChunksFromStore(); err != nil {
+		return err
+	}
+	if m.cloudIdx != nil {
+		newCount := m.cloudIdx.Count()
+		if newCount > prevCount {
+			m.logger.Info("cloud index reconciled with store",
+				"previous", prevCount, "current", newCount,
+				"added", newCount-prevCount)
+		} else {
+			m.logger.Info("cloud index ready", "count", newCount)
+		}
+	}
+	m.backfillTSOffsets()
+	return nil
 }
 
 // backfillTSOffsets reads the GLCB TOC footer for cloud chunks that have zero
@@ -3343,13 +3489,22 @@ func (m *Manager) backfillTSOffsets() {
 // the local B+ tree index. Does NOT insert into m.metas.
 func (m *Manager) loadCloudChunksFromStore() error {
 	var indexed int
-	err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix(), func(blob blobstore.BlobInfo) error {
+	err := m.cfg.CloudStore.List(context.Background(), m.cloudPrefix(), func(blob blobstore.BlobInfo) error { //nolint:contextcheck // long-lived background scan
 		id, ok := m.chunkIDFromBlobKey(blob.Key)
 		if !ok {
 			return nil
 		}
-		// Skip if local version exists (local always wins).
+		// Don't add to cloud index if the chunk has local data files —
+		// let the backfill handle it via UploadToCloud → adoptCloudBlob,
+		// which removes local files, updates cloud index, AND announces
+		// to the tier Raft FSM. Setting cloudBacked here would make the
+		// backfill skip the chunk, leaving the FSM out of date.
 		if _, exists := m.metas[id]; exists {
+			return nil
+		}
+		// Skip if already in the cloud index (preserves richer metadata
+		// like TS index offsets from previous backfills).
+		if m.cloudIdx != nil && m.cloudIdxHas(id) {
 			return nil
 		}
 		cm := chunkcloud.BlobMetaToChunkMeta(id, blob)
@@ -3387,6 +3542,7 @@ func (m *Manager) loadCloudChunksFromStore() error {
 		}
 		return nil
 	})
+	m.trackCloudResult(err)
 	if err != nil {
 		return fmt.Errorf("list cloud chunks: %w", err)
 	}

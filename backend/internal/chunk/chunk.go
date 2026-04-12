@@ -171,6 +171,14 @@ type ChunkPostSealProcessor interface {
 	HasIndexBuilders() bool
 }
 
+// ChunkCloudUploader extends ChunkManager with the ability to upload a
+// sealed chunk to cloud storage. Used by the cloud backfill path to retry
+// uploads that failed when S3 was unreachable. See gastrolog-68fqk.
+type ChunkCloudUploader interface {
+	UploadToCloud(id ChunkID) error
+}
+
+
 // ChunkArchiver extends ChunkManager with storage-class lifecycle operations
 // for cloud-backed chunks. Callers should type-assert to check availability.
 type ChunkArchiver interface {

@@ -152,6 +152,7 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 			now := o.now()
 			o.rotationRates.Evaluate(now)
 			o.retentionRates.Evaluate(now)
+			o.evaluateCloudHealth()
 		}
 	}
 }
