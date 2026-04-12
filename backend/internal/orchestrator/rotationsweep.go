@@ -52,7 +52,6 @@ func (o *Orchestrator) rotationSweep() {
 
 		for _, tier := range vault.Tiers {
 			if !tier.IsLeader() {
-				o.sealStaleNonLeaderActive(vaultID, tier)
 				tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				continue
 			}
