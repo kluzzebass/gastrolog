@@ -138,8 +138,14 @@ func (s *S3Store) List(ctx context.Context, prefix string, fn func(BlobInfo) err
 				StorageClass: string(obj.StorageClass),
 			}
 			// S3 ListObjectsV2 does not return user metadata — fetch per object.
+			// A 404 on Head means the object was deleted between the List page
+			// and the Head call (S3 eventual consistency). Skip it.
 			head, err := s.Head(ctx, info.Key)
 			if err != nil {
+				var nf *types.NotFound
+				if errors.As(err, &nf) {
+					continue
+				}
 				return fmt.Errorf("head %s: %w", info.Key, err)
 			}
 			info.Metadata = head.Metadata
