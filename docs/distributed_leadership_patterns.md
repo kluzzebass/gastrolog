@@ -6,7 +6,7 @@ Research compiled 2026-04-12 for gastrolog-1s3mf (unify tier leadership).
 
 GastroLog has per-tier Raft groups where the **tier leader** (the node designated `Leader: true` in the tier's placement config — receives ingested records, runs retention, replicates to followers) can diverge from the **tier Raft leader** (the node that won the tier's Raft group election). This "dual leadership" problem causes cascading failures: records land on a node without write authority, post-seal/compression/replication stops, transitions fail.
 
-Note: GastroLog also has a separate **cluster Raft** group for config consensus. This document is exclusively about **tier Raft** leadership.
+Note: GastroLog has two types of Raft groups. The **config Raft** group stores the cluster configuration — including the tier placements that designate tier leaders. **Tier Raft** groups (one per tier) store chunk metadata. The config Raft determines WHO the tier leader should be; the tier Raft elects its own leader independently. This document is about aligning the two.
 
 Every major distributed system using per-shard Raft groups has solved this. Here's how.
 
