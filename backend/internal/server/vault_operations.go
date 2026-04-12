@@ -56,9 +56,9 @@ func (s *VaultServer) SealVault(
 	// Resolve optional tier filter.
 	tierID := uuid.Nil
 	if req.Msg.Tier != "" {
-		tid, err := uuid.Parse(req.Msg.Tier)
-		if err != nil {
-			return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid tier ID: %w", err))
+		tid, connErr := parseUUID(req.Msg.Tier)
+		if connErr != nil {
+			return nil, connErr
 		}
 		tierID = tid
 	}

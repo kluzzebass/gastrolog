@@ -420,9 +420,9 @@ func (s *ConfigServer) TriggerIngester(
 	_ context.Context,
 	req *connect.Request[apiv1.TriggerIngesterRequest],
 ) (*connect.Response[apiv1.TriggerIngesterResponse], error) {
-	id, err := uuid.Parse(req.Msg.Id)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid ingester ID: %w", err))
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
 	}
 	if err := s.orch.TriggerIngester(id); err != nil {
 		return nil, connect.NewError(connect.CodeNotFound, err)

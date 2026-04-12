@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config/raftfsm"
@@ -46,9 +45,9 @@ func (s *ConfigServer) DeleteManagedFile(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
 	}
 
-	id, err := uuid.Parse(req.Msg.Id)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	id, connErr := parseUUID(req.Msg.Id)
+	if connErr != nil {
+		return nil, connErr
 	}
 
 	if err := s.cfgStore.DeleteManagedFile(ctx, id); err != nil {
