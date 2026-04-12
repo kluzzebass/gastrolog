@@ -3,13 +3,13 @@ package orchestrator
 import (
 	"context"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
 
 // findRotationPolicy finds a RotationPolicyConfig by ID in a slice.
-func findRotationPolicy(policies []config.RotationPolicyConfig, id uuid.UUID) *config.RotationPolicyConfig {
+func findRotationPolicy(policies []system.RotationPolicyConfig, id uuid.UUID) *system.RotationPolicyConfig {
 	for i := range policies {
 		if policies[i].ID == id {
 			return &policies[i]
@@ -19,7 +19,7 @@ func findRotationPolicy(policies []config.RotationPolicyConfig, id uuid.UUID) *c
 }
 
 // findRetentionPolicy finds a RetentionPolicyConfig by ID in a slice.
-func findRetentionPolicy(policies []config.RetentionPolicyConfig, id uuid.UUID) *config.RetentionPolicyConfig {
+func findRetentionPolicy(policies []system.RetentionPolicyConfig, id uuid.UUID) *system.RetentionPolicyConfig {
 	for i := range policies {
 		if policies[i].ID == id {
 			return &policies[i]

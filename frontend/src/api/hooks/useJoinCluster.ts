@@ -9,7 +9,7 @@ export function useJoinCluster() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clusterStatus"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
     },
   });

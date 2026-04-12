@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
@@ -105,7 +105,7 @@ func (m *mockOrch) VaultType(id uuid.UUID) string {
 	return ""
 }
 
-func (m *mockOrch) AddVault(context.Context, config.VaultConfig, orchestrator.Factories) error {
+func (m *mockOrch) AddVault(context.Context, system.VaultConfig, orchestrator.Factories) error {
 	return m.addVaultErr
 }
 func (m *mockOrch) ReloadFilters(context.Context) error {
@@ -156,41 +156,41 @@ func (m *mockOrch) AddIngester(uuid.UUID, string, string, orchestrator.Ingester)
 	return m.addIngesterErr
 }
 
-// stubCfgStore implements config.Store with configurable returns for the
+// stubCfgStore implements system.Store with configurable returns for the
 // methods the dispatcher reads. The nil-embedded interface panics on
 // any other method call — a deliberate test safety net.
 type stubCfgStore struct {
-	config.Store // nil embed — panics on uncalled methods
+	system.Store // nil embed — panics on uncalled methods
 
-	vault       *config.VaultConfig
+	vault       *system.VaultConfig
 	vaultErr    error
-	vaultList   []config.VaultConfig
+	vaultList   []system.VaultConfig
 	vaultListErr error
-	tiers       []config.TierConfig
-	ingester    *config.IngesterConfig
+	tiers       []system.TierConfig
+	ingester    *system.IngesterConfig
 	ingesterErr error
-	settings    config.ServerSettings
+	settings    system.ServerSettings
 	settingsErr error
-	cfg         *config.Config
+	cfg         *system.Config
 	loadErr     error
 }
 
-func (s *stubCfgStore) GetVault(context.Context, uuid.UUID) (*config.VaultConfig, error) {
+func (s *stubCfgStore) GetVault(context.Context, uuid.UUID) (*system.VaultConfig, error) {
 	return s.vault, s.vaultErr
 }
-func (s *stubCfgStore) ListVaults(context.Context) ([]config.VaultConfig, error) {
+func (s *stubCfgStore) ListVaults(context.Context) ([]system.VaultConfig, error) {
 	return s.vaultList, s.vaultListErr
 }
-func (s *stubCfgStore) GetIngester(context.Context, uuid.UUID) (*config.IngesterConfig, error) {
+func (s *stubCfgStore) GetIngester(context.Context, uuid.UUID) (*system.IngesterConfig, error) {
 	return s.ingester, s.ingesterErr
 }
-func (s *stubCfgStore) LoadServerSettings(context.Context) (config.ServerSettings, error) {
+func (s *stubCfgStore) LoadServerSettings(context.Context) (system.ServerSettings, error) {
 	return s.settings, s.settingsErr
 }
-func (s *stubCfgStore) Load(context.Context) (*config.Config, error) {
+func (s *stubCfgStore) Load(context.Context) (*system.Config, error) {
 	return s.cfg, s.loadErr
 }
-func (s *stubCfgStore) ListTiers(context.Context) ([]config.TierConfig, error) {
+func (s *stubCfgStore) ListTiers(context.Context) ([]system.TierConfig, error) {
 	if len(s.tiers) > 0 {
 		return s.tiers, nil
 	}
@@ -206,7 +206,7 @@ type noopIngester struct{}
 func (noopIngester) Run(context.Context, chan<- orchestrator.IngestMessage) error { return nil }
 
 // newTestDispatcher creates a configDispatcher wired to the given mocks.
-func newTestDispatcher(orch orchActions, store config.Store, h *captureHandler) *configDispatcher {
+func newTestDispatcher(orch orchActions, store system.Store, h *captureHandler) *configDispatcher {
 	return &configDispatcher{
 		orch:        orch,
 		cfgStore:    store,
@@ -271,8 +271,8 @@ func TestHandle_VaultPut(t *testing.T) {
 		mo := &mockOrch{} // no error → AddVault succeeds
 		tierID := uuid.Must(uuid.NewV7())
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
-			tiers: []config.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
+			vault: &system.VaultConfig{ID: id, Enabled: true},
+			tiers: []system.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -287,8 +287,8 @@ func TestHandle_VaultPut(t *testing.T) {
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
 		tierID := uuid.Must(uuid.NewV7())
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
-			tiers: []config.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
+			vault: &system.VaultConfig{ID: id, Enabled: true},
+			tiers: []system.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -307,7 +307,7 @@ func TestHandle_VaultPut(t *testing.T) {
 			reloadRetentionErr: errors.New("ret"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
+			vault: &system.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -389,7 +389,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // ingester not locally registered
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Enabled: true},
+			ingester: &system.IngesterConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -405,7 +405,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 			ingesters: []uuid.UUID{id}, // locally registered
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Name: "chatterbox", Enabled: true},
+			ingester: &system.IngesterConfig{ID: id, Name: "chatterbox", Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -421,7 +421,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 	t.Run("unknown_type", func(t *testing.T) {
 		h := &captureHandler{}
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Enabled: true},
+			ingester: &system.IngesterConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -434,7 +434,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 	t.Run("factory_error", func(t *testing.T) {
 		h := &captureHandler{}
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Type: "test", Enabled: true},
+			ingester: &system.IngesterConfig{ID: id, Type: "test", Enabled: true},
 		}, h)
 		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return nil, errors.New("bad params")
@@ -451,7 +451,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addIngesterErr: errors.New("duplicate")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Type: "test", Enabled: true},
+			ingester: &system.IngesterConfig{ID: id, Type: "test", Enabled: true},
 		}, h)
 		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
@@ -471,7 +471,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 			removeIngesterErr: errors.New("stuck"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Enabled: true},
+			ingester: &system.IngesterConfig{ID: id, Enabled: true},
 		}, h)
 		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
@@ -488,7 +488,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addIngesterErr: errors.New("should not be called")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			ingester: &config.IngesterConfig{ID: id, Enabled: false},
+			ingester: &system.IngesterConfig{ID: id, Enabled: false},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
@@ -611,8 +611,8 @@ func TestHandle_SettingPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{updateMaxJobsErr: errors.New("invalid")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			settings: config.ServerSettings{
-				Scheduler: config.SchedulerConfig{MaxConcurrentJobs: 8},
+			settings: system.ServerSettings{
+				Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 8},
 			},
 		}, h)
 
@@ -627,7 +627,7 @@ func TestHandle_SettingPut(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{updateMaxJobsErr: errors.New("should not be called")}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			settings: config.ServerSettings{}, // MaxConcurrentJobs = 0
+			settings: system.ServerSettings{}, // MaxConcurrentJobs = 0
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
@@ -671,7 +671,7 @@ func TestHandle_ClusterTLSPut(t *testing.T) {
 	t.Run("nil_cluster_tls_in_config", func(t *testing.T) {
 		h := &captureHandler{}
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
-			cfg: &config.Config{}, // ClusterTLS is nil
+			cfg: &system.Config{}, // ClusterTLS is nil
 		}, h)
 		d.clusterTLS = &cluster.ClusterTLS{}
 
@@ -782,7 +782,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 			isDraining: true,
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
+			vault: &system.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -800,7 +800,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 			isDraining: true,
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
+			vault: &system.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -818,7 +818,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 			cancelDrainErr: errors.New("boom"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vault: &config.VaultConfig{ID: id, Enabled: true},
+			vault: &system.VaultConfig{ID: id, Enabled: true},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
@@ -855,7 +855,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID}},
+			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
@@ -884,7 +884,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID}},
+			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
@@ -906,7 +906,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID}},
+			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: true})
@@ -931,7 +931,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			},
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
-			vaultList: []config.VaultConfig{{ID: vaultID}},
+			vaultList: []system.VaultConfig{{ID: vaultID}},
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyTierDeleted, ID: tierID, Drain: false})

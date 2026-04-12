@@ -1,14 +1,14 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { configClient } from "../client";
-import { IngesterConfig, GetIngesterStatusResponse } from "../gen/gastrolog/v1/config_pb";
+import { systemClient } from "../client";
+import { IngesterConfig, GetIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
-import { useConfigMutation } from "./useConfig";
+import { useSystemMutation } from "./useSystem";
 
 export function useIngesters() {
   return useQuery({
     queryKey: ["ingesters"],
     queryFn: async () => {
-      const response = await configClient.listIngesters({});
+      const response = await systemClient.listIngesters({});
       return response.ingesters;
     },
     structuralSharing: protoArraySharing(IngesterConfig.equals),
@@ -20,7 +20,7 @@ export function useIngesterStatus(id: string) {
   return useQuery({
     queryKey: ["ingester-status", id],
     queryFn: async () => {
-      const response = await configClient.getIngesterStatus({ id });
+      const response = await systemClient.getIngesterStatus({ id });
       return response;
     },
     structuralSharing: protoSharing(GetIngesterStatusResponse.equals),
@@ -40,7 +40,7 @@ function stripEmptyParams(params: Record<string, string>): Record<string, string
 }
 
 export function usePutIngester() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       id: string;
       name: string;
@@ -49,7 +49,7 @@ export function usePutIngester() {
       params: Record<string, string>;
       nodeId?: string;
     }) => {
-      return configClient.putIngester({
+      return systemClient.putIngester({
         config: {
           id: args.id,
           name: args.name,
@@ -64,9 +64,9 @@ export function usePutIngester() {
 }
 
 export function useDeleteIngester() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (id: string) => {
-      return configClient.deleteIngester({ id });
+      return systemClient.deleteIngester({ id });
     },
   );
 }
@@ -74,7 +74,7 @@ export function useDeleteIngester() {
 export function useTestIngester() {
   return useMutation({
     mutationFn: async (args: { type: string; params: Record<string, string>; id?: string }) => {
-      const response = await configClient.testIngester({
+      const response = await systemClient.testIngester({
         type: args.type,
         params: stripEmptyParams(args.params),
         id: args.id ?? "",
@@ -99,7 +99,7 @@ export function useCheckListenAddrs(type: string, params: Record<string, string>
   return useQuery({
     queryKey: ["checkListenAddrs", type, paramKey, id],
     queryFn: async () => {
-      const response = await configClient.testIngester({
+      const response = await systemClient.testIngester({
         type,
         params: stripped,
         id,

@@ -3,7 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatDateTimestamp } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
-import { useConfig } from "../../api/hooks/useConfig";
+import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 import { useDeleteManagedFile } from "../../api/hooks/useManagedFiles";
@@ -12,7 +12,7 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { ExpandableCard } from "./ExpandableCard";
 import { MaxMindCard } from "./lookup/MaxMindCard";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
-import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/config_pb";
+import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 
 interface FileGroup {
   name: string;

@@ -8,20 +8,20 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 
 	"github.com/google/uuid"
 )
 
 // primaryPlacement creates a Placements slice with a single primary using a synthetic storage ID.
-func primaryPlacement(nodeID string) []config.TierPlacement {
-	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}}
+func primaryPlacement(nodeID string) []system.TierPlacement {
+	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
-func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *cfgmem.Store, *alert.Collector) {
+func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*placementManager, *sysmem.Store, *alert.Collector) {
 	t.Helper()
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	ps := cluster.NewPeerState(60 * time.Second)
 	now := time.Now()
 	for _, p := range livePeers {
@@ -39,7 +39,7 @@ func newTestPlacement(t *testing.T, localNodeID string, livePeers []string) (*pl
 	return pm, store, alerts
 }
 
-func tierNode(t *testing.T, store *cfgmem.Store, tierID uuid.UUID) string {
+func tierNode(t *testing.T, store *sysmem.Store, tierID uuid.UUID) string {
 	t.Helper()
 	ctx := context.Background()
 	tier, err := store.GetTier(ctx, tierID)
@@ -74,8 +74,8 @@ func TestPlacementSingleNodeMemoryTier(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -91,13 +91,13 @@ func TestPlacementLocalTierRequiresStorageClass(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// Only node-2 has storage class 1.
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-2",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "fast", Path: "/data"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "fast", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -113,20 +113,20 @@ func TestPlacementCloudTierMatchesActiveChunkClass(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
 
 	csID := uuid.Must(uuid.NewV7())
-	_ = store.PutCloudService(ctx, config.CloudService{ID: csID, Name: "s3", Provider: "s3", Bucket: "b"})
+	_ = store.PutCloudService(ctx, system.CloudService{ID: csID, Name: "s3", Provider: "s3", Bucket: "b"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{
-		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+	_ = store.PutTier(ctx, system.TierConfig{
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		CloudServiceID: &csID, ActiveChunkClass: 2, VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// Only node-2 has storage class 2.
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-2",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 2, Name: "ssd", Path: "/cache"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 2, Name: "ssd", Path: "/cache"}},
 	})
 
 	pm.reconcile(ctx)
@@ -144,8 +144,8 @@ func TestPlacementMemoryTierAnyNodeEligible(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -164,8 +164,8 @@ func TestPlacementStableAssignment(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -181,8 +181,8 @@ func TestPlacementIdempotent(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 	first := tierNode(t, store, tierID)
@@ -203,8 +203,8 @@ func TestPlacementMultipleReconcilesStable(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 	assigned := tierNode(t, store, tierID)
@@ -228,8 +228,8 @@ func TestPlacementReassignOnNodeDeath(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -246,12 +246,12 @@ func TestPlacementReassignLocalTierOnNodeDeath(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-3",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -268,13 +268,13 @@ func TestPlacementNodeLosesStorageClass(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// node-1 has no file storages. node-2 has the right class.
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-2",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -292,8 +292,8 @@ func TestPlacementNoEligibleNodeClearsAssignment(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 5, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 5, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -315,8 +315,8 @@ func TestPlacementNoEligibleNodeAlreadyUnassigned(t *testing.T) {
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
 	// Already unassigned, no eligible node.
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 5, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 5, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -337,12 +337,12 @@ func TestPlacementLoadBalances(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tier1 := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tier1, Name: "t1", Type: config.TierTypeMemory, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tier1, Name: "t1", Type: system.TierTypeMemory, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
 
 	tier2 := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tier2, Name: "t2", Type: config.TierTypeMemory, VaultID: vaultID, Position: 1})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tier2, Name: "t2", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1})
 
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -360,10 +360,10 @@ func TestPlacementLoadBalancesAcrossThreeNodes(t *testing.T) {
 	var tierIDs []uuid.UUID
 	for i := 0; i < 6; i++ {
 		tid := uuid.Must(uuid.NewV7())
-		_ = store.PutTier(ctx, config.TierConfig{ID: tid, Name: "t", Type: config.TierTypeMemory, VaultID: vaultID, Position: uint32(i)})
+		_ = store.PutTier(ctx, system.TierConfig{ID: tid, Name: "t", Type: system.TierTypeMemory, VaultID: vaultID, Position: uint32(i)})
 		tierIDs = append(tierIDs, tid)
 	}
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -392,8 +392,8 @@ func TestPlacementRandomTiebreak(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -411,7 +411,7 @@ func TestPlacementOrphanedTierIgnored(t *testing.T) {
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "orphan", Type: config.TierTypeMemory})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "orphan", Type: system.TierTypeMemory})
 	// No vault references this tier.
 
 	pm.reconcile(ctx)
@@ -435,7 +435,7 @@ func TestPlacementVaultWithNoTiers(t *testing.T) {
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", nil)
 
-	_ = store.PutVault(ctx, config.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "empty"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: uuid.Must(uuid.NewV7()), Name: "empty"})
 
 	pm.reconcile(ctx)
 	// No panic, no error.
@@ -448,8 +448,8 @@ func TestPlacementUnknownTierType(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "weird", Type: "quantum", VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "weird", Type: "quantum", VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -470,12 +470,12 @@ func TestPlacementLocalTierStorageClassZero(t *testing.T) {
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
 	// StorageClass 0 is invalid — nodeHasStorageClass returns false for class 0.
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 0, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 0, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-1",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 0, Name: "zero", Path: "/z"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 0, Name: "zero", Path: "/z"}},
 	})
 
 	pm.reconcile(ctx)
@@ -494,15 +494,15 @@ func TestPlacementCloudTierActiveChunkClassZero(t *testing.T) {
 	pm, store, alerts := newTestPlacement(t, "node-1", nil)
 
 	csID := uuid.Must(uuid.NewV7())
-	_ = store.PutCloudService(ctx, config.CloudService{ID: csID, Name: "s3", Provider: "s3", Bucket: "b"})
+	_ = store.PutCloudService(ctx, system.CloudService{ID: csID, Name: "s3", Provider: "s3", Bucket: "b"})
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{
-		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+	_ = store.PutTier(ctx, system.TierConfig{
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		CloudServiceID: &csID, ActiveChunkClass: 0, VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -523,8 +523,8 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// First reconcile: no eligible node → alert set.
 	pm.reconcile(ctx)
@@ -533,9 +533,9 @@ func TestPlacementAlertClearedWhenPlaced(t *testing.T) {
 	}
 
 	// Add matching file storage → now eligible.
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-1",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -555,8 +555,8 @@ func TestPlacementAlertClearedOnStableAssignment(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// Pre-set an alert manually.
 	alerts.Set("tier-unplaced:"+tierID.String(), alert.Warning, "test", "stale alert")
@@ -579,11 +579,11 @@ func TestPlacementTierSharedByMultipleVaults(t *testing.T) {
 	vault1ID := uuid.Must(uuid.NewV7())
 	vault2ID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "shared", Type: config.TierTypeMemory, VaultID: vault1ID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "shared", Type: system.TierTypeMemory, VaultID: vault1ID, Position: 0})
 
 	// Two vaults reference the same tier.
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vault1ID, Name: "v1"})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vault2ID, Name: "v2"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vault1ID, Name: "v1"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vault2ID, Name: "v2"})
 
 	pm.reconcile(ctx)
 
@@ -599,19 +599,19 @@ func TestPlacementMultipleTiersDifferentTypes(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	memTier := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: memTier, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: memTier, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
 
 	localTier := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: localTier, Name: "local", Type: config.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 1})
+	_ = store.PutTier(ctx, system.TierConfig{ID: localTier, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 1})
 
-	_ = store.PutVault(ctx, config.VaultConfig{
+	_ = store.PutVault(ctx, system.VaultConfig{
 		ID: vaultID, Name: "v",
 	})
 
 	// Only node-2 has the storage class.
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-2",
-		FileStorages:  []config.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
+		FileStorages:  []system.FileStorage{{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "ssd", Path: "/data"}},
 	})
 
 	pm.reconcile(ctx)
@@ -637,17 +637,17 @@ func TestPlacementNodeWithMultipleStorageClasses(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tier1 := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tier1, Name: "fast", Type: config.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tier1, Name: "fast", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
 
 	tier2 := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tier2, Name: "slow", Type: config.TierTypeFile, StorageClass: 3, VaultID: vaultID, Position: 1})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tier2, Name: "slow", Type: system.TierTypeFile, StorageClass: 3, VaultID: vaultID, Position: 1})
 
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// node-1 has both classes.
-	_ = store.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
+	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 		NodeID: "node-1",
-		FileStorages: []config.FileStorage{
+		FileStorages: []system.FileStorage{
 			{ID: uuid.Must(uuid.NewV7()), StorageClass: 1, Name: "nvme", Path: "/fast"},
 			{ID: uuid.Must(uuid.NewV7()), StorageClass: 3, Name: "hdd", Path: "/slow"},
 		},
@@ -673,8 +673,8 @@ func TestPlacementNilAlerts(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// Should not panic.
 	pm.reconcile(ctx)
@@ -688,11 +688,11 @@ func TestPlacementNilAlerts(t *testing.T) {
 
 func TestNodeHasStorageClass(t *testing.T) {
 	t.Parallel()
-	nscs := []config.NodeStorageConfig{
-		{NodeID: "n1", FileStorages: []config.FileStorage{
+	nscs := []system.NodeStorageConfig{
+		{NodeID: "n1", FileStorages: []system.FileStorage{
 			{StorageClass: 1}, {StorageClass: 3},
 		}},
-		{NodeID: "n2", FileStorages: []config.FileStorage{
+		{NodeID: "n2", FileStorages: []system.FileStorage{
 			{StorageClass: 2},
 		}},
 	}
@@ -729,8 +729,8 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, ReplicationFactor: 2, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, ReplicationFactor: 2, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -755,8 +755,8 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, ReplicationFactor: 1, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, ReplicationFactor: 1, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 
@@ -774,8 +774,8 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, config.TierConfig{ID: tierID, Name: "mem", Type: config.TierTypeMemory, ReplicationFactor: 3, VaultID: vaultID, Position: 0})
-	_ = store.PutVault(ctx, config.VaultConfig{ID: vaultID, Name: "v"})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, ReplicationFactor: 3, VaultID: vaultID, Position: 0})
+	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
 

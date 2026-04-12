@@ -29,7 +29,7 @@ export function useLogin() {
       // Refetch settings and config now that the auth token is available —
       // the pre-login fetch only returns the password policy.
       qc.invalidateQueries({ queryKey: ["settings"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
     },
   });
 }
@@ -47,7 +47,7 @@ export function useRegister() {
       setRefreshToken(data.refreshToken);
       qc.invalidateQueries({ queryKey: ["authStatus"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
     },
   });
 }

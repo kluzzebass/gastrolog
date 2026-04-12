@@ -3,14 +3,14 @@ syntax = "proto3";
 package gastrolog.v1;
 
 import "google/protobuf/timestamp.proto";
-import "gastrolog/v1/config.proto";
+import "gastrolog/v1/system.proto";
 import "gastrolog/v1/storage.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
-// ConfigCommand is a single mutation applied to the config store via Raft.
-// Each variant maps 1:1 to a config.Store write method.
-message ConfigCommand {
+// SystemCommand is a single mutation applied to the system store via Raft.
+// Each variant maps 1:1 to a system.Store write method.
+message SystemCommand {
   oneof command {
     PutFilterCommand put_filter = 1;
     DeleteFilterCommand delete_filter = 2;
@@ -282,7 +282,7 @@ message SetNodeStorageConfigCommand {
 
 // --- Tiers ---
 
-// PutTierCommand carries the full API TierConfig from config.proto.
+// PutTierCommand carries the full API TierConfig from system.proto.
 message PutTierCommand {
   TierConfig tier = 1;
 }
@@ -294,10 +294,10 @@ message DeleteTierCommand {
 
 // --- Snapshot ---
 
-// ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
+// SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
 // Each repeated field contains one entry per entity, using the Put/Create
 // command messages to represent complete entity state.
-message ConfigSnapshot {
+message SystemSnapshot {
   repeated PutFilterCommand filters = 1;
   repeated PutRotationPolicyCommand rotation_policies = 2;
   repeated PutRetentionPolicyCommand retention_policies = 3;

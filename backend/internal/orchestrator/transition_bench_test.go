@@ -10,8 +10,8 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
@@ -91,23 +91,23 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 
 	tierIDs := make([]uuid.UUID, tierCount)
 	tiers := make([]*TierInstance, tierCount)
-	tierCfgs := make([]config.TierConfig, tierCount)
+	tierCfgs := make([]system.TierConfig, tierCount)
 
 	for i := range tierCount {
 		tierIDs[i] = uuid.Must(uuid.NewV7())
 		if withCloud && i == tierCount-1 {
 			cloudStore := blobstore.NewMemory()
 			tiers[i] = benchCloudFileTier(b, tierIDs[i], vaultID, cloudStore)
-			tierCfgs[i] = config.TierConfig{
+			tierCfgs[i] = system.TierConfig{
 				ID: tierIDs[i], Name: fmt.Sprintf("tier-%d", i),
-				Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+				Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 				VaultID: vaultID, Position: uint32(i),
 			}
 		} else {
 			tiers[i] = benchFileTier(b, tierIDs[i])
-			tierCfgs[i] = config.TierConfig{
+			tierCfgs[i] = system.TierConfig{
 				ID: tierIDs[i], Name: fmt.Sprintf("tier-%d", i),
-				Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+				Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 				VaultID: vaultID, Position: uint32(i),
 			}
 		}
@@ -122,8 +122,8 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 	vault.Name = "bench"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "bench",
 	})
 	for _, tc := range tierCfgs {

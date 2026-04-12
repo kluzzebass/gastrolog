@@ -12,8 +12,8 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
@@ -25,8 +25,8 @@ import (
 // archivalTestSetup creates a single-node orchestrator with a cloud tier backed
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
 // vault/tier IDs, and config store.
-func archivalTestSetup(t *testing.T, transitions []config.CloudStorageTransition) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, uuid.UUID, uuid.UUID, *cfgmem.Store,
+func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, uuid.UUID, uuid.UUID, *sysmem.Store,
 ) {
 	t.Helper()
 	vaultID := uuid.Must(uuid.NewV7())
@@ -45,17 +45,17 @@ func archivalTestSetup(t *testing.T, transitions []config.CloudStorageTransition
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "archival-test",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		Placements:     syntheticPlacements(nodeID),
 		CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutCloudService(context.Background(), config.CloudService{
+	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
 		Provider:     "memory",
@@ -112,7 +112,7 @@ func ingestSealUpload(t *testing.T, cm *chunkfile.Manager, n int) []chunk.ChunkI
 
 func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
+	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "GLACIER"},
 	})
 
@@ -141,7 +141,7 @@ func TestArchivalSweepArchivesOldChunks(t *testing.T) {
 
 func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
+	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: ""},  // delete after 1 day
 	})
 
@@ -160,7 +160,7 @@ func TestArchivalSweepDeletesExpiredChunks(t *testing.T) {
 
 func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, store := archivalTestSetup(t, []config.CloudStorageTransition{
+	orch, _, cm, _, _, store := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "GLACIER"},
 	})
 
@@ -183,7 +183,7 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 
 func TestArchivalSweepMultiStepTransition(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, _, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
+	orch, _, cm, _, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 		{After: "30d", StorageClass: "deep-freeze"},
 	})
@@ -334,7 +334,7 @@ func TestChunkSuspectSkippedInTransition(t *testing.T) {
 
 func TestArchivalFullLifecycle(t *testing.T) {
 	t.Parallel()
-	orch, _, cm, vaultID, _, _ := archivalTestSetup(t, []config.CloudStorageTransition{
+	orch, _, cm, vaultID, _, _ := archivalTestSetup(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -447,15 +447,15 @@ func TestSuspectTrackerMarkClearLookup(t *testing.T) {
 
 func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 	t.Parallel()
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	ctx := context.Background()
 
-	cs := config.CloudService{
+	cs := system.CloudService{
 		ID:                uuid.Must(uuid.NewV7()),
 		Name:              "roundtrip-test",
 		Provider:          "memory",
 		ArchivalMode:      "active",
-		Transitions: []config.CloudStorageTransition{
+		Transitions: []system.CloudStorageTransition{
 			{After: "30d", StorageClass: "cold"},
 			{After: "90d", StorageClass: "deep-freeze"},
 			{After: "365d", StorageClass: ""},
@@ -549,7 +549,7 @@ type cloudClusterHarness struct {
 // using a shared in-memory blobstore. The leader has a file-backed chunk manager
 // with CloudStore set; followers have file-backed chunk managers without CloudStore
 // (matching production: followers don't upload to cloud).
-func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition) *cloudClusterHarness {
+func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition) *cloudClusterHarness {
 	t.Helper()
 	nodeIDs := []string{"leader", "f1", "f2", "f3"}
 	leaderID := nodeIDs[0]
@@ -559,24 +559,24 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 
 	cloudStore := blobstore.NewMemory()
 
-	store := cfgmem.NewStore()
-	placements := []config.TierPlacement{
-		{StorageID: config.SyntheticStorageID(leaderID), Leader: true},
+	store := sysmem.NewStore()
+	placements := []system.TierPlacement{
+		{StorageID: system.SyntheticStorageID(leaderID), Leader: true},
 	}
 	for _, fid := range nodeIDs[1:] {
-		placements = append(placements, config.TierPlacement{
-			StorageID: config.SyntheticStorageID(fid), Leader: false,
+		placements = append(placements, system.TierPlacement{
+			StorageID: system.SyntheticStorageID(fid), Leader: false,
 		})
 	}
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "cloud-tier", Type: config.TierTypeCloud,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "cloud-tier", Type: system.TierTypeCloud,
 		Placements: placements, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-vault",
 	})
-	_ = store.PutCloudService(context.Background(), config.CloudService{
+	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
 		Provider:     "memory",
@@ -586,9 +586,9 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 		RestoreDays:  7,
 	})
 
-	followerTargets := make([]config.ReplicationTarget, 0, len(nodeIDs)-1)
+	followerTargets := make([]system.ReplicationTarget, 0, len(nodeIDs)-1)
 	for _, fid := range nodeIDs[1:] {
-		followerTargets = append(followerTargets, config.ReplicationTarget{NodeID: fid})
+		followerTargets = append(followerTargets, system.ReplicationTarget{NodeID: fid})
 	}
 
 	orchs := make(map[string]*Orchestrator)
@@ -675,7 +675,7 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 
 func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 	t.Parallel()
-	h := setupCloudCluster(t, []config.CloudStorageTransition{
+	h := setupCloudCluster(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -735,7 +735,7 @@ func TestCloudClusterArchivalSweepSetsArchivedOnLeader(t *testing.T) {
 
 func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 	t.Parallel()
-	h := setupCloudCluster(t, []config.CloudStorageTransition{
+	h := setupCloudCluster(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -776,7 +776,7 @@ func TestCloudClusterArchivalSweepOnlyRunsOnLeader(t *testing.T) {
 
 func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 	t.Parallel()
-	h := setupCloudCluster(t, []config.CloudStorageTransition{
+	h := setupCloudCluster(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -835,7 +835,7 @@ func TestCloudClusterRestoreChunkViaOrchestrator(t *testing.T) {
 
 func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
 	t.Parallel()
-	h := setupCloudCluster(t, []config.CloudStorageTransition{
+	h := setupCloudCluster(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -884,7 +884,7 @@ func TestCloudClusterArchivedChunkUnreadableOnLeader(t *testing.T) {
 func TestCloudClusterSweepThresholdBoundary(t *testing.T) {
 	t.Parallel()
 	// AfterDays=5: chunks younger than 5 days should NOT be archived.
-	h := setupCloudCluster(t, []config.CloudStorageTransition{
+	h := setupCloudCluster(t, []system.CloudStorageTransition{
 		{After: "5d", StorageClass: "cold"},
 	})
 
@@ -1003,7 +1003,7 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 
 func TestCloudClusterArchivalSurvivesRestart(t *testing.T) {
 	t.Parallel()
-	h := setupCloudCluster(t, []config.CloudStorageTransition{
+	h := setupCloudCluster(t, []system.CloudStorageTransition{
 		{After: "1d", StorageClass: "cold"},
 	})
 
@@ -1134,16 +1134,16 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 	cloudStore := blobstore.NewMemory()
 	cacheDir := t.TempDir()
 
-	store := cfgmem.NewStore()
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+	store := sysmem.NewStore()
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cache-test",
 	})
-	_ = store.PutCloudService(context.Background(), config.CloudService{
+	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID: csID, Name: "test-cloud", Provider: "memory",
 	})
 
@@ -1261,16 +1261,16 @@ func TestCacheEvictionViaRetentionSweep(t *testing.T) {
 	cloudStore := blobstore.NewMemory()
 	cacheDir := t.TempDir()
 
-	store := cfgmem.NewStore()
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+	store := sysmem.NewStore()
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "eviction-test",
 	})
-	_ = store.PutCloudService(context.Background(), config.CloudService{
+	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID: csID, Name: "test-cloud", Provider: "memory",
 	})
 

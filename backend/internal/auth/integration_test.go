@@ -12,15 +12,15 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	"gastrolog/internal/config"
-	configmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 )
 
 // TestIntegration_RegisterThenDeny proves that after a user is created,
 // unauthenticated requests to protected endpoints are denied.
 func TestIntegration_RegisterThenDeny(t *testing.T) {
 	t.Parallel()
-	cfgStore := configmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)
 	opts := connect.WithInterceptors(interceptor)
@@ -48,7 +48,7 @@ func TestIntegration_RegisterThenDeny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HashPassword: %v", err)
 	}
-	err = cfgStore.CreateUser(context.Background(), config.User{
+	err = cfgStore.CreateUser(context.Background(), system.User{
 		Username:     "admin",
 		PasswordHash: hash,
 		Role:         "admin",

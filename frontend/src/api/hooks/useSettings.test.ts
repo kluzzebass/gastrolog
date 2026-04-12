@@ -8,13 +8,13 @@ const mocks = installMockClients();
 import { useSettings, usePutSettings } from "./useSettings";
 
 beforeEach(() => {
-  m(mocks.configClient, "getSettings").mockClear();
-  m(mocks.configClient, "putSettings").mockClear();
+  m(mocks.systemClient, "getSettings").mockClear();
+  m(mocks.systemClient, "putSettings").mockClear();
 });
 
 describe("useSettings", () => {
   test("fetches settings", async () => {
-    m(mocks.configClient, "getSettings").mockResolvedValueOnce({
+    m(mocks.systemClient, "getSettings").mockResolvedValueOnce({
       auth: { tokenDuration: "24h" },
       query: { timeout: "30s" },
     });
@@ -28,7 +28,7 @@ describe("useSettings", () => {
 
 describe("usePutSettings", () => {
   test("sends settings and invalidates cache", async () => {
-    m(mocks.configClient, "putSettings").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putSettings").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], { auth: {} });
 
@@ -40,7 +40,7 @@ describe("usePutSettings", () => {
       });
     });
 
-    expect(m(mocks.configClient, "putSettings")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "putSettings")).toHaveBeenCalledTimes(1);
     expect(qc.getQueryState(["settings"])?.isInvalidated).toBe(true);
   });
 });

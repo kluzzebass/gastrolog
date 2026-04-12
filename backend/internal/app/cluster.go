@@ -13,8 +13,8 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/cluster/tlsutil"
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/home"
 	"gastrolog/internal/orchestrator"
 )
@@ -88,7 +88,7 @@ func enrollInCluster(ctx context.Context, logger *slog.Logger, cfg RunConfig, hd
 }
 
 // startClusterServices bootstraps TLS if needed and starts the cluster gRPC server.
-func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore config.Store, hd home.Dir, logger *slog.Logger) error {
+func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clusterTLS *cluster.ClusterTLS, cfgStore system.Store, hd home.Dir, logger *slog.Logger) error {
 	if clusterSrv == nil {
 		return nil
 	}
@@ -104,7 +104,7 @@ func startClusterServices(ctx context.Context, clusterSrv *cluster.Server, clust
 }
 
 // bootstrapClusterTLS generates CA, cluster cert, and join token.
-func bootstrapClusterTLS(ctx context.Context, cfgStore config.Store, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger) error {
+func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *cluster.ClusterTLS, tlsFilePath string, logger *slog.Logger) error {
 	existingCfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return fmt.Errorf("check existing cluster TLS: %w", err)
@@ -136,7 +136,7 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore config.Store, ctls *clust
 		return fmt.Errorf("generate join token: %w", err)
 	}
 
-	if err := cfgStore.PutClusterTLS(ctx, config.ClusterTLS{
+	if err := cfgStore.PutClusterTLS(ctx, system.ClusterTLS{
 		CACertPEM:      string(ca.CertPEM),
 		CAKeyPEM:       string(ca.KeyPEM),
 		ClusterCertPEM: string(cert.CertPEM),
@@ -161,7 +161,7 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore config.Store, ctls *clust
 }
 
 // makeEnrollHandler creates the Enroll RPC handler for the cluster server.
-func makeEnrollHandler(cfgStore config.Store, logger *slog.Logger) cluster.EnrollHandler {
+func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.EnrollHandler {
 	return func(ctx context.Context, req *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error) {
 		cfg, err := cfgStore.Load(ctx)
 		if err != nil || cfg == nil || cfg.ClusterTLS == nil {
@@ -194,7 +194,7 @@ func makeEnrollHandler(cfgStore config.Store, logger *slog.Logger) cluster.Enrol
 // makeJoinRollback creates a rollback function that restores the old raft
 // directory from backup and reopens the old config store.
 func makeJoinRollback(
-	proxy *config.StoreProxy,
+	proxy *system.StoreProxy,
 	clusterSrv *cluster.Server,
 	clusterTLS *cluster.ClusterTLS,
 	hd home.Dir,
@@ -245,7 +245,7 @@ func cleanOrchestrator(orch *orchestrator.Orchestrator, logger *slog.Logger) {
 
 // restartClusterWithStore configures the cluster server to use the given config
 // store's raft instance and starts the gRPC server.
-func restartClusterWithStore(store *raftConfigStore, proxy *config.StoreProxy, clusterSrv *cluster.Server, logger *slog.Logger) error {
+func restartClusterWithStore(store *raftConfigStore, proxy *system.StoreProxy, clusterSrv *cluster.Server, logger *slog.Logger) error {
 	clusterSrv.SetApplyFn(func(ctx context.Context, data []byte) error {
 		return store.raftStore.ApplyRaw(data)
 	})
@@ -259,7 +259,7 @@ func restartClusterWithStore(store *raftConfigStore, proxy *config.StoreProxy, c
 
 // validateSingleNodeCluster checks that the proxy wraps a raft store and
 // the cluster has exactly one node (self).
-func validateSingleNodeCluster(proxy *config.StoreProxy, clusterSrv *cluster.Server, nodeID string) (*raftConfigStore, error) {
+func validateSingleNodeCluster(proxy *system.StoreProxy, clusterSrv *cluster.Server, nodeID string) (*raftConfigStore, error) {
 	rcs, ok := proxy.Inner().(*raftConfigStore)
 	if !ok {
 		return nil, errors.New("runtime cluster join requires raft config store")
@@ -276,7 +276,7 @@ func validateSingleNodeCluster(proxy *config.StoreProxy, clusterSrv *cluster.Ser
 
 // makeJoinClusterFunc creates the callback for the JoinCluster RPC.
 func makeJoinClusterFunc(
-	proxy *config.StoreProxy,
+	proxy *system.StoreProxy,
 	clusterSrv *cluster.Server,
 	clusterTLS *cluster.ClusterTLS,
 	hd home.Dir,
@@ -401,7 +401,7 @@ func makeJoinClusterFunc(
 // makeEvictionHandler creates the callback invoked when this node is evicted
 // from the cluster. Reinitializes as a fresh single-node cluster.
 func makeEvictionHandler(
-	proxy *config.StoreProxy,
+	proxy *system.StoreProxy,
 	clusterSrv *cluster.Server,
 	clusterTLS *cluster.ClusterTLS,
 	hd home.Dir,

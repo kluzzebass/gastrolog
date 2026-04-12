@@ -9,7 +9,7 @@ import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
-import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
 function serializeCsvLookups(lookups: CSVLookupDraft[]) {
   return lookups

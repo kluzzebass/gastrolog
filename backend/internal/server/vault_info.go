@@ -12,7 +12,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/index/analyzer"
 	"gastrolog/internal/sysmetrics"
@@ -322,7 +322,7 @@ func (s *VaultServer) buildVaultInfo(ctx context.Context, id uuid.UUID) *apiv1.V
 // vaultInfoFromConfig builds a VaultInfo from a config store entry, enriching
 // with runtime stats from the local orchestrator (if local) or peer broadcasts
 // (if remote).
-func (s *VaultServer) vaultInfoFromConfig(cfg config.VaultConfig, localSet map[uuid.UUID]struct{}) *apiv1.VaultInfo {
+func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[uuid.UUID]struct{}) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
 		Id:      cfg.ID.String(),
 		Name:    cfg.Name,

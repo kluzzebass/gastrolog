@@ -9,7 +9,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
 
@@ -98,7 +98,7 @@ type Factories struct {
 // been constructed and registered while others were not. Callers must discard
 // the orchestrator on error and create a fresh one. Do not attempt to recover
 // or retry with the same orchestrator instance.
-func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) error {
+func (o *Orchestrator) ApplyConfig(cfg *system.Config, factories Factories) error {
 	if cfg == nil {
 		return nil
 	}
@@ -126,7 +126,7 @@ func (o *Orchestrator) ApplyConfig(cfg *config.Config, factories Factories) erro
 
 // applyVaults creates tier instances for each vault in the config,
 // compiles filters, and registers vaults.
-func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) error {
+func (o *Orchestrator) applyVaults(cfg *system.Config, factories Factories) error {
 	vaultIDs := make(map[uuid.UUID]bool)
 
 	for _, vaultCfg := range cfg.Vaults {
@@ -151,7 +151,7 @@ func (o *Orchestrator) applyVaults(cfg *config.Config, factories Factories) erro
 // initVault creates tier instances for a single vault and registers it.
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
-func (o *Orchestrator) initVault(cfg *config.Config, vaultCfg config.VaultConfig, factories Factories) error {
+func (o *Orchestrator) initVault(cfg *system.Config, vaultCfg system.VaultConfig, factories Factories) error {
 	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
 
 	tiers, err := o.buildTierInstances(cfg, vaultCfg, factories)
@@ -194,8 +194,8 @@ func (o *Orchestrator) startRetentionSweep() error {
 	return nil
 }
 
-// applyIngesters creates and registers ingesters from the config.
-func (o *Orchestrator) applyIngesters(cfg *config.Config, factories Factories) error {
+// applyIngesters creates and registers ingesters from the system.
+func (o *Orchestrator) applyIngesters(cfg *system.Config, factories Factories) error {
 	ingesterIDs := make(map[uuid.UUID]bool)
 
 	for _, recvCfg := range cfg.Ingesters {

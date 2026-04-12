@@ -10,15 +10,15 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
 	"github.com/google/uuid"
 )
 
-func newMemTier(t *testing.T, tierID uuid.UUID, isFollower bool, followers []config.ReplicationTarget) *TierInstance {
+func newMemTier(t *testing.T, tierID uuid.UUID, isFollower bool, followers []system.ReplicationTarget) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
@@ -436,7 +436,7 @@ func TestTierReplicationInfoSkipsFollowers(t *testing.T) {
 	followerTierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	primary := newMemTier(t, primaryTierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
+	primary := newMemTier(t, primaryTierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	follower := newMemTier(t, followerTierID, true, nil)
 	vault := NewVault(vaultID, primary, follower)
 	vault.Name = "repl-info"
@@ -472,15 +472,15 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 	policyID := uuid.Must(uuid.NewV7())
 
 	vaultID := uuid.Must(uuid.NewV7())
-	vaultCfg := config.VaultConfig{
+	vaultCfg := system.VaultConfig{
 		ID: vaultID,
 	}
 
-	cfg := &config.Config{
-		RetentionPolicies: []config.RetentionPolicyConfig{
+	cfg := &system.Config{
+		RetentionPolicies: []system.RetentionPolicyConfig{
 			{ID: policyID, MaxAge: func() *string { s := "1s"; return &s }()},
 		},
-		Tiers: []config.TierConfig{
+		Tiers: []system.TierConfig{
 			{ID: tier1ID, VaultID: vaultID, Position: 0},
 			{ID: tier2ID, VaultID: vaultID, Position: 1},
 			{ID: tier3ID, VaultID: vaultID, Position: 2},
@@ -488,10 +488,10 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 	}
 
 	// Tier at position 0 (not last) — should be transition.
-	tier1Cfg := &config.TierConfig{
+	tier1Cfg := &system.TierConfig{
 		ID: tier1ID, VaultID: vaultID, Position: 0,
-		RetentionRules: []config.RetentionRule{
-			{RetentionPolicyID: policyID, Action: config.RetentionActionExpire}, // stored as expire
+		RetentionRules: []system.RetentionRule{
+			{RetentionPolicyID: policyID, Action: system.RetentionActionExpire}, // stored as expire
 		},
 	}
 	rules1, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tier1Cfg)
@@ -501,15 +501,15 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 	if len(rules1) != 1 {
 		t.Fatalf("expected 1 rule, got %d", len(rules1))
 	}
-	if rules1[0].action != config.RetentionActionTransition {
+	if rules1[0].action != system.RetentionActionTransition {
 		t.Errorf("position 0 of 3: expected transition, got %v", rules1[0].action)
 	}
 
 	// Tier at position 2 (last) — should be expire.
-	tier3Cfg := &config.TierConfig{
+	tier3Cfg := &system.TierConfig{
 		ID: tier3ID, VaultID: vaultID, Position: 2,
-		RetentionRules: []config.RetentionRule{
-			{RetentionPolicyID: policyID, Action: config.RetentionActionTransition}, // stored as transition
+		RetentionRules: []system.RetentionRule{
+			{RetentionPolicyID: policyID, Action: system.RetentionActionTransition}, // stored as transition
 		},
 	}
 	rules3, err := resolveRetentionRulesFromTier(cfg, vaultCfg, tier3Cfg)
@@ -519,7 +519,7 @@ func TestRetentionActionDerivedFromPosition(t *testing.T) {
 	if len(rules3) != 1 {
 		t.Fatalf("expected 1 rule, got %d", len(rules3))
 	}
-	if rules3[0].action != config.RetentionActionExpire {
+	if rules3[0].action != system.RetentionActionExpire {
 		t.Errorf("position 2 of 3: expected expire, got %v", rules3[0].action)
 	}
 }
@@ -620,7 +620,7 @@ func TestAppendToTierLeaderForwardsToFollowers(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "fwd-test"
 	orch.RegisterVault(vault)
@@ -867,7 +867,7 @@ func TestAppendToTierNoForwarderSingleNode(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "no-forwarder"
 	orch.RegisterVault(vault)
@@ -979,7 +979,7 @@ func TestAppendToTierForwardLifecycle(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "forward-lifecycle"
 	orch.RegisterVault(vault)
@@ -1060,7 +1060,7 @@ func TestAppendRecordWaitForReplicaReturnsTask(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "ack-gated"
 	orch.RegisterVault(vault)
@@ -1103,7 +1103,7 @@ func TestAppendRecordNoWaitForReplicaFiresAndForgets(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "no-ack"
 	orch.RegisterVault(vault)
@@ -1146,7 +1146,7 @@ func TestIngestReturnsReplicationTasks(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "ingest-ack"
 	orch.RegisterVault(vault)
@@ -1188,7 +1188,7 @@ func TestAckAfterReplicationSuccess(t *testing.T) {
 				vaultID: uuid.Must(uuid.NewV7()),
 				tierID:  uuid.Must(uuid.NewV7()),
 				chunkID: chunk.NewChunkID(),
-				targets: []config.ReplicationTarget{{NodeID: "node-2"}},
+				targets: []system.ReplicationTarget{{NodeID: "node-2"}},
 			},
 		},
 	}
@@ -1224,7 +1224,7 @@ func TestAckAfterReplicationFailure(t *testing.T) {
 				vaultID: uuid.Must(uuid.NewV7()),
 				tierID:  uuid.Must(uuid.NewV7()),
 				chunkID: chunk.NewChunkID(),
-				targets: []config.ReplicationTarget{{NodeID: "node-2"}},
+				targets: []system.ReplicationTarget{{NodeID: "node-2"}},
 			},
 		},
 	}
@@ -1371,19 +1371,19 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 	orch.RegisterVault(vault)
 
 	// Set up config loader.
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "stress-transition",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory,
 		VaultID: vaultID, Position: 0,
-		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}},
+		Placements: []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}},
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeMemory,
 		VaultID: vaultID, Position: 1,
-		Placements: []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}},
+		Placements: []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
@@ -1569,7 +1569,7 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 
 	tierID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
-	tier := newMemTier(t, tierID, false, []config.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
+	tier := newMemTier(t, tierID, false, []system.ReplicationTarget{{NodeID: "node-2"}, {NodeID: "node-3"}})
 	vault := NewVault(vaultID, tier)
 	vault.Name = "non-blocking"
 	orch.RegisterVault(vault)

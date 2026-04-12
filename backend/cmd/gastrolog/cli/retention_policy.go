@@ -32,7 +32,7 @@ func newRetentionPolicyListCmd() *cobra.Command {
 		Short: "List all retention policies",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -62,7 +62,7 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -110,7 +110,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 				Name: name,
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -137,7 +137,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 				cfg.MaxChunks, _ = cmd.Flags().GetInt64("max-chunks")
 			}
 
-			_, err = client.Config.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
+			_, err = client.System.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -173,7 +173,7 @@ func newRetentionPolicyDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteRetentionPolicy(context.Background(), connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: id}))
+			_, err = client.System.DeleteRetentionPolicy(context.Background(), connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: id}))
 			if err != nil {
 				return err
 			}

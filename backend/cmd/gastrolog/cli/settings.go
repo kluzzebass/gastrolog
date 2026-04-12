@@ -139,7 +139,7 @@ func groupSet(cmd *cobra.Command, g settingsGroup, changed []settingsField) erro
 			return err
 		}
 	}
-	if _, err := client.Config.PutSettings(context.Background(), connect.NewRequest(req)); err != nil {
+	if _, err := client.System.PutSettings(context.Background(), connect.NewRequest(req)); err != nil {
 		return err
 	}
 	for _, f := range changed {
@@ -151,7 +151,7 @@ func groupSet(cmd *cobra.Command, g settingsGroup, changed []settingsField) erro
 
 func groupGet(cmd *cobra.Command, g settingsGroup) error {
 	client := clientFromCmd(cmd)
-	resp, err := client.Config.GetSettings(context.Background(), connect.NewRequest(&v1.GetSettingsRequest{}))
+	resp, err := client.System.GetSettings(context.Background(), connect.NewRequest(&v1.GetSettingsRequest{}))
 	if err != nil {
 		return err
 	}

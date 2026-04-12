@@ -10,12 +10,12 @@ import (
 	"github.com/google/uuid"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 )
 
-// tokenValidator adapts config.Store to auth.TokenValidator.
+// tokenValidator adapts system.Store to auth.TokenValidator.
 type tokenValidator struct {
-	cfgStore config.Store
+	cfgStore system.Store
 }
 
 func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error) {
@@ -40,7 +40,7 @@ func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issue
 type Client struct {
 	Query     gastrologv1connect.QueryServiceClient
 	Vault     gastrologv1connect.VaultServiceClient
-	Config    gastrologv1connect.ConfigServiceClient
+	System    gastrologv1connect.SystemServiceClient
 	Lifecycle gastrologv1connect.LifecycleServiceClient
 	Auth      gastrologv1connect.AuthServiceClient
 	Job       gastrologv1connect.JobServiceClient
@@ -51,7 +51,7 @@ func NewClient(baseURL string, opts ...connect.ClientOption) *Client {
 	return &Client{
 		Query:     gastrologv1connect.NewQueryServiceClient(http.DefaultClient, baseURL, opts...),
 		Vault:     gastrologv1connect.NewVaultServiceClient(http.DefaultClient, baseURL, opts...),
-		Config:    gastrologv1connect.NewConfigServiceClient(http.DefaultClient, baseURL, opts...),
+		System:    gastrologv1connect.NewSystemServiceClient(http.DefaultClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(http.DefaultClient, baseURL, opts...),
 		Auth:      gastrologv1connect.NewAuthServiceClient(http.DefaultClient, baseURL, opts...),
 		Job:       gastrologv1connect.NewJobServiceClient(http.DefaultClient, baseURL, opts...),
@@ -63,7 +63,7 @@ func NewClientWithHTTP(httpClient connect.HTTPClient, baseURL string, opts ...co
 	return &Client{
 		Query:     gastrologv1connect.NewQueryServiceClient(httpClient, baseURL, opts...),
 		Vault:     gastrologv1connect.NewVaultServiceClient(httpClient, baseURL, opts...),
-		Config:    gastrologv1connect.NewConfigServiceClient(httpClient, baseURL, opts...),
+		System:    gastrologv1connect.NewSystemServiceClient(httpClient, baseURL, opts...),
 		Lifecycle: gastrologv1connect.NewLifecycleServiceClient(httpClient, baseURL, opts...),
 		Auth:      gastrologv1connect.NewAuthServiceClient(httpClient, baseURL, opts...),
 		Job:       gastrologv1connect.NewJobServiceClient(httpClient, baseURL, opts...),

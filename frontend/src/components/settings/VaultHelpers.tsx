@@ -47,7 +47,7 @@ export function JobProgress({
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
       qc.invalidateQueries({ queryKey: ["indexes"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
       onComplete(job);
     } else if (job.status === JobStatus.FAILED) {
       handledRef.current = true;

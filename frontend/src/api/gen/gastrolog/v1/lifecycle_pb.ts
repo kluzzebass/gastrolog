@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { NodeStats } from "./cluster_pb.js";
-import { GetRouteStatsResponse } from "./config_pb.js";
+import { GetRouteStatsResponse } from "./system_pb.js";
 import { GetStatsResponse, VaultInfo } from "./vault_pb.js";
 
 /**

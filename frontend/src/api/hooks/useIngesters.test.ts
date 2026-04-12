@@ -12,14 +12,14 @@ import {
   useDeleteIngester,
   useTestIngester,
 } from "./useIngesters";
-import { IngesterConfig } from "../gen/gastrolog/v1/config_pb";
+import { IngesterConfig } from "../gen/gastrolog/v1/system_pb";
 
 beforeEach(() => {
-  m(mocks.configClient, "listIngesters").mockClear();
-  m(mocks.configClient, "getIngesterStatus").mockClear();
-  m(mocks.configClient, "putIngester").mockClear();
-  m(mocks.configClient, "deleteIngester").mockClear();
-  m(mocks.configClient, "testIngester").mockClear();
+  m(mocks.systemClient, "listIngesters").mockClear();
+  m(mocks.systemClient, "getIngesterStatus").mockClear();
+  m(mocks.systemClient, "putIngester").mockClear();
+  m(mocks.systemClient, "deleteIngester").mockClear();
+  m(mocks.systemClient, "testIngester").mockClear();
 });
 
 describe("useIngesters", () => {
@@ -27,7 +27,7 @@ describe("useIngesters", () => {
     const ingesters = [
       new IngesterConfig({ id: "i1", name: "syslog", type: "syslog", enabled: true }),
     ];
-    m(mocks.configClient, "listIngesters").mockResolvedValueOnce({ ingesters });
+    m(mocks.systemClient, "listIngesters").mockResolvedValueOnce({ ingesters });
 
     const { result } = renderHook(() => useIngesters(), { wrapper: wrapper() });
 
@@ -39,7 +39,7 @@ describe("useIngesters", () => {
 
 describe("useIngesterStatus", () => {
   test("fetches status when id is provided", async () => {
-    m(mocks.configClient, "getIngesterStatus").mockResolvedValueOnce({
+    m(mocks.systemClient, "getIngesterStatus").mockResolvedValueOnce({
       running: true,
       messagesIngested: BigInt(500),
     });
@@ -58,7 +58,7 @@ describe("useIngesterStatus", () => {
 
 describe("usePutIngester", () => {
   test("strips empty params before sending", async () => {
-    m(mocks.configClient, "putIngester").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putIngester").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
 
     const { result } = renderHook(() => usePutIngester(), { wrapper: wrapper(qc) });
@@ -73,7 +73,7 @@ describe("usePutIngester", () => {
       });
     });
 
-    const call = m(mocks.configClient, "putIngester").mock.calls[0]?.[0] as {
+    const call = m(mocks.systemClient, "putIngester").mock.calls[0]?.[0] as {
       config: { params: Record<string, string> };
     };
     // Empty "format" should be stripped.
@@ -83,9 +83,9 @@ describe("usePutIngester", () => {
 
 describe("useDeleteIngester", () => {
   test("deletes and invalidates config", async () => {
-    m(mocks.configClient, "deleteIngester").mockResolvedValueOnce({});
+    m(mocks.systemClient, "deleteIngester").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], {});
+    qc.setQueryData(["system"], {});
 
     const { result } = renderHook(() => useDeleteIngester(), { wrapper: wrapper(qc) });
 
@@ -93,14 +93,14 @@ describe("useDeleteIngester", () => {
       await result.current.mutateAsync("i1");
     });
 
-    expect(m(mocks.configClient, "deleteIngester")).toHaveBeenCalledWith({ id: "i1" });
-    expect(qc.getQueryState(["config"])?.isInvalidated).toBe(true);
+    expect(m(mocks.systemClient, "deleteIngester")).toHaveBeenCalledWith({ id: "i1" });
+    expect(qc.getQueryState(["system"])?.isInvalidated).toBe(true);
   });
 });
 
 describe("useTestIngester", () => {
   test("sends test request and returns response", async () => {
-    m(mocks.configClient, "testIngester").mockResolvedValueOnce({
+    m(mocks.systemClient, "testIngester").mockResolvedValueOnce({
       success: true,
       message: "connected",
     });
@@ -115,7 +115,7 @@ describe("useTestIngester", () => {
       });
     });
 
-    const call = m(mocks.configClient, "testIngester").mock.calls[0]?.[0] as {
+    const call = m(mocks.systemClient, "testIngester").mock.calls[0]?.[0] as {
       params: Record<string, string>;
     };
     // Empty params stripped here too.

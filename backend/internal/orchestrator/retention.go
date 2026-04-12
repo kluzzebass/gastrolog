@@ -12,7 +12,7 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 
 	"github.com/google/uuid"
@@ -34,7 +34,7 @@ func retentionKey(tierID uuid.UUID, storageID string) string {
 // retentionRule is a resolved rule: a compiled policy paired with an action.
 type retentionRule struct {
 	policy        chunk.RetentionPolicy
-	action        config.RetentionAction
+	action        system.RetentionAction
 	ejectRouteIDs []uuid.UUID // target route IDs, only for eject
 }
 
@@ -65,7 +65,7 @@ type retentionRunner struct {
 
 	// followerTargets are the remote nodes that hold replicas of this tier's
 	// chunks. Used to forward chunk deletions after retention expires them.
-	followerTargets []config.ReplicationTarget
+	followerTargets []system.ReplicationTarget
 
 	now func() time.Time
 	logger      *slog.Logger
@@ -161,7 +161,7 @@ func (o *Orchestrator) retentionSweepAll() {
 
 // enforceMemoryBudgets checks memory tiers for budget overruns and transitions
 // the oldest sealed chunks to the next tier. Only runs on leaders.
-func (o *Orchestrator) enforceMemoryBudgets(cfg *config.Config) {
+func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 	if cfg == nil {
 		return
 	}
@@ -282,7 +282,7 @@ func (o *Orchestrator) RetentionPendingChunks(vaultID uuid.UUID) map[chunk.Chunk
 
 // retentionTargetForTier resolves a single tier instance into a sweep target.
 // Returns nil if the tier should be skipped (no rules, no leader, etc.).
-func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg config.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
+func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg system.VaultConfig, tier *TierInstance, active map[string]bool) *sweepTarget {
 	if tier.HasRaftLeader != nil && !tier.HasRaftLeader() {
 		return nil
 	}
@@ -470,13 +470,13 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
 	}
 
 	switch b.action {
-	case config.RetentionActionExpire:
+	case system.RetentionActionExpire:
 		defer r.clearInflight(id)
 		r.expireChunk(id)
-	case config.RetentionActionEject:
+	case system.RetentionActionEject:
 		defer r.clearInflight(id)
 		r.ejectChunk(id, b.ejectRouteIDs)
-	case config.RetentionActionTransition:
+	case system.RetentionActionTransition:
 		// Transitions can be slow (streaming large chunks to slow tiers).
 		// Run as a one-shot scheduler job so the sweep isn't blocked.
 		// The inflight guard stays set until the job completes — the

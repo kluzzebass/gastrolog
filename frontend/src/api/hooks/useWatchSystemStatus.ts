@@ -27,7 +27,7 @@ function applyStatusMessage(qc: QueryClient, msg: WatchSystemStatusResponse) {
  * when system status changes. Replaces polling for cluster status, health,
  * and route stats.
  *
- * Uses the same reconnection pattern as useWatchConfig: exponential backoff
+ * Uses the same reconnection pattern as useWatchSystem: exponential backoff
  * on errors, auth refresh on Unauthenticated.
  */
 export function useWatchSystemStatus() {

@@ -12,14 +12,14 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	configmem "gastrolog/internal/config/memory"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/server"
 )
 
-func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *configmem.Store) {
+func newAuthTestClient(t *testing.T) (gastrologv1connect.AuthServiceClient, *sysmem.Store) {
 	t.Helper()
 
-	cfgStore := configmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-32-bytes-long-key!!"), 7*24*time.Hour)
 	authServer := server.NewAuthServer(cfgStore, tokens, nil, false)
 
@@ -40,10 +40,10 @@ func (alwaysValidTokenValidator) IsTokenValid(context.Context, string, time.Time
 
 // newAuthTestClientWithInterceptor returns a client whose requests pass through
 // the auth interceptor, allowing Logout (which reads JWT claims) to work.
-func newAuthTestClientWithInterceptor(t *testing.T) (gastrologv1connect.AuthServiceClient, *configmem.Store, *auth.TokenService) {
+func newAuthTestClientWithInterceptor(t *testing.T) (gastrologv1connect.AuthServiceClient, *sysmem.Store, *auth.TokenService) {
 	t.Helper()
 
-	cfgStore := configmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-32-bytes-long-key!!"), 7*24*time.Hour)
 	authServer := server.NewAuthServer(cfgStore, tokens, nil, false)
 	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, alwaysValidTokenValidator{})

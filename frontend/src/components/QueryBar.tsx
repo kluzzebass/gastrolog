@@ -16,7 +16,7 @@ import {
 } from "./icons";
 import type { HistoryEntry } from "../hooks/useQueryHistory";
 import { useHelp } from "../hooks/useHelp";
-import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
+import type { SavedQuery } from "../api/gen/gastrolog/v1/system_pb";
 import { useThemeClass } from "../hooks/useThemeClass";
 
 /**

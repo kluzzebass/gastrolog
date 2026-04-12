@@ -7,7 +7,7 @@ import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialM
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { Job } from "./job_pb.js";
 import { ChunkAnalysis, ChunkMeta, ChunkValidation, ExportRecord, IndexInfo, VaultStats } from "./vault_pb.js";
-import { PerRouteStats, VaultRouteStats } from "./config_pb.js";
+import { PerRouteStats, VaultRouteStats } from "./system_pb.js";
 import { ChunkPlan, HistogramBucket, TableResult } from "./query_pb.js";
 
 /**

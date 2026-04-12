@@ -12,7 +12,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
@@ -61,7 +61,7 @@ func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, 
 }
 // ---------- helpers ----------
 
-func newReplicationTier(t *testing.T, tierID uuid.UUID, followers []config.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
+func newReplicationTier(t *testing.T, tierID uuid.UUID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {

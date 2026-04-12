@@ -79,16 +79,16 @@ func (s *stubAuthService) ChangePassword(
 	return connect.NewResponse(&apiv1.ChangePasswordResponse{}), nil
 }
 
-// stubConfigService is a minimal ConfigService for testing admin endpoints.
-type stubConfigService struct {
-	gastrologv1connect.UnimplementedConfigServiceHandler
+// stubSystemService is a minimal ConfigService for testing admin endpoints.
+type stubSystemService struct {
+	gastrologv1connect.UnimplementedSystemServiceHandler
 }
 
-func (s *stubConfigService) GetConfig(
+func (s *stubSystemService) GetSystem(
 	ctx context.Context,
-	req *connect.Request[apiv1.GetConfigRequest],
-) (*connect.Response[apiv1.GetConfigResponse], error) {
-	return connect.NewResponse(&apiv1.GetConfigResponse{}), nil
+	req *connect.Request[apiv1.GetSystemRequest],
+) (*connect.Response[apiv1.GetSystemResponse], error) {
+	return connect.NewResponse(&apiv1.GetSystemResponse{}), nil
 }
 
 // stubQueryService for testing authenticated endpoints.
@@ -105,7 +105,7 @@ func (s *stubQueryService) Explain(
 
 type testSetup struct {
 	authClient   gastrologv1connect.AuthServiceClient
-	configClient gastrologv1connect.ConfigServiceClient
+	configClient gastrologv1connect.SystemServiceClient
 	queryClient  gastrologv1connect.QueryServiceClient
 	server       *httptest.Server
 }
@@ -119,7 +119,7 @@ func newTestSetup(t *testing.T, counter *mockCounter) *testSetup {
 
 	mux := http.NewServeMux()
 	mux.Handle(gastrologv1connect.NewAuthServiceHandler(&stubAuthService{}, opts))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(&stubConfigService{}, opts))
+	mux.Handle(gastrologv1connect.NewSystemServiceHandler(&stubSystemService{}, opts))
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(&stubQueryService{}, opts))
 
 	ts := httptest.NewServer(mux)
@@ -127,7 +127,7 @@ func newTestSetup(t *testing.T, counter *mockCounter) *testSetup {
 
 	return &testSetup{
 		authClient:   gastrologv1connect.NewAuthServiceClient(http.DefaultClient, ts.URL),
-		configClient: gastrologv1connect.NewConfigServiceClient(http.DefaultClient, ts.URL),
+		configClient: gastrologv1connect.NewSystemServiceClient(http.DefaultClient, ts.URL),
 		queryClient:  gastrologv1connect.NewQueryServiceClient(http.DefaultClient, ts.URL),
 		server:       ts,
 	}
@@ -164,7 +164,7 @@ func newNoAuthSetup(t *testing.T) *testSetup {
 
 	mux := http.NewServeMux()
 	mux.Handle(gastrologv1connect.NewAuthServiceHandler(&stubAuthService{}, opts))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(&stubConfigService{}, opts))
+	mux.Handle(gastrologv1connect.NewSystemServiceHandler(&stubSystemService{}, opts))
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(&stubQueryService{}, opts))
 
 	ts := httptest.NewServer(mux)
@@ -172,7 +172,7 @@ func newNoAuthSetup(t *testing.T) *testSetup {
 
 	return &testSetup{
 		authClient:   gastrologv1connect.NewAuthServiceClient(http.DefaultClient, ts.URL),
-		configClient: gastrologv1connect.NewConfigServiceClient(http.DefaultClient, ts.URL),
+		configClient: gastrologv1connect.NewSystemServiceClient(http.DefaultClient, ts.URL),
 		queryClient:  gastrologv1connect.NewQueryServiceClient(http.DefaultClient, ts.URL),
 		server:       ts,
 	}
@@ -199,7 +199,7 @@ func TestNoAuth_AuthenticatedEndpoint(t *testing.T) {
 func TestNoAuth_AdminEndpoint(t *testing.T) {
 	t.Parallel()
 	s := newNoAuthSetup(t)
-	_, err := s.configClient.GetConfig(context.Background(), connect.NewRequest(&apiv1.GetConfigRequest{}))
+	_, err := s.configClient.GetSystem(context.Background(), connect.NewRequest(&apiv1.GetSystemRequest{}))
 	if err != nil {
 		t.Fatalf("admin endpoint should work without token in no-auth mode: %v", err)
 	}
@@ -307,9 +307,9 @@ func TestAdminEndpoint_NonAdminToken(t *testing.T) {
 	}
 
 	s := newTestSetup(t, &mockCounter{count: 1})
-	client := gastrologv1connect.NewConfigServiceClient(http.DefaultClient, s.server.URL, withBearer(token))
+	client := gastrologv1connect.NewSystemServiceClient(http.DefaultClient, s.server.URL, withBearer(token))
 
-	_, err = client.GetConfig(context.Background(), connect.NewRequest(&apiv1.GetConfigRequest{}))
+	_, err = client.GetSystem(context.Background(), connect.NewRequest(&apiv1.GetSystemRequest{}))
 	if err == nil {
 		t.Fatal("expected error for non-admin on admin endpoint")
 	}
@@ -327,9 +327,9 @@ func TestAdminEndpoint_AdminToken(t *testing.T) {
 	}
 
 	s := newTestSetup(t, &mockCounter{count: 1})
-	client := gastrologv1connect.NewConfigServiceClient(http.DefaultClient, s.server.URL, withBearer(token))
+	client := gastrologv1connect.NewSystemServiceClient(http.DefaultClient, s.server.URL, withBearer(token))
 
-	_, err = client.GetConfig(context.Background(), connect.NewRequest(&apiv1.GetConfigRequest{}))
+	_, err = client.GetSystem(context.Background(), connect.NewRequest(&apiv1.GetSystemRequest{}))
 	if err != nil {
 		t.Fatalf("admin should access admin endpoint: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestFirstBoot_NonPublicDenied(t *testing.T) {
 	s := newTestSetup(t, &mockCounter{count: 0})
 
 	// Non-public endpoints should be denied even during first-boot.
-	_, err := s.configClient.GetConfig(context.Background(), connect.NewRequest(&apiv1.GetConfigRequest{}))
+	_, err := s.configClient.GetSystem(context.Background(), connect.NewRequest(&apiv1.GetSystemRequest{}))
 	if err == nil {
 		t.Fatal("expected non-public endpoint to be denied during first-boot")
 	}

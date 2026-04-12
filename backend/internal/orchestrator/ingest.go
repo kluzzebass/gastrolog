@@ -7,7 +7,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -259,7 +259,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 // tierReplicationInfo returns the tier ID and follower targets for the tier
 // that owns the given ChunkManager. Returns zero values if not found or if the
 // tier is a follower (followers don't replicate further).
-func (o *Orchestrator) tierReplicationInfo(vaultID uuid.UUID, cm chunk.ChunkManager) (uuid.UUID, []config.ReplicationTarget) {
+func (o *Orchestrator) tierReplicationInfo(vaultID uuid.UUID, cm chunk.ChunkManager) (uuid.UUID, []system.ReplicationTarget) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return uuid.UUID{}, nil

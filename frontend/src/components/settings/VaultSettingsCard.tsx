@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
-import type { VaultConfig, RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import type { VaultConfig, RouteConfig, NodeConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { NodeStorageConfig } from "../../api/gen/gastrolog/v1/storage_pb";
-import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/config_pb";
+import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/system_pb";
 import {
   usePutVault,
   useDeleteVault,

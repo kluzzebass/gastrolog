@@ -13,8 +13,8 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
@@ -178,16 +178,16 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 	}
 	im1 := indexfile.NewManager(dir1, nil, nil)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "concurrent-transition",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -478,16 +478,16 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 	tier0, _ := newFileTierInstance(t, tier0ID)
 	tier1, _ := newFileTierInstance(t, tier1ID)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "delete-fail",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -654,16 +654,16 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 	cloudTier, _ := newCloudFileTier(t, cloudTierID, vaultID, faulty)
 	nextTier := newMemoryTierInstance(t, nextTierID)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "download-fail",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: nextTierID, Name: "local", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: nextTierID, Name: "local", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -731,16 +731,16 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 	tier0, _ := newFileTierInstance(t, tier0ID)
 	tier1, _ := newFileTierInstance(t, tier1ID)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "reconfig-race",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -774,13 +774,13 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 		}
 	}()
 
-	// Simultaneously reconfigure — remove tier 1 from the vault's config.
+	// Simultaneously reconfigure — remove tier 1 from the vault's system.
 	// The transition's resolveNextTierInChain will see the change.
 	// Remove tier1 from vault by clearing its VaultID.
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "reconfig-race",
 	})
 
@@ -814,18 +814,18 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	routeID := uuid.Must(uuid.NewV7())
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "drain-concurrent",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements("node-A"),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements("node-A"),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutFilter(context.Background(), config.FilterConfig{
+	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "all", Expression: "*",
 	})
-	_ = store.PutRoute(context.Background(), config.RouteConfig{
+	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "default", FilterID: &filterID,
 		Destinations: []uuid.UUID{vaultID}, Enabled: true,
 	})

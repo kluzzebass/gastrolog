@@ -23,8 +23,8 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
 	"gastrolog/internal/cert"
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/frontend"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
@@ -33,9 +33,9 @@ import (
 	"gastrolog/internal/server/routing"
 )
 
-// configLoadTimeout bounds how long background config store reads can take.
+// systemLoadTimeout bounds how long background config store reads can take.
 // Prevents indefinite hangs if the Raft FSM or underlying store is slow.
-const configLoadTimeout = 5 * time.Second
+const systemLoadTimeout = 5 * time.Second
 
 // readHeaderTimeout is the maximum time to read HTTP request headers.
 // Shared by HTTP, HTTPS, and Unix socket servers.
@@ -54,7 +54,7 @@ type Config struct {
 	NoAuth bool
 
 	// HomeDir is the gastrolog home directory path. Used for auto-downloaded
-	// lookup databases. Empty when running with in-memory config.
+	// lookup databases. Empty when running with in-memory system.
 	HomeDir string
 
 	// AfterConfigApply is called after the server handler persists a config
@@ -151,7 +151,7 @@ type CertManager interface {
 // HTTP is always on; HTTPS is added when TLS enabled and default cert exists.
 type Server struct {
 	orch        *orchestrator.Orchestrator
-	cfgStore    config.Store
+	cfgStore    system.Store
 	factories   orchestrator.Factories
 	tokens      *auth.TokenService
 	certManager CertManager
@@ -208,7 +208,7 @@ type Server struct {
 }
 
 // New creates a new Server.
-func New(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, tokens *auth.TokenService, cfg Config) *Server {
+func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, tokens *auth.TokenService, cfg Config) *Server {
 	return &Server{
 		orch:        orch,
 		cfgStore:    cfgStore,
@@ -276,7 +276,7 @@ func (s *Server) routingInterceptor() []connect.Interceptor {
 
 // configVaultOwner resolves vault ownership from the config store.
 type configVaultOwner struct {
-	cfgStore    config.Store
+	cfgStore    system.Store
 	localNodeID string
 }
 
@@ -303,13 +303,13 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 		return ""
 	}
 
-	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
+	tierMap := make(map[uuid.UUID]*system.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
 	// temporary: find the tier's leader node to determine the owning node (until tier election).
-	for _, tierID := range config.VaultTierIDs(tiers, vaultCfg.ID) {
+	for _, tierID := range system.VaultTierIDs(tiers, vaultCfg.ID) {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue
@@ -430,7 +430,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	queryServer := NewQueryServer(s.orch, s.cfgStore, s.remoteSearcher, s.localNodeID, lookupRegistry.Resolve, lookupRegistry.Names(), queryTimeout, maxFollowDuration, maxResultCount, s.logger.With("component", "query"))
 	s.queryServer = queryServer
 	vaultServer := NewVaultServer(s.orch, s.cfgStore, s.factories, s.peerVaultStats, s.remoteChunkLister, s.localNodeID, s.logger)
-	configServer := NewConfigServer(ConfigServerConfig{
+	configServer := NewSystemServer(SystemServerConfig{
 		Orch:               s.orch,
 		CfgStore:           s.cfgStore,
 		Factories:          s.factories,
@@ -445,7 +445,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		Tokens:             s.tokens,
 		PlacementReconcile: s.placementReconcile,
 		OnTLSConfigChange:  s.reconfigureTLS,
-		OnLookupConfigChange: func(cfg config.LookupConfig, mm config.MaxMindConfig) {
+		OnLookupConfigChange: func(cfg system.LookupConfig, mm system.MaxMindConfig) {
 			s.applyLookupConfig(cfg, mm, lookupRegistry)
 		},
 	})
@@ -477,7 +477,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewVaultServiceHandler(vaultServer, handlerOpts...))
-	mux.Handle(gastrologv1connect.NewConfigServiceHandler(configServer, handlerOpts...))
+	mux.Handle(gastrologv1connect.NewSystemServiceHandler(configServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewLifecycleServiceHandler(lifecycleServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewAuthServiceHandler(authServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewJobServiceHandler(jobServer, handlerOpts...))
@@ -497,7 +497,7 @@ func (s *Server) loadQueryConfig() (queryTimeout, maxFollowDuration time.Duratio
 	if s.cfgStore == nil {
 		return 0, 0, 0
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {

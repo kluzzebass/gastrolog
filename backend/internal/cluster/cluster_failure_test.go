@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
@@ -32,7 +32,7 @@ func waitStableLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *t
 }
 
 // waitReplication waits for a filter to appear on a node's FSM.
-func waitReplication(t *testing.T, node *testNode, filterID uuid.UUID, timeout time.Duration) *config.FilterConfig {
+func waitReplication(t *testing.T, node *testNode, filterID uuid.UUID, timeout time.Duration) *system.FilterConfig {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)
@@ -64,7 +64,7 @@ func threeNodeCluster(t *testing.T) []*testNode {
 	addVoter(t, node1.srv.Addr(), "node-2", node2.srv.Addr())
 	addVoter(t, node1.srv.Addr(), "node-3", node3.srv.Addr())
 
-	// Wait for all 3 nodes visible in Raft config.
+	// Wait for all 3 nodes visible in Raft system.
 	deadline := time.After(5 * time.Second)
 	for {
 		cfg := node1.raft.GetConfiguration()
@@ -96,7 +96,7 @@ func TestLeadershipTransfer(t *testing.T) {
 	// Write a filter while node1 is leader.
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "before-transfer", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter before transfer: %v", err)
@@ -117,7 +117,7 @@ func TestLeadershipTransfer(t *testing.T) {
 
 	// Write on the new leader.
 	filter2ID := uuid.Must(uuid.NewV7())
-	if err := newLeader.store.PutFilter(ctx, config.FilterConfig{
+	if err := newLeader.store.PutFilter(ctx, system.FilterConfig{
 		ID: filter2ID, Name: "after-transfer", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter on new leader: %v", err)
@@ -166,7 +166,7 @@ func TestNodeRemoval(t *testing.T) {
 	// Write on the leader after removal — cluster should still work with 2 nodes.
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "post-removal", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter after removal: %v", err)
@@ -199,7 +199,7 @@ func TestFollowerShutdownClusterSurvives(t *testing.T) {
 	// Leader should still accept writes (quorum of 2 out of 3).
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "after-follower-down", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter with one follower down: %v", err)
@@ -259,7 +259,7 @@ found:
 	// Write on leader and verify replication to nonvoter.
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "nonvoter-test", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -310,7 +310,7 @@ demoted:
 	// Leader should still accept writes (2 voters: node-1 + node-2).
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "after-demote", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter after demote: %v", err)
@@ -336,7 +336,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 	// Write something before the leader goes down.
 	ctx := context.Background()
 	preFilterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: preFilterID, Name: "pre-election", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter pre-election: %v", err)
@@ -353,7 +353,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 
 	// Write on the new leader.
 	postFilterID := uuid.Must(uuid.NewV7())
-	if err := newLeader.store.PutFilter(ctx, config.FilterConfig{
+	if err := newLeader.store.PutFilter(ctx, system.FilterConfig{
 		ID: postFilterID, Name: "post-election", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter post-election: %v", err)
@@ -391,7 +391,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 	// Write via follower (node2) — should forward to node1 (current leader).
 	ctx := context.Background()
 	filter1ID := uuid.Must(uuid.NewV7())
-	if err := node2.store.PutFilter(ctx, config.FilterConfig{
+	if err := node2.store.PutFilter(ctx, system.FilterConfig{
 		ID: filter1ID, Name: "fwd-to-node1", Expression: "*",
 	}); err != nil {
 		t.Fatalf("PutFilter via follower before transfer: %v", err)
@@ -420,7 +420,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 	filter2ID := uuid.Must(uuid.NewV7())
 	fwdDeadline := time.Now().Add(5 * time.Second)
 	for {
-		err := follower.store.PutFilter(ctx, config.FilterConfig{
+		err := follower.store.PutFilter(ctx, system.FilterConfig{
 			ID: filter2ID, Name: "fwd-to-new-leader", Expression: "*",
 		})
 		if err == nil {
@@ -461,7 +461,7 @@ func TestQuorumLossBlocksWrites(t *testing.T) {
 	defer cancel()
 
 	filterID := uuid.Must(uuid.NewV7())
-	err := node1.store.PutFilter(ctx, config.FilterConfig{
+	err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "should-fail", Expression: "*",
 	})
 	if err == nil {

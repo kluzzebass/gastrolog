@@ -10,7 +10,7 @@ import { Checkbox } from "./Checkbox";
 import { ExpandableCard } from "./ExpandableCard";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { extractMessage } from "../../utils/errors";
-import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/config_pb";
+import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
 
 // ── Form reducer ─────────────────────────────────────────────────────
 

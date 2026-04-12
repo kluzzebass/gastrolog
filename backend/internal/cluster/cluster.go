@@ -329,7 +329,7 @@ func (s *Server) PeerConns() *PeerConns {
 }
 
 // NewPeerConnsPool creates an independent connection pool using the same
-// Raft discovery and TLS config. Use for bulk traffic (replication, migration)
+// Raft discovery and TLS system. Use for bulk traffic (replication, migration)
 // that shouldn't compete for HTTP/2 flow control with queries and config RPCs.
 func (s *Server) NewPeerConnsPool() *PeerConns {
 	return NewPeerConns(s.raft, s.cfg.TLS, s.cfg.NodeID)

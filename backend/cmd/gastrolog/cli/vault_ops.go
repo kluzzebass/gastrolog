@@ -106,7 +106,7 @@ func NewPauseCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.PauseVault(context.Background(), connect.NewRequest(&v1.PauseVaultRequest{Id: id}))
+			_, err = client.System.PauseVault(context.Background(), connect.NewRequest(&v1.PauseVaultRequest{Id: id}))
 			if err != nil {
 				return err
 			}
@@ -132,7 +132,7 @@ func NewResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.ResumeVault(context.Background(), connect.NewRequest(&v1.ResumeVaultRequest{Id: id}))
+			_, err = client.System.ResumeVault(context.Background(), connect.NewRequest(&v1.ResumeVaultRequest{Id: id}))
 			if err != nil {
 				return err
 			}

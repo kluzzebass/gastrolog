@@ -19,11 +19,11 @@ const sampleSettings = {
 };
 
 beforeEach(() => {
-  m(mocks.configClient, "listCertificates").mockClear();
-  m(mocks.configClient, "getCertificate").mockClear();
-  m(mocks.configClient, "putCertificate").mockClear();
-  m(mocks.configClient, "deleteCertificate").mockClear();
-  m(mocks.configClient, "getSettings").mockClear();
+  m(mocks.systemClient, "listCertificates").mockClear();
+  m(mocks.systemClient, "getCertificate").mockClear();
+  m(mocks.systemClient, "putCertificate").mockClear();
+  m(mocks.systemClient, "deleteCertificate").mockClear();
+  m(mocks.systemClient, "getSettings").mockClear();
 });
 
 describe("CertificatesSettings", () => {
@@ -121,7 +121,7 @@ describe("CertificatesSettings", () => {
   });
 
   test("deletes certificate via confirm flow", async () => {
-    m(mocks.configClient, "deleteCertificate").mockResolvedValueOnce({});
+    m(mocks.systemClient, "deleteCertificate").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);
@@ -135,7 +135,7 @@ describe("CertificatesSettings", () => {
     fireEvent.click(getByText("Yes"));
 
     await waitFor(() => {
-      expect(m(mocks.configClient, "deleteCertificate")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "deleteCertificate")).toHaveBeenCalledTimes(1);
     });
   });
 

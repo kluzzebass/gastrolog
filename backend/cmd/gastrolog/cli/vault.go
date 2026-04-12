@@ -32,7 +32,7 @@ func newVaultListCmd() *cobra.Command {
 		Short: "List all vaults",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -68,7 +68,7 @@ func newVaultGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -128,7 +128,7 @@ func newVaultCreateCmd() *cobra.Command {
 				Enabled: true,
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -144,7 +144,7 @@ func newVaultCreateCmd() *cobra.Command {
 				cfg.Enabled, _ = cmd.Flags().GetBool("enabled")
 			}
 
-			_, err = client.Config.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
+			_, err = client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -179,7 +179,7 @@ func newVaultDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteVault(context.Background(), connect.NewRequest(&v1.DeleteVaultRequest{
+			_, err = client.System.DeleteVault(context.Background(), connect.NewRequest(&v1.DeleteVaultRequest{
 				Id:    id,
 				Force: force,
 			}))

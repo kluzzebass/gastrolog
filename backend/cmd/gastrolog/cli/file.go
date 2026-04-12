@@ -36,7 +36,7 @@ func newFileListCmd() *cobra.Command {
 		Short: "List all managed files",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.ListManagedFiles(context.Background(), connect.NewRequest(&v1.ListManagedFilesRequest{}))
+			resp, err := client.System.ListManagedFiles(context.Background(), connect.NewRequest(&v1.ListManagedFilesRequest{}))
 			if err != nil {
 				return err
 			}
@@ -125,7 +125,7 @@ func newFileDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			_, err := client.Config.DeleteManagedFile(context.Background(), connect.NewRequest(&v1.DeleteManagedFileRequest{Id: args[0]}))
+			_, err := client.System.DeleteManagedFile(context.Background(), connect.NewRequest(&v1.DeleteManagedFileRequest{Id: args[0]}))
 			if err != nil {
 				return err
 			}

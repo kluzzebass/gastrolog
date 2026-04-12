@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/home"
 
 	"github.com/google/uuid"
@@ -112,9 +112,9 @@ func (s *Server) handleManagedFileUpload(w http.ResponseWriter, r *http.Request)
 // The original file at srcPath is consumed (moved, not copied).
 // If a file with the same name and SHA256 already exists, the duplicate is
 // discarded and the existing entry is returned (deduplication).
-func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) (config.ManagedFileConfig, error) {
+func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) (system.ManagedFileConfig, error) {
 	if s.homeDir == "" {
-		return config.ManagedFileConfig{}, errors.New("no home directory")
+		return system.ManagedFileConfig{}, errors.New("no home directory")
 	}
 
 	displayName := name
@@ -125,20 +125,20 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	// Compute SHA256 and size by streaming through the file.
 	f, err := os.Open(filepath.Clean(srcPath)) // #nosec G703 — srcPath is from internal temp dir
 	if err != nil {
-		return config.ManagedFileConfig{}, fmt.Errorf("open source file: %w", err)
+		return system.ManagedFileConfig{}, fmt.Errorf("open source file: %w", err)
 	}
 	h := sha256.New()
 	size, err := io.Copy(h, f)
 	_ = f.Close()
 	if err != nil {
-		return config.ManagedFileConfig{}, fmt.Errorf("hash source file: %w", err)
+		return system.ManagedFileConfig{}, fmt.Errorf("hash source file: %w", err)
 	}
 	hash := hex.EncodeToString(h.Sum(nil))
 
 	// Deduplicate: if a version with the same name and hash already exists, return it.
 	existing, err := s.cfgStore.ListManagedFiles(ctx)
 	if err != nil {
-		return config.ManagedFileConfig{}, fmt.Errorf("list managed files: %w", err)
+		return system.ManagedFileConfig{}, fmt.Errorf("list managed files: %w", err)
 	}
 	for _, ef := range existing {
 		if ef.Name == displayName && ef.SHA256 == hash {
@@ -151,18 +151,18 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	hd := home.New(s.homeDir)
 	fileDir := hd.ManagedFileDir(fileID.String())
 	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // G703: fileDir from trusted home + UUID
-		return config.ManagedFileConfig{}, fmt.Errorf("create dir: %w", err)
+		return system.ManagedFileConfig{}, fmt.Errorf("create dir: %w", err)
 	}
 
 	// Store with a fixed filename — user-supplied name stays in metadata only.
 	finalPath := filepath.Join(fileDir, managedFileName)
 	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // G703: finalPath uses constant filename, srcPath from trusted temp
 		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
-		return config.ManagedFileConfig{}, fmt.Errorf("move file: %w", err)
+		return system.ManagedFileConfig{}, fmt.Errorf("move file: %w", err)
 	}
 
 	now := time.Now().UTC()
-	lf := config.ManagedFileConfig{
+	lf := system.ManagedFileConfig{
 		ID:         fileID,
 		Name:       displayName,
 		SHA256:     hash,
@@ -171,7 +171,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	}
 	if err := s.cfgStore.PutManagedFile(ctx, lf); err != nil {
 		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
-		return config.ManagedFileConfig{}, fmt.Errorf("commit metadata: %w", err)
+		return system.ManagedFileConfig{}, fmt.Errorf("commit metadata: %w", err)
 	}
 	s.configSignal.Notify()
 
@@ -286,7 +286,7 @@ func (s *Server) ManagedFileReader(fileID string) (name string, rc io.ReadCloser
 		return "", nil, "", err
 	}
 
-	// Look up display name from config.
+	// Look up display name from system.
 	files, listErr := s.cfgStore.ListManagedFiles(context.Background())
 	displayName := managedFileName
 	if listErr == nil {

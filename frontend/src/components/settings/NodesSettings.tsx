@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
-import { useConfig, usePutNodeConfig } from "../../api/hooks/useConfig";
+import { useConfig, usePutNodeConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useSetNodeSuffrage } from "../../api/hooks/useSetNodeSuffrage";

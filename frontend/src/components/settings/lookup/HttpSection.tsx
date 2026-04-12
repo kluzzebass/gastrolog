@@ -9,7 +9,7 @@ import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type HTTPLookupDraft, type LookupSectionProps, emptyHttpDraft, httpLookupEqual } from "./types";
-import type { HTTPLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { HTTPLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
 function serializeHttpLookups(lookups: HTTPLookupDraft[]) {
   return lookups

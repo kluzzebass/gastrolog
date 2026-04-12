@@ -5,16 +5,18 @@
 
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
+import { CloudService, NodeStorageConfig } from "./storage_pb.js";
+import { TierConfig } from "./system_pb.js";
 
 /**
- * ConfigCommand is a single mutation applied to the config store via Raft.
- * Each variant maps 1:1 to a config.Store write method.
+ * SystemCommand is a single mutation applied to the system store via Raft.
+ * Each variant maps 1:1 to a system.Store write method.
  *
- * @generated from message gastrolog.v1.ConfigCommand
+ * @generated from message gastrolog.v1.SystemCommand
  */
-export class ConfigCommand extends Message<ConfigCommand> {
+export class SystemCommand extends Message<SystemCommand> {
   /**
-   * @generated from oneof gastrolog.v1.ConfigCommand.command
+   * @generated from oneof gastrolog.v1.SystemCommand.command
    */
   command: {
     /**
@@ -234,13 +236,13 @@ export class ConfigCommand extends Message<ConfigCommand> {
     case: "deleteTier";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
-  constructor(data?: PartialMessage<ConfigCommand>) {
+  constructor(data?: PartialMessage<SystemCommand>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ConfigCommand";
+  static readonly typeName = "gastrolog.v1.SystemCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "put_filter", kind: "message", T: PutFilterCommand, oneof: "command" },
     { no: 2, name: "delete_filter", kind: "message", T: DeleteFilterCommand, oneof: "command" },
@@ -280,20 +282,20 @@ export class ConfigCommand extends Message<ConfigCommand> {
     { no: 36, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigCommand {
-    return new ConfigCommand().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
+    return new SystemCommand().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ConfigCommand {
-    return new ConfigCommand().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SystemCommand {
+    return new SystemCommand().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ConfigCommand {
-    return new ConfigCommand().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SystemCommand {
+    return new SystemCommand().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ConfigCommand | PlainMessage<ConfigCommand> | undefined, b: ConfigCommand | PlainMessage<ConfigCommand> | undefined): boolean {
-    return proto3.util.equals(ConfigCommand, a, b);
+  static equals(a: SystemCommand | PlainMessage<SystemCommand> | undefined, b: SystemCommand | PlainMessage<SystemCommand> | undefined): boolean {
+    return proto3.util.equals(SystemCommand, a, b);
   }
 }
 
@@ -589,75 +591,6 @@ export class DeleteRetentionPolicyCommand extends Message<DeleteRetentionPolicyC
  * RetentionRule for vault commands. Separate from config.proto's RetentionRule
  * to avoid naming collisions and to match Go types exactly.
  *
- * @generated from message gastrolog.v1.VaultRetentionRule
- */
-export class VaultRetentionRule extends Message<VaultRetentionRule> {
-  /**
-   * @generated from field: string retention_policy_id = 1;
-   */
-  retentionPolicyId = "";
-
-  /**
-   * "expire", "eject", "transition", or "archive"
-   *
-   * @generated from field: string action = 2;
-   */
-  action = "";
-
-  /**
-   * deprecated — was target vault for action=migrate
-   *
-   * @generated from field: string destination = 3;
-   */
-  destination = "";
-
-  /**
-   * target routes, only for action=eject
-   *
-   * @generated from field: repeated string eject_route_ids = 4;
-   */
-  ejectRouteIds: string[] = [];
-
-  /**
-   * target class for archive
-   *
-   * @generated from field: string archive_storage_class = 5;
-   */
-  archiveStorageClass = "";
-
-  constructor(data?: PartialMessage<VaultRetentionRule>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.VaultRetentionRule";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "retention_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "destination", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "eject_route_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 5, name: "archive_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): VaultRetentionRule {
-    return new VaultRetentionRule().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): VaultRetentionRule {
-    return new VaultRetentionRule().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): VaultRetentionRule {
-    return new VaultRetentionRule().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: VaultRetentionRule | PlainMessage<VaultRetentionRule> | undefined, b: VaultRetentionRule | PlainMessage<VaultRetentionRule> | undefined): boolean {
-    return proto3.util.equals(VaultRetentionRule, a, b);
-  }
-}
-
-/**
  * @generated from message gastrolog.v1.PutVaultCommand
  */
 export class PutVaultCommand extends Message<PutVaultCommand> {
@@ -1863,141 +1796,17 @@ export class DeleteManagedFileCommand extends Message<DeleteManagedFileCommand> 
 }
 
 /**
- * @generated from message gastrolog.v1.CloudServiceTransition
- */
-export class CloudServiceTransition extends Message<CloudServiceTransition> {
-  /**
-   * @generated from field: string after = 1;
-   */
-  after = "";
-
-  /**
-   * @generated from field: string storage_class = 2;
-   */
-  storageClass = "";
-
-  constructor(data?: PartialMessage<CloudServiceTransition>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.CloudServiceTransition";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "after", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): CloudServiceTransition {
-    return new CloudServiceTransition().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): CloudServiceTransition {
-    return new CloudServiceTransition().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): CloudServiceTransition {
-    return new CloudServiceTransition().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: CloudServiceTransition | PlainMessage<CloudServiceTransition> | undefined, b: CloudServiceTransition | PlainMessage<CloudServiceTransition> | undefined): boolean {
-    return proto3.util.equals(CloudServiceTransition, a, b);
-  }
-}
-
-/**
+ * PutCloudServiceCommand carries the full API CloudService from storage.proto.
+ * Previously flattened all fields here; now embeds to share the conversion layer.
+ * See gastrolog-2f8et. Breaking change: not wire-compatible with old Raft logs.
+ *
  * @generated from message gastrolog.v1.PutCloudServiceCommand
  */
 export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: gastrolog.v1.CloudService cloud_service = 1;
    */
-  id = "";
-
-  /**
-   * @generated from field: string name = 2;
-   */
-  name = "";
-
-  /**
-   * @generated from field: string provider = 3;
-   */
-  provider = "";
-
-  /**
-   * @generated from field: string bucket = 4;
-   */
-  bucket = "";
-
-  /**
-   * @generated from field: string region = 5;
-   */
-  region = "";
-
-  /**
-   * @generated from field: string endpoint = 6;
-   */
-  endpoint = "";
-
-  /**
-   * @generated from field: string access_key = 7;
-   */
-  accessKey = "";
-
-  /**
-   * @generated from field: string secret_key = 8;
-   */
-  secretKey = "";
-
-  /**
-   * @generated from field: string container = 9;
-   */
-  container = "";
-
-  /**
-   * @generated from field: string connection_string = 10;
-   */
-  connectionString = "";
-
-  /**
-   * @generated from field: string credentials_json = 11;
-   */
-  credentialsJson = "";
-
-  /**
-   * @generated from field: uint32 storage_class = 15;
-   */
-  storageClass = 0;
-
-  /**
-   * @generated from field: string archival_mode = 20;
-   */
-  archivalMode = "";
-
-  /**
-   * @generated from field: repeated gastrolog.v1.CloudServiceTransition transitions = 21;
-   */
-  transitions: CloudServiceTransition[] = [];
-
-  /**
-   * @generated from field: string restore_tier = 22;
-   */
-  restoreTier = "";
-
-  /**
-   * @generated from field: uint32 restore_days = 23;
-   */
-  restoreDays = 0;
-
-  /**
-   * @generated from field: uint32 suspect_grace_days = 24;
-   */
-  suspectGraceDays = 0;
-
-  /**
-   * @generated from field: string reconcile_schedule = 25;
-   */
-  reconcileSchedule = "";
+  cloudService?: CloudService;
 
   constructor(data?: PartialMessage<PutCloudServiceCommand>) {
     super();
@@ -2007,24 +1816,7 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutCloudServiceCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "provider", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "bucket", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "region", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "endpoint", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 7, name: "access_key", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 8, name: "secret_key", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 9, name: "container", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 10, name: "connection_string", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 11, name: "credentials_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 20, name: "archival_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 21, name: "transitions", kind: "message", T: CloudServiceTransition, repeated: true },
-    { no: 22, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 23, name: "restore_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 24, name: "suspect_grace_days", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 25, name: "reconcile_schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "cloud_service", kind: "message", T: CloudService },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutCloudServiceCommand {
@@ -2082,18 +1874,15 @@ export class DeleteCloudServiceCommand extends Message<DeleteCloudServiceCommand
 }
 
 /**
+ * SetNodeStorageConfigCommand carries the full API NodeStorageConfig from storage.proto.
+ *
  * @generated from message gastrolog.v1.SetNodeStorageConfigCommand
  */
 export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCommand> {
   /**
-   * @generated from field: string node_id = 1;
+   * @generated from field: gastrolog.v1.NodeStorageConfig node_storage = 1;
    */
-  nodeId = "";
-
-  /**
-   * @generated from field: repeated gastrolog.v1.FileStorageCommand file_storages = 2;
-   */
-  fileStorages: FileStorageCommand[] = [];
+  nodeStorage?: NodeStorageConfig;
 
   constructor(data?: PartialMessage<SetNodeStorageConfigCommand>) {
     super();
@@ -2103,8 +1892,7 @@ export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCom
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SetNodeStorageConfigCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "file_storages", kind: "message", T: FileStorageCommand, repeated: true },
+    { no: 1, name: "node_storage", kind: "message", T: NodeStorageConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetNodeStorageConfigCommand {
@@ -2125,161 +1913,15 @@ export class SetNodeStorageConfigCommand extends Message<SetNodeStorageConfigCom
 }
 
 /**
- * @generated from message gastrolog.v1.FileStorageCommand
- */
-export class FileStorageCommand extends Message<FileStorageCommand> {
-  /**
-   * @generated from field: string id = 1;
-   */
-  id = "";
-
-  /**
-   * @generated from field: uint32 storage_class = 2;
-   */
-  storageClass = 0;
-
-  /**
-   * @generated from field: string name = 3;
-   */
-  name = "";
-
-  /**
-   * @generated from field: string path = 4;
-   */
-  path = "";
-
-  /**
-   * @generated from field: uint64 memory_budget_bytes = 6;
-   */
-  memoryBudgetBytes = protoInt64.zero;
-
-  constructor(data?: PartialMessage<FileStorageCommand>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.FileStorageCommand";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): FileStorageCommand {
-    return new FileStorageCommand().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): FileStorageCommand {
-    return new FileStorageCommand().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): FileStorageCommand {
-    return new FileStorageCommand().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: FileStorageCommand | PlainMessage<FileStorageCommand> | undefined, b: FileStorageCommand | PlainMessage<FileStorageCommand> | undefined): boolean {
-    return proto3.util.equals(FileStorageCommand, a, b);
-  }
-}
-
-/**
+ * PutTierCommand carries the full API TierConfig from system.proto.
+ *
  * @generated from message gastrolog.v1.PutTierCommand
  */
 export class PutTierCommand extends Message<PutTierCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: gastrolog.v1.TierConfig tier = 1;
    */
-  id = "";
-
-  /**
-   * @generated from field: string name = 2;
-   */
-  name = "";
-
-  /**
-   * "memory", "local", "cloud"
-   *
-   * @generated from field: string type = 3;
-   */
-  type = "";
-
-  /**
-   * @generated from field: string rotation_policy_id = 4;
-   */
-  rotationPolicyId = "";
-
-  /**
-   * @generated from field: repeated gastrolog.v1.VaultRetentionRule retention_rules = 5;
-   */
-  retentionRules: VaultRetentionRule[] = [];
-
-  /**
-   * @generated from field: uint64 memory_budget_bytes = 6;
-   */
-  memoryBudgetBytes = protoInt64.zero;
-
-  /**
-   * @generated from field: uint32 storage_class = 7;
-   */
-  storageClass = 0;
-
-  /**
-   * @generated from field: string cloud_service_id = 8;
-   */
-  cloudServiceId = "";
-
-  /**
-   * @generated from field: uint32 active_chunk_class = 9;
-   */
-  activeChunkClass = 0;
-
-  /**
-   * @generated from field: uint32 cache_class = 10;
-   */
-  cacheClass = 0;
-
-  /**
-   * @generated from field: uint32 replication_factor = 12;
-   */
-  replicationFactor = 0;
-
-  /**
-   * @generated from field: string path = 14;
-   */
-  path = "";
-
-  /**
-   * @generated from field: repeated gastrolog.v1.TierPlacementEntry placements = 15;
-   */
-  placements: TierPlacementEntry[] = [];
-
-  /**
-   * @generated from field: string vault_id = 16;
-   */
-  vaultId = "";
-
-  /**
-   * @generated from field: uint32 position = 17;
-   */
-  position = 0;
-
-  /**
-   * @generated from field: string cache_eviction = 18;
-   */
-  cacheEviction = "";
-
-  /**
-   * @generated from field: string cache_budget = 19;
-   */
-  cacheBudget = "";
-
-  /**
-   * @generated from field: string cache_ttl = 20;
-   */
-  cacheTtl = "";
+  tier?: TierConfig;
 
   constructor(data?: PartialMessage<PutTierCommand>) {
     super();
@@ -2289,24 +1931,7 @@ export class PutTierCommand extends Message<PutTierCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutTierCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "rotation_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "retention_rules", kind: "message", T: VaultRetentionRule, repeated: true },
-    { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 7, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 15, name: "placements", kind: "message", T: TierPlacementEntry, repeated: true },
-    { no: 16, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 17, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 18, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 19, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 20, name: "cache_ttl", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "tier", kind: "message", T: TierConfig },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutTierCommand {
@@ -2323,49 +1948,6 @@ export class PutTierCommand extends Message<PutTierCommand> {
 
   static equals(a: PutTierCommand | PlainMessage<PutTierCommand> | undefined, b: PutTierCommand | PlainMessage<PutTierCommand> | undefined): boolean {
     return proto3.util.equals(PutTierCommand, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.TierPlacementEntry
- */
-export class TierPlacementEntry extends Message<TierPlacementEntry> {
-  /**
-   * @generated from field: string storage_id = 1;
-   */
-  storageId = "";
-
-  /**
-   * @generated from field: bool primary = 2;
-   */
-  primary = false;
-
-  constructor(data?: PartialMessage<TierPlacementEntry>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.TierPlacementEntry";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "storage_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "primary", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierPlacementEntry {
-    return new TierPlacementEntry().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): TierPlacementEntry {
-    return new TierPlacementEntry().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): TierPlacementEntry {
-    return new TierPlacementEntry().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: TierPlacementEntry | PlainMessage<TierPlacementEntry> | undefined, b: TierPlacementEntry | PlainMessage<TierPlacementEntry> | undefined): boolean {
-    return proto3.util.equals(TierPlacementEntry, a, b);
   }
 }
 
@@ -2415,13 +1997,13 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
 }
 
 /**
- * ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
+ * SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
  *
- * @generated from message gastrolog.v1.ConfigSnapshot
+ * @generated from message gastrolog.v1.SystemSnapshot
  */
-export class ConfigSnapshot extends Message<ConfigSnapshot> {
+export class SystemSnapshot extends Message<SystemSnapshot> {
   /**
    * @generated from field: repeated gastrolog.v1.PutFilterCommand filters = 1;
    */
@@ -2502,13 +2084,13 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
    */
   tiers: PutTierCommand[] = [];
 
-  constructor(data?: PartialMessage<ConfigSnapshot>) {
+  constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ConfigSnapshot";
+  static readonly typeName = "gastrolog.v1.SystemSnapshot";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "filters", kind: "message", T: PutFilterCommand, repeated: true },
     { no: 2, name: "rotation_policies", kind: "message", T: PutRotationPolicyCommand, repeated: true },
@@ -2528,20 +2110,20 @@ export class ConfigSnapshot extends Message<ConfigSnapshot> {
     { no: 16, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ConfigSnapshot {
-    return new ConfigSnapshot().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {
+    return new SystemSnapshot().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ConfigSnapshot {
-    return new ConfigSnapshot().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SystemSnapshot {
+    return new SystemSnapshot().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ConfigSnapshot {
-    return new ConfigSnapshot().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SystemSnapshot {
+    return new SystemSnapshot().fromJsonString(jsonString, options);
   }
 
-  static equals(a: ConfigSnapshot | PlainMessage<ConfigSnapshot> | undefined, b: ConfigSnapshot | PlainMessage<ConfigSnapshot> | undefined): boolean {
-    return proto3.util.equals(ConfigSnapshot, a, b);
+  static equals(a: SystemSnapshot | PlainMessage<SystemSnapshot> | undefined, b: SystemSnapshot | PlainMessage<SystemSnapshot> | undefined): boolean {
+    return proto3.util.equals(SystemSnapshot, a, b);
   }
 }
 

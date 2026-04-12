@@ -1,8 +1,8 @@
-import { configClient } from "../client";
-import { useConfigMutation } from "./useConfig";
+import { systemClient } from "../client";
+import { useSystemMutation } from "./useSystem";
 
 export function usePutRetentionPolicy() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       id: string;
       name: string;
@@ -10,7 +10,7 @@ export function usePutRetentionPolicy() {
       maxBytes: bigint;
       maxChunks: bigint;
     }) => {
-      return configClient.putRetentionPolicy({
+      return systemClient.putRetentionPolicy({
         config: {
           id: args.id,
           name: args.name,
@@ -24,7 +24,7 @@ export function usePutRetentionPolicy() {
 }
 
 export function useDeleteRetentionPolicy() {
-  return useConfigMutation(async (id: string) => {
-    return configClient.deleteRetentionPolicy({ id });
+  return useSystemMutation(async (id: string) => {
+    return systemClient.deleteRetentionPolicy({ id });
   });
 }

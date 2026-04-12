@@ -1,12 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { configClient } from "../client";
-import { useConfigMutation } from "./useConfig";
+import { systemClient } from "../client";
+import { useSystemMutation } from "./useSystem";
 
 export function useCertificates() {
   return useQuery({
     queryKey: ["certificates"],
     queryFn: async () => {
-      const response = await configClient.listCertificates({});
+      const response = await systemClient.listCertificates({});
       return response;
     },
   });
@@ -17,7 +17,7 @@ export function useCertificate(id: string | null) {
     queryKey: ["certificate", id],
     queryFn: async () => {
       if (!id) return null;
-      const response = await configClient.getCertificate({ id });
+      const response = await systemClient.getCertificate({ id });
       return response;
     },
     enabled: !!id,
@@ -25,7 +25,7 @@ export function useCertificate(id: string | null) {
 }
 
 export function usePutCertificate() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       id: string;
       name: string;
@@ -35,7 +35,7 @@ export function usePutCertificate() {
       keyFile?: string;
       setAsDefault?: boolean;
     }) => {
-      return configClient.putCertificate({
+      return systemClient.putCertificate({
         id: args.id,
         name: args.name,
         certPem: args.certPem ?? "",
@@ -50,9 +50,9 @@ export function usePutCertificate() {
 }
 
 export function useDeleteCertificate() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (id: string) => {
-      return configClient.deleteCertificate({ id });
+      return systemClient.deleteCertificate({ id });
     },
     [["certificates"], ["settings"]],
   );

@@ -10,7 +10,7 @@ import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, jsonFileLookupEqual } from "./types";
-import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
 function serializeJsonLookups(lookups: JSONFileLookupDraft[]) {
   return lookups

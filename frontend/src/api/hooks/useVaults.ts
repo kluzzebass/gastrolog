@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { vaultClient, configClient } from "../client";
+import { vaultClient, systemClient } from "../client";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
-import { useConfigMutation } from "./useConfig";
+import { useSystemMutation } from "./useSystem";
 
 export function useVaults() {
   return useQuery({
@@ -191,7 +191,7 @@ export function useMigrateVault() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
     },
   });
 }
@@ -209,19 +209,19 @@ export function useMergeVaults() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["vaults"] });
       qc.invalidateQueries({ queryKey: ["stats"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
     },
   });
 }
 
 export function usePutVault() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       id: string;
       name: string;
       enabled?: boolean;
     }) => {
-      return configClient.putVault({
+      return systemClient.putVault({
         config: {
           id: args.id,
           name: args.name,
@@ -246,7 +246,7 @@ function stripEmptyParams(params: Record<string, string>): Record<string, string
 export function useTestCloudService() {
   return useMutation({
     mutationFn: async (args: { type: string; params: Record<string, string> }) => {
-      const response = await configClient.testCloudService({
+      const response = await systemClient.testCloudService({
         type: args.type,
         params: stripEmptyParams(args.params),
       });
@@ -256,9 +256,9 @@ export function useTestCloudService() {
 }
 
 export function useDeleteVault() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: { id: string; force?: boolean; deleteData?: boolean }) => {
-      return configClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
+      return systemClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
     },
     [["vaults"], ["stats"]],
   );

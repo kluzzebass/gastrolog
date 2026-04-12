@@ -9,7 +9,7 @@ import (
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -76,10 +76,10 @@ func (m *mockForwarder) getCalls() []forwardCall {
 
 // mockConfigLoader returns a fixed config for testing.
 type mockConfigLoader struct {
-	cfg *config.Config
+	cfg *system.Config
 }
 
-func (m *mockConfigLoader) Load(_ context.Context) (*config.Config, error) {
+func (m *mockConfigLoader) Load(_ context.Context) (*system.Config, error) {
 	return m.cfg, nil
 }
 
@@ -154,15 +154,15 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	// Test that reloadFiltersFromRoutes correctly skips remote
 	// vaults when no forwarder is set.
 	o.filterSet = nil
-	o.cfgLoader = &mockConfigLoader{cfg: &config.Config{
-		Routes: []config.RouteConfig{
+	o.cfgLoader = &mockConfigLoader{cfg: &system.Config{
+		Routes: []system.RouteConfig{
 			{
 				ID:           uuid.Must(uuid.NewV7()),
 				Enabled:      true,
 				Destinations: []uuid.UUID{localVaultID, remoteVaultID},
 			},
 		},
-		Vaults: []config.VaultConfig{
+		Vaults: []system.VaultConfig{
 			{ID: localVaultID},
 			{ID: remoteVaultID},
 		},

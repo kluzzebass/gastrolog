@@ -22,67 +22,67 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// ConfigCommand is a single mutation applied to the config store via Raft.
-// Each variant maps 1:1 to a config.Store write method.
-type ConfigCommand struct {
+// SystemCommand is a single mutation applied to the system store via Raft.
+// Each variant maps 1:1 to a system.Store write method.
+type SystemCommand struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Command:
 	//
-	//	*ConfigCommand_PutFilter
-	//	*ConfigCommand_DeleteFilter
-	//	*ConfigCommand_PutRotationPolicy
-	//	*ConfigCommand_DeleteRotationPolicy
-	//	*ConfigCommand_PutRetentionPolicy
-	//	*ConfigCommand_DeleteRetentionPolicy
-	//	*ConfigCommand_PutVault
-	//	*ConfigCommand_DeleteVault
-	//	*ConfigCommand_PutIngester
-	//	*ConfigCommand_DeleteIngester
-	//	*ConfigCommand_PutSetting
-	//	*ConfigCommand_DeleteSetting
-	//	*ConfigCommand_PutCertificate
-	//	*ConfigCommand_DeleteCertificate
-	//	*ConfigCommand_CreateUser
-	//	*ConfigCommand_UpdatePassword
-	//	*ConfigCommand_UpdateUserRole
-	//	*ConfigCommand_UpdateUsername
-	//	*ConfigCommand_DeleteUser
-	//	*ConfigCommand_InvalidateTokens
-	//	*ConfigCommand_PutUserPreferences
-	//	*ConfigCommand_CreateRefreshToken
-	//	*ConfigCommand_DeleteRefreshToken
-	//	*ConfigCommand_DeleteUserRefreshTokens
-	//	*ConfigCommand_PutNodeConfig
-	//	*ConfigCommand_DeleteNodeConfig
-	//	*ConfigCommand_PutClusterTls
-	//	*ConfigCommand_PutRoute
-	//	*ConfigCommand_DeleteRoute
-	//	*ConfigCommand_PutManagedFile
-	//	*ConfigCommand_DeleteManagedFile
-	//	*ConfigCommand_PutCloudService
-	//	*ConfigCommand_DeleteCloudService
-	//	*ConfigCommand_SetNodeStorageConfig
-	//	*ConfigCommand_PutTier
-	//	*ConfigCommand_DeleteTier
-	Command       isConfigCommand_Command `protobuf_oneof:"command"`
+	//	*SystemCommand_PutFilter
+	//	*SystemCommand_DeleteFilter
+	//	*SystemCommand_PutRotationPolicy
+	//	*SystemCommand_DeleteRotationPolicy
+	//	*SystemCommand_PutRetentionPolicy
+	//	*SystemCommand_DeleteRetentionPolicy
+	//	*SystemCommand_PutVault
+	//	*SystemCommand_DeleteVault
+	//	*SystemCommand_PutIngester
+	//	*SystemCommand_DeleteIngester
+	//	*SystemCommand_PutSetting
+	//	*SystemCommand_DeleteSetting
+	//	*SystemCommand_PutCertificate
+	//	*SystemCommand_DeleteCertificate
+	//	*SystemCommand_CreateUser
+	//	*SystemCommand_UpdatePassword
+	//	*SystemCommand_UpdateUserRole
+	//	*SystemCommand_UpdateUsername
+	//	*SystemCommand_DeleteUser
+	//	*SystemCommand_InvalidateTokens
+	//	*SystemCommand_PutUserPreferences
+	//	*SystemCommand_CreateRefreshToken
+	//	*SystemCommand_DeleteRefreshToken
+	//	*SystemCommand_DeleteUserRefreshTokens
+	//	*SystemCommand_PutNodeConfig
+	//	*SystemCommand_DeleteNodeConfig
+	//	*SystemCommand_PutClusterTls
+	//	*SystemCommand_PutRoute
+	//	*SystemCommand_DeleteRoute
+	//	*SystemCommand_PutManagedFile
+	//	*SystemCommand_DeleteManagedFile
+	//	*SystemCommand_PutCloudService
+	//	*SystemCommand_DeleteCloudService
+	//	*SystemCommand_SetNodeStorageConfig
+	//	*SystemCommand_PutTier
+	//	*SystemCommand_DeleteTier
+	Command       isSystemCommand_Command `protobuf_oneof:"command"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *ConfigCommand) Reset() {
-	*x = ConfigCommand{}
+func (x *SystemCommand) Reset() {
+	*x = SystemCommand{}
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ConfigCommand) String() string {
+func (x *SystemCommand) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ConfigCommand) ProtoMessage() {}
+func (*SystemCommand) ProtoMessage() {}
 
-func (x *ConfigCommand) ProtoReflect() protoreflect.Message {
+func (x *SystemCommand) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -94,561 +94,561 @@ func (x *ConfigCommand) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ConfigCommand.ProtoReflect.Descriptor instead.
-func (*ConfigCommand) Descriptor() ([]byte, []int) {
+// Deprecated: Use SystemCommand.ProtoReflect.Descriptor instead.
+func (*SystemCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *ConfigCommand) GetCommand() isConfigCommand_Command {
+func (x *SystemCommand) GetCommand() isSystemCommand_Command {
 	if x != nil {
 		return x.Command
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutFilter() *PutFilterCommand {
+func (x *SystemCommand) GetPutFilter() *PutFilterCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutFilter); ok {
+		if x, ok := x.Command.(*SystemCommand_PutFilter); ok {
 			return x.PutFilter
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteFilter() *DeleteFilterCommand {
+func (x *SystemCommand) GetDeleteFilter() *DeleteFilterCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteFilter); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteFilter); ok {
 			return x.DeleteFilter
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutRotationPolicy() *PutRotationPolicyCommand {
+func (x *SystemCommand) GetPutRotationPolicy() *PutRotationPolicyCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutRotationPolicy); ok {
+		if x, ok := x.Command.(*SystemCommand_PutRotationPolicy); ok {
 			return x.PutRotationPolicy
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteRotationPolicy() *DeleteRotationPolicyCommand {
+func (x *SystemCommand) GetDeleteRotationPolicy() *DeleteRotationPolicyCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteRotationPolicy); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteRotationPolicy); ok {
 			return x.DeleteRotationPolicy
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutRetentionPolicy() *PutRetentionPolicyCommand {
+func (x *SystemCommand) GetPutRetentionPolicy() *PutRetentionPolicyCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutRetentionPolicy); ok {
+		if x, ok := x.Command.(*SystemCommand_PutRetentionPolicy); ok {
 			return x.PutRetentionPolicy
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteRetentionPolicy() *DeleteRetentionPolicyCommand {
+func (x *SystemCommand) GetDeleteRetentionPolicy() *DeleteRetentionPolicyCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteRetentionPolicy); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteRetentionPolicy); ok {
 			return x.DeleteRetentionPolicy
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutVault() *PutVaultCommand {
+func (x *SystemCommand) GetPutVault() *PutVaultCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutVault); ok {
+		if x, ok := x.Command.(*SystemCommand_PutVault); ok {
 			return x.PutVault
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteVault() *DeleteVaultCommand {
+func (x *SystemCommand) GetDeleteVault() *DeleteVaultCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteVault); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteVault); ok {
 			return x.DeleteVault
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutIngester() *PutIngesterCommand {
+func (x *SystemCommand) GetPutIngester() *PutIngesterCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutIngester); ok {
+		if x, ok := x.Command.(*SystemCommand_PutIngester); ok {
 			return x.PutIngester
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteIngester() *DeleteIngesterCommand {
+func (x *SystemCommand) GetDeleteIngester() *DeleteIngesterCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteIngester); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteIngester); ok {
 			return x.DeleteIngester
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutSetting() *PutSettingCommand {
+func (x *SystemCommand) GetPutSetting() *PutSettingCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutSetting); ok {
+		if x, ok := x.Command.(*SystemCommand_PutSetting); ok {
 			return x.PutSetting
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteSetting() *DeleteSettingCommand {
+func (x *SystemCommand) GetDeleteSetting() *DeleteSettingCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteSetting); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteSetting); ok {
 			return x.DeleteSetting
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutCertificate() *PutCertificateCommand {
+func (x *SystemCommand) GetPutCertificate() *PutCertificateCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutCertificate); ok {
+		if x, ok := x.Command.(*SystemCommand_PutCertificate); ok {
 			return x.PutCertificate
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteCertificate() *DeleteCertificateCommand {
+func (x *SystemCommand) GetDeleteCertificate() *DeleteCertificateCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteCertificate); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteCertificate); ok {
 			return x.DeleteCertificate
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetCreateUser() *CreateUserCommand {
+func (x *SystemCommand) GetCreateUser() *CreateUserCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_CreateUser); ok {
+		if x, ok := x.Command.(*SystemCommand_CreateUser); ok {
 			return x.CreateUser
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetUpdatePassword() *UpdatePasswordCommand {
+func (x *SystemCommand) GetUpdatePassword() *UpdatePasswordCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_UpdatePassword); ok {
+		if x, ok := x.Command.(*SystemCommand_UpdatePassword); ok {
 			return x.UpdatePassword
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetUpdateUserRole() *UpdateUserRoleCommand {
+func (x *SystemCommand) GetUpdateUserRole() *UpdateUserRoleCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_UpdateUserRole); ok {
+		if x, ok := x.Command.(*SystemCommand_UpdateUserRole); ok {
 			return x.UpdateUserRole
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetUpdateUsername() *UpdateUsernameCommand {
+func (x *SystemCommand) GetUpdateUsername() *UpdateUsernameCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_UpdateUsername); ok {
+		if x, ok := x.Command.(*SystemCommand_UpdateUsername); ok {
 			return x.UpdateUsername
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteUser() *DeleteUserCommand {
+func (x *SystemCommand) GetDeleteUser() *DeleteUserCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteUser); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteUser); ok {
 			return x.DeleteUser
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetInvalidateTokens() *InvalidateTokensCommand {
+func (x *SystemCommand) GetInvalidateTokens() *InvalidateTokensCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_InvalidateTokens); ok {
+		if x, ok := x.Command.(*SystemCommand_InvalidateTokens); ok {
 			return x.InvalidateTokens
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutUserPreferences() *PutUserPreferencesCommand {
+func (x *SystemCommand) GetPutUserPreferences() *PutUserPreferencesCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutUserPreferences); ok {
+		if x, ok := x.Command.(*SystemCommand_PutUserPreferences); ok {
 			return x.PutUserPreferences
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetCreateRefreshToken() *CreateRefreshTokenCommand {
+func (x *SystemCommand) GetCreateRefreshToken() *CreateRefreshTokenCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_CreateRefreshToken); ok {
+		if x, ok := x.Command.(*SystemCommand_CreateRefreshToken); ok {
 			return x.CreateRefreshToken
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteRefreshToken() *DeleteRefreshTokenCommand {
+func (x *SystemCommand) GetDeleteRefreshToken() *DeleteRefreshTokenCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteRefreshToken); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteRefreshToken); ok {
 			return x.DeleteRefreshToken
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteUserRefreshTokens() *DeleteUserRefreshTokensCommand {
+func (x *SystemCommand) GetDeleteUserRefreshTokens() *DeleteUserRefreshTokensCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteUserRefreshTokens); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteUserRefreshTokens); ok {
 			return x.DeleteUserRefreshTokens
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutNodeConfig() *PutNodeConfigCommand {
+func (x *SystemCommand) GetPutNodeConfig() *PutNodeConfigCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutNodeConfig); ok {
+		if x, ok := x.Command.(*SystemCommand_PutNodeConfig); ok {
 			return x.PutNodeConfig
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteNodeConfig() *DeleteNodeConfigCommand {
+func (x *SystemCommand) GetDeleteNodeConfig() *DeleteNodeConfigCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteNodeConfig); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteNodeConfig); ok {
 			return x.DeleteNodeConfig
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutClusterTls() *PutClusterTLSCommand {
+func (x *SystemCommand) GetPutClusterTls() *PutClusterTLSCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutClusterTls); ok {
+		if x, ok := x.Command.(*SystemCommand_PutClusterTls); ok {
 			return x.PutClusterTls
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutRoute() *PutRouteCommand {
+func (x *SystemCommand) GetPutRoute() *PutRouteCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutRoute); ok {
+		if x, ok := x.Command.(*SystemCommand_PutRoute); ok {
 			return x.PutRoute
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteRoute() *DeleteRouteCommand {
+func (x *SystemCommand) GetDeleteRoute() *DeleteRouteCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteRoute); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteRoute); ok {
 			return x.DeleteRoute
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutManagedFile() *PutManagedFileCommand {
+func (x *SystemCommand) GetPutManagedFile() *PutManagedFileCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutManagedFile); ok {
+		if x, ok := x.Command.(*SystemCommand_PutManagedFile); ok {
 			return x.PutManagedFile
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteManagedFile() *DeleteManagedFileCommand {
+func (x *SystemCommand) GetDeleteManagedFile() *DeleteManagedFileCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteManagedFile); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteManagedFile); ok {
 			return x.DeleteManagedFile
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutCloudService() *PutCloudServiceCommand {
+func (x *SystemCommand) GetPutCloudService() *PutCloudServiceCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutCloudService); ok {
+		if x, ok := x.Command.(*SystemCommand_PutCloudService); ok {
 			return x.PutCloudService
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteCloudService() *DeleteCloudServiceCommand {
+func (x *SystemCommand) GetDeleteCloudService() *DeleteCloudServiceCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteCloudService); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteCloudService); ok {
 			return x.DeleteCloudService
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetSetNodeStorageConfig() *SetNodeStorageConfigCommand {
+func (x *SystemCommand) GetSetNodeStorageConfig() *SetNodeStorageConfigCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_SetNodeStorageConfig); ok {
+		if x, ok := x.Command.(*SystemCommand_SetNodeStorageConfig); ok {
 			return x.SetNodeStorageConfig
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetPutTier() *PutTierCommand {
+func (x *SystemCommand) GetPutTier() *PutTierCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_PutTier); ok {
+		if x, ok := x.Command.(*SystemCommand_PutTier); ok {
 			return x.PutTier
 		}
 	}
 	return nil
 }
 
-func (x *ConfigCommand) GetDeleteTier() *DeleteTierCommand {
+func (x *SystemCommand) GetDeleteTier() *DeleteTierCommand {
 	if x != nil {
-		if x, ok := x.Command.(*ConfigCommand_DeleteTier); ok {
+		if x, ok := x.Command.(*SystemCommand_DeleteTier); ok {
 			return x.DeleteTier
 		}
 	}
 	return nil
 }
 
-type isConfigCommand_Command interface {
-	isConfigCommand_Command()
+type isSystemCommand_Command interface {
+	isSystemCommand_Command()
 }
 
-type ConfigCommand_PutFilter struct {
+type SystemCommand_PutFilter struct {
 	PutFilter *PutFilterCommand `protobuf:"bytes,1,opt,name=put_filter,json=putFilter,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteFilter struct {
+type SystemCommand_DeleteFilter struct {
 	DeleteFilter *DeleteFilterCommand `protobuf:"bytes,2,opt,name=delete_filter,json=deleteFilter,proto3,oneof"`
 }
 
-type ConfigCommand_PutRotationPolicy struct {
+type SystemCommand_PutRotationPolicy struct {
 	PutRotationPolicy *PutRotationPolicyCommand `protobuf:"bytes,3,opt,name=put_rotation_policy,json=putRotationPolicy,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteRotationPolicy struct {
+type SystemCommand_DeleteRotationPolicy struct {
 	DeleteRotationPolicy *DeleteRotationPolicyCommand `protobuf:"bytes,4,opt,name=delete_rotation_policy,json=deleteRotationPolicy,proto3,oneof"`
 }
 
-type ConfigCommand_PutRetentionPolicy struct {
+type SystemCommand_PutRetentionPolicy struct {
 	PutRetentionPolicy *PutRetentionPolicyCommand `protobuf:"bytes,5,opt,name=put_retention_policy,json=putRetentionPolicy,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteRetentionPolicy struct {
+type SystemCommand_DeleteRetentionPolicy struct {
 	DeleteRetentionPolicy *DeleteRetentionPolicyCommand `protobuf:"bytes,6,opt,name=delete_retention_policy,json=deleteRetentionPolicy,proto3,oneof"`
 }
 
-type ConfigCommand_PutVault struct {
+type SystemCommand_PutVault struct {
 	PutVault *PutVaultCommand `protobuf:"bytes,7,opt,name=put_vault,json=putVault,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteVault struct {
+type SystemCommand_DeleteVault struct {
 	DeleteVault *DeleteVaultCommand `protobuf:"bytes,8,opt,name=delete_vault,json=deleteVault,proto3,oneof"`
 }
 
-type ConfigCommand_PutIngester struct {
+type SystemCommand_PutIngester struct {
 	PutIngester *PutIngesterCommand `protobuf:"bytes,9,opt,name=put_ingester,json=putIngester,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteIngester struct {
+type SystemCommand_DeleteIngester struct {
 	DeleteIngester *DeleteIngesterCommand `protobuf:"bytes,10,opt,name=delete_ingester,json=deleteIngester,proto3,oneof"`
 }
 
-type ConfigCommand_PutSetting struct {
+type SystemCommand_PutSetting struct {
 	PutSetting *PutSettingCommand `protobuf:"bytes,11,opt,name=put_setting,json=putSetting,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteSetting struct {
+type SystemCommand_DeleteSetting struct {
 	DeleteSetting *DeleteSettingCommand `protobuf:"bytes,12,opt,name=delete_setting,json=deleteSetting,proto3,oneof"`
 }
 
-type ConfigCommand_PutCertificate struct {
+type SystemCommand_PutCertificate struct {
 	PutCertificate *PutCertificateCommand `protobuf:"bytes,13,opt,name=put_certificate,json=putCertificate,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteCertificate struct {
+type SystemCommand_DeleteCertificate struct {
 	DeleteCertificate *DeleteCertificateCommand `protobuf:"bytes,14,opt,name=delete_certificate,json=deleteCertificate,proto3,oneof"`
 }
 
-type ConfigCommand_CreateUser struct {
+type SystemCommand_CreateUser struct {
 	CreateUser *CreateUserCommand `protobuf:"bytes,15,opt,name=create_user,json=createUser,proto3,oneof"`
 }
 
-type ConfigCommand_UpdatePassword struct {
+type SystemCommand_UpdatePassword struct {
 	UpdatePassword *UpdatePasswordCommand `protobuf:"bytes,16,opt,name=update_password,json=updatePassword,proto3,oneof"`
 }
 
-type ConfigCommand_UpdateUserRole struct {
+type SystemCommand_UpdateUserRole struct {
 	UpdateUserRole *UpdateUserRoleCommand `protobuf:"bytes,17,opt,name=update_user_role,json=updateUserRole,proto3,oneof"`
 }
 
-type ConfigCommand_UpdateUsername struct {
+type SystemCommand_UpdateUsername struct {
 	UpdateUsername *UpdateUsernameCommand `protobuf:"bytes,18,opt,name=update_username,json=updateUsername,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteUser struct {
+type SystemCommand_DeleteUser struct {
 	DeleteUser *DeleteUserCommand `protobuf:"bytes,19,opt,name=delete_user,json=deleteUser,proto3,oneof"`
 }
 
-type ConfigCommand_InvalidateTokens struct {
+type SystemCommand_InvalidateTokens struct {
 	InvalidateTokens *InvalidateTokensCommand `protobuf:"bytes,20,opt,name=invalidate_tokens,json=invalidateTokens,proto3,oneof"`
 }
 
-type ConfigCommand_PutUserPreferences struct {
+type SystemCommand_PutUserPreferences struct {
 	PutUserPreferences *PutUserPreferencesCommand `protobuf:"bytes,21,opt,name=put_user_preferences,json=putUserPreferences,proto3,oneof"`
 }
 
-type ConfigCommand_CreateRefreshToken struct {
+type SystemCommand_CreateRefreshToken struct {
 	CreateRefreshToken *CreateRefreshTokenCommand `protobuf:"bytes,22,opt,name=create_refresh_token,json=createRefreshToken,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteRefreshToken struct {
+type SystemCommand_DeleteRefreshToken struct {
 	DeleteRefreshToken *DeleteRefreshTokenCommand `protobuf:"bytes,23,opt,name=delete_refresh_token,json=deleteRefreshToken,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteUserRefreshTokens struct {
+type SystemCommand_DeleteUserRefreshTokens struct {
 	DeleteUserRefreshTokens *DeleteUserRefreshTokensCommand `protobuf:"bytes,24,opt,name=delete_user_refresh_tokens,json=deleteUserRefreshTokens,proto3,oneof"`
 }
 
-type ConfigCommand_PutNodeConfig struct {
+type SystemCommand_PutNodeConfig struct {
 	PutNodeConfig *PutNodeConfigCommand `protobuf:"bytes,25,opt,name=put_node_config,json=putNodeConfig,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteNodeConfig struct {
+type SystemCommand_DeleteNodeConfig struct {
 	DeleteNodeConfig *DeleteNodeConfigCommand `protobuf:"bytes,26,opt,name=delete_node_config,json=deleteNodeConfig,proto3,oneof"`
 }
 
-type ConfigCommand_PutClusterTls struct {
+type SystemCommand_PutClusterTls struct {
 	PutClusterTls *PutClusterTLSCommand `protobuf:"bytes,27,opt,name=put_cluster_tls,json=putClusterTls,proto3,oneof"`
 }
 
-type ConfigCommand_PutRoute struct {
+type SystemCommand_PutRoute struct {
 	PutRoute *PutRouteCommand `protobuf:"bytes,28,opt,name=put_route,json=putRoute,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteRoute struct {
+type SystemCommand_DeleteRoute struct {
 	DeleteRoute *DeleteRouteCommand `protobuf:"bytes,29,opt,name=delete_route,json=deleteRoute,proto3,oneof"`
 }
 
-type ConfigCommand_PutManagedFile struct {
+type SystemCommand_PutManagedFile struct {
 	PutManagedFile *PutManagedFileCommand `protobuf:"bytes,30,opt,name=put_managed_file,json=putManagedFile,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteManagedFile struct {
+type SystemCommand_DeleteManagedFile struct {
 	DeleteManagedFile *DeleteManagedFileCommand `protobuf:"bytes,31,opt,name=delete_managed_file,json=deleteManagedFile,proto3,oneof"`
 }
 
-type ConfigCommand_PutCloudService struct {
+type SystemCommand_PutCloudService struct {
 	PutCloudService *PutCloudServiceCommand `protobuf:"bytes,32,opt,name=put_cloud_service,json=putCloudService,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteCloudService struct {
+type SystemCommand_DeleteCloudService struct {
 	DeleteCloudService *DeleteCloudServiceCommand `protobuf:"bytes,33,opt,name=delete_cloud_service,json=deleteCloudService,proto3,oneof"`
 }
 
-type ConfigCommand_SetNodeStorageConfig struct {
+type SystemCommand_SetNodeStorageConfig struct {
 	SetNodeStorageConfig *SetNodeStorageConfigCommand `protobuf:"bytes,34,opt,name=set_node_storage_config,json=setNodeStorageConfig,proto3,oneof"`
 }
 
-type ConfigCommand_PutTier struct {
+type SystemCommand_PutTier struct {
 	PutTier *PutTierCommand `protobuf:"bytes,35,opt,name=put_tier,json=putTier,proto3,oneof"`
 }
 
-type ConfigCommand_DeleteTier struct {
+type SystemCommand_DeleteTier struct {
 	DeleteTier *DeleteTierCommand `protobuf:"bytes,36,opt,name=delete_tier,json=deleteTier,proto3,oneof"`
 }
 
-func (*ConfigCommand_PutFilter) isConfigCommand_Command() {}
+func (*SystemCommand_PutFilter) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteFilter) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteFilter) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutRotationPolicy) isConfigCommand_Command() {}
+func (*SystemCommand_PutRotationPolicy) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteRotationPolicy) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteRotationPolicy) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutRetentionPolicy) isConfigCommand_Command() {}
+func (*SystemCommand_PutRetentionPolicy) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteRetentionPolicy) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteRetentionPolicy) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutVault) isConfigCommand_Command() {}
+func (*SystemCommand_PutVault) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteVault) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteVault) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutIngester) isConfigCommand_Command() {}
+func (*SystemCommand_PutIngester) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteIngester) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteIngester) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutSetting) isConfigCommand_Command() {}
+func (*SystemCommand_PutSetting) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteSetting) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteSetting) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutCertificate) isConfigCommand_Command() {}
+func (*SystemCommand_PutCertificate) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteCertificate) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteCertificate) isSystemCommand_Command() {}
 
-func (*ConfigCommand_CreateUser) isConfigCommand_Command() {}
+func (*SystemCommand_CreateUser) isSystemCommand_Command() {}
 
-func (*ConfigCommand_UpdatePassword) isConfigCommand_Command() {}
+func (*SystemCommand_UpdatePassword) isSystemCommand_Command() {}
 
-func (*ConfigCommand_UpdateUserRole) isConfigCommand_Command() {}
+func (*SystemCommand_UpdateUserRole) isSystemCommand_Command() {}
 
-func (*ConfigCommand_UpdateUsername) isConfigCommand_Command() {}
+func (*SystemCommand_UpdateUsername) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteUser) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteUser) isSystemCommand_Command() {}
 
-func (*ConfigCommand_InvalidateTokens) isConfigCommand_Command() {}
+func (*SystemCommand_InvalidateTokens) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutUserPreferences) isConfigCommand_Command() {}
+func (*SystemCommand_PutUserPreferences) isSystemCommand_Command() {}
 
-func (*ConfigCommand_CreateRefreshToken) isConfigCommand_Command() {}
+func (*SystemCommand_CreateRefreshToken) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteRefreshToken) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteRefreshToken) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteUserRefreshTokens) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteUserRefreshTokens) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutNodeConfig) isConfigCommand_Command() {}
+func (*SystemCommand_PutNodeConfig) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteNodeConfig) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteNodeConfig) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutClusterTls) isConfigCommand_Command() {}
+func (*SystemCommand_PutClusterTls) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutRoute) isConfigCommand_Command() {}
+func (*SystemCommand_PutRoute) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteRoute) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteRoute) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutManagedFile) isConfigCommand_Command() {}
+func (*SystemCommand_PutManagedFile) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteManagedFile) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteManagedFile) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutCloudService) isConfigCommand_Command() {}
+func (*SystemCommand_PutCloudService) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteCloudService) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteCloudService) isSystemCommand_Command() {}
 
-func (*ConfigCommand_SetNodeStorageConfig) isConfigCommand_Command() {}
+func (*SystemCommand_SetNodeStorageConfig) isSystemCommand_Command() {}
 
-func (*ConfigCommand_PutTier) isConfigCommand_Command() {}
+func (*SystemCommand_PutTier) isSystemCommand_Command() {}
 
-func (*ConfigCommand_DeleteTier) isConfigCommand_Command() {}
+func (*SystemCommand_DeleteTier) isSystemCommand_Command() {}
 
 type PutFilterCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2601,7 +2601,7 @@ func (x *SetNodeStorageConfigCommand) GetNodeStorage() *NodeStorageConfig {
 	return nil
 }
 
-// PutTierCommand carries the full API TierConfig from config.proto.
+// PutTierCommand carries the full API TierConfig from system.proto.
 type PutTierCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Tier          *TierConfig            `protobuf:"bytes,1,opt,name=tier,proto3" json:"tier,omitempty"`
@@ -2698,10 +2698,10 @@ func (x *DeleteTierCommand) GetDrain() bool {
 	return false
 }
 
-// ConfigSnapshot captures the full config state for FSM.Snapshot()/Restore().
+// SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
 // Each repeated field contains one entry per entity, using the Put/Create
 // command messages to represent complete entity state.
-type ConfigSnapshot struct {
+type SystemSnapshot struct {
 	state              protoimpl.MessageState         `protogen:"open.v1"`
 	Filters            []*PutFilterCommand            `protobuf:"bytes,1,rep,name=filters,proto3" json:"filters,omitempty"`
 	RotationPolicies   []*PutRotationPolicyCommand    `protobuf:"bytes,2,rep,name=rotation_policies,json=rotationPolicies,proto3" json:"rotation_policies,omitempty"`
@@ -2723,20 +2723,20 @@ type ConfigSnapshot struct {
 	sizeCache          protoimpl.SizeCache
 }
 
-func (x *ConfigSnapshot) Reset() {
-	*x = ConfigSnapshot{}
+func (x *SystemSnapshot) Reset() {
+	*x = SystemSnapshot{}
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *ConfigSnapshot) String() string {
+func (x *SystemSnapshot) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*ConfigSnapshot) ProtoMessage() {}
+func (*SystemSnapshot) ProtoMessage() {}
 
-func (x *ConfigSnapshot) ProtoReflect() protoreflect.Message {
+func (x *SystemSnapshot) ProtoReflect() protoreflect.Message {
 	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2748,117 +2748,117 @@ func (x *ConfigSnapshot) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use ConfigSnapshot.ProtoReflect.Descriptor instead.
-func (*ConfigSnapshot) Descriptor() ([]byte, []int) {
+// Deprecated: Use SystemSnapshot.ProtoReflect.Descriptor instead.
+func (*SystemSnapshot) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *ConfigSnapshot) GetFilters() []*PutFilterCommand {
+func (x *SystemSnapshot) GetFilters() []*PutFilterCommand {
 	if x != nil {
 		return x.Filters
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetRotationPolicies() []*PutRotationPolicyCommand {
+func (x *SystemSnapshot) GetRotationPolicies() []*PutRotationPolicyCommand {
 	if x != nil {
 		return x.RotationPolicies
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetRetentionPolicies() []*PutRetentionPolicyCommand {
+func (x *SystemSnapshot) GetRetentionPolicies() []*PutRetentionPolicyCommand {
 	if x != nil {
 		return x.RetentionPolicies
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetVaults() []*PutVaultCommand {
+func (x *SystemSnapshot) GetVaults() []*PutVaultCommand {
 	if x != nil {
 		return x.Vaults
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetIngesters() []*PutIngesterCommand {
+func (x *SystemSnapshot) GetIngesters() []*PutIngesterCommand {
 	if x != nil {
 		return x.Ingesters
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetSettings() map[string]string {
+func (x *SystemSnapshot) GetSettings() map[string]string {
 	if x != nil {
 		return x.Settings
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetCertificates() []*PutCertificateCommand {
+func (x *SystemSnapshot) GetCertificates() []*PutCertificateCommand {
 	if x != nil {
 		return x.Certificates
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetUsers() []*CreateUserCommand {
+func (x *SystemSnapshot) GetUsers() []*CreateUserCommand {
 	if x != nil {
 		return x.Users
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetRefreshTokens() []*CreateRefreshTokenCommand {
+func (x *SystemSnapshot) GetRefreshTokens() []*CreateRefreshTokenCommand {
 	if x != nil {
 		return x.RefreshTokens
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetNodeConfigs() []*PutNodeConfigCommand {
+func (x *SystemSnapshot) GetNodeConfigs() []*PutNodeConfigCommand {
 	if x != nil {
 		return x.NodeConfigs
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetClusterTls() *PutClusterTLSCommand {
+func (x *SystemSnapshot) GetClusterTls() *PutClusterTLSCommand {
 	if x != nil {
 		return x.ClusterTls
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetRoutes() []*PutRouteCommand {
+func (x *SystemSnapshot) GetRoutes() []*PutRouteCommand {
 	if x != nil {
 		return x.Routes
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetManagedFiles() []*PutManagedFileCommand {
+func (x *SystemSnapshot) GetManagedFiles() []*PutManagedFileCommand {
 	if x != nil {
 		return x.ManagedFiles
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetCloudServices() []*PutCloudServiceCommand {
+func (x *SystemSnapshot) GetCloudServices() []*PutCloudServiceCommand {
 	if x != nil {
 		return x.CloudServices
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetNodeStorageConfigs() []*SetNodeStorageConfigCommand {
+func (x *SystemSnapshot) GetNodeStorageConfigs() []*SetNodeStorageConfigCommand {
 	if x != nil {
 		return x.NodeStorageConfigs
 	}
 	return nil
 }
 
-func (x *ConfigSnapshot) GetTiers() []*PutTierCommand {
+func (x *SystemSnapshot) GetTiers() []*PutTierCommand {
 	if x != nil {
 		return x.Tiers
 	}
@@ -2869,8 +2869,8 @@ var File_gastrolog_v1_fsm_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19gastrolog/v1/config.proto\x1a\x1agastrolog/v1/storage.proto\"\x85\x17\n" +
-	"\rConfigCommand\x12?\n" +
+	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19gastrolog/v1/system.proto\x1a\x1agastrolog/v1/storage.proto\"\x85\x17\n" +
+	"\rSystemCommand\x12?\n" +
 	"\n" +
 	"put_filter\x18\x01 \x01(\v2\x1e.gastrolog.v1.PutFilterCommandH\x00R\tputFilter\x12H\n" +
 	"\rdelete_filter\x18\x02 \x01(\v2!.gastrolog.v1.DeleteFilterCommandH\x00R\fdeleteFilter\x12X\n" +
@@ -3071,13 +3071,13 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05drain\x18\x02 \x01(\bR\x05drain\"\xae\t\n" +
-	"\x0eConfigSnapshot\x128\n" +
+	"\x0eSystemSnapshot\x128\n" +
 	"\afilters\x18\x01 \x03(\v2\x1e.gastrolog.v1.PutFilterCommandR\afilters\x12S\n" +
 	"\x11rotation_policies\x18\x02 \x03(\v2&.gastrolog.v1.PutRotationPolicyCommandR\x10rotationPolicies\x12V\n" +
 	"\x12retention_policies\x18\x03 \x03(\v2'.gastrolog.v1.PutRetentionPolicyCommandR\x11retentionPolicies\x125\n" +
 	"\x06vaults\x18\x04 \x03(\v2\x1d.gastrolog.v1.PutVaultCommandR\x06vaults\x12>\n" +
 	"\tingesters\x18\x05 \x03(\v2 .gastrolog.v1.PutIngesterCommandR\tingesters\x12F\n" +
-	"\bsettings\x18\x06 \x03(\v2*.gastrolog.v1.ConfigSnapshot.SettingsEntryR\bsettings\x12G\n" +
+	"\bsettings\x18\x06 \x03(\v2*.gastrolog.v1.SystemSnapshot.SettingsEntryR\bsettings\x12G\n" +
 	"\fcertificates\x18\a \x03(\v2#.gastrolog.v1.PutCertificateCommandR\fcertificates\x125\n" +
 	"\x05users\x18\b \x03(\v2\x1f.gastrolog.v1.CreateUserCommandR\x05users\x12N\n" +
 	"\x0erefresh_tokens\x18\t \x03(\v2'.gastrolog.v1.CreateRefreshTokenCommandR\rrefreshTokens\x12E\n" +
@@ -3108,7 +3108,7 @@ func file_gastrolog_v1_fsm_proto_rawDescGZIP() []byte {
 
 var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_gastrolog_v1_fsm_proto_goTypes = []any{
-	(*ConfigCommand)(nil),                  // 0: gastrolog.v1.ConfigCommand
+	(*SystemCommand)(nil),                  // 0: gastrolog.v1.SystemCommand
 	(*PutFilterCommand)(nil),               // 1: gastrolog.v1.PutFilterCommand
 	(*DeleteFilterCommand)(nil),            // 2: gastrolog.v1.DeleteFilterCommand
 	(*PutRotationPolicyCommand)(nil),       // 3: gastrolog.v1.PutRotationPolicyCommand
@@ -3145,51 +3145,51 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*SetNodeStorageConfigCommand)(nil),    // 34: gastrolog.v1.SetNodeStorageConfigCommand
 	(*PutTierCommand)(nil),                 // 35: gastrolog.v1.PutTierCommand
 	(*DeleteTierCommand)(nil),              // 36: gastrolog.v1.DeleteTierCommand
-	(*ConfigSnapshot)(nil),                 // 37: gastrolog.v1.ConfigSnapshot
+	(*SystemSnapshot)(nil),                 // 37: gastrolog.v1.SystemSnapshot
 	nil,                                    // 38: gastrolog.v1.PutIngesterCommand.ParamsEntry
-	nil,                                    // 39: gastrolog.v1.ConfigSnapshot.SettingsEntry
+	nil,                                    // 39: gastrolog.v1.SystemSnapshot.SettingsEntry
 	(*timestamppb.Timestamp)(nil),          // 40: google.protobuf.Timestamp
 	(*CloudService)(nil),                   // 41: gastrolog.v1.CloudService
 	(*NodeStorageConfig)(nil),              // 42: gastrolog.v1.NodeStorageConfig
 	(*TierConfig)(nil),                     // 43: gastrolog.v1.TierConfig
 }
 var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
-	1,  // 0: gastrolog.v1.ConfigCommand.put_filter:type_name -> gastrolog.v1.PutFilterCommand
-	2,  // 1: gastrolog.v1.ConfigCommand.delete_filter:type_name -> gastrolog.v1.DeleteFilterCommand
-	3,  // 2: gastrolog.v1.ConfigCommand.put_rotation_policy:type_name -> gastrolog.v1.PutRotationPolicyCommand
-	4,  // 3: gastrolog.v1.ConfigCommand.delete_rotation_policy:type_name -> gastrolog.v1.DeleteRotationPolicyCommand
-	5,  // 4: gastrolog.v1.ConfigCommand.put_retention_policy:type_name -> gastrolog.v1.PutRetentionPolicyCommand
-	6,  // 5: gastrolog.v1.ConfigCommand.delete_retention_policy:type_name -> gastrolog.v1.DeleteRetentionPolicyCommand
-	7,  // 6: gastrolog.v1.ConfigCommand.put_vault:type_name -> gastrolog.v1.PutVaultCommand
-	8,  // 7: gastrolog.v1.ConfigCommand.delete_vault:type_name -> gastrolog.v1.DeleteVaultCommand
-	9,  // 8: gastrolog.v1.ConfigCommand.put_ingester:type_name -> gastrolog.v1.PutIngesterCommand
-	10, // 9: gastrolog.v1.ConfigCommand.delete_ingester:type_name -> gastrolog.v1.DeleteIngesterCommand
-	11, // 10: gastrolog.v1.ConfigCommand.put_setting:type_name -> gastrolog.v1.PutSettingCommand
-	12, // 11: gastrolog.v1.ConfigCommand.delete_setting:type_name -> gastrolog.v1.DeleteSettingCommand
-	13, // 12: gastrolog.v1.ConfigCommand.put_certificate:type_name -> gastrolog.v1.PutCertificateCommand
-	14, // 13: gastrolog.v1.ConfigCommand.delete_certificate:type_name -> gastrolog.v1.DeleteCertificateCommand
-	15, // 14: gastrolog.v1.ConfigCommand.create_user:type_name -> gastrolog.v1.CreateUserCommand
-	16, // 15: gastrolog.v1.ConfigCommand.update_password:type_name -> gastrolog.v1.UpdatePasswordCommand
-	17, // 16: gastrolog.v1.ConfigCommand.update_user_role:type_name -> gastrolog.v1.UpdateUserRoleCommand
-	18, // 17: gastrolog.v1.ConfigCommand.update_username:type_name -> gastrolog.v1.UpdateUsernameCommand
-	19, // 18: gastrolog.v1.ConfigCommand.delete_user:type_name -> gastrolog.v1.DeleteUserCommand
-	20, // 19: gastrolog.v1.ConfigCommand.invalidate_tokens:type_name -> gastrolog.v1.InvalidateTokensCommand
-	21, // 20: gastrolog.v1.ConfigCommand.put_user_preferences:type_name -> gastrolog.v1.PutUserPreferencesCommand
-	22, // 21: gastrolog.v1.ConfigCommand.create_refresh_token:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	23, // 22: gastrolog.v1.ConfigCommand.delete_refresh_token:type_name -> gastrolog.v1.DeleteRefreshTokenCommand
-	24, // 23: gastrolog.v1.ConfigCommand.delete_user_refresh_tokens:type_name -> gastrolog.v1.DeleteUserRefreshTokensCommand
-	25, // 24: gastrolog.v1.ConfigCommand.put_node_config:type_name -> gastrolog.v1.PutNodeConfigCommand
-	26, // 25: gastrolog.v1.ConfigCommand.delete_node_config:type_name -> gastrolog.v1.DeleteNodeConfigCommand
-	27, // 26: gastrolog.v1.ConfigCommand.put_cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	28, // 27: gastrolog.v1.ConfigCommand.put_route:type_name -> gastrolog.v1.PutRouteCommand
-	29, // 28: gastrolog.v1.ConfigCommand.delete_route:type_name -> gastrolog.v1.DeleteRouteCommand
-	30, // 29: gastrolog.v1.ConfigCommand.put_managed_file:type_name -> gastrolog.v1.PutManagedFileCommand
-	31, // 30: gastrolog.v1.ConfigCommand.delete_managed_file:type_name -> gastrolog.v1.DeleteManagedFileCommand
-	32, // 31: gastrolog.v1.ConfigCommand.put_cloud_service:type_name -> gastrolog.v1.PutCloudServiceCommand
-	33, // 32: gastrolog.v1.ConfigCommand.delete_cloud_service:type_name -> gastrolog.v1.DeleteCloudServiceCommand
-	34, // 33: gastrolog.v1.ConfigCommand.set_node_storage_config:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	35, // 34: gastrolog.v1.ConfigCommand.put_tier:type_name -> gastrolog.v1.PutTierCommand
-	36, // 35: gastrolog.v1.ConfigCommand.delete_tier:type_name -> gastrolog.v1.DeleteTierCommand
+	1,  // 0: gastrolog.v1.SystemCommand.put_filter:type_name -> gastrolog.v1.PutFilterCommand
+	2,  // 1: gastrolog.v1.SystemCommand.delete_filter:type_name -> gastrolog.v1.DeleteFilterCommand
+	3,  // 2: gastrolog.v1.SystemCommand.put_rotation_policy:type_name -> gastrolog.v1.PutRotationPolicyCommand
+	4,  // 3: gastrolog.v1.SystemCommand.delete_rotation_policy:type_name -> gastrolog.v1.DeleteRotationPolicyCommand
+	5,  // 4: gastrolog.v1.SystemCommand.put_retention_policy:type_name -> gastrolog.v1.PutRetentionPolicyCommand
+	6,  // 5: gastrolog.v1.SystemCommand.delete_retention_policy:type_name -> gastrolog.v1.DeleteRetentionPolicyCommand
+	7,  // 6: gastrolog.v1.SystemCommand.put_vault:type_name -> gastrolog.v1.PutVaultCommand
+	8,  // 7: gastrolog.v1.SystemCommand.delete_vault:type_name -> gastrolog.v1.DeleteVaultCommand
+	9,  // 8: gastrolog.v1.SystemCommand.put_ingester:type_name -> gastrolog.v1.PutIngesterCommand
+	10, // 9: gastrolog.v1.SystemCommand.delete_ingester:type_name -> gastrolog.v1.DeleteIngesterCommand
+	11, // 10: gastrolog.v1.SystemCommand.put_setting:type_name -> gastrolog.v1.PutSettingCommand
+	12, // 11: gastrolog.v1.SystemCommand.delete_setting:type_name -> gastrolog.v1.DeleteSettingCommand
+	13, // 12: gastrolog.v1.SystemCommand.put_certificate:type_name -> gastrolog.v1.PutCertificateCommand
+	14, // 13: gastrolog.v1.SystemCommand.delete_certificate:type_name -> gastrolog.v1.DeleteCertificateCommand
+	15, // 14: gastrolog.v1.SystemCommand.create_user:type_name -> gastrolog.v1.CreateUserCommand
+	16, // 15: gastrolog.v1.SystemCommand.update_password:type_name -> gastrolog.v1.UpdatePasswordCommand
+	17, // 16: gastrolog.v1.SystemCommand.update_user_role:type_name -> gastrolog.v1.UpdateUserRoleCommand
+	18, // 17: gastrolog.v1.SystemCommand.update_username:type_name -> gastrolog.v1.UpdateUsernameCommand
+	19, // 18: gastrolog.v1.SystemCommand.delete_user:type_name -> gastrolog.v1.DeleteUserCommand
+	20, // 19: gastrolog.v1.SystemCommand.invalidate_tokens:type_name -> gastrolog.v1.InvalidateTokensCommand
+	21, // 20: gastrolog.v1.SystemCommand.put_user_preferences:type_name -> gastrolog.v1.PutUserPreferencesCommand
+	22, // 21: gastrolog.v1.SystemCommand.create_refresh_token:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	23, // 22: gastrolog.v1.SystemCommand.delete_refresh_token:type_name -> gastrolog.v1.DeleteRefreshTokenCommand
+	24, // 23: gastrolog.v1.SystemCommand.delete_user_refresh_tokens:type_name -> gastrolog.v1.DeleteUserRefreshTokensCommand
+	25, // 24: gastrolog.v1.SystemCommand.put_node_config:type_name -> gastrolog.v1.PutNodeConfigCommand
+	26, // 25: gastrolog.v1.SystemCommand.delete_node_config:type_name -> gastrolog.v1.DeleteNodeConfigCommand
+	27, // 26: gastrolog.v1.SystemCommand.put_cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	28, // 27: gastrolog.v1.SystemCommand.put_route:type_name -> gastrolog.v1.PutRouteCommand
+	29, // 28: gastrolog.v1.SystemCommand.delete_route:type_name -> gastrolog.v1.DeleteRouteCommand
+	30, // 29: gastrolog.v1.SystemCommand.put_managed_file:type_name -> gastrolog.v1.PutManagedFileCommand
+	31, // 30: gastrolog.v1.SystemCommand.delete_managed_file:type_name -> gastrolog.v1.DeleteManagedFileCommand
+	32, // 31: gastrolog.v1.SystemCommand.put_cloud_service:type_name -> gastrolog.v1.PutCloudServiceCommand
+	33, // 32: gastrolog.v1.SystemCommand.delete_cloud_service:type_name -> gastrolog.v1.DeleteCloudServiceCommand
+	34, // 33: gastrolog.v1.SystemCommand.set_node_storage_config:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	35, // 34: gastrolog.v1.SystemCommand.put_tier:type_name -> gastrolog.v1.PutTierCommand
+	36, // 35: gastrolog.v1.SystemCommand.delete_tier:type_name -> gastrolog.v1.DeleteTierCommand
 	38, // 36: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
 	40, // 37: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
 	40, // 38: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
@@ -3200,22 +3200,22 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	41, // 43: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
 	42, // 44: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
 	43, // 45: gastrolog.v1.PutTierCommand.tier:type_name -> gastrolog.v1.TierConfig
-	1,  // 46: gastrolog.v1.ConfigSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
-	3,  // 47: gastrolog.v1.ConfigSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
-	5,  // 48: gastrolog.v1.ConfigSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
-	7,  // 49: gastrolog.v1.ConfigSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
-	9,  // 50: gastrolog.v1.ConfigSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
-	39, // 51: gastrolog.v1.ConfigSnapshot.settings:type_name -> gastrolog.v1.ConfigSnapshot.SettingsEntry
-	13, // 52: gastrolog.v1.ConfigSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
-	15, // 53: gastrolog.v1.ConfigSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
-	22, // 54: gastrolog.v1.ConfigSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	25, // 55: gastrolog.v1.ConfigSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
-	27, // 56: gastrolog.v1.ConfigSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	28, // 57: gastrolog.v1.ConfigSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
-	30, // 58: gastrolog.v1.ConfigSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
-	32, // 59: gastrolog.v1.ConfigSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
-	34, // 60: gastrolog.v1.ConfigSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	35, // 61: gastrolog.v1.ConfigSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
+	1,  // 46: gastrolog.v1.SystemSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
+	3,  // 47: gastrolog.v1.SystemSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
+	5,  // 48: gastrolog.v1.SystemSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
+	7,  // 49: gastrolog.v1.SystemSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
+	9,  // 50: gastrolog.v1.SystemSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
+	39, // 51: gastrolog.v1.SystemSnapshot.settings:type_name -> gastrolog.v1.SystemSnapshot.SettingsEntry
+	13, // 52: gastrolog.v1.SystemSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
+	15, // 53: gastrolog.v1.SystemSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
+	22, // 54: gastrolog.v1.SystemSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	25, // 55: gastrolog.v1.SystemSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
+	27, // 56: gastrolog.v1.SystemSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	28, // 57: gastrolog.v1.SystemSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
+	30, // 58: gastrolog.v1.SystemSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
+	32, // 59: gastrolog.v1.SystemSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
+	34, // 60: gastrolog.v1.SystemSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	35, // 61: gastrolog.v1.SystemSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
 	62, // [62:62] is the sub-list for method output_type
 	62, // [62:62] is the sub-list for method input_type
 	62, // [62:62] is the sub-list for extension type_name
@@ -3228,45 +3228,45 @@ func file_gastrolog_v1_fsm_proto_init() {
 	if File_gastrolog_v1_fsm_proto != nil {
 		return
 	}
-	file_gastrolog_v1_config_proto_init()
+	file_gastrolog_v1_system_proto_init()
 	file_gastrolog_v1_storage_proto_init()
 	file_gastrolog_v1_fsm_proto_msgTypes[0].OneofWrappers = []any{
-		(*ConfigCommand_PutFilter)(nil),
-		(*ConfigCommand_DeleteFilter)(nil),
-		(*ConfigCommand_PutRotationPolicy)(nil),
-		(*ConfigCommand_DeleteRotationPolicy)(nil),
-		(*ConfigCommand_PutRetentionPolicy)(nil),
-		(*ConfigCommand_DeleteRetentionPolicy)(nil),
-		(*ConfigCommand_PutVault)(nil),
-		(*ConfigCommand_DeleteVault)(nil),
-		(*ConfigCommand_PutIngester)(nil),
-		(*ConfigCommand_DeleteIngester)(nil),
-		(*ConfigCommand_PutSetting)(nil),
-		(*ConfigCommand_DeleteSetting)(nil),
-		(*ConfigCommand_PutCertificate)(nil),
-		(*ConfigCommand_DeleteCertificate)(nil),
-		(*ConfigCommand_CreateUser)(nil),
-		(*ConfigCommand_UpdatePassword)(nil),
-		(*ConfigCommand_UpdateUserRole)(nil),
-		(*ConfigCommand_UpdateUsername)(nil),
-		(*ConfigCommand_DeleteUser)(nil),
-		(*ConfigCommand_InvalidateTokens)(nil),
-		(*ConfigCommand_PutUserPreferences)(nil),
-		(*ConfigCommand_CreateRefreshToken)(nil),
-		(*ConfigCommand_DeleteRefreshToken)(nil),
-		(*ConfigCommand_DeleteUserRefreshTokens)(nil),
-		(*ConfigCommand_PutNodeConfig)(nil),
-		(*ConfigCommand_DeleteNodeConfig)(nil),
-		(*ConfigCommand_PutClusterTls)(nil),
-		(*ConfigCommand_PutRoute)(nil),
-		(*ConfigCommand_DeleteRoute)(nil),
-		(*ConfigCommand_PutManagedFile)(nil),
-		(*ConfigCommand_DeleteManagedFile)(nil),
-		(*ConfigCommand_PutCloudService)(nil),
-		(*ConfigCommand_DeleteCloudService)(nil),
-		(*ConfigCommand_SetNodeStorageConfig)(nil),
-		(*ConfigCommand_PutTier)(nil),
-		(*ConfigCommand_DeleteTier)(nil),
+		(*SystemCommand_PutFilter)(nil),
+		(*SystemCommand_DeleteFilter)(nil),
+		(*SystemCommand_PutRotationPolicy)(nil),
+		(*SystemCommand_DeleteRotationPolicy)(nil),
+		(*SystemCommand_PutRetentionPolicy)(nil),
+		(*SystemCommand_DeleteRetentionPolicy)(nil),
+		(*SystemCommand_PutVault)(nil),
+		(*SystemCommand_DeleteVault)(nil),
+		(*SystemCommand_PutIngester)(nil),
+		(*SystemCommand_DeleteIngester)(nil),
+		(*SystemCommand_PutSetting)(nil),
+		(*SystemCommand_DeleteSetting)(nil),
+		(*SystemCommand_PutCertificate)(nil),
+		(*SystemCommand_DeleteCertificate)(nil),
+		(*SystemCommand_CreateUser)(nil),
+		(*SystemCommand_UpdatePassword)(nil),
+		(*SystemCommand_UpdateUserRole)(nil),
+		(*SystemCommand_UpdateUsername)(nil),
+		(*SystemCommand_DeleteUser)(nil),
+		(*SystemCommand_InvalidateTokens)(nil),
+		(*SystemCommand_PutUserPreferences)(nil),
+		(*SystemCommand_CreateRefreshToken)(nil),
+		(*SystemCommand_DeleteRefreshToken)(nil),
+		(*SystemCommand_DeleteUserRefreshTokens)(nil),
+		(*SystemCommand_PutNodeConfig)(nil),
+		(*SystemCommand_DeleteNodeConfig)(nil),
+		(*SystemCommand_PutClusterTls)(nil),
+		(*SystemCommand_PutRoute)(nil),
+		(*SystemCommand_DeleteRoute)(nil),
+		(*SystemCommand_PutManagedFile)(nil),
+		(*SystemCommand_DeleteManagedFile)(nil),
+		(*SystemCommand_PutCloudService)(nil),
+		(*SystemCommand_DeleteCloudService)(nil),
+		(*SystemCommand_SetNodeStorageConfig)(nil),
+		(*SystemCommand_PutTier)(nil),
+		(*SystemCommand_DeleteTier)(nil),
 	}
 	file_gastrolog_v1_fsm_proto_msgTypes[3].OneofWrappers = []any{}
 	file_gastrolog_v1_fsm_proto_msgTypes[5].OneofWrappers = []any{}

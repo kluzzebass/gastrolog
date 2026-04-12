@@ -12,7 +12,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -40,7 +40,7 @@ type LifecycleServer struct {
 	startTime      time.Time
 	shutdown       func(drain bool)
 	cluster        ClusterStatusProvider
-	cfgStore       config.Store
+	cfgStore       system.Store
 	nodeID         string
 	clusterAddress string
 	peerStats      NodeStatsProvider
@@ -59,7 +59,7 @@ var _ gastrologv1connect.LifecycleServiceHandler = (*LifecycleServer)(nil)
 
 // NewLifecycleServer creates a new LifecycleServer.
 // The shutdown function is called when Shutdown is invoked with the drain flag.
-func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore config.Store, nodeID string, clusterAddress string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats, logger *slog.Logger) *LifecycleServer {
+func NewLifecycleServer(orch *orchestrator.Orchestrator, shutdown func(drain bool), cluster ClusterStatusProvider, cfgStore system.Store, nodeID string, clusterAddress string, peerStats NodeStatsProvider, localStats func() *apiv1.NodeStats, logger *slog.Logger) *LifecycleServer {
 	return &LifecycleServer{
 		orch:           orch,
 		startTime:      time.Now(),

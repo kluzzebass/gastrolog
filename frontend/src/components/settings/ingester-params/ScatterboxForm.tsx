@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FormField, TextInput, NumberInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { configClient } from "../../../api/client";
+import { systemClient } from "../../../api/client";
 import type { SubFormProps } from "./types";
 
 interface ScatterboxFormProps extends SubFormProps {
@@ -27,7 +27,7 @@ export function ScatterboxForm({
   const handleTrigger = async () => {
     if (!ingesterId) return;
     try {
-      await configClient.triggerIngester(
+      await systemClient.triggerIngester(
         { id: ingesterId },
         ingesterNodeId ? { headers: { "X-Target-Node": ingesterNodeId } } : {},
       );

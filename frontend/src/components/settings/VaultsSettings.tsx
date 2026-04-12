@@ -9,7 +9,7 @@ import {
   usePutTier,
   useGenerateName,
 } from "../../api/hooks";
-import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/config_pb";
+import { TierConfig, TierType, RetentionRule } from "../../api/gen/gastrolog/v1/system_pb";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";

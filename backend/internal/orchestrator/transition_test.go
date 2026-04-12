@@ -16,8 +16,8 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -27,17 +27,17 @@ import (
 )
 
 // syntheticPlacements creates a Placements slice with a primary using a synthetic storage ID.
-func syntheticPlacements(nodeID string) []config.TierPlacement {
-	return []config.TierPlacement{{StorageID: config.SyntheticStorageID(nodeID), Leader: true}}
+func syntheticPlacements(nodeID string) []system.TierPlacement {
+	return []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}}
 }
 
 // ---------- config loader adapter ----------
 
 type transitionConfigLoader struct {
-	store *cfgmem.Store
+	store *sysmem.Store
 }
 
-func (l *transitionConfigLoader) Load(ctx context.Context) (*config.Config, error) {
+func (l *transitionConfigLoader) Load(ctx context.Context) (*system.Config, error) {
 	return l.store.Load(ctx)
 }
 
@@ -84,7 +84,7 @@ func newMemoryTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
 	}
 }
 
-func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.UUID, *config.Config) {
+func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.UUID, *system.Config) {
 	t.Helper()
 	vaultID := uuid.Must(uuid.NewV7())
 	tier0ID := uuid.Must(uuid.NewV7())
@@ -100,13 +100,13 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.
 	vault.Name = "test-vault"
 	orch.RegisterVault(vault)
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "test-vault"},
 		},
-		Tiers: []config.TierConfig{
-			{ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID), VaultID: vaultID, Position: 0},
-			{ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID), VaultID: vaultID, Position: 1},
+		Tiers: []system.TierConfig{
+			{ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID), VaultID: vaultID, Position: 0},
+			{ID: tier1ID, Name: "warm", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID), VaultID: vaultID, Position: 1},
 		},
 	}
 
@@ -132,8 +132,8 @@ func TestTransitionSameNodeTwoTiers(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, tier1ID, cfg := setupTwoTierVault(t)
 
-	// Use a real config store so the transition can load config.
-	store := cfgmem.NewStore()
+	// Use a real config store so the transition can load system.
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -207,7 +207,7 @@ func TestTransitionRecordIntegrity(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -268,12 +268,12 @@ func TestTransitionTerminalTier(t *testing.T) {
 	vault.Name = "terminal"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "terminal",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "only", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "only", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -309,7 +309,7 @@ func TestTransitionEmptyChunk(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -348,7 +348,7 @@ func TestTransitionMultipleChunks(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -404,7 +404,7 @@ func TestTransitionSourceChunkDeleted(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -489,16 +489,16 @@ func TestTransitionCrossNode(t *testing.T) {
 	mock := &transitionFakeTransferrer{}
 	orch.transferrer = mock
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cross-node",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(localNode),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, Placements: syntheticPlacements(localNode),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(remoteNode),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(remoteNode),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -560,16 +560,16 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 	mock := &transitionFakeTransferrer{failErr: context.DeadlineExceeded}
 	orch.transferrer = mock
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "fail",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(localNode),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, Placements: syntheticPlacements(localNode),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(remoteNode),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(remoteNode),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -614,16 +614,16 @@ func TestTransitionNoTransferrer(t *testing.T) {
 	orch.RegisterVault(vault)
 	// No transferrer set.
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "no-xfer",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(localNode),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, Placements: syntheticPlacements(localNode),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(remoteNode),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(remoteNode),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -650,7 +650,7 @@ func TestTransitionSweepDispatch(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -672,7 +672,7 @@ func TestTransitionSweepDispatch(t *testing.T) {
 
 	rules := []retentionRule{{
 		policy: &keepNPolicy{n: 0}, // matches all sealed chunks
-		action: config.RetentionActionTransition,
+		action: system.RetentionActionTransition,
 	}}
 	runner := &retentionRunner{
 		isLeader: true,
@@ -722,16 +722,16 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	vault.Name = "ttl-cloud"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "ttl-cloud",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: nextTierID, Name: "local", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: nextTierID, Name: "local", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -764,7 +764,7 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 
 	rules := []retentionRule{{
 		policy: chunk.NewTTLRetentionPolicy(3 * time.Minute),
-		action: config.RetentionActionTransition,
+		action: system.RetentionActionTransition,
 	}}
 	runner := &retentionRunner{
 		isLeader: true,
@@ -840,31 +840,31 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{{
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
 			ID:   vaultID,
 			Name: "cloud-leader-test",
 		}},
-		Tiers: []config.TierConfig{{
+		Tiers: []system.TierConfig{{
 			VaultID:  vaultID,
 			Position: 0,
 			ID:               cloudTierID,
 			Name:             "cloud",
-			Type:             config.TierTypeCloud,
+			Type:             system.TierTypeCloud,
 			CloudServiceID:   &csID,
 			ActiveChunkClass: 1,
-			Placements: []config.TierPlacement{
+			Placements: []system.TierPlacement{
 				{StorageID: fsID.String(), Leader: true},
 			},
 		}},
-		CloudServices: []config.CloudService{{
+		CloudServices: []system.CloudService{{
 			ID:       csID,
 			Name:     "test-cloud",
 			Provider: "memory",
 		}},
-		NodeStorageConfigs: []config.NodeStorageConfig{{
+		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
-			FileStorages: []config.FileStorage{{
+			FileStorages: []system.FileStorage{{
 				ID:           fsID,
 				StorageClass: 1,
 				Name:         "disk-1",
@@ -887,7 +887,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 	defer orch.Stop()
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
 	if err := orch.ApplyConfig(cfg, factories); err != nil {
@@ -1004,23 +1004,23 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	primaryVault.Name = "overwrite-test"
 	leaderOrch.RegisterVault(primaryVault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "overwrite-test",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud,
 		VaultID: vaultID, Position: 0,
-		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
-			{StorageID: config.SyntheticStorageID(followerNode), Leader: false},
+		Placements: []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID(leaderNode), Leader: true},
+			{StorageID: system.SyntheticStorageID(followerNode), Leader: false},
 		},
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: nextTierID, Name: "local", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: nextTierID, Name: "local", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 1,
-		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
+		Placements: []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID(leaderNode), Leader: true},
 		},
 	})
 	leaderOrch.cfgLoader = &transitionConfigLoader{store: store}
@@ -1202,16 +1202,16 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 	vault.Name = "cloud-transition"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-transition",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: nextTierID, Name: "local", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: nextTierID, Name: "local", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -1314,16 +1314,16 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	vault.Name = "cloud-sweep"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-sweep",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: nextTierID, Name: "local", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: nextTierID, Name: "local", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -1362,7 +1362,7 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	// transition action. This simulates what the production retention sweep does.
 	rules := []retentionRule{{
 		policy: &keepNPolicy{n: 0}, // matches all sealed chunks
-		action: config.RetentionActionTransition,
+		action: system.RetentionActionTransition,
 	}}
 	runner := &retentionRunner{
 		isLeader: true,
@@ -1561,20 +1561,20 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 	vault.Name = "three-tier"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "three-tier",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier2ID, Name: "cold", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier2ID, Name: "cold", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 2,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -1651,20 +1651,20 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 	vault.Name = "file-file-cloud"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "file-file-cloud",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier2ID, Name: "cold", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier2ID, Name: "cold", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 2,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -1766,7 +1766,7 @@ func TestTransitionEventIDPreserved(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	for _, v := range cfg.Vaults {
 		_ = store.PutVault(context.Background(), v)
 	}
@@ -1846,16 +1846,16 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 	vault.Name = "eventid-cloud"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "eventid-cloud",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: nextTierID, Name: "local", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: nextTierID, Name: "local", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -1931,16 +1931,16 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 	vault.Name = "count-accuracy"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "count-accuracy",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -2021,16 +2021,16 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 	vault.Name = "cloud-search"
 	orch.RegisterVault(vault)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-search",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: config.TierTypeCloud, Placements: syntheticPlacements(nodeID),
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 	orch.cfgLoader = &transitionConfigLoader{store: store}
@@ -2298,7 +2298,7 @@ type clusterTestNode struct {
 // clusterHarness holds the full multi-node cluster.
 type clusterHarness struct {
 	nodes    map[string]*clusterTestNode
-	cfgStore *cfgmem.Store
+	cfgStore *sysmem.Store
 	vaultID  uuid.UUID
 	tierIDs  []uuid.UUID
 }
@@ -2378,36 +2378,36 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	}
 
 	// Create config store.
-	store := cfgmem.NewStore()
-	tierCfgs := make([]config.TierConfig, tierCount)
+	store := sysmem.NewStore()
+	tierCfgs := make([]system.TierConfig, tierCount)
 	for i := range tierCount {
-		placements := make([]config.TierPlacement, 0, len(nodeIDs))
-		placements = append(placements, config.TierPlacement{
-			StorageID: config.SyntheticStorageID(leaderID), Leader: true,
+		placements := make([]system.TierPlacement, 0, len(nodeIDs))
+		placements = append(placements, system.TierPlacement{
+			StorageID: system.SyntheticStorageID(leaderID), Leader: true,
 		})
 		for _, fid := range nodeIDs[1:] {
-			placements = append(placements, config.TierPlacement{
-				StorageID: config.SyntheticStorageID(fid), Leader: false,
+			placements = append(placements, system.TierPlacement{
+				StorageID: system.SyntheticStorageID(fid), Leader: false,
 			})
 		}
-		tierCfgs[i] = config.TierConfig{
+		tierCfgs[i] = system.TierConfig{
 			ID:         tierIDs[i],
 			Name:       fmt.Sprintf("tier-%d", i),
-			Type:       config.TierTypeFile,
+			Type:       system.TierTypeFile,
 			Placements: placements,
 			VaultID:    vaultID,
 			Position:   uint32(i),
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
 	}
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cluster-vault",
 	})
 
 	// Build follower targets for the leader.
-	followerTargets := make([]config.ReplicationTarget, 0, len(nodeIDs)-1)
+	followerTargets := make([]system.ReplicationTarget, 0, len(nodeIDs)-1)
 	for _, fid := range nodeIDs[1:] {
-		followerTargets = append(followerTargets, config.ReplicationTarget{NodeID: fid})
+		followerTargets = append(followerTargets, system.ReplicationTarget{NodeID: fid})
 	}
 
 	// Create all orchestrators with file-backed tiers.
@@ -2976,19 +2976,19 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
 
-	// Config store — both nodes share the same vault/tier config.
-	store := cfgmem.NewStore()
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "hot", Type: config.TierTypeFile,
+	// Config store — both nodes share the same vault/tier system.
+	store := sysmem.NewStore()
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "hot", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 0,
-		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID("node-A"), Leader: true},
+		Placements: []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID("node-A"), Leader: true},
 		},
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "drain-test",
 	})
-	_ = store.PutFilter(context.Background(), config.FilterConfig{
+	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: uuid.Must(uuid.NewV7()), Name: "catch-all", Expression: "*",
 	})
 
@@ -3122,18 +3122,18 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 	}
 	fileIM := indexfile.NewManager(dir, nil, nil)
 
-	store := cfgmem.NewStore()
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "mem", Type: config.TierTypeMemory,
+	store := sysmem.NewStore()
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "mem", Type: system.TierTypeMemory,
 		Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "file", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "file", Type: system.TierTypeFile,
 		Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "budget-test",
 	})
 
@@ -3205,13 +3205,13 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 	memCM, _ := chunkmem.NewFactory()(map[string]string{"budgetBytes": "100"}, nil)
 	memIM, _ := indexmem.NewFactory()(nil, memCM, nil)
 
-	store := cfgmem.NewStore()
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "mem-terminal", Type: config.TierTypeMemory,
+	store := sysmem.NewStore()
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "mem-terminal", Type: system.TierTypeMemory,
 		Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "terminal-budget",
 	})
 
@@ -3274,21 +3274,21 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	fileCMFollower, _ := chunkfile.NewManager(chunkfile.Config{Dir: fileDirFollower, Now: time.Now, RotationPolicy: chunk.NewRecordCountPolicy(1000)})
 	fileIMFollower := indexfile.NewManager(fileDirFollower, nil, nil)
 
-	store := cfgmem.NewStore()
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "mem", Type: config.TierTypeMemory,
-		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID(leaderNode), Leader: true},
-			{StorageID: config.SyntheticStorageID(followerNode)},
+	store := sysmem.NewStore()
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "mem", Type: system.TierTypeMemory,
+		Placements: []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID(leaderNode), Leader: true},
+			{StorageID: system.SyntheticStorageID(followerNode)},
 		},
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "file", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "file", Type: system.TierTypeFile,
 		Placements: syntheticPlacements(leaderNode),
 		VaultID: vaultID, Position: 1,
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "budget-leader-only",
 	})
 
@@ -3358,7 +3358,7 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 
 // TestExplicitStorageLeaderGetsRotationPolicy verifies that a tier built via
 // buildTierInstanceForStorage (explicit placement path) applies the rotation
-// policy from config. Regression test for a gap where applyRotationPolicy was
+// policy from system. Regression test for a gap where applyRotationPolicy was
 // only called in buildTierInstance but not buildTierInstanceForStorage.
 func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	t.Parallel()
@@ -3375,30 +3375,30 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	}
 
 	maxRecords := int64(3)
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{{
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{
 			ID:   vaultID,
 			Name: "rotation-test",
 		}},
-		Tiers: []config.TierConfig{{
+		Tiers: []system.TierConfig{{
 			VaultID:          vaultID,
 			Position:         0,
 			ID:               tierID,
 			Name:             "file",
-			Type:             config.TierTypeFile,
+			Type:             system.TierTypeFile,
 			RotationPolicyID: &policyID,
-			Placements: []config.TierPlacement{
+			Placements: []system.TierPlacement{
 				{StorageID: fsID.String(), Leader: true},
 			},
 		}},
-		RotationPolicies: []config.RotationPolicyConfig{{
+		RotationPolicies: []system.RotationPolicyConfig{{
 			ID:         policyID,
 			Name:       "3-records",
 			MaxRecords: &maxRecords,
 		}},
-		NodeStorageConfigs: []config.NodeStorageConfig{{
+		NodeStorageConfigs: []system.NodeStorageConfig{{
 			NodeID: nodeID,
-			FileStorages: []config.FileStorage{{
+			FileStorages: []system.FileStorage{{
 				ID:           fsID,
 				StorageClass: 1,
 				Name:         "disk-1",
@@ -3421,7 +3421,7 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID})
 	defer orch.Stop()
 
-	store := cfgmem.NewStore()
+	store := sysmem.NewStore()
 	orch.cfgLoader = &transitionConfigLoader{store: store}
 
 	if err := orch.ApplyConfig(cfg, factories); err != nil {

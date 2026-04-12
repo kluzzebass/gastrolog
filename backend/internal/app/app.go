@@ -27,9 +27,9 @@ import (
 	chunkjsonl "gastrolog/internal/chunk/jsonl"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	configmem "gastrolog/internal/config/memory"
-	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
+	"gastrolog/internal/system/raftfsm"
 	digestlevel "gastrolog/internal/digester/level"
 	digesttimestamp "gastrolog/internal/digester/timestamp"
 	"gastrolog/internal/home"
@@ -120,8 +120,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	// Wrap in a proxy so runtime cluster join can swap the inner store.
 	// All consumers hold a reference to proxy; on join, only the inner changes.
-	proxy := config.NewStoreProxy(rawStore)
-	cfgStore := config.Store(proxy)
+	proxy := system.NewStoreProxy(rawStore)
+	cfgStore := system.Store(proxy)
 	var groupMgr *raftgroup.GroupManager // set later if cluster mode
 
 	if err := startClusterServices(ctx, clusterSrv, clusterTLS, cfgStore, hd, logger); err != nil {
@@ -319,7 +319,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 // makeTierDrainCompleteHandler returns a callback that deletes the drained tier
 // config (removing its vault association) and destroys the tier's Raft group.
-func makeTierDrainCompleteHandler(cfgStore config.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, uuid.UUID, uuid.UUID) {
+func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, uuid.UUID, uuid.UUID) {
 	return func(ctx context.Context, _, tierID uuid.UUID) {
 		// Tier ownership lives on TierConfig.VaultID — deleting the tier
 		// config removes the association. The drain=false flag avoids
@@ -441,7 +441,7 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 
 // wireManagedFileTransfer sets up cluster-side handlers for streaming managed
 // files between nodes and returns a managedFileManager for the dispatcher.
-func wireManagedFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, cfgStore config.Store, homeDir string, logger *slog.Logger) *managedFileManager {
+func wireManagedFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server, cfgStore system.Store, homeDir string, logger *slog.Logger) *managedFileManager {
 	peerConns := clusterSrv.PeerConns()
 	clusterSrv.SetManagedFileReader(httpSrv.ManagedFileReader)
 	clusterSrv.SetManagedFileIDs(httpSrv.ManagedFileIDs)
@@ -466,7 +466,7 @@ func nonRaftApplyHook(configType string, handle func(raftfsm.Notification)) func
 }
 
 // startOrchestrator applies config, rebuilds missing indexes, and starts the orchestrator.
-func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestrator.Orchestrator, appCfg *config.Config, factories orchestrator.Factories) error {
+func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestrator.Orchestrator, appCfg *system.Config, factories orchestrator.Factories) error {
 	if appCfg != nil {
 		logger.Info("loaded config",
 			"ingesters", len(appCfg.Ingesters),
@@ -488,7 +488,7 @@ func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestra
 
 // setupClusterStats creates the broadcaster, peer state tracker, and stats
 // collector. Returns nils for single-node mode.
-func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore config.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
+func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system.Store, clusterSrv *cluster.Server, orch *orchestrator.Orchestrator, recordForwarder *cluster.RecordForwarder, alerts *alert.Collector, nodeID string, apiAddr string, pprofAddr string, statsSignal *notify.Signal) (*cluster.Broadcaster, *cluster.PeerState, *cluster.PeerJobState, func() *gastrologv1.NodeStats) {
 	var broadcaster *cluster.Broadcaster
 	if clusterSrv != nil && clusterSrv.PeerConns() != nil {
 		broadcaster = cluster.NewBroadcaster(clusterSrv.PeerConns(), logger.With("component", "broadcast"))
@@ -567,7 +567,7 @@ func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, e
 }
 
 // loadLocalConfig attempts to load config from the local FSM or bootstrap.
-func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore config.Store, clusterTLS *cluster.ClusterTLS, nodeID string) (*config.Config, bool, error) {
+func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.Config, bool, error) {
 	if err := requestClusterMembership(ctx, logger, cfg, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
@@ -630,7 +630,7 @@ func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunC
 // finalizeNodeSetup ensures this node has a NodeConfig with a name and
 // resolves the home directory and socket path. If preferredName is set, it
 // is used instead of generating a random petname.
-func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore config.Store, nodeID, configType, preferredName string, asyncNodeConfig bool, hd home.Dir) (string, string, error) {
+func finalizeNodeSetup(ctx context.Context, logger *slog.Logger, cfgStore system.Store, nodeID, configType, preferredName string, asyncNodeConfig bool, hd home.Dir) (string, string, error) {
 	if asyncNodeConfig {
 		logNodeIdentity(logger, nodeID, hd.ReadNodeName())
 		go ensureNodeConfigAsync(ctx, cfgStore, nodeID, configType, preferredName, hd, logger)
@@ -662,14 +662,14 @@ func logNodeIdentity(logger *slog.Logger, nodeID, nodeName string) {
 
 // awaitReplication blocks until server settings replicate from the leader.
 // No-op when config was loaded locally.
-func awaitReplication(ctx context.Context, appCfg *config.Config, configType string, cfgStore config.Store, logger *slog.Logger) error {
+func awaitReplication(ctx context.Context, appCfg *system.Config, configType string, cfgStore system.Store, logger *slog.Logger) error {
 	if appCfg != nil || configType != "raft" {
 		return nil
 	}
 	return waitForServerSettings(ctx, cfgStore, 60*time.Second, logger)
 }
 
-func waitForServerSettings(ctx context.Context, cfgStore config.Store, timeout time.Duration, logger *slog.Logger) error {
+func waitForServerSettings(ctx context.Context, cfgStore system.Store, timeout time.Duration, logger *slog.Logger) error {
 	logger.Info("waiting for server settings replication")
 	deadline := time.After(timeout)
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -698,7 +698,7 @@ func waitForServerSettings(ctx context.Context, cfgStore config.Store, timeout t
 	}
 }
 
-func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID, preferredName string) (string, error) {
+func ensureNodeConfig(ctx context.Context, cfgStore system.Store, nodeID, preferredName string) (string, error) {
 	nodeUUID, err := uuid.Parse(nodeID)
 	if err != nil {
 		return "", fmt.Errorf("parse node ID %q: %w", nodeID, err)
@@ -722,15 +722,15 @@ func ensureNodeConfig(ctx context.Context, cfgStore config.Store, nodeID, prefer
 	if name == "" {
 		name = petname.Generate(2, "-")
 	}
-	if err := cfgStore.PutNode(ctx, config.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
+	if err := cfgStore.PutNode(ctx, system.NodeConfig{ID: nodeUUID, Name: name}); err != nil {
 		return "", err
 	}
 	return name, nil
 }
 
-func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logger) error {
+func waitForQuorum(ctx context.Context, cfgStore system.Store, logger *slog.Logger) error {
 	inner := cfgStore
-	if p, ok := cfgStore.(*config.StoreProxy); ok {
+	if p, ok := cfgStore.(*system.StoreProxy); ok {
 		inner = p.Inner()
 	}
 	rcs, ok := inner.(*raftConfigStore)
@@ -747,9 +747,9 @@ func waitForQuorum(ctx context.Context, cfgStore config.Store, logger *slog.Logg
 
 // waitForFSMCatchup blocks until the local config FSM reflects the cluster's
 // committed state. No-op for non-raft stores.
-func waitForFSMCatchup(ctx context.Context, cfgStore config.Store, timeout time.Duration, logger *slog.Logger) error {
+func waitForFSMCatchup(ctx context.Context, cfgStore system.Store, timeout time.Duration, logger *slog.Logger) error {
 	inner := cfgStore
-	if p, ok := cfgStore.(*config.StoreProxy); ok {
+	if p, ok := cfgStore.(*system.StoreProxy); ok {
 		inner = p.Inner()
 	}
 	rcs, ok := inner.(*raftConfigStore)
@@ -764,7 +764,7 @@ func waitForFSMCatchup(ctx context.Context, cfgStore config.Store, timeout time.
 	return nil
 }
 
-func ensureNodeConfigAsync(ctx context.Context, cfgStore config.Store, nodeID, configType, preferredName string, hd home.Dir, logger *slog.Logger) {
+func ensureNodeConfigAsync(ctx context.Context, cfgStore system.Store, nodeID, configType, preferredName string, hd home.Dir, logger *slog.Logger) {
 	if err := waitForQuorum(ctx, cfgStore, logger); err != nil {
 		return
 	}
@@ -785,7 +785,7 @@ func persistNodeName(logger *slog.Logger, configType string, hd home.Dir, nodeNa
 	}
 }
 
-func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Store) (*config.Config, error) {
+func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore system.Store) (*system.Config, error) {
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return nil, err
@@ -801,7 +801,7 @@ func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Stor
 
 	if ss.Auth.JWTSecret == "" {
 		logger.Info("bootstrapping server settings (auth + query defaults)")
-		if err := config.BootstrapMinimal(ctx, cfgStore); err != nil {
+		if err := system.BootstrapMinimal(ctx, cfgStore); err != nil {
 			return nil, fmt.Errorf("bootstrap minimal config: %w", err)
 		}
 	}
@@ -813,7 +813,7 @@ func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore config.Stor
 	return cfg, nil
 }
 
-func loadMaxConcurrentJobs(ctx context.Context, cfgStore config.Store) int {
+func loadMaxConcurrentJobs(ctx context.Context, cfgStore system.Store) int {
 	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return 0
@@ -821,7 +821,7 @@ func loadMaxConcurrentJobs(ctx context.Context, cfgStore config.Store) int {
 	return ss.Scheduler.MaxConcurrentJobs
 }
 
-func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore config.Store, noAuth bool) (*auth.TokenService, error) {
+func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore system.Store, noAuth bool) (*auth.TokenService, error) {
 	if noAuth {
 		logger.Info("authentication disabled (--no-auth)")
 		return nil, nil
@@ -833,7 +833,7 @@ func buildAuthTokens(ctx context.Context, logger *slog.Logger, cfgStore config.S
 	return tokens, nil
 }
 
-func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore config.Store) (*cert.Manager, error) {
+func loadCertManager(ctx context.Context, logger *slog.Logger, cfgStore system.Store) (*cert.Manager, error) {
 	certMgr := cert.New(cert.Config{Logger: logger})
 	certList, err := cfgStore.ListCertificates(ctx)
 	if err != nil {
@@ -862,7 +862,7 @@ type serverDeps struct {
 	SocketPath          string
 	ClusterAddr         string
 	Orch                *orchestrator.Orchestrator
-	CfgStore            config.Store
+	CfgStore            system.Store
 	Factories           orchestrator.Factories
 	Tokens              *auth.TokenService
 	CertMgr             *cert.Manager
@@ -996,7 +996,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 // setupMultiRaft creates the GroupManager and node address resolver for tier
 // Raft groups. Returns (nil, nil) in single-node / non-raft mode.
-func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, func(string) (string, bool)) {
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, func(string) (string, bool)) {
 	if clusterSrv == nil {
 		return nil, nil
 	}
@@ -1032,7 +1032,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore config.Store, nodeID, h
 	return groupMgr, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore config.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -1085,7 +1085,7 @@ func resolveHome(flagValue string) (home.Dir, error) {
 	return home.Default()
 }
 
-func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenService, error) {
+func buildTokenService(ctx context.Context, cfgStore system.Store) (*auth.TokenService, error) {
 	ss, err := cfgStore.LoadServerSettings(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("load server settings: %w", err)
@@ -1110,11 +1110,11 @@ func buildTokenService(ctx context.Context, cfgStore config.Store) (*auth.TokenS
 	return auth.NewTokenService(secret, duration), nil
 }
 
-// openConfigStore creates a config.Store based on config type.
-func openConfigStore(configType string, opts raftStoreOpts) (config.Store, error) {
+// openConfigStore creates a system.Store based on config type.
+func openConfigStore(configType string, opts raftStoreOpts) (system.Store, error) {
 	switch configType {
 	case "memory":
-		return configmem.NewStore(), nil
+		return sysmem.NewStore(), nil
 	case "raft":
 		return openRaftConfigStore(opts)
 	default:

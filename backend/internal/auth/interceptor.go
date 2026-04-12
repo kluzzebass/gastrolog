@@ -48,7 +48,7 @@ func (i *NoAuthInterceptor) WrapStreamingClient(next connect.StreamingClientFunc
 }
 
 // UserCounter provides user count for first-boot detection.
-// config.Store satisfies this interface.
+// system.Store satisfies this interface.
 type UserCounter interface {
 	CountUsers(ctx context.Context) (int, error)
 }
@@ -85,7 +85,7 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.AuthServiceLoginProcedure:             true,
 			gastrologv1connect.AuthServiceRegisterProcedure:          true, // self-guards after first user
 			gastrologv1connect.AuthServiceRefreshTokenProcedure:      true, // uses opaque token, not JWT
-			gastrologv1connect.ConfigServiceGetSettingsProcedure: true, // password policy needed on register page
+			gastrologv1connect.SystemServiceGetSettingsProcedure: true, // password policy needed on register page
 		},
 		admin: map[string]bool{
 			// User management
@@ -118,35 +118,35 @@ func NewAuthInterceptor(tokens *TokenService, counter UserCounter, validator Tok
 			gastrologv1connect.VaultServiceMergeVaultsProcedure:   true,
 			gastrologv1connect.VaultServiceSealVaultProcedure:     true,
 			// ConfigService — mutations
-			gastrologv1connect.ConfigServiceGetConfigProcedure:             true,
-			gastrologv1connect.ConfigServiceListIngestersProcedure:         true,
-			gastrologv1connect.ConfigServiceGetIngesterStatusProcedure:     true,
-			gastrologv1connect.ConfigServicePutFilterProcedure:             true,
-			gastrologv1connect.ConfigServiceDeleteFilterProcedure:          true,
-			gastrologv1connect.ConfigServicePutRotationPolicyProcedure:     true,
-			gastrologv1connect.ConfigServiceDeleteRotationPolicyProcedure:  true,
-			gastrologv1connect.ConfigServicePutRetentionPolicyProcedure:    true,
-			gastrologv1connect.ConfigServiceDeleteRetentionPolicyProcedure: true,
-			gastrologv1connect.ConfigServicePutVaultProcedure:              true,
-			gastrologv1connect.ConfigServiceDeleteVaultProcedure:           true,
-			gastrologv1connect.ConfigServicePutIngesterProcedure:           true,
-			gastrologv1connect.ConfigServiceDeleteIngesterProcedure:        true,
-			gastrologv1connect.ConfigServicePutSettingsProcedure:           true,
-			gastrologv1connect.ConfigServiceRegenerateJwtSecretProcedure:   true,
-			gastrologv1connect.ConfigServicePutNodeConfigProcedure:         true,
-			gastrologv1connect.ConfigServicePutRouteProcedure:              true,
-			gastrologv1connect.ConfigServiceDeleteRouteProcedure:           true,
-			gastrologv1connect.ConfigServicePauseVaultProcedure:            true,
-			gastrologv1connect.ConfigServiceResumeVaultProcedure:           true,
-			gastrologv1connect.ConfigServiceTriggerIngesterProcedure:       true,
+			gastrologv1connect.SystemServiceGetSystemProcedure:             true,
+			gastrologv1connect.SystemServiceListIngestersProcedure:         true,
+			gastrologv1connect.SystemServiceGetIngesterStatusProcedure:     true,
+			gastrologv1connect.SystemServicePutFilterProcedure:             true,
+			gastrologv1connect.SystemServiceDeleteFilterProcedure:          true,
+			gastrologv1connect.SystemServicePutRotationPolicyProcedure:     true,
+			gastrologv1connect.SystemServiceDeleteRotationPolicyProcedure:  true,
+			gastrologv1connect.SystemServicePutRetentionPolicyProcedure:    true,
+			gastrologv1connect.SystemServiceDeleteRetentionPolicyProcedure: true,
+			gastrologv1connect.SystemServicePutVaultProcedure:              true,
+			gastrologv1connect.SystemServiceDeleteVaultProcedure:           true,
+			gastrologv1connect.SystemServicePutIngesterProcedure:           true,
+			gastrologv1connect.SystemServiceDeleteIngesterProcedure:        true,
+			gastrologv1connect.SystemServicePutSettingsProcedure:           true,
+			gastrologv1connect.SystemServiceRegenerateJwtSecretProcedure:   true,
+			gastrologv1connect.SystemServicePutNodeConfigProcedure:         true,
+			gastrologv1connect.SystemServicePutRouteProcedure:              true,
+			gastrologv1connect.SystemServiceDeleteRouteProcedure:           true,
+			gastrologv1connect.SystemServicePauseVaultProcedure:            true,
+			gastrologv1connect.SystemServiceResumeVaultProcedure:           true,
+			gastrologv1connect.SystemServiceTriggerIngesterProcedure:       true,
 			// ConfigService — certificates
-			gastrologv1connect.ConfigServiceListCertificatesProcedure:  true,
-			gastrologv1connect.ConfigServiceGetCertificateProcedure:    true,
-			gastrologv1connect.ConfigServicePutCertificateProcedure:    true,
-			gastrologv1connect.ConfigServiceDeleteCertificateProcedure: true,
+			gastrologv1connect.SystemServiceListCertificatesProcedure:  true,
+			gastrologv1connect.SystemServiceGetCertificateProcedure:    true,
+			gastrologv1connect.SystemServicePutCertificateProcedure:    true,
+			gastrologv1connect.SystemServiceDeleteCertificateProcedure: true,
 			// ConfigService — managed files
-			gastrologv1connect.ConfigServiceListManagedFilesProcedure:  true,
-			gastrologv1connect.ConfigServiceDeleteManagedFileProcedure: true,
+			gastrologv1connect.SystemServiceListManagedFilesProcedure:  true,
+			gastrologv1connect.SystemServiceDeleteManagedFileProcedure: true,
 			// QueryService — destructive
 			gastrologv1connect.QueryServiceExportToVaultProcedure: true,
 		},

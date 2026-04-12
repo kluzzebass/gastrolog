@@ -5,7 +5,7 @@ import { mock } from "bun:test";
 import * as queryPb from "../src/api/gen/gastrolog/v1/query_pb";
 import * as vaultPb from "../src/api/gen/gastrolog/v1/vault_pb";
 import * as lifecyclePb from "../src/api/gen/gastrolog/v1/lifecycle_pb";
-import * as configPb from "../src/api/gen/gastrolog/v1/config_pb";
+import * as configPb from "../src/api/gen/gastrolog/v1/system_pb";
 import * as authPb from "../src/api/gen/gastrolog/v1/auth_pb";
 import * as jobPb from "../src/api/gen/gastrolog/v1/job_pb";
 
@@ -54,7 +54,7 @@ export function installMockClients() {
     queryClient: autoMockClient(),
     vaultClient: autoMockClient(),
     lifecycleClient: autoMockClient(),
-    configClient: autoMockClient(),
+    systemClient: autoMockClient(),
     authClient: autoMockClient(),
     jobClient: autoMockClient(),
   };

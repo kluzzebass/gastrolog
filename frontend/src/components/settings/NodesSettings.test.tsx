@@ -51,9 +51,9 @@ const sampleCluster = {
 };
 
 beforeEach(() => {
-  m(mocks.configClient, "getConfig").mockClear();
-  m(mocks.configClient, "getSettings").mockClear();
-  m(mocks.configClient, "putNodeConfig").mockClear();
+  m(mocks.systemClient, "getConfig").mockClear();
+  m(mocks.systemClient, "getSettings").mockClear();
+  m(mocks.systemClient, "putNodeConfig").mockClear();
   m(mocks.lifecycleClient, "getClusterStatus").mockClear();
   m(mocks.lifecycleClient, "setNodeSuffrage").mockClear();
   m(mocks.lifecycleClient, "removeNode").mockClear();
@@ -61,7 +61,7 @@ beforeEach(() => {
 
 function seedQueries(qc: ReturnType<typeof createTestQueryClient>, overrides?: { cluster?: object }) {
   qc.setQueryData(["settings"], sampleSettings);
-  qc.setQueryData(["config"], sampleConfig);
+  qc.setQueryData(["system"], sampleConfig);
   qc.setQueryData(["clusterStatus"], overrides?.cluster ?? sampleCluster);
 }
 
@@ -69,7 +69,7 @@ describe("NodesSettings", () => {
   test("renders single node in non-cluster mode", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], sampleSettings);
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
     qc.setQueryData(["clusterStatus"], { clusterEnabled: false, nodes: [] });
 
     const { getByText } = render(<NodesSettings dark />, {
@@ -238,7 +238,7 @@ describe("NodesSettings", () => {
   test("empty state when no nodes", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], { nodeId: "", nodeName: "" });
-    qc.setQueryData(["config"], { ...sampleConfig, nodeConfigs: [] });
+    qc.setQueryData(["system"], { ...sampleConfig, nodeConfigs: [] });
     qc.setQueryData(["clusterStatus"], { clusterEnabled: false, nodes: [] });
 
     const { getByText } = render(<NodesSettings dark />, {

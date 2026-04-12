@@ -2,7 +2,7 @@ package orchestrator
 
 import (
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 
@@ -26,7 +26,7 @@ type TierInstance struct {
 	Query            *query.Engine
 	IsFollower      bool                     // true if this node is a follower for this tier
 	LeaderNodeID    string                   // the leader node's ID (empty if this IS the leader)
-	FollowerTargets []config.ReplicationTarget // per-storage targets (populated on leader only)
+	FollowerTargets []system.ReplicationTarget // per-storage targets (populated on leader only)
 
 	// HasRaftLeader returns true if the tier's Raft group has an elected leader.
 	// Nil when no Raft group exists (single-node / memory mode).

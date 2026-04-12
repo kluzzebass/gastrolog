@@ -32,7 +32,7 @@ func newCloudServiceListCmd() *cobra.Command {
 		Short: "List all cloud services",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -59,7 +59,7 @@ func newCloudServiceGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -96,7 +96,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 				Name: name,
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -110,7 +110,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 
 			applyCloudServiceFlags(cmd, cfg)
 
-			_, err = client.Config.PutCloudService(ctx, connect.NewRequest(&v1.PutCloudServiceRequest{
+			_, err = client.System.PutCloudService(ctx, connect.NewRequest(&v1.PutCloudServiceRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -159,7 +159,7 @@ func newCloudServiceDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteCloudService(context.Background(), connect.NewRequest(&v1.DeleteCloudServiceRequest{Id: id}))
+			_, err = client.System.DeleteCloudService(context.Background(), connect.NewRequest(&v1.DeleteCloudServiceRequest{Id: id}))
 			if err != nil {
 				return err
 			}

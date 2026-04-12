@@ -1116,7 +1116,7 @@ var File_gastrolog_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1agastrolog/v1/cluster.proto\x1a\x19gastrolog/v1/config.proto\x1a\x18gastrolog/v1/vault.proto\"\x0f\n" +
+	"\x1cgastrolog/v1/lifecycle.proto\x12\fgastrolog.v1\x1a\x1agastrolog/v1/cluster.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"\x0f\n" +
 	"\rHealthRequest\"\xe1\x01\n" +
 	"\x0eHealthResponse\x12,\n" +
 	"\x06status\x18\x01 \x01(\x0e2\x14.gastrolog.v1.StatusR\x06status\x12\x18\n" +
@@ -1287,7 +1287,7 @@ func file_gastrolog_v1_lifecycle_proto_init() {
 		return
 	}
 	file_gastrolog_v1_cluster_proto_init()
-	file_gastrolog_v1_config_proto_init()
+	file_gastrolog_v1_system_proto_init()
 	file_gastrolog_v1_vault_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{

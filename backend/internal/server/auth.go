@@ -16,7 +16,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
 )
 
@@ -24,7 +24,7 @@ var usernameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{3,64}$`)
 
 // AuthServer implements the AuthService.
 type AuthServer struct {
-	cfgStore config.Store
+	cfgStore system.Store
 	tokens   *auth.TokenService
 	logger   *slog.Logger
 	noAuth   bool
@@ -33,7 +33,7 @@ type AuthServer struct {
 var _ gastrologv1connect.AuthServiceHandler = (*AuthServer)(nil)
 
 // NewAuthServer creates a new AuthServer.
-func NewAuthServer(cfgStore config.Store, tokens *auth.TokenService, logger *slog.Logger, noAuth bool) *AuthServer {
+func NewAuthServer(cfgStore system.Store, tokens *auth.TokenService, logger *slog.Logger, noAuth bool) *AuthServer {
 	return &AuthServer{
 		cfgStore: cfgStore,
 		tokens:   tokens,
@@ -49,7 +49,7 @@ var animalNoises = []string{
 	"howl", "purr", "squeak", "growl", "caw", "gobble",
 }
 
-// loadRefreshDuration reads the refresh token duration from server config.
+// loadRefreshDuration reads the refresh token duration from server system.
 // Returns 168h (7 days) as default.
 func (s *AuthServer) loadRefreshDuration(ctx context.Context) time.Duration {
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
@@ -74,7 +74,7 @@ func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (s
 	}
 	refreshDuration := s.loadRefreshDuration(ctx)
 	now := time.Now().UTC()
-	rt := config.RefreshToken{
+	rt := system.RefreshToken{
 		ID:        uuid.Must(uuid.NewV7()),
 		UserID:    userID,
 		TokenHash: hash,
@@ -87,11 +87,11 @@ func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (s
 	return token, nil
 }
 
-// loadPasswordPolicy reads the password policy from server config.
-func (s *AuthServer) loadPasswordPolicy(ctx context.Context) config.PasswordPolicy {
+// loadPasswordPolicy reads the password policy from server system.
+func (s *AuthServer) loadPasswordPolicy(ctx context.Context) system.PasswordPolicy {
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return config.PasswordPolicy{MinLength: 8}
+		return system.PasswordPolicy{MinLength: 8}
 	}
 	p := ss.Auth.PasswordPolicy
 	if p.MinLength <= 0 {
@@ -101,7 +101,7 @@ func (s *AuthServer) loadPasswordPolicy(ctx context.Context) config.PasswordPoli
 }
 
 // validatePassword checks a password against the policy and returns a descriptive error.
-func validatePassword(pw string, p config.PasswordPolicy) error {
+func validatePassword(pw string, p system.PasswordPolicy) error {
 	if utf8.RuneCountInString(pw) < p.MinLength {
 		return fmt.Errorf("password must be at least %d characters", p.MinLength)
 	}
@@ -187,7 +187,7 @@ func (s *AuthServer) Register(
 	// Create first user as admin.
 	userID := uuid.Must(uuid.NewV7())
 	now := time.Now().UTC()
-	user := config.User{
+	user := system.User{
 		ID:           userID,
 		Username:     username,
 		PasswordHash: hash,
@@ -456,7 +456,7 @@ func (s *AuthServer) CreateUser(
 	}
 
 	now := time.Now().UTC()
-	user := config.User{
+	user := system.User{
 		ID:           uuid.Must(uuid.NewV7()),
 		Username:     username,
 		PasswordHash: hash,
@@ -695,8 +695,8 @@ func (s *AuthServer) Logout(
 	return connect.NewResponse(&apiv1.LogoutResponse{}), nil
 }
 
-// userToProto converts a config.User to a proto UserInfo, stripping the password hash.
-func userToProto(u config.User) *apiv1.UserInfo {
+// userToProto converts a system.User to a proto UserInfo, stripping the password hash.
+func userToProto(u system.User) *apiv1.UserInfo {
 	return &apiv1.UserInfo{
 		Id:        u.ID.String(),
 		Username:  u.Username,

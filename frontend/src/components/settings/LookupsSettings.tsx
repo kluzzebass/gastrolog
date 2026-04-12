@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useSettings } from "../../api/hooks/useSettings";
-import { useConfig, useGenerateName } from "../../api/hooks/useConfig";
+import { useConfig, useGenerateName } from "../../api/hooks/useSystem";
 import { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";

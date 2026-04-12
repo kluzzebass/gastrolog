@@ -18,7 +18,7 @@ export { useFollow } from "./useFollow";
 export { useExplain } from "./useExplain";
 export { useLiveHistogram } from "./useLiveHistogram";
 export { useRecordContext } from "./useContext";
-export { useConfig, useGenerateName } from "./useConfig";
+export { useConfig, useGenerateName } from "./useSystem";
 export { usePutFilter, useDeleteFilter } from "./useFilters";
 export { usePutRotationPolicy, useDeleteRotationPolicy } from "./useRotationPolicies";
 export { usePutRetentionPolicy, useDeleteRetentionPolicy } from "./useRetentionPolicies";
@@ -42,7 +42,7 @@ export {
   useCheckListenAddrs,
 } from "./useIngesters";
 export { useJob, useWatchJobs } from "./useJobs";
-export { useWatchConfig } from "./useWatchConfig";
+export { useWatchSystem } from "./useWatchSystem";
 export { useWatchChunks } from "./useWatchChunks";
 export { useHealth } from "./useHealth";
 export { useSyntax } from "./useSyntax";

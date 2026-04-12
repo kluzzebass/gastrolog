@@ -1,11 +1,11 @@
-import { configClient } from "../client";
-import { useConfigMutation } from "./useConfig";
+import { systemClient } from "../client";
+import { useSystemMutation } from "./useSystem";
 import type { CloudService } from "../gen/gastrolog/v1/storage_pb";
 import type { NodeStorageConfig } from "../gen/gastrolog/v1/storage_pb";
-import type { TierConfig } from "../gen/gastrolog/v1/config_pb";
+import type { TierConfig } from "../gen/gastrolog/v1/system_pb";
 
 export function usePutCloudService() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       id: string;
       name: string;
@@ -25,7 +25,7 @@ export function usePutCloudService() {
       suspectGraceDays?: number;
       reconcileSchedule?: string;
     }) => {
-      return configClient.putCloudService({
+      return systemClient.putCloudService({
         config: {
           id: args.id,
           name: args.name,
@@ -55,16 +55,16 @@ export function usePutCloudService() {
 }
 
 export function useDeleteCloudService() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: { id: string }) => {
-      return configClient.deleteCloudService({ id: args.id });
+      return systemClient.deleteCloudService({ id: args.id });
     },
     [],
   );
 }
 
 export function useSetNodeStorageConfig() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       nodeId: string;
       fileStorages: {
@@ -75,7 +75,7 @@ export function useSetNodeStorageConfig() {
         memoryBudgetBytes: bigint;
       }[];
     }) => {
-      return configClient.setNodeStorageConfig({
+      return systemClient.setNodeStorageConfig({
         config: {
           nodeId: args.nodeId,
           fileStorages: args.fileStorages,
@@ -87,20 +87,20 @@ export function useSetNodeStorageConfig() {
 }
 
 export function usePutTier() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       config: TierConfig;
     }) => {
-      return configClient.putTier({ config: args.config });
+      return systemClient.putTier({ config: args.config });
     },
     [["vaults"], ["stats"]],
   );
 }
 
 export function useDeleteTier() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: { id: string; drain?: boolean }) => {
-      return configClient.deleteTier({ id: args.id, drain: args.drain });
+      return systemClient.deleteTier({ id: args.id, drain: args.drain });
     },
     [["vaults"], ["stats"]],
   );

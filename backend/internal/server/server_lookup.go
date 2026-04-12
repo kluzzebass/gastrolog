@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/home"
 	"gastrolog/internal/lookup"
 )
@@ -17,7 +17,7 @@ func (s *Server) loadInitialLookupConfig(registry lookup.Registry) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
@@ -32,29 +32,29 @@ func (s *Server) resolveMMDBPath(ctx context.Context, filename string) string {
 	return s.ResolveManagedFilePath(ctx, filename)
 }
 
-// applyLookupConfig loads (or reloads) MMDB, HTTP, and JSON lookup tables from the given config.
+// applyLookupConfig loads (or reloads) MMDB, HTTP, and JSON lookup tables from the given system.
 // It also manages the maxmind-update cron job for automatic downloads.
-func (s *Server) applyLookupConfig(cfg config.LookupConfig, mm config.MaxMindConfig, registry lookup.Registry) {
-	// Register MMDB lookup tables (GeoIP City / ASN) from config.
+func (s *Server) applyLookupConfig(cfg system.LookupConfig, mm system.MaxMindConfig, registry lookup.Registry) {
+	// Register MMDB lookup tables (GeoIP City / ASN) from system.
 	s.registerMMDBLookups(cfg, registry)
 
-	// Register HTTP lookup tables from config.
+	// Register HTTP lookup tables from system.
 	s.registerHTTPLookups(cfg, registry)
 
-	// Register JSON file lookup tables from config.
+	// Register JSON file lookup tables from system.
 	s.registerJSONFileLookups(cfg, registry)
 
-	// Register CSV lookup tables from config.
+	// Register CSV lookup tables from system.
 	s.registerCSVLookups(cfg, registry)
 
 	// Manage the maxmind-update cron job.
 	s.manageMaxMindJob(mm, registry)
 }
 
-// registerMMDBLookups registers MMDB-backed lookup tables (GeoIP City / ASN) from config.
+// registerMMDBLookups registers MMDB-backed lookup tables (GeoIP City / ASN) from system.
 // Follows the same lifecycle pattern as registerJSONFileLookups: close+remove stale, create+load new.
-func (s *Server) registerMMDBLookups(cfg config.LookupConfig, registry lookup.Registry) {
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+func (s *Server) registerMMDBLookups(cfg system.LookupConfig, registry lookup.Registry) {
+	ctx, cancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	defer cancel()
 
 	// Build keep set of names that should exist.
@@ -65,7 +65,7 @@ func (s *Server) registerMMDBLookups(cfg config.LookupConfig, registry lookup.Re
 		}
 	}
 
-	// Close and remove any MMDB lookups no longer in config.
+	// Close and remove any MMDB lookups no longer in system.
 	for name, table := range registry {
 		if m, ok := table.(*lookup.MMDB); ok {
 			if _, exists := keep[name]; !exists {
@@ -123,7 +123,7 @@ func mmdbFileName(dbType string) string {
 }
 
 // registerHTTPLookups registers HTTP API lookup tables from config into the registry.
-func (s *Server) registerHTTPLookups(cfg config.LookupConfig, registry lookup.Registry) {
+func (s *Server) registerHTTPLookups(cfg system.LookupConfig, registry lookup.Registry) {
 	for _, hcfg := range cfg.HTTPLookups {
 		if hcfg.Name == "" || hcfg.URLTemplate == "" {
 			continue
@@ -157,8 +157,8 @@ func (s *Server) registerHTTPLookups(cfg config.LookupConfig, registry lookup.Re
 }
 
 // registerJSONFileLookups registers JSON file-backed lookup tables from config into the registry.
-// It also cleans up any previously registered JSON file lookups that are no longer in the config.
-func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry lookup.Registry) {
+// It also cleans up any previously registered JSON file lookups that are no longer in the system.
+func (s *Server) registerJSONFileLookups(cfg system.LookupConfig, registry lookup.Registry) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -170,7 +170,7 @@ func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry looku
 		}
 	}
 
-	// Close and remove any JSON file lookups no longer in config.
+	// Close and remove any JSON file lookups no longer in system.
 	for name, table := range registry {
 		if jf, ok := table.(*lookup.JSONFile); ok {
 			if _, exists := keep[name]; !exists {
@@ -222,9 +222,9 @@ func (s *Server) registerJSONFileLookups(cfg config.LookupConfig, registry looku
 	}
 }
 
-// registerCSVLookups registers CSV file-backed lookup tables from config.
-func (s *Server) registerCSVLookups(cfg config.LookupConfig, registry lookup.Registry) {
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+// registerCSVLookups registers CSV file-backed lookup tables from system.
+func (s *Server) registerCSVLookups(cfg system.LookupConfig, registry lookup.Registry) {
+	ctx, cancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	defer cancel()
 
 	keep := make(map[string]struct{}, len(cfg.CSVLookups))
@@ -234,7 +234,7 @@ func (s *Server) registerCSVLookups(cfg config.LookupConfig, registry lookup.Reg
 		}
 	}
 
-	// Close and remove any CSV lookups no longer in config.
+	// Close and remove any CSV lookups no longer in system.
 	for name, table := range registry {
 		if ct, ok := table.(*lookup.CSV); ok {
 			if _, exists := keep[name]; !exists {
@@ -280,8 +280,8 @@ func (s *Server) registerCSVLookups(cfg config.LookupConfig, registry lookup.Reg
 	}
 }
 
-// manageMaxMindJob adds or removes the maxmind-update cron job based on config.
-func (s *Server) manageMaxMindJob(mm config.MaxMindConfig, registry lookup.Registry) {
+// manageMaxMindJob adds or removes the maxmind-update cron job based on system.
+func (s *Server) manageMaxMindJob(mm system.MaxMindConfig, registry lookup.Registry) {
 	scheduler := s.orch.Scheduler()
 	if scheduler == nil {
 		return
@@ -306,7 +306,7 @@ func (s *Server) manageMaxMindJob(mm config.MaxMindConfig, registry lookup.Regis
 
 	// If any MMDB entry has no file available yet, trigger an immediate download.
 	// Load current lookup config to check MMDB entries.
-	loadCtx, loadCancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	ss, err := s.cfgStore.LoadServerSettings(loadCtx)
 	loadCancel()
 	needsDownload := false
@@ -326,7 +326,7 @@ func (s *Server) manageMaxMindJob(mm config.MaxMindConfig, registry lookup.Regis
 // runMaxMindUpdate downloads both MaxMind editions, registers them as managed files,
 // and reloads any MMDB registry entries that use auto-downloaded databases.
 func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
-	loadCtx, loadCancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	loadCtx, loadCancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	ss, err := s.cfgStore.LoadServerSettings(loadCtx)
 	loadCancel()
 	if err != nil {
@@ -370,7 +370,7 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 	}
 
 	// Re-apply config to reload MMDB entries that use auto-downloaded databases.
-	reloadCtx, reloadCancel := context.WithTimeout(ctx, configLoadTimeout)
+	reloadCtx, reloadCancel := context.WithTimeout(ctx, systemLoadTimeout)
 	var loadErr error
 	ss, loadErr = s.cfgStore.LoadServerSettings(reloadCtx)
 	reloadCancel()
@@ -381,7 +381,7 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 	s.registerMMDBLookups(ss.Lookup, registry)
 
 	// Update the last-update timestamp.
-	saveCtx, saveCancel := context.WithTimeout(ctx, configLoadTimeout)
+	saveCtx, saveCancel := context.WithTimeout(ctx, systemLoadTimeout)
 	defer saveCancel()
 	ss.MaxMind.LastUpdate = time.Now()
 	if err := s.cfgStore.SaveServerSettings(saveCtx, ss); err != nil {

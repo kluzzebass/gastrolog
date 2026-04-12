@@ -11,7 +11,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -127,7 +127,7 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 	// double-query their primary remotely.
 	localTierIDs := s.orch.LocalPrimaryTierIDs()
 
-	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
+	tierMap := make(map[uuid.UUID]*system.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
@@ -138,7 +138,7 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 			continue
 		}
 		seen := make(map[string]bool)
-		for _, tierID := range config.VaultTierIDs(tiers, v.ID) {
+		for _, tierID := range system.VaultTierIDs(tiers, v.ID) {
 			if localTierIDs[tierID] {
 				continue // searched locally, skip remote
 			}

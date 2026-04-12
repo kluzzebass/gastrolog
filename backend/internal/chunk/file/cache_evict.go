@@ -6,7 +6,7 @@ import (
 	"slices"
 	"time"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 )
 
 const defaultCacheBudget = 1 << 30 // 1 GiB
@@ -30,7 +30,7 @@ func (m *Manager) EvictCache() {
 
 	var budget uint64
 	if m.cfg.CacheBudget != "" {
-		parsed, err := config.ParseSize(m.cfg.CacheBudget)
+		parsed, err := system.ParseSize(m.cfg.CacheBudget)
 		if err == nil {
 			budget = parsed
 		}
@@ -106,7 +106,7 @@ func (m *Manager) scanCache() ([]cacheEntry, int64) {
 
 // evictByTTL removes entries older than the configured CacheTTL.
 func (m *Manager) evictByTTL(entries []cacheEntry, totalSize int64) ([]cacheEntry, int64, int) {
-	ttl, err := config.ParseDuration(m.cfg.CacheTTL)
+	ttl, err := system.ParseDuration(m.cfg.CacheTTL)
 	if err != nil || ttl < 0 {
 		return entries, totalSize, 0
 	}

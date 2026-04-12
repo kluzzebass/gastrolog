@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/raftfsm"
-	"gastrolog/internal/config/raftstore"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
+	"gastrolog/internal/system/raftstore"
 
 	"github.com/Jille/raftadmin/proto"
 	"github.com/google/uuid"
@@ -152,7 +152,7 @@ func TestSingleNodeForwardApply(t *testing.T) {
 	// Write a filter config via the store (goes through raft.Apply on leader).
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	err := node.store.PutFilter(ctx, config.FilterConfig{
+	err := node.store.PutFilter(ctx, system.FilterConfig{
 		ID:         filterID,
 		Name:       "test-filter",
 		Expression: "*",
@@ -214,7 +214,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	// Write a filter on the leader.
 	ctx := context.Background()
 	filterID := uuid.Must(uuid.NewV7())
-	if err := node1.store.PutFilter(ctx, config.FilterConfig{
+	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID:         filterID,
 		Name:       "leader-filter",
 		Expression: "*",
@@ -223,7 +223,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	}
 
 	// Verify the filter is replicated to node 2 and 3.
-	var got2, got3 *config.FilterConfig
+	var got2, got3 *system.FilterConfig
 	replDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(replDeadline) {
 		got2, _ = node2.store.GetFilter(ctx, filterID)
@@ -242,7 +242,7 @@ func TestThreeNodeCluster(t *testing.T) {
 
 	// Write on a follower — should be forwarded to the leader.
 	followerFilterID := uuid.Must(uuid.NewV7())
-	if err := node2.store.PutFilter(ctx, config.FilterConfig{
+	if err := node2.store.PutFilter(ctx, system.FilterConfig{
 		ID:         followerFilterID,
 		Name:       "follower-filter",
 		Expression: "*",
@@ -251,7 +251,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	}
 
 	// Verify the filter written via follower is readable on the leader.
-	var leaderGot *config.FilterConfig
+	var leaderGot *system.FilterConfig
 	fwdDeadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(fwdDeadline) {
 		leaderGot, _ = node1.store.GetFilter(ctx, followerFilterID)

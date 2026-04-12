@@ -4,14 +4,14 @@ import (
 	"context"
 	"fmt"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
 
 // resolveFilterExpr looks up a filter ID in the config and returns its expression.
 // Returns empty string if the filter ID is nil or not found (vault receives nothing).
-func resolveFilterExpr(cfg *config.Config, filterID uuid.UUID) string {
+func resolveFilterExpr(cfg *system.Config, filterID uuid.UUID) string {
 	if filterID == uuid.Nil || cfg == nil {
 		return ""
 	}
@@ -23,7 +23,7 @@ func resolveFilterExpr(cfg *config.Config, filterID uuid.UUID) string {
 }
 
 // findFilter finds a FilterConfig by ID in a slice.
-func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfig {
+func findFilter(filters []system.FilterConfig, id uuid.UUID) *system.FilterConfig {
 	for i := range filters {
 		if filters[i].ID == id {
 			return &filters[i]
@@ -34,9 +34,9 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 
 // resolveVaultNodeID finds the node that owns the vault's first (active) tier.
 // Returns empty string if the vault has no tiers or the active tier is unassigned.
-func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
+func resolveVaultNodeID(cfg *system.Config, vaultID uuid.UUID) string {
 	for _, v := range cfg.Vaults {
-		tierIDs := config.VaultTierIDs(cfg.Tiers, v.ID)
+		tierIDs := system.VaultTierIDs(cfg.Tiers, v.ID)
 		if v.ID != vaultID || len(tierIDs) == 0 {
 			continue
 		}
@@ -75,7 +75,7 @@ func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
 // For each enabled route, resolves the filter expression and compiles a
 // CompiledFilter for each destination vault. If multiple routes target
 // the same vault, the last route's filter wins (AddOrUpdate replaces).
-func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
+func (o *Orchestrator) reloadFiltersFromRoutes(cfg *system.Config) error {
 	if cfg == nil {
 		return nil
 	}

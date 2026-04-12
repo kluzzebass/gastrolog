@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 
 	"github.com/google/uuid"
@@ -105,13 +105,13 @@ func (f *fakeIndexManager) IndexSizes(chunkID chunk.ChunkID) map[string]int64 {
 func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // testVaultCfg creates a VaultConfig + TierConfig pair for tests.
-// tierType is the tier type (e.g., config.TierTypeMemory or "test").
-func testVaultCfg(vaultID uuid.UUID, tierType config.TierType) (config.VaultConfig, config.TierConfig) {
+// tierType is the tier type (e.g., system.TierTypeMemory or "test").
+func testVaultCfg(vaultID uuid.UUID, tierType system.TierType) (system.VaultConfig, system.TierConfig) {
 	tierID := uuid.Must(uuid.NewV7())
-	return config.VaultConfig{
+	return system.VaultConfig{
 			ID:      vaultID,
 			Enabled: true,
-		}, config.TierConfig{
+		}, system.TierConfig{
 			ID:      tierID,
 			Name:    "tier-" + vaultID.String()[:8],
 			Type:    tierType,
@@ -171,12 +171,12 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{{ID: vaultID, Enabled: true}},
-		Tiers: []config.TierConfig{{
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
+		Tiers: []system.TierConfig{{
 			ID:         tierID,
 			Name:       "remote-only",
-			Type:       config.TierTypeMemory,
+			Type:       system.TierTypeMemory,
 			VaultID:    vaultID,
 			Placements: syntheticPlacements("node-2"), // NOT node-1
 		}},
@@ -211,12 +211,12 @@ func TestApplyConfigVaults(t *testing.T) {
 
 	vault1ID := uuid.Must(uuid.NewV7())
 	vault2ID := uuid.Must(uuid.NewV7())
-	vc1, tc1 := testVaultCfg(vault1ID, config.TierTypeMemory)
-	vc2, tc2 := testVaultCfg(vault2ID, config.TierTypeMemory)
+	vc1, tc1 := testVaultCfg(vault1ID, system.TierTypeMemory)
+	vc2, tc2 := testVaultCfg(vault2ID, system.TierTypeMemory)
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc1, vc2},
-		Tiers:  []config.TierConfig{tc1, tc2},
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc1, vc2},
+		Tiers:  []system.TierConfig{tc1, tc2},
 	}
 
 	err := orch.ApplyConfig(cfg, factories)
@@ -253,8 +253,8 @@ func TestApplyConfigIngesters(t *testing.T) {
 
 	recv1ID := uuid.Must(uuid.NewV7())
 	recv2ID := uuid.Must(uuid.NewV7())
-	cfg := &config.Config{
-		Ingesters: []config.IngesterConfig{
+	cfg := &system.Config{
+		Ingesters: []system.IngesterConfig{
 			{ID: recv1ID, Type: "test", Enabled: true},
 			{ID: recv2ID, Type: "test", Enabled: true},
 		},
@@ -274,10 +274,10 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
-	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc},
-		Tiers:  []config.TierConfig{tc},
+	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc},
+		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
@@ -297,7 +297,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
-	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
+	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -307,9 +307,9 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 		IndexManagers: map[string]index.ManagerFactory{}, // missing "memory"
 	}
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc},
-		Tiers:  []config.TierConfig{tc},
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc},
+		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
@@ -325,8 +325,8 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 func TestApplyConfigUnknownIngesterType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
-	cfg := &config.Config{
-		Ingesters: []config.IngesterConfig{
+	cfg := &system.Config{
+		Ingesters: []system.IngesterConfig{
 			{ID: uuid.Must(uuid.NewV7()), Enabled: true},
 		},
 	}
@@ -356,11 +356,11 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 	}
 
 	dupID := uuid.Must(uuid.NewV7())
-	vc1, tc1 := testVaultCfg(dupID, config.TierTypeMemory)
+	vc1, tc1 := testVaultCfg(dupID, system.TierTypeMemory)
 	vc2 := vc1 // duplicate ID, same tier
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc1, vc2},
-		Tiers:  []config.TierConfig{tc1},
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc1, vc2},
+		Tiers:  []system.TierConfig{tc1},
 	}
 
 	err := orch.ApplyConfig(cfg, factories)
@@ -381,8 +381,8 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 	}
 
 	dupIngID := uuid.Must(uuid.NewV7())
-	cfg := &config.Config{
-		Ingesters: []config.IngesterConfig{
+	cfg := &system.Config{
+		Ingesters: []system.IngesterConfig{
 			{ID: dupIngID, Enabled: true},
 			{ID: dupIngID, Enabled: true}, // duplicate
 		},
@@ -398,7 +398,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
-	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
+	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -412,9 +412,9 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 		},
 	}
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc},
-		Tiers:  []config.TierConfig{tc},
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc},
+		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -431,7 +431,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
 	vaultID := uuid.Must(uuid.NewV7())
-	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
+	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
 			"memory": func(params map[string]string, _ *slog.Logger) (chunk.ChunkManager, error) {
@@ -445,9 +445,9 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 		},
 	}
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc},
-		Tiers:  []config.TierConfig{tc},
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc},
+		Tiers:  []system.TierConfig{tc},
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
@@ -471,8 +471,8 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 		},
 	}
 
-	cfg := &config.Config{
-		Ingesters: []config.IngesterConfig{
+	cfg := &system.Config{
+		Ingesters: []system.IngesterConfig{
 			{ID: uuid.Must(uuid.NewV7()), Enabled: true},
 		},
 	}
@@ -496,8 +496,8 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 		},
 	}
 
-	cfg := &config.Config{
-		Ingesters: []config.IngesterConfig{
+	cfg := &system.Config{
+		Ingesters: []system.IngesterConfig{
 			{ID: uuid.Must(uuid.NewV7()), Type: "test", Enabled: true, Params: map[string]string{
 				"host": "localhost",
 				"port": "514",
@@ -543,15 +543,15 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 	tierID := uuid.Must(uuid.NewV7())
 	storageID := uuid.Must(uuid.NewV7())
 
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: vaultID, Enabled: true},
 		},
-		Tiers: []config.TierConfig{
-			{ID: tierID, Name: "local", Type: config.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
+		Tiers: []system.TierConfig{
+			{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
 		},
-		NodeStorageConfigs: []config.NodeStorageConfig{
-			{NodeID: "node-1", FileStorages: []config.FileStorage{
+		NodeStorageConfigs: []system.NodeStorageConfig{
+			{NodeID: "node-1", FileStorages: []system.FileStorage{
 				{ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks"},
 			}},
 		},
@@ -593,10 +593,10 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 	}
 
 	vaultID := uuid.Must(uuid.NewV7())
-	vc, tc := testVaultCfg(vaultID, config.TierTypeMemory)
-	cfg := &config.Config{
-		Vaults: []config.VaultConfig{vc},
-		Tiers:  []config.TierConfig{tc},
+	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
+	cfg := &system.Config{
+		Vaults: []system.VaultConfig{vc},
+		Tiers:  []system.TierConfig{tc},
 	}
 
 	err := orch.ApplyConfig(cfg, factories)

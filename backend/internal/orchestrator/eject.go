@@ -5,7 +5,7 @@ import (
 	"errors"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/querylang"
 
 	"github.com/google/uuid"
@@ -83,7 +83,7 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
 
 // resolveEjectRoutes compiles each route's filter and resolves destinations.
 // Returns nil if resolution fails (errors are logged).
-func (r *retentionRunner) resolveEjectRoutes(cfg *config.Config, id chunk.ChunkID, routeIDs []uuid.UUID) []resolvedRoute {
+func (r *retentionRunner) resolveEjectRoutes(cfg *system.Config, id chunk.ChunkID, routeIDs []uuid.UUID) []resolvedRoute {
 	var routes []resolvedRoute
 	for _, routeID := range routeIDs {
 		route := findRoute(cfg.Routes, routeID)
@@ -120,7 +120,7 @@ func (r *retentionRunner) resolveEjectRoutes(cfg *config.Config, id chunk.ChunkI
 
 // resolveOneRoute compiles a single route's filter and resolves its destinations.
 // Returns nil on compile error (logged).
-func (r *retentionRunner) resolveOneRoute(cfg *config.Config, routeID uuid.UUID, route *config.RouteConfig) *resolvedRoute {
+func (r *retentionRunner) resolveOneRoute(cfg *system.Config, routeID uuid.UUID, route *system.RouteConfig) *resolvedRoute {
 	var cf *CompiledFilter
 	if route.FilterID != nil {
 		filterExpr := resolveFilterExpr(cfg, *route.FilterID)
@@ -240,7 +240,7 @@ func matchesEjectFilter(cf *CompiledFilter, attrs chunk.Attributes) bool {
 }
 
 // findRoute finds a RouteConfig by ID in a slice.
-func findRoute(routes []config.RouteConfig, id uuid.UUID) *config.RouteConfig {
+func findRoute(routes []system.RouteConfig, id uuid.UUID) *system.RouteConfig {
 	for i := range routes {
 		if routes[i].ID == id {
 			return &routes[i]

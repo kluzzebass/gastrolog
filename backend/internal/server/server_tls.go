@@ -14,9 +14,9 @@ import (
 	"gastrolog/internal/auth"
 )
 
-// reconfigureTLS starts/stops HTTPS listener based on config. Safe to call from any goroutine.
+// reconfigureTLS starts/stops HTTPS listener based on system. Safe to call from any goroutine.
 func (s *Server) reconfigureTLS() {
-	ctx, cancel := context.WithTimeout(context.Background(), configLoadTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), systemLoadTimeout)
 	defer cancel()
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *Server) reconfigureTLS() {
 	tlsConfig := s.certManager.TLSConfig()
 	// Harden server-side TLS: require TLS 1.2+ and prefer modern curves.
 	// CertManager.TLSConfig() is generic (also used for client certs);
-	// server hardening is applied here, not in the shared config.
+	// server hardening is applied here, not in the shared system.
 	tlsConfig.MinVersion = tls.VersionTLS12
 	tlsConfig.CurvePreferences = []tls.CurveID{tls.X25519, tls.CurveP256}
 	tlsLn := tls.NewListener(ln, tlsConfig)
