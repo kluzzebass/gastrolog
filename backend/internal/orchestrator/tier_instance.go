@@ -35,6 +35,10 @@ type TierInstance struct {
 	// Nil when no Raft group exists (single-node / memory mode — always leader).
 	IsRaftLeader func() bool
 
+	// RaftLeaderNodeID returns the node ID of the current tier Raft leader.
+	// Returns "" if no leader is elected or no Raft group exists.
+	RaftLeaderNodeID func() string
+
 	// ApplyRaftRetentionPending marks a chunk as retention-pending in the tier Raft.
 	ApplyRaftRetentionPending func(id chunk.ChunkID) error
 
@@ -93,6 +97,7 @@ type TierInstance struct {
 func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
+	t.RaftLeaderNodeID = cb.leaderNodeID
 	t.ApplyRaftDelete = cb.applyDelete
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending

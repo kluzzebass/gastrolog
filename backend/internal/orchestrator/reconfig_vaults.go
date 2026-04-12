@@ -922,6 +922,7 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []config.RotationPolicy
 type tierRaftCallbacks struct {
 	hasLeader              func() bool
 	isLeader               func() bool
+	leaderNodeID           func() string
 	isFSMReady             func() bool
 	applyDelete            func(id chunk.ChunkID) error
 	applyRetPending        func(id chunk.ChunkID) error
@@ -1030,8 +1031,12 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 // thresholds.
 func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
 	return tierRaftCallbacks{
-		hasLeader:  func() bool { return r.Leader() != "" },
-		isLeader:   func() bool { return r.State() == hraft.Leader },
+		hasLeader: func() bool { return r.Leader() != "" },
+		isLeader:  func() bool { return r.State() == hraft.Leader },
+		leaderNodeID: func() string {
+			_, id := r.LeaderWithID()
+			return string(id)
+		},
 		isFSMReady: func() bool { return fsm != nil && fsm.Ready() },
 		applyDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalDeleteChunk(id))
