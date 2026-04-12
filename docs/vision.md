@@ -169,41 +169,39 @@ The vault doesn't care where its data lives. It hands records to the first tier 
 
 At configuration time, the system validates that at least one node can serve each tier's storage class requirement. At runtime, if a tier's nodes become unavailable, the upstream tier holds its data (see durability handoff below) — effectively failing up until the operator resolves the issue.
 
-### Per-tier primary nodes
+### Per-tier leader nodes
 
-Each tier within a vault has an **elected primary node**. The primary is the single authority for that tier — it receives all writes, decides chunk boundaries, and handles rotation. Secondary nodes for the same tier receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
-
-This model is similar to CockroachDB's range leaders: each range has a leader that handles writes, and leadership can move between nodes. Here, each tier-within-a-vault has a leader.
+Each tier within a vault has an **elected leader node** (via tier Raft groups). The leader is the single authority for that tier — it receives all writes, decides chunk boundaries, and handles rotation. Follower nodes for the same tier receive replicated records with chunk assignment metadata, producing identical chunks (same boundaries, same content, same IDs). No independent chunking decisions on replicas.
 
 ### Replication
 
-The primary for each tier replicates to its secondaries. How replication works depends on the tier type:
+The leader for each tier replicates to its followers. How replication works depends on the tier type:
 
-- **Memory tiers**: the primary mirrors writes to secondary nodes' memory buffers. Secondaries receive records tagged with chunk assignment. If the primary dies, a secondary is promoted — it has identical data and can resume streaming to the next tier.
-- **Local tiers**: the primary replicates sealed chunks (post-compression, post-indexing) to secondaries. A sealed chunk is stable and self-contained, so replication is a file copy.
+- **Memory tiers**: the leader mirrors writes to follower nodes' memory buffers. Followers receive records tagged with chunk assignment. If the leader dies, a follower is promoted — it has identical data and can resume streaming to the next tier.
+- **Local tiers**: the leader replicates sealed chunks (post-compression, post-indexing) to followers. A sealed chunk is stable and self-contained, so replication is a file copy.
 - **Cloud tiers**: no cluster-level replication of sealed chunks needed — the cloud provider handles AZ redundancy. Only chunk metadata needs to be shared across the cluster so every node knows what exists. The active chunk (on local disk) is replicated the same way as a local tier.
 
 ### The golden thread
 
-Tier transitions are **primary-to-primary**. When a tier's primary rotates sealed chunks, it streams records to the next tier's primary. There is exactly one authoritative path from first insert through every tier — the golden thread:
+Tier transitions are **leader-to-leader**. When a tier's leader rotates sealed chunks, it streams records to the next tier's leader. There is exactly one authoritative path from first insert through every tier — the golden thread:
 
 ```mermaid
 flowchart TB
     I([fa:fa-plug Ingester]) --> M
 
-    subgraph node1mem [Node-1: memory tier primary]
+    subgraph node1mem [Node-1: memory tier leader]
         M[fa:fa-bolt Memory<br/>active + sealed chunks]
     end
 
-    subgraph node2mem [Node-2: memory tier secondary]
+    subgraph node2mem [Node-2: memory tier follower]
         MR[fa:fa-bolt Memory<br/>replica]
     end
 
-    subgraph node3local [Node-3: local tier primary]
+    subgraph node3local [Node-3: local tier leader]
         L[fa:fa-hard-drive Local tier<br/>active chunk] -->|seal| LS[Sealed chunks]
     end
 
-    subgraph node1local [Node-1: local tier secondary]
+    subgraph node1local [Node-1: local tier follower]
         LR[fa:fa-hard-drive Local tier<br/>replica]
     end
 
@@ -219,36 +217,31 @@ flowchart TB
     style LR fill:#a0785033,color:#a07850,stroke:#a07850,stroke-dasharray:5
 ```
 
-No duplicate uploads. No coordination questions about who does what. The primary for each tier is the single decision-maker. If a primary dies, its secondary is promoted and the golden thread reconnects — the new primary picks up where the old one left off, resuming the stream to the next tier's primary.
+No duplicate uploads. No coordination questions about who does what. The leader for each tier is the single decision-maker. If a leader dies, a follower is promoted and the golden thread reconnects — the new leader picks up where the old one left off, resuming the stream to the next tier's leader.
 
 ### Durability handoff
 
 A tier must not drop a chunk until the next tier has **received and durably replicated** the records it contained. Without this guarantee, a poorly timed failure loses data:
 
 1. Priority 0 drops a sealed chunk ("priority 1 received it")
-2. Priority 1 primary has the records but hasn't replicated to secondaries yet
-3. Priority 1 primary dies → records lost
+2. Priority 1 leader has the records but hasn't replicated to followers yet
+3. Priority 1 leader dies → records lost
 
 The handoff sequence at each tier boundary:
 
-1. Source tier primary streams records from a sealed chunk to the destination tier primary
-2. Destination tier primary appends records to its active chunk
-3. If the destination tier has replication configured, the primary waits for replication ack from its secondaries
-4. Destination tier primary sends a **durable ack** back to the source tier primary
+1. Source tier leader streams records from a sealed chunk to the destination tier leader
+2. Destination tier leader appends records to its active chunk
+3. If the destination tier has replication configured, the leader waits for replication ack from its followers
+4. Destination tier leader sends a **durable ack** back to the source tier leader
 5. Only then does the source tier mark the chunk as eligible for removal by its retention policy
 
-The same pattern applies at every tier boundary. A local-disk tier doesn't delete a chunk until the cloud tier confirms the upload completed. The ack always means "durably stored according to this tier's replication requirements," not just "received by the primary."
+The same pattern applies at every tier boundary. A local-disk tier doesn't delete a chunk until the cloud tier confirms the upload completed. The ack always means "durably stored according to this tier's replication requirements," not just "received by the leader."
 
 This is effectively a two-phase commit at each tier boundary — the cost is one extra round-trip per chunk transition, which is negligible given that chunks seal on the order of minutes to hours.
 
-### Open design question: chunk metadata in Raft
+### Resolved: chunk metadata in Raft
 
-Today, Raft stores only configuration state (vaults, routes, filters, users, policies) — a few KB. The per-tier primary model requires cluster-wide knowledge of chunk metadata: which chunks exist, which tier they're in, which nodes hold them. At scale (10 vaults × 1,000 chunks × ~200 bytes per record), this could grow to megabytes of Raft state.
-
-Options to investigate:
-- **Raft for chunk metadata**: simple, consistent, but adds write amplification and snapshot size. May be acceptable if chunk counts stay in the low thousands.
-- **Separate metadata store**: chunk metadata lives outside Raft (e.g. in a lightweight per-node database), synchronized via gossip or a dedicated metadata protocol. More complex, but decouples data plane metadata from config plane state.
-- **Hybrid**: Raft tracks tier primaries and vault-level summaries; chunk-level metadata is exchanged directly between tier primaries and their secondaries via the replication stream itself.
+Each tier has its own Raft group (tier Raft). The config Raft stores cluster-wide configuration; per-tier Raft groups store the chunk manifest for that tier — which chunks exist, their sealed/deleted state, and replication metadata. This is the hybrid approach: config-plane state in the config Raft, data-plane metadata in per-tier Raft groups. Leaders and followers for each tier are determined by the tier Raft group's election.
 
 ### Tier transitions
 
@@ -299,13 +292,13 @@ Records can also move between vaults based on policies (e.g. eject old records, 
 
 ```mermaid
 flowchart LR
-    subgraph node1mem [Node-1: memory tier primary]
+    subgraph node1mem [Node-1: memory tier leader]
         I([fa:fa-plug Ingester]) --> MT[Active + sealed chunks<br/>seals every ~5 min]
     end
 
     MT -->|stream from sealed chunks| LT
 
-    subgraph node3local [Node-3: local tier primary]
+    subgraph node3local [Node-3: local tier leader]
         LT[Active chunk<br/>seals every ~1h or ~500MB] -->|seal| LTS[Sealed chunks<br/>compressed · indexed]
     end
 
@@ -321,7 +314,7 @@ flowchart LR
     style CT fill:#6a5040,color:#f0e8e0
 ```
 
-Each tier is a full chunk manager with its own active chunk and sealed chunks. When a sealed chunk in one tier reaches its transition threshold, its records stream to the next tier's primary. Each tier just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
+Each tier is a full chunk manager with its own active chunk and sealed chunks. When a sealed chunk in one tier reaches its transition threshold, its records stream to the next tier's leader. Each tier just does what it already knows how to do: accept records, chunk them, seal them. No compaction, no merge logic.
 
 **Every tier in the chain is a full chunk manager** — including cloud tiers. Cloud tiers receive a record stream, buffer into an active chunk on local disk (matching the active chunk storage class requirement), and seal into objects optimized for their medium (fewer, larger objects to minimize per-request overhead and listing costs). The only exception is the archival transition (e.g. S3 Standard → Glacier): a storage class change on the same object, not a re-chunking.
 
@@ -523,7 +516,7 @@ A snapshot of where GastroLog is today against each pillar of the vision. This s
 | CloudService model | Not started | Cluster-wide cloud service definitions |
 | Three tier types (memory/local/cloud) | Not started | Tiers reference storage classes and cloud services |
 | Vault as logical container | Not started | Vault type is still coupled to a single backend |
-| Per-tier primary election | Not started | Vaults have a single owner node |
+| Per-tier leader election | Not started | Vaults have a single owner node |
 | Inter-tier record streaming | Not started | No record-level streaming between tiers |
 | Durability handoff | Not started | No durable ack protocol between tiers |
 | Budget-driven retention | Not started | Retention is time/count/size-based only |
