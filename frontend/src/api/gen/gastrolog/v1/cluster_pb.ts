@@ -800,8 +800,9 @@ export class IngesterNodeStats extends Message<IngesterNodeStats> {
 
 /**
  * ForwardRecordsRequest ships a batch of records to the node that owns
- * the destination vault. Sent by the ingesting node when a route targets
- * a remote vault.
+ * the destination vault. Sent by retention eject to route records to a
+ * remote vault. Records are appended to the destination vault's active
+ * chunk.
  *
  * @generated from message gastrolog.v1.ForwardRecordsRequest
  */
@@ -816,20 +817,6 @@ export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
    */
   records: ExportRecord[] = [];
 
-  /**
-   * optional: target specific tier for inter-tier transition; empty = active tier
-   *
-   * @generated from field: string tier_id = 3;
-   */
-  tierId = "";
-
-  /**
-   * optional: primary's active chunk ID for replica ID synchronization
-   *
-   * @generated from field: string chunk_id = 4;
-   */
-  chunkId = "";
-
   constructor(data?: PartialMessage<ForwardRecordsRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -840,8 +827,6 @@ export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
-    { no: 3, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRecordsRequest {
@@ -895,176 +880,6 @@ export class ForwardRecordsResponse extends Message<ForwardRecordsResponse> {
 
   static equals(a: ForwardRecordsResponse | PlainMessage<ForwardRecordsResponse> | undefined, b: ForwardRecordsResponse | PlainMessage<ForwardRecordsResponse> | undefined): boolean {
     return proto3.util.equals(ForwardRecordsResponse, a, b);
-  }
-}
-
-/**
- * ForwardSealTierRequest commands a follower to seal its active chunk
- * at the same boundary as the leader. Used for seal synchronization
- * during record-level replication.
- *
- * @generated from message gastrolog.v1.ForwardSealTierRequest
- */
-export class ForwardSealTierRequest extends Message<ForwardSealTierRequest> {
-  /**
-   * @generated from field: string vault_id = 1;
-   */
-  vaultId = "";
-
-  /**
-   * @generated from field: string tier_id = 2;
-   */
-  tierId = "";
-
-  /**
-   * expected active chunk ID (for validation)
-   *
-   * @generated from field: string chunk_id = 3;
-   */
-  chunkId = "";
-
-  constructor(data?: PartialMessage<ForwardSealTierRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardSealTierRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealTierRequest {
-    return new ForwardSealTierRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealTierRequest {
-    return new ForwardSealTierRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealTierRequest {
-    return new ForwardSealTierRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardSealTierRequest | PlainMessage<ForwardSealTierRequest> | undefined, b: ForwardSealTierRequest | PlainMessage<ForwardSealTierRequest> | undefined): boolean {
-    return proto3.util.equals(ForwardSealTierRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.ForwardSealTierResponse
- */
-export class ForwardSealTierResponse extends Message<ForwardSealTierResponse> {
-  constructor(data?: PartialMessage<ForwardSealTierResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardSealTierResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealTierResponse {
-    return new ForwardSealTierResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardSealTierResponse {
-    return new ForwardSealTierResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardSealTierResponse {
-    return new ForwardSealTierResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardSealTierResponse | PlainMessage<ForwardSealTierResponse> | undefined, b: ForwardSealTierResponse | PlainMessage<ForwardSealTierResponse> | undefined): boolean {
-    return proto3.util.equals(ForwardSealTierResponse, a, b);
-  }
-}
-
-/**
- * ForwardDeleteChunkRequest commands a follower to delete a specific
- * sealed chunk from a tier. Sent by the leader after its retention
- * sweep expires the chunk, so followers don't hold orphaned replicas.
- *
- * @generated from message gastrolog.v1.ForwardDeleteChunkRequest
- */
-export class ForwardDeleteChunkRequest extends Message<ForwardDeleteChunkRequest> {
-  /**
-   * @generated from field: string vault_id = 1;
-   */
-  vaultId = "";
-
-  /**
-   * @generated from field: string tier_id = 2;
-   */
-  tierId = "";
-
-  /**
-   * @generated from field: string chunk_id = 3;
-   */
-  chunkId = "";
-
-  constructor(data?: PartialMessage<ForwardDeleteChunkRequest>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardDeleteChunkRequest";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardDeleteChunkRequest {
-    return new ForwardDeleteChunkRequest().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardDeleteChunkRequest {
-    return new ForwardDeleteChunkRequest().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardDeleteChunkRequest {
-    return new ForwardDeleteChunkRequest().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardDeleteChunkRequest | PlainMessage<ForwardDeleteChunkRequest> | undefined, b: ForwardDeleteChunkRequest | PlainMessage<ForwardDeleteChunkRequest> | undefined): boolean {
-    return proto3.util.equals(ForwardDeleteChunkRequest, a, b);
-  }
-}
-
-/**
- * @generated from message gastrolog.v1.ForwardDeleteChunkResponse
- */
-export class ForwardDeleteChunkResponse extends Message<ForwardDeleteChunkResponse> {
-  constructor(data?: PartialMessage<ForwardDeleteChunkResponse>) {
-    super();
-    proto3.util.initPartial(data, this);
-  }
-
-  static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.ForwardDeleteChunkResponse";
-  static readonly fields: FieldList = proto3.util.newFieldList(() => [
-  ]);
-
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardDeleteChunkResponse {
-    return new ForwardDeleteChunkResponse().fromBinary(bytes, options);
-  }
-
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): ForwardDeleteChunkResponse {
-    return new ForwardDeleteChunkResponse().fromJson(jsonValue, options);
-  }
-
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): ForwardDeleteChunkResponse {
-    return new ForwardDeleteChunkResponse().fromJsonString(jsonString, options);
-  }
-
-  static equals(a: ForwardDeleteChunkResponse | PlainMessage<ForwardDeleteChunkResponse> | undefined, b: ForwardDeleteChunkResponse | PlainMessage<ForwardDeleteChunkResponse> | undefined): boolean {
-    return proto3.util.equals(ForwardDeleteChunkResponse, a, b);
   }
 }
 
@@ -2763,18 +2578,11 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
   record?: ExportRecord;
 
   /**
-   * optional: target specific tier (sealed-chunk replication)
+   * optional: route to a specific tier's active chunk (StreamToTier)
    *
    * @generated from field: string tier_id = 3;
    */
   tierId = "";
-
-  /**
-   * optional: preserve primary's chunk ID on import
-   *
-   * @generated from field: string chunk_id = 4;
-   */
-  chunkId = "";
 
   constructor(data?: PartialMessage<ImportRecordMessage>) {
     super();
@@ -2787,7 +2595,6 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
     { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "record", kind: "message", T: ExportRecord },
     { no: 3, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordMessage {

@@ -37,6 +37,9 @@ func (s *VaultServer) ListChunks(
 		return nil, mapVaultError(err)
 	}
 	for _, meta := range metas {
+		if req.Msg.ActiveOnly && meta.Sealed {
+			continue // lightweight poll: skip sealed chunks
+		}
 		pb := TieredChunkMetaToProto(meta)
 		if pending[meta.ID] {
 			pb.RetentionPending = true
@@ -44,8 +47,11 @@ func (s *VaultServer) ListChunks(
 		allChunks = append(allChunks, pb)
 	}
 
-	// Collect remote chunks from all nodes hosting the vault's tiers.
-	if s.remoteChunkLister != nil {
+	// Full mode: collect remote chunks from all nodes hosting the vault's
+	// tiers. Skipped in active_only mode — the caller only needs the
+	// connected node's active chunk stats for the 5-second refresh; the
+	// full cluster-wide picture comes through the stream-driven refetch.
+	if !req.Msg.ActiveOnly && s.remoteChunkLister != nil {
 		remoteNodes := s.remoteTierNodes(ctx, vaultID)
 		for _, nodeID := range remoteNodes {
 			remote, err := s.remoteChunkLister.ListChunks(ctx, nodeID, &apiv1.ForwardListChunksRequest{
@@ -354,4 +360,42 @@ func validateChunk(orch *orchestrator.Orchestrator, vaultID uuid.UUID, meta chun
 	}
 
 	return cv
+}
+
+// WatchChunks opens a server-streaming subscription that pushes a
+// notification every time chunk metadata changes on this node. The
+// client uses each notification as a signal to refetch via ListChunks —
+// no chunk data is carried in the stream itself. Same pattern as
+// WatchConfig. See gastrolog-1jijm.
+//
+// Routing: RouteLocal — the client connects to each node independently.
+// React Query's cache invalidation covers all vaults on the connected
+// node when any chunk event fires.
+func (s *VaultServer) WatchChunks(
+	ctx context.Context,
+	_ *connect.Request[apiv1.WatchChunksRequest],
+	stream *connect.ServerStream[apiv1.WatchChunksResponse],
+) error {
+	signal := s.orch.ChunkSignal()
+
+	// Send one initial message so the client knows the stream is alive.
+	if err := stream.Send(&apiv1.WatchChunksResponse{
+		Version: signal.Version(),
+	}); err != nil {
+		return err
+	}
+
+	for {
+		ch := signal.C()
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ch:
+			if err := stream.Send(&apiv1.WatchChunksResponse{
+				Version: signal.Version(),
+			}); err != nil {
+				return err
+			}
+		}
+	}
 }

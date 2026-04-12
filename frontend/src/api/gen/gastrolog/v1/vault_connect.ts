@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse } from "./vault_pb.js";
+import { AnalyzeChunkRequest, AnalyzeChunkResponse, ArchiveChunkRequest, ArchiveChunkResponse, ExportVaultRequest, ExportVaultResponse, GetChunkRequest, GetChunkResponse, GetIndexesRequest, GetIndexesResponse, GetStatsRequest, GetStatsResponse, GetVaultRequest, GetVaultResponse, ImportRecordsRequest, ImportRecordsResponse, ListChunksRequest, ListChunksResponse, ListVaultsRequest, ListVaultsResponse, MergeVaultsRequest, MergeVaultsResponse, MigrateVaultRequest, MigrateVaultResponse, ReindexVaultRequest, ReindexVaultResponse, RestoreChunkRequest, RestoreChunkResponse, SealVaultRequest, SealVaultResponse, ValidateVaultRequest, ValidateVaultResponse, WatchChunksRequest, WatchChunksResponse } from "./vault_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -194,6 +194,22 @@ export const VaultService = {
       I: RestoreChunkRequest,
       O: RestoreChunkResponse,
       kind: MethodKind.Unary,
+    },
+    /**
+     * WatchChunks opens a server-streaming subscription that pushes a
+     * notification every time chunk metadata changes on this node (seal,
+     * delete, create, compress, cloud upload). The client uses the
+     * notification as a signal to refetch via ListChunks — no chunk data
+     * is carried in the stream itself. Same pattern as WatchConfig.
+     * See gastrolog-1jijm.
+     *
+     * @generated from rpc gastrolog.v1.VaultService.WatchChunks
+     */
+    watchChunks: {
+      name: "WatchChunks",
+      I: WatchChunksRequest,
+      O: WatchChunksResponse,
+      kind: MethodKind.ServerStreaming,
     },
   }
 } as const;

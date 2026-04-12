@@ -28,8 +28,25 @@ export function useVault(id: string) {
   });
 }
 
+/**
+ * useChunks returns the full chunk list for a vault. Discrete metadata
+ * changes (seal, delete, compress) arrive instantly via the WatchChunks
+ * stream which invalidates the ["chunks"] cache. Active chunk stats
+ * (record count, bytes) are kept fresh by a lightweight 5-second poll
+ * that fetches only unsealed chunks from the local node (no fan-out)
+ * and merges them into the full cache by ID replacement.
+ *
+ * Net effect: instant updates for operational events, 5-second lag for
+ * gradual active-chunk growth, and dramatically less network traffic
+ * than polling the full fan-out list every 5 seconds.
+ *
+ * See gastrolog-1jijm.
+ */
 export function useChunks(vaultId: string) {
-  return useQuery({
+  const qc = useQueryClient();
+
+  // Full chunk list: stream-driven invalidation, no polling.
+  const query = useQuery({
     queryKey: ["chunks", vaultId],
     queryFn: async () => {
       const response = await vaultClient.listChunks({ vault: vaultId });
@@ -37,8 +54,53 @@ export function useChunks(vaultId: string) {
     },
     structuralSharing: protoArraySharing(ChunkMeta.equals),
     enabled: !!vaultId,
-    refetchInterval: 5_000, // detail data — only active when vault card is expanded
   });
+
+  // Lightweight active-chunk poll: local-only, no fan-out. Merges
+  // updated active chunks into the full cache by ID replacement so
+  // the component sees a single unified array.
+  useQuery({
+    queryKey: ["active-chunks", vaultId],
+    queryFn: async () => {
+      const resp = await vaultClient.listChunks({
+        vault: vaultId,
+        activeOnly: true,
+      });
+      qc.setQueryData(
+        ["chunks", vaultId],
+        (old: ChunkMeta[] | undefined) => {
+          if (!old) return resp.chunks;
+          const freshById = new Map(resp.chunks.map((c) => [c.id, c]));
+          // Merge: for chunks in both old and poll, update only the
+          // fields the active-only poll is authoritative for (growing
+          // stats). Preserve everything else (replica_count, compressed,
+          // cloud_backed, etc.) from the full-refetch cache entry,
+          // since those require the fan-out/dedup path to be accurate.
+          const merged = old.map((c) => {
+            const fresh = freshById.get(c.id);
+            if (!fresh) return c;
+            freshById.delete(c.id);
+            const patched = c.clone();
+            patched.recordCount = fresh.recordCount;
+            patched.bytes = fresh.bytes;
+            patched.diskBytes = fresh.diskBytes;
+            return patched;
+          });
+          // Append any active chunks not in the old list (new chunk
+          // created since last full refetch).
+          for (const c of freshById.values()) {
+            merged.push(c);
+          }
+          return merged;
+        },
+      );
+      return resp.chunks;
+    },
+    enabled: !!vaultId,
+    refetchInterval: 5_000,
+  });
+
+  return query;
 }
 
 export function useIndexes(vaultId: string, chunkId: string) {

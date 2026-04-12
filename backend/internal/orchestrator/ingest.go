@@ -201,6 +201,8 @@ func (o *Orchestrator) postSealWork(vaultID uuid.UUID, cm chunk.ChunkManager, ch
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	o.schedulePostSeal(vaultID, cm, chunkID)
+	// Notify WatchChunks subscribers: the chunk's sealed flag has changed.
+	o.NotifyChunkChange()
 }
 
 // schedulePostSeal schedules the unified post-seal pipeline (compress → index → upload).
@@ -218,6 +220,8 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 			if err := processor.PostSealProcess(ctx, id); err != nil {
 				return err
 			}
+			// Notify: compression/indexing done, metadata changed again.
+			o.NotifyChunkChange()
 			// Schedule replication as a separate job — never blocks the
 			// post-seal scheduler slot.
 			o.scheduleReplication(vaultID, tierID, id, followerTargets)
@@ -238,6 +242,7 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 			if err := compressor.CompressChunk(id); err != nil {
 				return err
 			}
+			o.NotifyChunkChange()
 			o.scheduleReplication(vaultID, tierID, id, followerTargets)
 			return nil
 		}

@@ -18,6 +18,7 @@ import (
 	"gastrolog/internal/config"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
+	"gastrolog/internal/notify"
 
 	"github.com/google/uuid"
 )
@@ -260,6 +261,12 @@ type Orchestrator struct {
 	// Alert collector for runtime system alerts.
 	alerts AlertCollector
 
+	// chunkSignal fires every time chunk metadata changes on this node
+	// (seal, delete, create, compress, cloud upload). The WatchChunks
+	// streaming RPC watches this signal to push notifications to
+	// connected clients. See gastrolog-1jijm.
+	chunkSignal *notify.Signal
+
 	// Suspect tracker for cloud chunks that returned 404.
 	suspects *suspectTracker
 
@@ -289,6 +296,19 @@ type Orchestrator struct {
 // wired phase), preserving the pre-gastrolog-1e5ke behaviour.
 func (o *Orchestrator) shuttingDown() bool {
 	return o.phase != nil && o.phase.ShuttingDown()
+}
+
+// ChunkSignal returns the signal that fires on every chunk metadata change.
+// The WatchChunks streaming handler uses this to push notifications.
+func (o *Orchestrator) ChunkSignal() *notify.Signal {
+	return o.chunkSignal
+}
+
+// NotifyChunkChange fires the chunk-change signal so that WatchChunks
+// subscribers know to refetch. Called from seal, delete, create,
+// compress, and cloud upload code paths. Safe for concurrent use.
+func (o *Orchestrator) NotifyChunkChange() {
+	o.chunkSignal.Notify()
 }
 
 // tierLabel returns the operator-friendly name for a tier as configured,
@@ -400,6 +420,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingestSeqs:      make(map[string]uint32),
 		alerts:          cfg.Alerts,
 		suspects:        newSuspectTracker(),
+		chunkSignal:     notify.NewSignal(),
 		tierLeaders:     newTierLeaderManager(logger),
 		phase:           cfg.Phase,
 		now:             cfg.Now,

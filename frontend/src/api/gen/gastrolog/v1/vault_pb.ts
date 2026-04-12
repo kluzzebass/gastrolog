@@ -244,6 +244,17 @@ export class ListChunksRequest extends Message<ListChunksRequest> {
    */
   vault = "";
 
+  /**
+   * When true, return only unsealed (active) chunks from this node's
+   * local tiers — no cross-node fan-out. Used for lightweight 5-second
+   * polling of active-chunk stats (record count, bytes) while discrete
+   * events (seal, delete, compress) come through the WatchChunks stream.
+   * See gastrolog-1jijm.
+   *
+   * @generated from field: bool active_only = 2;
+   */
+  activeOnly = false;
+
   constructor(data?: PartialMessage<ListChunksRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -253,6 +264,7 @@ export class ListChunksRequest extends Message<ListChunksRequest> {
   static readonly typeName = "gastrolog.v1.ListChunksRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "active_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListChunksRequest {
@@ -2150,6 +2162,79 @@ export class RestoreChunkResponse extends Message<RestoreChunkResponse> {
 
   static equals(a: RestoreChunkResponse | PlainMessage<RestoreChunkResponse> | undefined, b: RestoreChunkResponse | PlainMessage<RestoreChunkResponse> | undefined): boolean {
     return proto3.util.equals(RestoreChunkResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchChunksRequest
+ */
+export class WatchChunksRequest extends Message<WatchChunksRequest> {
+  constructor(data?: PartialMessage<WatchChunksRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchChunksRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchChunksRequest {
+    return new WatchChunksRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchChunksRequest {
+    return new WatchChunksRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchChunksRequest {
+    return new WatchChunksRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchChunksRequest | PlainMessage<WatchChunksRequest> | undefined, b: WatchChunksRequest | PlainMessage<WatchChunksRequest> | undefined): boolean {
+    return proto3.util.equals(WatchChunksRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.WatchChunksResponse
+ */
+export class WatchChunksResponse extends Message<WatchChunksResponse> {
+  /**
+   * Monotonic event counter. Increments on every chunk metadata change
+   * (seal, delete, create, compress, cloud upload). Clients can compare
+   * against the last version they processed to skip stale notifications
+   * during reconnect bursts.
+   *
+   * @generated from field: uint64 version = 1;
+   */
+  version = protoInt64.zero;
+
+  constructor(data?: PartialMessage<WatchChunksResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.WatchChunksResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchChunksResponse {
+    return new WatchChunksResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchChunksResponse {
+    return new WatchChunksResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchChunksResponse {
+    return new WatchChunksResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: WatchChunksResponse | PlainMessage<WatchChunksResponse> | undefined, b: WatchChunksResponse | PlainMessage<WatchChunksResponse> | undefined): boolean {
+    return proto3.util.equals(WatchChunksResponse, a, b);
   }
 }
 

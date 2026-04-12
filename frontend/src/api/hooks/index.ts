@@ -43,6 +43,7 @@ export {
 } from "./useIngesters";
 export { useJob, useWatchJobs } from "./useJobs";
 export { useWatchConfig } from "./useWatchConfig";
+export { useWatchChunks } from "./useWatchChunks";
 export { useHealth } from "./useHealth";
 export { useSyntax } from "./useSyntax";
 export type { SyntaxKeywords } from "./useSyntax";

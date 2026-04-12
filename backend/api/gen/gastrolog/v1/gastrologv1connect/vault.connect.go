@@ -74,6 +74,9 @@ const (
 	// VaultServiceRestoreChunkProcedure is the fully-qualified name of the VaultService's RestoreChunk
 	// RPC.
 	VaultServiceRestoreChunkProcedure = "/gastrolog.v1.VaultService/RestoreChunk"
+	// VaultServiceWatchChunksProcedure is the fully-qualified name of the VaultService's WatchChunks
+	// RPC.
+	VaultServiceWatchChunksProcedure = "/gastrolog.v1.VaultService/WatchChunks"
 )
 
 // VaultServiceClient is a client for the gastrolog.v1.VaultService service.
@@ -115,6 +118,13 @@ type VaultServiceClient interface {
 	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
 	// async (RestoreObject). The chunk becomes readable once restore completes.
 	RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error)
+	// WatchChunks opens a server-streaming subscription that pushes a
+	// notification every time chunk metadata changes on this node (seal,
+	// delete, create, compress, cloud upload). The client uses the
+	// notification as a signal to refetch via ListChunks — no chunk data
+	// is carried in the stream itself. Same pattern as WatchConfig.
+	// See gastrolog-1jijm.
+	WatchChunks(context.Context, *connect.Request[v1.WatchChunksRequest]) (*connect.ServerStreamForClient[v1.WatchChunksResponse], error)
 }
 
 // NewVaultServiceClient constructs a client for the gastrolog.v1.VaultService service. By default,
@@ -224,6 +234,12 @@ func NewVaultServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(vaultServiceMethods.ByName("RestoreChunk")),
 			connect.WithClientOptions(opts...),
 		),
+		watchChunks: connect.NewClient[v1.WatchChunksRequest, v1.WatchChunksResponse](
+			httpClient,
+			baseURL+VaultServiceWatchChunksProcedure,
+			connect.WithSchema(vaultServiceMethods.ByName("WatchChunks")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -245,6 +261,7 @@ type vaultServiceClient struct {
 	sealVault     *connect.Client[v1.SealVaultRequest, v1.SealVaultResponse]
 	archiveChunk  *connect.Client[v1.ArchiveChunkRequest, v1.ArchiveChunkResponse]
 	restoreChunk  *connect.Client[v1.RestoreChunkRequest, v1.RestoreChunkResponse]
+	watchChunks   *connect.Client[v1.WatchChunksRequest, v1.WatchChunksResponse]
 }
 
 // ListVaults calls gastrolog.v1.VaultService.ListVaults.
@@ -327,6 +344,11 @@ func (c *vaultServiceClient) RestoreChunk(ctx context.Context, req *connect.Requ
 	return c.restoreChunk.CallUnary(ctx, req)
 }
 
+// WatchChunks calls gastrolog.v1.VaultService.WatchChunks.
+func (c *vaultServiceClient) WatchChunks(ctx context.Context, req *connect.Request[v1.WatchChunksRequest]) (*connect.ServerStreamForClient[v1.WatchChunksResponse], error) {
+	return c.watchChunks.CallServerStream(ctx, req)
+}
+
 // VaultServiceHandler is an implementation of the gastrolog.v1.VaultService service.
 type VaultServiceHandler interface {
 	// ListVaults returns all registered vaults.
@@ -366,6 +388,13 @@ type VaultServiceHandler interface {
 	// RestoreChunk initiates retrieval of an archived chunk. On S3 this is
 	// async (RestoreObject). The chunk becomes readable once restore completes.
 	RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error)
+	// WatchChunks opens a server-streaming subscription that pushes a
+	// notification every time chunk metadata changes on this node (seal,
+	// delete, create, compress, cloud upload). The client uses the
+	// notification as a signal to refetch via ListChunks — no chunk data
+	// is carried in the stream itself. Same pattern as WatchConfig.
+	// See gastrolog-1jijm.
+	WatchChunks(context.Context, *connect.Request[v1.WatchChunksRequest], *connect.ServerStream[v1.WatchChunksResponse]) error
 }
 
 // NewVaultServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -471,6 +500,12 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(vaultServiceMethods.ByName("RestoreChunk")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vaultServiceWatchChunksHandler := connect.NewServerStreamHandler(
+		VaultServiceWatchChunksProcedure,
+		svc.WatchChunks,
+		connect.WithSchema(vaultServiceMethods.ByName("WatchChunks")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.VaultService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VaultServiceListVaultsProcedure:
@@ -505,6 +540,8 @@ func NewVaultServiceHandler(svc VaultServiceHandler, opts ...connect.HandlerOpti
 			vaultServiceArchiveChunkHandler.ServeHTTP(w, r)
 		case VaultServiceRestoreChunkProcedure:
 			vaultServiceRestoreChunkHandler.ServeHTTP(w, r)
+		case VaultServiceWatchChunksProcedure:
+			vaultServiceWatchChunksHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -576,4 +613,8 @@ func (UnimplementedVaultServiceHandler) ArchiveChunk(context.Context, *connect.R
 
 func (UnimplementedVaultServiceHandler) RestoreChunk(context.Context, *connect.Request[v1.RestoreChunkRequest]) (*connect.Response[v1.RestoreChunkResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.RestoreChunk is not implemented"))
+}
+
+func (UnimplementedVaultServiceHandler) WatchChunks(context.Context, *connect.Request[v1.WatchChunksRequest], *connect.ServerStream[v1.WatchChunksResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.VaultService.WatchChunks is not implemented"))
 }

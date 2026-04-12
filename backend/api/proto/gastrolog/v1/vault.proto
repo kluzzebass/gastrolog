@@ -60,6 +60,14 @@ service VaultService {
   // RestoreChunk initiates retrieval of an archived chunk. On S3 this is
   // async (RestoreObject). The chunk becomes readable once restore completes.
   rpc RestoreChunk(RestoreChunkRequest) returns (RestoreChunkResponse);
+
+  // WatchChunks opens a server-streaming subscription that pushes a
+  // notification every time chunk metadata changes on this node (seal,
+  // delete, create, compress, cloud upload). The client uses the
+  // notification as a signal to refetch via ListChunks — no chunk data
+  // is carried in the stream itself. Same pattern as WatchConfig.
+  // See gastrolog-1jijm.
+  rpc WatchChunks(WatchChunksRequest) returns (stream WatchChunksResponse);
 }
 
 message ListVaultsRequest {}
@@ -90,6 +98,13 @@ message GetVaultResponse {
 
 message ListChunksRequest {
   string vault = 1;
+
+  // When true, return only unsealed (active) chunks from this node's
+  // local tiers — no cross-node fan-out. Used for lightweight 5-second
+  // polling of active-chunk stats (record count, bytes) while discrete
+  // events (seal, delete, compress) come through the WatchChunks stream.
+  // See gastrolog-1jijm.
+  bool active_only = 2;
 }
 
 message ListChunksResponse {
@@ -329,3 +344,13 @@ message RestoreChunkRequest {
 }
 
 message RestoreChunkResponse {}
+
+message WatchChunksRequest {}
+
+message WatchChunksResponse {
+  // Monotonic event counter. Increments on every chunk metadata change
+  // (seal, delete, create, compress, cloud upload). Clients can compare
+  // against the last version they processed to skip stale notifications
+  // during reconnect bursts.
+  uint64 version = 1;
+}

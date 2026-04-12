@@ -3,12 +3,14 @@ import { useThemeSync } from "./hooks/useThemeSync";
 import { useThemeClass } from "./hooks/useThemeClass";
 import { ToastProvider } from "./components/Toast";
 import { useWatchConfig } from "./api/hooks/useWatchConfig";
+import { useWatchChunks } from "./api/hooks/useWatchChunks";
 import { useWatchSystemStatus } from "./api/hooks/useWatchSystemStatus";
 
 export function App() {
   const { dark } = useThemeSync();
   const c = useThemeClass(dark);
   useWatchConfig();
+  useWatchChunks();
   useWatchSystemStatus();
 
   return (

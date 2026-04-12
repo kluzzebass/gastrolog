@@ -442,6 +442,10 @@ func (r *retentionRunner) tryRetainChunk(id chunk.ChunkID, b retentionRule) {
 			r.clearInflight(id)
 			return
 		}
+		// Notify: retention_pending flag changed — inspector shows this.
+		if r.orch != nil {
+			r.orch.NotifyChunkChange()
+		}
 	}
 
 	defer r.clearInflight(id)
@@ -526,6 +530,8 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 		// runs on tier leaders) so the rate reflects active expiration
 		// decisions, not follower OnDelete cascades. See gastrolog-47qyw.
 		r.orch.retentionRates.Record(r.tierID, r.orch.now())
+		// Notify WatchChunks subscribers: a chunk has been removed.
+		r.orch.NotifyChunkChange()
 
 		// Delete from same-node follower instances.
 		r.orch.deleteFromFollowers(r.vaultID, r.tierID, id)
