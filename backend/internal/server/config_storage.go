@@ -11,6 +11,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/config"
 	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/convert"
 )
 
 // --- Cloud Services ---
@@ -44,7 +45,7 @@ func (s *ConfigServer) PutCloudService(
 		return nil, connErr
 	}
 
-	cfg := protoToCloudService(req.Msg.Config)
+	cfg := convert.CloudServiceFromProto(req.Msg.Config)
 	cfg.ID = id
 
 	if err := s.cfgStore.PutCloudService(ctx, cfg); err != nil {
@@ -119,7 +120,7 @@ func (s *ConfigServer) SetNodeStorageConfig(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id required"))
 	}
 
-	cfg := protoToNodeStorageConfig(req.Msg.Config)
+	cfg := convert.NodeStorageConfigFromProto(req.Msg.Config)
 
 	// Assign UUIDs to file storages that don't have one.
 	for i := range cfg.FileStorages {
@@ -159,7 +160,7 @@ func (s *ConfigServer) PutTier(
 	}
 
 	// Validate tier type.
-	tierType := protoToTierType(req.Msg.Config.Type)
+	tierType := convert.TierTypeFromProto(req.Msg.Config.Type)
 	if tierType == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("type must be memory, file, cloud, or jsonl"))
 	}
@@ -191,7 +192,7 @@ func (s *ConfigServer) PutTier(
 		return nil, err
 	}
 
-	cfg, err := protoToTierConfig(req.Msg.Config)
+	cfg, err := convert.TierConfigFromProto(req.Msg.Config)
 	if err != nil {
 		return nil, errInvalidArg(err)
 	}
@@ -261,72 +262,12 @@ func (s *ConfigServer) DeleteTier(
 	return connect.NewResponse(&apiv1.DeleteTierResponse{Config: cfg}), nil
 }
 
-// --- Proto <-> Config conversion helpers for storage ---
-
-func protoToCloudService(p *apiv1.CloudService) config.CloudService {
-	transitions := make([]config.CloudStorageTransition, len(p.Transitions))
-	for i, t := range p.Transitions {
-		transitions[i] = config.CloudStorageTransition{
-			After:        t.After,
-			StorageClass: t.StorageClass,
-		}
-	}
-	return config.CloudService{
-		Name:              p.Name,
-		Provider:          p.Provider,
-		Bucket:            p.Bucket,
-		Region:            p.Region,
-		Endpoint:          p.Endpoint,
-		AccessKey:         p.AccessKey,
-		SecretKey:         p.SecretKey,
-		Container:         p.Container,
-		ConnectionString:  p.ConnectionString,
-		CredentialsJSON:   p.CredentialsJson,
-		StorageClass:      p.StorageClass,
-		ArchivalMode:      p.ArchivalMode,
-		Transitions:       transitions,
-		RestoreTier:       p.RestoreTier,
-		RestoreDays:       p.RestoreDays,
-		SuspectGraceDays:  p.SuspectGraceDays,
-		ReconcileSchedule: p.ReconcileSchedule,
-	}
-}
-
-func protoToNodeStorageConfig(p *apiv1.NodeStorageConfig) config.NodeStorageConfig {
-	cfg := config.NodeStorageConfig{
-		NodeID: p.NodeId,
-	}
-	for _, a := range p.FileStorages {
-		fs := config.FileStorage{
-			StorageClass:      a.StorageClass,
-			Name:              a.Name,
-			Path:              a.Path,
-			MemoryBudgetBytes: a.MemoryBudgetBytes,
-		}
-		if a.Id != "" {
-			if id, err := uuid.Parse(a.Id); err == nil {
-				fs.ID = id
-			}
-		}
-		cfg.FileStorages = append(cfg.FileStorages, fs)
-	}
-	return cfg
-}
-
-func protoToTierType(t apiv1.TierType) config.TierType {
-	switch t { //nolint:exhaustive // UNSPECIFIED handled by default
-	case apiv1.TierType_TIER_TYPE_MEMORY:
-		return config.TierTypeMemory
-	case apiv1.TierType_TIER_TYPE_FILE:
-		return config.TierTypeFile
-	case apiv1.TierType_TIER_TYPE_CLOUD:
-		return config.TierTypeCloud
-	case apiv1.TierType_TIER_TYPE_JSONL:
-		return config.TierTypeJSONL
-	default:
-		return ""
-	}
-}
+// --- Proto <-> Config conversion ---
+//
+// Canonical converters live in the convert package (gastrolog-2f8et).
+// protoToCloudService, protoToNodeStorageConfig, protoToTierType were
+// moved there as CloudServiceFromProto, NodeStorageConfigFromProto, and
+// tierTypeFromProto respectively.
 
 // validateCloudTierFields checks that a cloud tier has all required fields and
 // that the referenced cloud service exists.
@@ -414,64 +355,4 @@ func (s *ConfigServer) countEligibleStorages(ctx context.Context, tierType confi
 	}
 }
 
-func protoToTierConfig(p *apiv1.TierConfig) (config.TierConfig, error) {
-	cfg := config.TierConfig{
-		Name:              p.Name,
-		Type:              protoToTierType(p.Type),
-		MemoryBudgetBytes: p.MemoryBudgetBytes,
-		StorageClass:      p.StorageClass,
-		ActiveChunkClass:  p.ActiveChunkClass,
-		CacheClass:        p.CacheClass,
-		ReplicationFactor: p.ReplicationFactor,
-		Path:              p.Path,
-		Position:          p.Position,
-		CacheEviction:     p.CacheEviction,
-		CacheBudget:  p.CacheBudget,
-		CacheTTL:          p.CacheTtl,
-	}
-
-	if p.VaultId != "" {
-		vaultID, err := uuid.Parse(p.VaultId)
-		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid vault_id: %w", err)
-		}
-		cfg.VaultID = vaultID
-	}
-
-	if p.RotationPolicyId != "" {
-		rpID, err := uuid.Parse(p.RotationPolicyId)
-		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid rotation_policy_id: %w", err)
-		}
-		cfg.RotationPolicyID = &rpID
-	}
-
-	if p.CloudServiceId != "" {
-		csID, err := uuid.Parse(p.CloudServiceId)
-		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid cloud_service_id: %w", err)
-		}
-		cfg.CloudServiceID = &csID
-	}
-
-	for _, r := range p.RetentionRules {
-		rpID, err := uuid.Parse(r.RetentionPolicyId)
-		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid retention_policy_id in rule: %w", err)
-		}
-		rule := config.RetentionRule{
-			RetentionPolicyID: rpID,
-			Action:            config.RetentionAction(r.Action),
-		}
-		for _, eid := range r.EjectRouteIds {
-			routeID, err := uuid.Parse(eid)
-			if err != nil {
-				return config.TierConfig{}, fmt.Errorf("invalid eject_route_id: %w", err)
-			}
-			rule.EjectRouteIDs = append(rule.EjectRouteIDs, routeID)
-		}
-		cfg.RetentionRules = append(cfg.RetentionRules, rule)
-	}
-
-	return cfg, nil
-}
+// protoToTierConfig was here — now lives in convert.TierConfigFromProto.

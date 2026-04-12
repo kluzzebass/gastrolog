@@ -3,6 +3,8 @@ syntax = "proto3";
 package gastrolog.v1;
 
 import "google/protobuf/timestamp.proto";
+import "gastrolog/v1/config.proto";
+import "gastrolog/v1/storage.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";
 
@@ -94,14 +96,6 @@ message DeleteRetentionPolicyCommand {
 
 // RetentionRule for vault commands. Separate from config.proto's RetentionRule
 // to avoid naming collisions and to match Go types exactly.
-message VaultRetentionRule {
-  string retention_policy_id = 1;
-  string action = 2; // "expire", "eject", "transition", or "archive"
-  string destination = 3; // deprecated — was target vault for action=migrate
-  repeated string eject_route_ids = 4; // target routes, only for action=eject
-  string archive_storage_class = 5;    // target class for archive
-}
-
 message PutVaultCommand {
   string id = 1;
   string name = 2;
@@ -268,33 +262,11 @@ message DeleteManagedFileCommand {
 
 // --- Cloud Services ---
 
-message CloudServiceTransition {
-  string after = 1;
-  string storage_class = 2;
-}
-
+// PutCloudServiceCommand carries the full API CloudService from storage.proto.
+// Previously flattened all fields here; now embeds to share the conversion layer.
+// See gastrolog-2f8et. Breaking change: not wire-compatible with old Raft logs.
 message PutCloudServiceCommand {
-  string id = 1;
-  string name = 2;
-  string provider = 3;
-  string bucket = 4;
-  string region = 5;
-  string endpoint = 6;
-  string access_key = 7;
-  string secret_key = 8;
-  string container = 9;
-  string connection_string = 10;
-  string credentials_json = 11;
-  reserved 12;
-  reserved 13, 14;
-  uint32 storage_class = 15;
-
-  string archival_mode = 20;
-  repeated CloudServiceTransition transitions = 21;
-  string restore_tier = 22;
-  uint32 restore_days = 23;
-  uint32 suspect_grace_days = 24;
-  string reconcile_schedule = 25;
+  CloudService cloud_service = 1;
 }
 
 message DeleteCloudServiceCommand {
@@ -303,46 +275,16 @@ message DeleteCloudServiceCommand {
 
 // --- Node Storage ---
 
+// SetNodeStorageConfigCommand carries the full API NodeStorageConfig from storage.proto.
 message SetNodeStorageConfigCommand {
-  string node_id = 1;
-  repeated FileStorageCommand file_storages = 2;
-}
-
-message FileStorageCommand {
-  string id = 1;
-  uint32 storage_class = 2;
-  string name = 3;
-  string path = 4;
-  reserved 5;
-  uint64 memory_budget_bytes = 6;
+  NodeStorageConfig node_storage = 1;
 }
 
 // --- Tiers ---
 
+// PutTierCommand carries the full API TierConfig from config.proto.
 message PutTierCommand {
-  string id = 1;
-  string name = 2;
-  string type = 3;              // "memory", "local", "cloud"
-  string rotation_policy_id = 4;
-  repeated VaultRetentionRule retention_rules = 5;
-  uint64 memory_budget_bytes = 6;
-  uint32 storage_class = 7;
-  string cloud_service_id = 8;
-  uint32 active_chunk_class = 9;
-  uint32 cache_class = 10;
-  uint32 replication_factor = 12;
-  string path = 14;
-  repeated TierPlacementEntry placements = 15;
-  string vault_id = 16;
-  uint32 position = 17;
-  string cache_eviction = 18;
-  string cache_budget = 19;
-  string cache_ttl = 20;
-}
-
-message TierPlacementEntry {
-  string storage_id = 1;
-  bool primary = 2;
+  TierConfig tier = 1;
 }
 
 message DeleteTierCommand {

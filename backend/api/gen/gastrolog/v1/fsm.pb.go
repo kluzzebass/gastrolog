@@ -1004,82 +1004,6 @@ func (x *DeleteRetentionPolicyCommand) GetId() string {
 
 // RetentionRule for vault commands. Separate from config.proto's RetentionRule
 // to avoid naming collisions and to match Go types exactly.
-type VaultRetentionRule struct {
-	state               protoimpl.MessageState `protogen:"open.v1"`
-	RetentionPolicyId   string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
-	Action              string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                                        // "expire", "eject", "transition", or "archive"
-	Destination         string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`                                              // deprecated — was target vault for action=migrate
-	EjectRouteIds       []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"`                   // target routes, only for action=eject
-	ArchiveStorageClass string                 `protobuf:"bytes,5,opt,name=archive_storage_class,json=archiveStorageClass,proto3" json:"archive_storage_class,omitempty"` // target class for archive
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
-}
-
-func (x *VaultRetentionRule) Reset() {
-	*x = VaultRetentionRule{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *VaultRetentionRule) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*VaultRetentionRule) ProtoMessage() {}
-
-func (x *VaultRetentionRule) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use VaultRetentionRule.ProtoReflect.Descriptor instead.
-func (*VaultRetentionRule) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *VaultRetentionRule) GetRetentionPolicyId() string {
-	if x != nil {
-		return x.RetentionPolicyId
-	}
-	return ""
-}
-
-func (x *VaultRetentionRule) GetAction() string {
-	if x != nil {
-		return x.Action
-	}
-	return ""
-}
-
-func (x *VaultRetentionRule) GetDestination() string {
-	if x != nil {
-		return x.Destination
-	}
-	return ""
-}
-
-func (x *VaultRetentionRule) GetEjectRouteIds() []string {
-	if x != nil {
-		return x.EjectRouteIds
-	}
-	return nil
-}
-
-func (x *VaultRetentionRule) GetArchiveStorageClass() string {
-	if x != nil {
-		return x.ArchiveStorageClass
-	}
-	return ""
-}
-
 type PutVaultCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1091,7 +1015,7 @@ type PutVaultCommand struct {
 
 func (x *PutVaultCommand) Reset() {
 	*x = PutVaultCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[8]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1103,7 +1027,7 @@ func (x *PutVaultCommand) String() string {
 func (*PutVaultCommand) ProtoMessage() {}
 
 func (x *PutVaultCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[8]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1116,7 +1040,7 @@ func (x *PutVaultCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutVaultCommand.ProtoReflect.Descriptor instead.
 func (*PutVaultCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{8}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PutVaultCommand) GetId() string {
@@ -1151,7 +1075,7 @@ type DeleteVaultCommand struct {
 
 func (x *DeleteVaultCommand) Reset() {
 	*x = DeleteVaultCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[9]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1163,7 +1087,7 @@ func (x *DeleteVaultCommand) String() string {
 func (*DeleteVaultCommand) ProtoMessage() {}
 
 func (x *DeleteVaultCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[9]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1176,7 +1100,7 @@ func (x *DeleteVaultCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteVaultCommand.ProtoReflect.Descriptor instead.
 func (*DeleteVaultCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{9}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DeleteVaultCommand) GetId() string {
@@ -1207,7 +1131,7 @@ type PutIngesterCommand struct {
 
 func (x *PutIngesterCommand) Reset() {
 	*x = PutIngesterCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[10]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1219,7 +1143,7 @@ func (x *PutIngesterCommand) String() string {
 func (*PutIngesterCommand) ProtoMessage() {}
 
 func (x *PutIngesterCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[10]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1232,7 +1156,7 @@ func (x *PutIngesterCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutIngesterCommand.ProtoReflect.Descriptor instead.
 func (*PutIngesterCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{10}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *PutIngesterCommand) GetId() string {
@@ -1286,7 +1210,7 @@ type DeleteIngesterCommand struct {
 
 func (x *DeleteIngesterCommand) Reset() {
 	*x = DeleteIngesterCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[11]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1298,7 +1222,7 @@ func (x *DeleteIngesterCommand) String() string {
 func (*DeleteIngesterCommand) ProtoMessage() {}
 
 func (x *DeleteIngesterCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[11]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1311,7 +1235,7 @@ func (x *DeleteIngesterCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteIngesterCommand.ProtoReflect.Descriptor instead.
 func (*DeleteIngesterCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{11}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *DeleteIngesterCommand) GetId() string {
@@ -1331,7 +1255,7 @@ type PutSettingCommand struct {
 
 func (x *PutSettingCommand) Reset() {
 	*x = PutSettingCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[12]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1343,7 +1267,7 @@ func (x *PutSettingCommand) String() string {
 func (*PutSettingCommand) ProtoMessage() {}
 
 func (x *PutSettingCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[12]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1356,7 +1280,7 @@ func (x *PutSettingCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutSettingCommand.ProtoReflect.Descriptor instead.
 func (*PutSettingCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{12}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *PutSettingCommand) GetKey() string {
@@ -1382,7 +1306,7 @@ type DeleteSettingCommand struct {
 
 func (x *DeleteSettingCommand) Reset() {
 	*x = DeleteSettingCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1394,7 +1318,7 @@ func (x *DeleteSettingCommand) String() string {
 func (*DeleteSettingCommand) ProtoMessage() {}
 
 func (x *DeleteSettingCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[13]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1407,7 +1331,7 @@ func (x *DeleteSettingCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteSettingCommand.ProtoReflect.Descriptor instead.
 func (*DeleteSettingCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{13}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *DeleteSettingCommand) GetKey() string {
@@ -1431,7 +1355,7 @@ type PutCertificateCommand struct {
 
 func (x *PutCertificateCommand) Reset() {
 	*x = PutCertificateCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1443,7 +1367,7 @@ func (x *PutCertificateCommand) String() string {
 func (*PutCertificateCommand) ProtoMessage() {}
 
 func (x *PutCertificateCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[14]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1456,7 +1380,7 @@ func (x *PutCertificateCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutCertificateCommand.ProtoReflect.Descriptor instead.
 func (*PutCertificateCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{14}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *PutCertificateCommand) GetId() string {
@@ -1510,7 +1434,7 @@ type DeleteCertificateCommand struct {
 
 func (x *DeleteCertificateCommand) Reset() {
 	*x = DeleteCertificateCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1522,7 +1446,7 @@ func (x *DeleteCertificateCommand) String() string {
 func (*DeleteCertificateCommand) ProtoMessage() {}
 
 func (x *DeleteCertificateCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[15]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1535,7 +1459,7 @@ func (x *DeleteCertificateCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCertificateCommand.ProtoReflect.Descriptor instead.
 func (*DeleteCertificateCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{15}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *DeleteCertificateCommand) GetId() string {
@@ -1561,7 +1485,7 @@ type CreateUserCommand struct {
 
 func (x *CreateUserCommand) Reset() {
 	*x = CreateUserCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1573,7 +1497,7 @@ func (x *CreateUserCommand) String() string {
 func (*CreateUserCommand) ProtoMessage() {}
 
 func (x *CreateUserCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[16]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1586,7 +1510,7 @@ func (x *CreateUserCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateUserCommand.ProtoReflect.Descriptor instead.
 func (*CreateUserCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{16}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *CreateUserCommand) GetId() string {
@@ -1655,7 +1579,7 @@ type UpdatePasswordCommand struct {
 
 func (x *UpdatePasswordCommand) Reset() {
 	*x = UpdatePasswordCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[17]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1667,7 +1591,7 @@ func (x *UpdatePasswordCommand) String() string {
 func (*UpdatePasswordCommand) ProtoMessage() {}
 
 func (x *UpdatePasswordCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[17]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1680,7 +1604,7 @@ func (x *UpdatePasswordCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdatePasswordCommand.ProtoReflect.Descriptor instead.
 func (*UpdatePasswordCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{17}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *UpdatePasswordCommand) GetId() string {
@@ -1707,7 +1631,7 @@ type UpdateUserRoleCommand struct {
 
 func (x *UpdateUserRoleCommand) Reset() {
 	*x = UpdateUserRoleCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[18]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1719,7 +1643,7 @@ func (x *UpdateUserRoleCommand) String() string {
 func (*UpdateUserRoleCommand) ProtoMessage() {}
 
 func (x *UpdateUserRoleCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[18]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1732,7 +1656,7 @@ func (x *UpdateUserRoleCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUserRoleCommand.ProtoReflect.Descriptor instead.
 func (*UpdateUserRoleCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{18}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *UpdateUserRoleCommand) GetId() string {
@@ -1759,7 +1683,7 @@ type UpdateUsernameCommand struct {
 
 func (x *UpdateUsernameCommand) Reset() {
 	*x = UpdateUsernameCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[19]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1771,7 +1695,7 @@ func (x *UpdateUsernameCommand) String() string {
 func (*UpdateUsernameCommand) ProtoMessage() {}
 
 func (x *UpdateUsernameCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[19]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1784,7 +1708,7 @@ func (x *UpdateUsernameCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateUsernameCommand.ProtoReflect.Descriptor instead.
 func (*UpdateUsernameCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{19}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *UpdateUsernameCommand) GetId() string {
@@ -1810,7 +1734,7 @@ type DeleteUserCommand struct {
 
 func (x *DeleteUserCommand) Reset() {
 	*x = DeleteUserCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1822,7 +1746,7 @@ func (x *DeleteUserCommand) String() string {
 func (*DeleteUserCommand) ProtoMessage() {}
 
 func (x *DeleteUserCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[20]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1835,7 +1759,7 @@ func (x *DeleteUserCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUserCommand.ProtoReflect.Descriptor instead.
 func (*DeleteUserCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{20}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *DeleteUserCommand) GetId() string {
@@ -1855,7 +1779,7 @@ type InvalidateTokensCommand struct {
 
 func (x *InvalidateTokensCommand) Reset() {
 	*x = InvalidateTokensCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1867,7 +1791,7 @@ func (x *InvalidateTokensCommand) String() string {
 func (*InvalidateTokensCommand) ProtoMessage() {}
 
 func (x *InvalidateTokensCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[21]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1880,7 +1804,7 @@ func (x *InvalidateTokensCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InvalidateTokensCommand.ProtoReflect.Descriptor instead.
 func (*InvalidateTokensCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{21}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *InvalidateTokensCommand) GetId() string {
@@ -1907,7 +1831,7 @@ type PutUserPreferencesCommand struct {
 
 func (x *PutUserPreferencesCommand) Reset() {
 	*x = PutUserPreferencesCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[22]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1919,7 +1843,7 @@ func (x *PutUserPreferencesCommand) String() string {
 func (*PutUserPreferencesCommand) ProtoMessage() {}
 
 func (x *PutUserPreferencesCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[22]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1932,7 +1856,7 @@ func (x *PutUserPreferencesCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutUserPreferencesCommand.ProtoReflect.Descriptor instead.
 func (*PutUserPreferencesCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{22}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *PutUserPreferencesCommand) GetId() string {
@@ -1962,7 +1886,7 @@ type CreateRefreshTokenCommand struct {
 
 func (x *CreateRefreshTokenCommand) Reset() {
 	*x = CreateRefreshTokenCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1974,7 +1898,7 @@ func (x *CreateRefreshTokenCommand) String() string {
 func (*CreateRefreshTokenCommand) ProtoMessage() {}
 
 func (x *CreateRefreshTokenCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[23]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1987,7 +1911,7 @@ func (x *CreateRefreshTokenCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateRefreshTokenCommand.ProtoReflect.Descriptor instead.
 func (*CreateRefreshTokenCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{23}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *CreateRefreshTokenCommand) GetId() string {
@@ -2034,7 +1958,7 @@ type DeleteRefreshTokenCommand struct {
 
 func (x *DeleteRefreshTokenCommand) Reset() {
 	*x = DeleteRefreshTokenCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2046,7 +1970,7 @@ func (x *DeleteRefreshTokenCommand) String() string {
 func (*DeleteRefreshTokenCommand) ProtoMessage() {}
 
 func (x *DeleteRefreshTokenCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[24]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2059,7 +1983,7 @@ func (x *DeleteRefreshTokenCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRefreshTokenCommand.ProtoReflect.Descriptor instead.
 func (*DeleteRefreshTokenCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{24}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *DeleteRefreshTokenCommand) GetId() string {
@@ -2078,7 +2002,7 @@ type DeleteUserRefreshTokensCommand struct {
 
 func (x *DeleteUserRefreshTokensCommand) Reset() {
 	*x = DeleteUserRefreshTokensCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2090,7 +2014,7 @@ func (x *DeleteUserRefreshTokensCommand) String() string {
 func (*DeleteUserRefreshTokensCommand) ProtoMessage() {}
 
 func (x *DeleteUserRefreshTokensCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[25]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2103,7 +2027,7 @@ func (x *DeleteUserRefreshTokensCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteUserRefreshTokensCommand.ProtoReflect.Descriptor instead.
 func (*DeleteUserRefreshTokensCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{25}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DeleteUserRefreshTokensCommand) GetUserId() string {
@@ -2123,7 +2047,7 @@ type PutNodeConfigCommand struct {
 
 func (x *PutNodeConfigCommand) Reset() {
 	*x = PutNodeConfigCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[26]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2135,7 +2059,7 @@ func (x *PutNodeConfigCommand) String() string {
 func (*PutNodeConfigCommand) ProtoMessage() {}
 
 func (x *PutNodeConfigCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[26]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2148,7 +2072,7 @@ func (x *PutNodeConfigCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutNodeConfigCommand.ProtoReflect.Descriptor instead.
 func (*PutNodeConfigCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{26}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *PutNodeConfigCommand) GetId() string {
@@ -2174,7 +2098,7 @@ type DeleteNodeConfigCommand struct {
 
 func (x *DeleteNodeConfigCommand) Reset() {
 	*x = DeleteNodeConfigCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2186,7 +2110,7 @@ func (x *DeleteNodeConfigCommand) String() string {
 func (*DeleteNodeConfigCommand) ProtoMessage() {}
 
 func (x *DeleteNodeConfigCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[27]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2199,7 +2123,7 @@ func (x *DeleteNodeConfigCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteNodeConfigCommand.ProtoReflect.Descriptor instead.
 func (*DeleteNodeConfigCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{27}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *DeleteNodeConfigCommand) GetId() string {
@@ -2222,7 +2146,7 @@ type PutClusterTLSCommand struct {
 
 func (x *PutClusterTLSCommand) Reset() {
 	*x = PutClusterTLSCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2234,7 +2158,7 @@ func (x *PutClusterTLSCommand) String() string {
 func (*PutClusterTLSCommand) ProtoMessage() {}
 
 func (x *PutClusterTLSCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[28]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2247,7 +2171,7 @@ func (x *PutClusterTLSCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutClusterTLSCommand.ProtoReflect.Descriptor instead.
 func (*PutClusterTLSCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{28}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *PutClusterTLSCommand) GetCaCertPem() []byte {
@@ -2300,7 +2224,7 @@ type PutRouteCommand struct {
 
 func (x *PutRouteCommand) Reset() {
 	*x = PutRouteCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[29]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2312,7 +2236,7 @@ func (x *PutRouteCommand) String() string {
 func (*PutRouteCommand) ProtoMessage() {}
 
 func (x *PutRouteCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[29]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2325,7 +2249,7 @@ func (x *PutRouteCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutRouteCommand.ProtoReflect.Descriptor instead.
 func (*PutRouteCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{29}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *PutRouteCommand) GetId() string {
@@ -2386,7 +2310,7 @@ type DeleteRouteCommand struct {
 
 func (x *DeleteRouteCommand) Reset() {
 	*x = DeleteRouteCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[30]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2398,7 +2322,7 @@ func (x *DeleteRouteCommand) String() string {
 func (*DeleteRouteCommand) ProtoMessage() {}
 
 func (x *DeleteRouteCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[30]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2411,7 +2335,7 @@ func (x *DeleteRouteCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRouteCommand.ProtoReflect.Descriptor instead.
 func (*DeleteRouteCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{30}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *DeleteRouteCommand) GetId() string {
@@ -2434,7 +2358,7 @@ type PutManagedFileCommand struct {
 
 func (x *PutManagedFileCommand) Reset() {
 	*x = PutManagedFileCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[31]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2446,7 +2370,7 @@ func (x *PutManagedFileCommand) String() string {
 func (*PutManagedFileCommand) ProtoMessage() {}
 
 func (x *PutManagedFileCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[31]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2459,7 +2383,7 @@ func (x *PutManagedFileCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutManagedFileCommand.ProtoReflect.Descriptor instead.
 func (*PutManagedFileCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{31}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *PutManagedFileCommand) GetId() string {
@@ -2506,7 +2430,7 @@ type DeleteManagedFileCommand struct {
 
 func (x *DeleteManagedFileCommand) Reset() {
 	*x = DeleteManagedFileCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[32]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2518,7 +2442,7 @@ func (x *DeleteManagedFileCommand) String() string {
 func (*DeleteManagedFileCommand) ProtoMessage() {}
 
 func (x *DeleteManagedFileCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[32]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2531,7 +2455,7 @@ func (x *DeleteManagedFileCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteManagedFileCommand.ProtoReflect.Descriptor instead.
 func (*DeleteManagedFileCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{32}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DeleteManagedFileCommand) GetId() string {
@@ -2541,85 +2465,19 @@ func (x *DeleteManagedFileCommand) GetId() string {
 	return ""
 }
 
-type CloudServiceTransition struct {
+// PutCloudServiceCommand carries the full API CloudService from storage.proto.
+// Previously flattened all fields here; now embeds to share the conversion layer.
+// See gastrolog-2f8et. Breaking change: not wire-compatible with old Raft logs.
+type PutCloudServiceCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	After         string                 `protobuf:"bytes,1,opt,name=after,proto3" json:"after,omitempty"`
-	StorageClass  string                 `protobuf:"bytes,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
+	CloudService  *CloudService          `protobuf:"bytes,1,opt,name=cloud_service,json=cloudService,proto3" json:"cloud_service,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CloudServiceTransition) Reset() {
-	*x = CloudServiceTransition{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[33]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *CloudServiceTransition) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*CloudServiceTransition) ProtoMessage() {}
-
-func (x *CloudServiceTransition) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[33]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use CloudServiceTransition.ProtoReflect.Descriptor instead.
-func (*CloudServiceTransition) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{33}
-}
-
-func (x *CloudServiceTransition) GetAfter() string {
-	if x != nil {
-		return x.After
-	}
-	return ""
-}
-
-func (x *CloudServiceTransition) GetStorageClass() string {
-	if x != nil {
-		return x.StorageClass
-	}
-	return ""
-}
-
-type PutCloudServiceCommand struct {
-	state             protoimpl.MessageState    `protogen:"open.v1"`
-	Id                string                    `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name              string                    `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Provider          string                    `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
-	Bucket            string                    `protobuf:"bytes,4,opt,name=bucket,proto3" json:"bucket,omitempty"`
-	Region            string                    `protobuf:"bytes,5,opt,name=region,proto3" json:"region,omitempty"`
-	Endpoint          string                    `protobuf:"bytes,6,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
-	AccessKey         string                    `protobuf:"bytes,7,opt,name=access_key,json=accessKey,proto3" json:"access_key,omitempty"`
-	SecretKey         string                    `protobuf:"bytes,8,opt,name=secret_key,json=secretKey,proto3" json:"secret_key,omitempty"`
-	Container         string                    `protobuf:"bytes,9,opt,name=container,proto3" json:"container,omitempty"`
-	ConnectionString  string                    `protobuf:"bytes,10,opt,name=connection_string,json=connectionString,proto3" json:"connection_string,omitempty"`
-	CredentialsJson   string                    `protobuf:"bytes,11,opt,name=credentials_json,json=credentialsJson,proto3" json:"credentials_json,omitempty"`
-	StorageClass      uint32                    `protobuf:"varint,15,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	ArchivalMode      string                    `protobuf:"bytes,20,opt,name=archival_mode,json=archivalMode,proto3" json:"archival_mode,omitempty"`
-	Transitions       []*CloudServiceTransition `protobuf:"bytes,21,rep,name=transitions,proto3" json:"transitions,omitempty"`
-	RestoreTier       string                    `protobuf:"bytes,22,opt,name=restore_tier,json=restoreTier,proto3" json:"restore_tier,omitempty"`
-	RestoreDays       uint32                    `protobuf:"varint,23,opt,name=restore_days,json=restoreDays,proto3" json:"restore_days,omitempty"`
-	SuspectGraceDays  uint32                    `protobuf:"varint,24,opt,name=suspect_grace_days,json=suspectGraceDays,proto3" json:"suspect_grace_days,omitempty"`
-	ReconcileSchedule string                    `protobuf:"bytes,25,opt,name=reconcile_schedule,json=reconcileSchedule,proto3" json:"reconcile_schedule,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
 func (x *PutCloudServiceCommand) Reset() {
 	*x = PutCloudServiceCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2631,7 +2489,7 @@ func (x *PutCloudServiceCommand) String() string {
 func (*PutCloudServiceCommand) ProtoMessage() {}
 
 func (x *PutCloudServiceCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2644,133 +2502,14 @@ func (x *PutCloudServiceCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutCloudServiceCommand.ProtoReflect.Descriptor instead.
 func (*PutCloudServiceCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{34}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{32}
 }
 
-func (x *PutCloudServiceCommand) GetId() string {
+func (x *PutCloudServiceCommand) GetCloudService() *CloudService {
 	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetProvider() string {
-	if x != nil {
-		return x.Provider
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetBucket() string {
-	if x != nil {
-		return x.Bucket
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetRegion() string {
-	if x != nil {
-		return x.Region
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetEndpoint() string {
-	if x != nil {
-		return x.Endpoint
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetAccessKey() string {
-	if x != nil {
-		return x.AccessKey
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetSecretKey() string {
-	if x != nil {
-		return x.SecretKey
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetContainer() string {
-	if x != nil {
-		return x.Container
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetConnectionString() string {
-	if x != nil {
-		return x.ConnectionString
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetCredentialsJson() string {
-	if x != nil {
-		return x.CredentialsJson
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetStorageClass() uint32 {
-	if x != nil {
-		return x.StorageClass
-	}
-	return 0
-}
-
-func (x *PutCloudServiceCommand) GetArchivalMode() string {
-	if x != nil {
-		return x.ArchivalMode
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetTransitions() []*CloudServiceTransition {
-	if x != nil {
-		return x.Transitions
+		return x.CloudService
 	}
 	return nil
-}
-
-func (x *PutCloudServiceCommand) GetRestoreTier() string {
-	if x != nil {
-		return x.RestoreTier
-	}
-	return ""
-}
-
-func (x *PutCloudServiceCommand) GetRestoreDays() uint32 {
-	if x != nil {
-		return x.RestoreDays
-	}
-	return 0
-}
-
-func (x *PutCloudServiceCommand) GetSuspectGraceDays() uint32 {
-	if x != nil {
-		return x.SuspectGraceDays
-	}
-	return 0
-}
-
-func (x *PutCloudServiceCommand) GetReconcileSchedule() string {
-	if x != nil {
-		return x.ReconcileSchedule
-	}
-	return ""
 }
 
 type DeleteCloudServiceCommand struct {
@@ -2782,7 +2521,7 @@ type DeleteCloudServiceCommand struct {
 
 func (x *DeleteCloudServiceCommand) Reset() {
 	*x = DeleteCloudServiceCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2794,7 +2533,7 @@ func (x *DeleteCloudServiceCommand) String() string {
 func (*DeleteCloudServiceCommand) ProtoMessage() {}
 
 func (x *DeleteCloudServiceCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2807,7 +2546,7 @@ func (x *DeleteCloudServiceCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteCloudServiceCommand.ProtoReflect.Descriptor instead.
 func (*DeleteCloudServiceCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{35}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DeleteCloudServiceCommand) GetId() string {
@@ -2817,17 +2556,17 @@ func (x *DeleteCloudServiceCommand) GetId() string {
 	return ""
 }
 
+// SetNodeStorageConfigCommand carries the full API NodeStorageConfig from storage.proto.
 type SetNodeStorageConfigCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	FileStorages  []*FileStorageCommand  `protobuf:"bytes,2,rep,name=file_storages,json=fileStorages,proto3" json:"file_storages,omitempty"`
+	NodeStorage   *NodeStorageConfig     `protobuf:"bytes,1,opt,name=node_storage,json=nodeStorage,proto3" json:"node_storage,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *SetNodeStorageConfigCommand) Reset() {
 	*x = SetNodeStorageConfigCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2839,7 +2578,7 @@ func (x *SetNodeStorageConfigCommand) String() string {
 func (*SetNodeStorageConfigCommand) ProtoMessage() {}
 
 func (x *SetNodeStorageConfigCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2852,126 +2591,27 @@ func (x *SetNodeStorageConfigCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SetNodeStorageConfigCommand.ProtoReflect.Descriptor instead.
 func (*SetNodeStorageConfigCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{36}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{34}
 }
 
-func (x *SetNodeStorageConfigCommand) GetNodeId() string {
+func (x *SetNodeStorageConfigCommand) GetNodeStorage() *NodeStorageConfig {
 	if x != nil {
-		return x.NodeId
-	}
-	return ""
-}
-
-func (x *SetNodeStorageConfigCommand) GetFileStorages() []*FileStorageCommand {
-	if x != nil {
-		return x.FileStorages
+		return x.NodeStorage
 	}
 	return nil
 }
 
-type FileStorageCommand struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	StorageClass      uint32                 `protobuf:"varint,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	Name              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
-	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
-	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
-}
-
-func (x *FileStorageCommand) Reset() {
-	*x = FileStorageCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FileStorageCommand) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FileStorageCommand) ProtoMessage() {}
-
-func (x *FileStorageCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FileStorageCommand.ProtoReflect.Descriptor instead.
-func (*FileStorageCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{37}
-}
-
-func (x *FileStorageCommand) GetId() string {
-	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *FileStorageCommand) GetStorageClass() uint32 {
-	if x != nil {
-		return x.StorageClass
-	}
-	return 0
-}
-
-func (x *FileStorageCommand) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *FileStorageCommand) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *FileStorageCommand) GetMemoryBudgetBytes() uint64 {
-	if x != nil {
-		return x.MemoryBudgetBytes
-	}
-	return 0
-}
-
+// PutTierCommand carries the full API TierConfig from config.proto.
 type PutTierCommand struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Type              string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"` // "memory", "local", "cloud"
-	RotationPolicyId  string                 `protobuf:"bytes,4,opt,name=rotation_policy_id,json=rotationPolicyId,proto3" json:"rotation_policy_id,omitempty"`
-	RetentionRules    []*VaultRetentionRule  `protobuf:"bytes,5,rep,name=retention_rules,json=retentionRules,proto3" json:"retention_rules,omitempty"`
-	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
-	StorageClass      uint32                 `protobuf:"varint,7,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	CloudServiceId    string                 `protobuf:"bytes,8,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
-	ActiveChunkClass  uint32                 `protobuf:"varint,9,opt,name=active_chunk_class,json=activeChunkClass,proto3" json:"active_chunk_class,omitempty"`
-	CacheClass        uint32                 `protobuf:"varint,10,opt,name=cache_class,json=cacheClass,proto3" json:"cache_class,omitempty"`
-	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"`
-	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`
-	Placements        []*TierPlacementEntry  `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`
-	VaultId           string                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`
-	CacheEviction     string                 `protobuf:"bytes,18,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`
-	CacheBudget       string                 `protobuf:"bytes,19,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`
-	CacheTtl          string                 `protobuf:"bytes,20,opt,name=cache_ttl,json=cacheTtl,proto3" json:"cache_ttl,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tier          *TierConfig            `protobuf:"bytes,1,opt,name=tier,proto3" json:"tier,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PutTierCommand) Reset() {
 	*x = PutTierCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[38]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2983,7 +2623,7 @@ func (x *PutTierCommand) String() string {
 func (*PutTierCommand) ProtoMessage() {}
 
 func (x *PutTierCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[38]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2996,185 +2636,14 @@ func (x *PutTierCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutTierCommand.ProtoReflect.Descriptor instead.
 func (*PutTierCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{38}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{35}
 }
 
-func (x *PutTierCommand) GetId() string {
+func (x *PutTierCommand) GetTier() *TierConfig {
 	if x != nil {
-		return x.Id
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetName() string {
-	if x != nil {
-		return x.Name
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetType() string {
-	if x != nil {
-		return x.Type
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetRotationPolicyId() string {
-	if x != nil {
-		return x.RotationPolicyId
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetRetentionRules() []*VaultRetentionRule {
-	if x != nil {
-		return x.RetentionRules
+		return x.Tier
 	}
 	return nil
-}
-
-func (x *PutTierCommand) GetMemoryBudgetBytes() uint64 {
-	if x != nil {
-		return x.MemoryBudgetBytes
-	}
-	return 0
-}
-
-func (x *PutTierCommand) GetStorageClass() uint32 {
-	if x != nil {
-		return x.StorageClass
-	}
-	return 0
-}
-
-func (x *PutTierCommand) GetCloudServiceId() string {
-	if x != nil {
-		return x.CloudServiceId
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetActiveChunkClass() uint32 {
-	if x != nil {
-		return x.ActiveChunkClass
-	}
-	return 0
-}
-
-func (x *PutTierCommand) GetCacheClass() uint32 {
-	if x != nil {
-		return x.CacheClass
-	}
-	return 0
-}
-
-func (x *PutTierCommand) GetReplicationFactor() uint32 {
-	if x != nil {
-		return x.ReplicationFactor
-	}
-	return 0
-}
-
-func (x *PutTierCommand) GetPath() string {
-	if x != nil {
-		return x.Path
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetPlacements() []*TierPlacementEntry {
-	if x != nil {
-		return x.Placements
-	}
-	return nil
-}
-
-func (x *PutTierCommand) GetVaultId() string {
-	if x != nil {
-		return x.VaultId
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetPosition() uint32 {
-	if x != nil {
-		return x.Position
-	}
-	return 0
-}
-
-func (x *PutTierCommand) GetCacheEviction() string {
-	if x != nil {
-		return x.CacheEviction
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetCacheBudget() string {
-	if x != nil {
-		return x.CacheBudget
-	}
-	return ""
-}
-
-func (x *PutTierCommand) GetCacheTtl() string {
-	if x != nil {
-		return x.CacheTtl
-	}
-	return ""
-}
-
-type TierPlacementEntry struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	StorageId     string                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"`
-	Primary       bool                   `protobuf:"varint,2,opt,name=primary,proto3" json:"primary,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *TierPlacementEntry) Reset() {
-	*x = TierPlacementEntry{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[39]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *TierPlacementEntry) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*TierPlacementEntry) ProtoMessage() {}
-
-func (x *TierPlacementEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[39]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use TierPlacementEntry.ProtoReflect.Descriptor instead.
-func (*TierPlacementEntry) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{39}
-}
-
-func (x *TierPlacementEntry) GetStorageId() string {
-	if x != nil {
-		return x.StorageId
-	}
-	return ""
-}
-
-func (x *TierPlacementEntry) GetPrimary() bool {
-	if x != nil {
-		return x.Primary
-	}
-	return false
 }
 
 type DeleteTierCommand struct {
@@ -3187,7 +2656,7 @@ type DeleteTierCommand struct {
 
 func (x *DeleteTierCommand) Reset() {
 	*x = DeleteTierCommand{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[40]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3199,7 +2668,7 @@ func (x *DeleteTierCommand) String() string {
 func (*DeleteTierCommand) ProtoMessage() {}
 
 func (x *DeleteTierCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[40]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3212,7 +2681,7 @@ func (x *DeleteTierCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteTierCommand.ProtoReflect.Descriptor instead.
 func (*DeleteTierCommand) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{40}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DeleteTierCommand) GetId() string {
@@ -3256,7 +2725,7 @@ type ConfigSnapshot struct {
 
 func (x *ConfigSnapshot) Reset() {
 	*x = ConfigSnapshot{}
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[41]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3268,7 +2737,7 @@ func (x *ConfigSnapshot) String() string {
 func (*ConfigSnapshot) ProtoMessage() {}
 
 func (x *ConfigSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_gastrolog_v1_fsm_proto_msgTypes[41]
+	mi := &file_gastrolog_v1_fsm_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3281,7 +2750,7 @@ func (x *ConfigSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfigSnapshot.ProtoReflect.Descriptor instead.
 func (*ConfigSnapshot) Descriptor() ([]byte, []int) {
-	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{41}
+	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ConfigSnapshot) GetFilters() []*PutFilterCommand {
@@ -3400,7 +2869,7 @@ var File_gastrolog_v1_fsm_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
-	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x85\x17\n" +
+	"\x16gastrolog/v1/fsm.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19gastrolog/v1/config.proto\x1a\x1agastrolog/v1/storage.proto\"\x85\x17\n" +
 	"\rConfigCommand\x12?\n" +
 	"\n" +
 	"put_filter\x18\x01 \x01(\v2\x1e.gastrolog.v1.PutFilterCommandH\x00R\tputFilter\x12H\n" +
@@ -3482,13 +2951,7 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"_max_bytesB\r\n" +
 	"\v_max_chunks\".\n" +
 	"\x1cDeleteRetentionPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xda\x01\n" +
-	"\x12VaultRetentionRule\x12.\n" +
-	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
-	"\x06action\x18\x02 \x01(\tR\x06action\x12 \n" +
-	"\vdestination\x18\x03 \x01(\tR\vdestination\x12&\n" +
-	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\x122\n" +
-	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"O\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"O\n" +
 	"\x0fPutVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
@@ -3596,70 +3059,15 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\vuploaded_at\x18\x05 \x01(\tR\n" +
 	"uploadedAt\"*\n" +
 	"\x18DeleteManagedFileCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"S\n" +
-	"\x16CloudServiceTransition\x12\x14\n" +
-	"\x05after\x18\x01 \x01(\tR\x05after\x12#\n" +
-	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x9f\x05\n" +
-	"\x16PutCloudServiceCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
-	"\bprovider\x18\x03 \x01(\tR\bprovider\x12\x16\n" +
-	"\x06bucket\x18\x04 \x01(\tR\x06bucket\x12\x16\n" +
-	"\x06region\x18\x05 \x01(\tR\x06region\x12\x1a\n" +
-	"\bendpoint\x18\x06 \x01(\tR\bendpoint\x12\x1d\n" +
-	"\n" +
-	"access_key\x18\a \x01(\tR\taccessKey\x12\x1d\n" +
-	"\n" +
-	"secret_key\x18\b \x01(\tR\tsecretKey\x12\x1c\n" +
-	"\tcontainer\x18\t \x01(\tR\tcontainer\x12+\n" +
-	"\x11connection_string\x18\n" +
-	" \x01(\tR\x10connectionString\x12)\n" +
-	"\x10credentials_json\x18\v \x01(\tR\x0fcredentialsJson\x12#\n" +
-	"\rstorage_class\x18\x0f \x01(\rR\fstorageClass\x12#\n" +
-	"\rarchival_mode\x18\x14 \x01(\tR\farchivalMode\x12F\n" +
-	"\vtransitions\x18\x15 \x03(\v2$.gastrolog.v1.CloudServiceTransitionR\vtransitions\x12!\n" +
-	"\frestore_tier\x18\x16 \x01(\tR\vrestoreTier\x12!\n" +
-	"\frestore_days\x18\x17 \x01(\rR\vrestoreDays\x12,\n" +
-	"\x12suspect_grace_days\x18\x18 \x01(\rR\x10suspectGraceDays\x12-\n" +
-	"\x12reconcile_schedule\x18\x19 \x01(\tR\x11reconcileScheduleJ\x04\b\f\x10\rJ\x04\b\r\x10\x0eJ\x04\b\x0e\x10\x0f\"+\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"Y\n" +
+	"\x16PutCloudServiceCommand\x12?\n" +
+	"\rcloud_service\x18\x01 \x01(\v2\x1a.gastrolog.v1.CloudServiceR\fcloudService\"+\n" +
 	"\x19DeleteCloudServiceCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"}\n" +
-	"\x1bSetNodeStorageConfigCommand\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12E\n" +
-	"\rfile_storages\x18\x02 \x03(\v2 .gastrolog.v1.FileStorageCommandR\ffileStorages\"\xa7\x01\n" +
-	"\x12FileStorageCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
-	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
-	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
-	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"\xb2\x05\n" +
-	"\x0ePutTierCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
-	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
-	"\x04type\x18\x03 \x01(\tR\x04type\x12,\n" +
-	"\x12rotation_policy_id\x18\x04 \x01(\tR\x10rotationPolicyId\x12I\n" +
-	"\x0fretention_rules\x18\x05 \x03(\v2 .gastrolog.v1.VaultRetentionRuleR\x0eretentionRules\x12.\n" +
-	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\x12#\n" +
-	"\rstorage_class\x18\a \x01(\rR\fstorageClass\x12(\n" +
-	"\x10cloud_service_id\x18\b \x01(\tR\x0ecloudServiceId\x12,\n" +
-	"\x12active_chunk_class\x18\t \x01(\rR\x10activeChunkClass\x12\x1f\n" +
-	"\vcache_class\x18\n" +
-	" \x01(\rR\n" +
-	"cacheClass\x12-\n" +
-	"\x12replication_factor\x18\f \x01(\rR\x11replicationFactor\x12\x12\n" +
-	"\x04path\x18\x0e \x01(\tR\x04path\x12@\n" +
-	"\n" +
-	"placements\x18\x0f \x03(\v2 .gastrolog.v1.TierPlacementEntryR\n" +
-	"placements\x12\x19\n" +
-	"\bvault_id\x18\x10 \x01(\tR\avaultId\x12\x1a\n" +
-	"\bposition\x18\x11 \x01(\rR\bposition\x12%\n" +
-	"\x0ecache_eviction\x18\x12 \x01(\tR\rcacheEviction\x12!\n" +
-	"\fcache_budget\x18\x13 \x01(\tR\vcacheBudget\x12\x1b\n" +
-	"\tcache_ttl\x18\x14 \x01(\tR\bcacheTtl\"M\n" +
-	"\x12TierPlacementEntry\x12\x1d\n" +
-	"\n" +
-	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x18\n" +
-	"\aprimary\x18\x02 \x01(\bR\aprimary\"9\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"a\n" +
+	"\x1bSetNodeStorageConfigCommand\x12B\n" +
+	"\fnode_storage\x18\x01 \x01(\v2\x1f.gastrolog.v1.NodeStorageConfigR\vnodeStorage\">\n" +
+	"\x0ePutTierCommand\x12,\n" +
+	"\x04tier\x18\x01 \x01(\v2\x18.gastrolog.v1.TierConfigR\x04tier\"9\n" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05drain\x18\x02 \x01(\bR\x05drain\"\xae\t\n" +
@@ -3698,7 +3106,7 @@ func file_gastrolog_v1_fsm_proto_rawDescGZIP() []byte {
 	return file_gastrolog_v1_fsm_proto_rawDescData
 }
 
-var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
+var file_gastrolog_v1_fsm_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*ConfigCommand)(nil),                  // 0: gastrolog.v1.ConfigCommand
 	(*PutFilterCommand)(nil),               // 1: gastrolog.v1.PutFilterCommand
@@ -3707,44 +3115,43 @@ var file_gastrolog_v1_fsm_proto_goTypes = []any{
 	(*DeleteRotationPolicyCommand)(nil),    // 4: gastrolog.v1.DeleteRotationPolicyCommand
 	(*PutRetentionPolicyCommand)(nil),      // 5: gastrolog.v1.PutRetentionPolicyCommand
 	(*DeleteRetentionPolicyCommand)(nil),   // 6: gastrolog.v1.DeleteRetentionPolicyCommand
-	(*VaultRetentionRule)(nil),             // 7: gastrolog.v1.VaultRetentionRule
-	(*PutVaultCommand)(nil),                // 8: gastrolog.v1.PutVaultCommand
-	(*DeleteVaultCommand)(nil),             // 9: gastrolog.v1.DeleteVaultCommand
-	(*PutIngesterCommand)(nil),             // 10: gastrolog.v1.PutIngesterCommand
-	(*DeleteIngesterCommand)(nil),          // 11: gastrolog.v1.DeleteIngesterCommand
-	(*PutSettingCommand)(nil),              // 12: gastrolog.v1.PutSettingCommand
-	(*DeleteSettingCommand)(nil),           // 13: gastrolog.v1.DeleteSettingCommand
-	(*PutCertificateCommand)(nil),          // 14: gastrolog.v1.PutCertificateCommand
-	(*DeleteCertificateCommand)(nil),       // 15: gastrolog.v1.DeleteCertificateCommand
-	(*CreateUserCommand)(nil),              // 16: gastrolog.v1.CreateUserCommand
-	(*UpdatePasswordCommand)(nil),          // 17: gastrolog.v1.UpdatePasswordCommand
-	(*UpdateUserRoleCommand)(nil),          // 18: gastrolog.v1.UpdateUserRoleCommand
-	(*UpdateUsernameCommand)(nil),          // 19: gastrolog.v1.UpdateUsernameCommand
-	(*DeleteUserCommand)(nil),              // 20: gastrolog.v1.DeleteUserCommand
-	(*InvalidateTokensCommand)(nil),        // 21: gastrolog.v1.InvalidateTokensCommand
-	(*PutUserPreferencesCommand)(nil),      // 22: gastrolog.v1.PutUserPreferencesCommand
-	(*CreateRefreshTokenCommand)(nil),      // 23: gastrolog.v1.CreateRefreshTokenCommand
-	(*DeleteRefreshTokenCommand)(nil),      // 24: gastrolog.v1.DeleteRefreshTokenCommand
-	(*DeleteUserRefreshTokensCommand)(nil), // 25: gastrolog.v1.DeleteUserRefreshTokensCommand
-	(*PutNodeConfigCommand)(nil),           // 26: gastrolog.v1.PutNodeConfigCommand
-	(*DeleteNodeConfigCommand)(nil),        // 27: gastrolog.v1.DeleteNodeConfigCommand
-	(*PutClusterTLSCommand)(nil),           // 28: gastrolog.v1.PutClusterTLSCommand
-	(*PutRouteCommand)(nil),                // 29: gastrolog.v1.PutRouteCommand
-	(*DeleteRouteCommand)(nil),             // 30: gastrolog.v1.DeleteRouteCommand
-	(*PutManagedFileCommand)(nil),          // 31: gastrolog.v1.PutManagedFileCommand
-	(*DeleteManagedFileCommand)(nil),       // 32: gastrolog.v1.DeleteManagedFileCommand
-	(*CloudServiceTransition)(nil),         // 33: gastrolog.v1.CloudServiceTransition
-	(*PutCloudServiceCommand)(nil),         // 34: gastrolog.v1.PutCloudServiceCommand
-	(*DeleteCloudServiceCommand)(nil),      // 35: gastrolog.v1.DeleteCloudServiceCommand
-	(*SetNodeStorageConfigCommand)(nil),    // 36: gastrolog.v1.SetNodeStorageConfigCommand
-	(*FileStorageCommand)(nil),             // 37: gastrolog.v1.FileStorageCommand
-	(*PutTierCommand)(nil),                 // 38: gastrolog.v1.PutTierCommand
-	(*TierPlacementEntry)(nil),             // 39: gastrolog.v1.TierPlacementEntry
-	(*DeleteTierCommand)(nil),              // 40: gastrolog.v1.DeleteTierCommand
-	(*ConfigSnapshot)(nil),                 // 41: gastrolog.v1.ConfigSnapshot
-	nil,                                    // 42: gastrolog.v1.PutIngesterCommand.ParamsEntry
-	nil,                                    // 43: gastrolog.v1.ConfigSnapshot.SettingsEntry
-	(*timestamppb.Timestamp)(nil),          // 44: google.protobuf.Timestamp
+	(*PutVaultCommand)(nil),                // 7: gastrolog.v1.PutVaultCommand
+	(*DeleteVaultCommand)(nil),             // 8: gastrolog.v1.DeleteVaultCommand
+	(*PutIngesterCommand)(nil),             // 9: gastrolog.v1.PutIngesterCommand
+	(*DeleteIngesterCommand)(nil),          // 10: gastrolog.v1.DeleteIngesterCommand
+	(*PutSettingCommand)(nil),              // 11: gastrolog.v1.PutSettingCommand
+	(*DeleteSettingCommand)(nil),           // 12: gastrolog.v1.DeleteSettingCommand
+	(*PutCertificateCommand)(nil),          // 13: gastrolog.v1.PutCertificateCommand
+	(*DeleteCertificateCommand)(nil),       // 14: gastrolog.v1.DeleteCertificateCommand
+	(*CreateUserCommand)(nil),              // 15: gastrolog.v1.CreateUserCommand
+	(*UpdatePasswordCommand)(nil),          // 16: gastrolog.v1.UpdatePasswordCommand
+	(*UpdateUserRoleCommand)(nil),          // 17: gastrolog.v1.UpdateUserRoleCommand
+	(*UpdateUsernameCommand)(nil),          // 18: gastrolog.v1.UpdateUsernameCommand
+	(*DeleteUserCommand)(nil),              // 19: gastrolog.v1.DeleteUserCommand
+	(*InvalidateTokensCommand)(nil),        // 20: gastrolog.v1.InvalidateTokensCommand
+	(*PutUserPreferencesCommand)(nil),      // 21: gastrolog.v1.PutUserPreferencesCommand
+	(*CreateRefreshTokenCommand)(nil),      // 22: gastrolog.v1.CreateRefreshTokenCommand
+	(*DeleteRefreshTokenCommand)(nil),      // 23: gastrolog.v1.DeleteRefreshTokenCommand
+	(*DeleteUserRefreshTokensCommand)(nil), // 24: gastrolog.v1.DeleteUserRefreshTokensCommand
+	(*PutNodeConfigCommand)(nil),           // 25: gastrolog.v1.PutNodeConfigCommand
+	(*DeleteNodeConfigCommand)(nil),        // 26: gastrolog.v1.DeleteNodeConfigCommand
+	(*PutClusterTLSCommand)(nil),           // 27: gastrolog.v1.PutClusterTLSCommand
+	(*PutRouteCommand)(nil),                // 28: gastrolog.v1.PutRouteCommand
+	(*DeleteRouteCommand)(nil),             // 29: gastrolog.v1.DeleteRouteCommand
+	(*PutManagedFileCommand)(nil),          // 30: gastrolog.v1.PutManagedFileCommand
+	(*DeleteManagedFileCommand)(nil),       // 31: gastrolog.v1.DeleteManagedFileCommand
+	(*PutCloudServiceCommand)(nil),         // 32: gastrolog.v1.PutCloudServiceCommand
+	(*DeleteCloudServiceCommand)(nil),      // 33: gastrolog.v1.DeleteCloudServiceCommand
+	(*SetNodeStorageConfigCommand)(nil),    // 34: gastrolog.v1.SetNodeStorageConfigCommand
+	(*PutTierCommand)(nil),                 // 35: gastrolog.v1.PutTierCommand
+	(*DeleteTierCommand)(nil),              // 36: gastrolog.v1.DeleteTierCommand
+	(*ConfigSnapshot)(nil),                 // 37: gastrolog.v1.ConfigSnapshot
+	nil,                                    // 38: gastrolog.v1.PutIngesterCommand.ParamsEntry
+	nil,                                    // 39: gastrolog.v1.ConfigSnapshot.SettingsEntry
+	(*timestamppb.Timestamp)(nil),          // 40: google.protobuf.Timestamp
+	(*CloudService)(nil),                   // 41: gastrolog.v1.CloudService
+	(*NodeStorageConfig)(nil),              // 42: gastrolog.v1.NodeStorageConfig
+	(*TierConfig)(nil),                     // 43: gastrolog.v1.TierConfig
 }
 var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	1,  // 0: gastrolog.v1.ConfigCommand.put_filter:type_name -> gastrolog.v1.PutFilterCommand
@@ -3753,68 +3160,67 @@ var file_gastrolog_v1_fsm_proto_depIdxs = []int32{
 	4,  // 3: gastrolog.v1.ConfigCommand.delete_rotation_policy:type_name -> gastrolog.v1.DeleteRotationPolicyCommand
 	5,  // 4: gastrolog.v1.ConfigCommand.put_retention_policy:type_name -> gastrolog.v1.PutRetentionPolicyCommand
 	6,  // 5: gastrolog.v1.ConfigCommand.delete_retention_policy:type_name -> gastrolog.v1.DeleteRetentionPolicyCommand
-	8,  // 6: gastrolog.v1.ConfigCommand.put_vault:type_name -> gastrolog.v1.PutVaultCommand
-	9,  // 7: gastrolog.v1.ConfigCommand.delete_vault:type_name -> gastrolog.v1.DeleteVaultCommand
-	10, // 8: gastrolog.v1.ConfigCommand.put_ingester:type_name -> gastrolog.v1.PutIngesterCommand
-	11, // 9: gastrolog.v1.ConfigCommand.delete_ingester:type_name -> gastrolog.v1.DeleteIngesterCommand
-	12, // 10: gastrolog.v1.ConfigCommand.put_setting:type_name -> gastrolog.v1.PutSettingCommand
-	13, // 11: gastrolog.v1.ConfigCommand.delete_setting:type_name -> gastrolog.v1.DeleteSettingCommand
-	14, // 12: gastrolog.v1.ConfigCommand.put_certificate:type_name -> gastrolog.v1.PutCertificateCommand
-	15, // 13: gastrolog.v1.ConfigCommand.delete_certificate:type_name -> gastrolog.v1.DeleteCertificateCommand
-	16, // 14: gastrolog.v1.ConfigCommand.create_user:type_name -> gastrolog.v1.CreateUserCommand
-	17, // 15: gastrolog.v1.ConfigCommand.update_password:type_name -> gastrolog.v1.UpdatePasswordCommand
-	18, // 16: gastrolog.v1.ConfigCommand.update_user_role:type_name -> gastrolog.v1.UpdateUserRoleCommand
-	19, // 17: gastrolog.v1.ConfigCommand.update_username:type_name -> gastrolog.v1.UpdateUsernameCommand
-	20, // 18: gastrolog.v1.ConfigCommand.delete_user:type_name -> gastrolog.v1.DeleteUserCommand
-	21, // 19: gastrolog.v1.ConfigCommand.invalidate_tokens:type_name -> gastrolog.v1.InvalidateTokensCommand
-	22, // 20: gastrolog.v1.ConfigCommand.put_user_preferences:type_name -> gastrolog.v1.PutUserPreferencesCommand
-	23, // 21: gastrolog.v1.ConfigCommand.create_refresh_token:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	24, // 22: gastrolog.v1.ConfigCommand.delete_refresh_token:type_name -> gastrolog.v1.DeleteRefreshTokenCommand
-	25, // 23: gastrolog.v1.ConfigCommand.delete_user_refresh_tokens:type_name -> gastrolog.v1.DeleteUserRefreshTokensCommand
-	26, // 24: gastrolog.v1.ConfigCommand.put_node_config:type_name -> gastrolog.v1.PutNodeConfigCommand
-	27, // 25: gastrolog.v1.ConfigCommand.delete_node_config:type_name -> gastrolog.v1.DeleteNodeConfigCommand
-	28, // 26: gastrolog.v1.ConfigCommand.put_cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	29, // 27: gastrolog.v1.ConfigCommand.put_route:type_name -> gastrolog.v1.PutRouteCommand
-	30, // 28: gastrolog.v1.ConfigCommand.delete_route:type_name -> gastrolog.v1.DeleteRouteCommand
-	31, // 29: gastrolog.v1.ConfigCommand.put_managed_file:type_name -> gastrolog.v1.PutManagedFileCommand
-	32, // 30: gastrolog.v1.ConfigCommand.delete_managed_file:type_name -> gastrolog.v1.DeleteManagedFileCommand
-	34, // 31: gastrolog.v1.ConfigCommand.put_cloud_service:type_name -> gastrolog.v1.PutCloudServiceCommand
-	35, // 32: gastrolog.v1.ConfigCommand.delete_cloud_service:type_name -> gastrolog.v1.DeleteCloudServiceCommand
-	36, // 33: gastrolog.v1.ConfigCommand.set_node_storage_config:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	38, // 34: gastrolog.v1.ConfigCommand.put_tier:type_name -> gastrolog.v1.PutTierCommand
-	40, // 35: gastrolog.v1.ConfigCommand.delete_tier:type_name -> gastrolog.v1.DeleteTierCommand
-	42, // 36: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
-	44, // 37: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
-	44, // 38: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
-	44, // 39: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
-	44, // 40: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
-	44, // 41: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
-	44, // 42: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
-	33, // 43: gastrolog.v1.PutCloudServiceCommand.transitions:type_name -> gastrolog.v1.CloudServiceTransition
-	37, // 44: gastrolog.v1.SetNodeStorageConfigCommand.file_storages:type_name -> gastrolog.v1.FileStorageCommand
-	7,  // 45: gastrolog.v1.PutTierCommand.retention_rules:type_name -> gastrolog.v1.VaultRetentionRule
-	39, // 46: gastrolog.v1.PutTierCommand.placements:type_name -> gastrolog.v1.TierPlacementEntry
-	1,  // 47: gastrolog.v1.ConfigSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
-	3,  // 48: gastrolog.v1.ConfigSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
-	5,  // 49: gastrolog.v1.ConfigSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
-	8,  // 50: gastrolog.v1.ConfigSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
-	10, // 51: gastrolog.v1.ConfigSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
-	43, // 52: gastrolog.v1.ConfigSnapshot.settings:type_name -> gastrolog.v1.ConfigSnapshot.SettingsEntry
-	14, // 53: gastrolog.v1.ConfigSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
-	16, // 54: gastrolog.v1.ConfigSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
-	23, // 55: gastrolog.v1.ConfigSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
-	26, // 56: gastrolog.v1.ConfigSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
-	28, // 57: gastrolog.v1.ConfigSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
-	29, // 58: gastrolog.v1.ConfigSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
-	31, // 59: gastrolog.v1.ConfigSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
-	34, // 60: gastrolog.v1.ConfigSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
-	36, // 61: gastrolog.v1.ConfigSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
-	38, // 62: gastrolog.v1.ConfigSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
-	63, // [63:63] is the sub-list for method output_type
-	63, // [63:63] is the sub-list for method input_type
-	63, // [63:63] is the sub-list for extension type_name
-	63, // [63:63] is the sub-list for extension extendee
-	0,  // [0:63] is the sub-list for field type_name
+	7,  // 6: gastrolog.v1.ConfigCommand.put_vault:type_name -> gastrolog.v1.PutVaultCommand
+	8,  // 7: gastrolog.v1.ConfigCommand.delete_vault:type_name -> gastrolog.v1.DeleteVaultCommand
+	9,  // 8: gastrolog.v1.ConfigCommand.put_ingester:type_name -> gastrolog.v1.PutIngesterCommand
+	10, // 9: gastrolog.v1.ConfigCommand.delete_ingester:type_name -> gastrolog.v1.DeleteIngesterCommand
+	11, // 10: gastrolog.v1.ConfigCommand.put_setting:type_name -> gastrolog.v1.PutSettingCommand
+	12, // 11: gastrolog.v1.ConfigCommand.delete_setting:type_name -> gastrolog.v1.DeleteSettingCommand
+	13, // 12: gastrolog.v1.ConfigCommand.put_certificate:type_name -> gastrolog.v1.PutCertificateCommand
+	14, // 13: gastrolog.v1.ConfigCommand.delete_certificate:type_name -> gastrolog.v1.DeleteCertificateCommand
+	15, // 14: gastrolog.v1.ConfigCommand.create_user:type_name -> gastrolog.v1.CreateUserCommand
+	16, // 15: gastrolog.v1.ConfigCommand.update_password:type_name -> gastrolog.v1.UpdatePasswordCommand
+	17, // 16: gastrolog.v1.ConfigCommand.update_user_role:type_name -> gastrolog.v1.UpdateUserRoleCommand
+	18, // 17: gastrolog.v1.ConfigCommand.update_username:type_name -> gastrolog.v1.UpdateUsernameCommand
+	19, // 18: gastrolog.v1.ConfigCommand.delete_user:type_name -> gastrolog.v1.DeleteUserCommand
+	20, // 19: gastrolog.v1.ConfigCommand.invalidate_tokens:type_name -> gastrolog.v1.InvalidateTokensCommand
+	21, // 20: gastrolog.v1.ConfigCommand.put_user_preferences:type_name -> gastrolog.v1.PutUserPreferencesCommand
+	22, // 21: gastrolog.v1.ConfigCommand.create_refresh_token:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	23, // 22: gastrolog.v1.ConfigCommand.delete_refresh_token:type_name -> gastrolog.v1.DeleteRefreshTokenCommand
+	24, // 23: gastrolog.v1.ConfigCommand.delete_user_refresh_tokens:type_name -> gastrolog.v1.DeleteUserRefreshTokensCommand
+	25, // 24: gastrolog.v1.ConfigCommand.put_node_config:type_name -> gastrolog.v1.PutNodeConfigCommand
+	26, // 25: gastrolog.v1.ConfigCommand.delete_node_config:type_name -> gastrolog.v1.DeleteNodeConfigCommand
+	27, // 26: gastrolog.v1.ConfigCommand.put_cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	28, // 27: gastrolog.v1.ConfigCommand.put_route:type_name -> gastrolog.v1.PutRouteCommand
+	29, // 28: gastrolog.v1.ConfigCommand.delete_route:type_name -> gastrolog.v1.DeleteRouteCommand
+	30, // 29: gastrolog.v1.ConfigCommand.put_managed_file:type_name -> gastrolog.v1.PutManagedFileCommand
+	31, // 30: gastrolog.v1.ConfigCommand.delete_managed_file:type_name -> gastrolog.v1.DeleteManagedFileCommand
+	32, // 31: gastrolog.v1.ConfigCommand.put_cloud_service:type_name -> gastrolog.v1.PutCloudServiceCommand
+	33, // 32: gastrolog.v1.ConfigCommand.delete_cloud_service:type_name -> gastrolog.v1.DeleteCloudServiceCommand
+	34, // 33: gastrolog.v1.ConfigCommand.set_node_storage_config:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	35, // 34: gastrolog.v1.ConfigCommand.put_tier:type_name -> gastrolog.v1.PutTierCommand
+	36, // 35: gastrolog.v1.ConfigCommand.delete_tier:type_name -> gastrolog.v1.DeleteTierCommand
+	38, // 36: gastrolog.v1.PutIngesterCommand.params:type_name -> gastrolog.v1.PutIngesterCommand.ParamsEntry
+	40, // 37: gastrolog.v1.CreateUserCommand.token_invalidated_at:type_name -> google.protobuf.Timestamp
+	40, // 38: gastrolog.v1.CreateUserCommand.created_at:type_name -> google.protobuf.Timestamp
+	40, // 39: gastrolog.v1.CreateUserCommand.updated_at:type_name -> google.protobuf.Timestamp
+	40, // 40: gastrolog.v1.InvalidateTokensCommand.at:type_name -> google.protobuf.Timestamp
+	40, // 41: gastrolog.v1.CreateRefreshTokenCommand.expires_at:type_name -> google.protobuf.Timestamp
+	40, // 42: gastrolog.v1.CreateRefreshTokenCommand.created_at:type_name -> google.protobuf.Timestamp
+	41, // 43: gastrolog.v1.PutCloudServiceCommand.cloud_service:type_name -> gastrolog.v1.CloudService
+	42, // 44: gastrolog.v1.SetNodeStorageConfigCommand.node_storage:type_name -> gastrolog.v1.NodeStorageConfig
+	43, // 45: gastrolog.v1.PutTierCommand.tier:type_name -> gastrolog.v1.TierConfig
+	1,  // 46: gastrolog.v1.ConfigSnapshot.filters:type_name -> gastrolog.v1.PutFilterCommand
+	3,  // 47: gastrolog.v1.ConfigSnapshot.rotation_policies:type_name -> gastrolog.v1.PutRotationPolicyCommand
+	5,  // 48: gastrolog.v1.ConfigSnapshot.retention_policies:type_name -> gastrolog.v1.PutRetentionPolicyCommand
+	7,  // 49: gastrolog.v1.ConfigSnapshot.vaults:type_name -> gastrolog.v1.PutVaultCommand
+	9,  // 50: gastrolog.v1.ConfigSnapshot.ingesters:type_name -> gastrolog.v1.PutIngesterCommand
+	39, // 51: gastrolog.v1.ConfigSnapshot.settings:type_name -> gastrolog.v1.ConfigSnapshot.SettingsEntry
+	13, // 52: gastrolog.v1.ConfigSnapshot.certificates:type_name -> gastrolog.v1.PutCertificateCommand
+	15, // 53: gastrolog.v1.ConfigSnapshot.users:type_name -> gastrolog.v1.CreateUserCommand
+	22, // 54: gastrolog.v1.ConfigSnapshot.refresh_tokens:type_name -> gastrolog.v1.CreateRefreshTokenCommand
+	25, // 55: gastrolog.v1.ConfigSnapshot.node_configs:type_name -> gastrolog.v1.PutNodeConfigCommand
+	27, // 56: gastrolog.v1.ConfigSnapshot.cluster_tls:type_name -> gastrolog.v1.PutClusterTLSCommand
+	28, // 57: gastrolog.v1.ConfigSnapshot.routes:type_name -> gastrolog.v1.PutRouteCommand
+	30, // 58: gastrolog.v1.ConfigSnapshot.managed_files:type_name -> gastrolog.v1.PutManagedFileCommand
+	32, // 59: gastrolog.v1.ConfigSnapshot.cloud_services:type_name -> gastrolog.v1.PutCloudServiceCommand
+	34, // 60: gastrolog.v1.ConfigSnapshot.node_storage_configs:type_name -> gastrolog.v1.SetNodeStorageConfigCommand
+	35, // 61: gastrolog.v1.ConfigSnapshot.tiers:type_name -> gastrolog.v1.PutTierCommand
+	62, // [62:62] is the sub-list for method output_type
+	62, // [62:62] is the sub-list for method input_type
+	62, // [62:62] is the sub-list for extension type_name
+	62, // [62:62] is the sub-list for extension extendee
+	0,  // [0:62] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_fsm_proto_init() }
@@ -3822,6 +3228,8 @@ func file_gastrolog_v1_fsm_proto_init() {
 	if File_gastrolog_v1_fsm_proto != nil {
 		return
 	}
+	file_gastrolog_v1_config_proto_init()
+	file_gastrolog_v1_storage_proto_init()
 	file_gastrolog_v1_fsm_proto_msgTypes[0].OneofWrappers = []any{
 		(*ConfigCommand_PutFilter)(nil),
 		(*ConfigCommand_DeleteFilter)(nil),
@@ -3868,7 +3276,7 @@ func file_gastrolog_v1_fsm_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_fsm_proto_rawDesc), len(file_gastrolog_v1_fsm_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   44,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
