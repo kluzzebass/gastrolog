@@ -8,9 +8,9 @@ const mocks = installMockClients();
 import { useSavedQueries, usePutSavedQuery, useDeleteSavedQuery } from "./useSavedQueries";
 
 beforeEach(() => {
-  m(mocks.configClient, "getSavedQueries").mockClear();
-  m(mocks.configClient, "putSavedQuery").mockClear();
-  m(mocks.configClient, "deleteSavedQuery").mockClear();
+  m(mocks.systemClient, "getSavedQueries").mockClear();
+  m(mocks.systemClient, "putSavedQuery").mockClear();
+  m(mocks.systemClient, "deleteSavedQuery").mockClear();
 });
 
 describe("useSavedQueries", () => {
@@ -19,7 +19,7 @@ describe("useSavedQueries", () => {
       { name: "errors", query: "level=error" },
       { name: "slow", query: "duration>1000" },
     ];
-    m(mocks.configClient, "getSavedQueries").mockResolvedValueOnce({ queries });
+    m(mocks.systemClient, "getSavedQueries").mockResolvedValueOnce({ queries });
 
     const { result } = renderHook(() => useSavedQueries(), { wrapper: wrapper() });
 
@@ -30,7 +30,7 @@ describe("useSavedQueries", () => {
 
 describe("usePutSavedQuery", () => {
   test("saves query and invalidates cache", async () => {
-    m(mocks.configClient, "putSavedQuery").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putSavedQuery").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["savedQueries"], []);
 
@@ -40,7 +40,7 @@ describe("usePutSavedQuery", () => {
       await result.current.mutateAsync({ name: "errors", query: "level=error" });
     });
 
-    expect(m(mocks.configClient, "putSavedQuery")).toHaveBeenCalledWith({
+    expect(m(mocks.systemClient, "putSavedQuery")).toHaveBeenCalledWith({
       query: { name: "errors", query: "level=error" },
     });
     expect(qc.getQueryState(["savedQueries"])?.isInvalidated).toBe(true);
@@ -49,7 +49,7 @@ describe("usePutSavedQuery", () => {
 
 describe("useDeleteSavedQuery", () => {
   test("deletes query by name", async () => {
-    m(mocks.configClient, "deleteSavedQuery").mockResolvedValueOnce({});
+    m(mocks.systemClient, "deleteSavedQuery").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["savedQueries"], []);
 
@@ -59,6 +59,6 @@ describe("useDeleteSavedQuery", () => {
       await result.current.mutateAsync("errors");
     });
 
-    expect(m(mocks.configClient, "deleteSavedQuery")).toHaveBeenCalledWith({ name: "errors" });
+    expect(m(mocks.systemClient, "deleteSavedQuery")).toHaveBeenCalledWith({ name: "errors" });
   });
 });

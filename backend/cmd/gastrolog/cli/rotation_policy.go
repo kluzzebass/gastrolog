@@ -34,7 +34,7 @@ func newRotationPolicyListCmd() *cobra.Command {
 		Short: "List all rotation policies",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -65,7 +65,7 @@ func newRotationPolicyGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -114,7 +114,7 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 				Name: name,
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -144,7 +144,7 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 				cfg.Cron, _ = cmd.Flags().GetString("cron")
 			}
 
-			_, err = client.Config.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
+			_, err = client.System.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -181,7 +181,7 @@ func newRotationPolicyDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteRotationPolicy(context.Background(), connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: id}))
+			_, err = client.System.DeleteRotationPolicy(context.Background(), connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: id}))
 			if err != nil {
 				return err
 			}

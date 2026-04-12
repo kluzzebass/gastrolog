@@ -6,7 +6,7 @@ import (
 	"fmt"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -193,7 +193,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 }
 
 // drainTierChunks transfers all sealed chunks from the tier. Returns false if cancelled.
-func (o *Orchestrator) drainTierChunks(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, tier *TierInstance, mode TierDrainMode, targetNodeID string) bool {
+func (o *Orchestrator) drainTierChunks(ctx context.Context, cfg *system.Config, vaultID, tierID uuid.UUID, tier *TierInstance, mode TierDrainMode, targetNodeID string) bool {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		o.logger.Error("tier drain: list chunks failed", "vault", vaultID, "tier", tierID, "error", err)
@@ -237,7 +237,7 @@ func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
 }
 
 // drainOneChunk transfers a single chunk and deletes the source.
-func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
+func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *system.Config, vaultID, tierID uuid.UUID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
 	cursor, err := tier.Chunks.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -299,7 +299,7 @@ func (o *Orchestrator) finishTierDrain(vaultID, tierID uuid.UUID) {
 	}
 
 	// Notify the dispatch layer to remove the tier from the vault's tier
-	// list in config. This fires a vault-put through Raft, causing all
+	// list in system. This fires a vault-put through Raft, causing all
 	// nodes to rebuild the vault without the drained tier.
 	if o.OnTierDrainComplete != nil {
 		o.OnTierDrainComplete(context.Background(), vaultID, tierID)
@@ -359,7 +359,7 @@ func (o *Orchestrator) IsTierDraining(vaultID, tierID uuid.UUID) bool {
 
 // drainChunkToNextTier streams a chunk to the next tier in the vault chain.
 // If the tier is terminal, returns nil (chunk will just be deleted).
-func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, cfg *config.Config, vaultID, tierID uuid.UUID, cursor chunk.RecordCursor) error {
+func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, cfg *system.Config, vaultID, tierID uuid.UUID, cursor chunk.RecordCursor) error {
 	nextTierID, nextTierCfg, _ := resolveNextTierInChain(cfg, vaultID, tierID)
 	if nextTierCfg == nil {
 		return nil // terminal tier — caller deletes the chunk

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useClickOutside } from "../hooks/useClickOutside";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { clickableProps } from "../utils";
-import type { SavedQuery } from "../api/gen/gastrolog/v1/config_pb";
+import type { SavedQuery } from "../api/gen/gastrolog/v1/system_pb";
 
 export function SavedQueries({
   queries,

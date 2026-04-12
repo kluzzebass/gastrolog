@@ -40,7 +40,7 @@ export function useUploadManagedFile() {
     onSuccess: () => {
       // The backend fires configSignal.Notify() which pushes via
       // WatchConfig, but invalidate eagerly for snappy feedback.
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
     },
   });

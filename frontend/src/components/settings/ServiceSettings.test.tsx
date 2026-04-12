@@ -28,9 +28,9 @@ const sampleSettings = {
 };
 
 beforeEach(() => {
-  m(mocks.configClient, "getSettings").mockClear();
-  m(mocks.configClient, "putSettings").mockClear();
-  m(mocks.configClient, "listCertificates").mockClear();
+  m(mocks.systemClient, "getSettings").mockClear();
+  m(mocks.systemClient, "putSettings").mockClear();
+  m(mocks.systemClient, "listCertificates").mockClear();
 });
 
 describe("ServiceSettings", () => {

@@ -1,8 +1,8 @@
-import { configClient } from "../client";
-import { useConfigMutation } from "./useConfig";
+import { systemClient } from "../client";
+import { useSystemMutation } from "./useSystem";
 
 export function usePutRoute() {
-  return useConfigMutation(
+  return useSystemMutation(
     async (args: {
       id: string;
       name: string;
@@ -12,7 +12,7 @@ export function usePutRoute() {
       enabled: boolean;
       ejectOnly: boolean;
     }) => {
-      return configClient.putRoute({
+      return systemClient.putRoute({
         config: {
           id: args.id,
           name: args.name,
@@ -28,7 +28,7 @@ export function usePutRoute() {
 }
 
 export function useDeleteRoute() {
-  return useConfigMutation(async (id: string) => {
-    return configClient.deleteRoute({ id });
+  return useSystemMutation(async (id: string) => {
+    return systemClient.deleteRoute({ id });
   });
 }

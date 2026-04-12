@@ -29,7 +29,7 @@ type resolver struct {
 
 // newResolver fetches the full config and user list, building name→ID maps.
 func newResolver(ctx context.Context, client *server.Client) (*resolver, error) {
-	resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+	resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
 		return nil, fmt.Errorf("get config: %w", err)
 	}
@@ -78,7 +78,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	}
 
 	// Certs via ListCertificates.
-	certResp, err := client.Config.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
+	certResp, err := client.System.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
 	if err == nil {
 		for _, c := range certResp.Msg.Certificates {
 			r.certs[strings.ToLower(c.Name)] = c.Id

@@ -12,7 +12,7 @@ import (
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/auth"
-	configmem "gastrolog/internal/config/memory"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/server"
 )
 
@@ -20,7 +20,7 @@ import (
 // then verifies that an unauthenticated query request is denied.
 func TestIntegration_RegisterThenDenyQuery(t *testing.T) {
 	t.Parallel()
-	cfgStore := configmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	tokens := auth.NewTokenService([]byte("test-secret-key-32-bytes-long!!"), 7*24*time.Hour)
 	interceptor := auth.NewAuthInterceptor(tokens, cfgStore, nil)
 	opts := connect.WithInterceptors(interceptor)

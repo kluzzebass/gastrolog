@@ -3,7 +3,7 @@ syntax = "proto3";
 package gastrolog.v1;
 
 import "gastrolog/v1/cluster.proto";
-import "gastrolog/v1/config.proto";
+import "gastrolog/v1/system.proto";
 import "gastrolog/v1/vault.proto";
 
 option go_package = "gastrolog/api/gen/gastrolog/v1;gastrologv1";

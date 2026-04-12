@@ -13,8 +13,8 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -84,12 +84,12 @@ func (d *mnTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID)
 	return nil
 }
 
-// mnConfigLoader wraps a config.Store to implement orchestrator.ConfigLoader.
+// mnConfigLoader wraps a system.Store to implement orchestrator.ConfigLoader.
 type mnConfigLoader struct {
-	store *cfgmem.Store
+	store *sysmem.Store
 }
 
-func (l *mnConfigLoader) Load(ctx context.Context) (*config.Config, error) {
+func (l *mnConfigLoader) Load(ctx context.Context) (*system.Config, error) {
 	return l.store.Load(ctx)
 }
 
@@ -115,24 +115,24 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	tier0ID := uuid.Must(uuid.NewV7())
 	tier1ID := uuid.Must(uuid.NewV7())
 
-	cfgStore := cfgmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	ctx := context.Background()
 
-	_ = cfgStore.PutTier(ctx, config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeFile,
+	_ = cfgStore.PutTier(ctx, system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 0,
-		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID("data-1"), Leader: true},
+		Placements: []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID("data-1"), Leader: true},
 		},
 	})
-	_ = cfgStore.PutTier(ctx, config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeFile,
+	_ = cfgStore.PutTier(ctx, system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 1,
-		Placements: []config.TierPlacement{
-			{StorageID: config.SyntheticStorageID("data-1"), Leader: true},
+		Placements: []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID("data-1"), Leader: true},
 		},
 	})
-	_ = cfgStore.PutVault(ctx, config.VaultConfig{
+	_ = cfgStore.PutVault(ctx, system.VaultConfig{
 		ID: vaultID, Name: "tiered-vault",
 	})
 

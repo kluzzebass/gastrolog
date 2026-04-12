@@ -3,9 +3,9 @@ import { useNavigate } from "@tanstack/react-router";
 import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
-import { configClient } from "../../api/client";
+import { systemClient } from "../../api/client";
 import { usePutSettings } from "../../api/hooks/useSettings";
-import { useGenerateName } from "../../api/hooks/useConfig";
+import { useGenerateName } from "../../api/hooks/useSystem";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../settings/Buttons";
 import { WelcomeStep } from "./WelcomeStep";
@@ -149,13 +149,13 @@ export function SetupWizard() {
 
     // Build policy promises outside try so the compiler can optimize conditionals.
     const policyPromises: Promise<unknown>[] = [
-      configClient.putFilter({
+      systemClient.putFilter({
         config: { id: filterId, name: "catch-all", expression: "*" },
       }),
     ];
     if (rotationId) {
       policyPromises.push(
-        configClient.putRotationPolicy({
+        systemClient.putRotationPolicy({
           config: {
             id: rotationId,
             name: rotationName,
@@ -169,7 +169,7 @@ export function SetupWizard() {
     }
     if (retentionId) {
       policyPromises.push(
-        configClient.putRetentionPolicy({
+        systemClient.putRetentionPolicy({
           config: {
             id: retentionId,
             name: retentionName,
@@ -186,7 +186,7 @@ export function SetupWizard() {
       await Promise.all(policyPromises);
 
       // 2. Create vault (tier assignment will be handled in a follow-up).
-      await configClient.putVault({
+      await systemClient.putVault({
         config: {
           id: vaultId,
           name: vaultName,
@@ -196,7 +196,7 @@ export function SetupWizard() {
 
       // 3. Create route + ingester in parallel (route references filter + vault).
       await Promise.all([
-        configClient.putRoute({
+        systemClient.putRoute({
           config: {
             id: crypto.randomUUID(),
             name: "default",
@@ -206,7 +206,7 @@ export function SetupWizard() {
             enabled: true,
           },
         }),
-        configClient.putIngester({
+        systemClient.putIngester({
           config: {
             id: ingesterId,
             name: ingesterName,
@@ -224,7 +224,7 @@ export function SetupWizard() {
         if (!old) return old;
         return { ...old, setupWizardDismissed: true };
       });
-      await queryClient.invalidateQueries({ queryKey: ["config"], refetchType: "all" });
+      await queryClient.invalidateQueries({ queryKey: ["system"], refetchType: "all" });
       addToast("Configuration created successfully!", "info");
       setCreating(false);
       navigate({ to: "/search", search: { q: "", help: undefined, settings: undefined, inspector: undefined } });

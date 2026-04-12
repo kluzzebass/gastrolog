@@ -8,7 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
@@ -59,7 +59,7 @@ func TestStopWaitsForAckGoroutines(t *testing.T) {
 		Chunks:           cm,
 		Indexes:          im,
 		Query:            qe,
-		FollowerTargets: []config.ReplicationTarget{{NodeID: "node-2"}},
+		FollowerTargets: []system.ReplicationTarget{{NodeID: "node-2"}},
 	}
 	vault := NewVault(vaultID, tier)
 	vault.Name = "ack-test"

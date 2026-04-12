@@ -32,11 +32,11 @@ const sampleConfig = {
 };
 
 beforeEach(() => {
-  m(mocks.configClient, "getConfig").mockClear();
-  m(mocks.configClient, "putVault").mockClear();
-  m(mocks.configClient, "putTier").mockClear();
-  m(mocks.configClient, "deleteVault").mockClear();
-  m(mocks.configClient, "generateName").mockClear();
+  m(mocks.systemClient, "getConfig").mockClear();
+  m(mocks.systemClient, "putVault").mockClear();
+  m(mocks.systemClient, "putTier").mockClear();
+  m(mocks.systemClient, "deleteVault").mockClear();
+  m(mocks.systemClient, "generateName").mockClear();
   m(mocks.vaultClient, "sealVault").mockClear();
   m(mocks.vaultClient, "reindexVault").mockClear();
 });
@@ -44,7 +44,7 @@ beforeEach(() => {
 describe("VaultsSettings", () => {
   test("renders empty state when no vaults", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
+    qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -55,7 +55,7 @@ describe("VaultsSettings", () => {
 
   test("renders vault cards with names and type badges", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -69,7 +69,7 @@ describe("VaultsSettings", () => {
 
   test("shows disabled badge for disabled vaults", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -81,7 +81,7 @@ describe("VaultsSettings", () => {
 
   test("warns about missing tiers", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -93,7 +93,7 @@ describe("VaultsSettings", () => {
 
   test("expand vault shows edit form and action buttons", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText, getByDisplayValue } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -115,7 +115,7 @@ describe("VaultsSettings", () => {
 
   test("save button disabled when not dirty", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -129,7 +129,7 @@ describe("VaultsSettings", () => {
   test("rotate calls sealVault API", async () => {
     m(mocks.vaultClient, "sealVault").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -146,7 +146,7 @@ describe("VaultsSettings", () => {
   test("reindex calls reindexVault API", async () => {
     m(mocks.vaultClient, "reindexVault").mockResolvedValueOnce({ jobId: "j1" });
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -162,7 +162,7 @@ describe("VaultsSettings", () => {
 
   test("migrate button toggles migrate form", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -178,7 +178,7 @@ describe("VaultsSettings", () => {
 
   test("merge button toggles merge form", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -193,9 +193,9 @@ describe("VaultsSettings", () => {
   });
 
   test("deletes vault via confirm flow", async () => {
-    m(mocks.configClient, "deleteVault").mockResolvedValueOnce({});
+    m(mocks.systemClient, "deleteVault").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -206,14 +206,14 @@ describe("VaultsSettings", () => {
     fireEvent.click(getByText("Yes"));
 
     await waitFor(() => {
-      expect(m(mocks.configClient, "deleteVault")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "deleteVault")).toHaveBeenCalledTimes(1);
     });
   });
 
   test("opens add form via button click", async () => {
-    m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
+    qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -228,9 +228,9 @@ describe("VaultsSettings", () => {
   });
 
   test("create button disabled with no tiers", async () => {
-    m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
+    qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -244,9 +244,9 @@ describe("VaultsSettings", () => {
   });
 
   test("create vault with memory tier calls putVault then putTier", async () => {
-    m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
-    m(mocks.configClient, "putVault").mockResolvedValueOnce({});
-    m(mocks.configClient, "putTier").mockResolvedValueOnce({
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "happy-fox" });
+    m(mocks.systemClient, "putVault").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putTier").mockResolvedValueOnce({
       config: {
         ...sampleConfig,
         tiers: [
@@ -256,7 +256,7 @@ describe("VaultsSettings", () => {
       },
     });
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], { ...sampleConfig, vaults: [] });
+    qc.setQueryData(["system"], { ...sampleConfig, vaults: [] });
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -276,15 +276,15 @@ describe("VaultsSettings", () => {
     fireEvent.click(createBtn);
 
     await waitFor(() => {
-      expect(m(mocks.configClient, "putTier")).toHaveBeenCalledTimes(1);
-      expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "putTier")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
     });
   });
 });
 
 // ── handleSaveAll tests ──────────────────────────────────────────────
 
-import { TierConfig, RetentionRule, TierType } from "../../api/gen/gastrolog/v1/config_pb";
+import { TierConfig, RetentionRule, TierType } from "../../api/gen/gastrolog/v1/system_pb";
 
 // Config with a vault that has two tiers — enough to test multi-tier updates.
 // Uses real TierConfig proto instances so .clone() works in updateExistingTiers.
@@ -310,9 +310,9 @@ function expandVault(getByText: (text: string | RegExp) => HTMLElement) {
 
 describe("handleSaveAll", () => {
   beforeEach(() => {
-    m(mocks.configClient, "putVault").mockClear();
-    m(mocks.configClient, "putTier").mockClear();
-    m(mocks.configClient, "deleteTier").mockClear();
+    m(mocks.systemClient, "putVault").mockClear();
+    m(mocks.systemClient, "putTier").mockClear();
+    m(mocks.systemClient, "deleteTier").mockClear();
   });
 
   // ── Happy path ────────────────────────────────────────────────────
@@ -322,9 +322,9 @@ describe("handleSaveAll", () => {
   // to dirty the form instead.
 
   test("saves vault enabled toggle", async () => {
-    m(mocks.configClient, "putVault").mockResolvedValue({});
+    m(mocks.systemClient, "putVault").mockResolvedValue({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], twoTierConfig);
+    qc.setQueryData(["system"], twoTierConfig);
 
     const { getByText, container } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -344,17 +344,17 @@ describe("handleSaveAll", () => {
     fireEvent.click(getByText("Save").closest("button")!);
 
     await waitFor(() => {
-      expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(1);
-      const call = m(mocks.configClient, "putVault").mock.calls[0]! as unknown[];
+      expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
+      const call = m(mocks.systemClient, "putVault").mock.calls[0]! as unknown[];
       const arg = call[0] as Record<string, Record<string, unknown>>;
       expect(arg.config!.enabled).toBe(false);
     });
   });
 
   test("saves tier rotation policy change via select", async () => {
-    m(mocks.configClient, "putTier").mockResolvedValue({});
+    m(mocks.systemClient, "putTier").mockResolvedValue({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], twoTierConfig);
+    qc.setQueryData(["system"], twoTierConfig);
 
     const { getByText, container } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -375,17 +375,17 @@ describe("handleSaveAll", () => {
     fireEvent.click(getByText("Save").closest("button")!);
 
     await waitFor(() => {
-      expect(m(mocks.configClient, "putTier")).toHaveBeenCalled();
+      expect(m(mocks.systemClient, "putTier")).toHaveBeenCalled();
     });
   });
 
   // ── Unhappy path — tier creation failure aborts save ──────────────
 
   test("tier creation failure aborts entire save", async () => {
-    m(mocks.configClient, "putTier").mockRejectedValueOnce(new Error("tier create failed"));
-    m(mocks.configClient, "putVault").mockResolvedValue({});
+    m(mocks.systemClient, "putTier").mockRejectedValueOnce(new Error("tier create failed"));
+    m(mocks.systemClient, "putVault").mockResolvedValue({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], twoTierConfig);
+    qc.setQueryData(["system"], twoTierConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -406,22 +406,22 @@ describe("handleSaveAll", () => {
 
     await waitFor(() => {
       // putTier was called (for the new tier) and failed
-      expect(m(mocks.configClient, "putTier")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "putTier")).toHaveBeenCalledTimes(1);
     });
 
     // Vault save should NOT have been called — creation failure aborts
-    expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(0);
+    expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(0);
   });
 
   // ── Unhappy path — tier update failure doesn't reset edit state ───
 
   test("tier update failure toasts error and preserves edit state", async () => {
     // putTier fails on the first tier update
-    m(mocks.configClient, "putTier").mockRejectedValue(new Error("tier update failed"));
-    m(mocks.configClient, "putVault").mockResolvedValue({});
+    m(mocks.systemClient, "putTier").mockRejectedValue(new Error("tier update failed"));
+    m(mocks.systemClient, "putVault").mockResolvedValue({});
 
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], twoTierConfig);
+    qc.setQueryData(["system"], twoTierConfig);
 
     const { getByText, container } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -447,18 +447,18 @@ describe("handleSaveAll", () => {
 
     await waitFor(() => {
       // putTier was attempted (and failed)
-      expect(m(mocks.configClient, "putTier")).toHaveBeenCalled();
+      expect(m(mocks.systemClient, "putTier")).toHaveBeenCalled();
       // Vault save still runs (we continue despite tier failures)
-      expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(1);
     });
   });
 
   // ── Unhappy path — removal failure toasts and continues ───────────
 
   test("tier removal failure toasts error", async () => {
-    m(mocks.configClient, "deleteTier").mockRejectedValueOnce(new Error("delete failed"));
+    m(mocks.systemClient, "deleteTier").mockRejectedValueOnce(new Error("delete failed"));
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], twoTierConfig);
+    qc.setQueryData(["system"], twoTierConfig);
 
     const { getByText, getAllByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -485,7 +485,7 @@ describe("handleSaveAll", () => {
       fireEvent.click(saveBtn);
 
       await waitFor(() => {
-        expect(m(mocks.configClient, "deleteTier")).toHaveBeenCalled();
+        expect(m(mocks.systemClient, "deleteTier")).toHaveBeenCalled();
       });
     }
   });
@@ -494,7 +494,7 @@ describe("handleSaveAll", () => {
 
   test("save button stays disabled when nothing is dirty", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], twoTierConfig);
+    qc.setQueryData(["system"], twoTierConfig);
 
     const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -505,7 +505,7 @@ describe("handleSaveAll", () => {
     const saveBtn = getByText("Save").closest("button")!;
     expect(saveBtn.disabled).toBe(true);
     // No API calls should have been made
-    expect(m(mocks.configClient, "putVault")).toHaveBeenCalledTimes(0);
-    expect(m(mocks.configClient, "putTier")).toHaveBeenCalledTimes(0);
+    expect(m(mocks.systemClient, "putVault")).toHaveBeenCalledTimes(0);
+    expect(m(mocks.systemClient, "putTier")).toHaveBeenCalledTimes(0);
   });
 });

@@ -8,8 +8,8 @@ const mocks = installMockClients();
 import { usePreferences, usePutPreferences } from "./usePreferences";
 
 beforeEach(() => {
-  m(mocks.configClient, "getPreferences").mockClear();
-  m(mocks.configClient, "putPreferences").mockClear();
+  m(mocks.systemClient, "getPreferences").mockClear();
+  m(mocks.systemClient, "putPreferences").mockClear();
 });
 
 describe("usePreferences", () => {
@@ -25,7 +25,7 @@ describe("usePreferences", () => {
 
 describe("usePutPreferences", () => {
   test("sends preferences and invalidates cache", async () => {
-    m(mocks.configClient, "putPreferences").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putPreferences").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["preferences"], {});
 
@@ -39,7 +39,7 @@ describe("usePutPreferences", () => {
       });
     });
 
-    expect(m(mocks.configClient, "putPreferences")).toHaveBeenCalledWith({
+    expect(m(mocks.systemClient, "putPreferences")).toHaveBeenCalledWith({
       theme: "dark",
       syntaxHighlight: "full",
       palette: "nord",

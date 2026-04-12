@@ -15,7 +15,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
@@ -207,7 +207,7 @@ func (s *QueryServer) runExportJob(
 }
 
 // resolveTargetVault resolves a target string to a vault UUID.
-// Tries UUID parse first, then name lookup in config.
+// Tries UUID parse first, then name lookup in system.
 func (s *QueryServer) resolveTargetVault(ctx context.Context, target string) (uuid.UUID, string, *connect.Error) {
 	// Try UUID first.
 	if id, err := uuid.Parse(target); err == nil {
@@ -223,7 +223,7 @@ func (s *QueryServer) resolveTargetVault(ctx context.Context, target string) (uu
 		return uuid.Nil, "", connect.NewError(connect.CodeInternal, fmt.Errorf("list vaults: %w", err))
 	}
 
-	var matches []config.VaultConfig
+	var matches []system.VaultConfig
 	for _, vc := range allVaults {
 		if strings.EqualFold(vc.Name, target) {
 			matches = append(matches, vc)

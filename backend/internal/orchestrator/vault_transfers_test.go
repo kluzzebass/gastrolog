@@ -12,7 +12,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/orchestrator"
 )
@@ -92,10 +92,10 @@ func (m *mockTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultI
 
 // staticConfigLoader implements orchestrator.ConfigLoader for tests.
 type staticConfigLoader struct {
-	cfg *config.Config
+	cfg *system.Config
 }
 
-func (f *staticConfigLoader) Load(_ context.Context) (*config.Config, error) {
+func (f *staticConfigLoader) Load(_ context.Context) (*system.Config, error) {
 	return f.cfg, nil
 }
 
@@ -163,8 +163,8 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 
 	srcCM, srcIM := newFileVault(t)
 
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &staticConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: dstID},
 		},
 	}}
@@ -397,14 +397,14 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 
 	cm := newMemVault(t)
 
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &staticConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -503,14 +503,14 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 
 	cm := newMemVault(t)
 
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &staticConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -633,14 +633,14 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 
 	cm := newMemVault(t)
 
-	loader := &staticConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &staticConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}

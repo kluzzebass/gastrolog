@@ -3,7 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatDateOnly } from "../../utils/temporal";
 import { formatBytes } from "../../utils/units";
 import { handleDragOver, handleDragEnter, handleDragLeave } from "./CertificateForms";
-import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/config_pb";
+import type { ManagedFileInfo } from "../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../api/hooks/useUploadManagedFile";
 
 export function FileDropZone({

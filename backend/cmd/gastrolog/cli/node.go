@@ -33,7 +33,7 @@ func newNodeListCmd() *cobra.Command {
 		Short: "List all nodes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -58,7 +58,7 @@ func newNodeGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -103,7 +103,7 @@ func newNodeRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.PutNodeConfig(context.Background(), connect.NewRequest(&v1.PutNodeConfigRequest{
+			_, err = client.System.PutNodeConfig(context.Background(), connect.NewRequest(&v1.PutNodeConfigRequest{
 				Config: &v1.NodeConfig{
 					Id:   id,
 					Name: args[1],
@@ -140,7 +140,7 @@ func newNodeAddStorageCmd() *cobra.Command {
 			}
 
 			// Get existing storage config for this node.
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -161,7 +161,7 @@ func newNodeAddStorageCmd() *cobra.Command {
 				StorageClass: storageClass,
 			})
 
-			_, err = client.Config.SetNodeStorageConfig(context.Background(), connect.NewRequest(&v1.SetNodeStorageConfigRequest{
+			_, err = client.System.SetNodeStorageConfig(context.Background(), connect.NewRequest(&v1.SetNodeStorageConfigRequest{
 				Config: &v1.NodeStorageConfig{
 					NodeId:       nodeID,
 					FileStorages: existing,
@@ -187,7 +187,7 @@ func newNodeListStorageCmd() *cobra.Command {
 		Short: "List file storages for a node (or all nodes)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}

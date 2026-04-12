@@ -3,7 +3,7 @@ import { useThemeClass } from "../../hooks/useThemeClass";
 import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { useConfig } from "../../api/hooks/useConfig";
+import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { JobKind } from "../../api/gen/gastrolog/v1/job_pb";
 import { toastError } from "../Toast";

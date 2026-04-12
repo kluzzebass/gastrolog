@@ -8,7 +8,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/memtest"
@@ -20,28 +20,28 @@ import (
 
 // fakeConfigLoader implements orchestrator.ConfigLoader for tests.
 type fakeConfigLoader struct {
-	cfg *config.Config
+	cfg *system.Config
 }
 
-func (f *fakeConfigLoader) Load(_ context.Context) (*config.Config, error) {
+func (f *fakeConfigLoader) Load(_ context.Context) (*system.Config, error) {
 	return f.cfg, nil
 }
 
 // memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.
 // It also adds the TierConfig to the loader's config if present, so AddVault
 // can find it via buildTierInstances.
-func memVaultCfg(vaultID uuid.UUID, loader *fakeConfigLoader) config.VaultConfig {
+func memVaultCfg(vaultID uuid.UUID, loader *fakeConfigLoader) system.VaultConfig {
 	tierID := uuid.Must(uuid.NewV7())
-	tc := config.TierConfig{
+	tc := system.TierConfig{
 		ID:      tierID,
 		Name:    "tier-" + vaultID.String()[:8],
-		Type:    config.TierTypeMemory,
+		Type:    system.TierTypeMemory,
 		VaultID: vaultID,
 	}
 	if loader != nil && loader.cfg != nil {
 		loader.cfg.Tiers = append(loader.cfg.Tiers, tc)
 	}
-	return config.VaultConfig{
+	return system.VaultConfig{
 		ID: vaultID,
 	}
 }
@@ -55,12 +55,12 @@ func TestReloadFilters(t *testing.T) {
 	catchAllFilterID := uuid.Must(uuid.NewV7())
 
 	// Initially set filters: prod gets env=prod, archive is catch-all.
-	loader.cfg = &config.Config{
-		Filters: []config.FilterConfig{
+	loader.cfg = &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(prodFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(catchAllFilterID), Destinations: []uuid.UUID{vaults.archive}, Enabled: true},
 		},
@@ -87,12 +87,12 @@ func TestReloadFilters(t *testing.T) {
 	}
 
 	// Now update filters: prod gets env=staging instead.
-	loader.cfg = &config.Config{
-		Filters: []config.FilterConfig{
+	loader.cfg = &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: prodFilterID, Expression: "env=staging"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(prodFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(catchAllFilterID), Destinations: []uuid.UUID{vaults.archive}, Enabled: true},
 		},
@@ -127,11 +127,11 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 
 	invalidFilterID := uuid.Must(uuid.NewV7())
 
-	loader.cfg = &config.Config{
-		Filters: []config.FilterConfig{
+	loader.cfg = &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: invalidFilterID, Expression: "(unclosed"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(invalidFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
 		},
 	}
@@ -151,12 +151,12 @@ func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	nonexistentVaultID := uuid.Must(uuid.NewV7())
 
 	// Include a vault that doesn't exist - should be ignored.
-	loader.cfg = &config.Config{
-		Filters: []config.FilterConfig{
+	loader.cfg = &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: prodFilterID, Expression: "env=prod"},
 			{ID: catchAllFilterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(prodFilterID), Destinations: []uuid.UUID{vaults.prod}, Enabled: true},
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(catchAllFilterID), Destinations: []uuid.UUID{nonexistentVaultID}, Enabled: true},
 		},
@@ -171,11 +171,11 @@ func TestAddVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "env=test"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -225,11 +225,11 @@ func TestAddVaultDuplicate(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -265,11 +265,11 @@ func TestRemoveVaultEmpty(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -309,11 +309,11 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -356,7 +356,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 
 func TestRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{cfg: &config.Config{}}
+	loader := &fakeConfigLoader{cfg: &system.Config{}}
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 	if err != nil {
 		t.Fatal(err)
@@ -373,11 +373,11 @@ func TestForceRemoveVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -443,7 +443,7 @@ func TestForceRemoveVault(t *testing.T) {
 
 func TestForceRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{cfg: &config.Config{}}
+	loader := &fakeConfigLoader{cfg: &system.Config{}}
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
 	if err != nil {
 		t.Fatal(err)
@@ -460,11 +460,11 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -660,11 +660,11 @@ func TestVaultConfig(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "env=prod AND level=error"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -767,11 +767,11 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -827,11 +827,11 @@ func TestPauseVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -898,11 +898,11 @@ func TestResumeVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -973,11 +973,11 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
@@ -1040,23 +1040,23 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	retPolicyID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
-		RetentionPolicies: []config.RetentionPolicyConfig{
+		RetentionPolicies: []system.RetentionPolicyConfig{
 			{ID: retPolicyID, Name: "age-2m", MaxAge: strPtr("2m")},
 		},
-		Tiers: []config.TierConfig{
-			{ID: tierID, Name: "tier", Type: config.TierTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []config.RetentionRule{{
+		Tiers: []system.TierConfig{
+			{ID: tierID, Name: "tier", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0, RetentionRules: []system.RetentionRule{{
 				RetentionPolicyID: retPolicyID,
-				Action:            config.RetentionActionExpire,
+				Action:            system.RetentionActionExpire,
 			}}},
 		},
-		Vaults: []config.VaultConfig{
+		Vaults: []system.VaultConfig{
 			{ID: vaultID, Name: "src"},
 		},
 	}}
@@ -1105,11 +1105,11 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &config.Config{
-		Filters: []config.FilterConfig{
+	loader := &fakeConfigLoader{cfg: &system.Config{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}

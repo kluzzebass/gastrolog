@@ -16,9 +16,9 @@ import (
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
-	cfgmem "gastrolog/internal/config/memory"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -53,11 +53,11 @@ type multinodeTestNode struct {
 type multiNodeHarness struct {
 	coordinator        string // nodeID of the coordinator
 	nodes              map[string]multinodeTestNode
-	cfgStore           config.Store
+	cfgStore           system.Store
 	srv                *server.Server
 	client             gastrologv1connect.QueryServiceClient
 	vaultClient        gastrologv1connect.VaultServiceClient
-	configClient       gastrologv1connect.ConfigServiceClient
+	configClient       gastrologv1connect.SystemServiceClient
 	jobSrv             gastrologv1connect.JobServiceClient
 	peerJobs           *mnPeerJobs
 	peerRouteStats     *mnPeerRouteStats
@@ -117,7 +117,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 
 	coordinatorID := nodeIDs[0]
 	nodes := make(map[string]multinodeTestNode, len(nodeIDs))
-	cfgStore := cfgmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	ctx := context.Background()
 
 	// Create all nodes.
@@ -128,16 +128,16 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 			node := setupMNNode(t, id)
 			// Create a tier assigned to this node (test-only manual assignment; production uses placement manager).
 			tierID := uuid.Must(uuid.NewV7())
-			_ = cfgStore.PutTier(ctx, config.TierConfig{
+			_ = cfgStore.PutTier(ctx, system.TierConfig{
 				ID:   tierID,
 				Name: "tier-" + id,
-				Type: config.TierTypeMemory,
+				Type: system.TierTypeMemory,
 				VaultID: node.vaultID, Position: 0,
-				Placements: []config.TierPlacement{
-					{StorageID: config.SyntheticStorageID(id), Leader: true},
+				Placements: []system.TierPlacement{
+					{StorageID: system.SyntheticStorageID(id), Leader: true},
 				}, // test-only: placement manager assigns this in production
 			})
-			_ = cfgStore.PutVault(ctx, config.VaultConfig{
+			_ = cfgStore.PutVault(ctx, system.VaultConfig{
 				ID: node.vaultID, Name: "vault-" + id,
 			})
 			nodes[id] = node
@@ -186,7 +186,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	}
 	queryClient := gastrologv1connect.NewQueryServiceClient(httpClient, "http://embedded")
 	vaultClient := gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded")
-	configClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+	configClient := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 
 	t.Cleanup(func() {
@@ -724,7 +724,7 @@ type directUnaryForwarder struct {
 	handlers map[string]http.Handler // nodeID → Connect mux handler
 }
 
-func newDirectUnaryForwarder(nodes map[string]multinodeTestNode, cfgStore config.Store, coordinatorID string) *directUnaryForwarder {
+func newDirectUnaryForwarder(nodes map[string]multinodeTestNode, cfgStore system.Store, coordinatorID string) *directUnaryForwarder {
 	handlers := make(map[string]http.Handler)
 	for id, node := range nodes {
 		if id == coordinatorID {
@@ -1697,7 +1697,7 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
 
 	// Also register it in the config store so ListIngesters can find it.
-	_ = h.cfgStore.PutIngester(ctx, config.IngesterConfig{
+	_ = h.cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID:     ingID,
 		Name:   "test-ing",
 		Type:   "mqtt",
@@ -1733,7 +1733,7 @@ func TestMultiNode_GetIngesterStatusCrossNode(t *testing.T) {
 	ingID := uuid.Must(uuid.NewV7())
 	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
 
-	_ = h.cfgStore.PutIngester(ctx, config.IngesterConfig{
+	_ = h.cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID:     ingID,
 		Name:   "test-ing",
 		Type:   "mqtt",

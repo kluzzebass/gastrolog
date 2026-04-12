@@ -36,16 +36,16 @@ const sampleConfig = {
 };
 
 beforeEach(() => {
-  m(mocks.configClient, "getConfig").mockClear();
-  m(mocks.configClient, "putRoute").mockClear();
-  m(mocks.configClient, "deleteRoute").mockClear();
-  m(mocks.configClient, "generateName").mockClear();
+  m(mocks.systemClient, "getConfig").mockClear();
+  m(mocks.systemClient, "putRoute").mockClear();
+  m(mocks.systemClient, "deleteRoute").mockClear();
+  m(mocks.systemClient, "generateName").mockClear();
 });
 
 describe("RoutesSettings", () => {
   test("renders empty state when no routes", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], { routes: [], filters: [], vaults: [], ingesters: [], nodeConfigs: [] });
+    qc.setQueryData(["system"], { routes: [], filters: [], vaults: [], ingesters: [], nodeConfigs: [] });
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -56,7 +56,7 @@ describe("RoutesSettings", () => {
 
   test("renders route cards with names and distribution badges", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -70,7 +70,7 @@ describe("RoutesSettings", () => {
 
   test("shows filter and destination names in route status", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -82,7 +82,7 @@ describe("RoutesSettings", () => {
 
   test("shows disabled indicator for disabled routes", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -93,7 +93,7 @@ describe("RoutesSettings", () => {
 
   test("shows no filter label when route has no filter", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getAllByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -105,7 +105,7 @@ describe("RoutesSettings", () => {
 
   test("expands route card on click and shows edit form", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -122,7 +122,7 @@ describe("RoutesSettings", () => {
 
   test("save button disabled when not dirty", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -134,9 +134,9 @@ describe("RoutesSettings", () => {
   });
 
   test("deletes route via confirm flow", async () => {
-    m(mocks.configClient, "deleteRoute").mockResolvedValueOnce({});
+    m(mocks.systemClient, "deleteRoute").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], sampleConfig);
+    qc.setQueryData(["system"], sampleConfig);
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),
@@ -147,14 +147,14 @@ describe("RoutesSettings", () => {
     fireEvent.click(getByText("Yes"));
 
     await waitFor(() => {
-      expect(m(mocks.configClient, "deleteRoute")).toHaveBeenCalledTimes(1);
+      expect(m(mocks.systemClient, "deleteRoute")).toHaveBeenCalledTimes(1);
     });
   });
 
   test("opens add form via Add Route button", async () => {
-    m(mocks.configClient, "generateName").mockResolvedValueOnce({ name: "lucky-panda" });
+    m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "lucky-panda" });
     const qc = createTestQueryClient();
-    qc.setQueryData(["config"], { routes: [], filters: [], vaults: [{ id: "v1", name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
+    qc.setQueryData(["system"], { routes: [], filters: [], vaults: [{ id: "v1", name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),

@@ -36,7 +36,7 @@ func newIngesterListCmd() *cobra.Command {
 		Short: "List all ingesters",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -65,7 +65,7 @@ func newIngesterGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func newIngesterCreateCmd() *cobra.Command {
 				Enabled: true, // default for new ingesters
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -150,7 +150,7 @@ func newIngesterCreateCmd() *cobra.Command {
 				return errors.New("--type is required for new ingesters")
 			}
 
-			_, err = client.Config.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
+			_, err = client.System.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -187,7 +187,7 @@ func newIngesterDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteIngester(context.Background(), connect.NewRequest(&v1.DeleteIngesterRequest{Id: id}))
+			_, err = client.System.DeleteIngester(context.Background(), connect.NewRequest(&v1.DeleteIngesterRequest{Id: id}))
 			if err != nil {
 				return err
 			}
@@ -212,7 +212,7 @@ func newIngesterStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := client.Config.GetIngesterStatus(context.Background(), connect.NewRequest(&v1.GetIngesterStatusRequest{Id: id}))
+			resp, err := client.System.GetIngesterStatus(context.Background(), connect.NewRequest(&v1.GetIngesterStatusRequest{Id: id}))
 			if err != nil {
 				return err
 			}
@@ -242,7 +242,7 @@ func newIngesterTestCmd() *cobra.Command {
 			params, _ := cmd.Flags().GetStringSlice("param")
 
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.TestIngester(context.Background(), connect.NewRequest(&v1.TestIngesterRequest{
+			resp, err := client.System.TestIngester(context.Background(), connect.NewRequest(&v1.TestIngesterRequest{
 				Type:   ingType,
 				Params: parseParams(params),
 			}))

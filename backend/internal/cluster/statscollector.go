@@ -109,7 +109,7 @@ type StatsCollector struct {
 	cfg StatsCollectorConfig
 }
 
-// NewStatsCollector creates a collector with the given config.
+// NewStatsCollector creates a collector with the given system.
 func NewStatsCollector(cfg StatsCollectorConfig) *StatsCollector {
 	if cfg.Interval <= 0 {
 		cfg.Interval = 5 * time.Second

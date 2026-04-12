@@ -17,7 +17,7 @@ import { NodeSelect } from "./NodeSelect";
 import { sortByName } from "../../lib/sort";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
-import type { IngesterConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import type { IngesterConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { IngesterDefaults } from "../../api/hooks/useIngesterDefaults";
 
 const ingesterTypes = [

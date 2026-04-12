@@ -10,7 +10,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/index/analyzer"
 )
@@ -635,7 +635,7 @@ type replicationTask struct {
 	vaultID uuid.UUID
 	tierID  uuid.UUID
 	chunkID chunk.ChunkID
-	targets []config.ReplicationTarget
+	targets []system.ReplicationTarget
 }
 
 // appendRecord is the unified append-with-seal-detection path.

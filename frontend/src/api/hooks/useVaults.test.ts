@@ -13,7 +13,7 @@ beforeEach(() => {
   m(mocks.vaultClient, "getVault").mockClear();
   m(mocks.vaultClient, "getStats").mockClear();
   m(mocks.vaultClient, "sealVault").mockClear();
-  m(mocks.configClient, "deleteVault").mockClear();
+  m(mocks.systemClient, "deleteVault").mockClear();
 });
 
 describe("useVaults", () => {
@@ -79,7 +79,7 @@ describe("useSealVault", () => {
 
 describe("useDeleteVault", () => {
   test("calls deleteVault with force flag", async () => {
-    m(mocks.configClient, "deleteVault").mockResolvedValueOnce({});
+    m(mocks.systemClient, "deleteVault").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
 
     const { result } = renderHook(() => useDeleteVault(), { wrapper: wrapper(qc) });
@@ -88,7 +88,7 @@ describe("useDeleteVault", () => {
       await result.current.mutateAsync({ id: "v1", force: true });
     });
 
-    expect(m(mocks.configClient, "deleteVault")).toHaveBeenCalledWith({
+    expect(m(mocks.systemClient, "deleteVault")).toHaveBeenCalledWith({
       id: "v1",
       force: true,
       deleteData: false,

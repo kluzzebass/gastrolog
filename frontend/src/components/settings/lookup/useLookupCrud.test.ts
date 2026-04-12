@@ -15,7 +15,7 @@ const equal = (a: Draft, b: Saved) => a.name === b.name && a.value === b.value;
 const getName = (d: Draft) => d.name;
 
 beforeEach(() => {
-  m(mocks.configClient, "putSettings").mockClear();
+  m(mocks.systemClient, "putSettings").mockClear();
 });
 
 function renderCrud(overrides: Partial<Parameters<typeof useLookupCrud<Draft, Saved>>[0]> = {}) {
@@ -65,16 +65,16 @@ describe("useLookupCrud", () => {
   // ── save ──────────────────────────────────────────────────────
 
   test("save calls putSettings with serialized lookups", async () => {
-    m(mocks.configClient, "putSettings").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putSettings").mockResolvedValueOnce({});
     const { result } = renderCrud();
 
     await act(() => result.current.save(0));
 
-    expect(m(mocks.configClient, "putSettings")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "putSettings")).toHaveBeenCalledTimes(1);
   });
 
   test("save shows error toast on failure", async () => {
-    m(mocks.configClient, "putSettings").mockRejectedValueOnce(new Error("network"));
+    m(mocks.systemClient, "putSettings").mockRejectedValueOnce(new Error("network"));
     const { result } = renderCrud();
 
     // Should not throw — error is caught and toasted.
@@ -84,19 +84,19 @@ describe("useLookupCrud", () => {
   // ── handleDelete ──────────────────────────────────────────────
 
   test("handleDelete calls putSettings with remaining items", async () => {
-    m(mocks.configClient, "putSettings").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putSettings").mockResolvedValueOnce({});
     const { result, onDelete } = renderCrud({
       lookups: [{ name: "a", value: "1" }, { name: "b", value: "2" }],
     });
 
     await act(() => result.current.handleDelete(0));
 
-    expect(m(mocks.configClient, "putSettings")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "putSettings")).toHaveBeenCalledTimes(1);
     expect(onDelete).toHaveBeenCalledWith(0);
   });
 
   test("handleDelete shows error toast on failure", async () => {
-    m(mocks.configClient, "putSettings").mockRejectedValueOnce(new Error("fail"));
+    m(mocks.systemClient, "putSettings").mockRejectedValueOnce(new Error("fail"));
     const { result, onDelete } = renderCrud();
 
     await act(() => result.current.handleDelete(0));

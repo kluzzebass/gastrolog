@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
@@ -43,7 +43,7 @@ func DockerSocketExamples() []string {
 
 // NewFactory returns an IngesterFactory for Docker container log ingesters.
 // The config store is used to resolve certificate names for TLS.
-func NewFactory(cfgStore config.Store) orchestrator.IngesterFactory {
+func NewFactory(cfgStore system.Store) orchestrator.IngesterFactory {
 	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		cfg, err := parseConfig(id.String(), params, cfgStore, logger)
 		if err != nil {
@@ -67,7 +67,7 @@ type ingesterConfig struct {
 	Logger       *slog.Logger
 }
 
-func parseConfig(id string, params map[string]string, cfgStore config.Store, logger *slog.Logger) (ingesterConfig, error) {
+func parseConfig(id string, params map[string]string, cfgStore system.Store, logger *slog.Logger) (ingesterConfig, error) {
 	host := params["host"]
 	if host == "" {
 		host = "unix:///var/run/docker.sock"
@@ -148,7 +148,7 @@ func parseConfig(id string, params map[string]string, cfgStore config.Store, log
 
 // resolveTLS builds a clientTLSConfig by looking up named certificates from the
 // config store. Params: tls_ca (CA cert name), tls_cert (client cert name), tls_verify.
-func resolveTLS(id string, params map[string]string, cfgStore config.Store) (*clientTLSConfig, error) {
+func resolveTLS(id string, params map[string]string, cfgStore system.Store) (*clientTLSConfig, error) {
 	caName := params["tls_ca"]
 	certName := params["tls_cert"]
 	if caName == "" && certName == "" {
@@ -165,7 +165,7 @@ func resolveTLS(id string, params map[string]string, cfgStore config.Store) (*cl
 
 	// We need to look up certificates by name. ListCertificates returns all
 	// certs, and we find the one matching the requested name.
-	var certs []config.CertPEM
+	var certs []system.CertPEM
 	if caName != "" || certName != "" {
 		var err error
 		certs, err = cfgStore.ListCertificates(ctx)
@@ -198,7 +198,7 @@ func resolveTLS(id string, params map[string]string, cfgStore config.Store) (*cl
 }
 
 // findCertByName returns the first certificate with the given name, or nil if not found.
-func findCertByName(certs []config.CertPEM, name string) *config.CertPEM {
+func findCertByName(certs []system.CertPEM, name string) *system.CertPEM {
 	for i := range certs {
 		if certs[i].Name == name {
 			return &certs[i]
@@ -209,7 +209,7 @@ func findCertByName(certs []config.CertPEM, name string) *config.CertPEM {
 
 // TestConnection creates a temporary Docker client from the given params,
 // pings the daemon, and lists containers. Returns a human-readable summary.
-func TestConnection(ctx context.Context, params map[string]string, cfgStore config.Store) (string, error) {
+func TestConnection(ctx context.Context, params map[string]string, cfgStore system.Store) (string, error) {
 	host := params["host"]
 	if host == "" {
 		host = "unix:///var/run/docker.sock"

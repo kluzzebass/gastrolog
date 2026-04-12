@@ -1,6 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useRouteStats } from "../../api/hooks/useRouteStats";
-import { useConfig } from "../../api/hooks/useConfig";
+import { useConfig } from "../../api/hooks/useSystem";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { Badge } from "../Badge";
 

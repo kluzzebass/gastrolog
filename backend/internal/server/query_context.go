@@ -13,7 +13,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/query"
 )
 
@@ -234,13 +234,13 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID)
 		return ""
 	}
 
-	tierMap := make(map[uuid.UUID]*config.TierConfig, len(tiers))
+	tierMap := make(map[uuid.UUID]*system.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
 	// temporary: find the tier's leader node to determine the owning node (until tier election).
-	for _, tierID := range config.VaultTierIDs(tiers, vaultCfg.ID) {
+	for _, tierID := range system.VaultTierIDs(tiers, vaultCfg.ID) {
 		tc := tierMap[tierID]
 		if tc == nil {
 			continue

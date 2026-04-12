@@ -72,11 +72,11 @@ func TestRoutingInterceptor_RouteLocal_AlwaysLocal(t *testing.T) {
 
 	var handlerCalled bool
 	resp, err := runUnary(t, ri,
-		gastrologv1connect.ConfigServiceGetConfigProcedure,
-		&apiv1.GetConfigRequest{},
-		func(ctx context.Context, req *connect.Request[apiv1.GetConfigRequest]) (*connect.Response[apiv1.GetConfigResponse], error) {
+		gastrologv1connect.SystemServiceGetSystemProcedure,
+		&apiv1.GetSystemRequest{},
+		func(ctx context.Context, req *connect.Request[apiv1.GetSystemRequest]) (*connect.Response[apiv1.GetSystemResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.GetConfigResponse{}), nil
+			return connect.NewResponse(&apiv1.GetSystemResponse{}), nil
 		},
 		context.Background(), nil,
 	)
@@ -159,7 +159,7 @@ func TestRoutingInterceptor_RouteLeader_PassThrough(t *testing.T) {
 
 	var handlerCalled bool
 	_, err := runUnary(t, ri,
-		gastrologv1connect.ConfigServicePutVaultProcedure,
+		gastrologv1connect.SystemServicePutVaultProcedure,
 		&apiv1.PutVaultRequest{},
 		func(ctx context.Context, req *connect.Request[apiv1.PutVaultRequest]) (*connect.Response[apiv1.PutVaultResponse], error) {
 			handlerCalled = true
@@ -181,11 +181,11 @@ func TestRoutingInterceptor_ExplicitTarget_SameNode(t *testing.T) {
 	var handlerCalled bool
 	ctx := routing.WithTargetNode(context.Background(), "node-1")
 	_, err := runUnary(t, ri,
-		gastrologv1connect.ConfigServiceGetConfigProcedure,
-		&apiv1.GetConfigRequest{},
-		func(ctx context.Context, req *connect.Request[apiv1.GetConfigRequest]) (*connect.Response[apiv1.GetConfigResponse], error) {
+		gastrologv1connect.SystemServiceGetSystemProcedure,
+		&apiv1.GetSystemRequest{},
+		func(ctx context.Context, req *connect.Request[apiv1.GetSystemRequest]) (*connect.Response[apiv1.GetSystemResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.GetConfigResponse{}), nil
+			return connect.NewResponse(&apiv1.GetSystemResponse{}), nil
 		},
 		ctx, nil,
 	)
@@ -248,11 +248,11 @@ func TestRoutingInterceptor_ExplicitTargetFromHeader(t *testing.T) {
 
 	var handlerCalled bool
 	_, err := runUnary(t, ri,
-		gastrologv1connect.ConfigServiceGetConfigProcedure,
-		&apiv1.GetConfigRequest{},
-		func(ctx context.Context, req *connect.Request[apiv1.GetConfigRequest]) (*connect.Response[apiv1.GetConfigResponse], error) {
+		gastrologv1connect.SystemServiceGetSystemProcedure,
+		&apiv1.GetSystemRequest{},
+		func(ctx context.Context, req *connect.Request[apiv1.GetSystemRequest]) (*connect.Response[apiv1.GetSystemResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.GetConfigResponse{}), nil
+			return connect.NewResponse(&apiv1.GetSystemResponse{}), nil
 		},
 		context.Background(),
 		map[string]string{"X-Target-Node": "node-1"},
@@ -366,10 +366,10 @@ func TestRoutingInterceptor_UndeclaredRPC(t *testing.T) {
 	var handlerCalled bool
 	_, err := runUnary(t, ri,
 		"/gastrolog.v1.FakeService/NotReal",
-		&apiv1.GetConfigRequest{},
-		func(ctx context.Context, req *connect.Request[apiv1.GetConfigRequest]) (*connect.Response[apiv1.GetConfigResponse], error) {
+		&apiv1.GetSystemRequest{},
+		func(ctx context.Context, req *connect.Request[apiv1.GetSystemRequest]) (*connect.Response[apiv1.GetSystemResponse], error) {
 			handlerCalled = true
-			return connect.NewResponse(&apiv1.GetConfigResponse{}), nil
+			return connect.NewResponse(&apiv1.GetSystemResponse{}), nil
 		},
 		context.Background(), nil,
 	)

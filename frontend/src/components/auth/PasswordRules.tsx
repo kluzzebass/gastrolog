@@ -1,4 +1,4 @@
-import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/config_pb";
+import type { GetSettingsResponse } from "../../api/gen/gastrolog/v1/system_pb";
 
 interface PasswordRulesProps {
   password: string;

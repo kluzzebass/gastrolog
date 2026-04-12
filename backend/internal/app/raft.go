@@ -12,9 +12,9 @@ import (
 	"time"
 
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/raftfsm"
-	"gastrolog/internal/config/raftstore"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
+	"gastrolog/internal/system/raftstore"
 	"gastrolog/internal/home"
 	"gastrolog/internal/logging"
 
@@ -42,7 +42,7 @@ type raftStoreOpts struct {
 // raftConfigStore wraps a raftstore.Store with cleanup logic for the
 // underlying raft instance, forwarder, and boltdb store.
 type raftConfigStore struct {
-	config.Store
+	system.Store
 	raftStore *raftstore.Store
 	raft      *hraft.Raft
 	boltDB    io.Closer

@@ -8,7 +8,7 @@ import { createConnectTransport } from "@connectrpc/connect-web";
 import { QueryService } from "./gen/gastrolog/v1/query_connect";
 import { VaultService } from "./gen/gastrolog/v1/vault_connect";
 import { LifecycleService } from "./gen/gastrolog/v1/lifecycle_connect";
-import { ConfigService } from "./gen/gastrolog/v1/config_connect";
+import { SystemService } from "./gen/gastrolog/v1/system_connect";
 import { AuthService } from "./gen/gastrolog/v1/auth_connect";
 import { JobService } from "./gen/gastrolog/v1/job_connect";
 
@@ -161,7 +161,7 @@ const transport = createConnectTransport({
 export const queryClient = createPromiseClient(QueryService, transport);
 export const vaultClient = createPromiseClient(VaultService, transport);
 export const lifecycleClient = createPromiseClient(LifecycleService, transport);
-export const configClient = createPromiseClient(ConfigService, transport);
+export const systemClient = createPromiseClient(SystemService, transport);
 export const authClient = createPromiseClient(AuthService, transport);
 export const jobClient = createPromiseClient(JobService, transport);
 
@@ -195,6 +195,6 @@ document.addEventListener("visibilitychange", () => {
 export * from "./gen/gastrolog/v1/query_pb";
 export * from "./gen/gastrolog/v1/vault_pb";
 export * from "./gen/gastrolog/v1/lifecycle_pb";
-export * from "./gen/gastrolog/v1/config_pb";
+export * from "./gen/gastrolog/v1/system_pb";
 export * from "./gen/gastrolog/v1/auth_pb";
 export * from "./gen/gastrolog/v1/job_pb";

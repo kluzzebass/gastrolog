@@ -1,12 +1,12 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { configClient } from "../client";
-import { useConfigMutation } from "./useConfig";
+import { systemClient } from "../client";
+import { useSystemMutation } from "./useSystem";
 
 export function useSettings() {
   return useQuery({
     queryKey: ["settings"],
     queryFn: async () => {
-      const response = await configClient.getSettings({});
+      const response = await systemClient.getSettings({});
       return response;
     },
   });
@@ -100,7 +100,7 @@ function buildMaxMindReq(mm: NonNullable<PutSettingsArgs["maxmind"]>): Record<st
 }
 
 export function usePutSettings() {
-  return useConfigMutation(async (args: PutSettingsArgs) => {
+  return useSystemMutation(async (args: PutSettingsArgs) => {
     const req: Record<string, unknown> = {};
     if (args.auth) req.auth = buildAuthReq(args.auth);
     if (args.query) req.query = args.query;
@@ -111,7 +111,7 @@ export function usePutSettings() {
     if (args.cluster) req.cluster = args.cluster;
     if (args.setupWizardDismissed !== undefined)
       req.setupWizardDismissed = args.setupWizardDismissed;
-    return configClient.putSettings(req as Parameters<typeof configClient.putSettings>[0]);
+    return systemClient.putSettings(req as Parameters<typeof systemClient.putSettings>[0]);
   }, [["settings"], ["certificates"]]);
 }
 
@@ -131,7 +131,7 @@ type TestHTTPLookupArgs = {
 export function useTestHTTPLookup() {
   return useMutation({
     mutationFn: async (args: TestHTTPLookupArgs) => {
-      const response = await configClient.testHTTPLookup({
+      const response = await systemClient.testHTTPLookup({
         config: args.config,
         values: args.values,
       });
@@ -150,7 +150,7 @@ type PreviewCSVLookupArgs = {
 export function usePreviewCSVLookup() {
   return useMutation({
     mutationFn: async (args: PreviewCSVLookupArgs) => {
-      const response = await configClient.previewCSVLookup({
+      const response = await systemClient.previewCSVLookup({
         fileId: args.fileId,
         keyColumn: args.keyColumn ?? "",
         valueColumns: args.valueColumns ?? [],
@@ -162,7 +162,7 @@ export function usePreviewCSVLookup() {
 }
 
 export function useRegenerateJwtSecret() {
-  return useConfigMutation(async () => {
-    return configClient.regenerateJwtSecret({});
+  return useSystemMutation(async () => {
+    return systemClient.regenerateJwtSecret({});
   }, [["settings"]]);
 }

@@ -1,11 +1,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { configClient } from "../client";
+import { systemClient } from "../client";
 
 export function useSavedQueries() {
   return useQuery({
     queryKey: ["savedQueries"],
     queryFn: async () => {
-      const response = await configClient.getSavedQueries({});
+      const response = await systemClient.getSavedQueries({});
       return response.queries;
     },
   });
@@ -15,7 +15,7 @@ export function usePutSavedQuery() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { name: string; query: string }) => {
-      await configClient.putSavedQuery({
+      await systemClient.putSavedQuery({
         query: { name: args.name, query: args.query },
       });
     },
@@ -27,7 +27,7 @@ export function useDeleteSavedQuery() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
-      await configClient.deleteSavedQuery({ name });
+      await systemClient.deleteSavedQuery({ name });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["savedQueries"] }),
   });

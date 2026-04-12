@@ -12,7 +12,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/orchestrator"
 )
@@ -156,7 +156,7 @@ func (s *VaultServer) MigrateVault(
 
 	// Phase 1: Clone source tiers to destination vault, then create vault.
 	// Tiers must exist before AddVault so buildTierInstances can find them.
-	dstCfg := config.VaultConfig{
+	dstCfg := system.VaultConfig{
 		ID:      uuid.Must(uuid.NewV7()),
 		Name:    req.Msg.Destination,
 		Enabled: true,
@@ -164,7 +164,7 @@ func (s *VaultServer) MigrateVault(
 
 	if s.cfgStore != nil {
 		srcTiers, _ := s.cfgStore.ListTiers(ctx)
-		for _, t := range config.VaultTiers(srcTiers, srcID) {
+		for _, t := range system.VaultTiers(srcTiers, srcID) {
 			t.ID = uuid.Must(uuid.NewV7())
 			t.VaultID = dstCfg.ID
 			if err := s.cfgStore.PutTier(ctx, t); err != nil {
@@ -381,8 +381,8 @@ func (s *VaultServer) ImportRecords(
 }
 
 // getFullVaultConfig retrieves vault config from the config vault (with type/params),
-// falling back to the orchestrator's limited config.
-func (s *VaultServer) getFullVaultConfig(ctx context.Context, id uuid.UUID) (config.VaultConfig, error) {
+// falling back to the orchestrator's limited system.
+func (s *VaultServer) getFullVaultConfig(ctx context.Context, id uuid.UUID) (system.VaultConfig, error) {
 	if s.cfgStore != nil {
 		cfg, err := s.cfgStore.GetVault(ctx, id)
 		if err == nil && cfg != nil {
@@ -393,7 +393,7 @@ func (s *VaultServer) getFullVaultConfig(ctx context.Context, id uuid.UUID) (con
 }
 
 // createVault persists a vault config and adds it to the orchestrator.
-func (s *VaultServer) createVault(ctx context.Context, cfg config.VaultConfig) *connect.Error {
+func (s *VaultServer) createVault(ctx context.Context, cfg system.VaultConfig) *connect.Error {
 	// Persist to config vault.
 	if s.cfgStore != nil {
 		if err := s.cfgStore.PutVault(ctx, cfg); err != nil {
@@ -470,7 +470,7 @@ func (s *VaultServer) RestoreChunk(
 	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
 }
 
-// resolveRestoreDefaults fills in restore tier and days from cloud service config.
+// resolveRestoreDefaults fills in restore tier and days from cloud service system.
 func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, reqTier string, reqDays int) (string, int) {
 	tier, days := reqTier, reqDays
 	if (tier == "" || days <= 0) && s.cfgStore != nil {
@@ -492,7 +492,7 @@ func (s *VaultServer) resolveRestoreDefaults(ctx context.Context, vaultID uuid.U
 }
 
 // lookupCloudServiceForChunk finds the CloudService config for a chunk's tier.
-func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID uuid.UUID, _ chunk.ChunkID) *config.CloudService {
+func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID uuid.UUID, _ chunk.ChunkID) *system.CloudService {
 	cfg, err := s.cfgStore.Load(ctx)
 	if err != nil || cfg == nil {
 		return nil

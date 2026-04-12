@@ -7,7 +7,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -86,7 +86,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
-func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []config.ReplicationTarget) {
+func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if len(targets) == 0 {
 		return
 	}
@@ -110,7 +110,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
 // need record streaming. The tier Raft FSM's OnUpload callback registers the
 // chunk in each follower's cloud index (see wireTierFSMOnUpload).
-func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []config.ReplicationTarget) {
+func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
 		return
 	}
@@ -139,7 +139,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 
 // replicateToTarget sends a sealed chunk to one target. Same-node targets
 // use local ImportToTierStorage; cross-node targets use gRPC.
-func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt config.ReplicationTarget) {
+func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) {
 	if tgt.NodeID == o.localNodeID {
 		if err := o.replicateLocally(ctx, vaultID, tierID, tgt.StorageID, chunkID, sourceCM); err != nil {
 			o.logger.Warn("replication: local copy failed",

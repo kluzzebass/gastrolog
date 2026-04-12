@@ -16,7 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
-	configmem "gastrolog/internal/config/memory"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/querylang"
@@ -157,7 +157,7 @@ func collectMessages(ctx context.Context, out <-chan orchestrator.IngestMessage,
 
 func TestFactoryValidation(t *testing.T) {
 	t.Parallel()
-	vault := configmem.NewStore()
+	vault := sysmem.NewStore()
 	factory := NewFactory(vault)
 
 	tests := []struct {

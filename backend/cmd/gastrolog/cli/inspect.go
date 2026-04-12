@@ -52,7 +52,7 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	cfgResp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+	cfgResp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
 		return err
 	}
@@ -184,7 +184,7 @@ func resolveTierName(client *server.Client, tierID string) string {
 	if tierID == "" {
 		return ""
 	}
-	cfgResp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+	cfgResp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
 		return tierID
 	}

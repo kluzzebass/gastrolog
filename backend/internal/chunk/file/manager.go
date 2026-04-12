@@ -107,9 +107,9 @@ type Config struct {
 	// CacheEviction selects the eviction policy: "lru" (default) or "ttl".
 	CacheEviction string
 	// CacheBudget is the max cache size as a human-readable string (e.g. "1GB", "500MB").
-	// Parsed via config.ParseSize. Default 1 GiB.
+	// Parsed via system.ParseSize. Default 1 GiB.
 	CacheBudget string
-	// CacheTTL is the max age of cached blobs (TTL mode only). Parsed via config.ParseDuration.
+	// CacheTTL is the max age of cached blobs (TTL mode only). Parsed via system.ParseDuration.
 	CacheTTL string
 
 	// CloudReadOnly, when true, enables cloud store reads (cursor, cache)

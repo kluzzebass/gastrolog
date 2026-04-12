@@ -97,7 +97,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, f := range doc.Filters {
 		ensureID(f.Name, r.filters, &f.Id)
-		_, err := client.Config.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
+		_, err := client.System.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
 			Config: f,
 		}))
 		if err != nil {
@@ -108,7 +108,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, p := range doc.RotationPolicies {
 		ensureID(p.Name, r.rotationPolicies, &p.Id)
-		_, err := client.Config.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
+		_, err := client.System.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
 			Config: p,
 		}))
 		if err != nil {
@@ -119,7 +119,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, p := range doc.RetentionPolicies {
 		ensureID(p.Name, r.retentionPolicies, &p.Id)
-		_, err := client.Config.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
+		_, err := client.System.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
 			Config: p,
 		}))
 		if err != nil {
@@ -130,7 +130,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, v := range doc.Vaults {
 		ensureID(v.Name, r.vaults, &v.Id)
-		_, err := client.Config.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
+		_, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 			Config: v,
 		}))
 		if err != nil {
@@ -141,7 +141,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, ig := range doc.Ingesters {
 		ensureID(ig.Name, r.ingesters, &ig.Id)
-		_, err := client.Config.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
+		_, err := client.System.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
 			Config: ig,
 		}))
 		if err != nil {
@@ -152,7 +152,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, n := range doc.Nodes {
 		ensureID(n.Name, r.nodes, &n.Id)
-		_, err := client.Config.PutNodeConfig(ctx, connect.NewRequest(&v1.PutNodeConfigRequest{
+		_, err := client.System.PutNodeConfig(ctx, connect.NewRequest(&v1.PutNodeConfigRequest{
 			Config: n,
 		}))
 		if err != nil {
@@ -163,7 +163,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, c := range doc.Certificates {
 		ensureID(c.Name, r.certs, &c.ID)
-		_, err := client.Config.PutCertificate(ctx, connect.NewRequest(&v1.PutCertificateRequest{
+		_, err := client.System.PutCertificate(ctx, connect.NewRequest(&v1.PutCertificateRequest{
 			Id:       c.ID,
 			Name:     c.Name,
 			CertFile: c.CertFile,
@@ -185,7 +185,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	if req := buildSettingsRequest(doc); req != nil {
-		_, err := client.Config.PutSettings(ctx, connect.NewRequest(req))
+		_, err := client.System.PutSettings(ctx, connect.NewRequest(req))
 		if err != nil {
 			return imported, fmt.Errorf("import server config: %w", err)
 		}
@@ -206,43 +206,43 @@ func ensureID(name string, existing map[string]string, id *string) {
 
 // deleteAll removes all config entities (not server config).
 func deleteAll(ctx context.Context, client *server.Client) error {
-	resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+	resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
 		return err
 	}
 
 	// Delete in reverse dependency order: vaults, ingesters first, then policies/filters.
 	for _, v := range resp.Msg.Vaults {
-		if _, err := client.Config.DeleteVault(ctx, connect.NewRequest(&v1.DeleteVaultRequest{Id: v.Id, Force: true})); err != nil {
+		if _, err := client.System.DeleteVault(ctx, connect.NewRequest(&v1.DeleteVaultRequest{Id: v.Id, Force: true})); err != nil {
 			return fmt.Errorf("delete vault %s: %w", v.Name, err)
 		}
 	}
 	for _, ig := range resp.Msg.Ingesters {
-		if _, err := client.Config.DeleteIngester(ctx, connect.NewRequest(&v1.DeleteIngesterRequest{Id: ig.Id})); err != nil {
+		if _, err := client.System.DeleteIngester(ctx, connect.NewRequest(&v1.DeleteIngesterRequest{Id: ig.Id})); err != nil {
 			return fmt.Errorf("delete ingester %s: %w", ig.Name, err)
 		}
 	}
 	for _, f := range resp.Msg.Filters {
-		if _, err := client.Config.DeleteFilter(ctx, connect.NewRequest(&v1.DeleteFilterRequest{Id: f.Id})); err != nil {
+		if _, err := client.System.DeleteFilter(ctx, connect.NewRequest(&v1.DeleteFilterRequest{Id: f.Id})); err != nil {
 			return fmt.Errorf("delete filter %s: %w", f.Name, err)
 		}
 	}
 	for _, p := range resp.Msg.RotationPolicies {
-		if _, err := client.Config.DeleteRotationPolicy(ctx, connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: p.Id})); err != nil {
+		if _, err := client.System.DeleteRotationPolicy(ctx, connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: p.Id})); err != nil {
 			return fmt.Errorf("delete rotation policy %s: %w", p.Name, err)
 		}
 	}
 	for _, p := range resp.Msg.RetentionPolicies {
-		if _, err := client.Config.DeleteRetentionPolicy(ctx, connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: p.Id})); err != nil {
+		if _, err := client.System.DeleteRetentionPolicy(ctx, connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: p.Id})); err != nil {
 			return fmt.Errorf("delete retention policy %s: %w", p.Name, err)
 		}
 	}
 
 	// Delete certs.
-	certResp, err := client.Config.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
+	certResp, err := client.System.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
 	if err == nil {
 		for _, c := range certResp.Msg.Certificates {
-			if _, err := client.Config.DeleteCertificate(ctx, connect.NewRequest(&v1.DeleteCertificateRequest{Id: c.Id})); err != nil {
+			if _, err := client.System.DeleteCertificate(ctx, connect.NewRequest(&v1.DeleteCertificateRequest{Id: c.Id})); err != nil {
 				return fmt.Errorf("delete certificate %s: %w", c.Name, err)
 			}
 		}

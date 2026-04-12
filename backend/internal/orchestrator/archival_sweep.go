@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -71,7 +71,7 @@ func (o *Orchestrator) archivalSweepAll() {
 	}
 
 	// Build map of active cloud services (archivalMode == "active").
-	activeCS := make(map[uuid.UUID]*config.CloudService)
+	activeCS := make(map[uuid.UUID]*system.CloudService)
 	for i := range cfg.CloudServices {
 		cs := &cfg.CloudServices[i]
 		if cs.ArchivalMode == "active" && len(cs.Transitions) > 0 {
@@ -110,7 +110,7 @@ func (o *Orchestrator) archivalSweepAll() {
 }
 
 // archivalSweepTier evaluates one tier's cloud chunks against the transition chain.
-func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudService, now time.Time) {
+func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *system.CloudService, now time.Time) {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		o.logger.Warn("archival sweep: list chunks failed", "tier", tier.TierID, "error", err)
@@ -167,10 +167,10 @@ func (o *Orchestrator) archivalSweepTier(tier *TierInstance, cs *config.CloudSer
 // resolveTransitionTarget finds the highest-matching transition for a chunk's age.
 // Parses each transition's After duration and returns the last one the age exceeds.
 // Returns nil if no transition applies yet.
-func resolveTransitionTarget(transitions []config.CloudStorageTransition, age time.Duration) *config.CloudStorageTransition {
-	var best *config.CloudStorageTransition
+func resolveTransitionTarget(transitions []system.CloudStorageTransition, age time.Duration) *system.CloudStorageTransition {
+	var best *system.CloudStorageTransition
 	for i := range transitions {
-		threshold, err := config.ParseDuration(transitions[i].After)
+		threshold, err := system.ParseDuration(transitions[i].After)
 		if err != nil {
 			continue // skip unparseable
 		}
@@ -226,7 +226,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 }
 
 // reconcileTier checks one tier's cloud chunks against the blob store.
-func (o *Orchestrator) reconcileTier(tier *TierInstance, cs *config.CloudService, now time.Time) {
+func (o *Orchestrator) reconcileTier(tier *TierInstance, cs *system.CloudService, now time.Time) {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		return

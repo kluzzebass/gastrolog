@@ -10,8 +10,8 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
@@ -39,12 +39,12 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	}
 	im := indexfile.NewManager(dir, nil, nil)
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "archive-test",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "cloud", Type: config.TierTypeCloud,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})

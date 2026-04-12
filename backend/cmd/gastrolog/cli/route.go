@@ -35,7 +35,7 @@ func newRouteListCmd() *cobra.Command {
 		Short: "List all routes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -69,7 +69,7 @@ func newRouteGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -124,7 +124,7 @@ func newRouteCreateCmd() *cobra.Command {
 				Enabled:      true,
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -147,7 +147,7 @@ func newRouteCreateCmd() *cobra.Command {
 				cfg.Enabled, _ = cmd.Flags().GetBool("enabled")
 			}
 
-			_, err = client.Config.PutRoute(ctx, connect.NewRequest(&v1.PutRouteRequest{
+			_, err = client.System.PutRoute(ctx, connect.NewRequest(&v1.PutRouteRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -221,7 +221,7 @@ func newRouteDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteRoute(context.Background(), connect.NewRequest(&v1.DeleteRouteRequest{Id: id}))
+			_, err = client.System.DeleteRoute(context.Background(), connect.NewRequest(&v1.DeleteRouteRequest{Id: id}))
 			if err != nil {
 				return err
 			}

@@ -12,7 +12,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 )
@@ -31,7 +31,7 @@ type RemoteChunkLister interface {
 // VaultServer implements the VaultService.
 type VaultServer struct {
 	orch              *orchestrator.Orchestrator
-	cfgStore          config.Store
+	cfgStore          system.Store
 	factories         orchestrator.Factories
 	peerStats         PeerVaultStatsProvider
 	remoteChunkLister RemoteChunkLister
@@ -42,7 +42,7 @@ type VaultServer struct {
 var _ gastrologv1connect.VaultServiceHandler = (*VaultServer)(nil)
 
 // NewVaultServer creates a new VaultServer.
-func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore config.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, localNodeID string, logger *slog.Logger) *VaultServer {
+func NewVaultServer(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orchestrator.Factories, peerStats PeerVaultStatsProvider, remoteChunkLister RemoteChunkLister, localNodeID string, logger *slog.Logger) *VaultServer {
 	return &VaultServer{
 		orch:              orch,
 		cfgStore:          cfgStore,

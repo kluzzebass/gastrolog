@@ -13,7 +13,7 @@ import { vaultClient, refreshAuth } from "../client";
  * Replaces the previous 5-second polling interval on useChunks. The
  * stream carries only a monotonic version counter — no chunk data —
  * so the bandwidth is negligible. Same reconnection pattern as
- * useWatchConfig: exponential backoff on error, auth refresh on 401.
+ * useWatchSystem: exponential backoff on error, auth refresh on 401.
  *
  * See gastrolog-1jijm.
  */

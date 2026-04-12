@@ -33,7 +33,7 @@ func newTierListCmd() *cobra.Command {
 		Short: "List all tiers",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -72,7 +72,7 @@ func newTierCreateCmd() *cobra.Command {
 				StorageClass:      1,
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -95,7 +95,7 @@ func newTierCreateCmd() *cobra.Command {
 				return errors.New("--vault is required when creating a new tier")
 			}
 
-			_, err = client.Config.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{
+			_, err = client.System.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -255,7 +255,7 @@ func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	if err != nil {
 		return err
 	}
-	resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+	resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 	if err != nil {
 		return err
 	}
@@ -276,7 +276,7 @@ func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Clie
 		}
 		t.VaultId = vaultID
 		t.Position = maxPos
-		_, err = client.Config.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{Config: t}))
+		_, err = client.System.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{Config: t}))
 		if err != nil {
 			return fmt.Errorf("tier created but failed to set vault: %w", err)
 		}
@@ -306,7 +306,7 @@ before deleting — no data is lost but the operation is asynchronous.`,
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteTier(context.Background(), connect.NewRequest(&v1.DeleteTierRequest{
+			_, err = client.System.DeleteTier(context.Background(), connect.NewRequest(&v1.DeleteTierRequest{
 				Id:    id,
 				Drain: drain,
 			}))

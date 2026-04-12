@@ -10,8 +10,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 
 	"github.com/google/uuid"
 )
@@ -65,15 +65,15 @@ func setupRemoteTransitionRunner(t *testing.T, transferrer RemoteTransferrer) (*
 	orch.RegisterVault(vault)
 
 	// Config store — tier0 lives on local-node, tier1 lives on remote-node.
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{ID: vaultID, Name: "test-vault"})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier0ID, Name: "hot", Type: config.TierTypeMemory,
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{ID: vaultID, Name: "test-vault"})
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory,
 		Placements: syntheticPlacements(localNodeID),
 		VaultID:    vaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: tier1ID, Name: "warm", Type: config.TierTypeMemory,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: tier1ID, Name: "warm", Type: system.TierTypeMemory,
 		Placements: syntheticPlacements(remoteNodeID),
 		VaultID:    vaultID, Position: 1,
 	})

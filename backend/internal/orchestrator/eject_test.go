@@ -12,8 +12,8 @@ import (
 
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
@@ -22,10 +22,10 @@ import (
 
 // ejectConfigLoader implements ConfigLoader for eject tests.
 type ejectConfigLoader struct {
-	cfg *config.Config
+	cfg *system.Config
 }
 
-func (f *ejectConfigLoader) Load(_ context.Context) (*config.Config, error) {
+func (f *ejectConfigLoader) Load(_ context.Context) (*system.Config, error) {
 	return f.cfg, nil
 }
 
@@ -207,15 +207,15 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	}
 
 	// Create orchestrator with dst vault registered.
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, Name: "eject-route", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
@@ -270,15 +270,15 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, Name: "eject-separate", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
@@ -341,15 +341,15 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "level=error"}, // only matches error records
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, Name: "eject-filtered", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
@@ -412,17 +412,17 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstA},
 			{ID: dstB},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterAll, Expression: "*"},
 			{ID: filterErrors, Expression: "level=error"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeA, Name: "route-all", FilterID: &filterAll, Destinations: []uuid.UUID{dstA}, Enabled: true, EjectOnly: true},
 			{ID: routeB, Name: "route-errors", FilterID: &filterErrors, Destinations: []uuid.UUID{dstB}, Enabled: true, EjectOnly: true},
 		},
@@ -481,15 +481,15 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, Name: "eject-fail", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
@@ -540,15 +540,15 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, Name: "disabled-route", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: false, EjectOnly: true},
 		},
 	}}
@@ -595,12 +595,12 @@ func TestEjectChunkNoFilter(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			// Route with no filter ID — matchesEjectFilter returns false for nil.
 			{ID: routeID, Name: "no-filter-route", Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
@@ -660,15 +660,15 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &config.Config{
-		Vaults: []config.VaultConfig{
+	loader := &ejectConfigLoader{cfg: &system.Config{
+		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
 		},
-		Filters: []config.FilterConfig{
+		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
-		Routes: []config.RouteConfig{
+		Routes: []system.RouteConfig{
 			{ID: routeID, Name: "eject-sweep", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
@@ -686,7 +686,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	rules := []retentionRule{
 		{
 			policy:        chunk.NewCountRetentionPolicy(1),
-			action:        config.RetentionActionEject,
+			action:        system.RetentionActionEject,
 			ejectRouteIDs: []uuid.UUID{routeID},
 		},
 	}
@@ -741,27 +741,27 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	nodeID := "node-A"
 
 	// Config store with source vault, destination vault, filter, and eject route.
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: srcVaultID, Name: "src",
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: dstVaultID, Name: "dst",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: srcTierID, Name: "src-hot", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
 		Placements: syntheticPlacements(nodeID),
 		VaultID: srcVaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: dstTierID, Name: "dst-hot", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
 		Placements: syntheticPlacements(nodeID),
 		VaultID: dstVaultID, Position: 0,
 	})
-	_ = store.PutFilter(context.Background(), config.FilterConfig{
+	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "catch-all", Expression: "*",
 	})
-	_ = store.PutRoute(context.Background(), config.RouteConfig{
+	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "eject-route", FilterID: &filterID,
 		Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true,
 	})
@@ -899,27 +899,27 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	routeID := uuid.Must(uuid.NewV7())
 
-	store := cfgmem.NewStore()
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	store := sysmem.NewStore()
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: srcVaultID, Name: "src",
 	})
-	_ = store.PutVault(context.Background(), config.VaultConfig{
+	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: dstVaultID, Name: "dst",
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: srcTierID, Name: "src-hot", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
 		Placements: syntheticPlacements("node-A"),
 		VaultID: srcVaultID, Position: 0,
 	})
-	_ = store.PutTier(context.Background(), config.TierConfig{
-		ID: dstTierID, Name: "dst-hot", Type: config.TierTypeFile,
+	_ = store.PutTier(context.Background(), system.TierConfig{
+		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
 		Placements: syntheticPlacements("node-B"),
 		VaultID: dstVaultID, Position: 0,
 	})
-	_ = store.PutFilter(context.Background(), config.FilterConfig{
+	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "catch-all", Expression: "*",
 	})
-	_ = store.PutRoute(context.Background(), config.RouteConfig{
+	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "eject-route", FilterID: &filterID,
 		Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true,
 	})

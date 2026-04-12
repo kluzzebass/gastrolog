@@ -1,4 +1,4 @@
-import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../../api/hooks/useUploadManagedFile";
 
 // ---------------------------------------------------------------------------

@@ -40,7 +40,7 @@ import {
 import { hasPipeOutsideQuotes } from "../lib/hasPipeOutsideQuotes";
 import type { SyntaxSets } from "../lib/syntaxSets";
 import { useAutocomplete } from "./useAutocomplete";
-import { useConfig } from "../api/hooks/useConfig";
+import { useConfig } from "../api/hooks/useSystem";
 import { useSettings } from "../api/hooks/useSettings";
 import { useSyntax } from "../api/hooks/useSyntax";
 import { useValidation } from "./useValidation";

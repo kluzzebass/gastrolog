@@ -11,7 +11,7 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/orchestrator"
 
 	"github.com/google/uuid"
@@ -22,9 +22,9 @@ const placementInterval = 15 * time.Second
 
 // placementManager assigns tiers to nodes automatically.
 // Runs on every node but only acts when this node is the Raft leader.
-// Writes tier assignments via config.Store (Raft-replicated).
+// Writes tier assignments via system.Store (Raft-replicated).
 type placementManager struct {
-	cfgStore    config.Store
+	cfgStore    system.Store
 	clusterSrv  *cluster.Server
 	peerState   *cluster.PeerState
 	alerts      orchestrator.AlertCollector
@@ -143,7 +143,7 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 }
 
 // placeTier evaluates a single tier and assigns it to an eligible node if needed.
-func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+func (pm *placementManager) placeTier(ctx context.Context, tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	alertKey := fmt.Sprintf("tier-unplaced:%s", tier.ID)
 
 	currentLeader := tier.LeaderNodeID(nscs)
@@ -171,7 +171,7 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 
 	old := currentLeader
 	// Replace the leader placement.
-	tier.Placements = replaceLeaderPlacement(tier.Placements, config.StorageIDForNode(best, tier, nscs))
+	tier.Placements = replaceLeaderPlacement(tier.Placements, system.StorageIDForNode(best, tier, nscs))
 	if err := pm.cfgStore.PutTier(ctx, tier); err != nil {
 		pm.logger.Error("placement: assign tier", "tier", tier.ID, "name", tier.Name, "node", best, "error", err)
 		return
@@ -197,20 +197,20 @@ func (pm *placementManager) placeTier(ctx context.Context, tier config.TierConfi
 }
 
 // replaceLeaderPlacement returns a new Placements slice with the leader set to storageID.
-func replaceLeaderPlacement(placements []config.TierPlacement, storageID string) []config.TierPlacement {
-	var result []config.TierPlacement
+func replaceLeaderPlacement(placements []system.TierPlacement, storageID string) []system.TierPlacement {
+	var result []system.TierPlacement
 	for _, p := range placements {
 		if !p.Leader {
 			result = append(result, p)
 		}
 	}
-	return append([]config.TierPlacement{{StorageID: storageID, Leader: true}}, result...)
+	return append([]system.TierPlacement{{StorageID: storageID, Leader: true}}, result...)
 }
 
 // placeFollowers assigns follower file storages for a tier based on its ReplicationFactor.
 // Prefers storages on different nodes (availability), falls back to different storages on
 // the same node (redundancy). Never places two replicas on the same file storage.
-func (pm *placementManager) placeFollowers(ctx context.Context, tier *config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+func (pm *placementManager) placeFollowers(ctx context.Context, tier *system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	desired := int(tier.ReplicationFactor) - 1
 	if desired <= 0 {
 		pm.clearStaleFollowers(ctx, tier, nscs, tierCount)
@@ -218,12 +218,12 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *config.Tie
 	}
 
 	leaderStorageID := tier.LeaderStorageID()
-	leaderNodeID := config.NodeIDForStorage(leaderStorageID, nscs)
+	leaderNodeID := system.NodeIDForStorage(leaderStorageID, nscs)
 	candidates := pm.followerCandidates(*tier, leaderStorageID, leaderNodeID, alive, nscs, tierCount)
 	kept := pm.selectFollowers(tier, desired, leaderStorageID, leaderNodeID, candidates, nscs, alive, tierCount)
 
 	// Build new placements.
-	newPlacements := []config.TierPlacement{{StorageID: leaderStorageID, Leader: true}}
+	newPlacements := []system.TierPlacement{{StorageID: leaderStorageID, Leader: true}}
 	newPlacements = append(newPlacements, kept...)
 
 	if !placementsEqual(tier.Placements, newPlacements) {
@@ -240,13 +240,13 @@ func (pm *placementManager) placeFollowers(ctx context.Context, tier *config.Tie
 }
 
 // clearStaleFollowers removes leftover follower placements when RF <= 1.
-func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *config.TierConfig, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *system.TierConfig, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	currentFollowers := tier.FollowerStorageIDs()
 	if len(currentFollowers) == 0 {
 		return
 	}
 	for _, sID := range currentFollowers {
-		if nid := config.NodeIDForStorage(sID, nscs); nid != "" {
+		if nid := system.NodeIDForStorage(sID, nscs); nid != "" {
 			tierCount[nid]--
 		}
 	}
@@ -259,7 +259,7 @@ func (pm *placementManager) clearStaleFollowers(ctx context.Context, tier *confi
 // followerCandidates returns eligible storages excluding the leader, sorted
 // by preference: cross-node first (availability), then same-node (redundancy),
 // then least-loaded.
-func (pm *placementManager) followerCandidates(tier config.TierConfig, leaderStorageID, leaderNodeID string, alive map[string]bool, nscs []config.NodeStorageConfig, tierCount map[string]int) []eligibleStorage {
+func (pm *placementManager) followerCandidates(tier system.TierConfig, leaderStorageID, leaderNodeID string, alive map[string]bool, nscs []system.NodeStorageConfig, tierCount map[string]int) []eligibleStorage {
 	all := pm.eligibleStorages(tier, alive, nscs)
 	var candidates []eligibleStorage
 	for _, ea := range all {
@@ -283,8 +283,8 @@ func (pm *placementManager) followerCandidates(tier config.TierConfig, leaderSto
 
 // selectFollowers picks follower placements: retains existing valid ones first,
 // then fills from sorted candidates.
-func (pm *placementManager) selectFollowers(tier *config.TierConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []config.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []config.TierPlacement {
-	var kept []config.TierPlacement
+func (pm *placementManager) selectFollowers(tier *system.TierConfig, desired int, leaderStorageID, leaderNodeID string, candidates []eligibleStorage, nscs []system.NodeStorageConfig, alive map[string]bool, tierCount map[string]int) []system.TierPlacement {
+	var kept []system.TierPlacement
 	usedStorages := map[string]bool{leaderStorageID: true}
 	usedNodes := map[string]bool{leaderNodeID: true} // 1:1:1: one store per tier per node
 
@@ -293,7 +293,7 @@ func (pm *placementManager) selectFollowers(tier *config.TierConfig, desired int
 		if p.Leader || len(kept) >= desired {
 			continue
 		}
-		nid := config.NodeIDForStorage(p.StorageID, nscs)
+		nid := system.NodeIDForStorage(p.StorageID, nscs)
 		if nid != "" && alive[nid] && !usedStorages[p.StorageID] && !usedNodes[nid] && pm.storageEligible(p.StorageID, *tier, nscs) {
 			kept = append(kept, p)
 			usedStorages[p.StorageID] = true
@@ -309,7 +309,7 @@ func (pm *placementManager) selectFollowers(tier *config.TierConfig, desired int
 		if usedStorages[ea.storageID] || usedNodes[ea.nodeID] {
 			continue
 		}
-		kept = append(kept, config.TierPlacement{StorageID: ea.storageID, Leader: false})
+		kept = append(kept, system.TierPlacement{StorageID: ea.storageID, Leader: false})
 		usedStorages[ea.storageID] = true
 		usedNodes[ea.nodeID] = true
 		tierCount[ea.nodeID]++
@@ -318,7 +318,7 @@ func (pm *placementManager) selectFollowers(tier *config.TierConfig, desired int
 }
 
 // alertReplication sets or clears the under-replicated tier alert.
-func (pm *placementManager) alertReplication(tier *config.TierConfig, placed, desired int) {
+func (pm *placementManager) alertReplication(tier *system.TierConfig, placed, desired int) {
 	if pm.alerts == nil {
 		return
 	}
@@ -339,13 +339,13 @@ type eligibleStorage struct {
 // eligibleStorages returns all storages across all alive nodes that can host a replica.
 // For memory tiers: one synthetic storage per alive node (no file storage needed).
 // For file/cloud tiers: all file storages matching the required class.
-func (pm *placementManager) eligibleStorages(tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig) []eligibleStorage {
+func (pm *placementManager) eligibleStorages(tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []eligibleStorage {
 	var result []eligibleStorage
 
-	if tier.Type == config.TierTypeMemory {
+	if tier.Type == system.TierTypeMemory {
 		for nodeID := range alive {
 			result = append(result, eligibleStorage{
-				storageID: config.SyntheticStorageID(nodeID),
+				storageID: system.SyntheticStorageID(nodeID),
 				nodeID:    nodeID,
 			})
 		}
@@ -353,7 +353,7 @@ func (pm *placementManager) eligibleStorages(tier config.TierConfig, alive map[s
 	}
 
 	sc := tier.StorageClass
-	if tier.Type == config.TierTypeCloud {
+	if tier.Type == system.TierTypeCloud {
 		sc = tier.ActiveChunkClass
 	}
 	for _, nsc := range nscs {
@@ -370,12 +370,12 @@ func (pm *placementManager) eligibleStorages(tier config.TierConfig, alive map[s
 }
 
 // storageEligible checks if a specific storage still matches the tier's requirements.
-func (pm *placementManager) storageEligible(storageID string, tier config.TierConfig, nscs []config.NodeStorageConfig) bool {
-	if tier.Type == config.TierTypeMemory {
-		return strings.HasPrefix(storageID, config.SyntheticStoragePrefix)
+func (pm *placementManager) storageEligible(storageID string, tier system.TierConfig, nscs []system.NodeStorageConfig) bool {
+	if tier.Type == system.TierTypeMemory {
+		return strings.HasPrefix(storageID, system.SyntheticStoragePrefix)
 	}
 	sc := tier.StorageClass
-	if tier.Type == config.TierTypeCloud {
+	if tier.Type == system.TierTypeCloud {
 		sc = tier.ActiveChunkClass
 	}
 	for _, nsc := range nscs {
@@ -389,8 +389,8 @@ func (pm *placementManager) storageEligible(storageID string, tier config.TierCo
 }
 
 // clearFollowerPlacements removes all non-leader placements.
-func clearFollowerPlacements(placements []config.TierPlacement) []config.TierPlacement {
-	var result []config.TierPlacement
+func clearFollowerPlacements(placements []system.TierPlacement) []system.TierPlacement {
+	var result []system.TierPlacement
 	for _, p := range placements {
 		if p.Leader {
 			result = append(result, p)
@@ -399,7 +399,7 @@ func clearFollowerPlacements(placements []config.TierPlacement) []config.TierPla
 	return result
 }
 
-func placementsEqual(a, b []config.TierPlacement) bool {
+func placementsEqual(a, b []system.TierPlacement) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -424,7 +424,7 @@ func slicesEqual(a, b []string) bool {
 }
 
 // handleUnplaceable clears a tier's assignment when no eligible node exists.
-func (pm *placementManager) handleUnplaceable(ctx context.Context, tier config.TierConfig, alertKey string, nscs []config.NodeStorageConfig, tierCount map[string]int) {
+func (pm *placementManager) handleUnplaceable(ctx context.Context, tier system.TierConfig, alertKey string, nscs []system.NodeStorageConfig, tierCount map[string]int) {
 	currentLeader := tier.LeaderNodeID(nscs)
 	if currentLeader != "" {
 		old := currentLeader
@@ -443,15 +443,15 @@ func (pm *placementManager) handleUnplaceable(ctx context.Context, tier config.T
 }
 
 // nodeEligible checks whether a specific node can serve a tier.
-func (pm *placementManager) nodeEligible(tier config.TierConfig, nodeID string, nscs []config.NodeStorageConfig) bool {
+func (pm *placementManager) nodeEligible(tier system.TierConfig, nodeID string, nscs []system.NodeStorageConfig) bool {
 	switch tier.Type {
-	case config.TierTypeMemory:
+	case system.TierTypeMemory:
 		return true // any node can serve memory tiers
-	case config.TierTypeFile:
+	case system.TierTypeFile:
 		return nodeHasStorageClass(nscs, nodeID, tier.StorageClass)
-	case config.TierTypeCloud:
+	case system.TierTypeCloud:
 		return nodeHasStorageClass(nscs, nodeID, tier.ActiveChunkClass)
-	case config.TierTypeJSONL:
+	case system.TierTypeJSONL:
 		// JSONL tiers have explicit node assignment via Path.
 		leaderNodeID := tier.LeaderNodeID(nscs)
 		return leaderNodeID == nodeID
@@ -461,7 +461,7 @@ func (pm *placementManager) nodeEligible(tier config.TierConfig, nodeID string, 
 }
 
 // eligibleNodes returns all alive nodes that can serve a tier.
-func (pm *placementManager) eligibleNodes(tier config.TierConfig, alive map[string]bool, nscs []config.NodeStorageConfig) []string {
+func (pm *placementManager) eligibleNodes(tier system.TierConfig, alive map[string]bool, nscs []system.NodeStorageConfig) []string {
 	var result []string
 	for nodeID := range alive {
 		if pm.nodeEligible(tier, nodeID, nscs) {
@@ -492,13 +492,13 @@ func (pm *placementManager) selectNode(eligible []string, tierCount map[string]i
 }
 
 // nodeHasStorageClass checks if a node has a file storage with the given class.
-func nodeHasStorageClass(nscs []config.NodeStorageConfig, nodeID string, storageClass uint32) bool {
+func nodeHasStorageClass(nscs []system.NodeStorageConfig, nodeID string, storageClass uint32) bool {
 	if storageClass == 0 {
 		return false
 	}
-	idx := slices.IndexFunc(nscs, func(n config.NodeStorageConfig) bool { return n.NodeID == nodeID })
+	idx := slices.IndexFunc(nscs, func(n system.NodeStorageConfig) bool { return n.NodeID == nodeID })
 	if idx < 0 {
 		return false
 	}
-	return slices.ContainsFunc(nscs[idx].FileStorages, func(a config.FileStorage) bool { return a.StorageClass == storageClass })
+	return slices.ContainsFunc(nscs[idx].FileStorages, func(a system.FileStorage) bool { return a.StorageClass == storageClass })
 }

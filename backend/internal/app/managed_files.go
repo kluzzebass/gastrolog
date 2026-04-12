@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/home"
 
 	"github.com/google/uuid"
@@ -27,7 +27,7 @@ const (
 // disk. File pulls are asynchronous to avoid blocking FSM.Apply.
 type managedFileManager struct {
 	homeDir     string
-	cfgStore    config.Store
+	cfgStore    system.Store
 	transferrer *cluster.ManagedFileTransferrer
 	peerIDs     func() []string // returns peer node IDs in the cluster
 	fileExists  func(fileID string) bool

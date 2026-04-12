@@ -3435,7 +3435,7 @@ var File_gastrolog_v1_cluster_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\n" +
-	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16gastrolog/v1/job.proto\x1a\x18gastrolog/v1/query.proto\x1a\x19gastrolog/v1/config.proto\x1a\x18gastrolog/v1/vault.proto\"/\n" +
+	"\x1agastrolog/v1/cluster.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16gastrolog/v1/job.proto\x1a\x18gastrolog/v1/query.proto\x1a\x19gastrolog/v1/system.proto\x1a\x18gastrolog/v1/vault.proto\"/\n" +
 	"\x13ForwardApplyRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x01(\fR\acommand\"\x16\n" +
 	"\x14ForwardApplyResponse\"h\n" +
@@ -3795,7 +3795,7 @@ func file_gastrolog_v1_cluster_proto_init() {
 	}
 	file_gastrolog_v1_job_proto_init()
 	file_gastrolog_v1_query_proto_init()
-	file_gastrolog_v1_config_proto_init()
+	file_gastrolog_v1_system_proto_init()
 	file_gastrolog_v1_vault_proto_init()
 	file_gastrolog_v1_cluster_proto_msgTypes[6].OneofWrappers = []any{
 		(*BroadcastMessage_NodeStats)(nil),

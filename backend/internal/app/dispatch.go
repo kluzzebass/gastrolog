@@ -11,8 +11,8 @@ import (
 	"github.com/google/uuid"
 
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/raftfsm"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
@@ -22,7 +22,7 @@ import (
 type orchActions interface {
 	ListVaults() []uuid.UUID
 	VaultType(id uuid.UUID) string
-	AddVault(ctx context.Context, cfg config.VaultConfig, f orchestrator.Factories) error
+	AddVault(ctx context.Context, cfg system.VaultConfig, f orchestrator.Factories) error
 	ReloadFilters(ctx context.Context) error
 	ReloadRotationPolicies(ctx context.Context) error
 	ReloadRetentionPolicies(ctx context.Context) error
@@ -60,7 +60,7 @@ type ManagedFileHandler interface {
 // the cfgStore write method returns to the server handler.
 type configDispatcher struct {
 	orch              orchActions
-	cfgStore          config.Store
+	cfgStore          system.Store
 	factories         orchestrator.Factories
 	localNodeID       string
 	logger            *slog.Logger
@@ -142,7 +142,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 		d.logger.Error("dispatch: list tiers for vault put", "id", id, "error", err)
 		return
 	}
-	tierIDs := config.VaultTierIDs(tiers, id)
+	tierIDs := system.VaultTierIDs(tiers, id)
 
 	// With tiered storage, vaults no longer have a NodeID. Every node
 	// instantiates all tiers it can serve.
@@ -242,7 +242,7 @@ func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID uuid
 	}
 }
 
-func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uuid.UUID, cfg *config.VaultConfig) {
+func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uuid.UUID, cfg *system.VaultConfig) {
 	if err := d.orch.ReloadFilters(ctx); err != nil {
 		d.logger.Error("dispatch: reload filters", "error", err)
 	}
@@ -438,7 +438,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutTier from the placement manager will retry.
-func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *config.TierConfig, v config.VaultConfig, tierID uuid.UUID, leaderNodeID string, followerNodeIDs []string) {
+func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *system.TierConfig, v system.VaultConfig, tierID uuid.UUID, leaderNodeID string, followerNodeIDs []string) {
 	expected := int(tierCfg.ReplicationFactor)
 	placementsComplete := expected <= 0 || len(tierCfg.Placements) >= expected
 	if !placementsComplete {
@@ -461,14 +461,14 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCf
 	}
 }
 
-func (d *configDispatcher) registerVault(ctx context.Context, v config.VaultConfig, tierID uuid.UUID) {
+func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, tierID uuid.UUID) {
 	if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
 		d.logger.Error("dispatch: add vault for gained tier",
 			"vault", v.ID, "tier", tierID, "error", err)
 	}
 }
 
-func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v config.VaultConfig, tierID uuid.UUID) {
+func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v system.VaultConfig, tierID uuid.UUID) {
 	existing := d.orch.FindLocalTierExported(v.ID, tierID)
 	if existing != nil {
 		d.updateTierRoleIfNeeded(ctx, v.ID, tierID, existing)

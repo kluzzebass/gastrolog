@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 )
 
 var (
@@ -24,7 +24,7 @@ var (
 
 // loadConfig loads the full configuration via the ConfigLoader.
 // Returns ErrNoConfigLoader if no ConfigLoader is set.
-func (o *Orchestrator) loadConfig(ctx context.Context) (*config.Config, error) {
+func (o *Orchestrator) loadConfig(ctx context.Context) (*system.Config, error) {
 	if o.cfgLoader == nil {
 		return nil, ErrNoConfigLoader
 	}

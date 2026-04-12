@@ -32,7 +32,7 @@ func newCertListCmd() *cobra.Command {
 		Short: "List all certificates",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.ListCertificates(context.Background(), connect.NewRequest(&v1.ListCertificatesRequest{}))
+			resp, err := client.System.ListCertificates(context.Background(), connect.NewRequest(&v1.ListCertificatesRequest{}))
 			if err != nil {
 				return err
 			}
@@ -65,7 +65,7 @@ func newCertGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := client.Config.GetCertificate(context.Background(), connect.NewRequest(&v1.GetCertificateRequest{Id: id}))
+			resp, err := client.System.GetCertificate(context.Background(), connect.NewRequest(&v1.GetCertificateRequest{Id: id}))
 			if err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func newCertCreateCmd() *cobra.Command {
 
 			client := clientFromCmd(cmd)
 			id := uuid.Must(uuid.NewV7()).String()
-			_, err := client.Config.PutCertificate(context.Background(), connect.NewRequest(&v1.PutCertificateRequest{
+			_, err := client.System.PutCertificate(context.Background(), connect.NewRequest(&v1.PutCertificateRequest{
 				Id:           id,
 				Name:         name,
 				CertPem:      certPem,
@@ -160,7 +160,7 @@ func newCertDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteCertificate(context.Background(), connect.NewRequest(&v1.DeleteCertificateRequest{Id: id}))
+			_, err = client.System.DeleteCertificate(context.Background(), connect.NewRequest(&v1.DeleteCertificateRequest{Id: id}))
 			if err != nil {
 				return err
 			}

@@ -1,7 +1,7 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
-import type { VaultConfig } from "../../api/gen/gastrolog/v1/config_pb";
+import type { VaultConfig } from "../../api/gen/gastrolog/v1/system_pb";
 
 interface MigrateTarget {
   name: string;

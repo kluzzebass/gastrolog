@@ -60,7 +60,7 @@ func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.
 		return
 	}
 
-	// Build name lookup from config.
+	// Build name lookup from system.
 	nameMap := make(map[string]string, len(ids))
 	if s.cfgStore != nil {
 		ingesters, err := s.cfgStore.ListIngesters(context.Background())
@@ -117,7 +117,7 @@ func (s *Server) writeVaultMetrics(w http.ResponseWriter, orch *orchestrator.Orc
 		return
 	}
 
-	// Build name/type lookup from config.
+	// Build name/type lookup from system.
 	type vaultMeta struct {
 		name      string
 		vaultType string

@@ -1,8 +1,8 @@
-import { configClient } from "../client";
-import { useConfigMutation } from "./useConfig";
+import { systemClient } from "../client";
+import { useSystemMutation } from "./useSystem";
 
 export function useDeleteManagedFile() {
-  return useConfigMutation(async (id: string) => {
-    await configClient.deleteManagedFile({ id });
+  return useSystemMutation(async (id: string) => {
+    await systemClient.deleteManagedFile({ id });
   });
 }

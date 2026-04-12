@@ -9,7 +9,7 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -136,7 +136,7 @@ func (r *retentionRunner) findDestTierInstance(destTierID uuid.UUID) *TierInstan
 }
 
 // resolveNextTier delegates to resolveNextTierInChain.
-func (r *retentionRunner) resolveNextTier(cfg *config.Config) (uuid.UUID, *config.TierConfig) {
+func (r *retentionRunner) resolveNextTier(cfg *system.Config) (uuid.UUID, *system.TierConfig) {
 	nextID, nextCfg, err := resolveNextTierInChain(cfg, r.vaultID, r.tierID)
 	if err != nil {
 		r.logger.Warn("transition: "+err.Error(), "vault", r.vaultID, "tier", r.tierID)
@@ -146,8 +146,8 @@ func (r *retentionRunner) resolveNextTier(cfg *config.Config) (uuid.UUID, *confi
 
 // resolveNextTierInChain finds the next tier in a vault's chain after the given tier.
 // Returns an error string if the tier is terminal or not found.
-func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid.UUID, *config.TierConfig, error) {
-	var vaultCfg *config.VaultConfig
+func resolveNextTierInChain(cfg *system.Config, vaultID, tierID uuid.UUID) (uuid.UUID, *system.TierConfig, error) {
+	var vaultCfg *system.VaultConfig
 	for i := range cfg.Vaults {
 		if cfg.Vaults[i].ID == vaultID {
 			vaultCfg = &cfg.Vaults[i]
@@ -158,7 +158,7 @@ func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid
 		return uuid.UUID{}, nil, fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
-	tierIDs := config.VaultTierIDs(cfg.Tiers, vaultID)
+	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultID)
 	idx := slices.Index(tierIDs, tierID)
 	if idx < 0 {
 		return uuid.UUID{}, nil, fmt.Errorf("tier %s not found in vault's tier chain", tierID)
@@ -184,7 +184,7 @@ func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid
 // If the destination tier has no local instance on this node (fully remote
 // tier placement), the check can't be performed locally. In that case, chunks
 // are expired after a grace period to avoid blocking forever.
-func (r *retentionRunner) confirmStreamedTransitions(cfg *config.Config) {
+func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	if r.orch == nil {
 		return
 	}

@@ -4,7 +4,7 @@ import { LoadingPlaceholder } from "../LoadingPlaceholder";
 import { useVaults, useIngesters } from "../../api/hooks";
 import { useWatchJobs } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
-import { useConfig } from "../../api/hooks/useConfig";
+import { useConfig } from "../../api/hooks/useSystem";
 import { useSettings } from "../../api/hooks/useSettings";
 import { JobKind, JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
 import type { Job } from "../../api/gen/gastrolog/v1/job_pb";

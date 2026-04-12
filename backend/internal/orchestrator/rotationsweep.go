@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -40,7 +40,7 @@ func (o *Orchestrator) rotationSweep() {
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		// Find vault config for cron reconciliation.
-		var vaultCfg *config.VaultConfig
+		var vaultCfg *system.VaultConfig
 		if cfg != nil {
 			for i := range cfg.Vaults {
 				if cfg.Vaults[i].ID == vaultID {
@@ -102,7 +102,7 @@ func (o *Orchestrator) rotationSweep() {
 }
 
 // reconcileFilters recompiles the filter set from config under a write lock.
-func (o *Orchestrator) reconcileFilters(cfg *config.Config) {
+func (o *Orchestrator) reconcileFilters(cfg *system.Config) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
@@ -114,16 +114,16 @@ func (o *Orchestrator) reconcileFilters(cfg *config.Config) {
 // from the current config and applies it. Also ensures the cron job exists
 // if configured. Called each tick by rotationSweep.
 func (o *Orchestrator) applyRotationFromConfig(
-	cfg *config.Config,
-	vaultCfg config.VaultConfig,
+	cfg *system.Config,
+	vaultCfg system.VaultConfig,
 	tier *TierInstance,
-	tierCfg *config.TierConfig,
+	tierCfg *system.TierConfig,
 	activeCronJobs map[string]bool,
 ) {
 	if tierCfg == nil {
 		return
 	}
-	// Refresh replication targets from current config.
+	// Refresh replication targets from current system.
 	tier.FollowerTargets = tierCfg.FollowerTargets(cfg.NodeStorageConfigs)
 
 	if tierCfg.RotationPolicyID == nil {

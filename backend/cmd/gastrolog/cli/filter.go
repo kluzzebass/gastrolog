@@ -31,7 +31,7 @@ func newFilterListCmd() *cobra.Command {
 		Short: "List all filters",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -56,7 +56,7 @@ func newFilterGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Config.GetConfig(context.Background(), connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(context.Background(), connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -103,7 +103,7 @@ func newFilterCreateCmd() *cobra.Command {
 				Expression: "*",
 			}
 			verb := "Created"
-			resp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			resp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return err
 			}
@@ -119,7 +119,7 @@ func newFilterCreateCmd() *cobra.Command {
 				cfg.Expression, _ = cmd.Flags().GetString("expression")
 			}
 
-			_, err = client.Config.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
+			_, err = client.System.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
 				Config: cfg,
 			}))
 			if err != nil {
@@ -153,7 +153,7 @@ func newFilterDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Config.DeleteFilter(context.Background(), connect.NewRequest(&v1.DeleteFilterRequest{Id: id}))
+			_, err = client.System.DeleteFilter(context.Background(), connect.NewRequest(&v1.DeleteFilterRequest{Id: id}))
 			if err != nil {
 				return err
 			}

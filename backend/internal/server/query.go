@@ -14,7 +14,7 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
@@ -48,7 +48,7 @@ type RemoteSearcher interface {
 // QueryServer implements the QueryService.
 type QueryServer struct {
 	orch              *orchestrator.Orchestrator
-	cfgStore          config.Store
+	cfgStore          system.Store
 	remoteSearcher    RemoteSearcher
 	localNodeID       string
 	lookupResolver    lookup.Resolver
@@ -62,7 +62,7 @@ type QueryServer struct {
 var _ gastrologv1connect.QueryServiceHandler = (*QueryServer)(nil)
 
 // NewQueryServer creates a new QueryServer.
-func NewQueryServer(orch *orchestrator.Orchestrator, cfgStore config.Store, remoteSearcher RemoteSearcher, localNodeID string, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64, logger *slog.Logger) *QueryServer {
+func NewQueryServer(orch *orchestrator.Orchestrator, cfgStore system.Store, remoteSearcher RemoteSearcher, localNodeID string, lookupResolver lookup.Resolver, lookupNames []string, queryTimeout, maxFollowDuration time.Duration, maxResultCount int64, logger *slog.Logger) *QueryServer {
 	return &QueryServer{orch: orch, cfgStore: cfgStore, remoteSearcher: remoteSearcher, localNodeID: localNodeID, lookupResolver: lookupResolver, lookupNames: lookupNames, queryTimeout: queryTimeout, maxFollowDuration: maxFollowDuration, maxResultCount: maxResultCount, logger: logger}
 }
 

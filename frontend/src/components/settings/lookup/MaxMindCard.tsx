@@ -8,7 +8,7 @@ import { Checkbox } from "../Checkbox";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
 import { PasswordInput } from "./FormHelpers";
-import type { MaxMindSettings } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { MaxMindSettings } from "../../../api/gen/gastrolog/v1/system_pb";
 
 export function MaxMindCard({
   dark,

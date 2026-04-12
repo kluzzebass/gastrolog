@@ -15,7 +15,7 @@ import (
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/cluster"
-	cfgmem "gastrolog/internal/config/memory"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -337,7 +337,7 @@ func TestGetClusterStatus_ClusterAddressUsesAdvertised(t *testing.T) {
 		},
 	}
 
-	cfgStore := cfgmem.NewStore()
+	cfgStore := sysmem.NewStore()
 
 	// Server's listen address is port-only (the bug condition).
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{

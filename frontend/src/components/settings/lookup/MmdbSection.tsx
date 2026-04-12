@@ -9,7 +9,7 @@ import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
 import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbLookupEqual } from "./types";
-import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/config_pb";
+import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
 function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
   return lookups

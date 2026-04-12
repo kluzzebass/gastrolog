@@ -13,8 +13,8 @@ import (
 	"gastrolog/internal/chunk"
 	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/config"
-	cfgmem "gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/index"
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
@@ -282,14 +282,14 @@ func TestGetStatsFilterByVault(t *testing.T) {
 type fullVaultTestClients struct {
 	vault     gastrologv1connect.VaultServiceClient
 	job       gastrologv1connect.JobServiceClient
-	cfgStore  config.Store
+	cfgStore  system.Store
 	defaultID uuid.UUID
 }
 
 func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	t.Helper()
 
-	cfgStore := cfgmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
@@ -307,11 +307,11 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 
 	// Create default vault via config + orchestrator.
 	tierID := uuid.Must(uuid.NewV7())
-	cfgStore.PutTier(context.Background(), config.TierConfig{
-		ID: tierID, Name: "default-tier", Type: config.TierTypeMemory,
+	cfgStore.PutTier(context.Background(), system.TierConfig{
+		ID: tierID, Name: "default-tier", Type: system.TierTypeMemory,
 		VaultID: defaultID, Position: 0,
 	})
-	vaultCfg := config.VaultConfig{
+	vaultCfg := system.VaultConfig{
 		ID: defaultID,
 	}
 	cfgStore.PutVault(context.Background(), vaultCfg)
@@ -627,7 +627,7 @@ type twoVaultTestClients struct {
 func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	t.Helper()
 
-	cfgStore := cfgmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
@@ -655,14 +655,14 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	}
 
 	// Use config client to create vaults.
-	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+	cfgClient := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
 	// Create a memory tier for each vault.
 	for _, vid := range []uuid.UUID{srcID, dstID} {
 		tierID := uuid.Must(uuid.NewV7())
-		if err := cfgStore.PutTier(ctx, config.TierConfig{
-			ID: tierID, Name: "tier-" + vid.String()[:8], Type: config.TierTypeMemory,
+		if err := cfgStore.PutTier(ctx, system.TierConfig{
+			ID: tierID, Name: "tier-" + vid.String()[:8], Type: system.TierTypeMemory,
 			VaultID: vid, Position: 0,
 		}); err != nil {
 			t.Fatal(err)
@@ -766,7 +766,7 @@ func TestMergeVaultsMemory(t *testing.T) {
 
 func TestMergeVaultsFileBacked(t *testing.T) {
 	t.Parallel()
-	cfgStore := cfgmem.NewStore()
+	cfgStore := sysmem.NewStore()
 	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
@@ -791,7 +791,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		Transport: &embeddedTransport{handler: handler},
 	}
 
-	cfgClient := gastrologv1connect.NewConfigServiceClient(httpClient, "http://embedded")
+	cfgClient := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 	vaultClient := gastrologv1connect.NewVaultServiceClient(httpClient, "http://embedded")
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
@@ -814,15 +814,15 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		vaultDir := filepath.Join(homeDir, "vaults", v.id.String())
 		// Create a local tier + node storage config for the vault directory.
 		fileTierID := uuid.Must(uuid.NewV7())
-		if err := cfgStore.PutTier(ctx, config.TierConfig{
-			ID: fileTierID, Name: v.name + "-tier", Type: config.TierTypeFile, StorageClass: 1,
+		if err := cfgStore.PutTier(ctx, system.TierConfig{
+			ID: fileTierID, Name: v.name + "-tier", Type: system.TierTypeFile, StorageClass: 1,
 			VaultID: v.id, Position: 0,
 		}); err != nil {
 			t.Fatal(err)
 		}
 		storageID := uuid.Must(uuid.NewV7())
-		if err := cfgStore.SetNodeStorageConfig(ctx, config.NodeStorageConfig{
-			NodeID: "", FileStorages: []config.FileStorage{{ID: storageID, StorageClass: 1, Path: vaultDir}},
+		if err := cfgStore.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
+			NodeID: "", FileStorages: []system.FileStorage{{ID: storageID, StorageClass: 1, Path: vaultDir}},
 		}); err != nil {
 			t.Fatal(err)
 		}

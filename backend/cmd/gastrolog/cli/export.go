@@ -14,7 +14,7 @@ import (
 
 // exportDoc is the JSON structure for config export/import.
 // Server settings are promoted to the top level in a hierarchical layout
-// that mirrors the internal config.Config structure.
+// that mirrors the internal system.Config structure.
 type exportDoc struct {
 	// Entity collections.
 	Filters           []*v1.FilterConfig          `json:"filters,omitempty"`
@@ -180,23 +180,23 @@ func newExportCmd() *cobra.Command {
 			client := clientFromCmd(cmd)
 			ctx := context.Background()
 
-			cfgResp, err := client.Config.GetConfig(ctx, connect.NewRequest(&v1.GetConfigRequest{}))
+			cfgResp, err := client.System.GetSystem(ctx, connect.NewRequest(&v1.GetSystemRequest{}))
 			if err != nil {
 				return fmt.Errorf("get config: %w", err)
 			}
 
-			scResp, err := client.Config.GetSettings(ctx, connect.NewRequest(&v1.GetSettingsRequest{IncludeSecrets: true}))
+			scResp, err := client.System.GetSettings(ctx, connect.NewRequest(&v1.GetSettingsRequest{IncludeSecrets: true}))
 			if err != nil {
 				return fmt.Errorf("get server config: %w", err)
 			}
 
-			certResp, err := client.Config.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
+			certResp, err := client.System.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
 			if err != nil {
 				return fmt.Errorf("list certificates: %w", err)
 			}
 			var certs []*certExport
 			for _, c := range certResp.Msg.Certificates {
-				detail, err := client.Config.GetCertificate(ctx, connect.NewRequest(&v1.GetCertificateRequest{Id: c.Id}))
+				detail, err := client.System.GetCertificate(ctx, connect.NewRequest(&v1.GetCertificateRequest{Id: c.Id}))
 				if err != nil {
 					return fmt.Errorf("get certificate %s: %w", c.Id, err)
 				}

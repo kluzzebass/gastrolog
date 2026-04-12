@@ -15,7 +15,7 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
@@ -334,9 +334,9 @@ func (o *Orchestrator) tierLabel(tierID uuid.UUID) string {
 // ReloadRotationPolicies, etc.) to resolve references like filter IDs
 // and policy IDs without the server having to mediate.
 //
-// config.Store satisfies this interface.
+// system.Store satisfies this interface.
 type ConfigLoader interface {
-	Load(ctx context.Context) (*config.Config, error)
+	Load(ctx context.Context) (*system.Config, error)
 }
 
 // Config configures an Orchestrator.

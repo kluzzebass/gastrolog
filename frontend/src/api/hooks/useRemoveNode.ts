@@ -9,7 +9,7 @@ export function useRemoveNode() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["clusterStatus"] });
-      qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
     },
   });
 }

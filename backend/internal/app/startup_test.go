@@ -10,8 +10,8 @@ import (
 
 	"github.com/google/uuid"
 
-	"gastrolog/internal/config"
-	"gastrolog/internal/config/memory"
+	"gastrolog/internal/system"
+	"gastrolog/internal/system/memory"
 )
 
 // ---------------------------------------------------------------------------
@@ -21,28 +21,28 @@ import (
 // startupStub extends stubCfgStore with node and server-settings methods
 // needed by the startup functions under test.
 type startupStub struct {
-	config.Store // nil embed — panics on uncalled methods
+	system.Store // nil embed — panics on uncalled methods
 
-	cfg         *config.Config
+	cfg         *system.Config
 	loadErr     error
-	settings    config.ServerSettings
+	settings    system.ServerSettings
 	settingsErr error
-	node        *config.NodeConfig
+	node        *system.NodeConfig
 	nodeErr     error
 	putNodeErr  error
-	putNodes    []config.NodeConfig // records PutNode calls
+	putNodes    []system.NodeConfig // records PutNode calls
 }
 
-func (s *startupStub) Load(context.Context) (*config.Config, error) {
+func (s *startupStub) Load(context.Context) (*system.Config, error) {
 	return s.cfg, s.loadErr
 }
-func (s *startupStub) LoadServerSettings(context.Context) (config.ServerSettings, error) {
+func (s *startupStub) LoadServerSettings(context.Context) (system.ServerSettings, error) {
 	return s.settings, s.settingsErr
 }
-func (s *startupStub) GetNode(_ context.Context, _ uuid.UUID) (*config.NodeConfig, error) {
+func (s *startupStub) GetNode(_ context.Context, _ uuid.UUID) (*system.NodeConfig, error) {
 	return s.node, s.nodeErr
 }
-func (s *startupStub) PutNode(_ context.Context, n config.NodeConfig) error {
+func (s *startupStub) PutNode(_ context.Context, n system.NodeConfig) error {
 	s.putNodes = append(s.putNodes, n)
 	return s.putNodeErr
 }
@@ -56,7 +56,7 @@ func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 func TestEnsureNodeConfig_ExistingNode(t *testing.T) {
 	t.Parallel()
 	nodeID := uuid.Must(uuid.NewV7()).String()
-	store := &startupStub{node: &config.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
+	store := &startupStub{node: &system.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err != nil {
@@ -140,7 +140,7 @@ func TestEnsureNodeConfig_PreferredName(t *testing.T) {
 func TestEnsureNodeConfig_PreferredNameOverridesExisting(t *testing.T) {
 	t.Parallel()
 	nodeID := uuid.Must(uuid.NewV7()).String()
-	store := &startupStub{node: &config.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
+	store := &startupStub{node: &system.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "data-1")
 	if err != nil {
@@ -157,7 +157,7 @@ func TestEnsureNodeConfig_PreferredNameOverridesExisting(t *testing.T) {
 func TestEnsureNodeConfig_PreferredNameMatchesExisting(t *testing.T) {
 	t.Parallel()
 	nodeID := uuid.Must(uuid.NewV7()).String()
-	store := &startupStub{node: &config.NodeConfig{ID: uuid.MustParse(nodeID), Name: "coord"}}
+	store := &startupStub{node: &system.NodeConfig{ID: uuid.MustParse(nodeID), Name: "coord"}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "coord")
 	if err != nil {
@@ -180,7 +180,7 @@ func TestEnsureConfig_ExistingConfigWithSecret(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
 	// Bootstrap first to get a valid config + secret.
-	if err := config.Bootstrap(ctx, store); err != nil {
+	if err := system.Bootstrap(ctx, store); err != nil {
 		t.Fatal(err)
 	}
 
@@ -198,7 +198,7 @@ func TestEnsureConfig_ConfigWithoutSecret(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
 	// Add a dummy filter so Load() returns non-nil, but leave server settings empty.
-	if err := store.PutFilter(ctx, config.FilterConfig{
+	if err := store.PutFilter(ctx, system.FilterConfig{
 		ID: uuid.Must(uuid.NewV7()), Name: "dummy", Expression: "*",
 	}); err != nil {
 		t.Fatal(err)
@@ -233,7 +233,7 @@ func TestEnsureConfig_LoadError(t *testing.T) {
 
 func TestAwaitReplication_SkipsWhenConfigPresent(t *testing.T) {
 	t.Parallel()
-	err := awaitReplication(context.Background(), &config.Config{}, "raft", nil, discardLogger())
+	err := awaitReplication(context.Background(), &system.Config{}, "raft", nil, discardLogger())
 	if err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
@@ -253,8 +253,8 @@ func TestAwaitReplication_SkipsWhenNotRaft(t *testing.T) {
 
 func TestWaitForServerSettings_ImmediateSuccess(t *testing.T) {
 	t.Parallel()
-	store := &startupStub{settings: config.ServerSettings{
-		Auth: config.AuthConfig{JWTSecret: "test-secret"},
+	store := &startupStub{settings: system.ServerSettings{
+		Auth: system.AuthConfig{JWTSecret: "test-secret"},
 	}}
 
 	err := waitForServerSettings(context.Background(), store, 5*time.Second, discardLogger())
@@ -304,10 +304,10 @@ func TestLoadLocalConfig_JoinAddrReturnsNil(t *testing.T) {
 
 func TestLoadLocalConfig_RaftWithLocalFSM(t *testing.T) {
 	t.Parallel()
-	existingCfg := &config.Config{}
+	existingCfg := &system.Config{}
 	store := &startupStub{
 		cfg:      existingCfg,
-		settings: config.ServerSettings{Auth: config.AuthConfig{JWTSecret: "s"}},
+		settings: system.ServerSettings{Auth: system.AuthConfig{JWTSecret: "s"}},
 	}
 	cfg := RunConfig{ConfigType: "raft"}
 
@@ -358,8 +358,8 @@ func TestBuildAuthTokens_NoAuth(t *testing.T) {
 func TestBuildAuthTokens_ValidSecret(t *testing.T) {
 	t.Parallel()
 	secret := base64.StdEncoding.EncodeToString([]byte("test-secret-key-32-bytes-long!!!"))
-	store := &startupStub{settings: config.ServerSettings{
-		Auth: config.AuthConfig{JWTSecret: secret},
+	store := &startupStub{settings: system.ServerSettings{
+		Auth: system.AuthConfig{JWTSecret: secret},
 	}}
 
 	tokens, err := buildAuthTokens(context.Background(), discardLogger(), store, false)
@@ -373,7 +373,7 @@ func TestBuildAuthTokens_ValidSecret(t *testing.T) {
 
 func TestBuildAuthTokens_MissingSecret(t *testing.T) {
 	t.Parallel()
-	store := &startupStub{settings: config.ServerSettings{}}
+	store := &startupStub{settings: system.ServerSettings{}}
 
 	_, err := buildAuthTokens(context.Background(), discardLogger(), store, false)
 	if err == nil {
@@ -397,8 +397,8 @@ func TestBuildAuthTokens_LoadError(t *testing.T) {
 
 func TestLoadMaxConcurrentJobs_Success(t *testing.T) {
 	t.Parallel()
-	store := &startupStub{settings: config.ServerSettings{
-		Scheduler: config.SchedulerConfig{MaxConcurrentJobs: 5},
+	store := &startupStub{settings: system.ServerSettings{
+		Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 5},
 	}}
 	if n := loadMaxConcurrentJobs(context.Background(), store); n != 5 {
 		t.Fatalf("expected 5, got %d", n)

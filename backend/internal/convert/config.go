@@ -1,6 +1,6 @@
 package convert
 
-// config.go provides canonical converters between config domain types and
+// system.go provides canonical converters between config domain types and
 // their protobuf representations for CloudService, NodeStorageConfig, and
 // TierConfig. Both the server RPC handlers and the Raft FSM command
 // package call these functions — there is exactly one source of truth for
@@ -10,7 +10,7 @@ import (
 	"fmt"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
-	"gastrolog/internal/config"
+	"gastrolog/internal/system"
 
 	"github.com/google/uuid"
 )
@@ -19,8 +19,8 @@ import (
 // CloudService
 // ---------------------------------------------------------------------------
 
-// CloudServiceToProto converts a config.CloudService to its proto representation.
-func CloudServiceToProto(cs config.CloudService) *gastrologv1.CloudService {
+// CloudServiceToProto converts a system.CloudService to its proto representation.
+func CloudServiceToProto(cs system.CloudService) *gastrologv1.CloudService {
 	transitions := make([]*gastrologv1.CloudStorageTransition, len(cs.Transitions))
 	for i, t := range cs.Transitions {
 		transitions[i] = &gastrologv1.CloudStorageTransition{
@@ -50,22 +50,22 @@ func CloudServiceToProto(cs config.CloudService) *gastrologv1.CloudService {
 	}
 }
 
-// CloudServiceFromProto converts a proto CloudService to config.CloudService.
+// CloudServiceFromProto converts a proto CloudService to system.CloudService.
 // The ID field is best-effort parsed; an empty or invalid ID yields uuid.Nil
 // (callers typically override it afterward for creation flows).
-func CloudServiceFromProto(p *gastrologv1.CloudService) config.CloudService {
+func CloudServiceFromProto(p *gastrologv1.CloudService) system.CloudService {
 	if p == nil {
-		return config.CloudService{}
+		return system.CloudService{}
 	}
 	id, _ := uuid.Parse(p.GetId())
-	transitions := make([]config.CloudStorageTransition, len(p.GetTransitions()))
+	transitions := make([]system.CloudStorageTransition, len(p.GetTransitions()))
 	for i, t := range p.GetTransitions() {
-		transitions[i] = config.CloudStorageTransition{
+		transitions[i] = system.CloudStorageTransition{
 			After:        t.GetAfter(),
 			StorageClass: t.GetStorageClass(),
 		}
 	}
-	return config.CloudService{
+	return system.CloudService{
 		ID:                id,
 		Name:              p.GetName(),
 		Provider:          p.GetProvider(),
@@ -91,8 +91,8 @@ func CloudServiceFromProto(p *gastrologv1.CloudService) config.CloudService {
 // NodeStorageConfig
 // ---------------------------------------------------------------------------
 
-// NodeStorageConfigToProto converts a config.NodeStorageConfig to its proto representation.
-func NodeStorageConfigToProto(cfg config.NodeStorageConfig) *gastrologv1.NodeStorageConfig {
+// NodeStorageConfigToProto converts a system.NodeStorageConfig to its proto representation.
+func NodeStorageConfigToProto(cfg system.NodeStorageConfig) *gastrologv1.NodeStorageConfig {
 	storages := make([]*gastrologv1.FileStorage, len(cfg.FileStorages))
 	for i, fs := range cfg.FileStorages {
 		storages[i] = &gastrologv1.FileStorage{
@@ -109,16 +109,16 @@ func NodeStorageConfigToProto(cfg config.NodeStorageConfig) *gastrologv1.NodeSto
 	}
 }
 
-// NodeStorageConfigFromProto converts a proto NodeStorageConfig to config.NodeStorageConfig.
-func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) config.NodeStorageConfig {
+// NodeStorageConfigFromProto converts a proto NodeStorageConfig to system.NodeStorageConfig.
+func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeStorageConfig {
 	if p == nil {
-		return config.NodeStorageConfig{}
+		return system.NodeStorageConfig{}
 	}
-	cfg := config.NodeStorageConfig{
+	cfg := system.NodeStorageConfig{
 		NodeID: p.GetNodeId(),
 	}
 	for _, a := range p.GetFileStorages() {
-		fs := config.FileStorage{
+		fs := system.FileStorage{
 			StorageClass:      a.GetStorageClass(),
 			Name:              a.GetName(),
 			Path:              a.GetPath(),
@@ -138,8 +138,8 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) config.NodeSto
 // TierConfig
 // ---------------------------------------------------------------------------
 
-// TierConfigToProto converts a config.TierConfig to its proto representation.
-func TierConfigToProto(t config.TierConfig) *gastrologv1.TierConfig {
+// TierConfigToProto converts a system.TierConfig to its proto representation.
+func TierConfigToProto(t system.TierConfig) *gastrologv1.TierConfig {
 	placements := make([]*gastrologv1.TierPlacement, len(t.Placements))
 	for i, p := range t.Placements {
 		placements[i] = &gastrologv1.TierPlacement{
@@ -187,10 +187,10 @@ func TierConfigToProto(t config.TierConfig) *gastrologv1.TierConfig {
 	return pb
 }
 
-// TierConfigFromProto converts a proto TierConfig to config.TierConfig.
-func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
+// TierConfigFromProto converts a proto TierConfig to system.TierConfig.
+func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 	if p == nil {
-		return config.TierConfig{}, nil
+		return system.TierConfig{}, nil
 	}
 	// ID and VaultID are best-effort parsed: empty values yield uuid.Nil.
 	// Callers that need a valid ID (e.g., the server handler) typically
@@ -198,7 +198,7 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	// when the vault is assigned separately.
 	id, _ := uuid.Parse(p.GetId())
 
-	cfg := config.TierConfig{
+	cfg := system.TierConfig{
 		ID:                id,
 		Name:              p.GetName(),
 		Type:              TierTypeFromProto(p.GetType()),
@@ -217,7 +217,7 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	if p.GetVaultId() != "" {
 		vaultID, err := uuid.Parse(p.GetVaultId())
 		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid vault_id: %w", err)
+			return system.TierConfig{}, fmt.Errorf("invalid vault_id: %w", err)
 		}
 		cfg.VaultID = vaultID
 	}
@@ -225,7 +225,7 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	if p.GetRotationPolicyId() != "" {
 		rpID, err := uuid.Parse(p.GetRotationPolicyId())
 		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid rotation_policy_id: %w", err)
+			return system.TierConfig{}, fmt.Errorf("invalid rotation_policy_id: %w", err)
 		}
 		cfg.RotationPolicyID = &rpID
 	}
@@ -233,7 +233,7 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	if p.GetCloudServiceId() != "" {
 		csID, err := uuid.Parse(p.GetCloudServiceId())
 		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid cloud_service_id: %w", err)
+			return system.TierConfig{}, fmt.Errorf("invalid cloud_service_id: %w", err)
 		}
 		cfg.CloudServiceID = &csID
 	}
@@ -241,16 +241,16 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	for _, r := range p.GetRetentionRules() {
 		rpID, err := uuid.Parse(r.GetRetentionPolicyId())
 		if err != nil {
-			return config.TierConfig{}, fmt.Errorf("invalid retention_policy_id in rule: %w", err)
+			return system.TierConfig{}, fmt.Errorf("invalid retention_policy_id in rule: %w", err)
 		}
-		rule := config.RetentionRule{
+		rule := system.RetentionRule{
 			RetentionPolicyID: rpID,
-			Action:            config.RetentionAction(r.GetAction()),
+			Action:            system.RetentionAction(r.GetAction()),
 		}
 		for _, eid := range r.GetEjectRouteIds() {
 			routeID, err := uuid.Parse(eid)
 			if err != nil {
-				return config.TierConfig{}, fmt.Errorf("invalid eject_route_id: %w", err)
+				return system.TierConfig{}, fmt.Errorf("invalid eject_route_id: %w", err)
 			}
 			rule.EjectRouteIDs = append(rule.EjectRouteIDs, routeID)
 		}
@@ -258,7 +258,7 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	}
 
 	for _, p := range p.GetPlacements() {
-		cfg.Placements = append(cfg.Placements, config.TierPlacement{
+		cfg.Placements = append(cfg.Placements, system.TierPlacement{
 			StorageID: p.GetStorageId(),
 			Leader:    p.GetLeader(),
 		})
@@ -267,34 +267,34 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (config.TierConfig, error) {
 	return cfg, nil
 }
 
-func TierTypeToProto(t config.TierType) gastrologv1.TierType {
+func TierTypeToProto(t system.TierType) gastrologv1.TierType {
 	switch t {
-	case config.TierTypeMemory:
+	case system.TierTypeMemory:
 		return gastrologv1.TierType_TIER_TYPE_MEMORY
-	case config.TierTypeFile:
+	case system.TierTypeFile:
 		return gastrologv1.TierType_TIER_TYPE_FILE
-	case config.TierTypeCloud:
+	case system.TierTypeCloud:
 		return gastrologv1.TierType_TIER_TYPE_CLOUD
-	case config.TierTypeJSONL:
+	case system.TierTypeJSONL:
 		return gastrologv1.TierType_TIER_TYPE_JSONL
 	default:
 		return gastrologv1.TierType_TIER_TYPE_UNSPECIFIED
 	}
 }
 
-func TierTypeFromProto(t gastrologv1.TierType) config.TierType {
+func TierTypeFromProto(t gastrologv1.TierType) system.TierType {
 	switch t {
 	case gastrologv1.TierType_TIER_TYPE_MEMORY:
-		return config.TierTypeMemory
+		return system.TierTypeMemory
 	case gastrologv1.TierType_TIER_TYPE_FILE:
-		return config.TierTypeFile
+		return system.TierTypeFile
 	case gastrologv1.TierType_TIER_TYPE_CLOUD:
-		return config.TierTypeCloud
+		return system.TierTypeCloud
 	case gastrologv1.TierType_TIER_TYPE_JSONL:
-		return config.TierTypeJSONL
+		return system.TierTypeJSONL
 	case gastrologv1.TierType_TIER_TYPE_UNSPECIFIED:
-		return config.TierTypeFile
+		return system.TierTypeFile
 	default:
-		return config.TierTypeFile
+		return system.TierTypeFile
 	}
 }
