@@ -122,15 +122,18 @@ func (t *TierInstance) IsLeader() bool {
 	return !t.IsFollower
 }
 
-// IsPrimaryInstance returns true if this is the config-placed primary
-// instance (not a follower replica). Used for query deduplication and
-// instance selection — "which local copy is canonical" — NOT for gating
-// background operations (use IsLeader() for that). See gastrolog-1s3mf.
-func (t *TierInstance) IsPrimaryInstance() bool {
+// IsConfigLeader returns true if this node is the config-placed leader
+// for this tier (not a follower replica). Used for data flow (ingestion,
+// replication, query dedup) — NOT for gating background operations
+// (use IsLeader() for that). See gastrolog-1s3mf.
+func (t *TierInstance) IsConfigLeader() bool {
 	return !t.IsFollower
 }
 
-// ShouldForwardToFollowers returns true if this leader tier has replication targets.
+// ShouldForwardToFollowers returns true if this config leader has
+// replication targets. Uses IsConfigLeader (config placement), not
+// IsLeader (Raft), because replication is about data flow from the
+// ingestion node — which is always the config placement leader.
 func (t *TierInstance) ShouldForwardToFollowers() bool {
-	return t.IsLeader() && len(t.FollowerTargets) > 0
+	return t.IsConfigLeader() && len(t.FollowerTargets) > 0
 }

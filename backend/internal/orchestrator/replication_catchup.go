@@ -17,7 +17,7 @@ func (o *Orchestrator) ScheduleCatchupForTier(tierID uuid.UUID, followerNodeIDs 
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		for _, t := range vault.Tiers {
-			if t.TierID == tierID && t.IsPrimaryInstance() {
+			if t.TierID == tierID && t.IsConfigLeader() {
 				o.mu.RUnlock()
 				o.scheduleCatchup(vaultID, tierID, followerNodeIDs)
 				return

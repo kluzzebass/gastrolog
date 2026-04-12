@@ -159,7 +159,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, 
 	// replication factor requires multiple local storages.
 	hasLeader := make(map[uuid.UUID]bool)
 	for _, tier := range vault.Tiers {
-		if tier.IsPrimaryInstance() {
+		if tier.IsConfigLeader() {
 			hasLeader[tier.TierID] = true
 		}
 	}
@@ -167,7 +167,7 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, 
 	var result []TieredChunkMeta
 	for _, tier := range vault.Tiers {
 		// Skip same-node follower if the primary instance is also here.
-		if !tier.IsPrimaryInstance() && hasLeader[tier.TierID] {
+		if !tier.IsConfigLeader() && hasLeader[tier.TierID] {
 			continue
 		}
 		metas, err := tier.Chunks.List()
@@ -368,7 +368,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		// On followers, sync chunk ID with the leader. If the active
 		// chunk has a different ID (left over from a previous leader cycle),
 		// seal it so the next append opens a new chunk with the synced ID.
-		if !tier.IsPrimaryInstance() && primaryChunkID != (chunk.ChunkID{}) {
+		if !tier.IsConfigLeader() && primaryChunkID != (chunk.ChunkID{}) {
 			if active := cm.Active(); active != nil && active.ID != primaryChunkID {
 				_ = cm.Seal()
 			}
@@ -388,7 +388,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 
 		activeAfter := cm.Active()
 		sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
-		if sealed && tier.IsLeader() {
+		if sealed && tier.IsConfigLeader() {
 			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 		}
 		o.mu.RUnlock()
@@ -489,7 +489,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 // identified by storageID. Called under o.mu.RLock — vault is already resolved.
 func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID uuid.UUID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && t.StorageID == storageID && !t.IsPrimaryInstance() { //nolint:nestif // error handling adds nesting
+		if t.TierID == tierID && t.StorageID == storageID && !t.IsConfigLeader() { //nolint:nestif // error handling adds nesting
 			if primaryChunkID != (chunk.ChunkID{}) {
 				if active := t.Chunks.Active(); active != nil && active.ID != primaryChunkID {
 					if err := t.Chunks.Seal(); err != nil {
@@ -603,7 +603,7 @@ func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, 
 		return
 	}
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && !t.IsPrimaryInstance() {
+		if t.TierID == tierID && !t.IsConfigLeader() {
 			if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
 				o.logger.Warn("delete from followers: failed",
 					"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
@@ -761,7 +761,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		}
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID && (storageID == "" || t.StorageID == storageID) {
-				return &tierRef{cm: t.Chunks, isFollower: !t.IsPrimaryInstance()}
+				return &tierRef{cm: t.Chunks, isFollower: !t.IsConfigLeader()}
 			}
 		}
 		return nil
