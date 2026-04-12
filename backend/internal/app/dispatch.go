@@ -492,6 +492,7 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	if err != nil {
 		return
 	}
+	leaderNodeID := tierCfg.LeaderNodeID(nscs)
 	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 	if existing.IsFollower == shouldBeFollower {
@@ -499,6 +500,11 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	}
 	existing.IsFollower = shouldBeFollower
 	// FollowerTargets are refreshed by the rotation sweep every 15s.
+	if shouldBeFollower {
+		existing.LeaderNodeID = leaderNodeID
+	} else {
+		existing.LeaderNodeID = ""
+	}
 	d.logger.Info("dispatch: tier role updated in place",
 		"vault", vaultID, "tier", tierID,
 		"isFollower", shouldBeFollower)

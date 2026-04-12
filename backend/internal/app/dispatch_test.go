@@ -879,6 +879,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 				return &orchestrator.TierInstance{
 					TierID:       tierID,
 					IsFollower:   true,
+					LeaderNodeID: "other-node",
 				}
 			},
 		}

@@ -2445,6 +2445,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 				tier.FollowerTargets = followerTargets
 			} else {
 				tier.IsFollower = true
+				tier.LeaderNodeID = leaderID
 			}
 			tiers[i] = tier
 		}
@@ -3311,9 +3312,11 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	orchLeader.RegisterVault(NewVault(vaultID, leaderMemTier, leaderFileTier))
 
 	followerMemTier := &TierInstance{
+		TierID: tier0ID, Type: "memory", IsFollower: true, LeaderNodeID: leaderNode,
 		Chunks: memCMFollower, Indexes: memIMFollower, Query: query.New(memCMFollower, memIMFollower, nil),
 	}
 	followerFileTier := &TierInstance{
+		TierID: tier1ID, Type: "file", IsFollower: true, LeaderNodeID: leaderNode,
 		Chunks: fileCMFollower, Indexes: fileIMFollower, Query: query.New(fileCMFollower, fileIMFollower, nil),
 	}
 	orchFollower.RegisterVault(NewVault(vaultID, followerMemTier, followerFileTier))

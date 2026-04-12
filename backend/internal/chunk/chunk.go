@@ -179,13 +179,6 @@ type ChunkCloudUploader interface {
 }
 
 
-// CloudReadOnlyToggler extends ChunkManager with the ability to toggle
-// cloud upload capability at runtime. Used when tier Raft leadership changes:
-// the new leader enables uploads, the old leader disables. See gastrolog-1s3mf.
-type CloudReadOnlyToggler interface {
-	SetCloudReadOnly(ro bool)
-}
-
 // ChunkArchiver extends ChunkManager with storage-class lifecycle operations
 // for cloud-backed chunks. Callers should type-assert to check availability.
 type ChunkArchiver interface {

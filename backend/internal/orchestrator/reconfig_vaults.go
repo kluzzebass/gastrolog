@@ -485,8 +485,8 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 				return fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
 			}
 			t.IsFollower = true
+			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
-			t.FollowerTargets = tierCfg.FollowerTargets(nscs)
 			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 			ti = t
 			break
@@ -640,8 +640,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 					break
 				}
 				sti.IsFollower = true
+				sti.LeaderNodeID = leaderNodeID
 				sti.StorageID = tgt.StorageID
-				sti.FollowerTargets = tierCfg.FollowerTargets(nscs)
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				tiers = append(tiers, sti)
 				break // 1:1:1: one store per tier per node
@@ -922,7 +922,6 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []config.RotationPolicy
 type tierRaftCallbacks struct {
 	hasLeader              func() bool
 	isLeader               func() bool
-	leaderNodeID           func() string
 	isFSMReady             func() bool
 	applyDelete            func(id chunk.ChunkID) error
 	applyRetPending        func(id chunk.ChunkID) error
@@ -1031,12 +1030,8 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 // thresholds.
 func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
 	return tierRaftCallbacks{
-		hasLeader: func() bool { return r.Leader() != "" },
-		isLeader:  func() bool { return r.State() == hraft.Leader },
-		leaderNodeID: func() string {
-			_, id := r.LeaderWithID()
-			return string(id)
-		},
+		hasLeader:  func() bool { return r.Leader() != "" },
+		isLeader:   func() bool { return r.State() == hraft.Leader },
 		isFSMReady: func() bool { return fsm != nil && fsm.Ready() },
 		applyDelete: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalDeleteChunk(id))

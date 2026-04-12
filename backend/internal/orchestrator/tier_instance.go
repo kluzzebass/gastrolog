@@ -24,8 +24,9 @@ type TierInstance struct {
 	Chunks           chunk.ChunkManager
 	Indexes          index.IndexManager
 	Query            *query.Engine
-	IsFollower      bool                     // true if this node is a config-placed follower (used at build time and as bootstrap fallback)
-	FollowerTargets []config.ReplicationTarget // per-storage replication targets
+	IsFollower      bool                     // true if this node is a follower for this tier
+	LeaderNodeID    string                   // the leader node's ID (empty if this IS the leader)
+	FollowerTargets []config.ReplicationTarget // per-storage targets (populated on leader only)
 
 	// HasRaftLeader returns true if the tier's Raft group has an elected leader.
 	// Nil when no Raft group exists (single-node / memory mode).
@@ -34,10 +35,6 @@ type TierInstance struct {
 	// IsRaftLeader returns true if THIS node is the Raft leader for this tier.
 	// Nil when no Raft group exists (single-node / memory mode — always leader).
 	IsRaftLeader func() bool
-
-	// RaftLeaderNodeID returns the node ID of the current tier Raft leader.
-	// Returns "" if no leader is elected or no Raft group exists.
-	RaftLeaderNodeID func() string
 
 	// ApplyRaftRetentionPending marks a chunk as retention-pending in the tier Raft.
 	ApplyRaftRetentionPending func(id chunk.ChunkID) error
@@ -97,7 +94,6 @@ type TierInstance struct {
 func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.HasRaftLeader = cb.hasLeader
 	t.IsRaftLeader = cb.isLeader
-	t.RaftLeaderNodeID = cb.leaderNodeID
 	t.ApplyRaftDelete = cb.applyDelete
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
@@ -110,35 +106,10 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.OverlayFromFSM = cb.overlayFromFSM
 }
 
-// IsLeader returns true if this node is the operational leader for this tier.
-// Derives from the tier Raft group when available. During bootstrap (Raft
-// exists but no leader elected yet) and in single-node/memory mode (no Raft
-// group), falls back to config placement (!IsFollower). See gastrolog-1s3mf.
-func (t *TierInstance) IsLeader() bool {
-	if t.IsRaftLeader != nil {
-		if t.HasRaftLeader != nil && !t.HasRaftLeader() {
-			// Bootstrap: Raft group exists but no leader elected yet.
-			// Fall back to config placement so the system can start up.
-			return !t.IsFollower
-		}
-		return t.IsRaftLeader()
-	}
-	// No Raft group (single-node / memory mode).
-	return !t.IsFollower
-}
+// IsLeader returns true if this node is the leader for this tier.
+func (t *TierInstance) IsLeader() bool { return !t.IsFollower }
 
-// IsConfigLeader returns true if this node is the config-placed leader
-// for this tier (not a follower replica). Used for data flow (ingestion,
-// replication, query dedup) — NOT for gating background operations
-// (use IsLeader() for that). See gastrolog-1s3mf.
-func (t *TierInstance) IsConfigLeader() bool {
-	return !t.IsFollower
-}
-
-// ShouldForwardToFollowers returns true if this tier leader has
-// replication targets. The tier Raft leader is the write authority —
-// it receives records (via forwarding from the ingester node) and
-// replicates to followers.
+// ShouldForwardToFollowers returns true if this leader tier has replication targets.
 func (t *TierInstance) ShouldForwardToFollowers() bool {
 	return t.IsLeader() && len(t.FollowerTargets) > 0
 }

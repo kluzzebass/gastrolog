@@ -32,56 +32,6 @@ func findFilter(filters []config.FilterConfig, id uuid.UUID) *config.FilterConfi
 	return nil
 }
 
-// resolveRouteTarget determines where an ingested record for the given vault
-// should be written. Returns (nodeID, skip). Empty nodeID = write locally.
-// skip=true means this destination should be excluded from the filter set.
-// Must be called with o.mu held.
-func (o *Orchestrator) resolveRouteTarget(cfg *config.Config, destID uuid.UUID) (string, bool) {
-	if d := o.draining[destID]; d != nil {
-		return d.TargetNodeID, false
-	}
-	hotTierNode := resolveVaultNodeID(cfg, destID)
-	switch {
-	case hotTierNode == "" || hotTierNode == o.localNodeID:
-		v, ok := o.vaults[destID]
-		if !ok {
-			return "", true // not registered locally — skip
-		}
-		// Config says local — forward to the tier Raft leader if it's
-		// a different node, so records reach the write authority.
-		if leaderNode := o.activeTierLeaderNodeID(v); leaderNode != "" && leaderNode != o.localNodeID && o.forwarder != nil {
-			return leaderNode, false
-		}
-		return "", false // write locally
-	case o.forwarder != nil:
-		return hotTierNode, false
-	default:
-		return "", true // single-node mode, skip remote
-	}
-}
-
-// isActiveTierLeader returns true if this node is the Raft leader for the
-// vault's active (first) tier. Must be called with o.mu held.
-func (o *Orchestrator) isActiveTierLeader(v *Vault) bool {
-	if len(v.Tiers) == 0 {
-		return true // no tiers — treat as local
-	}
-	return v.Tiers[0].IsLeader()
-}
-
-// activeTierLeaderNodeID returns the node ID of the current Raft leader
-// for the vault's active tier. Returns "" if unknown or no Raft group.
-func (o *Orchestrator) activeTierLeaderNodeID(v *Vault) string {
-	if len(v.Tiers) == 0 {
-		return ""
-	}
-	t := v.Tiers[0]
-	if t.RaftLeaderNodeID != nil {
-		return t.RaftLeaderNodeID()
-	}
-	return ""
-}
-
 // resolveVaultNodeID finds the node that owns the vault's first (active) tier.
 // Returns empty string if the vault has no tiers or the active tier is unassigned.
 func resolveVaultNodeID(cfg *config.Config, vaultID uuid.UUID) string {
@@ -145,9 +95,22 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *config.Config) error {
 		}
 
 		for _, destID := range route.Destinations {
-			nodeID, skip := o.resolveRouteTarget(cfg, destID)
-			if skip {
-				continue
+			hotTierNode := resolveVaultNodeID(cfg, destID)
+
+			nodeID := ""
+			switch {
+			case o.draining[destID] != nil:
+				nodeID = o.draining[destID].TargetNodeID
+			case hotTierNode == "" || hotTierNode == o.localNodeID:
+				// Hot tier is local (or unassigned) — append locally if registered.
+				if _, ok := o.vaults[destID]; !ok {
+					continue // not registered locally
+				}
+			case o.forwarder != nil:
+				// Hot tier is on a remote node — forward.
+				nodeID = hotTierNode
+			default:
+				continue // single-node mode, skip remote
 			}
 			var err error
 			fs, err = fs.AddOrUpdateWithNodeAndRoute(destID, filterExpr, nodeID, route.ID)

@@ -51,7 +51,7 @@ func (o *Orchestrator) rotationSweep() {
 		}
 
 		for _, tier := range vault.Tiers {
-			if !tier.IsLeader() {
+			if tier.IsFollower {
 				tier.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				continue
 			}
@@ -99,24 +99,6 @@ func (o *Orchestrator) rotationSweep() {
 	for _, s := range seals {
 		o.postSealWork(s.vaultID, s.cm, s.chunkID)
 	}
-}
-
-// sealStaleNonLeaderActive seals any active chunk on a non-leader tier instance.
-// After a disruption, non-leaders can have stale active chunks left over from
-// when they were independently creating chunks. Without this, stale actives
-// persist indefinitely and show as duplicate actives in the UI.
-func (o *Orchestrator) sealStaleNonLeaderActive(vaultID uuid.UUID, tier *TierInstance) {
-	active := tier.Chunks.Active()
-	if active == nil || active.RecordCount == 0 {
-		return
-	}
-	if err := tier.Chunks.Seal(); err != nil {
-		o.logger.Warn("rotation sweep: failed to seal stale active on non-leader",
-			"vault", vaultID, "tier", tier.TierID, "error", err)
-		return
-	}
-	o.logger.Info("rotation sweep: sealed stale active chunk on non-leader",
-		"vault", vaultID, "tier", tier.TierID, "chunk", active.ID)
 }
 
 // reconcileFilters recompiles the filter set from config under a write lock.
