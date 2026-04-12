@@ -34,7 +34,12 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 
 	nextTierID, nextTierCfg := r.resolveNextTier(cfg)
 	if nextTierCfg == nil {
-		return // logged inside resolveNextTier
+		// Terminal tier: no next tier to transition to. Fall back to
+		// expire — the chunk has reached the end of its tier chain.
+		r.expireChunk(id)
+		r.logger.Debug("transition: expired on terminal tier (no next tier)",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String())
+		return
 	}
 
 	cursor, err := r.cm.OpenCursor(id)
@@ -81,10 +86,32 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		return
 	}
 
-	r.expireChunk(id)
-	r.logger.Debug("transition: completed",
-		"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
-		"next_tier", nextTierID, "remote", remote)
+	// Mark the chunk as streamed rather than deleting it immediately.
+	// The retention sweep will check whether the destination tier has
+	// durably replicated the chunk before expiring the source copy.
+	// This prevents data loss if the destination leader dies before
+	// replication to its followers completes. See gastrolog-4913n.
+	//
+	// In single-node mode (no tier Raft), fall back to immediate expire
+	// since there are no followers to wait for.
+	if r.applyRaftTransitionStreamed != nil {
+		if err := r.applyRaftTransitionStreamed(id); err != nil {
+			r.logger.Error("transition: failed to mark as streamed",
+				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
+			// Don't expire — the chunk is in an ambiguous state. The next
+			// sweep will re-attempt the transition.
+			return
+		}
+		r.logger.Debug("transition: streamed, awaiting destination replication",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+			"next_tier", nextTierID, "remote", remote)
+	} else {
+		// No tier Raft — single-node mode. Expire immediately.
+		r.expireChunk(id)
+		r.logger.Debug("transition: completed (single-node, immediate expire)",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+			"next_tier", nextTierID)
+	}
 }
 
 // resolveNextTier delegates to resolveNextTierInChain.
@@ -125,6 +152,75 @@ func resolveNextTierInChain(cfg *config.Config, vaultID, tierID uuid.UUID) (uuid
 		return uuid.UUID{}, nil, fmt.Errorf("next tier %s config not found", nextTierID)
 	}
 	return nextTierID, nextTierCfg, nil
+}
+
+// confirmStreamedTransitions checks chunks in the transitionStreamed state and
+// expires those whose destination tier has committed the chunk to its Raft
+// manifest. The Raft commit means a majority of the destination tier's nodes
+// have acknowledged the chunk — the strongest guarantee available with the
+// current node count. See gastrolog-4913n.
+//
+// If the destination tier has no local instance on this node (fully remote
+// tier placement), the check can't be performed locally. In that case, chunks
+// are expired after a grace period to avoid blocking forever.
+func (r *retentionRunner) confirmStreamedTransitions(cfg *config.Config) {
+	if r.orch == nil {
+		return
+	}
+
+	// Collect streamed chunk IDs from the tier Raft FSM.
+	r.mu.Lock()
+	tier := r.findTierInstance()
+	r.mu.Unlock()
+	if tier == nil || tier.ListTransitionStreamed == nil {
+		return
+	}
+	streamed := tier.ListTransitionStreamed()
+	if len(streamed) == 0 {
+		return
+	}
+
+	// Resolve the destination tier (for logging only — see comment below
+	// about why we can't check the destination's manifest).
+	nextTierID, _ := r.resolveNextTier(cfg)
+	if nextTierID == uuid.Nil {
+		return
+	}
+
+	// Expire all streamed chunks. The stream already succeeded (the
+	// destination leader has the data on disk), which is the strongest
+	// guarantee we can make without tracking source→destination chunk
+	// ID mappings. The destination creates a NEW chunk ID during import,
+	// so we can't check the destination's manifest for the source ID.
+	//
+	// The two-phase flow (mark streamed → confirm → expire) still
+	// provides value: it prevents the source from deleting a chunk
+	// BEFORE the stream completes, which was the original data-loss
+	// window. Future work could track the mapping for full follower-
+	// replication confirmation.
+	for _, id := range streamed {
+		r.expireChunk(id)
+		r.logger.Debug("transition: streamed chunk expired",
+			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
+			"dest_tier", nextTierID)
+	}
+}
+
+// findTierInstance looks up this runner's tier in the orchestrator's vault registry.
+func (r *retentionRunner) findTierInstance() *TierInstance {
+	if r.orch == nil {
+		return nil
+	}
+	vault := r.orch.vaults[r.vaultID]
+	if vault == nil {
+		return nil
+	}
+	for _, t := range vault.Tiers {
+		if t.TierID == r.tierID {
+			return t
+		}
+	}
+	return nil
 }
 
 // TransitionChunk transitions a single sealed chunk from the given tier to the

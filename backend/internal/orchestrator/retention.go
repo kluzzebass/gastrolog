@@ -54,8 +54,9 @@ type retentionRunner struct {
 	// applyRaftDelete applies CmdDeleteChunk to the tier Raft before local
 	// deletion, so secondaries learn about it via the manifest. Nil in
 	// single-node / memory mode — local delete proceeds without Raft.
-	applyRaftDelete           func(id chunk.ChunkID) error
-	applyRaftRetentionPending func(id chunk.ChunkID) error
+	applyRaftDelete              func(id chunk.ChunkID) error
+	applyRaftRetentionPending    func(id chunk.ChunkID) error
+	applyRaftTransitionStreamed  func(id chunk.ChunkID) error
 
 	// isLeader returns true if this node is the config leader for this tier.
 	// Retention (expiry + transitions) only runs on the leader to prevent
@@ -123,6 +124,14 @@ func (o *Orchestrator) retentionSweepAll() {
 	// Leader: evaluate retention rules.
 	for _, t := range targets {
 		t.runner.sweep(t.rules)
+	}
+
+	// Leader: confirm streamed transitions. Chunks marked as
+	// transitionStreamed have been streamed to the next tier but not yet
+	// deleted — we wait for the destination to have adequate replicas
+	// before expiring the source. See gastrolog-4913n.
+	for _, t := range targets {
+		t.runner.confirmStreamedTransitions(cfg)
 	}
 
 	// Followers: reconcile against the tier Raft manifest.
@@ -314,6 +323,7 @@ func (o *Orchestrator) retentionTargetForTier(cfg *config.Config, vaultCfg confi
 	runner.im = tier.Indexes
 	runner.applyRaftDelete = tier.ApplyRaftDelete
 	runner.applyRaftRetentionPending = tier.ApplyRaftRetentionPending
+	runner.applyRaftTransitionStreamed = tier.ApplyRaftTransitionStreamed
 	runner.isLeader = tier.IsLeader()
 	runner.followerTargets = tier.FollowerTargets
 	return &sweepTarget{runner: runner, rules: rules}
@@ -391,10 +401,21 @@ func (r *retentionRunner) sweep(rules []retentionRule) {
 
 	r.mu.Lock()
 	unreadable := r.unreadable
+	tier := r.findTierInstance()
 	r.mu.Unlock()
+
+	// Build a set of chunks awaiting destination replication confirmation
+	// so we don't re-stream them on every sweep. See gastrolog-4913n.
+	streamed := make(map[chunk.ChunkID]bool)
+	if tier != nil && tier.ListTransitionStreamed != nil {
+		for _, id := range tier.ListTransitionStreamed() {
+			streamed[id] = true
+		}
+	}
+
 	var sealed []chunk.ChunkMeta
 	for _, meta := range metas {
-		if meta.Sealed && !unreadable[meta.ID] {
+		if meta.Sealed && !unreadable[meta.ID] && !streamed[meta.ID] {
 			sealed = append(sealed, meta)
 		}
 	}

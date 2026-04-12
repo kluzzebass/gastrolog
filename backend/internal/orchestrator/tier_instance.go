@@ -42,6 +42,14 @@ type TierInstance struct {
 	// ListRetentionPending returns chunk IDs with RetentionPending=true in the FSM.
 	ListRetentionPending func() []chunk.ChunkID
 
+	// ApplyRaftTransitionStreamed marks a chunk as streamed to the next tier
+	// in the tier Raft, so it won't be deleted until the destination confirms
+	// replication. See gastrolog-4913n.
+	ApplyRaftTransitionStreamed func(id chunk.ChunkID) error
+
+	// ListTransitionStreamed returns chunk IDs with TransitionStreamed=true in the FSM.
+	ListTransitionStreamed func() []chunk.ChunkID
+
 	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
 	// until committed. Returns an error if not leader or timeout. Nil when no
 	// Raft group exists.
@@ -80,6 +88,8 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ListManifest = cb.listChunks
 	t.ApplyRaftRetentionPending = cb.applyRetPending
 	t.ListRetentionPending = cb.listRetPending
+	t.ApplyRaftTransitionStreamed = cb.applyTransitionStreamed
+	t.ListTransitionStreamed = cb.listTransitionStreamed
 	t.IsFSMReady = cb.isFSMReady
 	t.OverlayFromFSM = cb.overlayFromFSM
 }

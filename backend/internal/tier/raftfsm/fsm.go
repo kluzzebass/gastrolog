@@ -22,7 +22,8 @@ const (
 	CmdCompressChunk Command = 3
 	CmdUploadChunk   Command = 4
 	CmdDeleteChunk      Command = 5
-	CmdRetentionPending Command = 6
+	CmdRetentionPending    Command = 6
+	CmdTransitionStreamed  Command = 7
 )
 
 // Entry holds the full metadata for one chunk in the FSM.
@@ -44,8 +45,9 @@ type Entry struct {
 
 	CloudBacked      bool
 	Archived         bool
-	RetentionPending bool
-	NumFrames        int32
+	RetentionPending    bool
+	TransitionStreamed  bool // chunk records have been streamed to the next tier but deletion awaits destination replication confirmation
+	NumFrames           int32
 
 	// Cloud-specific TOC offsets (GLCB format).
 	IngestIdxOffset int64
@@ -212,6 +214,8 @@ func (f *FSM) Apply(log *hraft.Log) any {
 		deletedID, result = f.applyDelete(payload)
 	case CmdRetentionPending:
 		result = f.applyRetentionPending(payload)
+	case CmdTransitionStreamed:
+		result = f.applyTransitionStreamed(payload)
 	default:
 		result = fmt.Errorf("unknown chunk FSM command: %d", cmd)
 	}
@@ -370,6 +374,19 @@ func (f *FSM) applyRetentionPending(data []byte) error {
 	return nil
 }
 
+// TransitionStreamed: [16 bytes ChunkID]
+func (f *FSM) applyTransitionStreamed(data []byte) error {
+	if len(data) < 16 {
+		return fmt.Errorf("transition streamed: payload too short (%d bytes)", len(data))
+	}
+	var id chunk.ChunkID
+	copy(id[:], data[:16])
+	if e := f.chunks[id]; e != nil {
+		e.TransitionStreamed = true
+	}
+	return nil
+}
+
 // ---------- Command builders (used by callers before Raft.Apply) ----------
 
 // MarshalCreateChunk builds the Raft log data for a CreateChunk command.
@@ -431,6 +448,14 @@ func MarshalDeleteChunk(id chunk.ChunkID) []byte {
 func MarshalRetentionPending(id chunk.ChunkID) []byte {
 	buf := make([]byte, 1+16)
 	buf[0] = byte(CmdRetentionPending)
+	copy(buf[1:17], id[:])
+	return buf
+}
+
+// MarshalTransitionStreamed builds the Raft log data for a TransitionStreamed command.
+func MarshalTransitionStreamed(id chunk.ChunkID) []byte {
+	buf := make([]byte, 1+16)
+	buf[0] = byte(CmdTransitionStreamed)
 	copy(buf[1:17], id[:])
 	return buf
 }
@@ -508,6 +533,9 @@ func encodeEntry(w io.Writer, e *Entry) error {
 	if e.RetentionPending {
 		flags |= 1 << 4
 	}
+	if e.TransitionStreamed {
+		flags |= 1 << 5
+	}
 	binary.BigEndian.PutUint16(buf[124:126], flags)
 	_, err := w.Write(buf[:])
 	return err
@@ -547,7 +575,8 @@ func decodeSnapshot(r io.Reader) ([]Entry, error) {
 			Compressed:       flags&(1<<1) != 0,
 			CloudBacked:      flags&(1<<2) != 0,
 			Archived:         flags&(1<<3) != 0,
-			RetentionPending: flags&(1<<4) != 0,
+			RetentionPending:   flags&(1<<4) != 0,
+			TransitionStreamed: flags&(1<<5) != 0,
 		})
 	}
 	return entries, nil

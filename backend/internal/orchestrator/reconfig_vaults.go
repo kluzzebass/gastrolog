@@ -909,14 +909,16 @@ func applyRotationPolicy(cm chunk.ChunkManager, policies []config.RotationPolicy
 
 // tierRaftCallbacks holds the callbacks returned by createTierRaftGroup.
 type tierRaftCallbacks struct {
-	hasLeader       func() bool
-	isLeader        func() bool
-	isFSMReady      func() bool
-	applyDelete     func(id chunk.ChunkID) error
-	applyRetPending func(id chunk.ChunkID) error
-	listChunks      func() []chunk.ChunkID
-	listRetPending  func() []chunk.ChunkID
-	overlayFromFSM  func(chunk.ChunkMeta) chunk.ChunkMeta
+	hasLeader              func() bool
+	isLeader               func() bool
+	isFSMReady             func() bool
+	applyDelete            func(id chunk.ChunkID) error
+	applyRetPending        func(id chunk.ChunkID) error
+	applyTransitionStreamed func(id chunk.ChunkID) error
+	listChunks             func() []chunk.ChunkID
+	listRetPending         func() []chunk.ChunkID
+	listTransitionStreamed  func() []chunk.ChunkID
+	overlayFromFSM         func(chunk.ChunkMeta) chunk.ChunkMeta
 }
 
 // createTierRaftGroup creates or retrieves the tier Raft group for a tier.
@@ -1007,7 +1009,14 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 		applier = &directApplier{raft: r, timeout: timeout}
 	}
 
-	return g, applier, tierRaftCallbacks{
+	return g, applier, buildTierRaftCallbacks(r, fsm, applier)
+}
+
+// buildTierRaftCallbacks constructs the callback struct for a tier Raft group.
+// Extracted from createTierRaftGroup to keep cognitive complexity within lint
+// thresholds.
+func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.Applier) tierRaftCallbacks {
+	return tierRaftCallbacks{
 		hasLeader:  func() bool { return r.Leader() != "" },
 		isLeader:   func() bool { return r.State() == hraft.Leader },
 		isFSMReady: func() bool { return fsm != nil && fsm.Ready() },
@@ -1016,6 +1025,9 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 		},
 		applyRetPending: func(id chunk.ChunkID) error {
 			return applier.Apply(tierfsm.MarshalRetentionPending(id))
+		},
+		applyTransitionStreamed: func(id chunk.ChunkID) error {
+			return applier.Apply(tierfsm.MarshalTransitionStreamed(id))
 		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {
@@ -1028,25 +1040,8 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 			}
 			return ids
 		},
-		listRetPending: func() []chunk.ChunkID {
-			if fsm == nil {
-				return nil
-			}
-			var ids []chunk.ChunkID
-			for _, e := range fsm.List() {
-				if e.RetentionPending {
-					ids = append(ids, e.ID)
-				}
-			}
-			return ids
-		},
-		// Override fields whose authoritative source is the cluster-wide
-		// FSM rather than this node's local chunk manager. The local
-		// chunk manager only has CloudBacked=true on the leader (which
-		// uploaded the blob); followers strip sealed_backing and never
-		// see the cloud state. The FSM has the cluster-wide truth via
-		// the replicated CmdUploadChunk / CmdArchiveChunk commands.
-		// See gastrolog-asg4l.
+		listRetPending:        listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.RetentionPending }),
+		listTransitionStreamed: listFSMByFlag(fsm, func(e tierfsm.Entry) bool { return e.TransitionStreamed }),
 		overlayFromFSM: func(m chunk.ChunkMeta) chunk.ChunkMeta {
 			if fsm == nil {
 				return m
@@ -1060,6 +1055,23 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg config.TierConfig, nscs []con
 			m.NumFrames = e.NumFrames
 			return m
 		},
+	}
+}
+
+// listFSMByFlag returns a function that filters the FSM's entries by a
+// boolean predicate (e.g., RetentionPending or TransitionStreamed).
+func listFSMByFlag(fsm *tierfsm.FSM, pred func(tierfsm.Entry) bool) func() []chunk.ChunkID {
+	return func() []chunk.ChunkID {
+		if fsm == nil {
+			return nil
+		}
+		var ids []chunk.ChunkID
+		for _, e := range fsm.List() {
+			if pred(e) {
+				ids = append(ids, e.ID)
+			}
+		}
+		return ids
 	}
 }
 
