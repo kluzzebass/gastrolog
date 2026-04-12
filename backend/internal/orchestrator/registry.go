@@ -126,7 +126,7 @@ func (o *Orchestrator) LocalPrimaryTierIDs() map[uuid.UUID]bool {
 	ids := make(map[uuid.UUID]bool)
 	for _, v := range o.vaults {
 		for _, t := range v.Tiers {
-			if !t.IsFollower {
+			if t.IsPrimaryInstance() {
 				ids[t.TierID] = true
 			}
 		}
@@ -200,7 +200,7 @@ func (r *primaryTierRegistry) ListVaults() []uuid.UUID {
 	var ids []uuid.UUID
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if !t.IsFollower && t.Query != nil {
+			if t.IsPrimaryInstance() && t.Query != nil {
 				ids = append(ids, t.TierID)
 			}
 		}
@@ -213,7 +213,7 @@ func (r *primaryTierRegistry) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsFollower && t.Query != nil {
+			if t.TierID == key && t.IsPrimaryInstance() && t.Query != nil {
 				return t.Chunks
 			}
 		}
@@ -226,7 +226,7 @@ func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
-			if t.TierID == key && !t.IsFollower && t.Query != nil {
+			if t.TierID == key && t.IsPrimaryInstance() && t.Query != nil {
 				return t.Indexes
 			}
 		}
@@ -248,7 +248,7 @@ func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID uuid.UUID) *query.
 	}
 	var primary []*TierInstance
 	for _, t := range v.Tiers {
-		if !t.IsFollower && t.Query != nil {
+		if t.IsPrimaryInstance() && t.Query != nil {
 			primary = append(primary, t)
 		}
 	}

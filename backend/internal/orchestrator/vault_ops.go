@@ -159,15 +159,15 @@ func (o *Orchestrator) ListAllChunkMetas(vaultID uuid.UUID) ([]TieredChunkMeta, 
 	// replication factor requires multiple local storages.
 	hasLeader := make(map[uuid.UUID]bool)
 	for _, tier := range vault.Tiers {
-		if !tier.IsFollower {
+		if tier.IsPrimaryInstance() {
 			hasLeader[tier.TierID] = true
 		}
 	}
 
 	var result []TieredChunkMeta
 	for _, tier := range vault.Tiers {
-		// Skip same-node follower if the leader instance is also here.
-		if tier.IsFollower && hasLeader[tier.TierID] {
+		// Skip same-node follower if the primary instance is also here.
+		if !tier.IsPrimaryInstance() && hasLeader[tier.TierID] {
 			continue
 		}
 		metas, err := tier.Chunks.List()
@@ -368,7 +368,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 		// On followers, sync chunk ID with the leader. If the active
 		// chunk has a different ID (left over from a previous leader cycle),
 		// seal it so the next append opens a new chunk with the synced ID.
-		if tier.IsFollower && primaryChunkID != (chunk.ChunkID{}) {
+		if !tier.IsPrimaryInstance() && primaryChunkID != (chunk.ChunkID{}) {
 			if active := cm.Active(); active != nil && active.ID != primaryChunkID {
 				_ = cm.Seal()
 			}
@@ -388,7 +388,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 
 		activeAfter := cm.Active()
 		sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
-		if sealed && !tier.IsFollower {
+		if sealed && tier.IsLeader() {
 			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 		}
 		o.mu.RUnlock()
@@ -489,7 +489,7 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 // identified by storageID. Called under o.mu.RLock — vault is already resolved.
 func (o *Orchestrator) appendToLocalFollower(vault *Vault, tierID uuid.UUID, storageID string, primaryChunkID chunk.ChunkID, rec chunk.Record) {
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && t.StorageID == storageID && t.IsFollower { //nolint:nestif // error handling adds nesting
+		if t.TierID == tierID && t.StorageID == storageID && !t.IsPrimaryInstance() { //nolint:nestif // error handling adds nesting
 			if primaryChunkID != (chunk.ChunkID{}) {
 				if active := t.Chunks.Active(); active != nil && active.ID != primaryChunkID {
 					if err := t.Chunks.Seal(); err != nil {
@@ -603,7 +603,7 @@ func (o *Orchestrator) deleteFromFollowers(vaultID uuid.UUID, tierID uuid.UUID, 
 		return
 	}
 	for _, t := range vault.Tiers {
-		if t.TierID == tierID && t.IsFollower {
+		if t.TierID == tierID && !t.IsPrimaryInstance() {
 			if err := chunk.DeleteNoAnnounce(t.Chunks, chunkID); err != nil {
 				o.logger.Warn("delete from followers: failed",
 					"vault", vaultID, "tier", tierID, "chunk", chunkID, "error", err)
@@ -735,7 +735,7 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID uuid.UUID
 // preserving the given chunk ID. Used by sealed-chunk replication —
 // the follower receives a sealed chunk from the leader with the same ID.
 // Schedules postSealWork for local indexing (secondaries need indexes for queries)
-// but won't trigger further replication (gated by !IsFollower in tierReplicationInfo).
+// but won't trigger further replication (gated by IsLeader in ShouldForwardToFollowers).
 func (o *Orchestrator) ImportToTier(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 	return o.ImportToTierStorage(ctx, vaultID, tierID, "", chunkID, next)
 }
@@ -761,7 +761,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		}
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID && (storageID == "" || t.StorageID == storageID) {
-				return &tierRef{cm: t.Chunks, isFollower: t.IsFollower}
+				return &tierRef{cm: t.Chunks, isFollower: !t.IsPrimaryInstance()}
 			}
 		}
 		return nil

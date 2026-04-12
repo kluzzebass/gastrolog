@@ -36,8 +36,8 @@ func (o *Orchestrator) evaluateCloudHealth() {
 	}
 }
 
-// evaluateTierCloudHealth checks a single cloud tier's health and runs
-// backfill on every node. See gastrolog-68fqk.
+// evaluateTierCloudHealth checks a single cloud tier's health, toggles
+// CloudReadOnly based on Raft leadership, and runs backfill. See gastrolog-68fqk.
 func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 	chk, ok := tier.Chunks.(cloudHealthChecker)
 	if !ok {
@@ -50,6 +50,12 @@ func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 				tier.TierID.String()[:8], chk.CloudDegradedError()))
 	} else {
 		o.alerts.Clear(alertID)
+	}
+	// Toggle CloudReadOnly based on leadership. The new Raft leader
+	// gets upload capability; the old leader loses it. Runs every 5s
+	// so leadership changes take effect within one tick. See gastrolog-1s3mf.
+	if toggler, ok := tier.Chunks.(chunk.CloudReadOnlyToggler); ok {
+		toggler.SetCloudReadOnly(!tier.IsLeader())
 	}
 	o.backfillCloudUploads(tier)
 }

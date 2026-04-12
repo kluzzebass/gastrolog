@@ -78,7 +78,6 @@ func newReplicationTier(t *testing.T, tierID uuid.UUID, followers []config.Repli
 		Indexes:          im,
 		Query:            query.New(cm, im, nil),
 		IsFollower:      isFollower,
-		LeaderNodeID:    leaderNodeID,
 		FollowerTargets: followers,
 	}
 }

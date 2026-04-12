@@ -3031,6 +3031,15 @@ func (m *Manager) cloudIdxHas(id chunk.ChunkID) bool {
 // Used for lazy initialization when S3 was unreachable at construction time
 // but becomes available later. Also re-runs cloud chunk discovery if the
 // cloud index is empty. Safe for concurrent use. See gastrolog-68fqk.
+// SetCloudReadOnly toggles whether this manager uploads to cloud in
+// PostSealProcess. Called when tier Raft leadership changes — the new
+// leader enables uploads, the old leader disables them. See gastrolog-1s3mf.
+func (m *Manager) SetCloudReadOnly(ro bool) {
+	m.mu.Lock()
+	m.cfg.CloudReadOnly = ro
+	m.mu.Unlock()
+}
+
 func (m *Manager) SetCloudStore(store blobstore.Store) {
 	m.mu.Lock()
 	m.cfg.CloudStore = store

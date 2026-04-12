@@ -485,8 +485,8 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 				return fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
 			}
 			t.IsFollower = true
-			t.LeaderNodeID = leaderNodeID
 			t.StorageID = tgt.StorageID
+			t.FollowerTargets = tierCfg.FollowerTargets(nscs)
 			t.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 			ti = t
 			break
@@ -640,8 +640,8 @@ func (o *Orchestrator) buildTierInstances(cfg *config.Config, vaultCfg config.Va
 					break
 				}
 				sti.IsFollower = true
-				sti.LeaderNodeID = leaderNodeID
 				sti.StorageID = tgt.StorageID
+				sti.FollowerTargets = tierCfg.FollowerTargets(nscs)
 				sti.Chunks.SetRotationPolicy(chunk.NeverRotatePolicy{})
 				tiers = append(tiers, sti)
 				break // 1:1:1: one store per tier per node

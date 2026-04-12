@@ -17,7 +17,7 @@ func (o *Orchestrator) ScheduleCatchupForTier(tierID uuid.UUID, followerNodeIDs 
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		for _, t := range vault.Tiers {
-			if t.TierID == tierID && !t.IsFollower {
+			if t.TierID == tierID && t.IsPrimaryInstance() {
 				o.mu.RUnlock()
 				o.scheduleCatchup(vaultID, tierID, followerNodeIDs)
 				return
@@ -56,7 +56,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 	if tier == nil {
 		return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)
 	}
-	if tier.IsFollower {
+	if !tier.IsLeader() {
 		return nil // only leader initiates catchup
 	}
 	if o.tierReplicator == nil {

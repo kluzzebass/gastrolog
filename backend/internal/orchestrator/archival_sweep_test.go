@@ -628,7 +628,6 @@ func setupCloudCluster(t *testing.T, transitions []config.CloudStorageTransition
 			tier.FollowerTargets = followerTargets
 		} else {
 			tier.IsFollower = true
-			tier.LeaderNodeID = leaderID
 		}
 
 		orch.RegisterVault(NewVault(vaultID, tier))
