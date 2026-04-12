@@ -135,10 +135,10 @@ func (t *TierInstance) IsConfigLeader() bool {
 	return !t.IsFollower
 }
 
-// ShouldForwardToFollowers returns true if this config leader has
-// replication targets. Uses IsConfigLeader (config placement), not
-// IsLeader (Raft), because replication is about data flow from the
-// ingestion node — which is always the config placement leader.
+// ShouldForwardToFollowers returns true if this tier leader has
+// replication targets. The tier Raft leader is the write authority —
+// it receives records (via forwarding from the ingester node) and
+// replicates to followers.
 func (t *TierInstance) ShouldForwardToFollowers() bool {
-	return t.IsConfigLeader() && len(t.FollowerTargets) > 0
+	return t.IsLeader() && len(t.FollowerTargets) > 0
 }

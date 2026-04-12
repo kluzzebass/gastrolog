@@ -388,7 +388,7 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID uuid.UUID, primaryChunkID ch
 
 		activeAfter := cm.Active()
 		sealed := activeBefore != nil && (activeAfter == nil || activeAfter.ID != activeBefore.ID)
-		if sealed && tier.IsConfigLeader() {
+		if sealed && tier.IsLeader() {
 			o.schedulePostSeal(vaultID, cm, activeBefore.ID)
 		}
 		o.mu.RUnlock()
