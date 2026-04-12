@@ -86,7 +86,7 @@ func (s *QueryServer) Search(
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return errInvalidArg(err)
 	}
 
 	if pipeline != nil && len(pipeline.Pipes) > 0 {
@@ -135,7 +135,7 @@ func (s *QueryServer) searchDirect(
 		var err error
 		resume, err = ProtoToResumeToken(resumeTokenData)
 		if err != nil {
-			return connect.NewError(connect.CodeInvalidArgument, err)
+			return errInvalidArg(err)
 		}
 		// Restore frozen time bounds from page 1 so "last-5m" doesn't shift.
 		if !resume.FrozenStart.IsZero() {
@@ -225,9 +225,9 @@ func mapSearchError(err error) error {
 	case errors.Is(err, context.Canceled):
 		return connect.NewError(connect.CodeCanceled, err)
 	case errors.Is(err, query.ErrInvalidResumeToken):
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return errInvalidArg(err)
 	default:
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 }
 

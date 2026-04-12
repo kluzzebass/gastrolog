@@ -20,24 +20,24 @@ func (s *ConfigServer) PutVault(
 	req *connect.Request[apiv1.PutVaultRequest],
 ) (*connect.Response[apiv1.PutVaultResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	vaultCfg, err := protoToVaultConfig(req.Msg.Config)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	// Reject duplicate names.
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v config.VaultConfig) (uuid.UUID, string) { return v.ID, v.Name }); connErr != nil {
 		return nil, connErr
@@ -54,7 +54,7 @@ func (s *ConfigServer) PutVault(
 	// Persist to config store. For raft stores, the FSM notification callback
 	// handles orchestrator side effects. For non-raft stores, notify() does.
 	if err := s.cfgStore.PutVault(ctx, vaultCfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: vaultCfg.ID})
 
@@ -65,7 +65,7 @@ func (s *ConfigServer) PutVault(
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutVaultResponse{Config: cfg}), nil
 }
@@ -78,7 +78,7 @@ func (s *ConfigServer) DeleteVault(
 	req *connect.Request[apiv1.DeleteVaultRequest],
 ) (*connect.Response[apiv1.DeleteVaultResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -91,7 +91,7 @@ func (s *ConfigServer) DeleteVault(
 	// must exist in the shared config store.
 	existing, err := s.cfgStore.GetVault(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if existing == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
@@ -99,7 +99,7 @@ func (s *ConfigServer) DeleteVault(
 
 	// Referential integrity: reject if any route references this vault as a destination.
 	if routeID, used, err := s.vaultReferencedByRoute(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	} else if used {
 		return nil, connect.NewError(connect.CodeFailedPrecondition,
 			fmt.Errorf("vault %q is referenced as destination in route %q", req.Msg.Id, routeID))
@@ -116,19 +116,19 @@ func (s *ConfigServer) DeleteVault(
 	}
 
 	if err := s.cfgStore.DeleteVault(ctx, id, req.Msg.GetDeleteData()); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteVaultResponse{Config: cfg}), nil
 }
 
 func (s *ConfigServer) forceDeleteVault(id uuid.UUID) error {
 	if err := s.orch.ForceRemoveVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 	return nil
 }
@@ -144,9 +144,9 @@ func (s *ConfigServer) removeVault(id uuid.UUID) error {
 		// node's FSM dispatcher handles its own runtime cleanup.
 		return nil
 	case errors.Is(err, orchestrator.ErrVaultNotEmpty):
-		return connect.NewError(connect.CodeFailedPrecondition, err)
+		return errPrecondition(err)
 	default:
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 }
 
@@ -158,7 +158,7 @@ func (s *ConfigServer) PauseVault(
 	req *connect.Request[apiv1.PauseVaultRequest],
 ) (*connect.Response[apiv1.PauseVaultResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -168,7 +168,7 @@ func (s *ConfigServer) PauseVault(
 
 	vaultCfg, err := s.cfgStore.GetVault(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if vaultCfg == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
@@ -176,13 +176,13 @@ func (s *ConfigServer) PauseVault(
 
 	vaultCfg.Enabled = false
 	if err := s.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PauseVaultResponse{Config: cfg}), nil
 }
@@ -195,7 +195,7 @@ func (s *ConfigServer) ResumeVault(
 	req *connect.Request[apiv1.ResumeVaultRequest],
 ) (*connect.Response[apiv1.ResumeVaultResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -205,7 +205,7 @@ func (s *ConfigServer) ResumeVault(
 
 	vaultCfg, err := s.cfgStore.GetVault(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if vaultCfg == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
@@ -213,13 +213,13 @@ func (s *ConfigServer) ResumeVault(
 
 	vaultCfg.Enabled = true
 	if err := s.cfgStore.PutVault(ctx, *vaultCfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: id})
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.ResumeVaultResponse{Config: cfg}), nil
 }

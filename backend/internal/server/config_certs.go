@@ -42,7 +42,7 @@ func (s *ConfigServer) ListCertificates(
 ) (*connect.Response[apiv1.ListCertificatesResponse], error) {
 	certs, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	infos := make([]*apiv1.CertificateInfo, len(certs))
 	for i, c := range certs {
@@ -71,7 +71,7 @@ func (s *ConfigServer) GetCertificate(
 	req *connect.Request[apiv1.GetCertificateRequest],
 ) (*connect.Response[apiv1.GetCertificateResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -81,7 +81,7 @@ func (s *ConfigServer) GetCertificate(
 
 	pem, err := s.cfgStore.GetCertificate(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if pem == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
@@ -102,7 +102,7 @@ func (s *ConfigServer) PutCertificate(
 	req *connect.Request[apiv1.PutCertificateRequest],
 ) (*connect.Response[apiv1.PutCertificateResponse], error) {
 	if req.Msg.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	existing, err := s.loadExistingCert(ctx, req.Msg.Id, req.Msg.Name)
@@ -125,13 +125,13 @@ func (s *ConfigServer) PutCertificate(
 
 	certID, err := resolveCertID(existing.ID, req.Msg.Id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	// Reject duplicate names.
 	certs, err := s.cfgStore.ListCertificates(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("certificate", certID, req.Msg.Name, certs, func(c config.CertPEM) (uuid.UUID, string) { return c.ID, c.Name }); connErr != nil {
 		return nil, connErr
@@ -146,7 +146,7 @@ func (s *ConfigServer) PutCertificate(
 		KeyFile:  req.Msg.KeyFile,
 	}
 	if err := s.cfgStore.PutCertificate(ctx, newCert); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	if req.Msg.SetAsDefault {
@@ -163,7 +163,7 @@ func (s *ConfigServer) PutCertificate(
 	}
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutCertificateResponse{Config: cfg}), nil
 }
@@ -181,7 +181,7 @@ func (s *ConfigServer) loadExistingCert(ctx context.Context, id, name string) (c
 		existing, err = s.findCertByName(ctx, name)
 	}
 	if err != nil {
-		return config.CertPEM{}, connect.NewError(connect.CodeInternal, err)
+		return config.CertPEM{}, errInternal(err)
 	}
 	if existing == nil {
 		return config.CertPEM{}, nil
@@ -239,11 +239,11 @@ func resolveCertID(existingID uuid.UUID, reqID string) (uuid.UUID, error) {
 func (s *ConfigServer) setDefaultCert(ctx context.Context, name string) error {
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 	ss.TLS.DefaultCert = name
 	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 	return nil
 }
@@ -254,7 +254,7 @@ func (s *ConfigServer) DeleteCertificate(
 	req *connect.Request[apiv1.DeleteCertificateRequest],
 ) (*connect.Response[apiv1.DeleteCertificateResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -264,26 +264,26 @@ func (s *ConfigServer) DeleteCertificate(
 
 	pem, err := s.cfgStore.GetCertificate(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if pem == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
 	if err := s.cfgStore.DeleteCertificate(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Clear default and disable TLS if the deleted cert was the default.
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if ss.TLS.DefaultCert == pem.Name {
 		ss.TLS.DefaultCert = ""
 		ss.TLS.TLSEnabled = false
 		ss.TLS.HTTPToHTTPSRedirect = false
 		if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, errInternal(err)
 		}
 	}
 
@@ -295,7 +295,7 @@ func (s *ConfigServer) DeleteCertificate(
 	}
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteCertificateResponse{Config: cfg}), nil
 }

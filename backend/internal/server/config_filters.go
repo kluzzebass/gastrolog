@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -20,13 +19,13 @@ func (s *ConfigServer) PutFilter(
 	req *connect.Request[apiv1.PutFilterRequest],
 ) (*connect.Response[apiv1.PutFilterResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	// Validate expression by trying to compile it.
@@ -42,7 +41,7 @@ func (s *ConfigServer) PutFilter(
 	// Reject duplicate names.
 	filters, err := s.cfgStore.ListFilters(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("filter", id, req.Msg.Config.Name, filters, func(f config.FilterConfig) (uuid.UUID, string) { return f.ID, f.Name }); connErr != nil {
 		return nil, connErr
@@ -50,13 +49,13 @@ func (s *ConfigServer) PutFilter(
 
 	cfg := config.FilterConfig{ID: id, Name: req.Msg.Config.Name, Expression: req.Msg.Config.Expression}
 	if err := s.cfgStore.PutFilter(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyFilterPut, ID: id})
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutFilterResponse{Config: fullCfg}), nil
 }
@@ -67,7 +66,7 @@ func (s *ConfigServer) DeleteFilter(
 	req *connect.Request[apiv1.DeleteFilterRequest],
 ) (*connect.Response[apiv1.DeleteFilterResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -78,7 +77,7 @@ func (s *ConfigServer) DeleteFilter(
 	// Check referential integrity: reject if any route references this filter.
 	routes, err := s.cfgStore.ListRoutes(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	for _, rt := range routes {
 		if rt.FilterID != nil && *rt.FilterID == id {
@@ -88,12 +87,12 @@ func (s *ConfigServer) DeleteFilter(
 	}
 
 	if err := s.cfgStore.DeleteFilter(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteFilterResponse{Config: cfg}), nil
 }

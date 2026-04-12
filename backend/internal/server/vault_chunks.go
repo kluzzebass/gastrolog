@@ -22,7 +22,7 @@ func (s *VaultServer) ListChunks(
 	req *connect.Request[apiv1.ListChunksRequest],
 ) (*connect.Response[apiv1.ListChunksResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -162,7 +162,7 @@ func (s *VaultServer) GetChunk(
 	req *connect.Request[apiv1.GetChunkRequest],
 ) (*connect.Response[apiv1.GetChunkResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -171,7 +171,7 @@ func (s *VaultServer) GetChunk(
 
 	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	meta, err := s.orch.GetTieredChunkMeta(vaultID, chunkID)
@@ -191,7 +191,7 @@ func (s *VaultServer) GetIndexes(
 	req *connect.Request[apiv1.GetIndexesRequest],
 ) (*connect.Response[apiv1.GetIndexesResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -200,7 +200,7 @@ func (s *VaultServer) GetIndexes(
 
 	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	report, err := s.orch.ChunkIndexInfos(vaultID, chunkID)
@@ -232,7 +232,7 @@ func (s *VaultServer) AnalyzeChunk(
 	req *connect.Request[apiv1.AnalyzeChunkRequest],
 ) (*connect.Response[apiv1.AnalyzeChunkResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -259,7 +259,7 @@ func (s *VaultServer) AnalyzeChunk(
 	} else {
 		agg, err := a.AnalyzeAll()
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, errInternal(err)
 		}
 		analyses = agg.Chunks
 	}
@@ -282,7 +282,7 @@ func (s *VaultServer) ValidateVault(
 	req *connect.Request[apiv1.ValidateVaultRequest],
 ) (*connect.Response[apiv1.ValidateVaultResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {

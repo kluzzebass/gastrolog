@@ -49,7 +49,7 @@ func (s *JobServer) GetJob(
 	req *connect.Request[apiv1.GetJobRequest],
 ) (*connect.Response[apiv1.GetJobResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	// Check local scheduler first.

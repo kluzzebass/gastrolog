@@ -29,7 +29,7 @@ func (s *ConfigServer) ListIngesters(
 		var err error
 		allIngesters, err = s.cfgStore.ListIngesters(ctx)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, errInternal(err)
 		}
 	}
 
@@ -73,7 +73,7 @@ func (s *ConfigServer) GetIngesterStatus(
 	req *connect.Request[apiv1.GetIngesterStatusRequest],
 ) (*connect.Response[apiv1.GetIngesterStatusResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -122,13 +122,13 @@ func (s *ConfigServer) PutIngester(
 	req *connect.Request[apiv1.PutIngesterRequest],
 ) (*connect.Response[apiv1.PutIngesterResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 	if req.Msg.Config.Type == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ingester type required"))
@@ -142,7 +142,7 @@ func (s *ConfigServer) PutIngester(
 	// Reject duplicate names.
 	ingesters, err := s.cfgStore.ListIngesters(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("ingester", id, req.Msg.Config.Name, ingesters, func(i config.IngesterConfig) (uuid.UUID, string) { return i.ID, i.Name }); connErr != nil {
 		return nil, connErr
@@ -173,13 +173,13 @@ func (s *ConfigServer) PutIngester(
 	}
 
 	if err := s.cfgStore.PutIngester(ctx, ingCfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: id})
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutIngesterResponse{Config: cfg}), nil
 }
@@ -199,7 +199,7 @@ func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig, existing [
 		params["_state_dir"] = s.factories.HomeDir
 	}
 	if _, err := reg.Factory(ingCfg.ID, params, s.factories.Logger); err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return errInvalidArg(err)
 	}
 
 	// For listener ingesters: (1) reject config-level address collisions
@@ -212,7 +212,7 @@ func (s *ConfigServer) validateIngester(ingCfg config.IngesterConfig, existing [
 		}
 		if s.orch.GetIngesterStats(ingCfg.ID) == nil {
 			if err := checkListenAddrs(reg.ListenAddrs(ingCfg.Params)); err != nil {
-				return connect.NewError(connect.CodeInvalidArgument, err)
+				return errInvalidArg(err)
 			}
 		}
 	}
@@ -305,7 +305,7 @@ func (s *ConfigServer) DeleteIngester(
 	req *connect.Request[apiv1.DeleteIngesterRequest],
 ) (*connect.Response[apiv1.DeleteIngesterResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -316,7 +316,7 @@ func (s *ConfigServer) DeleteIngester(
 	// Verify the ingester exists in config before touching the orchestrator.
 	existing, err := s.cfgStore.GetIngester(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if existing == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("ingester not found"))
@@ -326,17 +326,17 @@ func (s *ConfigServer) DeleteIngester(
 	// ingester belongs to another node — the owning node's FSM dispatcher
 	// handles its own cleanup.
 	if err := s.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Remove from config store.
 	if err := s.cfgStore.DeleteIngester(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteIngesterResponse{Config: cfg}), nil
 }
@@ -425,7 +425,7 @@ func (s *ConfigServer) TriggerIngester(
 		return nil, connErr
 	}
 	if err := s.orch.TriggerIngester(id); err != nil {
-		return nil, connect.NewError(connect.CodeNotFound, err)
+		return nil, errNotFound(err)
 	}
 	return connect.NewResponse(&apiv1.TriggerIngesterResponse{}), nil
 }

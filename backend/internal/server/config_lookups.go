@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
@@ -19,7 +18,7 @@ func (s *ConfigServer) ListManagedFiles(
 ) (*connect.Response[apiv1.ListManagedFilesResponse], error) {
 	files, err := s.cfgStore.ListManagedFiles(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	out := make([]*apiv1.ManagedFileInfo, len(files))
@@ -42,7 +41,7 @@ func (s *ConfigServer) DeleteManagedFile(
 	req *connect.Request[apiv1.DeleteManagedFileRequest],
 ) (*connect.Response[apiv1.DeleteManagedFileResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -51,7 +50,7 @@ func (s *ConfigServer) DeleteManagedFile(
 	}
 
 	if err := s.cfgStore.DeleteManagedFile(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyManagedFileDeleted, ID: id})
 

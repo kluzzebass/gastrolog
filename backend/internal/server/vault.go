@@ -60,9 +60,9 @@ func (s *VaultServer) now() time.Time { return time.Now() }
 // ErrVaultNotFound maps to CodeNotFound; everything else to CodeInternal.
 func mapVaultError(err error) *connect.Error {
 	if errors.Is(err, orchestrator.ErrVaultNotFound) {
-		return connect.NewError(connect.CodeNotFound, err)
+		return errNotFound(err)
 	}
-	return connect.NewError(connect.CodeInternal, err)
+	return errInternal(err)
 }
 
 // parseUUID parses a string into a uuid.UUID, returning a connect error on failure.

@@ -33,7 +33,7 @@ func (s *QueryServer) searchPipeline(
 	}
 	result, err := eng.RunPipeline(ctx, q, pipeline)
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 	// Compute local histogram to include alongside pipeline results.
 	histogram := HistogramToProto(eng.ComputeHistogram(ctx, q, 50))
@@ -94,7 +94,7 @@ func (s *QueryServer) searchPipelineGlobal(
 
 	result, err := eng.RunPipelineOnRecords(ctx, q, pipeline, extraRecords)
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 
 	// Compute and merge histogram.

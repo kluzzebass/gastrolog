@@ -402,7 +402,7 @@ func (s *ConfigServer) GetSettings(
 ) (*connect.Response[apiv1.GetSettingsResponse], error) {
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Unauthenticated: return only the password policy.
@@ -517,7 +517,7 @@ func (s *ConfigServer) PutSettings(
 	}
 
 	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
 
@@ -552,7 +552,7 @@ func (s *ConfigServer) RegenerateJwtSecret(
 	ss.Auth.JWTSecret = base64.StdEncoding.EncodeToString(secret)
 
 	if err := s.cfgStore.SaveServerSettings(ctx, ss); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Swap the live signing secret so existing tokens fail verification immediately.
@@ -604,7 +604,7 @@ func (s *ConfigServer) PutNodeConfig(
 	// Reject duplicate names.
 	nodes, err := s.cfgStore.ListNodes(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("node", nodeUUID, name, nodes, func(n config.NodeConfig) (uuid.UUID, string) { return n.ID, n.Name }); connErr != nil {
 		return nil, connErr
@@ -616,7 +616,7 @@ func (s *ConfigServer) PutNodeConfig(
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutNodeConfigResponse{Config: fullCfg}), nil
 }
@@ -669,7 +669,7 @@ func (s *ConfigServer) WatchConfig(
 func (s *ConfigServer) loadServerSettings(ctx context.Context) (config.ServerSettings, error) {
 	ss, err := s.cfgStore.LoadServerSettings(ctx)
 	if err != nil {
-		return ss, connect.NewError(connect.CodeInternal, err)
+		return ss, errInternal(err)
 	}
 	if ss.Auth.PasswordPolicy.MinLength == 0 {
 		ss.Auth.PasswordPolicy.MinLength = 8

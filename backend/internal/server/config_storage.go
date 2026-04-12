@@ -21,13 +21,13 @@ func (s *ConfigServer) PutCloudService(
 	req *connect.Request[apiv1.PutCloudServiceRequest],
 ) (*connect.Response[apiv1.PutCloudServiceResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
@@ -38,7 +38,7 @@ func (s *ConfigServer) PutCloudService(
 	// Reject duplicate names.
 	services, err := s.cfgStore.ListCloudServices(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("cloud service", id, req.Msg.Config.Name, services, func(cs config.CloudService) (uuid.UUID, string) { return cs.ID, cs.Name }); connErr != nil {
 		return nil, connErr
@@ -48,13 +48,13 @@ func (s *ConfigServer) PutCloudService(
 	cfg.ID = id
 
 	if err := s.cfgStore.PutCloudService(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyCloudServicePut, ID: id})
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutCloudServiceResponse{Config: fullCfg}), nil
 }
@@ -65,7 +65,7 @@ func (s *ConfigServer) DeleteCloudService(
 	req *connect.Request[apiv1.DeleteCloudServiceRequest],
 ) (*connect.Response[apiv1.DeleteCloudServiceResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -75,7 +75,7 @@ func (s *ConfigServer) DeleteCloudService(
 
 	existing, err := s.cfgStore.GetCloudService(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if existing == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("cloud service not found"))
@@ -84,7 +84,7 @@ func (s *ConfigServer) DeleteCloudService(
 	// Referential integrity: reject if any tier references this cloud service.
 	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	for _, t := range tiers {
 		if t.CloudServiceID != nil && *t.CloudServiceID == id {
@@ -94,13 +94,13 @@ func (s *ConfigServer) DeleteCloudService(
 	}
 
 	if err := s.cfgStore.DeleteCloudService(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyCloudServiceDeleted, ID: id})
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteCloudServiceResponse{Config: cfg}), nil
 }
@@ -113,7 +113,7 @@ func (s *ConfigServer) SetNodeStorageConfig(
 	req *connect.Request[apiv1.SetNodeStorageConfigRequest],
 ) (*connect.Response[apiv1.SetNodeStorageConfigResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.NodeId == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id required"))
@@ -129,13 +129,13 @@ func (s *ConfigServer) SetNodeStorageConfig(
 	}
 
 	if err := s.cfgStore.SetNodeStorageConfig(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyNodeStorageConfigSet})
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.SetNodeStorageConfigResponse{Config: fullCfg}), nil
 }
@@ -148,7 +148,7 @@ func (s *ConfigServer) PutTier(
 	req *connect.Request[apiv1.PutTierRequest],
 ) (*connect.Response[apiv1.PutTierResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
@@ -179,7 +179,7 @@ func (s *ConfigServer) PutTier(
 		}
 		rp, err := s.cfgStore.GetRotationPolicy(ctx, rpID)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, errInternal(err)
 		}
 		if rp == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument,
@@ -193,7 +193,7 @@ func (s *ConfigServer) PutTier(
 
 	cfg, err := protoToTierConfig(req.Msg.Config)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 	cfg.ID = id
 
@@ -205,7 +205,7 @@ func (s *ConfigServer) PutTier(
 	}
 
 	if err := s.cfgStore.PutTier(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyTierPut, ID: id})
 
@@ -215,7 +215,7 @@ func (s *ConfigServer) PutTier(
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutTierResponse{Config: fullCfg}), nil
 }
@@ -226,7 +226,7 @@ func (s *ConfigServer) DeleteTier(
 	req *connect.Request[apiv1.DeleteTierRequest],
 ) (*connect.Response[apiv1.DeleteTierResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -236,7 +236,7 @@ func (s *ConfigServer) DeleteTier(
 
 	existing, err := s.cfgStore.GetTier(ctx, id)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if existing == nil {
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("tier not found"))
@@ -245,7 +245,7 @@ func (s *ConfigServer) DeleteTier(
 	drain := req.Msg.GetDrain()
 
 	if err := s.cfgStore.DeleteTier(ctx, id, drain); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Tier ownership now lives on TierConfig (VaultID field), so there is no
@@ -256,7 +256,7 @@ func (s *ConfigServer) DeleteTier(
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteTierResponse{Config: cfg}), nil
 }
@@ -346,7 +346,7 @@ func (s *ConfigServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.T
 	}
 	cs, err := s.cfgStore.GetCloudService(ctx, csID)
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 	if cs == nil {
 		return connect.NewError(connect.CodeInvalidArgument,
@@ -362,7 +362,7 @@ func (s *ConfigServer) validateReplicationFactor(ctx context.Context, tierType c
 	}
 	eligible, err := s.countEligibleStorages(ctx, tierType, p)
 	if err != nil {
-		return connect.NewError(connect.CodeInternal, err)
+		return errInternal(err)
 	}
 	if int(p.ReplicationFactor) > eligible {
 		return connect.NewError(connect.CodeInvalidArgument,

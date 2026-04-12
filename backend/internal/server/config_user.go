@@ -67,7 +67,7 @@ func (s *ConfigServer) GetPreferences(
 
 	_, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetPreferencesResponse{
@@ -89,14 +89,14 @@ func (s *ConfigServer) PutPreferences(
 
 	uid, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	prefs.Theme = req.Msg.Theme
 	prefs.SyntaxHighlight = req.Msg.SyntaxHighlight
 	prefs.Palette = req.Msg.Palette
 	if err := s.savePrefs(ctx, uid, prefs); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	return connect.NewResponse(&apiv1.PutPreferencesResponse{}), nil
@@ -114,7 +114,7 @@ func (s *ConfigServer) GetSavedQueries(
 
 	_, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	resp := &apiv1.GetSavedQueriesResponse{}
@@ -137,12 +137,12 @@ func (s *ConfigServer) PutSavedQuery(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 	if req.Msg.Query == nil || req.Msg.Query.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("query name required"))
+		return nil, errRequired("query name")
 	}
 
 	uid, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Upsert: replace if name exists, append otherwise.
@@ -162,7 +162,7 @@ func (s *ConfigServer) PutSavedQuery(
 	}
 
 	if err := s.savePrefs(ctx, uid, prefs); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	return connect.NewResponse(&apiv1.PutSavedQueryResponse{}), nil
@@ -178,12 +178,12 @@ func (s *ConfigServer) DeleteSavedQuery(
 		return nil, connect.NewError(connect.CodeUnauthenticated, errors.New("not authenticated"))
 	}
 	if req.Msg.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("query name required"))
+		return nil, errRequired("query name")
 	}
 
 	uid, prefs, err := s.loadPrefs(ctx, claims)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	filtered := prefs.SavedQueries[:0]
@@ -195,7 +195,7 @@ func (s *ConfigServer) DeleteSavedQuery(
 	prefs.SavedQueries = filtered
 
 	if err := s.savePrefs(ctx, uid, prefs); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	return connect.NewResponse(&apiv1.DeleteSavedQueryResponse{}), nil

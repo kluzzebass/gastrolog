@@ -25,7 +25,7 @@ func (s *QueryServer) GetFields(
 ) (*connect.Response[apiv1.GetFieldsResponse], error) {
 	q, _, err := parseExpression(req.Msg.Expression)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	maxSamples := int(req.Msg.MaxSamples)

@@ -31,7 +31,7 @@ func (s *QueryServer) Follow(
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
-		return connect.NewError(connect.CodeInvalidArgument, err)
+		return errInvalidArg(err)
 	}
 
 	// Pipeline queries: allow non-aggregating streaming-compatible operators in
@@ -245,5 +245,5 @@ func followError(err error) error {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil
 	}
-	return connect.NewError(connect.CodeInternal, err)
+	return errInternal(err)
 }

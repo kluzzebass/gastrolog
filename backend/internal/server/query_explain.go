@@ -21,12 +21,12 @@ func (s *QueryServer) Explain(
 
 	q, pipeline, err := protoToQuery(req.Msg.Query)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	plan, err := eng.Explain(ctx, q)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	resp := &apiv1.ExplainResponse{

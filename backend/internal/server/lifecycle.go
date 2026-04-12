@@ -153,7 +153,7 @@ func (s *LifecycleServer) GetClusterStatus(
 	leaderAddr, leaderID := s.cluster.LeaderInfo()
 	servers, err := s.cluster.Servers()
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Build a name lookup from the config store's node list.
@@ -248,11 +248,11 @@ func (s *LifecycleServer) SetNodeSuffrage(
 
 	nodeID := req.Msg.NodeId
 	if nodeID == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id is required"))
+		return nil, errRequired("node_id")
 	}
 
 	if err := s.setNodeSuffrageFn(ctx, nodeID, req.Msg.Voter); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.SetNodeSuffrageResponse{}), nil
 }
@@ -306,7 +306,7 @@ func (s *LifecycleServer) JoinCluster(
 	}
 
 	if err := s.joinClusterFn(ctx, leaderAddr, joinToken); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.JoinClusterResponse{}), nil
 }
@@ -321,7 +321,7 @@ func (s *LifecycleServer) RemoveNode(
 	}
 	nodeID := req.Msg.NodeId
 	if nodeID == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id is required"))
+		return nil, errRequired("node_id")
 	}
 	if nodeID == s.nodeID {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("cannot remove self from cluster"))
@@ -330,7 +330,7 @@ func (s *LifecycleServer) RemoveNode(
 	s.logger.Info("removing node from cluster", "node_id", nodeID)
 	if err := s.removeNodeFn(ctx, nodeID); err != nil {
 		s.logger.Error("node removal failed", "node_id", nodeID, "error", err)
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.logger.Info("node removed from cluster", "node_id", nodeID)
 	return connect.NewResponse(&apiv1.RemoveNodeResponse{}), nil

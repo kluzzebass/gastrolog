@@ -175,7 +175,7 @@ func (s *AuthServer) Register(
 
 	// Validate password.
 	if err := validatePassword(password, s.loadPasswordPolicy(ctx)); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	// Hash password.
@@ -355,7 +355,7 @@ func (s *AuthServer) ChangePassword(
 
 	// Validate new password.
 	if err := validatePassword(newPassword, s.loadPasswordPolicy(ctx)); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	// Verify old password.
@@ -434,7 +434,7 @@ func (s *AuthServer) CreateUser(
 	}
 
 	if err := validatePassword(password, s.loadPasswordPolicy(ctx)); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	if role != "admin" && role != "user" {
@@ -552,7 +552,7 @@ func (s *AuthServer) ResetPassword(
 	newPassword := req.Msg.NewPassword
 
 	if err := validatePassword(newPassword, s.loadPasswordPolicy(ctx)); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	user, err := s.cfgStore.GetUser(ctx, userID)

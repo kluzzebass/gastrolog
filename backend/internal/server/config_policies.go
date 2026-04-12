@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -21,13 +20,13 @@ func (s *ConfigServer) PutRotationPolicy(
 	req *connect.Request[apiv1.PutRotationPolicyRequest],
 ) (*connect.Response[apiv1.PutRotationPolicyResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
@@ -38,7 +37,7 @@ func (s *ConfigServer) PutRotationPolicy(
 	// Reject duplicate names.
 	rotPolicies, err := s.cfgStore.ListRotationPolicies(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("rotation policy", id, req.Msg.Config.Name, rotPolicies, func(p config.RotationPolicyConfig) (uuid.UUID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
@@ -53,17 +52,17 @@ func (s *ConfigServer) PutRotationPolicy(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid rotation policy: %w", err))
 	}
 	if err := cfg.ValidateCron(); err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+		return nil, errInvalidArg(err)
 	}
 
 	if err := s.cfgStore.PutRotationPolicy(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRotationPolicyPut, ID: id})
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutRotationPolicyResponse{Config: fullCfg}), nil
 }
@@ -74,7 +73,7 @@ func (s *ConfigServer) DeleteRotationPolicy(
 	req *connect.Request[apiv1.DeleteRotationPolicyRequest],
 ) (*connect.Response[apiv1.DeleteRotationPolicyResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -85,24 +84,24 @@ func (s *ConfigServer) DeleteRotationPolicy(
 	// Clear policy reference on any tiers that use it.
 	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	for _, t := range tiers {
 		if t.RotationPolicyID != nil && *t.RotationPolicyID == id {
 			t.RotationPolicyID = nil
 			if err := s.cfgStore.PutTier(ctx, t); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, err)
+				return nil, errInternal(err)
 			}
 		}
 	}
 
 	if err := s.cfgStore.DeleteRotationPolicy(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteRotationPolicyResponse{Config: cfg}), nil
 }
@@ -113,13 +112,13 @@ func (s *ConfigServer) PutRetentionPolicy(
 	req *connect.Request[apiv1.PutRetentionPolicyRequest],
 ) (*connect.Response[apiv1.PutRetentionPolicyResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
@@ -130,7 +129,7 @@ func (s *ConfigServer) PutRetentionPolicy(
 	// Reject duplicate names.
 	retPolicies, err := s.cfgStore.ListRetentionPolicies(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("retention policy", id, req.Msg.Config.Name, retPolicies, func(p config.RetentionPolicyConfig) (uuid.UUID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
@@ -146,13 +145,13 @@ func (s *ConfigServer) PutRetentionPolicy(
 	}
 
 	if err := s.cfgStore.PutRetentionPolicy(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRetentionPolicyPut, ID: id})
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutRetentionPolicyResponse{Config: fullCfg}), nil
 }
@@ -163,7 +162,7 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 	req *connect.Request[apiv1.DeleteRetentionPolicyRequest],
 ) (*connect.Response[apiv1.DeleteRetentionPolicyResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -174,7 +173,7 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 	// Clear retention rules that reference this policy from tiers.
 	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	for _, t := range tiers {
 		changed := false
@@ -189,18 +188,18 @@ func (s *ConfigServer) DeleteRetentionPolicy(
 		if changed {
 			t.RetentionRules = kept
 			if err := s.cfgStore.PutTier(ctx, t); err != nil {
-				return nil, connect.NewError(connect.CodeInternal, err)
+				return nil, errInternal(err)
 			}
 		}
 	}
 
 	if err := s.cfgStore.DeleteRetentionPolicy(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteRetentionPolicyResponse{Config: cfg}), nil
 }

@@ -49,7 +49,7 @@ func (s *QueryServer) GetContext(
 	// Step 1: Read the anchor record from its owning vault.
 	anchor, err := s.readAnchor(ctx, vaultID, chunkID, ref.Pos)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	// Step 2: Collect context using the full cluster-wide search path.
@@ -77,7 +77,7 @@ func (s *QueryServer) GetContext(
 		IsReverse: true,
 	}, before, isAnchor)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	slices.Reverse(beforeRecs) // newest-first → oldest-first
 
@@ -86,7 +86,7 @@ func (s *QueryServer) GetContext(
 		Limit: after + 1,
 	}, after, isAnchor)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 
 	return connect.NewResponse(&apiv1.GetContextResponse{

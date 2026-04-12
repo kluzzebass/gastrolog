@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"slices"
 
@@ -20,14 +19,14 @@ func (s *ConfigServer) PutRoute(
 	req *connect.Request[apiv1.PutRouteRequest],
 ) (*connect.Response[apiv1.PutRouteResponse], error) {
 	if req.Msg.Config == nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("config required"))
+		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
 		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
 	}
 
 	if req.Msg.Config.Name == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("name required"))
+		return nil, errRequired("name")
 	}
 
 	id, connErr := parseUUID(req.Msg.Config.Id)
@@ -38,7 +37,7 @@ func (s *ConfigServer) PutRoute(
 	// Reject duplicate names.
 	routes, err := s.cfgStore.ListRoutes(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	if connErr := checkNameConflict("route", id, req.Msg.Config.Name, routes, func(r config.RouteConfig) (uuid.UUID, string) { return r.ID, r.Name }); connErr != nil {
 		return nil, connErr
@@ -53,7 +52,7 @@ func (s *ConfigServer) PutRoute(
 		}
 		fc, err := s.cfgStore.GetFilter(ctx, fid)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, errInternal(err)
 		}
 		if fc == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument,
@@ -71,7 +70,7 @@ func (s *ConfigServer) PutRoute(
 		}
 		vc, err := s.cfgStore.GetVault(ctx, vid)
 		if err != nil {
-			return nil, connect.NewError(connect.CodeInternal, err)
+			return nil, errInternal(err)
 		}
 		if vc == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument,
@@ -100,13 +99,13 @@ func (s *ConfigServer) PutRoute(
 		EjectOnly:    req.Msg.Config.EjectOnly,
 	}
 	if err := s.cfgStore.PutRoute(ctx, cfg); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRoutePut, ID: id})
 
 	fullCfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.PutRouteResponse{Config: fullCfg}), nil
 }
@@ -117,7 +116,7 @@ func (s *ConfigServer) DeleteRoute(
 	req *connect.Request[apiv1.DeleteRouteRequest],
 ) (*connect.Response[apiv1.DeleteRouteResponse], error) {
 	if req.Msg.Id == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("id required"))
+		return nil, errRequired("id")
 	}
 
 	id, connErr := parseUUID(req.Msg.Id)
@@ -128,7 +127,7 @@ func (s *ConfigServer) DeleteRoute(
 	// Referential integrity: reject if any tier references this route as an eject target.
 	tiers, err := s.cfgStore.ListTiers(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	for _, t := range tiers {
 		for _, rule := range t.RetentionRules {
@@ -142,13 +141,13 @@ func (s *ConfigServer) DeleteRoute(
 	}
 
 	if err := s.cfgStore.DeleteRoute(ctx, id); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	s.notify(raftfsm.Notification{Kind: raftfsm.NotifyRouteDeleted, ID: id})
 
 	cfg, err := s.buildFullConfig(ctx)
 	if err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.DeleteRouteResponse{Config: cfg}), nil
 }

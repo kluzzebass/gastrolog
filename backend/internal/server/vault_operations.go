@@ -42,7 +42,7 @@ func (s *VaultServer) SealVault(
 	req *connect.Request[apiv1.SealVaultRequest],
 ) (*connect.Response[apiv1.SealVaultResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -78,7 +78,7 @@ func (s *VaultServer) ReindexVault(
 	req *connect.Request[apiv1.ReindexVaultRequest],
 ) (*connect.Response[apiv1.ReindexVaultResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -132,10 +132,10 @@ func (s *VaultServer) MigrateVault(
 	req *connect.Request[apiv1.MigrateVaultRequest],
 ) (*connect.Response[apiv1.MigrateVaultResponse], error) {
 	if req.Msg.Source == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
+		return nil, errRequired("source")
 	}
 	if req.Msg.Destination == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
+		return nil, errRequired("destination")
 	}
 
 	srcID, connErr := parseUUID(req.Msg.Source)
@@ -214,10 +214,10 @@ func (s *VaultServer) MergeVaults(
 	req *connect.Request[apiv1.MergeVaultsRequest],
 ) (*connect.Response[apiv1.MergeVaultsResponse], error) {
 	if req.Msg.Source == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source required"))
+		return nil, errRequired("source")
 	}
 	if req.Msg.Destination == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("destination required"))
+		return nil, errRequired("destination")
 	}
 	if req.Msg.Source == req.Msg.Destination {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("source and destination must differ"))
@@ -264,7 +264,7 @@ func (s *VaultServer) ExportVault(
 	stream *connect.ServerStream[apiv1.ExportVaultResponse],
 ) error {
 	if req.Msg.Vault == "" {
-		return connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -346,7 +346,7 @@ func (s *VaultServer) ImportRecords(
 	req *connect.Request[apiv1.ImportRecordsRequest],
 ) (*connect.Response[apiv1.ImportRecordsResponse], error) {
 	if req.Msg.Vault == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("vault required"))
+		return nil, errRequired("vault")
 	}
 	vaultID, connErr := parseUUID(req.Msg.Vault)
 	if connErr != nil {
@@ -441,7 +441,7 @@ func (s *VaultServer) ArchiveChunk(
 	}
 
 	if err := s.orch.ArchiveChunk(ctx, vaultID, chunkID, storageClass); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.ArchiveChunkResponse{}), nil
 }
@@ -465,7 +465,7 @@ func (s *VaultServer) RestoreChunk(
 	tier, days := s.resolveRestoreDefaults(ctx, vaultID, chunkID, req.Msg.RestoreTier, int(req.Msg.RestoreDays))
 
 	if err := s.orch.RestoreChunk(ctx, vaultID, chunkID, tier, days); err != nil {
-		return nil, connect.NewError(connect.CodeInternal, err)
+		return nil, errInternal(err)
 	}
 	return connect.NewResponse(&apiv1.RestoreChunkResponse{}), nil
 }
