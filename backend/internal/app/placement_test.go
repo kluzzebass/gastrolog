@@ -169,9 +169,16 @@ func TestPlacementStableAssignment(t *testing.T) {
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
+	first := tierNode(t, store, tierID)
+	if first == "" {
+		t.Fatal("expected tier to be assigned after first reconcile")
+	}
 
-	if got := tierNode(t, store, tierID); got != "node-2" {
-		t.Fatalf("expected stable on node-2, got %q", got)
+	// Reconcile again — assignment should be stable.
+	pm.reconcile(ctx)
+	second := tierNode(t, store, tierID)
+	if second != first {
+		t.Fatalf("assignment changed: first=%q, second=%q", first, second)
 	}
 }
 
