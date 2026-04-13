@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -475,13 +476,54 @@ func (o *Orchestrator) fireAndForgetRemote(targets []remoteForwardTarget, rec ch
 		return
 	}
 	for _, tgt := range targets {
+		// Circuit breaker: skip nodes in backoff.
+		if rb := o.getReplicaBackoff(tgt.nodeID); rb != nil && rb.skipUntil.After(o.now()) {
+			continue
+		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), cluster.ForwardingTimeout)
 		err := o.tierReplicator.AppendRecords(ctx, tgt.nodeID, tgt.vaultID, tgt.tierID, tgt.activeChunkID, []chunk.Record{rec})
 		cancel()
 		if err != nil {
-			o.logger.Warn("replication: failed to forward record to follower",
-				"node", tgt.nodeID, "vault", tgt.vaultID, "tier", tgt.tierID, "error", err)
+			o.bumpReplicaBackoff(tgt.nodeID, err)
+		} else {
+			o.clearReplicaBackoff(tgt.nodeID)
 		}
+	}
+}
+
+// replicaBackoff tracks consecutive failures and exponential backoff for
+// a follower node's replication stream.
+type replicaBackoff struct {
+	failures  int
+	skipUntil time.Time
+}
+
+func (o *Orchestrator) getReplicaBackoff(nodeID string) *replicaBackoff {
+	v, ok := o.replicaCircuit.Load(nodeID)
+	if !ok {
+		return nil
+	}
+	return v.(*replicaBackoff)
+}
+
+func (o *Orchestrator) bumpReplicaBackoff(nodeID string, err error) {
+	v, _ := o.replicaCircuit.LoadOrStore(nodeID, &replicaBackoff{})
+	rb := v.(*replicaBackoff)
+	rb.failures++
+	backoff := time.Duration(1<<min(rb.failures, 5)) * time.Second // 2s, 4s, 8s, 16s, 32s cap
+	rb.skipUntil = o.now().Add(backoff)
+
+	// Log only on the first failure and when backoff increases.
+	if rb.failures == 1 || rb.failures&(rb.failures-1) == 0 { // powers of 2
+		o.logger.Warn("replication: follower unreachable, backing off",
+			"node", nodeID, "failures", rb.failures, "backoff", backoff, "error", err)
+	}
+}
+
+func (o *Orchestrator) clearReplicaBackoff(nodeID string) {
+	if _, loaded := o.replicaCircuit.LoadAndDelete(nodeID); loaded {
+		o.logger.Info("replication: follower recovered", "node", nodeID)
 	}
 }
 

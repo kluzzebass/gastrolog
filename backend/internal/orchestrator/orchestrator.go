@@ -202,6 +202,11 @@ type Orchestrator struct {
 	// Tier replicator: ordered stream per tier per follower (nil in single-node mode).
 	tierReplicator TierReplicator
 
+	// replicaCircuit tracks per-node backoff for follower replication.
+	// After consecutive failures, the node is skipped until the backoff
+	// expires. Prevents log spam when a follower is down.
+	replicaCircuit sync.Map // nodeID (string) → *replicaBackoff
+
 	// nodeAddrResolver maps node IDs to Raft addresses. Set from factories
 	// during ApplyConfig. Used by SetDesiredTierLeader to resolve the
 	// placement leader's Raft address for TransferLeadership.

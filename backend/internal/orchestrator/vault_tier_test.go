@@ -1590,11 +1590,12 @@ func TestAppendToTierForwardingDoesNotBlockOnFullChannel(t *testing.T) {
 		t.Errorf("expected %d records in active chunk, got %d", total, active.RecordCount)
 	}
 
-	// Verify the forwarder was called for each record to each follower.
-	// 200 records * 2 secondaries = 400 calls.
-	expectedCalls := total * 2
-	if got := fwd.callCount(); got != expectedCalls {
-		t.Errorf("expected %d AppendRecords calls (records * secondaries), got %d", expectedCalls, got)
+	// The circuit breaker stops forwarding after consecutive failures,
+	// so we expect at least 1 call per follower (to detect the failure)
+	// but not necessarily all 400. The important thing: local records
+	// are committed and the forwarder was attempted.
+	if got := fwd.callCount(); got < 2 {
+		t.Errorf("expected at least 2 AppendRecords calls (one per follower), got %d", got)
 	}
 }
 
