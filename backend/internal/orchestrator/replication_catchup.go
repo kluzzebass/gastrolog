@@ -109,7 +109,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 	sealed := catchupCandidates(metas, tier.Type, manifestSet)
 
 	if len(sealed) == 0 {
-		o.logger.Info("replication catchup: no sealed chunks to copy",
+		o.logger.Debug("replication catchup: no sealed chunks to copy",
 			"vault", vaultID, "tier", tierID, "follower", nodeID)
 		return nil
 	}
@@ -117,6 +117,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 	o.logger.Info("replication catchup: starting",
 		"vault", vaultID, "tier", tierID, "follower", nodeID, "chunks", len(sealed))
 
+	transferred := 0
 	for _, meta := range sealed {
 		if err := o.replicateToFollower(ctx, vaultID, tierID, meta.ID, tier.Chunks, nodeID); err != nil {
 			// If the follower rejected because its tier isn't built yet
@@ -129,13 +130,15 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)
 			continue
 		}
-		o.logger.Info("replication catchup: chunk transferred",
+		transferred++
+		o.logger.Debug("replication catchup: chunk transferred",
 			"vault", vaultID, "tier", tierID, "chunk", meta.ID.String(), "follower", nodeID,
 			"records", meta.RecordCount)
 	}
 
 	o.logger.Info("replication catchup: completed",
-		"vault", vaultID, "tier", tierID, "follower", nodeID, "chunks", len(sealed))
+		"vault", vaultID, "tier", tierID, "follower", nodeID,
+		"transferred", transferred, "total", len(sealed))
 	return nil
 }
 
