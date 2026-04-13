@@ -15,7 +15,6 @@ import (
 	"gastrolog/internal/raftwal"
 
 	hraft "github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 )
 
 // ErrGroupNotFound is returned when an operation targets a group that doesn't exist.
@@ -69,9 +68,7 @@ type GroupConfig struct {
 type Group struct {
 	Raft *hraft.Raft
 	FSM  hraft.FSM
-
-	boltDB io.Closer
-	dir    string
+	dir  string
 }
 
 // GroupManager manages the lifecycle of multiple Raft groups on a node.
@@ -143,61 +140,35 @@ func (m *GroupManager) CreateGroup(cfg GroupConfig) (*Group, error) {
 		return nil, fmt.Errorf("create group dir: %w", err)
 	}
 
-	// Choose log/stable store: shared WAL (coalesced fsync) or per-group boltdb.
-	var logStore hraft.LogStore
-	var stableStore hraft.StableStore
-	var storCloser io.Closer
-	if m.wal != nil {
-		gs := m.wal.GroupStore(cfg.GroupID)
-		logStore = gs
-		stableStore = gs
-		// No closer needed — WAL is managed by the GroupManager.
-	} else {
-		boltStore, err := raftboltdb.New(raftboltdb.Options{
-			Path: filepath.Join(groupDir, "raft.db"),
-		})
-		if err != nil {
-			return nil, fmt.Errorf("open boltdb for group %q: %w", cfg.GroupID, err)
-		}
-		logStore = boltStore
-		stableStore = boltStore
-		storCloser = boltStore
+	if m.wal == nil {
+		return nil, fmt.Errorf("WAL required for group %q", cfg.GroupID)
 	}
+	gs := m.wal.GroupStore(cfg.GroupID)
 
 	snapStore, err := hraft.NewFileSnapshotStore(groupDir, 2, io.Discard)
 	if err != nil {
-		if storCloser != nil {
-			_ = storCloser.Close()
-		}
 		return nil, fmt.Errorf("create snapshot store for group %q: %w", cfg.GroupID, err)
 	}
 
 	tp := m.transport.GroupTransport(cfg.GroupID)
 	raftCfg := m.newRaftConfig(cfg)
 
-	r, err := hraft.NewRaft(raftCfg, cfg.FSM, logStore, stableStore, snapStore, tp)
+	r, err := hraft.NewRaft(raftCfg, cfg.FSM, gs, gs, snapStore, tp)
 	if err != nil {
-		if storCloser != nil {
-			_ = storCloser.Close()
-		}
 		return nil, fmt.Errorf("create raft for group %q: %w", cfg.GroupID, err)
 	}
 
 	if len(cfg.SeedMembers) > 0 {
 		if err := m.seedGroup(r, cfg.SeedMembers); err != nil {
 			_ = r.Shutdown().Error()
-			if storCloser != nil {
-				_ = storCloser.Close()
-			}
 			return nil, fmt.Errorf("seed group %q: %w", cfg.GroupID, err)
 		}
 	}
 
 	g := &Group{
-		Raft:   r,
-		FSM:    cfg.FSM,
-		boltDB: storCloser, // nil when using shared WAL
-		dir:    groupDir,
+		Raft: r,
+		FSM:  cfg.FSM,
+		dir:  groupDir,
 	}
 	m.groups[cfg.GroupID] = g
 
@@ -241,12 +212,6 @@ func (m *GroupManager) DestroyGroup(groupID string) error {
 	if err := g.Raft.Shutdown().Error(); err != nil {
 		m.logger.Error("raft shutdown failed", "group", groupID, "error", err)
 	}
-	if g.boltDB != nil {
-		if err := g.boltDB.Close(); err != nil {
-			m.logger.Error("boltdb close failed", "group", groupID, "error", err)
-		}
-	}
-
 	m.transport.RemoveGroup(groupID)
 
 	m.logger.Info("raft group destroyed", "group", groupID)
@@ -346,11 +311,6 @@ func (m *GroupManager) shutdownGroup(id string, g *Group) {
 	}
 	if err := g.Raft.Shutdown().Error(); err != nil {
 		m.logger.Error("raft shutdown failed", "group", id, "error", err)
-	}
-	if g.boltDB != nil {
-		if err := g.boltDB.Close(); err != nil {
-			m.logger.Error("boltdb close failed", "group", id, "error", err)
-		}
 	}
 	m.transport.RemoveGroup(id)
 	m.logger.Info("raft group shut down", "group", id)

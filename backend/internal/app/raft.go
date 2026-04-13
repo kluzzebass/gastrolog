@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/raftwal"
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/raftfsm"
 	"gastrolog/internal/system/raftstore"
@@ -19,7 +20,6 @@ import (
 	"gastrolog/internal/logging"
 
 	hraft "github.com/hashicorp/raft"
-	raftboltdb "github.com/hashicorp/raft-boltdb/v2"
 )
 
 // raftStoreOpts groups the parameters needed to open a raft-backed config store.
@@ -180,23 +180,22 @@ func (s *raftConfigStore) Close() error {
 	return err
 }
 
-// openRaftConfigStore creates a raft-backed config store with BoltDB persistence.
+// openRaftConfigStore creates a raft-backed config store with WAL persistence.
 func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
 	raftDir := opts.Home.RaftDir()
 	if err := os.MkdirAll(raftDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create raft directory: %w", err)
 	}
 
-	boltStore, err := raftboltdb.New(raftboltdb.Options{
-		Path: filepath.Join(raftDir, "raft.db"),
-	})
+	wal, err := raftwal.Open(filepath.Join(raftDir, "wal"))
 	if err != nil {
-		return nil, fmt.Errorf("open raft boltdb: %w", err)
+		return nil, fmt.Errorf("open system raft WAL: %w", err)
 	}
+	gs := wal.GroupStore("system")
 
 	snapStore, err := hraft.NewFileSnapshotStore(raftDir, 2, io.Discard)
 	if err != nil {
-		_ = boltStore.Close()
+		_ = wal.Close()
 		return nil, fmt.Errorf("create snapshot store: %w", err)
 	}
 
@@ -208,19 +207,19 @@ func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
 	fsm := raftfsm.New(opts.FSMOpts...)
 	conf := newRaftConfig(opts.NodeID, opts.Logger)
 
-	r, err := hraft.NewRaft(conf, fsm, boltStore, boltStore, snapStore, tp)
+	r, err := hraft.NewRaft(conf, fsm, gs, gs, snapStore, tp)
 	if err != nil {
-		_ = boltStore.Close()
+		_ = wal.Close()
 		return nil, fmt.Errorf("create raft: %w", err)
 	}
 
 	observeLeaderChanges(r, opts.Logger)
 
-	if err := bootstrapAndWaitForLeader(r, boltStore, tp, opts); err != nil {
+	if err := bootstrapAndWaitForLeader(r, wal, tp, opts); err != nil {
 		return nil, err
 	}
 
-	opts.Logger.Info("raft config store ready", "dir", raftDir)
+	opts.Logger.Info("raft system store ready", "dir", raftDir)
 
 	store := raftstore.New(r, fsm, 10*time.Second)
 
@@ -235,7 +234,7 @@ func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
 		Store:     store,
 		raftStore: store,
 		raft:      r,
-		boltDB:    boltStore,
+		boltDB:    wal,
 		forwarder: fwd,
 	}, nil
 }

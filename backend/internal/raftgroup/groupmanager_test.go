@@ -4,11 +4,13 @@ import (
 	"context"
 	"io"
 	"net"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"gastrolog/internal/multiraft"
+	"gastrolog/internal/raftwal"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -69,6 +71,16 @@ type managerTestNode struct {
 	lis       *bufconn.Listener
 }
 
+func testWAL(t *testing.T, dir string) *raftwal.WAL {
+	t.Helper()
+	w, err := raftwal.Open(filepath.Join(dir, "wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = w.Close() })
+	return w
+}
+
 func makeManagerCluster(t *testing.T, nodeIDs []string) []*managerTestNode {
 	t.Helper()
 	n := len(nodeIDs)
@@ -88,10 +100,12 @@ func makeManagerCluster(t *testing.T, nodeIDs []string) []*managerTestNode {
 		tp.Register(srv)
 		go func() { _ = srv.Serve(lis) }()
 
+		baseDir := t.TempDir()
 		mgr := NewGroupManager(GroupManagerConfig{
 			Transport: tp,
 			NodeID:    nodeIDs[i],
-			BaseDir:   t.TempDir(),
+			BaseDir:   baseDir,
+			WAL:       testWAL(t, baseDir),
 		})
 		nodes[i] = &managerTestNode{manager: mgr, transport: tp, server: srv, lis: lis}
 	}
@@ -393,10 +407,16 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	tp.Register(srv)
 	go func() { _ = srv.Serve(lis) }()
 
+	wal1, err := raftwal.Open(filepath.Join(groupDir, "wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	mgr := NewGroupManager(GroupManagerConfig{
 		Transport: tp,
 		NodeID:    "node-1",
 		BaseDir:   groupDir,
+		WAL:       wal1,
 	})
 
 	// Create group and apply some commands.
@@ -422,6 +442,7 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 
 	// Shutdown.
 	mgr.Shutdown()
+	_ = wal1.Close()
 	srv.Stop()
 	_ = tp.Close()
 
@@ -441,10 +462,17 @@ func TestGroupRecoveryAfterRestart(t *testing.T) {
 	tp2.Register(srv2)
 	go func() { _ = srv2.Serve(lis2) }()
 
+	wal2, err := raftwal.Open(filepath.Join(groupDir, "wal"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = wal2.Close() }()
+
 	mgr2 := NewGroupManager(GroupManagerConfig{
 		Transport: tp2,
 		NodeID:    "node-1",
 		BaseDir:   groupDir,
+		WAL:       wal2,
 	})
 
 	fsm2 := &counterFSM{}
