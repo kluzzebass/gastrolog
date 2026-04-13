@@ -53,7 +53,7 @@ func tierNode(t *testing.T, store *sysmem.Store, tierID uuid.UUID) string {
 	if err != nil {
 		t.Fatalf("ListNodeStorageConfigs: %v", err)
 	}
-	return tier.LeaderNodeID(nscs)
+	return system.LeaderNodeID(nil, nscs)
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
@@ -164,7 +164,7 @@ func TestPlacementStableAssignment(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
@@ -228,7 +228,7 @@ func TestPlacementReassignOnNodeDeath(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
@@ -246,7 +246,7 @@ func TestPlacementReassignLocalTierOnNodeDeath(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-2"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	_ = store.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
@@ -268,7 +268,7 @@ func TestPlacementNodeLosesStorageClass(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// node-1 has no file storages. node-2 has the right class.
@@ -292,7 +292,7 @@ func TestPlacementNoEligibleNodeClearsAssignment(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 5, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 5, VaultID: vaultID, Position: 0})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	pm.reconcile(ctx)
@@ -337,7 +337,7 @@ func TestPlacementLoadBalances(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tier1 := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tier1, Name: "t1", Type: system.TierTypeMemory, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tier1, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
 
 	tier2 := uuid.Must(uuid.NewV7())
 	_ = store.PutTier(ctx, system.TierConfig{ID: tier2, Name: "t2", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1})
@@ -555,7 +555,7 @@ func TestPlacementAlertClearedOnStableAssignment(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, Placements: primaryPlacement("node-1"), VaultID: vaultID, Position: 0})
+	_ = store.PutTier(ctx, system.TierConfig{ID: tierID, Name: "mem", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0})
 	_ = store.PutVault(ctx, system.VaultConfig{ID: vaultID, Name: "v"})
 
 	// Pre-set an alert manually.
@@ -734,16 +734,16 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	tier, _ := store.GetTier(ctx, tierID)
+	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if tier.LeaderNodeID(nscs) == "" {
+	if system.LeaderNodeID(nil, nscs) == "" {
 		t.Fatal("expected leader assigned")
 	}
-	followers := tier.FollowerNodeIDs(nscs)
+	followers := system.FollowerNodeIDs(nil, nscs)
 	if len(followers) != 1 {
 		t.Fatalf("expected 1 follower, got %d", len(followers))
 	}
-	if followers[0] == tier.LeaderNodeID(nscs) {
+	if followers[0] == system.LeaderNodeID(nil, nscs) {
 		t.Error("follower should not be the same as leader")
 	}
 }
@@ -760,9 +760,9 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	tier, _ := store.GetTier(ctx, tierID)
+	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if followers := tier.FollowerNodeIDs(nscs); len(followers) != 0 {
+	if followers := system.FollowerNodeIDs(nil, nscs); len(followers) != 0 {
 		t.Errorf("expected 0 followers for RF=1, got %d", len(followers))
 	}
 }
@@ -779,10 +779,10 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	tier, _ := store.GetTier(ctx, tierID)
+	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	// RF=3 needs 2 followers, but only 1 other node available.
-	if followers := tier.FollowerNodeIDs(nscs); len(followers) != 1 {
+	if followers := system.FollowerNodeIDs(nil, nscs); len(followers) != 1 {
 		t.Errorf("expected 1 follower (max available), got %d", len(followers))
 	}
 	if !hasAlert(alerts, "tier-underreplicated:") {

@@ -100,14 +100,12 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 			tiers[i] = benchCloudFileTier(b, tierIDs[i], vaultID, cloudStore)
 			tierCfgs[i] = system.TierConfig{
 				ID: tierIDs[i], Name: fmt.Sprintf("tier-%d", i),
-				Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 				VaultID: vaultID, Position: uint32(i),
 			}
 		} else {
 			tiers[i] = benchFileTier(b, tierIDs[i])
 			tierCfgs[i] = system.TierConfig{
 				ID: tierIDs[i], Name: fmt.Sprintf("tier-%d", i),
-				Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 				VaultID: vaultID, Position: uint32(i),
 			}
 		}

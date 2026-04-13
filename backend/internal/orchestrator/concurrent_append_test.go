@@ -183,11 +183,9 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		ID: vaultID, Name: "concurrent-transition",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -483,11 +481,9 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 		ID: vaultID, Name: "delete-fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -659,11 +655,9 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 		ID: vaultID, Name: "download-fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: nextTierID, Name: "local", Type: system.TierTypeMemory, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -736,11 +730,9 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 		ID: vaultID, Name: "reconfig-race",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier0ID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 1,
 	})
 
@@ -778,7 +770,6 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 	// The transition's resolveNextTierInChain will see the change.
 	// Remove tier1 from vault by clearing its VaultID.
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tier1ID, Name: "warm", Type: system.TierTypeFile, Placements: syntheticPlacements(nodeID),
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "reconfig-race",
@@ -819,7 +810,6 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		ID: vaultID, Name: "drain-concurrent",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "hot", Type: system.TierTypeFile, Placements: syntheticPlacements("node-A"),
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{

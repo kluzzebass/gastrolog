@@ -45,7 +45,6 @@ func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
-		Placements: syntheticPlacements(nodeID),
 		VaultID: vaultID, Position: 0,
 	})
 

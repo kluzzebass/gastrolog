@@ -66,21 +66,21 @@ func TestBootstrap(t *testing.T) {
 	}
 
 	// After bootstrap, Load returns the default system.
-	cfg, err = s.Load(ctx)
+	sys, err := s.Load(ctx)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg == nil {
+	if sys == nil {
 		t.Fatal("expected config after bootstrap, got nil")
 	}
-	if len(cfg.RotationPolicies) != 1 {
-		t.Errorf("expected 1 rotation policy, got %d", len(cfg.RotationPolicies))
+	if len(sys.Config.RotationPolicies) != 1 {
+		t.Errorf("expected 1 rotation policy, got %d", len(sys.Config.RotationPolicies))
 	}
-	if len(cfg.Vaults) != 1 {
-		t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))
+	if len(sys.Config.Vaults) != 1 {
+		t.Errorf("expected 1 vault, got %d", len(sys.Config.Vaults))
 	}
-	if len(cfg.Ingesters) != 1 {
-		t.Errorf("expected 1 ingester, got %d", len(cfg.Ingesters))
+	if len(sys.Config.Ingesters) != 1 {
+		t.Errorf("expected 1 ingester, got %d", len(sys.Config.Ingesters))
 	}
 
 	// Verify server settings were written with a JWT secret.

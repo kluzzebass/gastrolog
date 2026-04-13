@@ -32,7 +32,7 @@ func FuzzSnapshotUnmarshal(f *testing.F) {
 			return
 		}
 		// If unmarshal succeeds, RestoreSnapshot must not panic either.
-		_, _, _, _, _ = RestoreSnapshot(snap)
+		_, _, _, _ = RestoreSnapshot(snap)
 	})
 }
 

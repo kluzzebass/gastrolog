@@ -51,7 +51,6 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
-		Placements:     syntheticPlacements(nodeID),
 		CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
@@ -167,8 +166,8 @@ func TestArchivalSweepIgnoresInactiveServices(t *testing.T) {
 	ids := ingestSealUpload(t, cm, 50)
 
 	// Set archival mode to "none".
-	cfg, _ := store.Load(context.Background())
-	cs := cfg.CloudServices[0]
+	sys, _ := store.Load(context.Background())
+	cs := sys.Config.CloudServices[0]
 	cs.ArchivalMode = "none"
 	_ = store.PutCloudService(context.Background(), cs)
 
@@ -239,8 +238,8 @@ func TestReconcileSweepRemovesAfterGracePeriod(t *testing.T) {
 	ids := ingestSealUpload(t, cm, 50)
 
 	// Set grace period to 1 day.
-	cfg, _ := store.Load(context.Background())
-	cs := cfg.CloudServices[0]
+	sys, _ := store.Load(context.Background())
+	cs := sys.Config.CloudServices[0]
 	cs.SuspectGraceDays = 1
 	_ = store.PutCloudService(context.Background(), cs)
 
@@ -570,7 +569,6 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	}
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "cloud-tier", Type: system.TierTypeCloud,
-		Placements: placements, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -944,8 +942,8 @@ func TestCloudClusterGracePeriodBoundary(t *testing.T) {
 	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
 
 	// Set grace period to 3 days.
-	cfg, _ := h.cfgStore.Load(context.Background())
-	cs := cfg.CloudServices[0]
+	sys, _ := h.cfgStore.Load(context.Background())
+	cs := sys.Config.CloudServices[0]
 	cs.SuspectGraceDays = 3
 	_ = h.cfgStore.PutCloudService(context.Background(), cs)
 
@@ -1137,7 +1135,6 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
-		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -1264,7 +1261,6 @@ func TestCacheEvictionViaRetentionSweep(t *testing.T) {
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
-		Placements: syntheticPlacements(nodeID), CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutVault(context.Background(), system.VaultConfig{

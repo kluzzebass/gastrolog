@@ -515,34 +515,34 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalSnapshot: %v", err)
 	}
-	gotCfg, gotUsers, gotTokens, _, err := RestoreSnapshot(snap2)
+	gotSys, gotUsers, gotTokens, err := RestoreSnapshot(snap2)
 	if err != nil {
 		t.Fatalf("RestoreSnapshot: %v", err)
 	}
 
 	// Compare config (excluding time-sensitive comparisons handled below).
-	if len(gotCfg.Filters) != len(cfg.Filters) {
-		t.Fatalf("filters: got %d, want %d", len(gotCfg.Filters), len(cfg.Filters))
+	if len(gotSys.Config.Filters) != len(cfg.Filters) {
+		t.Fatalf("filters: got %d, want %d", len(gotSys.Config.Filters), len(cfg.Filters))
 	}
-	if !reflect.DeepEqual(gotCfg.Filters, cfg.Filters) {
-		t.Fatalf("filters differ: got %+v, want %+v", gotCfg.Filters, cfg.Filters)
+	if !reflect.DeepEqual(gotSys.Config.Filters, cfg.Filters) {
+		t.Fatalf("filters differ: got %+v, want %+v", gotSys.Config.Filters, cfg.Filters)
 	}
-	if !reflect.DeepEqual(gotCfg.RotationPolicies, cfg.RotationPolicies) {
+	if !reflect.DeepEqual(gotSys.Config.RotationPolicies, cfg.RotationPolicies) {
 		t.Fatalf("rotation policies differ")
 	}
-	if !reflect.DeepEqual(gotCfg.RetentionPolicies, cfg.RetentionPolicies) {
+	if !reflect.DeepEqual(gotSys.Config.RetentionPolicies, cfg.RetentionPolicies) {
 		t.Fatalf("retention policies differ")
 	}
-	if !reflect.DeepEqual(gotCfg.Vaults, cfg.Vaults) {
-		t.Fatalf("vaults differ: got %+v, want %+v", gotCfg.Vaults, cfg.Vaults)
+	if !reflect.DeepEqual(gotSys.Config.Vaults, cfg.Vaults) {
+		t.Fatalf("vaults differ: got %+v, want %+v", gotSys.Config.Vaults, cfg.Vaults)
 	}
-	if !reflect.DeepEqual(gotCfg.Ingesters, cfg.Ingesters) {
+	if !reflect.DeepEqual(gotSys.Config.Ingesters, cfg.Ingesters) {
 		t.Fatalf("ingesters differ")
 	}
-	if gotCfg.Auth.JWTSecret != cfg.Auth.JWTSecret {
-		t.Fatalf("auth differ: got %+v, want %+v", gotCfg.Auth, cfg.Auth)
+	if gotSys.Config.Auth.JWTSecret != cfg.Auth.JWTSecret {
+		t.Fatalf("auth differ: got %+v, want %+v", gotSys.Config.Auth, cfg.Auth)
 	}
-	if !reflect.DeepEqual(gotCfg.Certs, cfg.Certs) {
+	if !reflect.DeepEqual(gotSys.Config.Certs, cfg.Certs) {
 		t.Fatalf("certs differ")
 	}
 
@@ -578,7 +578,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 func TestSnapshotEmpty(t *testing.T) {
 	t.Parallel()
 	cfg := &system.Config{}
-	snap := BuildSnapshot(cfg, nil, nil, nil)
+	snap := BuildSnapshot(&system.System{Config: *cfg}, nil, nil)
 	b, err := MarshalSnapshot(snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
@@ -587,12 +587,12 @@ func TestSnapshotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnmarshalSnapshot: %v", err)
 	}
-	gotCfg, gotUsers, gotTokens, _, err := RestoreSnapshot(snap2)
+	gotSys, gotUsers, gotTokens, err := RestoreSnapshot(snap2)
 	if err != nil {
 		t.Fatalf("RestoreSnapshot: %v", err)
 	}
-	if len(gotCfg.Filters) != 0 || len(gotCfg.Vaults) != 0 || len(gotCfg.Ingesters) != 0 {
-		t.Fatalf("expected empty config, got %+v", gotCfg)
+	if len(gotSys.Config.Filters) != 0 || len(gotSys.Config.Vaults) != 0 || len(gotSys.Config.Ingesters) != 0 {
+		t.Fatalf("expected empty config, got %+v", gotSys)
 	}
 	if len(gotUsers) != 0 {
 		t.Fatalf("expected no users, got %d", len(gotUsers))

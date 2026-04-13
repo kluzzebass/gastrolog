@@ -133,9 +133,6 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 				Name: "tier-" + id,
 				Type: system.TierTypeMemory,
 				VaultID: node.vaultID, Position: 0,
-				Placements: []system.TierPlacement{
-					{StorageID: system.SyntheticStorageID(id), Leader: true},
-				}, // test-only: placement manager assigns this in production
 			})
 			_ = cfgStore.PutVault(ctx, system.VaultConfig{
 				ID: node.vaultID, Name: "vault-" + id,

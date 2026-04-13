@@ -178,11 +178,10 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 			Name:       "remote-only",
 			Type:       system.TierTypeMemory,
 			VaultID:    vaultID,
-			Placements: syntheticPlacements("node-2"), // NOT node-1
 		}},
 	}
 
-	if err := orch.ApplyConfig(cfg, factories); err != nil {
+	if err := orch.ApplyConfig(&system.System{Config: *cfg}, factories); err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
@@ -219,7 +218,7 @@ func TestApplyConfigVaults(t *testing.T) {
 		Tiers:  []system.TierConfig{tc1, tc2},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -260,7 +259,7 @@ func TestApplyConfigIngesters(t *testing.T) {
 		},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -281,7 +280,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
-	err := orch.ApplyConfig(cfg, Factories{
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{},
 		IndexManagers: map[string]index.ManagerFactory{},
 	})
@@ -313,7 +312,7 @@ func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal (vault skipped), so no error returned.
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -331,7 +330,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 		},
 	}
 
-	err := orch.ApplyConfig(cfg, Factories{
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, Factories{
 		IngesterTypes: map[string]IngesterRegistration{},
 	})
 	if err == nil {
@@ -363,7 +362,7 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 		Tiers:  []system.TierConfig{tc1},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err == nil {
 		t.Error("expected error for duplicate vault ID")
 	}
@@ -388,7 +387,7 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 		},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err == nil {
 		t.Error("expected error for duplicate ingester ID")
 	}
@@ -418,7 +417,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -451,7 +450,7 @@ func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	}
 
 	// Vault init failure is non-fatal — node stays up, vault is skipped.
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -477,7 +476,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 		},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err == nil {
 		t.Error("expected error from ingester factory")
 	}
@@ -505,7 +504,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 		},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -557,7 +556,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -599,7 +598,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 		Tiers:  []system.TierConfig{tc},
 	}
 
-	err := orch.ApplyConfig(cfg, factories)
+	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -1378,12 +1378,10 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tier0ID, Name: "hot", Type: system.TierTypeMemory,
 		VaultID: vaultID, Position: 0,
-		Placements: []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tier1ID, Name: "warm", Type: system.TierTypeMemory,
 		VaultID: vaultID, Position: 1,
-		Placements: []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}},
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 

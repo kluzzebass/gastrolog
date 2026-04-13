@@ -25,8 +25,8 @@ type ejectSystemLoader struct {
 	cfg *system.Config
 }
 
-func (f *ejectSystemLoader) Load(_ context.Context) (*system.Config, error) {
-	return f.cfg, nil
+func (f *ejectSystemLoader) Load(_ context.Context) (*system.System, error) {
+	if f.cfg == nil { return nil, nil }; return &system.System{Config: *f.cfg}, nil
 }
 
 // ---------- fake cursor ----------
@@ -750,12 +750,10 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
-		Placements: syntheticPlacements(nodeID),
 		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
-		Placements: syntheticPlacements(nodeID),
 		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{
@@ -908,12 +906,10 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: srcTierID, Name: "src-hot", Type: system.TierTypeFile,
-		Placements: syntheticPlacements("node-A"),
 		VaultID: srcVaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
-		Placements: syntheticPlacements("node-B"),
 		VaultID: dstVaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{

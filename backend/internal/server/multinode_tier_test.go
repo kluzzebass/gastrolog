@@ -89,7 +89,7 @@ type mnSystemLoader struct {
 	store *sysmem.Store
 }
 
-func (l *mnSystemLoader) Load(ctx context.Context) (*system.Config, error) {
+func (l *mnSystemLoader) Load(ctx context.Context) (*system.System, error) {
 	return l.store.Load(ctx)
 }
 
@@ -121,16 +121,10 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	_ = cfgStore.PutTier(ctx, system.TierConfig{
 		ID: tier0ID, Name: "hot", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 0,
-		Placements: []system.TierPlacement{
-			{StorageID: system.SyntheticStorageID("data-1"), Leader: true},
-		},
 	})
 	_ = cfgStore.PutTier(ctx, system.TierConfig{
 		ID: tier1ID, Name: "warm", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 1,
-		Placements: []system.TierPlacement{
-			{StorageID: system.SyntheticStorageID("data-1"), Leader: true},
-		},
 	})
 	_ = cfgStore.PutVault(ctx, system.VaultConfig{
 		ID: vaultID, Name: "tiered-vault",

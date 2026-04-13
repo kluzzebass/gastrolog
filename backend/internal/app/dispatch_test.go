@@ -187,8 +187,8 @@ func (s *stubCfgStore) GetIngester(context.Context, uuid.UUID) (*system.Ingester
 func (s *stubCfgStore) LoadServerSettings(context.Context) (system.ServerSettings, error) {
 	return s.settings, s.settingsErr
 }
-func (s *stubCfgStore) Load(context.Context) (*system.Config, error) {
-	return s.cfg, s.loadErr
+func (s *stubCfgStore) Load(context.Context) (*system.System, error) {
+	if s.cfg == nil { return nil, s.loadErr }; return &system.System{Config: *s.cfg}, s.loadErr
 }
 func (s *stubCfgStore) ListTiers(context.Context) ([]system.TierConfig, error) {
 	if len(s.tiers) > 0 {

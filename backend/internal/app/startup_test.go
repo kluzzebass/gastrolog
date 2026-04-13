@@ -33,8 +33,11 @@ type startupStub struct {
 	putNodes    []system.NodeConfig // records PutNode calls
 }
 
-func (s *startupStub) Load(context.Context) (*system.Config, error) {
-	return s.cfg, s.loadErr
+func (s *startupStub) Load(context.Context) (*system.System, error) {
+	if s.cfg == nil {
+		return nil, s.loadErr
+	}
+	return &system.System{Config: *s.cfg}, s.loadErr
 }
 func (s *startupStub) LoadServerSettings(context.Context) (system.ServerSettings, error) {
 	return s.settings, s.settingsErr
@@ -233,7 +236,7 @@ func TestEnsureConfig_LoadError(t *testing.T) {
 
 func TestAwaitReplication_SkipsWhenConfigPresent(t *testing.T) {
 	t.Parallel()
-	err := awaitReplication(context.Background(), &system.Config{}, "raft", nil, discardLogger())
+	err := awaitReplication(context.Background(), &system.System{}, "raft", nil, discardLogger())
 	if err != nil {
 		t.Fatalf("expected nil, got %v", err)
 	}
@@ -304,9 +307,9 @@ func TestLoadLocalConfig_JoinAddrReturnsNil(t *testing.T) {
 
 func TestLoadLocalConfig_RaftWithLocalFSM(t *testing.T) {
 	t.Parallel()
-	existingCfg := &system.Config{}
+	existingCfg := &system.System{}
 	store := &startupStub{
-		cfg:      existingCfg,
+		cfg:      &existingCfg.Config,
 		settings: system.ServerSettings{Auth: system.AuthConfig{JWTSecret: "s"}},
 	}
 	cfg := RunConfig{ConfigType: "raft"}
@@ -315,7 +318,7 @@ func TestLoadLocalConfig_RaftWithLocalFSM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if appCfg != existingCfg {
+	if appCfg == nil {
 		t.Fatal("expected config from local FSM")
 	}
 	if !fromFSM {
