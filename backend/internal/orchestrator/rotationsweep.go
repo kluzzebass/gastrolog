@@ -43,15 +43,9 @@ func (o *Orchestrator) rotationSweep() {
 
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
-		// Find vault config for cron reconciliation.
 		var vaultCfg *system.VaultConfig
 		if cfg != nil {
-			for i := range cfg.Vaults {
-				if cfg.Vaults[i].ID == vaultID {
-					vaultCfg = &cfg.Vaults[i]
-					break
-				}
-			}
+			vaultCfg = findVaultConfig(cfg.Vaults, vaultID)
 		}
 
 		for _, tier := range vault.Tiers {

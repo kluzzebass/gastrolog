@@ -13,6 +13,7 @@ import (
 	"gastrolog/internal/index"
 
 	"github.com/google/uuid"
+	hraft "github.com/hashicorp/raft"
 )
 
 // fakeChunkManager implements chunk.ChunkManager for testing.
@@ -139,7 +140,7 @@ func TestApplyConfigNil(t *testing.T) {
 // gastrolog-264pk. Before the fix, ApplyConfig (the startup path) would
 // silently skip registering any vault whose buildTierInstances returned
 // zero local tiers — which happens on a node that isn't a placement
-// target for any of the vault's tiers (e.g. a voteless node that joined
+// target for any of the vault's tiers (e.g. a node that joined
 // the cluster as a non-tier-member, or a snapshot-restored node where
 // placements are reapplied via post-snapshot log replay rather than the
 // initial ApplyConfig). The vault then never made it into the
@@ -613,5 +614,109 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 
 	if receivedCM != expectedCM {
 		t.Error("index manager factory did not receive the correct chunk manager")
+	}
+}
+
+// --- gastrolog-292yi: all nodes in all tier Raft groups ---
+
+// TestBuildTierRaftMembers_AllClusterNodes verifies that buildTierRaftMembers
+// returns every cluster node as a Raft member, regardless of storage placement.
+func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
+	t.Parallel()
+
+	node1 := uuid.Must(uuid.NewV7())
+	node2 := uuid.Must(uuid.NewV7())
+	node3 := uuid.Must(uuid.NewV7())
+
+	clusterNodes := []system.NodeConfig{
+		{ID: node1, Name: "node-1"},
+		{ID: node2, Name: "node-2"},
+		{ID: node3, Name: "node-3"},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: node1.String()})
+
+	factories := Factories{
+		NodeAddressResolver: func(nodeID string) (string, bool) {
+			return nodeID + ":7946", true
+		},
+	}
+
+	members := orch.buildTierRaftMembers(clusterNodes, factories)
+
+	if len(members) != 3 {
+		t.Fatalf("expected 3 members (all cluster nodes), got %d", len(members))
+	}
+
+	// Verify all node IDs are present.
+	memberIDs := make(map[hraft.ServerID]bool)
+	for _, m := range members {
+		memberIDs[m.ID] = true
+	}
+	for _, node := range clusterNodes {
+		if !memberIDs[hraft.ServerID(node.ID.String())] {
+			t.Errorf("node %s missing from members", node.ID)
+		}
+	}
+}
+
+// TestBuildTierRaftMembers_UnresolvableNodeSkipped verifies that nodes whose
+// address can't be resolved are excluded from the member list.
+func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
+	t.Parallel()
+
+	node1 := uuid.Must(uuid.NewV7())
+	node2 := uuid.Must(uuid.NewV7())
+
+	clusterNodes := []system.NodeConfig{
+		{ID: node1, Name: "node-1"},
+		{ID: node2, Name: "node-2"},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: node1.String()})
+
+	// Only node-1 is resolvable.
+	factories := Factories{
+		NodeAddressResolver: func(nodeID string) (string, bool) {
+			if nodeID == node1.String() {
+				return "10.0.0.1:7946", true
+			}
+			return "", false
+		},
+	}
+
+	members := orch.buildTierRaftMembers(clusterNodes, factories)
+
+	if len(members) != 1 {
+		t.Fatalf("expected 1 member (only resolvable node), got %d", len(members))
+	}
+	if string(members[0].ID) != node1.String() {
+		t.Errorf("expected member %s, got %s", node1, members[0].ID)
+	}
+}
+
+// TestBuildTierRaftMembers_NilResolver verifies that a nil NodeAddressResolver
+// returns no members.
+func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{})
+	members := orch.buildTierRaftMembers(
+		[]system.NodeConfig{{ID: uuid.Must(uuid.NewV7())}},
+		Factories{},
+	)
+	if len(members) != 0 {
+		t.Fatalf("expected 0 members with nil resolver, got %d", len(members))
+	}
+}
+
+// TestBuildTierRaftMembers_EmptyNodes verifies that empty node list returns nil.
+func TestBuildTierRaftMembers_EmptyNodes(t *testing.T) {
+	t.Parallel()
+	orch := newTestOrch(t, Config{})
+	members := orch.buildTierRaftMembers(nil, Factories{
+		NodeAddressResolver: func(string) (string, bool) { return "addr", true },
+	})
+	if members != nil {
+		t.Fatalf("expected nil members for empty nodes, got %v", members)
 	}
 }

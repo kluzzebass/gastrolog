@@ -48,6 +48,8 @@ message SystemCommand {
     SetNodeStorageConfigCommand set_node_storage_config = 34;
     PutTierCommand put_tier = 35;
     DeleteTierCommand delete_tier = 36;
+    SetTierPlacementsCommand set_tier_placements = 37;
+    SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 38;
   }
 }
 
@@ -292,6 +294,19 @@ message DeleteTierCommand {
   bool drain = 2; // When true, drain chunks to the next tier before deleting.
 }
 
+// --- Tier Placements ---
+
+message SetTierPlacementsCommand {
+  string tier_id = 1;
+  repeated TierPlacement placements = 2;
+}
+
+// --- Setup Wizard ---
+
+message SetSetupWizardDismissedCommand {
+  bool dismissed = 1;
+}
+
 // --- Snapshot ---
 
 // SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
@@ -314,4 +329,6 @@ message SystemSnapshot {
   repeated PutCloudServiceCommand cloud_services = 14;
   repeated SetNodeStorageConfigCommand node_storage_configs = 15;
   repeated PutTierCommand tiers = 16;
+  repeated SetTierPlacementsCommand tier_placements = 17;
+  bool setup_wizard_dismissed = 18;
 }

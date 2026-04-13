@@ -45,6 +45,8 @@ const (
 	NotifyNodeStorageConfigSet
 	NotifyTierPut
 	NotifyTierDeleted
+	NotifyTierPlacementsSet
+	NotifySetupWizardDismissedSet
 )
 
 // Notification describes a config mutation that the FSM just applied.
@@ -131,7 +133,9 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_DeleteCloudService,
 		*gastrologv1.SystemCommand_SetNodeStorageConfig,
 		*gastrologv1.SystemCommand_PutTier,
-		*gastrologv1.SystemCommand_DeleteTier:
+		*gastrologv1.SystemCommand_DeleteTier,
+		*gastrologv1.SystemCommand_SetTierPlacements,
+		*gastrologv1.SystemCommand_SetSetupWizardDismissed:
 		return f.applyConfig(ctx, cmd, l.Index)
 
 	case *gastrologv1.SystemCommand_CreateUser,
@@ -254,6 +258,13 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		return f.applyPutTier(ctx, c.PutTier)
 	case *gastrologv1.SystemCommand_DeleteTier:
 		return f.applyDeleteTier(ctx, c.DeleteTier)
+	case *gastrologv1.SystemCommand_SetTierPlacements:
+		return f.applySetTierPlacements(ctx, c.SetTierPlacements)
+	case *gastrologv1.SystemCommand_SetSetupWizardDismissed:
+		if err := f.store.SetSetupWizardDismissed(ctx, c.SetSetupWizardDismissed.GetDismissed()); err != nil {
+			return nil, err
+		}
+		return &Notification{Kind: NotifySetupWizardDismissedSet}, nil
 	default:
 		return nil, fmt.Errorf("unexpected config command: %T", c)
 	}
@@ -500,6 +511,17 @@ func (f *FSM) applyDeleteTier(ctx context.Context, pb *gastrologv1.DeleteTierCom
 		return nil, err
 	}
 	return &Notification{Kind: NotifyTierDeleted, ID: id, Drain: pb.GetDrain()}, nil
+}
+
+func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTierPlacementsCommand) (*Notification, error) {
+	tierID, placements, err := command.ExtractSetTierPlacements(pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.store.SetTierPlacements(ctx, tierID, placements); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
 }
 
 // applyUser dispatches user-management commands.
@@ -782,6 +804,14 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 		if err := newStore.PutClusterTLS(ctx, *rt.ClusterTLS); err != nil {
 			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
+	}
+	for tierID, placements := range rt.TierPlacements {
+		if err := newStore.SetTierPlacements(ctx, tierID, placements); err != nil {
+			return fmt.Errorf("restore tier placements %s: %w", tierID, err)
+		}
+	}
+	if err := newStore.SetSetupWizardDismissed(ctx, rt.SetupWizardDismissed); err != nil {
+		return fmt.Errorf("restore setup wizard dismissed: %w", err)
 	}
 
 	f.store = newStore

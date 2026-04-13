@@ -43,6 +43,7 @@ type orchActions interface {
 	RemoveIngester(id uuid.UUID) error
 	UpdateMaxConcurrentJobs(n int) error
 	FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrator.TierInstance
+	StopTierLeaderLoop(tierID uuid.UUID)
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -117,8 +118,8 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleTierPut(ctx, n.ID)
 	case raftfsm.NotifyTierDeleted:
 		d.handleTierDeleted(ctx, n.ID, n.Drain)
-	case raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
-		raftfsm.NotifyNodeStorageConfigSet:
+	case raftfsm.NotifyTierPlacementsSet, raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
+		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet:
 		// No orchestrator side effects; configSignal fires below.
 	}
 
@@ -422,9 +423,14 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	d.reloadRotationPolicies(ctx)
 	d.reloadRetentionPolicies(ctx)
 
-	// If this node is the leader and has followers, schedule catchup.
+	// Schedule catchup only for NEWLY added followers, not existing ones.
+	// When a leader changes but followers stay the same (e.g. a node dies),
+	// the surviving followers already have all chunks — no catchup needed.
 	if leaderNodeID == d.localNodeID && len(followerNodeIDs) > 0 && d.catchupScheduler != nil {
-		d.catchupScheduler(tierID, followerNodeIDs)
+		newFollowers := d.newFollowersForTier(v.ID, tierID, followerNodeIDs)
+		if len(newFollowers) > 0 {
+			d.catchupScheduler(tierID, newFollowers)
+		}
 	}
 
 	// Trigger immediate placement reconcile so secondaries are assigned
@@ -510,6 +516,31 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 		"isFollower", shouldBeFollower)
 }
 
+// newFollowersForTier returns follower node IDs that don't already have a
+// local tier instance on this node's orchestrator. Existing followers already
+// have all chunks from normal replication — only genuinely new followers need
+// catchup. This prevents redundant chunk transfers on leader reassignment
+// (e.g. when a node dies and the leader moves but followers stay the same).
+func (d *configDispatcher) newFollowersForTier(vaultID, tierID uuid.UUID, followerNodeIDs []string) []string {
+	existing := d.orch.FindLocalTierExported(vaultID, tierID)
+	if existing == nil {
+		// Tier was just added to this node — all followers are new.
+		return followerNodeIDs
+	}
+	// Build set of follower node IDs that were already being replicated to.
+	prev := make(map[string]bool, len(existing.FollowerTargets))
+	for _, tgt := range existing.FollowerTargets {
+		prev[tgt.NodeID] = true
+	}
+	var added []string
+	for _, nid := range followerNodeIDs {
+		if !prev[nid] {
+			added = append(added, nid)
+		}
+	}
+	return added
+}
+
 // handleTierDeleted removes vaults that no longer have any local tiers.
 func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UUID, drain bool) {
 	d.logger.Info("dispatch: handleTierDeleted", "tier", tierID, "drain", drain)
@@ -538,6 +569,12 @@ func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UU
 			d.orch.RemoveTierFromVault(vaultID, tierID)
 		}
 	}
+
+	// Stop the leader loop before destroying the group. This is especially
+	// important for non-storage nodes that joined the tier Raft group
+	// (gastrolog-292yi) but have no TierInstance — RemoveTierFromVault
+	// above is a no-op for them, so the leader loop would otherwise leak.
+	d.orch.StopTierLeaderLoop(tierID)
 
 	// Destroy the tier's Raft group (safe for non-leader or non-drain paths).
 	if d.factories.GroupManager != nil {

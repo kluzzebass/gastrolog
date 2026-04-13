@@ -5,17 +5,20 @@
 // insertion order.
 //
 // Uses pread/pwrite for I/O with an in-process page cache.
-// Not safe for concurrent use; callers must synchronize access.
+// All exported methods are safe for concurrent use.
 package btree
 
 import (
 	"fmt"
 	"os"
 	"slices"
+	"sync"
 )
 
 // Tree is a file-backed B+ tree.
+// All exported methods are safe for concurrent use.
 type Tree[K, V any] struct {
+	mu          sync.RWMutex
 	file        *os.File
 	codec       Codec[K, V]
 	meta        meta
@@ -92,16 +95,30 @@ func Open[K, V any](path string, codec Codec[K, V]) (*Tree[K, V], error) {
 }
 
 // Count returns the total number of entries.
-func (t *Tree[K, V]) Count() uint64 { return t.meta.count }
+func (t *Tree[K, V]) Count() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.meta.count
+}
 
 // Height returns the tree height (1 = root is a leaf).
-func (t *Tree[K, V]) Height() uint16 { return t.meta.height }
+func (t *Tree[K, V]) Height() uint16 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.meta.height
+}
 
 // DiskSize returns the current on-disk size in bytes (pages × pageSize).
-func (t *Tree[K, V]) DiskSize() uint64 { return uint64(t.meta.nextPage) * pageSize }
+func (t *Tree[K, V]) DiskSize() uint64 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return uint64(t.meta.nextPage) * pageSize
+}
 
 // Insert adds a key-value pair to the tree.
 func (t *Tree[K, V]) Insert(key K, value V) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	e := Entry[K, V]{Key: key, Value: value}
 
 	path := make([]pathEntry, 0, t.meta.height)
@@ -142,6 +159,8 @@ func (t *Tree[K, V]) Insert(key K, value V) error {
 // FindGE returns an iterator at the first entry with Key >= key.
 // The returned iterator is invalid if no such entry exists.
 func (t *Tree[K, V]) FindGE(key K) (*Iter[K, V], error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	pageNum := t.meta.root
 	for {
 		n, err := t.getNode(pageNum)
@@ -175,6 +194,8 @@ func (t *Tree[K, V]) findInLeaf(leaf *node[K, V], leafNum uint32, key K) (*Iter[
 // Scan returns an iterator at the first (smallest) entry.
 // The returned iterator is invalid if the tree is empty.
 func (t *Tree[K, V]) Scan() (*Iter[K, V], error) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	pageNum := t.meta.root
 	for {
 		n, err := t.getNode(pageNum)
@@ -200,6 +221,8 @@ type deleteFrame struct {
 // Delete removes the first entry with the given key.
 // Returns (true, nil) if the key was found and removed, (false, nil) if not found.
 func (t *Tree[K, V]) Delete(key K) (bool, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	path := make([]deleteFrame, 0, t.meta.height)
 	pageNum := t.meta.root
 
@@ -435,6 +458,8 @@ func (t *Tree[K, V]) rebalanceInternalRight(path []deleteFrame, parent deleteFra
 
 // Sync writes all dirty pages and fsyncs the file.
 func (t *Tree[K, V]) Sync() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if err := t.flush(); err != nil {
 		return err
 	}
@@ -446,6 +471,8 @@ func (t *Tree[K, V]) Sync() error {
 // longer occupy Go heap memory. Call after bulk scans or point lookups
 // to bound heap usage.
 func (t *Tree[K, V]) EvictClean() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	for p := range t.pages {
 		if !t.dirty[p] {
 			delete(t.pages, p)
@@ -456,6 +483,8 @@ func (t *Tree[K, V]) EvictClean() {
 // Close writes dirty pages and closes the file.
 // Does not fsync — call Sync first if durability is needed.
 func (t *Tree[K, V]) Close() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	err := t.flush()
 	cerr := t.file.Close()
 	if err != nil {

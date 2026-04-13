@@ -85,7 +85,6 @@ func main() {
 				ClusterAddr: mustString(cmd, "cluster-addr"),
 				JoinAddr:    mustString(cmd, "join-addr"),
 				JoinToken:   mustString(cmd, "join-token"),
-				Voteless:    mustBool(cmd, "voteless"),
 				NodeName:    mustString(cmd, "name"),
 				PprofAddr:   mustString(cmd, "pprof"),
 				SlogCapture:        slogCaptureCh,
@@ -106,7 +105,6 @@ func main() {
 	serverCmd.Flags().String("cluster-addr", ":4566", "cluster gRPC listen address")
 	serverCmd.Flags().String("join-addr", "", "leader's cluster address to join an existing cluster")
 	serverCmd.Flags().String("join-token", "", "join token for cluster enrollment (from cluster-init node)")
-	serverCmd.Flags().Bool("voteless", false, "join cluster as a nonvoter")
 	serverCmd.Flags().String("name", "", "node name (default: random petname)")
 
 	versionCmd := &cobra.Command{

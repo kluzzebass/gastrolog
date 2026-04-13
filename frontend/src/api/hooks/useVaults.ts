@@ -69,7 +69,7 @@ export function useChunks(vaultId: string) {
       qc.setQueryData(
         ["chunks", vaultId],
         (old: ChunkMeta[] | undefined) => {
-          if (!old) return resp.chunks;
+          if (!old) return old; // full fetch hasn't completed — don't seed cache with active-only data (missing replicaCount)
           const freshById = new Map(resp.chunks.map((c) => [c.id, c]));
           // Merge: for chunks in both old and poll, update only the
           // fields the active-only poll is authoritative for (growing
@@ -86,11 +86,12 @@ export function useChunks(vaultId: string) {
             patched.diskBytes = fresh.diskBytes;
             return patched;
           });
-          // Append any active chunks not in the old list (new chunk
-          // created since last full refetch).
-          for (const c of freshById.values()) {
-            merged.push(c);
-          }
+          // Do NOT append chunks from the active-only poll that aren't
+          // in the full cache yet. The active-only path skips remote
+          // fan-out, so these chunks would enter the cache with
+          // replicaCount=0, displaying as "1 replica" in the inspector.
+          // New chunks will appear after the next full refetch
+          // (triggered by WatchChunks stream invalidation).
           return merged;
         },
       );

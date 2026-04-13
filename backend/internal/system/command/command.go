@@ -923,6 +923,14 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		snap.ClusterTls = NewPutClusterTLS(*rt.ClusterTLS).GetPutClusterTls()
 	}
 
+	// Runtime: tier placements.
+	for tierID, placements := range rt.TierPlacements {
+		cmd := NewSetTierPlacements(tierID, placements).GetSetTierPlacements()
+		snap.TierPlacements = append(snap.TierPlacements, cmd)
+	}
+
+	snap.SetupWizardDismissed = rt.SetupWizardDismissed
+
 	return snap
 }
 
@@ -948,7 +956,7 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 			cfg.Lookup = ss.Lookup
 			cfg.MaxMind = ss.MaxMind
 			cfg.Cluster = ss.Cluster
-			// TODO(gastrolog-2kx4r): SetupWizardDismissed needs its own snapshot field
+			// SetupWizardDismissed is restored from the dedicated snapshot field above.
 		}
 	}
 
@@ -1061,6 +1069,20 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		tls := ExtractPutClusterTLS(snap.ClusterTls)
 		rt.ClusterTLS = &tls
 	}
+
+	// Restore tier placements.
+	if len(snap.GetTierPlacements()) > 0 {
+		rt.TierPlacements = make(map[uuid.UUID][]system.TierPlacement, len(snap.GetTierPlacements()))
+		for _, tp := range snap.GetTierPlacements() {
+			tierID, placements, err := ExtractSetTierPlacements(tp)
+			if err != nil {
+				return nil, nil, nil, fmt.Errorf("restore tier placements: %w", err)
+			}
+			rt.TierPlacements[tierID] = placements
+		}
+	}
+
+	rt.SetupWizardDismissed = snap.GetSetupWizardDismissed()
 
 	return sys, users, tokens, nil
 }

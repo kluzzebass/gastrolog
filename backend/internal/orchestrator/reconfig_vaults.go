@@ -424,6 +424,14 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 	return true
 }
 
+// StopTierLeaderLoop stops the per-tier leader reconciliation loop for a tier.
+// Called by the dispatch handler during tier deletion cleanup so that non-storage
+// nodes (which have no TierInstance but do participate in the tier Raft group)
+// can cleanly stop the leader loop before the group is destroyed.
+func (o *Orchestrator) StopTierLeaderLoop(tierID uuid.UUID) {
+	o.tierLeaders.Stop(tierID)
+}
+
 // AddTierToVault builds a single tier instance and adds it to an existing vault
 // without tearing down any other tiers. This is the incremental counterpart to
 // RemoveTierFromVault.
@@ -466,7 +474,10 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
-		return nil // this node doesn't host this tier
+		// No storage placement, but still join the tier Raft group as a
+		// voter. See gastrolog-292yi.
+		o.createTierRaftGroup(*tierCfg, rt.Nodes, factories)
+		return nil
 	}
 
 	var ti *TierInstance
@@ -586,9 +597,10 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 	return nil
 }
 
-// buildTierInstances creates TierInstance objects for each tier in the vault system.
-// Tiers whose leader/follower storages don't resolve to the local node are skipped
-// (placement manager assigns storages via Raft).
+// buildTierInstances creates TierInstance objects for each tier in the vault config.
+// Every node joins every tier's Raft group regardless of storage placement
+// (gastrolog-292yi). Nodes with storage placements also get a TierInstance with
+// a chunk manager; nodes without storage only participate in the Raft group.
 func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.VaultConfig, factories Factories) ([]*TierInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
@@ -617,6 +629,11 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 		if !isLeader && !isFollower {
+			// This node has no storage placement for this tier, but still
+			// joins the tier Raft group as a voter. This decouples Raft
+			// membership from storage — every node votes on every tier's
+			// chunk metadata FSM. See gastrolog-292yi.
+			o.createTierRaftGroup(*tierCfg, rt.Nodes, factories)
 			continue
 		}
 
@@ -672,7 +689,7 @@ func (o *Orchestrator) alertTierInitFailed(tierID uuid.UUID, tierName string, er
 }
 
 // buildPrimaryTierInstance creates the leader TierInstance using the placement's
-// storage ID. This avoids directory collisions with same-node follower rt.TierPlacements[tierCfg.ID]
+// storage ID. This avoids directory collisions with same-node follower placements
 // that would occur if findLocalFileStorage picked a different storage by class.
 func (o *Orchestrator) buildPrimaryTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
 	rt := &sys.Runtime
@@ -710,7 +727,7 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.TierPlacements[tierCfg.ID], rt.NodeStorageConfigs, factories)
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.Nodes, factories)
 
 	// Build params from tier system.
 	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
@@ -807,8 +824,8 @@ func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.Vau
 }
 
 // buildTierInstanceForStorage creates a TierInstance whose data directory is
-// resolved from a specific file storage ID. Used for both primaries with
-// explicit rt.TierPlacements[tierCfg.ID] and secondaries (one per node per tier).
+// resolved from a specific file storage ID. Used for both leaders with
+// explicit storage placements and followers (one per node per tier).
 func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*TierInstance, error) {
 	cfg := &sys.Config
 	rt := &sys.Runtime
@@ -819,7 +836,7 @@ func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg 
 
 	// Create the tier Raft group BEFORE the chunk manager — same rationale
 	// as buildTierInstance: start elections while chunk loading is in progress.
-	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.TierPlacements[tierCfg.ID], rt.NodeStorageConfigs, factories)
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.Nodes, factories)
 
 	// Build params normally, then override the dir with this storage's path.
 	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
@@ -947,37 +964,32 @@ type tierRaftCallbacks struct {
 // This is independent of the chunk manager — it only needs the tier config
 // and group manager. Call this BEFORE creating the chunk manager so the Raft
 // group starts elections early (while chunk loading is still in progress).
-func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, placements []system.TierPlacement, nscs []system.NodeStorageConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
+func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, clusterNodes []system.NodeConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
 
 	groupID := tierCfg.ID.String()
-	members := o.buildTierRaftMembers(tierCfg, placements, nscs, factories)
-	// Do not create the tier Raft group until rt.TierPlacements[tierCfg.ID] are COMPLETE.
-	// A partial member list poisons the group's boltdb with a wrong-size
-	// initial configuration, and we can't recover from that on restart
-	// without losing data. If rt.TierPlacements[tierCfg.ID] are incomplete, return now and
-	// wait for a subsequent handleTierPut to fire once rt.TierPlacements[tierCfg.ID] finish.
+	members := o.buildTierRaftMembers(clusterNodes, factories)
+	// Do not create the tier Raft group until ALL cluster nodes are
+	// resolvable. A partial member list poisons the group's boltdb with a
+	// wrong-size initial configuration, and we can't recover from that on
+	// restart without losing data.
 	//
-	// We gate on len(members) >= ReplicationFactor rather than just
-	// "local node is in members" because even a correct local view isn't
-	// enough — all assigned members must be present in the seed list
-	// for symmetric seeding to produce a consistent initial configuration
-	// across every node.
-	expectedMembers := int(tierCfg.ReplicationFactor)
-	if expectedMembers <= 0 {
-		expectedMembers = 1
-	}
-	if len(members) < expectedMembers {
-		o.logger.Debug("tier raft group: rt.TierPlacements[tierCfg.ID] incomplete, deferring creation",
+	// Every cluster node participates in every tier Raft group (gastrolog-292yi),
+	// so the expected count is len(clusterNodes). If some nodes aren't
+	// resolvable yet (e.g. not yet announced via peer discovery), defer
+	// creation until the next reconfigure sweep.
+	if len(members) < len(clusterNodes) {
+		o.logger.Debug("tier raft group: not all cluster nodes resolvable, deferring creation",
 			"tier", tierCfg.ID,
 			"have", len(members),
-			"want", expectedMembers)
+			"want", len(clusterNodes))
 		return nil, nil, tierRaftCallbacks{}
 	}
-	// Only assigned members participate in the tier Raft group. If this
-	// node isn't in the (complete) member list, skip group creation entirely.
+	// Safety net: verify this node is in the member list. With all cluster
+	// nodes as members this should always be true, but guard against edge
+	// cases like a node not yet in the cluster node list.
 	isMember := false
 	for _, srv := range members {
 		if string(srv.ID) == o.localNodeID {
@@ -1230,31 +1242,22 @@ func (a *directApplier) Apply(data []byte) error {
 	return a.raft.Apply(data, a.timeout).Error()
 }
 
-// buildTierRaftMembers builds the Raft member list from tier placement.
-// Returns nil if the tier has no placement leader assigned yet — callers
-// must treat an empty result as "not ready to create the tier Raft group",
-// NOT as "single-member group with the local node". Falling back to the
-// local node when rt.TierPlacements[tierCfg.ID] are incomplete is the bug that poisoned the
-// tier Raft boltdbs with single-member seeds during earlier iterations.
-func (o *Orchestrator) buildTierRaftMembers(tierCfg system.TierConfig, placements []system.TierPlacement, nscs []system.NodeStorageConfig, factories Factories) []hraft.Server {
-	if factories.NodeAddressResolver == nil {
+// buildTierRaftMembers returns ALL cluster nodes as Raft members.
+// Every node participates in every tier Raft group regardless of storage
+// placement. Nodes without storage for a tier vote and replicate the FSM
+// but don't store chunk data. This decouples Raft membership from storage
+// assignment — adding/removing storage never triggers AddVoter/RemoveVoter.
+// See gastrolog-292yi.
+func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, factories Factories) []hraft.Server {
+	if factories.NodeAddressResolver == nil || len(clusterNodes) == 0 {
 		return nil
 	}
-	leaderNodeID := system.LeaderNodeID(placements, nscs)
-	if leaderNodeID == "" {
-		return nil // tier has no placement leader yet
-	}
 	var members []hraft.Server
-	if addr, ok := factories.NodeAddressResolver(leaderNodeID); ok {
-		members = append(members, hraft.Server{
-			ID:      hraft.ServerID(leaderNodeID),
-			Address: hraft.ServerAddress(addr),
-		})
-	}
-	for _, secID := range system.FollowerNodeIDs(placements, nscs) {
-		if addr, ok := factories.NodeAddressResolver(secID); ok {
+	for _, node := range clusterNodes {
+		nodeID := node.ID.String()
+		if addr, ok := factories.NodeAddressResolver(nodeID); ok {
 			members = append(members, hraft.Server{
-				ID:      hraft.ServerID(secID),
+				ID:      hraft.ServerID(nodeID),
 				Address: hraft.ServerAddress(addr),
 			})
 		}

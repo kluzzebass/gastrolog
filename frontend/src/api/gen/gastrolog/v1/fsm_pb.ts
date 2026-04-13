@@ -6,7 +6,7 @@
 import type { BinaryReadOptions, FieldList, JsonReadOptions, JsonValue, PartialMessage, PlainMessage } from "@bufbuild/protobuf";
 import { Message, proto3, protoInt64, Timestamp } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
-import { TierConfig } from "./system_pb.js";
+import { TierConfig, TierPlacement } from "./system_pb.js";
 
 /**
  * SystemCommand is a single mutation applied to the system store via Raft.
@@ -234,6 +234,18 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: DeleteTierCommand;
     case: "deleteTier";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SetTierPlacementsCommand set_tier_placements = 37;
+     */
+    value: SetTierPlacementsCommand;
+    case: "setTierPlacements";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 38;
+     */
+    value: SetSetupWizardDismissedCommand;
+    case: "setSetupWizardDismissed";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -280,6 +292,8 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 34, name: "set_node_storage_config", kind: "message", T: SetNodeStorageConfigCommand, oneof: "command" },
     { no: 35, name: "put_tier", kind: "message", T: PutTierCommand, oneof: "command" },
     { no: 36, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
+    { no: 37, name: "set_tier_placements", kind: "message", T: SetTierPlacementsCommand, oneof: "command" },
+    { no: 38, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -1997,6 +2011,86 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
 }
 
 /**
+ * @generated from message gastrolog.v1.SetTierPlacementsCommand
+ */
+export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> {
+  /**
+   * @generated from field: string tier_id = 1;
+   */
+  tierId = "";
+
+  /**
+   * @generated from field: repeated gastrolog.v1.TierPlacement placements = 2;
+   */
+  placements: TierPlacement[] = [];
+
+  constructor(data?: PartialMessage<SetTierPlacementsCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetTierPlacementsCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "placements", kind: "message", T: TierPlacement, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetTierPlacementsCommand {
+    return new SetTierPlacementsCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetTierPlacementsCommand {
+    return new SetTierPlacementsCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetTierPlacementsCommand {
+    return new SetTierPlacementsCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetTierPlacementsCommand | PlainMessage<SetTierPlacementsCommand> | undefined, b: SetTierPlacementsCommand | PlainMessage<SetTierPlacementsCommand> | undefined): boolean {
+    return proto3.util.equals(SetTierPlacementsCommand, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.SetSetupWizardDismissedCommand
+ */
+export class SetSetupWizardDismissedCommand extends Message<SetSetupWizardDismissedCommand> {
+  /**
+   * @generated from field: bool dismissed = 1;
+   */
+  dismissed = false;
+
+  constructor(data?: PartialMessage<SetSetupWizardDismissedCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetSetupWizardDismissedCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetSetupWizardDismissedCommand {
+    return new SetSetupWizardDismissedCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetSetupWizardDismissedCommand {
+    return new SetSetupWizardDismissedCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetSetupWizardDismissedCommand {
+    return new SetSetupWizardDismissedCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetSetupWizardDismissedCommand | PlainMessage<SetSetupWizardDismissedCommand> | undefined, b: SetSetupWizardDismissedCommand | PlainMessage<SetSetupWizardDismissedCommand> | undefined): boolean {
+    return proto3.util.equals(SetSetupWizardDismissedCommand, a, b);
+  }
+}
+
+/**
  * SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -2084,6 +2178,16 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   tiers: PutTierCommand[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.SetTierPlacementsCommand tier_placements = 17;
+   */
+  tierPlacements: SetTierPlacementsCommand[] = [];
+
+  /**
+   * @generated from field: bool setup_wizard_dismissed = 18;
+   */
+  setupWizardDismissed = false;
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2108,6 +2212,8 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 14, name: "cloud_services", kind: "message", T: PutCloudServiceCommand, repeated: true },
     { no: 15, name: "node_storage_configs", kind: "message", T: SetNodeStorageConfigCommand, repeated: true },
     { no: 16, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
+    { no: 17, name: "tier_placements", kind: "message", T: SetTierPlacementsCommand, repeated: true },
+    { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

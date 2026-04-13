@@ -620,7 +620,9 @@ func (m *Manager) lookupMeta(id chunk.ChunkID) *chunkMeta {
 	if m.cloudIdx == nil {
 		return nil
 	}
+	m.cloudIdxMu.Lock()
 	meta, _ := m.cloudIdx.Lookup(id)
+	m.cloudIdxMu.Unlock()
 	return meta
 }
 
@@ -2807,12 +2809,13 @@ func (m *Manager) setArchivedFlag(id chunk.ChunkID, archived bool, storageClass 
 	if m.cloudIdx == nil {
 		return
 	}
+	m.cloudIdxMu.Lock()
 	meta, found := m.cloudIdx.Lookup(id)
 	if !found {
+		m.cloudIdxMu.Unlock()
 		return
 	}
 	meta.archived = archived
-	m.cloudIdxMu.Lock()
 	if _, err := m.cloudIdx.Delete(id); err != nil {
 		m.logger.Warn("cloud index: delete failed", "chunk", id, "error", err)
 	}
@@ -3299,7 +3302,10 @@ func (m *Manager) RegisterCloudChunk(id chunk.ChunkID, info chunk.CloudChunkInfo
 		return nil // already local
 	}
 	m.mu.Unlock()
-	if existing, _ := m.cloudIdx.Lookup(id); existing != nil {
+	m.cloudIdxMu.Lock()
+	existing, _ := m.cloudIdx.Lookup(id)
+	m.cloudIdxMu.Unlock()
+	if existing != nil {
 		return nil // already in cloud index
 	}
 

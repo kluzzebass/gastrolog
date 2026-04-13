@@ -102,9 +102,6 @@ CLUSTERING
   # Join node 2 to node 1's cluster
   gastrolog server --join-addr node1:4566 --join-token <TOKEN>
 
-  # Join as read-only replica (no vote, no leader eligibility)
-  gastrolog server --join-addr node1:4566 --join-token <TOKEN> --voteless
-
   # List nodes
   gastrolog config node list
 

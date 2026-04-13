@@ -10,7 +10,7 @@ import { useConfig, useGenerateName } from "./useSystem";
 import { GetSystemResponse } from "../gen/gastrolog/v1/system_pb";
 
 beforeEach(() => {
-  m(mocks.systemClient, "getConfig").mockClear();
+  m(mocks.systemClient, "getSystem").mockClear();
   m(mocks.systemClient, "generateName").mockClear();
 });
 
@@ -19,17 +19,17 @@ describe("useConfig", () => {
     const fakeConfig = new GetSystemResponse({
       vaults: [{ id: "v1", name: "default", enabled: true }],
     });
-    m(mocks.systemClient, "getConfig").mockResolvedValueOnce(fakeConfig);
+    m(mocks.systemClient, "getSystem").mockResolvedValueOnce(fakeConfig);
 
     const { result } = renderHook(() => useConfig(), { wrapper: wrapper() });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toBe(fakeConfig);
-    expect(m(mocks.systemClient, "getConfig")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "getSystem")).toHaveBeenCalledTimes(1);
   });
 
   test("surfaces fetch errors", async () => {
-    m(mocks.systemClient, "getConfig").mockRejectedValueOnce(new Error("network down"));
+    m(mocks.systemClient, "getSystem").mockRejectedValueOnce(new Error("network down"));
 
     const { result } = renderHook(() => useConfig(), { wrapper: wrapper() });
 

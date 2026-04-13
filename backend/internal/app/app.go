@@ -72,7 +72,6 @@ type RunConfig struct {
 	ClusterAddr string
 	JoinAddr    string
 	JoinToken   string
-	Voteless    bool
 	NodeName    string
 
 	// PprofAddr is the pprof HTTP server address (e.g. "localhost:6060").
@@ -607,23 +606,19 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 }
 
 // requestClusterMembership asks the cluster leader to add this node as a Raft
-// voter or nonvoter. No-op if join parameters are not set.
+// requestClusterMembership asks the leader to add this node as a voter.
+// No-op if join parameters are not set.
 func requestClusterMembership(ctx context.Context, logger *slog.Logger, cfg RunConfig, clusterTLS *cluster.ClusterTLS, nodeID string) error {
 	if cfg.JoinAddr == "" || clusterTLS == nil || cfg.ClusterAddr == "" {
 		return nil
 	}
-	voter := !cfg.Voteless
-	kind := "voter"
-	if !voter {
-		kind = "nonvoter"
-	}
-	logger.Info("requesting "+kind+" membership from leader", "leader_addr", cfg.JoinAddr)
+	logger.Info("requesting voter membership from leader", "leader_addr", cfg.JoinAddr)
 	joinCtx, joinCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer joinCancel()
-	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, cfg.ClusterAddr, clusterTLS, voter); err != nil {
+	if err := cluster.JoinCluster(joinCtx, cfg.JoinAddr, nodeID, cfg.ClusterAddr, clusterTLS, true); err != nil {
 		return fmt.Errorf("join cluster: %w", err)
 	}
-	logger.Info(kind + " membership granted by leader")
+	logger.Info("voter membership granted by leader")
 	return nil
 }
 

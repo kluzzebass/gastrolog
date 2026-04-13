@@ -383,9 +383,7 @@ func (s *Store) GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([]syst
 }
 
 func (s *Store) SetTierPlacements(ctx context.Context, tierID uuid.UUID, placements []system.TierPlacement) error {
-	// TODO(gastrolog-2kx4r): route through Raft apply for cluster-wide consistency.
-	// For now, write directly to the inner store.
-	return s.fsm.Store().SetTierPlacements(ctx, tierID, placements)
+	return s.apply(command.NewSetTierPlacements(tierID, placements))
 }
 
 func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
@@ -393,6 +391,5 @@ func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 }
 
 func (s *Store) SetSetupWizardDismissed(ctx context.Context, dismissed bool) error {
-	// TODO(gastrolog-2kx4r): route through Raft apply for cluster-wide consistency.
-	return s.fsm.Store().SetSetupWizardDismissed(ctx, dismissed)
+	return s.apply(command.NewSetSetupWizardDismissed(dismissed))
 }

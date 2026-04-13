@@ -85,24 +85,7 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 		}
 	}
 
-	// Only replicate chunks where post-seal is complete. For file tiers,
-	// this means compressed — uncompressed sealed chunks are still in the
-	// post-seal pipeline (compress → index → replicate), which will handle
-	// replication itself. For memory tiers, all sealed chunks are ready.
-	var sealed []chunk.ChunkMeta
-	isFileTier := tier.Type == "file"
-	for _, m := range metas {
-		if !m.Sealed {
-			continue
-		}
-		if isFileTier && !m.Compressed {
-			continue // post-seal pipeline will replicate after compression
-		}
-		if manifestSet != nil && !manifestSet[m.ID] {
-			continue // FSM has retired this chunk — don't ship orphans
-		}
-		sealed = append(sealed, m)
-	}
+	sealed := catchupCandidates(metas, tier.Type, manifestSet)
 
 	if len(sealed) == 0 {
 		o.logger.Info("replication catchup: no sealed chunks to copy",
@@ -127,4 +110,28 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 	o.logger.Info("replication catchup: completed",
 		"vault", vaultID, "tier", tierID, "follower", nodeID, "chunks", len(sealed))
 	return nil
+}
+
+// catchupCandidates filters chunk metas to those eligible for catchup
+// replication. Excludes unsealed, uncompressed file-tier, cloud-backed,
+// and FSM-retired chunks.
+func catchupCandidates(metas []chunk.ChunkMeta, tierType string, manifestSet map[chunk.ChunkID]bool) []chunk.ChunkMeta {
+	var out []chunk.ChunkMeta
+	isFileTier := tierType == "file"
+	for _, m := range metas {
+		if !m.Sealed {
+			continue
+		}
+		if isFileTier && !m.Compressed {
+			continue // post-seal pipeline will replicate after compression
+		}
+		if m.CloudBacked {
+			continue // cloud-backed chunks replicate via FSM (RegisterCloudChunk), not record streaming
+		}
+		if manifestSet != nil && !manifestSet[m.ID] {
+			continue // FSM has retired this chunk — don't ship orphans
+		}
+		out = append(out, m)
+	}
+	return out
 }

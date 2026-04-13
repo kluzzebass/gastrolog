@@ -46,3 +46,47 @@ func ExtractPutTierPlacements(cmd *gastrologv1.PutTierCommand) []system.TierPlac
 func ExtractDeleteTier(cmd *gastrologv1.DeleteTierCommand) (uuid.UUID, error) {
 	return uuid.Parse(cmd.GetId())
 }
+
+// NewSetTierPlacements creates a SystemCommand for SetTierPlacements.
+func NewSetTierPlacements(tierID uuid.UUID, placements []system.TierPlacement) *gastrologv1.SystemCommand {
+	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
+	for i, p := range placements {
+		pbPlacements[i] = &gastrologv1.TierPlacement{
+			StorageId: p.StorageID,
+			Leader:    p.Leader,
+		}
+	}
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetTierPlacements{
+			SetTierPlacements: &gastrologv1.SetTierPlacementsCommand{
+				TierId:     tierID.String(),
+				Placements: pbPlacements,
+			},
+		},
+	}
+}
+
+// NewSetSetupWizardDismissed creates a SystemCommand for SetSetupWizardDismissed.
+func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetSetupWizardDismissed{
+			SetSetupWizardDismissed: &gastrologv1.SetSetupWizardDismissedCommand{Dismissed: dismissed},
+		},
+	}
+}
+
+// ExtractSetTierPlacements converts a SetTierPlacementsCommand back.
+func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (uuid.UUID, []system.TierPlacement, error) {
+	tierID, err := uuid.Parse(cmd.GetTierId())
+	if err != nil {
+		return uuid.UUID{}, nil, err
+	}
+	placements := make([]system.TierPlacement, len(cmd.GetPlacements()))
+	for i, p := range cmd.GetPlacements() {
+		placements[i] = system.TierPlacement{
+			StorageID: p.GetStorageId(),
+			Leader:    p.GetLeader(),
+		}
+	}
+	return tierID, placements, nil
+}

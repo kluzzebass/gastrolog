@@ -72,11 +72,8 @@ build_multirun_cmd() {
     if [[ -n "$names" ]]; then names="${names},"; fi
     names="${names}node${i}"
     local extra=""
-    if [[ "$i" -eq "$NODES" && "$NODES" -gt 3 ]]; then
-      extra=" --voteless"
-    fi
     if [[ "$PPROF" == true ]]; then
-      extra="${extra} --pprof localhost:$((6059 + i))"
+      extra=" --pprof localhost:$((6059 + i))"
     fi
     cmds+=("$GLOG server --home $(node_dir "$i") --listen :$(http_port "$i") --cluster-addr :$(cluster_port "$i")${extra}")
   done
@@ -155,18 +152,13 @@ enroll_nodes() {
   # Start and enroll nodes 2..N.
   for i in $(seq 2 "$NODES"); do
     echo ">>> Enrolling node ${i}..."
-    local extra=""
-    if [[ "$i" -eq "$NODES" && "$NODES" -gt 3 ]]; then
-      extra="--voteless"
-    fi
     $GLOG server \
       --name "node-${i}" \
       --home "$(node_dir "$i")" \
       --listen ":$(http_port "$i")" \
       --cluster-addr ":$(cluster_port "$i")" \
       --join-addr "localhost:$(cluster_port 1)" \
-      --join-token "$TOKEN" \
-      $extra > "${DATA_DIR}/init-${i}.log" 2>&1 &
+      --join-token "$TOKEN" > "${DATA_DIR}/init-${i}.log" 2>&1 &
     PIDS+=($!)
   done
 
