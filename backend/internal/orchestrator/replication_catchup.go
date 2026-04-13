@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
@@ -31,21 +33,40 @@ func (o *Orchestrator) ScheduleCatchupForTier(tierID uuid.UUID, followerNodeIDs 
 // from the leader to newly added follower nodes.
 func (o *Orchestrator) scheduleCatchup(vaultID, tierID uuid.UUID, newFollowers []string) {
 	for _, nodeID := range newFollowers {
-		name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
-		node := nodeID // capture for closure
-		if err := o.scheduler.RunOnce(name, func() {
-			// Created inside the closure so the timeout starts when the job
-			// executes, not when it's scheduled.
-			ctx, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
-			defer cancel()
-			if err := o.catchupFollower(ctx, vaultID, tierID, node); err != nil {
-				o.logger.Warn("catchup failed", "vault", vaultID, "tier", tierID, "node", node, "error", err)
-			}
-		}); err != nil {
-			o.logger.Warn("failed to schedule replication catchup", "name", name, "error", err)
-		}
-		o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
+		o.scheduleCatchupForNode(vaultID, tierID, nodeID, 0)
 	}
+}
+
+const maxCatchupRetries = 3
+
+func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID uuid.UUID, nodeID string, attempt int) {
+	name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
+	if attempt > 0 {
+		name += fmt.Sprintf(":retry-%d", attempt)
+	}
+	if err := o.scheduler.RunOnce(name, func() {
+		// On retries, wait for the recovering node to finish building
+		// its tiers. The tier appears within a few seconds as the
+		// dispatch processes Raft notifications after ApplyConfig.
+		if attempt > 0 {
+			<-time.After(5 * time.Second)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), cluster.CatchupTimeout)
+		defer cancel()
+		if err := o.catchupFollower(ctx, vaultID, tierID, nodeID); err != nil {
+			if attempt < maxCatchupRetries && strings.Contains(err.Error(), "not ready") {
+				o.logger.Info("catchup: follower not ready, will retry",
+					"vault", vaultID, "tier", tierID, "node", nodeID,
+					"attempt", attempt+1)
+				o.scheduleCatchupForNode(vaultID, tierID, nodeID, attempt+1)
+			} else {
+				o.logger.Warn("catchup failed", "vault", vaultID, "tier", tierID, "node", nodeID, "error", err)
+			}
+		}
+	}); err != nil {
+		o.logger.Warn("failed to schedule replication catchup", "name", name, "error", err)
+	}
+	o.scheduler.Describe(name, "Replicate sealed chunks to follower "+nodeID[:8])
 }
 
 // catchupFollower copies all sealed chunks from the leader's tier to a
@@ -98,6 +119,12 @@ func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid
 
 	for _, meta := range sealed {
 		if err := o.replicateToFollower(ctx, vaultID, tierID, meta.ID, tier.Chunks, nodeID); err != nil {
+			// If the follower rejected because its tier isn't built yet
+			// (recovering node still in startup), return a retryable error.
+			// The scheduler will re-run the job.
+			if strings.Contains(err.Error(), "vault not found") {
+				return fmt.Errorf("follower %s not ready for tier %s (still building): %w", nodeID, tierID, err)
+			}
 			o.logger.Warn("replication catchup: transfer failed",
 				"chunk", meta.ID.String(), "follower", nodeID, "error", err)
 			continue
