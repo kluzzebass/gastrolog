@@ -53,6 +53,7 @@ import (
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/logging"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftwal"
 	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
@@ -180,7 +181,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 
-	groupMgr, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
+	groupMgr, tierWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
 	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver)
 	if clusterSrv != nil {
@@ -321,6 +322,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		SetNodeSuffrageFunc: setNodeSuffrageFn,
 		Dispatcher:          disp,
 		GroupMgr:            groupMgr,
+		WAL:                 tierWAL,
 		ConfigStore:         proxy,
 		PlacementReconcile:  placementReconcileFn,
 	})
@@ -887,6 +889,7 @@ type serverDeps struct {
 	SetNodeSuffrageFunc func(ctx context.Context, nodeID string, voter bool) error
 	Dispatcher          *configDispatcher
 	GroupMgr            *raftgroup.GroupManager
+	WAL                 *raftwal.WAL // shared WAL for tier groups; nil = per-group boltdb
 	ConfigStore         io.Closer // rawStore — closed before gRPC for clean Raft shutdown
 	PlacementReconcile  func(ctx context.Context)
 }
@@ -984,6 +987,11 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		deps.Logger.Info("shutting down tier raft groups")
 		deps.GroupMgr.Shutdown()
 	}
+	if deps.WAL != nil {
+		if err := deps.WAL.Close(); err != nil {
+			deps.Logger.Error("raftwal close failed", "error", err)
+		}
+	}
 
 	if deps.ConfigStore != nil {
 		deps.Logger.Info("shutting down config raft")
@@ -1001,13 +1009,22 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 
 // setupMultiRaft creates the GroupManager and node address resolver for tier
 // Raft groups. Returns (nil, nil) in single-node / non-raft mode.
-func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, func(string) (string, bool)) {
+func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, homeDir string, logger *slog.Logger) (*raftgroup.GroupManager, *raftwal.WAL, func(string) (string, bool)) {
 	if clusterSrv == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	mrt := clusterSrv.MultiRaftTransport()
 	if mrt == nil {
-		return nil, nil
+		return nil, nil, nil
+	}
+
+	// Open the shared WAL for tier Raft groups. All groups write to a
+	// single WAL with coalesced fsync, replacing per-group boltdb.
+	walDir := filepath.Join(homeDir, "raft", "wal")
+	wal, err := raftwal.Open(walDir)
+	if err != nil {
+		logger.Warn("failed to open shared WAL, falling back to per-group boltdb", "error", err)
+		wal = nil
 	}
 
 	groupMgr := raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
@@ -1015,6 +1032,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		NodeID:       nodeID,
 		BaseDir:      filepath.Join(homeDir, "raft", "groups"),
 		ShutdownLast: "config",
+		WAL:          wal,
 		Logger:       logger,
 	})
 
@@ -1034,7 +1052,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 		}
 	}
 
-	return groupMgr, resolver
+	return groupMgr, wal, resolver
 }
 
 func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
