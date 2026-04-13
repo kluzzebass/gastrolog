@@ -14,6 +14,7 @@ import (
 // RPCs without knowing the concrete generic type parameter K.
 type raftDispatcher interface {
 	appendEntries(req *gastrologv1.MultiRaftAppendEntriesRequest) (*gastrologv1.MultiRaftAppendEntriesResponse, error)
+	batchHeartbeat(req *gastrologv1.MultiRaftBatchHeartbeatRequest) (*gastrologv1.MultiRaftBatchHeartbeatResponse, error)
 	requestVote(req *gastrologv1.MultiRaftRequestVoteRequest) (*gastrologv1.MultiRaftRequestVoteResponse, error)
 	requestPreVote(req *gastrologv1.MultiRaftRequestPreVoteRequest) (*gastrologv1.MultiRaftRequestPreVoteResponse, error)
 	timeoutNow(req *gastrologv1.MultiRaftTimeoutNowRequest) (*gastrologv1.MultiRaftTimeoutNowResponse, error)
@@ -33,6 +34,7 @@ var serviceDesc = grpc.ServiceDesc{
 		{MethodName: "RequestVote", Handler: handleRequestVote},
 		{MethodName: "RequestPreVote", Handler: handleRequestPreVote},
 		{MethodName: "TimeoutNow", Handler: handleTimeoutNow},
+		{MethodName: "BatchHeartbeat", Handler: handleBatchHeartbeat},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -79,6 +81,14 @@ func handleTimeoutNow(srv any, ctx context.Context, dec func(any) error, _ grpc.
 		return nil, err
 	}
 	return srv.(raftDispatcher).timeoutNow(req)
+}
+
+func handleBatchHeartbeat(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+	req := new(gastrologv1.MultiRaftBatchHeartbeatRequest)
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+	return srv.(raftDispatcher).batchHeartbeat(req)
 }
 
 func handleInstallSnapshot(srv any, stream grpc.ServerStream) error {

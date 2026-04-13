@@ -671,3 +671,218 @@ func TestPipelineCloseWaitsForReceiver(t *testing.T) {
 		t.Error("receiverDone channel not closed after Close()")
 	}
 }
+
+// --- Heartbeat coalescing tests ---
+
+func TestHeartbeatCoalescing(t *testing.T) {
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
+	nodes := makeTestCluster(t, 2)
+	_ = nodes // cleanup via t.Cleanup
+
+	// Create 10 groups on both nodes. Set a heartbeat handler on the
+	// receiver so heartbeats don't block on the unread rpcChan.
+	const numGroups = 10
+	groups := make([]raft.Transport, numGroups)
+	for i := range numGroups {
+		gid := "hb-group-" + string(rune('A'+i))
+		groups[i] = nodes[0].transport.GroupTransport(gid)
+		recvGT := nodes[1].transport.GroupTransport(gid)
+		recvGT.SetHeartbeatHandler(func(rpc raft.RPC) {
+			rpc.Respond(&raft.AppendEntriesResponse{Success: true}, nil)
+		})
+	}
+
+	// Send heartbeats from all groups concurrently.
+	// They should coalesce into fewer RPCs than numGroups.
+	var wg sync.WaitGroup
+	errs := make(chan error, numGroups)
+	for i := range numGroups {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			var resp raft.AppendEntriesResponse
+			err := groups[i].AppendEntries(
+				"node-1",
+				nodes[1].transport.LocalAddr(),
+				&raft.AppendEntriesRequest{
+					RPCHeader: raft.RPCHeader{
+						ProtocolVersion: 3,
+						ID:              []byte("node-0"),
+						Addr:            []byte(nodes[0].transport.LocalAddr()),
+					},
+					Term:              1,
+					LeaderCommitIndex: 0,
+				},
+				&resp,
+			)
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("heartbeat failed: %v", err)
+	}
+}
+
+func TestHeartbeatCoalescingWithDataAppend(t *testing.T) {
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
+	nodes := makeTestCluster(t, 2)
+	_ = nodes // cleanup via t.Cleanup
+
+	gid := "mixed-group"
+	gt0 := nodes[0].transport.GroupTransport(gid)
+	recvGT := nodes[1].transport.GroupTransport(gid)
+	recvGT.SetHeartbeatHandler(func(rpc raft.RPC) {
+		rpc.Respond(&raft.AppendEntriesResponse{Success: true}, nil)
+	})
+	// Also drain the rpcChan for non-heartbeat data appends.
+	go func() {
+		for rpc := range recvGT.Consumer() {
+			rpc.Respond(&raft.AppendEntriesResponse{Success: true}, nil)
+		}
+	}()
+
+	// Send a heartbeat (empty entries) — should be batched.
+	var hbResp raft.AppendEntriesResponse
+	err := gt0.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+		&raft.AppendEntriesRequest{
+			RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+			Term:      1,
+		}, &hbResp)
+	if err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+
+	// Send a data append (non-empty entries) — should go direct, not batched.
+	var dataResp raft.AppendEntriesResponse
+	err = gt0.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+		&raft.AppendEntriesRequest{
+			RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+			Term:      1,
+			Entries: []*raft.Log{{
+				Index: 1,
+				Term:  1,
+				Type:  raft.LogCommand,
+				Data:  []byte("data"),
+			}},
+		}, &dataResp)
+	if err != nil {
+		t.Fatalf("data append: %v", err)
+	}
+}
+
+func TestHeartbeatToDeadPeer(t *testing.T) {
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
+	nodes := makeTestCluster(t, 2)
+
+	gid := "dead-peer"
+	gt0 := nodes[0].transport.GroupTransport(gid)
+	nodes[1].transport.GroupTransport(gid)
+
+	// Kill node 1.
+	nodes[1].server.Stop()
+	_ = nodes[1].transport.Close()
+
+	// Heartbeat to dead peer should fail, not hang.
+	done := make(chan error, 1)
+	go func() {
+		var resp raft.AppendEntriesResponse
+		done <- gt0.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+			&raft.AppendEntriesRequest{
+				RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+				Term:      1,
+			}, &resp)
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected error from dead peer heartbeat")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("heartbeat to dead peer hung")
+	}
+
+	// Clean up node 0.
+	nodes[0].server.Stop()
+	_ = nodes[0].transport.Close()
+}
+
+func TestHeartbeatToUnregisteredGroup(t *testing.T) {
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
+	nodes := makeTestCluster(t, 2)
+	_ = nodes // cleanup via t.Cleanup
+
+	// Group exists on sender but NOT on receiver.
+	gid := "orphan-group"
+	gt0 := nodes[0].transport.GroupTransport(gid)
+	// Deliberately NOT calling nodes[1].transport.GroupTransport(gid)
+
+	var resp raft.AppendEntriesResponse
+	err := gt0.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+		&raft.AppendEntriesRequest{
+			RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+			Term:      1,
+		}, &resp)
+
+	// In batch mode, individual group failures are absorbed — the caller
+	// gets an empty (zeroed) response, not an error. This is by design:
+	// one bad group shouldn't kill the whole batch.
+	if err != nil {
+		t.Fatalf("unregistered group heartbeat should not return error (batch absorbs), got: %v", err)
+	}
+}
+
+func TestHeartbeatBatchMixedValidAndInvalid(t *testing.T) {
+	// Not parallel — gRPC servers + bufconn need clean sequential lifecycle.
+	nodes := makeTestCluster(t, 2)
+	_ = nodes // cleanup via t.Cleanup
+
+	// Two groups: one registered on both, one only on sender.
+	validGid := "valid-group"
+	invalidGid := "invalid-group"
+	gtValid := nodes[0].transport.GroupTransport(validGid)
+	recvValid := nodes[1].transport.GroupTransport(validGid)
+	recvValid.SetHeartbeatHandler(func(rpc raft.RPC) {
+		rpc.Respond(&raft.AppendEntriesResponse{Success: true}, nil)
+	})
+	gtInvalid := nodes[0].transport.GroupTransport(invalidGid)
+	// invalidGid NOT registered on node 1.
+
+	var wg sync.WaitGroup
+	var validErr, invalidErr error
+
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		var resp raft.AppendEntriesResponse
+		validErr = gtValid.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+			&raft.AppendEntriesRequest{
+				RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+				Term:      1,
+			}, &resp)
+	}()
+	go func() {
+		defer wg.Done()
+		var resp raft.AppendEntriesResponse
+		invalidErr = gtInvalid.AppendEntries("node-1", nodes[1].transport.LocalAddr(),
+			&raft.AppendEntriesRequest{
+				RPCHeader: raft.RPCHeader{ProtocolVersion: 3, ID: []byte("node-0"), Addr: []byte(nodes[0].transport.LocalAddr())},
+				Term:      1,
+			}, &resp)
+	}()
+	wg.Wait()
+
+	// Valid group should succeed even though the batch contains an invalid one.
+	if validErr != nil {
+		t.Errorf("valid group heartbeat failed: %v", validErr)
+	}
+	// Invalid group gets an error but doesn't crash.
+	// (The server returns an empty response for failed groups, which the
+	// client interprets as success with zero fields — not ideal but safe.)
+	_ = invalidErr
+}

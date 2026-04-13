@@ -960,6 +960,98 @@ func (x *MultiRaftInstallSnapshotResponse) GetSuccess() bool {
 	return false
 }
 
+// BatchHeartbeat coalesces heartbeat AppendEntries from multiple groups into
+// a single RPC per peer. Each entry is a standard AppendEntriesRequest with
+// empty log entries (heartbeat). Reduces per-tick RPC count from N (one per
+// group) to 1 (one per peer).
+type MultiRaftBatchHeartbeatRequest struct {
+	state         protoimpl.MessageState           `protogen:"open.v1"`
+	Heartbeats    []*MultiRaftAppendEntriesRequest `protobuf:"bytes,1,rep,name=heartbeats,proto3" json:"heartbeats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MultiRaftBatchHeartbeatRequest) Reset() {
+	*x = MultiRaftBatchHeartbeatRequest{}
+	mi := &file_gastrolog_v1_multiraft_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MultiRaftBatchHeartbeatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MultiRaftBatchHeartbeatRequest) ProtoMessage() {}
+
+func (x *MultiRaftBatchHeartbeatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_multiraft_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MultiRaftBatchHeartbeatRequest.ProtoReflect.Descriptor instead.
+func (*MultiRaftBatchHeartbeatRequest) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_multiraft_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *MultiRaftBatchHeartbeatRequest) GetHeartbeats() []*MultiRaftAppendEntriesRequest {
+	if x != nil {
+		return x.Heartbeats
+	}
+	return nil
+}
+
+type MultiRaftBatchHeartbeatResponse struct {
+	state         protoimpl.MessageState            `protogen:"open.v1"`
+	Responses     []*MultiRaftAppendEntriesResponse `protobuf:"bytes,1,rep,name=responses,proto3" json:"responses,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MultiRaftBatchHeartbeatResponse) Reset() {
+	*x = MultiRaftBatchHeartbeatResponse{}
+	mi := &file_gastrolog_v1_multiraft_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MultiRaftBatchHeartbeatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MultiRaftBatchHeartbeatResponse) ProtoMessage() {}
+
+func (x *MultiRaftBatchHeartbeatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gastrolog_v1_multiraft_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MultiRaftBatchHeartbeatResponse.ProtoReflect.Descriptor instead.
+func (*MultiRaftBatchHeartbeatResponse) Descriptor() ([]byte, []int) {
+	return file_gastrolog_v1_multiraft_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *MultiRaftBatchHeartbeatResponse) GetResponses() []*MultiRaftAppendEntriesResponse {
+	if x != nil {
+		return x.Responses
+	}
+	return nil
+}
+
 var File_gastrolog_v1_multiraft_proto protoreflect.FileDescriptor
 
 const file_gastrolog_v1_multiraft_proto_rawDesc = "" +
@@ -1053,7 +1145,13 @@ const file_gastrolog_v1_multiraft_proto_rawDesc = "" +
 	"\n" +
 	"rpc_header\x18\x01 \x01(\v2\x17.gastrolog.v1.RPCHeaderR\trpcHeader\x12\x12\n" +
 	"\x04term\x18\x02 \x01(\x04R\x04term\x12\x18\n" +
-	"\asuccess\x18\x03 \x01(\bR\asuccessB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
+	"\asuccess\x18\x03 \x01(\bR\asuccess\"m\n" +
+	"\x1eMultiRaftBatchHeartbeatRequest\x12K\n" +
+	"\n" +
+	"heartbeats\x18\x01 \x03(\v2+.gastrolog.v1.MultiRaftAppendEntriesRequestR\n" +
+	"heartbeats\"m\n" +
+	"\x1fMultiRaftBatchHeartbeatResponse\x12J\n" +
+	"\tresponses\x18\x01 \x03(\v2,.gastrolog.v1.MultiRaftAppendEntriesResponseR\tresponsesB,Z*gastrolog/api/gen/gastrolog/v1;gastrologv1b\x06proto3"
 
 var (
 	file_gastrolog_v1_multiraft_proto_rawDescOnce sync.Once
@@ -1068,7 +1166,7 @@ func file_gastrolog_v1_multiraft_proto_rawDescGZIP() []byte {
 }
 
 var file_gastrolog_v1_multiraft_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_gastrolog_v1_multiraft_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_gastrolog_v1_multiraft_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_gastrolog_v1_multiraft_proto_goTypes = []any{
 	(Log_LogType)(0),                         // 0: gastrolog.v1.Log.LogType
 	(*RPCHeader)(nil),                        // 1: gastrolog.v1.RPCHeader
@@ -1083,11 +1181,13 @@ var file_gastrolog_v1_multiraft_proto_goTypes = []any{
 	(*MultiRaftTimeoutNowResponse)(nil),      // 10: gastrolog.v1.MultiRaftTimeoutNowResponse
 	(*MultiRaftInstallSnapshotRequest)(nil),  // 11: gastrolog.v1.MultiRaftInstallSnapshotRequest
 	(*MultiRaftInstallSnapshotResponse)(nil), // 12: gastrolog.v1.MultiRaftInstallSnapshotResponse
-	(*timestamppb.Timestamp)(nil),            // 13: google.protobuf.Timestamp
+	(*MultiRaftBatchHeartbeatRequest)(nil),   // 13: gastrolog.v1.MultiRaftBatchHeartbeatRequest
+	(*MultiRaftBatchHeartbeatResponse)(nil),  // 14: gastrolog.v1.MultiRaftBatchHeartbeatResponse
+	(*timestamppb.Timestamp)(nil),            // 15: google.protobuf.Timestamp
 }
 var file_gastrolog_v1_multiraft_proto_depIdxs = []int32{
 	0,  // 0: gastrolog.v1.Log.type:type_name -> gastrolog.v1.Log.LogType
-	13, // 1: gastrolog.v1.Log.appended_at:type_name -> google.protobuf.Timestamp
+	15, // 1: gastrolog.v1.Log.appended_at:type_name -> google.protobuf.Timestamp
 	1,  // 2: gastrolog.v1.MultiRaftAppendEntriesRequest.rpc_header:type_name -> gastrolog.v1.RPCHeader
 	2,  // 3: gastrolog.v1.MultiRaftAppendEntriesRequest.entries:type_name -> gastrolog.v1.Log
 	1,  // 4: gastrolog.v1.MultiRaftAppendEntriesResponse.rpc_header:type_name -> gastrolog.v1.RPCHeader
@@ -1099,11 +1199,13 @@ var file_gastrolog_v1_multiraft_proto_depIdxs = []int32{
 	1,  // 10: gastrolog.v1.MultiRaftTimeoutNowResponse.rpc_header:type_name -> gastrolog.v1.RPCHeader
 	1,  // 11: gastrolog.v1.MultiRaftInstallSnapshotRequest.rpc_header:type_name -> gastrolog.v1.RPCHeader
 	1,  // 12: gastrolog.v1.MultiRaftInstallSnapshotResponse.rpc_header:type_name -> gastrolog.v1.RPCHeader
-	13, // [13:13] is the sub-list for method output_type
-	13, // [13:13] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	3,  // 13: gastrolog.v1.MultiRaftBatchHeartbeatRequest.heartbeats:type_name -> gastrolog.v1.MultiRaftAppendEntriesRequest
+	4,  // 14: gastrolog.v1.MultiRaftBatchHeartbeatResponse.responses:type_name -> gastrolog.v1.MultiRaftAppendEntriesResponse
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_gastrolog_v1_multiraft_proto_init() }
@@ -1117,7 +1219,7 @@ func file_gastrolog_v1_multiraft_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gastrolog_v1_multiraft_proto_rawDesc), len(file_gastrolog_v1_multiraft_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

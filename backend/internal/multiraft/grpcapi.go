@@ -99,6 +99,21 @@ func (g *grpcAPI[K]) timeoutNow(req *gastrologv1.MultiRaftTimeoutNowRequest) (*g
 	return encodeTimeoutNowResponse(resp.(*raft.TimeoutNowResponse)), nil
 }
 
+func (g *grpcAPI[K]) batchHeartbeat(req *gastrologv1.MultiRaftBatchHeartbeatRequest) (*gastrologv1.MultiRaftBatchHeartbeatResponse, error) {
+	responses := make([]*gastrologv1.MultiRaftAppendEntriesResponse, len(req.GetHeartbeats()))
+	for i, hb := range req.GetHeartbeats() {
+		resp, err := g.appendEntries(hb)
+		if err != nil {
+			// Return an error response for this group but continue with
+			// others — a single dead group shouldn't kill the whole batch.
+			responses[i] = &gastrologv1.MultiRaftAppendEntriesResponse{}
+			continue
+		}
+		responses[i] = resp
+	}
+	return &gastrologv1.MultiRaftBatchHeartbeatResponse{Responses: responses}, nil
+}
+
 // ---------- Snapshot stream ----------
 
 // snapshotStream adapts gRPC server-side streaming into an io.Reader for

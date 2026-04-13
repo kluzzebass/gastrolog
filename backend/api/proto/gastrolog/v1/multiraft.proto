@@ -120,3 +120,15 @@ message MultiRaftInstallSnapshotResponse {
   uint64 term = 2;
   bool success = 3;
 }
+
+// BatchHeartbeat coalesces heartbeat AppendEntries from multiple groups into
+// a single RPC per peer. Each entry is a standard AppendEntriesRequest with
+// empty log entries (heartbeat). Reduces per-tick RPC count from N (one per
+// group) to 1 (one per peer).
+message MultiRaftBatchHeartbeatRequest {
+  repeated MultiRaftAppendEntriesRequest heartbeats = 1;
+}
+
+message MultiRaftBatchHeartbeatResponse {
+  repeated MultiRaftAppendEntriesResponse responses = 1;
+}
