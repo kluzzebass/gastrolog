@@ -290,7 +290,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,7 +628,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,7 +767,7 @@ func TestMergeVaultsMemory(t *testing.T) {
 func TestMergeVaultsFileBacked(t *testing.T) {
 	t.Parallel()
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1385,7 +1385,7 @@ func TestTransitionLocalPreservesAllRecords(t *testing.T) {
 		VaultID: vaultID, Position: 1,
 		Placements: []system.TierPlacement{{StorageID: system.SyntheticStorageID(nodeID), Leader: true}},
 	})
-	orch.cfgLoader = &transitionConfigLoader{store: store}
+	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	// Append 5000 records to tier 0.
 	for i := 0; i < totalRecords; i++ {

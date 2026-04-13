@@ -18,19 +18,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakeConfigLoader implements orchestrator.ConfigLoader for tests.
-type fakeConfigLoader struct {
+// fakeSystemLoader implements orchestrator.SystemLoader for tests.
+type fakeSystemLoader struct {
 	cfg *system.Config
 }
 
-func (f *fakeConfigLoader) Load(_ context.Context) (*system.Config, error) {
+func (f *fakeSystemLoader) Load(_ context.Context) (*system.Config, error) {
 	return f.cfg, nil
 }
 
 // memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.
 // It also adds the TierConfig to the loader's config if present, so AddVault
 // can find it via buildTierInstances.
-func memVaultCfg(vaultID uuid.UUID, loader *fakeConfigLoader) system.VaultConfig {
+func memVaultCfg(vaultID uuid.UUID, loader *fakeSystemLoader) system.VaultConfig {
 	tierID := uuid.Must(uuid.NewV7())
 	tc := system.TierConfig{
 		ID:      tierID,
@@ -48,7 +48,7 @@ func memVaultCfg(vaultID uuid.UUID, loader *fakeConfigLoader) system.VaultConfig
 
 func TestReloadFilters(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{}
+	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
 	prodFilterID := uuid.Must(uuid.NewV7())
@@ -122,7 +122,7 @@ func TestReloadFilters(t *testing.T) {
 
 func TestReloadFiltersInvalidExpression(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{}
+	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
 	invalidFilterID := uuid.Must(uuid.NewV7())
@@ -143,7 +143,7 @@ func TestReloadFiltersInvalidExpression(t *testing.T) {
 
 func TestReloadFiltersIgnoresUnknownVaults(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{}
+	loader := &fakeSystemLoader{}
 	orch, vaults := newFilteredTestSetupWithLoader(t, loader)
 
 	prodFilterID := uuid.Must(uuid.NewV7())
@@ -171,7 +171,7 @@ func TestAddVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "env=test"},
 		},
@@ -179,7 +179,7 @@ func TestAddVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +225,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -233,7 +233,7 @@ func TestAddVaultDuplicate(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -265,7 +265,7 @@ func TestRemoveVaultEmpty(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -273,7 +273,7 @@ func TestRemoveVaultEmpty(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +309,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -317,7 +317,7 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,8 +356,8 @@ func TestRemoveVaultNotEmpty(t *testing.T) {
 
 func TestRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{cfg: &system.Config{}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	loader := &fakeSystemLoader{cfg: &system.Config{}}
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +373,7 @@ func TestForceRemoveVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -381,7 +381,7 @@ func TestForceRemoveVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -443,8 +443,8 @@ func TestForceRemoveVault(t *testing.T) {
 
 func TestForceRemoveVaultNotFound(t *testing.T) {
 	t.Parallel()
-	loader := &fakeConfigLoader{cfg: &system.Config{}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	loader := &fakeSystemLoader{cfg: &system.Config{}}
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -468,7 +468,7 @@ func TestForceRemoveEmptyVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,7 +660,7 @@ func TestVaultConfig(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "env=prod AND level=error"},
 		},
@@ -668,7 +668,7 @@ func TestVaultConfig(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -767,7 +767,7 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -775,7 +775,7 @@ func TestSetRotationPolicyOnVaultDirectly(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -827,7 +827,7 @@ func TestPauseVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -835,7 +835,7 @@ func TestPauseVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -898,7 +898,7 @@ func TestResumeVault(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -906,7 +906,7 @@ func TestResumeVault(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -973,7 +973,7 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -981,7 +981,7 @@ func TestDisableVaultDoesNotAffectQuery(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1040,7 +1040,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 	retPolicyID := uuid.Must(uuid.NewV7())
 	filterID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -1061,7 +1061,7 @@ func TestRetentionSingleJobRegistered(t *testing.T) {
 		},
 	}}
 
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1105,7 +1105,7 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 	filterID := uuid.Must(uuid.NewV7())
 	vaultID := uuid.Must(uuid.NewV7())
 
-	loader := &fakeConfigLoader{cfg: &system.Config{
+	loader := &fakeSystemLoader{cfg: &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Expression: "*"},
 		},
@@ -1113,7 +1113,7 @@ func TestUpdateVaultFilterInvalid(t *testing.T) {
 			{ID: uuid.Must(uuid.NewV7()), FilterID: new(filterID), Destinations: []uuid.UUID{vaultID}, Enabled: true},
 		},
 	}}
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}

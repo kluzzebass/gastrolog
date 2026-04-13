@@ -783,17 +783,17 @@ func testIntegration(t *testing.T, newStore func(t *testing.T) system.Store) {
 			t.Fatal("expected config, got nil")
 		}
 
-		if len(cfg.RotationPolicies) != 2 {
-			t.Errorf("expected 2 rotation policies, got %d", len(cfg.RotationPolicies))
+		if len(cfg.Config.RotationPolicies) != 2 {
+			t.Errorf("expected 2 rotation policies, got %d", len(cfg.Config.RotationPolicies))
 		}
-		if len(cfg.Vaults) != 1 {
-			t.Errorf("expected 1 vault, got %d", len(cfg.Vaults))
+		if len(cfg.Config.Vaults) != 1 {
+			t.Errorf("expected 1 vault, got %d", len(cfg.Config.Vaults))
 		}
-		if len(cfg.Ingesters) != 2 {
-			t.Errorf("expected 2 ingesters, got %d", len(cfg.Ingesters))
+		if len(cfg.Config.Ingesters) != 2 {
+			t.Errorf("expected 2 ingesters, got %d", len(cfg.Config.Ingesters))
 		}
-		if cfg.Auth.JWTSecret != "s3cret" {
-			t.Errorf("expected Auth.JWTSecret %q, got %q", "s3cret", cfg.Auth.JWTSecret)
+		if cfg.Config.Auth.JWTSecret != "s3cret" {
+			t.Errorf("expected Auth.JWTSecret %q, got %q", "s3cret", cfg.Config.Auth.JWTSecret)
 		}
 	})
 

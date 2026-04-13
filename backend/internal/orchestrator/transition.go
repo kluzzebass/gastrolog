@@ -25,7 +25,7 @@ import (
 func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	ctx := context.Background()
 
-	cfg, err := r.orch.loadConfig(ctx)
+	sys, err := r.orch.loadSystem(ctx)
 	if err != nil {
 		r.logger.Error("transition: failed to load config",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)

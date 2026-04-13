@@ -81,12 +81,12 @@ type sweepTarget struct {
 //   - Followers: reconcile local disk against the tier Raft manifest — delete anything
 //     the leader has removed. No independent rule evaluation.
 func (o *Orchestrator) retentionSweepAll() {
-	cfg, err := o.loadConfig(context.Background())
+	sys, err := o.loadSystem(context.Background())
 	if err != nil {
 		o.logger.Error("retention: failed to load config", "error", err)
 		return
 	}
-	if cfg == nil {
+	if sys == nil {
 		return
 	}
 
@@ -162,7 +162,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // enforceMemoryBudgets checks memory tiers for budget overruns and transitions
 // the oldest sealed chunks to the next tier. Only runs on leaders.
 func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
-	if cfg == nil {
+	if sys == nil {
 		return
 	}
 	type budgetTarget struct {

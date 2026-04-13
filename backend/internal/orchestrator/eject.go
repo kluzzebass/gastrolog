@@ -39,7 +39,7 @@ type remoteKey struct {
 func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
 	ctx := context.Background()
 
-	cfg, err := r.orch.loadConfig(ctx)
+	sys, err := r.orch.loadSystem(ctx)
 	if err != nil {
 		r.logger.Error("retention eject: failed to load config",
 			"vault", r.vaultID, "chunk", id.String(), "error", err)

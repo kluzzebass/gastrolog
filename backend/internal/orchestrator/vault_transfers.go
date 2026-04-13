@@ -100,10 +100,10 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 // With tiered storage, vaults no longer have a NodeID. All nodes can serve
 // all vaults. This always returns empty string (local).
 func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) (string, error) {
-	if o.cfgLoader == nil {
+	if o.sysLoader == nil {
 		return "", errors.New("config loader not configured")
 	}
-	cfg, err := o.cfgLoader.Load(ctx)
+	cfg, err := o.sysLoader.Load(ctx)
 	if err != nil {
 		return "", fmt.Errorf("load config: %w", err)
 	}
@@ -188,7 +188,7 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 // routes new records to the target node via RecordForwarder. Once all sealed
 // chunks are transferred, the vault is unregistered locally.
 func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error {
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for drain: %w", err)
 	}
@@ -340,7 +340,7 @@ func (o *Orchestrator) finishDrain(vaultID uuid.UUID) {
 
 // CancelDrain cancels an in-progress drain and restores local routing.
 func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID uuid.UUID) error {
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for cancel drain: %w", err)
 	}

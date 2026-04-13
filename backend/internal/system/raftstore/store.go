@@ -96,7 +96,7 @@ func (s *Store) ApplyRaw(data []byte) error {
 // Read methods — delegate to fsm.Store()
 // ---------------------------------------------------------------------------
 
-func (s *Store) Load(ctx context.Context) (*system.Config, error) {
+func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	return s.fsm.Store().Load(ctx)
 }
 
@@ -374,4 +374,25 @@ func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error 
 
 func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg system.NodeStorageConfig) error {
 	return s.apply(command.NewSetNodeStorageConfig(cfg))
+}
+
+// --- Runtime methods (delegate to inner store for reads, apply for writes) ---
+
+func (s *Store) GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([]system.TierPlacement, error) {
+	return s.fsm.Store().GetTierPlacements(ctx, tierID)
+}
+
+func (s *Store) SetTierPlacements(ctx context.Context, tierID uuid.UUID, placements []system.TierPlacement) error {
+	// TODO(gastrolog-2kx4r): route through Raft apply for cluster-wide consistency.
+	// For now, write directly to the inner store.
+	return s.fsm.Store().SetTierPlacements(ctx, tierID, placements)
+}
+
+func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
+	return s.fsm.Store().GetSetupWizardDismissed(ctx)
+}
+
+func (s *Store) SetSetupWizardDismissed(ctx context.Context, dismissed bool) error {
+	// TODO(gastrolog-2kx4r): route through Raft apply for cluster-wide consistency.
+	return s.fsm.Store().SetSetupWizardDismissed(ctx, dismissed)
 }

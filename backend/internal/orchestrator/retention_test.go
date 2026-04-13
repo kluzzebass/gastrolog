@@ -362,9 +362,9 @@ func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
 	}
 }
 
-type testConfigLoader struct{ cfg *system.Config }
+type testSystemLoader struct{ cfg *system.Config }
 
-func (l testConfigLoader) Load(_ context.Context) (*system.Config, error) {
+func (l testSystemLoader) Load(_ context.Context) (*system.Config, error) {
 	return l.cfg, nil
 }
 
@@ -566,7 +566,7 @@ func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	}
 
 	orch, err := New(Config{
-		ConfigLoader: testConfigLoader{cfg: cfg},
+		SystemLoader: testSystemLoader{cfg: cfg},
 		Logger:       slog.Default(),
 	})
 	if err != nil {

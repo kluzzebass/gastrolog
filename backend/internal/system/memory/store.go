@@ -58,8 +58,10 @@ type Store struct {
 	managedFiles       map[uuid.UUID]system.ManagedFileConfig
 	cloudServices      map[uuid.UUID]system.CloudService
 	tiers              map[uuid.UUID]system.TierConfig
-	nodeStorageConfigs map[string]system.NodeStorageConfig // keyed by nodeID
-	clusterTLS         *system.ClusterTLS
+	tierPlacements     map[uuid.UUID][]system.TierPlacement // runtime: system-managed
+	nodeStorageConfigs map[string]system.NodeStorageConfig   // runtime: keyed by nodeID
+	clusterTLS         *system.ClusterTLS                   // runtime: cluster identity
+	setupWizardDismissed bool                               // runtime: UI state
 }
 
 var _ system.Store = (*Store)(nil)
@@ -80,6 +82,7 @@ func NewStore() *Store {
 		managedFiles:       make(map[uuid.UUID]system.ManagedFileConfig),
 		cloudServices:      make(map[uuid.UUID]system.CloudService),
 		tiers:              make(map[uuid.UUID]system.TierConfig),
+		tierPlacements:     make(map[uuid.UUID][]system.TierPlacement),
 		nodeStorageConfigs: make(map[string]system.NodeStorageConfig),
 	}
 }
@@ -96,7 +99,7 @@ func (s *Store) isEmpty() bool {
 
 // Load returns the full configuration.
 // Returns nil if no entities exist.
-func (s *Store) Load(ctx context.Context) (*system.Config, error) {
+func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -104,8 +107,11 @@ func (s *Store) Load(ctx context.Context) (*system.Config, error) {
 		return nil, nil
 	}
 
-	cfg := &system.Config{}
+	sys := &system.System{}
+	cfg := &sys.Config
+	rt := &sys.Runtime
 
+	// Config: operator-controlled entities.
 	cfg.Filters = collectAndSort(s.filters, copyFilterConfig, func(a, b system.FilterConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.RotationPolicies = collectAndSort(s.rotationPolicies, copyRotationPolicy, func(a, b system.RotationPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.RetentionPolicies = collectAndSort(s.retentionPolicies, copyRetentionPolicy, func(a, b system.RetentionPolicyConfig) int { return cmpUUID(a.ID, b.ID) })
@@ -115,11 +121,9 @@ func (s *Store) Load(ctx context.Context) (*system.Config, error) {
 	cfg.ManagedFiles = collectAndSort(s.managedFiles, func(v system.ManagedFileConfig) system.ManagedFileConfig { return v }, func(a, b system.ManagedFileConfig) int { return cmpUUID(a.ID, b.ID) })
 	cfg.CloudServices = collectAndSort(s.cloudServices, copyCloudService, func(a, b system.CloudService) int { return cmpUUID(a.ID, b.ID) })
 	cfg.Tiers = collectAndSort(s.tiers, copyTierConfig, func(a, b system.TierConfig) int { return cmpUUID(a.ID, b.ID) })
-	cfg.NodeStorageConfigs = collectAndSort(s.nodeStorageConfigs, copyNodeStorageConfig, func(a, b system.NodeStorageConfig) int { return cmp.Compare(a.NodeID, b.NodeID) })
 	cfg.Certs = collectAndSort(s.certs, copyCertPEM, func(a, b system.CertPEM) int { return cmpUUID(a.ID, b.ID) })
-	cfg.Nodes = collectAndSort(s.nodes, func(v system.NodeConfig) system.NodeConfig { return v }, func(a, b system.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
 
-	// Populate server settings on Config.
+	// Config: server settings.
 	if s.ss.hasServerSettings {
 		cfg.Auth = s.ss.ss.Auth
 		cfg.Query = s.ss.ss.Query
@@ -127,16 +131,28 @@ func (s *Store) Load(ctx context.Context) (*system.Config, error) {
 		cfg.TLS = s.ss.ss.TLS
 		cfg.Lookup = s.ss.ss.Lookup
 		cfg.Cluster = s.ss.ss.Cluster
-		cfg.SetupWizardDismissed = s.ss.ss.SetupWizardDismissed
 	}
 
-	// Include ClusterTLS if loaded (cluster mode).
+	// Runtime: cluster-managed state.
+	rt.Nodes = collectAndSort(s.nodes, func(v system.NodeConfig) system.NodeConfig { return v }, func(a, b system.NodeConfig) int { return cmpUUID(a.ID, b.ID) })
+	rt.NodeStorageConfigs = collectAndSort(s.nodeStorageConfigs, copyNodeStorageConfig, func(a, b system.NodeStorageConfig) int { return cmp.Compare(a.NodeID, b.NodeID) })
 	if s.clusterTLS != nil {
 		c := *s.clusterTLS
-		cfg.ClusterTLS = &c
+		rt.ClusterTLS = &c
+	}
+	rt.SetupWizardDismissed = s.setupWizardDismissed
+
+	// Runtime: tier placements (stored separately from TierConfig).
+	if len(s.tierPlacements) > 0 {
+		rt.TierPlacements = make(map[uuid.UUID][]system.TierPlacement, len(s.tierPlacements))
+		for id, p := range s.tierPlacements {
+			cp := make([]system.TierPlacement, len(p))
+			copy(cp, p)
+			rt.TierPlacements[id] = cp
+		}
 	}
 
-	return cfg, nil
+	return sys, nil
 }
 
 // Filters
@@ -999,10 +1015,6 @@ func copyTierConfig(tc system.TierConfig) system.TierConfig {
 		c.RetentionRules = make([]system.RetentionRule, len(tc.RetentionRules))
 		copy(c.RetentionRules, tc.RetentionRules)
 	}
-	if len(tc.Placements) > 0 {
-		c.Placements = make([]system.TierPlacement, len(tc.Placements))
-		copy(c.Placements, tc.Placements)
-	}
 	return c
 }
 
@@ -1022,4 +1034,39 @@ func copyParams(params map[string]string) map[string]string {
 	cp := make(map[string]string, len(params))
 	maps.Copy(cp, params)
 	return cp
+}
+
+// --- Tier Placements (runtime) ---
+
+func (s *Store) GetTierPlacements(_ context.Context, tierID uuid.UUID) ([]system.TierPlacement, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	p := s.tierPlacements[tierID]
+	cp := make([]system.TierPlacement, len(p))
+	copy(cp, p)
+	return cp, nil
+}
+
+func (s *Store) SetTierPlacements(_ context.Context, tierID uuid.UUID, placements []system.TierPlacement) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := make([]system.TierPlacement, len(placements))
+	copy(cp, placements)
+	s.tierPlacements[tierID] = cp
+	return nil
+}
+
+// --- Setup Wizard (runtime) ---
+
+func (s *Store) GetSetupWizardDismissed(_ context.Context) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.setupWizardDismissed, nil
+}
+
+func (s *Store) SetSetupWizardDismissed(_ context.Context, dismissed bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.setupWizardDismissed = dismissed
+	return nil
 }

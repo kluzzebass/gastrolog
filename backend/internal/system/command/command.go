@@ -853,24 +853,26 @@ func ExtractPutClusterTLS(cmd *gastrologv1.PutClusterTLSCommand) system.ClusterT
 // BuildSnapshot creates a ConfigSnapshot from the full config state.
 // Server settings (Auth, Query, etc.) are serialized as JSON in the Settings map
 // under the "server" key for wire compatibility.
-func BuildSnapshot(cfg *system.Config, users []system.User, tokens []system.RefreshToken, nodes []system.NodeConfig) *gastrologv1.SystemSnapshot {
+func BuildSnapshot(sys *system.System, users []system.User, tokens []system.RefreshToken) *gastrologv1.SystemSnapshot {
 	snap := &gastrologv1.SystemSnapshot{}
+	cfg := &sys.Config
+	rt := &sys.Runtime
 
-	// Serialize server settings into the Settings map for backward compatibility.
+	// Serialize server settings.
 	blob, err := json.Marshal(system.ServerSettings{
-		Auth:                 cfg.Auth,
-		Query:                cfg.Query,
-		Scheduler:            cfg.Scheduler,
-		TLS:                  cfg.TLS,
-		Lookup:               cfg.Lookup,
-		MaxMind:              cfg.MaxMind,
-		Cluster:              cfg.Cluster,
-		SetupWizardDismissed: cfg.SetupWizardDismissed,
+		Auth:      cfg.Auth,
+		Query:     cfg.Query,
+		Scheduler: cfg.Scheduler,
+		TLS:       cfg.TLS,
+		Lookup:    cfg.Lookup,
+		MaxMind:   cfg.MaxMind,
+		Cluster:   cfg.Cluster,
 	})
 	if err == nil && string(blob) != "{}" {
 		snap.Settings = map[string]string{"server": string(blob)}
 	}
 
+	// Config entities.
 	for _, f := range cfg.Filters {
 		snap.Filters = append(snap.Filters, putFilterCmd(f))
 	}
@@ -895,28 +897,30 @@ func BuildSnapshot(cfg *system.Config, users []system.User, tokens []system.Refr
 	for _, c := range cfg.Certs {
 		snap.Certificates = append(snap.Certificates, putCertificateCmd(c))
 	}
+	for _, cs := range cfg.CloudServices {
+		snap.CloudServices = append(snap.CloudServices, putCloudServiceCmd(cs))
+	}
+	for _, tier := range cfg.Tiers {
+		snap.Tiers = append(snap.Tiers, putTierCmd(tier))
+	}
+
+	// Users and tokens.
 	for _, u := range users {
 		snap.Users = append(snap.Users, createUserCmd(u))
 	}
 	for _, t := range tokens {
 		snap.RefreshTokens = append(snap.RefreshTokens, createRefreshTokenCmd(t))
 	}
-	for _, n := range nodes {
+
+	// Runtime: nodes, storage, TLS.
+	for _, n := range rt.Nodes {
 		snap.NodeConfigs = append(snap.NodeConfigs, putNodeConfigCmd(n))
 	}
-	for _, cs := range cfg.CloudServices {
-		snap.CloudServices = append(snap.CloudServices, putCloudServiceCmd(cs))
-	}
-	for _, nsc := range cfg.NodeStorageConfigs {
+	for _, nsc := range rt.NodeStorageConfigs {
 		snap.NodeStorageConfigs = append(snap.NodeStorageConfigs, setNodeStorageConfigCmd(nsc))
 	}
-	for _, tier := range cfg.Tiers {
-		snap.Tiers = append(snap.Tiers, putTierCmd(tier))
-	}
-
-	// Include ClusterTLS if present on Config.
-	if cfg.ClusterTLS != nil {
-		snap.ClusterTls = NewPutClusterTLS(*cfg.ClusterTLS).GetPutClusterTls()
+	if rt.ClusterTLS != nil {
+		snap.ClusterTls = NewPutClusterTLS(*rt.ClusterTLS).GetPutClusterTls()
 	}
 
 	return snap
@@ -925,15 +929,17 @@ func BuildSnapshot(cfg *system.Config, users []system.User, tokens []system.Refr
 // RestoreSnapshot converts a ConfigSnapshot back to Go config types.
 // If the snapshot's Settings map contains a "server" key, it is parsed
 // into the Config's server-level fields (Auth, Query, etc.).
-func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.Config, []system.User, []system.RefreshToken, []system.NodeConfig, error) { //nolint:gocognit,gocyclo // flat field mapping from snapshot proto
-	cfg := &system.Config{}
+func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system.User, []system.RefreshToken, error) { //nolint:gocognit,gocyclo // flat field mapping from snapshot proto
+	sys := &system.System{}
+	cfg := &sys.Config
+	rt := &sys.Runtime
 
 	// Migrate server settings from the Settings map.
 	if settings := snap.GetSettings(); len(settings) > 0 {
 		if raw, ok := settings["server"]; ok {
 			ss, err := ExtractPutServerSettings(raw)
 			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("restore server settings: %w", err)
+				return nil, nil, nil, fmt.Errorf("restore server settings: %w", err)
 			}
 			cfg.Auth = ss.Auth
 			cfg.Query = ss.Query
@@ -942,84 +948,84 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.Config, []system
 			cfg.Lookup = ss.Lookup
 			cfg.MaxMind = ss.MaxMind
 			cfg.Cluster = ss.Cluster
-			cfg.SetupWizardDismissed = ss.SetupWizardDismissed
+			// TODO(gastrolog-2kx4r): SetupWizardDismissed needs its own snapshot field
 		}
 	}
 
 	for _, f := range snap.GetFilters() {
 		fc, err := ExtractPutFilter(f)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore filter: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore filter: %w", err)
 		}
 		cfg.Filters = append(cfg.Filters, fc)
 	}
 	for _, rp := range snap.GetRotationPolicies() {
 		rc, err := ExtractPutRotationPolicy(rp)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore rotation policy: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore rotation policy: %w", err)
 		}
 		cfg.RotationPolicies = append(cfg.RotationPolicies, rc)
 	}
 	for _, rp := range snap.GetRetentionPolicies() {
 		rc, err := ExtractPutRetentionPolicy(rp)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore retention policy: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore retention policy: %w", err)
 		}
 		cfg.RetentionPolicies = append(cfg.RetentionPolicies, rc)
 	}
 	for _, v := range snap.GetVaults() {
 		vc, err := ExtractPutVault(v)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore vault: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore vault: %w", err)
 		}
 		cfg.Vaults = append(cfg.Vaults, vc)
 	}
 	for _, ing := range snap.GetIngesters() {
 		ic, err := ExtractPutIngester(ing)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore ingester: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore ingester: %w", err)
 		}
 		cfg.Ingesters = append(cfg.Ingesters, ic)
 	}
 	for _, rt := range snap.GetRoutes() {
 		rc, err := ExtractPutRoute(rt)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore route: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore route: %w", err)
 		}
 		cfg.Routes = append(cfg.Routes, rc)
 	}
 	for _, lf := range snap.GetManagedFiles() {
 		lfc, err := ExtractPutManagedFile(lf)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore managed file: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore managed file: %w", err)
 		}
 		cfg.ManagedFiles = append(cfg.ManagedFiles, lfc)
 	}
 	for _, c := range snap.GetCertificates() {
 		cc, err := ExtractPutCertificate(c)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore certificate: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore certificate: %w", err)
 		}
 		cfg.Certs = append(cfg.Certs, cc)
 	}
 	for _, cs := range snap.GetCloudServices() {
 		svc, err := ExtractPutCloudService(cs)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore cloud service: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore cloud service: %w", err)
 		}
 		cfg.CloudServices = append(cfg.CloudServices, svc)
 	}
 	for _, nsc := range snap.GetNodeStorageConfigs() {
 		nc, err := ExtractSetNodeStorageConfig(nsc)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore node storage config: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore node storage config: %w", err)
 		}
-		cfg.NodeStorageConfigs = append(cfg.NodeStorageConfigs, nc)
+		rt.NodeStorageConfigs = append(rt.NodeStorageConfigs, nc)
 	}
 	for _, tier := range snap.GetTiers() {
 		tc, err := ExtractPutTier(tier)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore tier: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore tier: %w", err)
 		}
 		cfg.Tiers = append(cfg.Tiers, tc)
 	}
@@ -1028,7 +1034,7 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.Config, []system
 	for _, u := range snap.GetUsers() {
 		user, err := ExtractCreateUser(u)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore user: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore user: %w", err)
 		}
 		users = append(users, user)
 	}
@@ -1037,27 +1043,26 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.Config, []system
 	for _, t := range snap.GetRefreshTokens() {
 		token, err := ExtractCreateRefreshToken(t)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore refresh token: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore refresh token: %w", err)
 		}
 		tokens = append(tokens, token)
 	}
 
-	nodes := make([]system.NodeConfig, 0, len(snap.GetNodeConfigs()))
 	for _, n := range snap.GetNodeConfigs() {
 		node, err := ExtractPutNodeConfig(n)
 		if err != nil {
-			return nil, nil, nil, nil, fmt.Errorf("restore node: %w", err)
+			return nil, nil, nil, fmt.Errorf("restore node: %w", err)
 		}
-		nodes = append(nodes, node)
+		rt.Nodes = append(rt.Nodes, node)
 	}
 
 	// Restore ClusterTLS if present in snapshot.
 	if snap.ClusterTls != nil {
 		tls := ExtractPutClusterTLS(snap.ClusterTls)
-		cfg.ClusterTLS = &tls
+		rt.ClusterTLS = &tls
 	}
 
-	return cfg, users, tokens, nodes, nil
+	return sys, users, tokens, nil
 }
 
 // ---------------------------------------------------------------------------

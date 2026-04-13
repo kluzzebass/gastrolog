@@ -43,7 +43,7 @@ func tierDrainKey(vaultID, tierID uuid.UUID) string {
 // chunks transition to the next tier in the vault chain. In rebalance mode,
 // chunks replicate to the same tier on the target node.
 func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID uuid.UUID, mode TierDrainMode, targetNodeID string) error {
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for tier drain: %w", err)
 	}
@@ -151,7 +151,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 		}
 	}()
 
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		o.logger.Error("tier drain: failed to load config", "vault", vaultID, "tier", tierID, "error", err)
 		return

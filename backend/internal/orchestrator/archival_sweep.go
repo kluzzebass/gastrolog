@@ -65,15 +65,16 @@ func (o *Orchestrator) startArchivalSweep() error {
 // archivalSweepAll is the hourly job that transitions cloud chunks to
 // archive storage classes based on age and the cloud service's transition chain.
 func (o *Orchestrator) archivalSweepAll() {
-	cfg, err := o.loadConfig(context.Background())
+	sys, err := o.loadSystem(context.Background())
+
 	if err != nil || cfg == nil {
 		return
 	}
 
 	// Build map of active cloud services (archivalMode == "active").
 	activeCS := make(map[uuid.UUID]*system.CloudService)
-	for i := range cfg.CloudServices {
-		cs := &cfg.CloudServices[i]
+	for i := range sys.Config.CloudServices {
+		cs := &sys.Config.CloudServices[i]
 		if cs.ArchivalMode == "active" && len(cs.Transitions) > 0 {
 			activeCS[cs.ID] = cs
 		}
@@ -87,7 +88,7 @@ func (o *Orchestrator) archivalSweepAll() {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	for _, vaultCfg := range cfg.Vaults {
+	for _, vaultCfg := range sys.Config.Vaults {
 		vault := o.vaults[vaultCfg.ID]
 		if vault == nil {
 			continue
@@ -96,7 +97,7 @@ func (o *Orchestrator) archivalSweepAll() {
 			if !tier.IsLeader() {
 				continue
 			}
-			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+			tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
 			if tierCfg == nil || tierCfg.CloudServiceID == nil {
 				continue
 			}
@@ -193,7 +194,8 @@ func (o *Orchestrator) startReconcileSweep() error {
 // reconcileSweepAll compares cloud index entries against actual blobs in the store.
 // Only the reconciliation sweep removes cloud index entries — never the hot path.
 func (o *Orchestrator) reconcileSweepAll() {
-	cfg, err := o.loadConfig(context.Background())
+	sys, err := o.loadSystem(context.Background())
+
 	if err != nil || cfg == nil {
 		return
 	}
@@ -203,7 +205,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
-	for _, vaultCfg := range cfg.Vaults {
+	for _, vaultCfg := range sys.Config.Vaults {
 		vault := o.vaults[vaultCfg.ID]
 		if vault == nil {
 			continue
@@ -212,7 +214,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 			if !tier.IsLeader() {
 				continue
 			}
-			tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
+			tierCfg := findTierConfig(sys.Config.Tiers, tier.TierID)
 			if tierCfg == nil || tierCfg.CloudServiceID == nil {
 				continue
 			}

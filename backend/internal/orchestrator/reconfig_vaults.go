@@ -52,7 +52,7 @@ func resolveVaultDir(params map[string]string, vaultsDir, vaultID string) map[st
 // Loads the full config internally to resolve the vault's tier IDs to tier configs.
 // Returns ErrDuplicateID if a vault with this ID already exists.
 func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig, factories Factories) error {
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for AddVault: %w", err)
 	}
@@ -428,7 +428,7 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 // without tearing down any other tiers. This is the incremental counterpart to
 // RemoveTierFromVault.
 func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.UUID, factories Factories) error {
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
 	}

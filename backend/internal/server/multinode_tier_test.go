@@ -84,12 +84,12 @@ func (d *mnTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID)
 	return nil
 }
 
-// mnConfigLoader wraps a system.Store to implement orchestrator.ConfigLoader.
-type mnConfigLoader struct {
+// mnSystemLoader wraps a system.Store to implement orchestrator.SystemLoader.
+type mnSystemLoader struct {
 	store *sysmem.Store
 }
 
-func (l *mnConfigLoader) Load(ctx context.Context) (*system.Config, error) {
+func (l *mnSystemLoader) Load(ctx context.Context) (*system.Config, error) {
 	return l.store.Load(ctx)
 }
 
@@ -157,7 +157,7 @@ func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 
 	orchData1, err := orchestrator.New(orchestrator.Config{
 		LocalNodeID:  "data-1",
-		ConfigLoader: &mnConfigLoader{store: cfgStore},
+		SystemLoader: &mnSystemLoader{store: cfgStore},
 	})
 	if err != nil {
 		t.Fatal(err)

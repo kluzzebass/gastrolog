@@ -74,12 +74,12 @@ func (m *mockForwarder) getCalls() []forwardCall {
 	return append([]forwardCall(nil), m.calls...)
 }
 
-// mockConfigLoader returns a fixed config for testing.
-type mockConfigLoader struct {
+// mockSystemLoader returns a fixed config for testing.
+type mockSystemLoader struct {
 	cfg *system.Config
 }
 
-func (m *mockConfigLoader) Load(_ context.Context) (*system.Config, error) {
+func (m *mockSystemLoader) Load(_ context.Context) (*system.Config, error) {
 	return m.cfg, nil
 }
 
@@ -154,7 +154,7 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	// Test that reloadFiltersFromRoutes correctly skips remote
 	// vaults when no forwarder is set.
 	o.filterSet = nil
-	o.cfgLoader = &mockConfigLoader{cfg: &system.Config{
+	o.sysLoader = &mockSystemLoader{cfg: &system.Config{
 		Routes: []system.RouteConfig{
 			{
 				ID:           uuid.Must(uuid.NewV7()),
@@ -168,7 +168,7 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 		},
 	}}
 
-	if err := o.reloadFiltersFromRoutes(o.cfgLoader.(*mockConfigLoader).cfg); err != nil {
+	if err := o.reloadFiltersFromRoutes(o.sysLoader.(*mockSystemLoader).cfg); err != nil {
 		t.Fatalf("reloadFiltersFromRoutes failed: %v", err)
 	}
 

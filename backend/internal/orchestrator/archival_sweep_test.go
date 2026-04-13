@@ -67,7 +67,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 
 	orch := newTestOrch(t, Config{
 		LocalNodeID:  nodeID,
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 	})
 	_ = orch.Scheduler().Stop()
 
@@ -597,7 +597,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	for _, nid := range nodeIDs {
 		orch := newTestOrch(t, Config{
 			LocalNodeID:  nid,
-			ConfigLoader: &transitionConfigLoader{store: store},
+			SystemLoader: &transitionSystemLoader{store: store},
 		})
 		_ = orch.Scheduler().Stop()
 		orchs[nid] = orch
@@ -1159,7 +1159,7 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 
 	orch := newTestOrch(t, Config{
 		LocalNodeID:  nodeID,
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 	})
 	_ = orch.Scheduler().Stop()
 
@@ -1287,7 +1287,7 @@ func TestCacheEvictionViaRetentionSweep(t *testing.T) {
 
 	orch := newTestOrch(t, Config{
 		LocalNodeID:  nodeID,
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 	})
 
 	tier := &TierInstance{

@@ -80,7 +80,7 @@ func (p *StoreProxy) Close() error {
 // Store interface delegation — all methods: RLock → check joining → delegate
 // ---------------------------------------------------------------------------
 
-func (p *StoreProxy) Load(ctx context.Context) (*Config, error) {
+func (p *StoreProxy) Load(ctx context.Context) (*System, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -690,4 +690,40 @@ func (p *StoreProxy) SetNodeStorageConfig(ctx context.Context, cfg NodeStorageCo
 		return err
 	}
 	return p.inner.SetNodeStorageConfig(ctx, cfg)
+}
+
+func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([]TierPlacement, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.GetTierPlacements(ctx, tierID)
+}
+
+func (p *StoreProxy) SetTierPlacements(ctx context.Context, tierID uuid.UUID, placements []TierPlacement) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetTierPlacements(ctx, tierID, placements)
+}
+
+func (p *StoreProxy) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return false, err
+	}
+	return p.inner.GetSetupWizardDismissed(ctx)
+}
+
+func (p *StoreProxy) SetSetupWizardDismissed(ctx context.Context, dismissed bool) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetSetupWizardDismissed(ctx, dismissed)
 }

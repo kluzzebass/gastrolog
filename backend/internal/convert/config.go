@@ -139,10 +139,11 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 // ---------------------------------------------------------------------------
 
 // TierConfigToProto converts a system.TierConfig to its proto representation.
-func TierConfigToProto(t system.TierConfig) *gastrologv1.TierConfig {
-	placements := make([]*gastrologv1.TierPlacement, len(t.Placements))
-	for i, p := range t.Placements {
-		placements[i] = &gastrologv1.TierPlacement{
+// Placements are passed separately since they live in system.Runtime, not Config.
+func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *gastrologv1.TierConfig {
+	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
+	for i, p := range placements {
+		pbPlacements[i] = &gastrologv1.TierPlacement{
 			StorageId: p.StorageID,
 			Leader:    p.Leader,
 		}
@@ -171,7 +172,7 @@ func TierConfigToProto(t system.TierConfig) *gastrologv1.TierConfig {
 		CacheClass:        t.CacheClass,
 		ReplicationFactor: t.ReplicationFactor,
 		Path:              t.Path,
-		Placements:        placements,
+		Placements:        pbPlacements,
 		VaultId:           t.VaultID.String(),
 		Position:          t.Position,
 		CacheEviction:     t.CacheEviction,
@@ -257,14 +258,22 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 		cfg.RetentionRules = append(cfg.RetentionRules, rule)
 	}
 
-	for _, p := range p.GetPlacements() {
-		cfg.Placements = append(cfg.Placements, system.TierPlacement{
-			StorageID: p.GetStorageId(),
-			Leader:    p.GetLeader(),
+	return cfg, nil
+}
+
+// TierPlacementsFromProto extracts placements from a proto TierConfig.
+func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.TierPlacement {
+	if p == nil {
+		return nil
+	}
+	var placements []system.TierPlacement
+	for _, pp := range p.GetPlacements() {
+		placements = append(placements, system.TierPlacement{
+			StorageID: pp.GetStorageId(),
+			Leader:    pp.GetLeader(),
 		})
 	}
-
-	return cfg, nil
+	return placements
 }
 
 func TierTypeToProto(t system.TierType) gastrologv1.TierType {

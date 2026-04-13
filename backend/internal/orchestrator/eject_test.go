@@ -20,12 +20,12 @@ import (
 	"github.com/google/uuid"
 )
 
-// ejectConfigLoader implements ConfigLoader for eject tests.
-type ejectConfigLoader struct {
+// ejectSystemLoader implements SystemLoader for eject tests.
+type ejectSystemLoader struct {
 	cfg *system.Config
 }
 
-func (f *ejectConfigLoader) Load(_ context.Context) (*system.Config, error) {
+func (f *ejectSystemLoader) Load(_ context.Context) (*system.Config, error) {
 	return f.cfg, nil
 }
 
@@ -207,7 +207,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	}
 
 	// Create orchestrator with dst vault registered.
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -221,7 +221,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 	}}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 
@@ -270,7 +270,7 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -286,7 +286,7 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 	dstCM := &appendRecordingCM{}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	// Register destination vault locally.
@@ -341,7 +341,7 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -357,7 +357,7 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 	dstCM := &appendRecordingCM{}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	// Register destination vault locally.
@@ -412,7 +412,7 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstA},
@@ -432,7 +432,7 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 	dstBCM := &appendRecordingCM{}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	// Register destination vaults locally.
@@ -481,7 +481,7 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -497,7 +497,7 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 	mock := &ejectFakeTransferrer{failErr: errTest}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	orch.SetRemoteTransferrer(mock)
@@ -540,7 +540,7 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -554,7 +554,7 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 	}}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 
@@ -595,7 +595,7 @@ func TestEjectChunkNoFilter(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -609,7 +609,7 @@ func TestEjectChunkNoFilter(t *testing.T) {
 	mock := &ejectFakeTransferrer{}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	orch.SetRemoteTransferrer(mock)
@@ -660,7 +660,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 		cursorRecords: records,
 	}
 
-	loader := &ejectConfigLoader{cfg: &system.Config{
+	loader := &ejectSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: srcVaultID},
 			{ID: dstVaultID},
@@ -676,7 +676,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	dstCM := &appendRecordingCM{}
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	// Register destination vault locally.
@@ -791,7 +791,7 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	dstIM := indexfile.NewManager(dstDir, nil, nil)
 
 	orch := newTestOrch(t, Config{
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 		LocalNodeID:  nodeID,
 	})
 
@@ -935,7 +935,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	srcIM := indexfile.NewManager(srcDir, nil, nil)
 
 	orchA, err := New(Config{
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 		LocalNodeID:  "node-A",
 	})
 	if err != nil {
@@ -955,7 +955,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	dstIM := indexfile.NewManager(dstDir, nil, nil)
 
 	orchB, err := New(Config{
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 		LocalNodeID:  "node-B",
 	})
 	if err != nil {

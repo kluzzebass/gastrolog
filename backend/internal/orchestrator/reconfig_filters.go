@@ -34,7 +34,9 @@ func findFilter(filters []system.FilterConfig, id uuid.UUID) *system.FilterConfi
 
 // resolveVaultNodeID finds the node that owns the vault's first (active) tier.
 // Returns empty string if the vault has no tiers or the active tier is unassigned.
-func resolveVaultNodeID(cfg *system.Config, vaultID uuid.UUID) string {
+func resolveVaultNodeID(sys *system.System, vaultID uuid.UUID) string {
+	cfg := &sys.Config
+	rt := &sys.Runtime
 	for _, v := range cfg.Vaults {
 		tierIDs := system.VaultTierIDs(cfg.Tiers, v.ID)
 		if v.ID != vaultID || len(tierIDs) == 0 {
@@ -42,7 +44,7 @@ func resolveVaultNodeID(cfg *system.Config, vaultID uuid.UUID) string {
 		}
 		tier := findTierConfig(cfg.Tiers, tierIDs[0])
 		if tier != nil {
-			return tier.LeaderNodeID(cfg.NodeStorageConfigs)
+			return system.LeaderNodeID(rt.TierPlacements[tier.ID], rt.NodeStorageConfigs)
 		}
 	}
 	return ""
@@ -55,18 +57,18 @@ func resolveVaultNodeID(cfg *system.Config, vaultID uuid.UUID) string {
 // Route filter_id fields are resolved via cfg.Filters. Only destination
 // vaults that are currently registered in the orchestrator are included.
 func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
-	cfg, err := o.loadConfig(ctx)
+	sys, err := o.loadSystem(ctx)
 	if err != nil {
-		return fmt.Errorf("load config for filter reload: %w", err)
+		return fmt.Errorf("load system for filter reload: %w", err)
 	}
-	if cfg == nil {
+	if sys == nil {
 		return nil
 	}
 
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
-	return o.reloadFiltersFromRoutes(cfg)
+	return o.reloadFiltersFromRoutes(sys)
 }
 
 // reloadFiltersFromRoutes builds the FilterSet from route configuration.
@@ -75,10 +77,11 @@ func (o *Orchestrator) ReloadFilters(ctx context.Context) error {
 // For each enabled route, resolves the filter expression and compiles a
 // CompiledFilter for each destination vault. If multiple routes target
 // the same vault, the last route's filter wins (AddOrUpdate replaces).
-func (o *Orchestrator) reloadFiltersFromRoutes(cfg *system.Config) error {
-	if cfg == nil {
+func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
+	if sys == nil {
 		return nil
 	}
+	cfg := &sys.Config
 
 	var fs *FilterSet
 	for _, route := range cfg.Routes {
@@ -95,7 +98,7 @@ func (o *Orchestrator) reloadFiltersFromRoutes(cfg *system.Config) error {
 		}
 
 		for _, destID := range route.Destinations {
-			hotTierNode := resolveVaultNodeID(cfg, destID)
+			hotTierNode := resolveVaultNodeID(sys, destID)
 
 			nodeID := ""
 			switch {

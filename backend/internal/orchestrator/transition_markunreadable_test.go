@@ -77,7 +77,7 @@ func setupRemoteTransitionRunner(t *testing.T, transferrer RemoteTransferrer) (*
 		Placements: syntheticPlacements(remoteNodeID),
 		VaultID:    vaultID, Position: 1,
 	})
-	orch.cfgLoader = &transitionConfigLoader{store: store}
+	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	// Ingest and seal a chunk on tier0.
 	for i := range 3 {

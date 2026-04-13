@@ -129,7 +129,7 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 	for _, tc := range tierCfgs {
 		_ = store.PutTier(context.Background(), tc)
 	}
-	orch.cfgLoader = &transitionConfigLoader{store: store}
+	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	return orch, append([]uuid.UUID{vaultID}, tierIDs...), tiers
 }

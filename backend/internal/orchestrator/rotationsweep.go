@@ -22,7 +22,7 @@ const (
 // This discovery-based approach replaces the per-tier lifecycle management
 // (applyTierRotation / reloadTierRotation) — no setup, teardown, or hot-swap.
 func (o *Orchestrator) rotationSweep() {
-	cfg, err := o.loadConfig(context.Background())
+	sys, err := o.loadSystem(context.Background())
 	if err != nil {
 		o.logger.Error("rotation sweep: failed to load config", "error", err)
 		// Fall through with nil cfg — skip policy/cron reconciliation

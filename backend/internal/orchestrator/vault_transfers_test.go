@@ -90,12 +90,12 @@ func (m *mockTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultI
 	return nil
 }
 
-// staticConfigLoader implements orchestrator.ConfigLoader for tests.
-type staticConfigLoader struct {
+// staticSystemLoader implements orchestrator.SystemLoader for tests.
+type staticSystemLoader struct {
 	cfg *system.Config
 }
 
-func (f *staticConfigLoader) Load(_ context.Context) (*system.Config, error) {
+func (f *staticSystemLoader) Load(_ context.Context) (*system.Config, error) {
 	return f.cfg, nil
 }
 
@@ -163,14 +163,14 @@ func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 
 	srcCM, srcIM := newFileVault(t)
 
-	loader := &staticConfigLoader{cfg: &system.Config{
+	loader := &staticSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: dstID},
 		},
 	}}
 
 	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	if err != nil {
@@ -397,7 +397,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 
 	cm := newMemVault(t)
 
-	loader := &staticConfigLoader{cfg: &system.Config{
+	loader := &staticSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
@@ -410,7 +410,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 	}}
 
 	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	if err != nil {
@@ -503,7 +503,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 
 	cm := newMemVault(t)
 
-	loader := &staticConfigLoader{cfg: &system.Config{
+	loader := &staticSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
@@ -516,7 +516,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 	}}
 
 	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	if err != nil {
@@ -633,7 +633,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 
 	cm := newMemVault(t)
 
-	loader := &staticConfigLoader{cfg: &system.Config{
+	loader := &staticSystemLoader{cfg: &system.Config{
 		Vaults: []system.VaultConfig{
 			{ID: vaultID},
 		},
@@ -646,7 +646,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 	}}
 
 	orch, err := orchestrator.New(orchestrator.Config{
-		ConfigLoader: loader,
+		SystemLoader: loader,
 		LocalNodeID:  "node-A",
 	})
 	if err != nil {

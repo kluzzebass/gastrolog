@@ -24,8 +24,8 @@ import (
 // IDs, unknown types, dangling filter references) is the responsibility of
 // the component that consumes the config (e.g., Orchestrator at startup).
 type Store interface {
-	// Load reads the full configuration. Returns nil if nothing exists (bootstrap signal).
-	Load(ctx context.Context) (*Config, error)
+	// Load reads the full system state (config + runtime). Returns nil if nothing exists (bootstrap signal).
+	Load(ctx context.Context) (*System, error)
 
 	// Filters
 	GetFilter(ctx context.Context, id uuid.UUID) (*FilterConfig, error)
@@ -122,10 +122,18 @@ type Store interface {
 	PutTier(ctx context.Context, tier TierConfig) error
 	DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error
 
-	// Node storage (per-node)
+	// Tier placements (runtime — system-managed, not operator-edited)
+	GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([]TierPlacement, error)
+	SetTierPlacements(ctx context.Context, tierID uuid.UUID, placements []TierPlacement) error
+
+	// Node storage (per-node, runtime — discovered at enrollment)
 	GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error)
 	ListNodeStorageConfigs(ctx context.Context) ([]NodeStorageConfig, error)
 	SetNodeStorageConfig(ctx context.Context, cfg NodeStorageConfig) error
+
+	// Setup wizard (runtime — UI state)
+	GetSetupWizardDismissed(ctx context.Context) (bool, error)
+	SetSetupWizardDismissed(ctx context.Context, dismissed bool) error
 }
 
 // LoadServerSettings reads the server-level settings from the store.

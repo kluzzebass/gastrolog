@@ -635,12 +635,12 @@ func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID uuid.UU
 func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 	ctx := context.Background()
 
-	cfg, err := f.store.Load(ctx)
+	sys, err := f.store.Load(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("load config for snapshot: %w", err)
+		return nil, fmt.Errorf("load system for snapshot: %w", err)
 	}
-	if cfg == nil {
-		cfg = &system.Config{}
+	if sys == nil {
+		sys = &system.System{}
 	}
 
 	users, err := f.store.ListUsers(ctx)
@@ -653,12 +653,7 @@ func (f *FSM) Snapshot() (raft.FSMSnapshot, error) {
 		return nil, fmt.Errorf("list refresh tokens for snapshot: %w", err)
 	}
 
-	nodes, err := f.store.ListNodes(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("list nodes for snapshot: %w", err)
-	}
-
-	snap := command.BuildSnapshot(cfg, users, tokens, nodes)
+	snap := command.BuildSnapshot(sys, users, tokens)
 
 	data, err := command.MarshalSnapshot(snap)
 	if err != nil {
@@ -683,15 +678,17 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 		return fmt.Errorf("unmarshal snapshot: %w", err)
 	}
 
-	cfg, users, tokens, nodes, err := command.RestoreSnapshot(snap)
+	sys, users, tokens, err := command.RestoreSnapshot(snap)
 	if err != nil {
 		return fmt.Errorf("restore snapshot: %w", err)
 	}
 
 	newStore := memory.NewStore()
 	ctx := context.Background()
+	cfg := &sys.Config
+	rt := &sys.Runtime
 
-	// Populate config entities.
+	// Config entities.
 	for _, fc := range cfg.Filters {
 		if err := newStore.PutFilter(ctx, fc); err != nil {
 			return fmt.Errorf("restore filter %s: %w", fc.ID, err)
@@ -717,25 +714,21 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore ingester %s: %w", ing.ID, err)
 		}
 	}
-	for _, rt := range cfg.Routes {
-		if err := newStore.PutRoute(ctx, rt); err != nil {
-			return fmt.Errorf("restore route %s: %w", rt.ID, err)
+	for _, route := range cfg.Routes {
+		if err := newStore.PutRoute(ctx, route); err != nil {
+			return fmt.Errorf("restore route %s: %w", route.ID, err)
 		}
 	}
-	// Restore server settings from Config fields (populated by RestoreSnapshot).
-	// Only call SaveServerSettings if the snapshot actually contained settings;
-	// otherwise the empty save would make Load() return a non-nil Config.
 	if settings := snap.GetSettings(); len(settings) > 0 {
 		if _, ok := settings["server"]; ok {
 			if err := newStore.SaveServerSettings(ctx, system.ServerSettings{
-				Auth:                 cfg.Auth,
-				Query:                cfg.Query,
-				Scheduler:            cfg.Scheduler,
-				TLS:                  cfg.TLS,
-				Lookup:               cfg.Lookup,
-				MaxMind:              cfg.MaxMind,
-				Cluster:              cfg.Cluster,
-				SetupWizardDismissed: cfg.SetupWizardDismissed,
+				Auth:      cfg.Auth,
+				Query:     cfg.Query,
+				Scheduler: cfg.Scheduler,
+				TLS:       cfg.TLS,
+				Lookup:    cfg.Lookup,
+				MaxMind:   cfg.MaxMind,
+				Cluster:   cfg.Cluster,
 			}); err != nil {
 				return fmt.Errorf("restore server settings: %w", err)
 			}
@@ -756,41 +749,37 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			return fmt.Errorf("restore cloud service %s: %w", cs.ID, err)
 		}
 	}
-	for _, nsc := range cfg.NodeStorageConfigs {
-		if err := newStore.SetNodeStorageConfig(ctx, nsc); err != nil {
-			return fmt.Errorf("restore node storage config %s: %w", nsc.NodeID, err)
-		}
-	}
 	for _, tier := range cfg.Tiers {
 		if err := newStore.PutTier(ctx, tier); err != nil {
 			return fmt.Errorf("restore tier %s: %w", tier.ID, err)
 		}
 	}
 
-	// Populate users.
+	// Users and tokens.
 	for _, u := range users {
 		if err := newStore.CreateUser(ctx, u); err != nil {
 			return fmt.Errorf("restore user %s: %w", u.ID, err)
 		}
 	}
-
-	// Populate refresh tokens.
 	for _, t := range tokens {
 		if err := newStore.CreateRefreshToken(ctx, t); err != nil {
 			return fmt.Errorf("restore refresh token %s: %w", t.ID, err)
 		}
 	}
 
-	// Populate nodes.
-	for _, n := range nodes {
+	// Runtime: nodes, storage, TLS.
+	for _, n := range rt.Nodes {
 		if err := newStore.PutNode(ctx, n); err != nil {
 			return fmt.Errorf("restore node %s: %w", n.ID, err)
 		}
 	}
-
-	// Restore cluster TLS from Config (populated by RestoreSnapshot).
-	if cfg.ClusterTLS != nil {
-		if err := newStore.PutClusterTLS(ctx, *cfg.ClusterTLS); err != nil {
+	for _, nsc := range rt.NodeStorageConfigs {
+		if err := newStore.SetNodeStorageConfig(ctx, nsc); err != nil {
+			return fmt.Errorf("restore node storage config %s: %w", nsc.NodeID, err)
+		}
+	}
+	if rt.ClusterTLS != nil {
+		if err := newStore.PutClusterTLS(ctx, *rt.ClusterTLS); err != nil {
 			return fmt.Errorf("restore cluster TLS: %w", err)
 		}
 	}

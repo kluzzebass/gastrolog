@@ -18,17 +18,17 @@ var (
 	ErrVaultDisabled = errors.New("vault disabled")
 	// ErrDuplicateID is returned when attempting to add a component with an existing ID.
 	ErrDuplicateID = errors.New("duplicate ID")
-	// ErrNoConfigLoader is returned when a hot-update method is called without a ConfigLoader.
-	ErrNoConfigLoader = errors.New("no config loader configured")
+	// ErrNoSystemLoader is returned when a hot-update method is called without a SystemLoader.
+	ErrNoSystemLoader = errors.New("no config loader configured")
 )
 
-// loadConfig loads the full configuration via the ConfigLoader.
-// Returns ErrNoConfigLoader if no ConfigLoader is set.
-func (o *Orchestrator) loadConfig(ctx context.Context) (*system.Config, error) {
-	if o.cfgLoader == nil {
-		return nil, ErrNoConfigLoader
+// loadSystem loads the full system state (config + runtime) via the SystemLoader.
+// Returns ErrNoSystemLoader if no SystemLoader is set.
+func (o *Orchestrator) loadSystem(ctx context.Context) (*system.System, error) {
+	if o.sysLoader == nil {
+		return nil, ErrNoSystemLoader
 	}
-	return o.cfgLoader.Load(ctx)
+	return o.sysLoader.Load(ctx)
 }
 
 // MaxConcurrentJobs returns the current scheduler concurrency limit.
@@ -40,3 +40,4 @@ func (o *Orchestrator) MaxConcurrentJobs() int {
 func (o *Orchestrator) UpdateMaxConcurrentJobs(n int) error {
 	return o.scheduler.Rebuild(n)
 }
+

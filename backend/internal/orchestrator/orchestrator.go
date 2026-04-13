@@ -249,7 +249,7 @@ type Orchestrator struct {
 	now func() time.Time
 
 	// Config loader for hot-update operations.
-	cfgLoader ConfigLoader
+	sysLoader SystemLoader
 
 	// Local node identity for multi-node filtering.
 	localNodeID string
@@ -316,27 +316,27 @@ func (o *Orchestrator) NotifyChunkChange() {
 // alert messages that say "tier ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
 func (o *Orchestrator) tierLabel(tierID uuid.UUID) string {
-	if o.cfgLoader == nil {
+	if o.sysLoader == nil {
 		return ""
 	}
-	cfg, err := o.cfgLoader.Load(context.Background())
-	if err != nil || cfg == nil {
+	sys, err := o.sysLoader.Load(context.Background())
+	if err != nil || sys == nil {
 		return ""
 	}
-	if tierCfg := findTierConfig(cfg.Tiers, tierID); tierCfg != nil {
+	if tierCfg := findTierConfig(sys.Config.Tiers, tierID); tierCfg != nil {
 		return tierCfg.Name
 	}
 	return ""
 }
 
-// ConfigLoader provides read access to the full configuration.
+// SystemLoader provides read access to the full system state.
 // The orchestrator uses this during hot-update operations (ReloadFilters,
 // ReloadRotationPolicies, etc.) to resolve references like filter IDs
 // and policy IDs without the server having to mediate.
 //
 // system.Store satisfies this interface.
-type ConfigLoader interface {
-	Load(ctx context.Context) (*system.Config, error)
+type SystemLoader interface {
+	Load(ctx context.Context) (*system.System, error)
 }
 
 // Config configures an Orchestrator.
@@ -356,11 +356,11 @@ type Config struct {
 	// The orchestrator scopes this logger with component="orchestrator".
 	Logger *slog.Logger
 
-	// ConfigLoader provides read access to the full configuration.
+	// SystemLoader provides read access to the full configuration.
 	// If set, the orchestrator can reload config internally during
 	// hot-update operations (ReloadFilters, AddVault, etc.).
 	// If nil, hot-update methods that require config will return an error.
-	ConfigLoader ConfigLoader
+	SystemLoader SystemLoader
 
 	// LocalNodeID is the raft server ID of this node. Used to filter
 	// vaults and ingesters during ApplyConfig — only entities assigned
@@ -415,7 +415,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		scheduler:       sched,
 		cronRotation:    newCronRotationManager(sched, logger),
 		ingestSize:      cfg.IngestChannelSize,
-		cfgLoader:       cfg.ConfigLoader,
+		sysLoader:       cfg.SystemLoader,
 		localNodeID:     cfg.LocalNodeID,
 		ingestSeqs:      make(map[string]uint32),
 		alerts:          cfg.Alerts,

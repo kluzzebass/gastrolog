@@ -191,7 +191,7 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		VaultID: vaultID, Position: 1,
 	})
 
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	// Stop scheduler — we drive transitions manually.
 	_ = orch.Scheduler().Stop()
 
@@ -491,7 +491,7 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 		VaultID: vaultID, Position: 1,
 	})
 
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	orch.RegisterVault(NewVault(vaultID, tier0, tier1))
@@ -667,7 +667,7 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 		VaultID: vaultID, Position: 1,
 	})
 
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	orch.RegisterVault(NewVault(vaultID, cloudTier, nextTier))
@@ -744,7 +744,7 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 		VaultID: vaultID, Position: 1,
 	})
 
-	orch := newTestOrch(t, Config{LocalNodeID: nodeID, ConfigLoader: &transitionConfigLoader{store: store}})
+	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
 	_ = orch.Scheduler().Stop()
 
 	orch.RegisterVault(NewVault(vaultID, tier0, tier1))
@@ -842,7 +842,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 
 	orchA, err := New(Config{
 		LocalNodeID:  "node-A",
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -863,7 +863,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 
 	orchB, err := New(Config{
 		LocalNodeID:  "node-B",
-		ConfigLoader: &transitionConfigLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store},
 	})
 	if err != nil {
 		t.Fatal(err)

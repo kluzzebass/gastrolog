@@ -160,7 +160,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	orch, err := orchestrator.New(orchestrator.Config{
 		Logger:            logger,
 		MaxConcurrentJobs: loadMaxConcurrentJobs(ctx, cfgStore),
-		ConfigLoader:      cfgStore,
+		SystemLoader:      cfgStore,
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
 		Phase:             shutdownPhase,

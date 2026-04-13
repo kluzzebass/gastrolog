@@ -1138,8 +1138,8 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 }
 
 // newFilteredTestSetupWithLoader is like newFilteredTestSetup but accepts a
-// *fakeConfigLoader and passes it as the ConfigLoader in orchestrator.Config.
-func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*orchestrator.Orchestrator, filteredTestVaults) {
+// *fakeSystemLoader and passes it as the SystemLoader in orchestrator.Config.
+func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*orchestrator.Orchestrator, filteredTestVaults) {
 	t.Helper()
 
 	vaults := filteredTestVaults{
@@ -1150,7 +1150,7 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeConfigLoader) (*or
 		cms:      make(map[uuid.UUID]chunk.ChunkManager),
 	}
 
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: loader})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
 	if err != nil {
 		t.Fatal(err)
 	}

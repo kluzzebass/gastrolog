@@ -113,7 +113,7 @@ func newConfigTestSetup(t *testing.T) (gastrologv1connect.SystemServiceClient, s
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func newConfigTestSetupWithIngesters(t *testing.T) (gastrologv1connect.SystemSer
 	t.Helper()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,7 +710,7 @@ func TestListIngestersRemoteRunning(t *testing.T) {
 	ctx := context.Background()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, LocalNodeID: "node-A"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -758,7 +758,7 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 	ctx := context.Background()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, LocalNodeID: "node-A"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -807,7 +807,7 @@ func TestGetIngesterStatusLocal(t *testing.T) {
 	ctx := context.Background()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, LocalNodeID: "node-A"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -854,7 +854,7 @@ func TestListIngestersNoPeerStats(t *testing.T) {
 	ctx := context.Background()
 
 	cfgStore := sysmem.NewStore()
-	orch, err := orchestrator.New(orchestrator.Config{ConfigLoader: cfgStore, LocalNodeID: "node-A"})
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore, LocalNodeID: "node-A"})
 	if err != nil {
 		t.Fatal(err)
 	}

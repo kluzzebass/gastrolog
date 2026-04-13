@@ -13,14 +13,13 @@ import (
 // ServerSettings groups the server-level settings that are loaded/saved
 // atomically via LoadServerSettings / SaveServerSettings.
 type ServerSettings struct {
-	Auth                 AuthConfig      `json:"auth,omitzero"`
-	Query                QueryConfig     `json:"query,omitzero"`
-	Scheduler            SchedulerConfig `json:"scheduler,omitzero"`
-	TLS                  TLSConfig       `json:"tls,omitzero"`
-	Lookup               LookupConfig    `json:"lookup,omitzero"`
-	Cluster              ClusterConfig   `json:"cluster,omitzero"`
-	MaxMind              MaxMindConfig   `json:"maxmind,omitzero"`
-	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
+	Auth      AuthConfig      `json:"auth,omitzero"`
+	Query     QueryConfig     `json:"query,omitzero"`
+	Scheduler SchedulerConfig `json:"scheduler,omitzero"`
+	TLS       TLSConfig       `json:"tls,omitzero"`
+	Lookup    LookupConfig    `json:"lookup,omitzero"`
+	Cluster   ClusterConfig   `json:"cluster,omitzero"`
+	MaxMind   MaxMindConfig   `json:"maxmind,omitzero"`
 }
 
 // ClusterConfig holds cluster-wide settings.
@@ -39,6 +38,15 @@ type ClusterConfig struct {
 // live directly on Config rather than in a separate wrapper.
 // The Store interface provides typed Load/SaveServerSettings methods for
 // persisting these fields independently of entity CRUD.
+// System is the top-level state managed by the system Raft group.
+// Config holds operator-controlled settings. Runtime holds cluster-managed state.
+type System struct {
+	Config  Config  `json:"config"`
+	Runtime Runtime `json:"runtime"`
+}
+
+// Config holds operator-controlled settings — things the operator creates,
+// edits, and deletes via the CLI or UI.
 type Config struct {
 	// Entity collections.
 	Filters           []FilterConfig          `json:"filters,omitempty"`
@@ -48,25 +56,18 @@ type Config struct {
 	Vaults            []VaultConfig           `json:"vaults,omitempty"`
 	Routes            []RouteConfig           `json:"routes,omitempty"`
 	Certs             []CertPEM               `json:"certs,omitempty"`
-	Nodes             []NodeConfig            `json:"nodes,omitempty"`
-	ManagedFiles       []ManagedFileConfig      `json:"managedFiles,omitempty"`
-	CloudServices      []CloudService           `json:"cloudServices,omitempty"`
-	NodeStorageConfigs []NodeStorageConfig      `json:"nodeStorageConfigs,omitempty"`
-	Tiers              []TierConfig             `json:"tiers,omitempty"`
+	ManagedFiles      []ManagedFileConfig     `json:"managedFiles,omitempty"`
+	CloudServices     []CloudService          `json:"cloudServices,omitempty"`
+	Tiers             []TierConfig            `json:"tiers,omitempty"`
 
 	// Server-level settings.
-	Auth                 AuthConfig      `json:"auth,omitzero"`
-	Query                QueryConfig     `json:"query,omitzero"`
-	Scheduler            SchedulerConfig `json:"scheduler,omitzero"`
-	TLS                  TLSConfig       `json:"tls,omitzero"`
-	Lookup               LookupConfig    `json:"lookup,omitzero"`
-	Cluster              ClusterConfig   `json:"cluster,omitzero"`
-	MaxMind              MaxMindConfig   `json:"maxmind,omitzero"`
-	SetupWizardDismissed bool            `json:"setup_wizard_dismissed,omitempty"`
-
-	// Cluster TLS material (mTLS certs for cluster gRPC port).
-	// Nil when running in single-node mode or before cluster-init.
-	ClusterTLS *ClusterTLS `json:"cluster_tls,omitempty"`
+	Auth      AuthConfig      `json:"auth,omitzero"`
+	Query     QueryConfig     `json:"query,omitzero"`
+	Scheduler SchedulerConfig `json:"scheduler,omitzero"`
+	TLS       TLSConfig       `json:"tls,omitzero"`
+	Lookup    LookupConfig    `json:"lookup,omitzero"`
+	Cluster   ClusterConfig   `json:"cluster,omitzero"`
+	MaxMind   MaxMindConfig   `json:"maxmind,omitzero"`
 }
 
 // ---------------------------------------------------------------------------

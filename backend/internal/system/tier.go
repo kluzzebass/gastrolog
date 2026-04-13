@@ -84,8 +84,7 @@ type TierConfig struct {
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
 	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks
-	ReplicationFactor uint32          `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
-	Placements        []TierPlacement `json:"placements,omitempty"`        // system-managed: storage assignments
+	ReplicationFactor uint32 `json:"replicationFactor,omitempty"` // desired RF (1 = no replication)
 	CacheEviction string `json:"cacheEviction,omitempty"` // "lru" (default) or "ttl"
 	CacheBudget   string `json:"cacheBudget,omitempty"`   // max cache size (e.g. "1GB", "500MB", default: "1GiB")
 	CacheTTL      string `json:"cacheTtl,omitempty"`      // duration for TTL mode (e.g. "1h", "7d")
@@ -99,8 +98,8 @@ type TierPlacement struct {
 }
 
 // LeaderStorageID returns the storage ID of the leader placement, or empty if unplaced.
-func (t TierConfig) LeaderStorageID() string {
-	for _, p := range t.Placements {
+func LeaderStorageID(placements []TierPlacement) string {
+	for _, p := range placements {
 		if p.Leader {
 			return p.StorageID
 		}
@@ -109,9 +108,9 @@ func (t TierConfig) LeaderStorageID() string {
 }
 
 // FollowerStorageIDs returns the storage IDs of all follower placements.
-func (t TierConfig) FollowerStorageIDs() []string {
+func FollowerStorageIDs(placements []TierPlacement) []string {
 	var ids []string
-	for _, p := range t.Placements {
+	for _, p := range placements {
 		if !p.Leader {
 			ids = append(ids, p.StorageID)
 		}
@@ -120,9 +119,9 @@ func (t TierConfig) FollowerStorageIDs() []string {
 }
 
 // StorageIDs returns all placed storage IDs (leader first, then followers).
-func (t TierConfig) StorageIDs() []string {
+func StorageIDs(placements []TierPlacement) []string {
 	var ids []string
-	for _, p := range t.Placements {
+	for _, p := range placements {
 		if p.Leader {
 			ids = append([]string{p.StorageID}, ids...)
 		} else {
@@ -194,8 +193,8 @@ func StorageIDForNode(nodeID string, tier TierConfig, nscs []NodeStorageConfig) 
 }
 
 // LeaderNodeID derives the leader node from placements + storage configs.
-func (t TierConfig) LeaderNodeID(nscs []NodeStorageConfig) string {
-	storageID := t.LeaderStorageID()
+func LeaderNodeID(placements []TierPlacement, nscs []NodeStorageConfig) string {
+	storageID := LeaderStorageID(placements)
 	if storageID == "" {
 		return ""
 	}
@@ -205,10 +204,10 @@ func (t TierConfig) LeaderNodeID(nscs []NodeStorageConfig) string {
 // FollowerNodeIDs derives unique follower node IDs from placements + storage configs.
 // Multiple same-node placements are deduplicated. Use FollowerTargets for
 // storage-level granularity.
-func (t TierConfig) FollowerNodeIDs(nscs []NodeStorageConfig) []string {
+func FollowerNodeIDs(placements []TierPlacement, nscs []NodeStorageConfig) []string {
 	var nodeIDs []string
 	seen := make(map[string]bool)
-	for _, storageID := range t.FollowerStorageIDs() {
+	for _, storageID := range FollowerStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" && !seen[nid] {
 			seen[nid] = true
@@ -227,9 +226,9 @@ type ReplicationTarget struct {
 // FollowerTargets returns one target per follower placement — NOT deduplicated
 // by node. Multiple placements on the same node produce multiple targets,
 // enabling same-node replication across different file storages.
-func (t TierConfig) FollowerTargets(nscs []NodeStorageConfig) []ReplicationTarget {
+func FollowerTargets(placements []TierPlacement, nscs []NodeStorageConfig) []ReplicationTarget {
 	var targets []ReplicationTarget
-	for _, storageID := range t.FollowerStorageIDs() {
+	for _, storageID := range FollowerStorageIDs(placements) {
 		nid := NodeIDForStorage(storageID, nscs)
 		if nid != "" {
 			targets = append(targets, ReplicationTarget{NodeID: nid, StorageID: storageID})

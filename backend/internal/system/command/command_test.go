@@ -506,7 +506,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		},
 	}
 
-	snap := BuildSnapshot(cfg, users, tokens, nil)
+	snap := BuildSnapshot(&system.System{Config: *cfg}, users, tokens)
 	b, err := MarshalSnapshot(snap)
 	if err != nil {
 		t.Fatalf("MarshalSnapshot: %v", err)
