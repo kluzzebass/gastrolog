@@ -53,7 +53,8 @@ func tierNode(t *testing.T, store *sysmem.Store, tierID uuid.UUID) string {
 	if err != nil {
 		t.Fatalf("ListNodeStorageConfigs: %v", err)
 	}
-	return system.LeaderNodeID(nil, nscs)
+	placements, _ := store.GetTierPlacements(ctx, tierID)
+	return system.LeaderNodeID(placements, nscs)
 }
 
 func hasAlert(alerts *alert.Collector, prefix string) bool {
@@ -736,14 +737,14 @@ func TestPlacementRF2AssignsSecondary(t *testing.T) {
 
 	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if system.LeaderNodeID(nil, nscs) == "" {
+	if system.LeaderNodeID(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) == "" {
 		t.Fatal("expected leader assigned")
 	}
-	followers := system.FollowerNodeIDs(nil, nscs)
+	followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs)
 	if len(followers) != 1 {
 		t.Fatalf("expected 1 follower, got %d", len(followers))
 	}
-	if followers[0] == system.LeaderNodeID(nil, nscs) {
+	if followers[0] == system.LeaderNodeID(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs) {
 		t.Error("follower should not be the same as leader")
 	}
 }
@@ -762,7 +763,7 @@ func TestPlacementRF1NoSecondaries(t *testing.T) {
 
 	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
-	if followers := system.FollowerNodeIDs(nil, nscs); len(followers) != 0 {
+	if followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 0 {
 		t.Errorf("expected 0 followers for RF=1, got %d", len(followers))
 	}
 }
@@ -782,7 +783,7 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 	_, _ = store.GetTier(ctx, tierID)
 	nscs, _ := store.ListNodeStorageConfigs(ctx)
 	// RF=3 needs 2 followers, but only 1 other node available.
-	if followers := system.FollowerNodeIDs(nil, nscs); len(followers) != 1 {
+	if followers := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := store.GetTierPlacements(ctx, tierID); return p }(), nscs); len(followers) != 1 {
 		t.Errorf("expected 1 follower (max available), got %d", len(followers))
 	}
 	if !hasAlert(alerts, "tier-underreplicated:") {
