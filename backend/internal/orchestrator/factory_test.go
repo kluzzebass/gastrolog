@@ -540,7 +540,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	storageID := uuid.Must(uuid.NewV7())
+	_ = uuid.Must(uuid.NewV7())
 
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{
@@ -548,11 +548,6 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 		Tiers: []system.TierConfig{
 			{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
-		},
-		NodeStorageConfigs: []system.NodeStorageConfig{
-			{NodeID: "node-1", FileStorages: []system.FileStorage{
-				{ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks"},
-			}},
 		},
 	}
 

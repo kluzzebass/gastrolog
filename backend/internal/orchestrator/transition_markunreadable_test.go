@@ -52,7 +52,7 @@ func setupRemoteTransitionRunner(t *testing.T, transferrer RemoteTransferrer) (*
 	tier0ID := uuid.Must(uuid.NewV7())
 	tier1ID := uuid.Must(uuid.NewV7())
 	localNodeID := "local-node"
-	remoteNodeID := "remote-node"
+	_ = "remote-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
 	tier1 := newMemoryTierInstance(t, tier1ID)

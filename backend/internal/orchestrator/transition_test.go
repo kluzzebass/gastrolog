@@ -34,11 +34,52 @@ func syntheticPlacements(nodeID string) []system.TierPlacement {
 // ---------- config loader adapter ----------
 
 type transitionSystemLoader struct {
-	store *sysmem.Store
+	store  *sysmem.Store
+	nodeID string // defaults to "test-node" if empty
 }
 
 func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, error) {
-	return l.store.Load(ctx)
+	sys, err := l.store.Load(ctx)
+	if err != nil || sys == nil {
+		return sys, err
+	}
+	// Auto-populate placements for test tiers that don't have them.
+	nodeID := l.nodeID
+	if nodeID == "" {
+		nodeID = "test-node"
+	}
+	if sys.Runtime.TierPlacements == nil {
+		sys.Runtime.TierPlacements = make(map[uuid.UUID][]system.TierPlacement)
+	}
+	for _, tier := range sys.Config.Tiers {
+		if _, ok := sys.Runtime.TierPlacements[tier.ID]; !ok {
+			sys.Runtime.TierPlacements[tier.ID] = []system.TierPlacement{
+				{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+			}
+		}
+	}
+	return sys, nil
+}
+
+// newTestStore creates a memory store and populates it with config entities
+// AND runtime placements for single-node tests. Each tier gets a synthetic
+// leader placement for nodeID.
+func newTestStore(cfg *system.Config, nodeID string) *sysmem.Store {
+	store := sysmem.NewStore()
+	ctx := context.Background()
+	for _, v := range cfg.Vaults {
+		_ = store.PutVault(ctx, v)
+	}
+	for _, tc := range cfg.Tiers {
+		_ = store.PutTier(ctx, tc)
+		_ = store.SetTierPlacements(ctx, tc.ID, []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+		})
+	}
+	for _, rt := range cfg.Routes {
+		_ = store.PutRoute(ctx, rt)
+	}
+	return store
 }
 
 // ---------- helpers ----------
@@ -84,6 +125,18 @@ func newMemoryTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
 	}
 }
 
+// setupTestStoreRuntime populates the test store with runtime state that tests
+// need — tier placements and node storage config. Most tests use memory tiers
+// with a single test-node, so placements use synthetic storage IDs.
+func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...uuid.UUID) {
+	ctx := context.Background()
+	for _, tid := range tierIDs {
+		_ = store.SetTierPlacements(ctx, tid, []system.TierPlacement{
+			{StorageID: system.SyntheticStorageID(nodeID), Leader: true},
+		})
+	}
+}
+
 func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.UUID, *system.Config) {
 	t.Helper()
 	vaultID := uuid.Must(uuid.NewV7())
@@ -105,6 +158,8 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.
 			{ID: vaultID, Name: "test-vault"},
 		},
 		Tiers: []system.TierConfig{
+			{ID: tier0ID, Name: "hot", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0},
+			{ID: tier1ID, Name: "warm", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1},
 		},
 	}
 
@@ -131,13 +186,7 @@ func TestTransitionSameNodeTwoTiers(t *testing.T) {
 	orch, vaultID, tier0ID, tier1ID, cfg := setupTwoTierVault(t)
 
 	// Use a real config store so the transition can load system.
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -205,13 +254,7 @@ func TestTransitionRecordIntegrity(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -306,13 +349,7 @@ func TestTransitionEmptyChunk(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -345,13 +382,7 @@ func TestTransitionMultipleChunks(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -401,13 +432,7 @@ func TestTransitionSourceChunkDeleted(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -541,9 +566,9 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	_ = uuid.Must(uuid.NewV7())
 	localNode := "local-node"
-	remoteNode := "remote-node"
+	_ = "remote-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
 	orch := newTestOrch(t, Config{LocalNodeID: localNode})
@@ -595,9 +620,9 @@ func TestTransitionNoTransferrer(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	_ = uuid.Must(uuid.NewV7())
 	localNode := "local-node"
-	remoteNode := "remote-node"
+	_ = "remote-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
 	orch := newTestOrch(t, Config{LocalNodeID: localNode})
@@ -641,13 +666,7 @@ func TestTransitionSweepDispatch(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -817,7 +836,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 	nodeID := "test-node"
 	vaultID := uuid.Must(uuid.NewV7())
 	cloudTierID := uuid.Must(uuid.NewV7())
-	fsID := uuid.Must(uuid.NewV7())
+	_ = uuid.Must(uuid.NewV7())
 	csID := uuid.Must(uuid.NewV7())
 
 	storageDir := t.TempDir()
@@ -848,15 +867,6 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 			Name:     "test-cloud",
 			Provider: "memory",
 		}},
-		NodeStorageConfigs: []system.NodeStorageConfig{{
-			NodeID: nodeID,
-			FileStorages: []system.FileStorage{{
-				ID:           fsID,
-				StorageClass: 1,
-				Name:         "disk-1",
-				Path:         storageDir,
-			}},
-		}},
 	}
 
 	factories := Factories{
@@ -876,7 +886,7 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 	store := sysmem.NewStore()
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
-	if err := orch.ApplyConfig(cfg, factories); err != nil {
+	if err := orch.ApplyConfig(&system.System{Config: *cfg}, factories); err != nil {
 		t.Fatalf("ApplyConfig failed: %v", err)
 	}
 
@@ -960,7 +970,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	cloudTierID := uuid.Must(uuid.NewV7())
 	nextTierID := uuid.Must(uuid.NewV7())
 	leaderNode := "leader-node"
-	followerNode := "follower-node"
+	_ = "follower-node"
 
 	cloudStore := blobstore.NewMemory()
 
@@ -1735,13 +1745,7 @@ func TestTransitionEventIDPreserved(t *testing.T) {
 	t.Parallel()
 	orch, vaultID, tier0ID, _, cfg := setupTwoTierVault(t)
 
-	store := sysmem.NewStore()
-	for _, v := range cfg.Vaults {
-		_ = store.PutVault(context.Background(), v)
-	}
-	for _, tc := range cfg.Tiers {
-		_ = store.PutTier(context.Background(), tc)
-	}
+	store := newTestStore(cfg, "test-node")
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	vault := orch.vaults[vaultID]
@@ -2407,7 +2411,6 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 				tier.FollowerTargets = followerTargets
 			} else {
 				tier.IsFollower = true
-				tier.LeaderNodeID = leaderID
 			}
 			tiers[i] = tier
 		}
@@ -3263,11 +3266,9 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	orchLeader.RegisterVault(NewVault(vaultID, leaderMemTier, leaderFileTier))
 
 	followerMemTier := &TierInstance{
-		TierID: tier0ID, Type: "memory", IsFollower: true, LeaderNodeID: leaderNode,
 		Chunks: memCMFollower, Indexes: memIMFollower, Query: query.New(memCMFollower, memIMFollower, nil),
 	}
 	followerFileTier := &TierInstance{
-		TierID: tier1ID, Type: "file", IsFollower: true, LeaderNodeID: leaderNode,
 		Chunks: fileCMFollower, Indexes: fileIMFollower, Query: query.New(fileCMFollower, fileIMFollower, nil),
 	}
 	orchFollower.RegisterVault(NewVault(vaultID, followerMemTier, followerFileTier))
@@ -3316,7 +3317,7 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	nodeID := "test-node"
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	fsID := uuid.Must(uuid.NewV7())
+	_ = uuid.Must(uuid.NewV7())
 	policyID := uuid.Must(uuid.NewV7())
 
 	storageDir := t.TempDir()
@@ -3344,15 +3345,6 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 			Name:       "3-records",
 			MaxRecords: &maxRecords,
 		}},
-		NodeStorageConfigs: []system.NodeStorageConfig{{
-			NodeID: nodeID,
-			FileStorages: []system.FileStorage{{
-				ID:           fsID,
-				StorageClass: 1,
-				Name:         "disk-1",
-				Path:         storageDir,
-			}},
-		}},
 	}
 
 	factories := Factories{
@@ -3372,7 +3364,7 @@ func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	store := sysmem.NewStore()
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
-	if err := orch.ApplyConfig(cfg, factories); err != nil {
+	if err := orch.ApplyConfig(&system.System{Config: *cfg}, factories); err != nil {
 		t.Fatalf("ApplyConfig failed: %v", err)
 	}
 

@@ -79,8 +79,8 @@ type mockSystemLoader struct {
 	cfg *system.Config
 }
 
-func (m *mockSystemLoader) Load(_ context.Context) (*system.Config, error) {
-	return m.cfg, nil
+func (m *mockSystemLoader) Load(_ context.Context) (*system.System, error) {
+	if m.cfg == nil { return nil, nil }; return &system.System{Config: *m.cfg}, nil
 }
 
 func TestIngestForwardsToRemoteVault(t *testing.T) {
@@ -168,7 +168,7 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 		},
 	}}
 
-	if err := o.reloadFiltersFromRoutes(o.sysLoader.(*mockSystemLoader).cfg); err != nil {
+	if err := o.reloadFiltersFromRoutes(func() *system.System { s, _ := o.sysLoader.Load(context.Background()); return s }()); err != nil {
 		t.Fatalf("reloadFiltersFromRoutes failed: %v", err)
 	}
 

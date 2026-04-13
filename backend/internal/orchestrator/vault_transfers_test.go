@@ -95,8 +95,8 @@ type staticSystemLoader struct {
 	cfg *system.Config
 }
 
-func (f *staticSystemLoader) Load(_ context.Context) (*system.Config, error) {
-	return f.cfg, nil
+func (f *staticSystemLoader) Load(_ context.Context) (*system.System, error) {
+	if f.cfg == nil { return nil, nil }; return &system.System{Config: *f.cfg}, nil
 }
 
 func newFileVault(t *testing.T) (chunk.ChunkManager, *indexfile.Manager) {

@@ -364,8 +364,8 @@ func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
 
 type testSystemLoader struct{ cfg *system.Config }
 
-func (l testSystemLoader) Load(_ context.Context) (*system.Config, error) {
-	return l.cfg, nil
+func (l testSystemLoader) Load(_ context.Context) (*system.System, error) {
+	if l.cfg == nil { return nil, nil }; return &system.System{Config: *l.cfg}, nil
 }
 
 func strPtr(s string) *string { return &s }

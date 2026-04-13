@@ -23,8 +23,8 @@ type fakeSystemLoader struct {
 	cfg *system.Config
 }
 
-func (f *fakeSystemLoader) Load(_ context.Context) (*system.Config, error) {
-	return f.cfg, nil
+func (f *fakeSystemLoader) Load(_ context.Context) (*system.System, error) {
+	if f.cfg == nil { return nil, nil }; return &system.System{Config: *f.cfg}, nil
 }
 
 // memVaultCfg creates a VaultConfig + TierConfig pair for a memory-backed vault.
