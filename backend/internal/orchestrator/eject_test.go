@@ -756,6 +756,8 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
 		VaultID: dstVaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), srcTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})
+	_ = store.SetTierPlacements(context.Background(), dstTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "catch-all", Expression: "*",
 	})
@@ -789,7 +791,7 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	dstIM := indexfile.NewManager(dstDir, nil, nil)
 
 	orch := newTestOrch(t, Config{
-		SystemLoader: &transitionSystemLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store, nodeID: nodeID},
 		LocalNodeID:  nodeID,
 	})
 
@@ -912,6 +914,8 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 		ID: dstTierID, Name: "dst-hot", Type: system.TierTypeFile,
 		VaultID: dstVaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), srcTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-A"), Leader: true}})
+	_ = store.SetTierPlacements(context.Background(), dstTierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("node-B"), Leader: true}})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "catch-all", Expression: "*",
 	})
@@ -931,7 +935,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	srcIM := indexfile.NewManager(srcDir, nil, nil)
 
 	orchA, err := New(Config{
-		SystemLoader: &transitionSystemLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store, nodeID: "node-A"},
 		LocalNodeID:  "node-A",
 	})
 	if err != nil {
@@ -951,7 +955,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	dstIM := indexfile.NewManager(dstDir, nil, nil)
 
 	orchB, err := New(Config{
-		SystemLoader: &transitionSystemLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store, nodeID: "node-B"},
 		LocalNodeID:  "node-B",
 	})
 	if err != nil {

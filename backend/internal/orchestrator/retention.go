@@ -82,14 +82,14 @@ type sweepTarget struct {
 //     the leader has removed. No independent rule evaluation.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
-	cfg := &sys.Config
 	if err != nil {
 		o.logger.Error("retention: failed to load config", "error", err)
 		return
 	}
-	if cfg == nil {
+	if sys == nil {
 		return
 	}
+	cfg := &sys.Config
 
 	var targets []sweepTarget
 	var reconcileTiers []*TierInstance

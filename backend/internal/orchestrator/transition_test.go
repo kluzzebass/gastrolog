@@ -518,10 +518,16 @@ func TestTransitionCrossNode(t *testing.T) {
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), tier0ID, []system.TierPlacement{
+		{StorageID: system.SyntheticStorageID(localNode), Leader: true},
+	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
 		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
-	orch.sysLoader = &transitionSystemLoader{store: store}
+	_ = store.SetTierPlacements(context.Background(), tier1ID, []system.TierPlacement{
+		{StorageID: system.SyntheticStorageID(remoteNode), Leader: true},
+	})
+	orch.sysLoader = &transitionSystemLoader{nodeID: localNode, store: store}
 
 	// Ingest and seal.
 	for range 3 {
@@ -1014,7 +1020,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 		ID: nextTierID, Name: "local", Type: system.TierTypeFile,
 		VaultID: vaultID, Position: 1,
 	})
-	leaderOrch.sysLoader = &transitionSystemLoader{store: store}
+	leaderOrch.sysLoader = &transitionSystemLoader{store: store, nodeID: leaderNode}
 
 	// Ingest records on leader, seal, and upload to cloud.
 	const recordCount = 20
@@ -1997,10 +2003,10 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 		ID: vaultID, Name: "cloud-search",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: cloudTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
+		ID: cloudTierID, Name: "cloud", Type: system.TierTypeCloud, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -2367,6 +2373,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 			Position:   uint32(i),
 		}
 		_ = store.PutTier(context.Background(), tierCfgs[i])
+		_ = store.SetTierPlacements(context.Background(), tierIDs[i], placements)
 	}
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cluster-vault",
@@ -3250,11 +3257,11 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 
 	orchLeader := newTestOrch(t, Config{
 		LocalNodeID:  leaderNode,
-		SystemLoader: &transitionSystemLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store, nodeID: leaderNode},
 	})
 	orchFollower := newTestOrch(t, Config{
 		LocalNodeID:  followerNode,
-		SystemLoader: &transitionSystemLoader{store: store},
+		SystemLoader: &transitionSystemLoader{store: store, nodeID: followerNode},
 	})
 
 	leaderMemTier := &TierInstance{
@@ -3268,9 +3275,11 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	orchLeader.RegisterVault(NewVault(vaultID, leaderMemTier, leaderFileTier))
 
 	followerMemTier := &TierInstance{
+		TierID: tier0ID, Type: "memory", IsFollower: true,
 		Chunks: memCMFollower, Indexes: memIMFollower, Query: query.New(memCMFollower, memIMFollower, nil),
 	}
 	followerFileTier := &TierInstance{
+		TierID: tier1ID, Type: "file", IsFollower: true,
 		Chunks: fileCMFollower, Indexes: fileIMFollower, Query: query.New(fileCMFollower, fileIMFollower, nil),
 	}
 	orchFollower.RegisterVault(NewVault(vaultID, followerMemTier, followerFileTier))

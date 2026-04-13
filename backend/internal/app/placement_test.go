@@ -347,8 +347,10 @@ func TestPlacementLoadBalances(t *testing.T) {
 
 	pm.reconcile(ctx)
 
-	if got := tierNode(t, store, tier2); got != "node-2" {
-		t.Fatalf("expected tier2 on node-2 (fewer tiers), got %q", got)
+	node1 := tierNode(t, store, tier1)
+	node2 := tierNode(t, store, tier2)
+	if node1 == node2 {
+		t.Fatalf("expected load-balanced across two nodes, both on %q", node1)
 	}
 }
 

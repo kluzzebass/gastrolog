@@ -50,8 +50,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		ID: vaultID, Name: "archival-test",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
-		CloudServiceID: &csID,
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
@@ -569,10 +568,10 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		})
 	}
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud-tier", Type: system.TierTypeCloud,
+		ID: tierID, Name: "cloud-tier", Type: system.TierTypeCloud, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
-	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID(leaderID), Leader: true}})
+	_ = store.SetTierPlacements(context.Background(), tierID, placements)
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-vault",
 	})
@@ -628,7 +627,6 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			tier.FollowerTargets = followerTargets
 		} else {
 			tier.IsFollower = true
-			tier.LeaderNodeID = leaderID
 		}
 
 		orch.RegisterVault(NewVault(vaultID, tier))
@@ -1136,7 +1134,7 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
@@ -1263,7 +1261,7 @@ func TestCacheEvictionViaRetentionSweep(t *testing.T) {
 
 	store := sysmem.NewStore()
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
+		ID: tierID, Name: "cloud", Type: system.TierTypeCloud, CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
 	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})

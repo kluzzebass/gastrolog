@@ -540,18 +540,31 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 
 	vaultID := uuid.Must(uuid.NewV7())
 	tierID := uuid.Must(uuid.NewV7())
-	_ = uuid.Must(uuid.NewV7())
+	storageID := uuid.Must(uuid.NewV7())
 
-	cfg := &system.Config{
-		Vaults: []system.VaultConfig{
-			{ID: vaultID, Enabled: true},
+	sys := &system.System{
+		Config: system.Config{
+			Vaults: []system.VaultConfig{
+				{ID: vaultID, Enabled: true},
+			},
+			Tiers: []system.TierConfig{
+				{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
+			},
 		},
-		Tiers: []system.TierConfig{
-			{ID: tierID, Name: "local", Type: system.TierTypeFile, StorageClass: 1, VaultID: vaultID, Position: 0},
+		Runtime: system.Runtime{
+			NodeStorageConfigs: []system.NodeStorageConfig{{
+				NodeID: "node-1",
+				FileStorages: []system.FileStorage{{
+					ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks",
+				}},
+			}},
+			TierPlacements: map[uuid.UUID][]system.TierPlacement{
+				tierID: {{StorageID: storageID.String(), Leader: true}},
+			},
 		},
 	}
 
-	err := orch.ApplyConfig(&system.System{Config: *cfg}, factories)
+	err := orch.ApplyConfig(sys, factories)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

@@ -183,10 +183,10 @@ func TestTransitionConcurrentWithAppends(t *testing.T) {
 		ID: vaultID, Name: "concurrent-transition",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -481,10 +481,10 @@ func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 		ID: vaultID, Name: "delete-fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -655,10 +655,10 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 		ID: vaultID, Name: "download-fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -730,10 +730,10 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 		ID: vaultID, Name: "reconfig-race",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 
 	orch := newTestOrch(t, Config{LocalNodeID: nodeID, SystemLoader: &transitionSystemLoader{store: store}})
@@ -810,7 +810,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 		ID: vaultID, Name: "drain-concurrent",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{
 		ID: filterID, Name: "all", Expression: "*",
