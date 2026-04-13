@@ -95,6 +95,12 @@ type RecordForwarder struct {
 	// startNode calls register theirs as they are created. See
 	// gastrolog-27zvt.
 	pressureGate *chanwatch.PressureGate
+
+	// onNodeUnreachable is called on the first consecutive failure for a
+	// node. The orchestrator uses this to trigger immediate placement
+	// reconciliation so the dead node's tiers are reassigned without
+	// waiting for the 15-second placement interval.
+	onNodeUnreachable func(nodeID string)
 }
 
 // NewRecordForwarder creates a RecordForwarder using the shared PeerConns pool.
@@ -402,10 +408,21 @@ func forwardEntryToProto(e forwardEntry) *gastrologv1.ExportRecord {
 }
 
 // bumpBackoff increases the backoff after a failure.
+// SetOnNodeUnreachable registers a callback fired on the first consecutive
+// stream failure for a node. Safe to call before or after forwarding starts.
+func (rf *RecordForwarder) SetOnNodeUnreachable(fn func(nodeID string)) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	rf.onNodeUnreachable = fn
+}
+
 func (rf *RecordForwarder) bumpBackoff(nodeID string, nf *nodeForwarder, err error) {
 	nf.failures++
 	if nf.failures == 1 {
 		nf.backoff = backoffMin
+		if rf.onNodeUnreachable != nil {
+			go rf.onNodeUnreachable(nodeID)
+		}
 	} else {
 		nf.backoff = min(nf.backoff*2, backoffMax)
 	}
@@ -437,6 +454,47 @@ func (rf *RecordForwarder) stopping() bool {
 // Sent returns the total number of records successfully sent via forwarding.
 func (rf *RecordForwarder) Sent() int64 {
 	return rf.sent.Load()
+}
+
+// RedirectNode drains all queued records from fromNodeID's channel and
+// re-enqueues them to toNodeID. Called when placement reassigns a tier's
+// leader to a different node — records buffered for the dead node get
+// sent to the new leader instead of being stuck until the channel fills.
+// If toNodeID is empty, records are returned for local processing.
+func (rf *RecordForwarder) RedirectNode(fromNodeID, toNodeID string) {
+	rf.mu.Lock()
+	nf, ok := rf.nodes[fromNodeID]
+	rf.mu.Unlock()
+	if !ok || nf == nil {
+		return
+	}
+
+	// Drain non-blocking — take whatever is in the channel right now.
+	var drained []forwardEntry
+	for {
+		select {
+		case e := <-nf.ch:
+			drained = append(drained, e)
+		default:
+			goto done
+		}
+	}
+done:
+	if len(drained) == 0 {
+		return
+	}
+
+	// Re-enqueue to the new target node (or drop if toNodeID is empty,
+	// meaning the vault moved to this node — local append already happened
+	// via the new filter set).
+	if toNodeID != "" {
+		for _, e := range drained {
+			_ = rf.Forward(context.Background(), toNodeID, e.vaultID, []chunk.Record{e.record})
+		}
+	}
+
+	rf.logger.Info("redirected queued records",
+		"from", fromNodeID, "to", toNodeID, "count", len(drained))
 }
 
 // Close shuts down all per-node forwarders. Connection cleanup is handled

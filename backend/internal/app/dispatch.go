@@ -44,6 +44,7 @@ type orchActions interface {
 	UpdateMaxConcurrentJobs(n int) error
 	FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrator.TierInstance
 	StopTierLeaderLoop(tierID uuid.UUID)
+	SetDesiredTierLeader(tierID uuid.UUID, leaderNodeID string)
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
@@ -411,12 +412,23 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	// independent of placement state.
 	d.applyTierMembershipChange(ctx, tierCfg, *v, tierID, leaderNodeID, followerNodeIDs)
 
+	// Update the desired tier Raft leader so TransferLeadership aligns
+	// the Raft leader with the placement leader.
+	d.orch.SetDesiredTierLeader(tierID, leaderNodeID)
+
 	// Tier Raft group membership is handled by the per-group leader loop
 	// (see raftgroup.LeaderLoop). The placement leader does not push
 	// membership changes — the tier Raft leader (whoever currently holds
 	// leadership in the group) does, from inside its leader epoch after
 	// raft.Barrier() returns. This avoids the divergence problem where the
 	// placement leader and the tier Raft leader live on different nodes.
+
+	// Reload filters so ingestion routing picks up the new placement leader
+	// immediately. Without this, records are forwarded to the old (possibly
+	// dead) node until the rotation sweep recompiles filters (up to 15s).
+	if err := d.orch.ReloadFilters(ctx); err != nil {
+		d.logger.Warn("dispatch: reload filters after tier change", "error", err)
+	}
 
 	// Reload rotation and retention policies — tier config may have changed
 	// policy references (rotation_policy_id, retention_rules).
@@ -445,13 +457,22 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutTier from the placement manager will retry.
 func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *system.TierConfig, v system.VaultConfig, tierID uuid.UUID, leaderNodeID string, followerNodeIDs []string) {
-	expected := int(tierCfg.ReplicationFactor)
-	placementsComplete := expected <= 0 || func() int { p, _ := d.cfgStore.GetTierPlacements(ctx, tierID); return len(p) }() >= expected
-	if !placementsComplete {
-		d.logger.Debug("dispatch: tier placements incomplete, deferring rebuild",
-			"tier", tierID,
-			"have", func() int { p, _ := d.cfgStore.GetTierPlacements(ctx, tierID); return len(p) }(),
-			"want", expected)
+	// Placements are "complete" when they include a leader. We can't gate on
+	// len(placements) >= RF because RF may be unsatisfiable when a node is
+	// down — the placement manager writes the best it can with surviving
+	// nodes. Gating on RF caused permanent deferral after node failure:
+	// the role was never updated, rotation never ran, chunks never sealed.
+	placements, _ := d.cfgStore.GetTierPlacements(ctx, tierID)
+	hasLeader := false
+	for _, p := range placements {
+		if p.Leader {
+			hasLeader = true
+			break
+		}
+	}
+	if !hasLeader {
+		d.logger.Debug("dispatch: tier placements have no leader, deferring rebuild",
+			"tier", tierID, "placements", len(placements))
 		return
 	}
 

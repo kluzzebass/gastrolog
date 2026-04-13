@@ -103,6 +103,11 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 		return nil
 	}
 
+	// Store the address resolver for SetDesiredTierLeader (used by dispatch).
+	if factories.NodeAddressResolver != nil {
+		o.nodeAddrResolver = factories.NodeAddressResolver
+	}
+
 	if err := o.applyVaults(sys, factories); err != nil {
 		return err
 	}

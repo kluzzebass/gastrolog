@@ -257,6 +257,16 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		}
 		disp.placementTrigger = pm.Trigger
 		placementReconcileFn = pm.Reconcile
+		if recordForwarder != nil {
+			recordForwarder.SetOnNodeUnreachable(func(nodeID string) {
+				// Instantly expire the dead peer so LivePeers() stops
+				// including it, then trigger placement on this node. If
+				// this node is the config leader, placement runs
+				// immediately and reassigns the tier.
+				peerState.MarkUnreachable(nodeID)
+				pm.Trigger()
+			})
+		}
 		go pm.Run(ctx)
 	}
 
@@ -503,7 +513,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		}
 	}
 
-	peerState := cluster.NewPeerState(15 * time.Second)
+	peerState := cluster.NewPeerState(5 * time.Second)
 	clusterSrv.Subscribe(peerState.HandleBroadcast)
 
 	peerJobState := cluster.NewPeerJobState(15 * time.Second)

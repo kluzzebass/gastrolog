@@ -367,6 +367,8 @@ func (noopForwarder) RegisterPressureGate(*chanwatch.PressureGate) {
 	// No-op: these tests don't exercise forward-path pressure.
 }
 
+func (noopForwarder) RedirectNode(string, string) {}
+
 // waitForJob polls the scheduler until the job completes or the timeout expires.
 func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeout time.Duration) orchestrator.JobInfo {
 	t.Helper()

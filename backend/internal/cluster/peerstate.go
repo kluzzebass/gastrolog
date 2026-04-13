@@ -20,6 +20,18 @@ type PeerState struct {
 	ttl     time.Duration
 }
 
+// MarkUnreachable immediately expires a peer so LivePeers() stops including
+// it. Called when the record forwarder detects a dead stream — no need to
+// wait for the TTL. The next broadcast from the peer will restore it.
+func (p *PeerState) MarkUnreachable(nodeID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e, ok := p.entries[nodeID]; ok {
+		e.received = time.Time{} // zero time = always expired
+		p.entries[nodeID] = e
+	}
+}
+
 // NewPeerState creates a PeerState with the given TTL.
 func NewPeerState(ttl time.Duration) *PeerState {
 	return &PeerState{

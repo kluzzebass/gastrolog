@@ -26,30 +26,33 @@ const (
 
 // tierLeaderManager spawns and supervises per-tier leader loops. Each tier
 // Raft group gets a raftgroup.LeaderLoop whose OnLead callback runs
-// membership reconciliation against the orchestrator's view of the desired
-// member list for that tier.
+// membership reconciliation and leadership alignment against the
+// orchestrator's view of the desired state.
 //
-// Membership reconciliation happens ONLY on the tier Raft leader, from
-// inside its leader epoch (after raft.Barrier returns). The placement
-// leader does not push membership changes — they propagate to whichever
-// node currently holds tier-Raft leadership via the leader loop.
+// Membership reconciliation and leadership transfer happen ONLY on the
+// tier Raft leader, from inside its leader epoch (after raft.Barrier
+// returns). If the current Raft leader doesn't match the desired leader
+// (set by the placement manager), TransferLeadership moves Raft
+// leadership to the desired node.
 type tierLeaderManager struct {
-	mu      sync.Mutex
-	epochs  map[uuid.UUID]context.CancelFunc
-	desired *tierMembershipMap
-	rootCtx context.Context
-	rootCxl context.CancelFunc
-	logger  *slog.Logger
+	mu            sync.Mutex
+	epochs        map[uuid.UUID]context.CancelFunc
+	desired       *tierMembershipMap
+	desiredLeader *tierDesiredLeaderMap
+	rootCtx       context.Context
+	rootCxl       context.CancelFunc
+	logger        *slog.Logger
 }
 
 func newTierLeaderManager(logger *slog.Logger) *tierLeaderManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &tierLeaderManager{
-		epochs:  make(map[uuid.UUID]context.CancelFunc),
-		desired: newTierMembershipMap(),
-		rootCtx: ctx,
-		rootCxl: cancel,
-		logger:  logger.With("component", "tier-leader-manager"),
+		epochs:        make(map[uuid.UUID]context.CancelFunc),
+		desired:       newTierMembershipMap(),
+		desiredLeader: newTierDesiredLeaderMap(),
+		rootCtx:       ctx,
+		rootCxl:       cancel,
+		logger:        logger.With("component", "tier-leader-manager"),
 	}
 }
 
@@ -104,6 +107,13 @@ func (m *tierLeaderManager) StopAll() {
 // current Raft configuration.
 func (m *tierLeaderManager) SetDesiredMembers(tierID uuid.UUID, members []hraft.Server) {
 	m.desired.Set(tierID, members)
+}
+
+// SetDesiredLeader sets the node that should be the tier Raft leader.
+// If the current Raft leader differs, the leader epoch will call
+// LeadershipTransferToServer to align them. Pass nil to clear.
+func (m *tierLeaderManager) SetDesiredLeader(tierID uuid.UUID, server *hraft.Server) {
+	m.desiredLeader.Set(tierID, server)
 }
 
 // runLeaderEpoch runs the per-epoch reconcile loop. Called after Barrier()
@@ -183,6 +193,40 @@ func (m *tierLeaderManager) reconcile(tierID uuid.UUID, group *raftgroup.Group) 
 		m.logger.Info("removed server",
 			"tier", tierID, "node", srv.ID)
 	}
+
+	// Transfer leadership if the desired leader differs from the current
+	// Raft leader. Only the current leader can initiate a transfer (which
+	// is guaranteed — we're inside the leader epoch).
+	m.transferIfNeeded(tierID, group)
+}
+
+// transferIfNeeded checks whether the tier Raft leader matches the desired
+// placement leader. If not, initiates LeadershipTransferToServer so the Raft
+// leader aligns with the node that owns the data. This reduces FSM apply
+// latency (no forwarding hop) and simplifies the operational model.
+func (m *tierLeaderManager) transferIfNeeded(tierID uuid.UUID, group *raftgroup.Group) {
+	want := m.desiredLeader.Get(tierID)
+	if want == nil {
+		return // no desired leader set (single-node or not yet configured)
+	}
+	currentLeader, currentID := group.Raft.LeaderWithID()
+	if currentID == want.ID {
+		return // already aligned
+	}
+	if currentLeader == "" {
+		return // no leader elected yet
+	}
+
+	m.logger.Info("transferring tier Raft leadership",
+		"tier", tierID,
+		"from", currentID,
+		"to", want.ID)
+
+	fut := group.Raft.LeadershipTransferToServer(want.ID, want.Address)
+	if err := fut.Error(); err != nil {
+		m.logger.Warn("leadership transfer failed",
+			"tier", tierID, "target", want.ID, "error", err)
+	}
 }
 
 // tierMembershipMap is a thread-safe map of tierID → desired member list.
@@ -223,4 +267,38 @@ func (t *tierMembershipMap) Delete(tierID uuid.UUID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.desired, tierID)
+}
+
+// tierDesiredLeaderMap tracks which node should be the Raft leader for each tier.
+type tierDesiredLeaderMap struct {
+	mu      sync.RWMutex
+	leaders map[uuid.UUID]*hraft.Server
+}
+
+func newTierDesiredLeaderMap() *tierDesiredLeaderMap {
+	return &tierDesiredLeaderMap{
+		leaders: make(map[uuid.UUID]*hraft.Server),
+	}
+}
+
+func (t *tierDesiredLeaderMap) Set(tierID uuid.UUID, srv *hraft.Server) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if srv == nil {
+		delete(t.leaders, tierID)
+	} else {
+		cp := *srv
+		t.leaders[tierID] = &cp
+	}
+}
+
+func (t *tierDesiredLeaderMap) Get(tierID uuid.UUID) *hraft.Server {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	srv := t.leaders[tierID]
+	if srv == nil {
+		return nil
+	}
+	cp := *srv
+	return &cp
 }

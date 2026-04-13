@@ -473,6 +473,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 	followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
+	o.setDesiredTierLeader(tierCfg.ID, leaderNodeID, factories)
 	if !isLeader && !isFollower {
 		// No storage placement, but still join the tier Raft group as a
 		// voter. See gastrolog-292yi.
@@ -628,6 +629,11 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 		followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
 		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
+		// Tell the tier leader manager which node should be the Raft leader.
+		// Called for ALL paths (non-storage, leader, follower) since every
+		// node runs a leader loop and may need to transfer leadership.
+		o.setDesiredTierLeader(tierCfg.ID, leaderNodeID, factories)
+
 		if !isLeader && !isFollower {
 			// This node has no storage placement for this tier, but still
 			// joins the tier Raft group as a voter. This decouples Raft
@@ -1028,6 +1034,10 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, clusterNod
 	o.tierLeaders.SetDesiredMembers(tierCfg.ID, members)
 	o.tierLeaders.Start(tierCfg.ID, g)
 
+	// Desired leader is set separately by setDesiredTierLeader after the
+	// caller resolves the placement leader (createTierRaftGroup doesn't
+	// have placement info).
+
 	r := g.Raft
 	fsm, _ := g.FSM.(*tierfsm.FSM)
 	timeout := cluster.ReplicationTimeout
@@ -1263,6 +1273,38 @@ func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, fa
 		}
 	}
 	return members
+}
+
+// setDesiredTierLeader tells the tier leader manager which node the placement
+// manager assigned as the leader. Uses the factories' resolver.
+func (o *Orchestrator) setDesiredTierLeader(tierID uuid.UUID, leaderNodeID string, factories Factories) {
+	if leaderNodeID == "" || factories.NodeAddressResolver == nil {
+		return
+	}
+	addr, ok := factories.NodeAddressResolver(leaderNodeID)
+	if !ok {
+		return
+	}
+	o.tierLeaders.SetDesiredLeader(tierID, &hraft.Server{
+		ID:      hraft.ServerID(leaderNodeID),
+		Address: hraft.ServerAddress(addr),
+	})
+}
+
+// SetDesiredTierLeader is the exported version for use by the dispatch handler.
+// Uses the stored node address resolver from ApplyConfig.
+func (o *Orchestrator) SetDesiredTierLeader(tierID uuid.UUID, leaderNodeID string) {
+	if leaderNodeID == "" || o.nodeAddrResolver == nil {
+		return
+	}
+	addr, ok := o.nodeAddrResolver(leaderNodeID)
+	if !ok {
+		return
+	}
+	o.tierLeaders.SetDesiredLeader(tierID, &hraft.Server{
+		ID:      hraft.ServerID(leaderNodeID),
+		Address: hraft.ServerAddress(addr),
+	})
 }
 
 func mapTierTypeToFactory(t system.TierType) string {

@@ -836,7 +836,8 @@ func (m *mockOrch) FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrato
 	return nil
 }
 
-func (m *mockOrch) StopTierLeaderLoop(uuid.UUID) {}
+func (m *mockOrch) StopTierLeaderLoop(uuid.UUID)            {}
+func (m *mockOrch) SetDesiredTierLeader(uuid.UUID, string) {}
 
 // TestHandleTierDeleted_DrainOnlyOnLeader verifies that when a tier is deleted
 // with drain=true, only the config leader for that tier initiates a drain.

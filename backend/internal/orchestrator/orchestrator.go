@@ -98,6 +98,7 @@ type RecordForwarder interface {
 	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 	ForwardSync(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
 	RegisterPressureGate(gate *chanwatch.PressureGate)
+	RedirectNode(fromNodeID, toNodeID string)
 }
 
 // TierReplicator sequences all replication commands for a tier on a single
@@ -200,6 +201,11 @@ type Orchestrator struct {
 
 	// Tier replicator: ordered stream per tier per follower (nil in single-node mode).
 	tierReplicator TierReplicator
+
+	// nodeAddrResolver maps node IDs to Raft addresses. Set from factories
+	// during ApplyConfig. Used by SetDesiredTierLeader to resolve the
+	// placement leader's Raft address for TransferLeadership.
+	nodeAddrResolver func(nodeID string) (string, bool)
 
 	// Ingest channel and lifecycle.
 	ingestCh       chan IngestMessage

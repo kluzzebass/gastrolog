@@ -68,6 +68,8 @@ func (m *mockForwarder) RegisterPressureGate(_ *chanwatch.PressureGate) {
 	// Test mock: pressure gate integration is verified in record_forwarder_test.go.
 }
 
+func (m *mockForwarder) RedirectNode(string, string) {}
+
 func (m *mockForwarder) getCalls() []forwardCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()

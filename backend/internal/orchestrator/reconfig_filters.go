@@ -123,6 +123,13 @@ func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 		}
 	}
 
+	// Redirect records queued for nodes whose vault target changed.
+	// This drains the old node's forward buffer and re-enqueues to the
+	// new node, preventing record loss during leader failover.
+	if o.forwarder != nil && o.filterSet != nil && fs != nil {
+		o.redirectStaleForwards(o.filterSet, fs)
+	}
+
 	// Swap filter set atomically (we're under the lock).
 	oldCount := 0
 	if o.filterSet != nil {
@@ -140,6 +147,24 @@ func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 	}
 
 	return nil
+}
+
+// redirectStaleForwards compares old and new filter sets and redirects
+// queued records when a vault's target node changed (e.g. leader failover).
+func (o *Orchestrator) redirectStaleForwards(prev, next *FilterSet) {
+	oldNodes := make(map[uuid.UUID]string)
+	for _, f := range prev.filters {
+		if f.NodeID != "" {
+			oldNodes[f.VaultID] = f.NodeID
+		}
+	}
+	for _, f := range next.filters {
+		prev, hadOld := oldNodes[f.VaultID]
+		if !hadOld || prev == f.NodeID {
+			continue
+		}
+		o.forwarder.RedirectNode(prev, f.NodeID)
+	}
 }
 
 // updateFilterLocked adds or updates a single vault's filter in the filter set.
