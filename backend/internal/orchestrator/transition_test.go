@@ -314,7 +314,7 @@ func TestTransitionTerminalTier(t *testing.T) {
 		ID: vaultID, Name: "terminal",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -516,10 +516,10 @@ func TestTransitionCrossNode(t *testing.T) {
 		ID: vaultID, Name: "cross-node",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -566,6 +566,7 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
 	_ = uuid.Must(uuid.NewV7())
 	localNode := "local-node"
 	_ = "remote-node"
@@ -585,10 +586,10 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 		ID: vaultID, Name: "fail",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -620,6 +621,7 @@ func TestTransitionNoTransferrer(t *testing.T) {
 	t.Parallel()
 	vaultID := uuid.Must(uuid.NewV7())
 	tier0ID := uuid.Must(uuid.NewV7())
+	tier1ID := uuid.Must(uuid.NewV7())
 	_ = uuid.Must(uuid.NewV7())
 	localNode := "local-node"
 	_ = "remote-node"
@@ -637,10 +639,10 @@ func TestTransitionNoTransferrer(t *testing.T) {
 		ID: vaultID, Name: "no-xfer",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -737,10 +739,10 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 		ID: vaultID, Name: "ttl-cloud",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1196,10 +1198,10 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 		ID: vaultID, Name: "cloud-transition",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1306,10 +1308,10 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 		ID: vaultID, Name: "cloud-sweep",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1551,13 +1553,13 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 		ID: vaultID, Name: "three-tier",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 2,
+		ID: tier2ID, Name: "t2", Type: system.TierTypeMemory, VaultID: vaultID, Position: 2,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1638,13 +1640,13 @@ func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 		ID: vaultID, Name: "file-file-cloud",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 2,
+		ID: tier2ID, Name: "t2", Type: system.TierTypeMemory, VaultID: vaultID, Position: 2,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1824,10 +1826,10 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 		ID: vaultID, Name: "eventid-cloud",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: nextTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1907,10 +1909,10 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 		ID: vaultID, Name: "count-accuracy",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: tier0ID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: tier1ID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
@@ -1995,10 +1997,10 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 		ID: vaultID, Name: "cloud-search",
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 0,
+		ID: cloudTierID, Name: "t0", Type: system.TierTypeMemory, VaultID: vaultID, Position: 0,
 	})
 	_ = store.PutTier(context.Background(), system.TierConfig{
-		VaultID: vaultID, Position: 1,
+		ID: cloudTierID, Name: "t1", Type: system.TierTypeMemory, VaultID: vaultID, Position: 1,
 	})
 	orch.sysLoader = &transitionSystemLoader{store: store}
 

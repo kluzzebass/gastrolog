@@ -54,6 +54,7 @@ func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition
 		CloudServiceID: &csID,
 		VaultID: vaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutCloudService(context.Background(), system.CloudService{
 		ID:           csID,
 		Name:         "test-cloud",
@@ -571,6 +572,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 		ID: tierID, Name: "cloud-tier", Type: system.TierTypeCloud,
 		VaultID: vaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID(leaderID), Leader: true}})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cloud-vault",
 	})
@@ -1137,6 +1139,7 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		VaultID: vaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "cache-test",
 	})
@@ -1263,6 +1266,7 @@ func TestCacheEvictionViaRetentionSweep(t *testing.T) {
 		ID: tierID, Name: "cloud", Type: system.TierTypeCloud,
 		VaultID: vaultID, Position: 0,
 	})
+	_ = store.SetTierPlacements(context.Background(), tierID, []system.TierPlacement{{StorageID: system.SyntheticStorageID("test-node"), Leader: true}})
 	_ = store.PutVault(context.Background(), system.VaultConfig{
 		ID: vaultID, Name: "eviction-test",
 	})
