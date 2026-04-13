@@ -395,8 +395,8 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 		return
 	}
 
-	leaderNodeID := tierCfg.LeaderNodeID(nscs)
-	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
 
 	// Only act on tier membership once placements are fully assigned. During
 	// cluster-init the placement manager assigns placements one-at-a-time,
@@ -440,11 +440,11 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 // incomplete — the next CmdPutTier from the placement manager will retry.
 func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *system.TierConfig, v system.VaultConfig, tierID uuid.UUID, leaderNodeID string, followerNodeIDs []string) {
 	expected := int(tierCfg.ReplicationFactor)
-	placementsComplete := expected <= 0 || len(tierCfg.Placements) >= expected
+	placementsComplete := expected <= 0 || func() int { p, _ := d.cfgStore.GetTierPlacements(ctx, tierID); return len(p) }() >= expected
 	if !placementsComplete {
 		d.logger.Debug("dispatch: tier placements incomplete, deferring rebuild",
 			"tier", tierID,
-			"have", len(tierCfg.Placements),
+			"have", func() int { p, _ := d.cfgStore.GetTierPlacements(ctx, tierID); return len(p) }(),
 			"want", expected)
 		return
 	}
@@ -492,8 +492,8 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 	if err != nil {
 		return
 	}
-	leaderNodeID := tierCfg.LeaderNodeID(nscs)
-	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+	leaderNodeID := system.LeaderNodeID(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
+	followerNodeIDs := system.FollowerNodeIDs(func() []system.TierPlacement { p, _ := d.cfgStore.GetTierPlacements(ctx, tierCfg.ID); return p }(), nscs)
 	shouldBeFollower := slices.Contains(followerNodeIDs, d.localNodeID)
 	if existing.IsFollower == shouldBeFollower {
 		return // role unchanged
@@ -552,11 +552,11 @@ func (d *configDispatcher) handleClusterTLSPut(ctx context.Context) {
 		return
 	}
 	cfg, err := d.cfgStore.Load(ctx)
-	if err != nil || cfg == nil || cfg.ClusterTLS == nil {
+	if err != nil || cfg == nil || cfg.Runtime.ClusterTLS == nil {
 		d.logger.Error("dispatch: read cluster TLS for reload", "error", err)
 		return
 	}
-	tls := cfg.ClusterTLS
+	tls := cfg.Runtime.ClusterTLS
 	if err := d.clusterTLS.Load([]byte(tls.ClusterCertPEM), []byte(tls.ClusterKeyPEM), []byte(tls.CACertPEM)); err != nil {
 		d.logger.Error("dispatch: reload cluster TLS", "error", err)
 		return

@@ -230,8 +230,8 @@ func (s *LifecycleServer) GetClusterStatus(
 	}
 
 	// Expose join token from the replicated config (available on all nodes).
-	if cfg, err := s.cfgStore.Load(ctx); err == nil && cfg != nil && cfg.ClusterTLS != nil {
-		resp.JoinToken = cfg.ClusterTLS.JoinToken
+	if sys, err := s.cfgStore.Load(ctx); err == nil && sys != nil && sys.Runtime.ClusterTLS != nil {
+		resp.JoinToken = sys.Runtime.ClusterTLS.JoinToken
 	}
 
 	return connect.NewResponse(resp), nil

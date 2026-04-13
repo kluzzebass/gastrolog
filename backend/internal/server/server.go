@@ -314,7 +314,8 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 		if tc == nil {
 			continue
 		}
-		leaderNodeID := tc.LeaderNodeID(nscs)
+		placements, _ := c.cfgStore.GetTierPlacements(ctx, tc.ID)
+		leaderNodeID := system.LeaderNodeID(placements, nscs)
 		if leaderNodeID != "" && leaderNodeID != c.localNodeID {
 			return leaderNodeID
 		}

@@ -109,8 +109,8 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *clust
 	if err != nil {
 		return fmt.Errorf("check existing cluster TLS: %w", err)
 	}
-	if existingCfg != nil && existingCfg.ClusterTLS != nil {
-		existing := existingCfg.ClusterTLS
+	if existingCfg != nil && existingCfg.Runtime.ClusterTLS != nil {
+		existing := existingCfg.Runtime.ClusterTLS
 		if err := ctls.Load([]byte(existing.ClusterCertPEM), []byte(existing.ClusterKeyPEM), []byte(existing.CACertPEM)); err != nil {
 			return fmt.Errorf("load existing cluster TLS: %w", err)
 		}
@@ -164,11 +164,11 @@ func bootstrapClusterTLS(ctx context.Context, cfgStore system.Store, ctls *clust
 func makeEnrollHandler(cfgStore system.Store, logger *slog.Logger) cluster.EnrollHandler {
 	return func(ctx context.Context, req *gastrologv1.EnrollRequest) (*gastrologv1.EnrollResponse, error) {
 		cfg, err := cfgStore.Load(ctx)
-		if err != nil || cfg == nil || cfg.ClusterTLS == nil {
+		if err != nil || cfg == nil || cfg.Runtime.ClusterTLS == nil {
 			logger.Error("enroll: read cluster TLS", "error", err)
 			return nil, errors.New("cluster TLS not available")
 		}
-		tls := cfg.ClusterTLS
+		tls := cfg.Runtime.ClusterTLS
 
 		storedSecret, _, err := tlsutil.ParseJoinToken(tls.JoinToken)
 		if err != nil {

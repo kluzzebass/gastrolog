@@ -64,7 +64,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 		return fmt.Errorf("%w: %s", ErrDuplicateID, vaultCfg.ID)
 	}
 
-	tiers, err := o.buildTierInstances(cfg, vaultCfg, factories)
+	tiers, err := o.buildTierInstances(sys, vaultCfg, factories)
 	if err != nil {
 		return fmt.Errorf("build tier instances for vault %s: %w", vaultCfg.ID, err)
 	}
@@ -76,8 +76,8 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 
 	// Compile filters immediately so the vault can receive records right away.
 	// The rotation sweep also reconciles filters every 15s as a safety net.
-	if cfg != nil {
-		_ = o.reloadFiltersFromRoutes(cfg)
+	if sys != nil {
+		_ = o.reloadFiltersFromRoutes(sys)
 	}
 
 	// Rotation and retention are reconciled by the discovery-based sweep
@@ -448,6 +448,8 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 	}
 	o.mu.Unlock()
 
+	cfg := &sys.Config
+	rt := &sys.Runtime
 	tierCfg := findTierConfig(cfg.Tiers, tierID)
 	if tierCfg == nil {
 		return fmt.Errorf("tier %s not found in config", tierID)
@@ -458,9 +460,9 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 		return fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
-	nscs := cfg.NodeStorageConfigs
-	leaderNodeID := tierCfg.LeaderNodeID(nscs)
-	followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+	nscs := rt.NodeStorageConfigs
+	leaderNodeID := system.LeaderNodeID(rt.TierPlacements[tierCfg.ID], nscs)
+	followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
 	isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 	isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 	if !isLeader && !isFollower {
@@ -469,18 +471,18 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 
 	var ti *TierInstance
 	if isLeader {
-		t, err := o.buildPrimaryTierInstance(cfg, *vaultCfg, tierCfg, factories)
+		t, err := o.buildPrimaryTierInstance(sys, *vaultCfg, tierCfg, factories)
 		if err != nil {
 			return fmt.Errorf("build tier %s: %w", tierID, err)
 		}
-		t.FollowerTargets = tierCfg.FollowerTargets(nscs)
+		t.FollowerTargets = system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs)
 		ti = t
 	} else {
-		for _, tgt := range tierCfg.FollowerTargets(nscs) {
+		for _, tgt := range system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs) {
 			if tgt.NodeID != o.localNodeID {
 				continue
 			}
-			t, err := o.buildTierInstanceForStorage(cfg, *vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+			t, err := o.buildTierInstanceForStorage(sys, *vaultCfg, *tierCfg, factories, tgt.StorageID, true)
 			if err != nil {
 				return fmt.Errorf("build tier %s storage %s: %w", tierID, tgt.StorageID, err)
 			}
@@ -587,13 +589,15 @@ func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
 // buildTierInstances creates TierInstance objects for each tier in the vault system.
 // Tiers whose leader/follower storages don't resolve to the local node are skipped
 // (placement manager assigns storages via Raft).
-func (o *Orchestrator) buildTierInstances(cfg *system.Config, vaultCfg system.VaultConfig, factories Factories) ([]*TierInstance, error) {
+func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.VaultConfig, factories Factories) ([]*TierInstance, error) {
+	cfg := &sys.Config
+	rt := &sys.Runtime
 	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultCfg.ID)
 	if len(tierIDs) == 0 {
 		return nil, nil // vault has no tiers yet — tiers are added incrementally via handleTierPut
 	}
 
-	nscs := cfg.NodeStorageConfigs
+	nscs := rt.NodeStorageConfigs
 
 	tiers := make([]*TierInstance, 0, len(tierIDs))
 	for _, tierID := range tierIDs {
@@ -608,8 +612,8 @@ func (o *Orchestrator) buildTierInstances(cfg *system.Config, vaultCfg system.Va
 		}
 
 		// Determine if this node hosts this tier (as leader or follower).
-		leaderNodeID := tierCfg.LeaderNodeID(nscs)
-		followerNodeIDs := tierCfg.FollowerNodeIDs(nscs)
+		leaderNodeID := system.LeaderNodeID(rt.TierPlacements[tierCfg.ID], nscs)
+		followerNodeIDs := system.FollowerNodeIDs(rt.TierPlacements[tierCfg.ID], nscs)
 		isLeader := leaderNodeID == "" || leaderNodeID == o.localNodeID
 		isFollower := slices.Contains(followerNodeIDs, o.localNodeID)
 		if !isLeader && !isFollower {
@@ -617,24 +621,24 @@ func (o *Orchestrator) buildTierInstances(cfg *system.Config, vaultCfg system.Va
 		}
 
 		if isLeader {
-			ti, err := o.buildPrimaryTierInstance(cfg, vaultCfg, tierCfg, factories)
+			ti, err := o.buildPrimaryTierInstance(sys, vaultCfg, tierCfg, factories)
 			if err != nil {
 				o.alertTierInitFailed(tierID, tierCfg.Name, err)
 				continue
 			}
-			ti.FollowerTargets = tierCfg.FollowerTargets(nscs)
+			ti.FollowerTargets = system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs)
 			tiers = append(tiers, ti)
 		}
 
 		// Follower: build one instance for this node's placement.
 		// 1:1:1 constraint: at most one store per tier per node.
 		if isFollower {
-			localTargets := tierCfg.FollowerTargets(nscs)
+			localTargets := system.FollowerTargets(rt.TierPlacements[tierCfg.ID], nscs)
 			for _, tgt := range localTargets {
 				if tgt.NodeID != o.localNodeID {
 					continue
 				}
-				sti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
+				sti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, tgt.StorageID, true)
 				if err != nil {
 					o.alertTierInitFailed(tierID, tierCfg.Name, err)
 					break
@@ -668,12 +672,13 @@ func (o *Orchestrator) alertTierInitFailed(tierID uuid.UUID, tierName string, er
 }
 
 // buildPrimaryTierInstance creates the leader TierInstance using the placement's
-// storage ID. This avoids directory collisions with same-node follower placements
+// storage ID. This avoids directory collisions with same-node follower rt.TierPlacements[tierCfg.ID]
 // that would occur if findLocalFileStorage picked a different storage by class.
-func (o *Orchestrator) buildPrimaryTierInstance(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
-	storageID := tierCfg.LeaderStorageID()
+func (o *Orchestrator) buildPrimaryTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg *system.TierConfig, factories Factories) (*TierInstance, error) {
+	rt := &sys.Runtime
+	storageID := system.LeaderStorageID(rt.TierPlacements[tierCfg.ID])
 	if storageID != "" && !strings.HasPrefix(storageID, system.SyntheticStoragePrefix) {
-		ti, err := o.buildTierInstanceForStorage(cfg, vaultCfg, *tierCfg, factories, storageID, false)
+		ti, err := o.buildTierInstanceForStorage(sys, vaultCfg, *tierCfg, factories, storageID, false)
 		if err != nil {
 			return nil, err
 		}
@@ -681,7 +686,7 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *system.Config, vaultCfg sys
 		return ti, nil
 	}
 	// Synthetic or unplaced — fall back to class-based resolution.
-	ti, err := o.buildTierInstance(cfg, vaultCfg, *tierCfg, factories, false)
+	ti, err := o.buildTierInstance(sys, vaultCfg, *tierCfg, factories, false)
 	if err != nil {
 		return nil, err
 	}
@@ -695,7 +700,9 @@ func (o *Orchestrator) buildPrimaryTierInstance(cfg *system.Config, vaultCfg sys
 // Cloud tiers use a shared blob key (vault-ID/chunk-ID.glcb) — if the follower
 // also uploads, it overwrites the leader's blob with a different-sized version,
 // corrupting the leader's stored diskBytes and breaking all future cloud reads.
-func (o *Orchestrator) buildTierInstance(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, isFollower bool) (*TierInstance, error) {
+func (o *Orchestrator) buildTierInstance(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, isFollower bool) (*TierInstance, error) {
+	cfg := &sys.Config
+	rt := &sys.Runtime
 	// Map TierConfig.Type to factory name.
 	factoryName := mapTierTypeToFactory(tierCfg.Type)
 
@@ -703,10 +710,10 @@ func (o *Orchestrator) buildTierInstance(cfg *system.Config, vaultCfg system.Vau
 	// fast (Raft log replay). Chunk manager creation is slow (scans disk for
 	// existing chunks). Starting the Raft group early gives it time to elect
 	// a leader and catch up while the chunk manager is loading.
-	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.TierPlacements[tierCfg.ID], rt.NodeStorageConfigs, factories)
 
 	// Build params from tier system.
-	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
+	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
 
 	// Followers keep cloud store access for reads (queries) but skip uploads.
 	// The leader owns the blob; the follower adopts it via RegisterCloudChunk
@@ -801,19 +808,21 @@ func (o *Orchestrator) buildTierInstance(cfg *system.Config, vaultCfg system.Vau
 
 // buildTierInstanceForStorage creates a TierInstance whose data directory is
 // resolved from a specific file storage ID. Used for both primaries with
-// explicit placements and secondaries (one per node per tier).
-func (o *Orchestrator) buildTierInstanceForStorage(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*TierInstance, error) {
-	fs := findFileStorageByID(cfg, storageID)
+// explicit rt.TierPlacements[tierCfg.ID] and secondaries (one per node per tier).
+func (o *Orchestrator) buildTierInstanceForStorage(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, factories Factories, storageID string, isFollower bool) (*TierInstance, error) {
+	cfg := &sys.Config
+	rt := &sys.Runtime
+	fs := findFileStorageByID(rt, storageID)
 	if fs == nil {
 		return nil, fmt.Errorf("file storage %s not found", storageID)
 	}
 
 	// Create the tier Raft group BEFORE the chunk manager — same rationale
 	// as buildTierInstance: start elections while chunk loading is in progress.
-	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, cfg.NodeStorageConfigs, factories)
+	tierGroup, applier, raftCB := o.createTierRaftGroup(tierCfg, rt.TierPlacements[tierCfg.ID], rt.NodeStorageConfigs, factories)
 
 	// Build params normally, then override the dir with this storage's path.
-	params := buildTierParams(cfg, vaultCfg, tierCfg, o.localNodeID)
+	params := buildTierParams(sys, vaultCfg, tierCfg, o.localNodeID)
 	// Followers keep cloud store access for reads but skip uploads.
 	if isFollower {
 		params["_cloud_read_only"] = "true"
@@ -888,8 +897,8 @@ func (o *Orchestrator) buildTierInstanceForStorage(cfg *system.Config, vaultCfg 
 }
 
 // findFileStorageByID resolves a file storage ID to its config across all nodes.
-func findFileStorageByID(cfg *system.Config, storageID string) *system.FileStorage {
-	for _, nsc := range cfg.NodeStorageConfigs {
+func findFileStorageByID(rt *system.Runtime, storageID string) *system.FileStorage {
+	for _, nsc := range rt.NodeStorageConfigs {
 		for i := range nsc.FileStorages {
 			if nsc.FileStorages[i].ID.String() == storageID {
 				return &nsc.FileStorages[i]
@@ -938,18 +947,18 @@ type tierRaftCallbacks struct {
 // This is independent of the chunk manager — it only needs the tier config
 // and group manager. Call this BEFORE creating the chunk manager so the Raft
 // group starts elections early (while chunk loading is still in progress).
-func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, nscs []system.NodeStorageConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
+func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, placements []system.TierPlacement, nscs []system.NodeStorageConfig, factories Factories) (*raftgroup.Group, tierfsm.Applier, tierRaftCallbacks) {
 	if factories.GroupManager == nil {
 		return nil, nil, tierRaftCallbacks{}
 	}
 
 	groupID := tierCfg.ID.String()
-	members := o.buildTierRaftMembers(tierCfg, nscs, factories)
-	// Do not create the tier Raft group until placements are COMPLETE.
+	members := o.buildTierRaftMembers(tierCfg, placements, nscs, factories)
+	// Do not create the tier Raft group until rt.TierPlacements[tierCfg.ID] are COMPLETE.
 	// A partial member list poisons the group's boltdb with a wrong-size
 	// initial configuration, and we can't recover from that on restart
-	// without losing data. If placements are incomplete, return now and
-	// wait for a subsequent handleTierPut to fire once placements finish.
+	// without losing data. If rt.TierPlacements[tierCfg.ID] are incomplete, return now and
+	// wait for a subsequent handleTierPut to fire once rt.TierPlacements[tierCfg.ID] finish.
 	//
 	// We gate on len(members) >= ReplicationFactor rather than just
 	// "local node is in members" because even a correct local view isn't
@@ -961,7 +970,7 @@ func (o *Orchestrator) createTierRaftGroup(tierCfg system.TierConfig, nscs []sys
 		expectedMembers = 1
 	}
 	if len(members) < expectedMembers {
-		o.logger.Debug("tier raft group: placements incomplete, deferring creation",
+		o.logger.Debug("tier raft group: rt.TierPlacements[tierCfg.ID] incomplete, deferring creation",
 			"tier", tierCfg.ID,
 			"have", len(members),
 			"want", expectedMembers)
@@ -1225,13 +1234,13 @@ func (a *directApplier) Apply(data []byte) error {
 // Returns nil if the tier has no placement leader assigned yet — callers
 // must treat an empty result as "not ready to create the tier Raft group",
 // NOT as "single-member group with the local node". Falling back to the
-// local node when placements are incomplete is the bug that poisoned the
+// local node when rt.TierPlacements[tierCfg.ID] are incomplete is the bug that poisoned the
 // tier Raft boltdbs with single-member seeds during earlier iterations.
-func (o *Orchestrator) buildTierRaftMembers(tierCfg system.TierConfig, nscs []system.NodeStorageConfig, factories Factories) []hraft.Server {
+func (o *Orchestrator) buildTierRaftMembers(tierCfg system.TierConfig, placements []system.TierPlacement, nscs []system.NodeStorageConfig, factories Factories) []hraft.Server {
 	if factories.NodeAddressResolver == nil {
 		return nil
 	}
-	leaderNodeID := tierCfg.LeaderNodeID(nscs)
+	leaderNodeID := system.LeaderNodeID(placements, nscs)
 	if leaderNodeID == "" {
 		return nil // tier has no placement leader yet
 	}
@@ -1242,7 +1251,7 @@ func (o *Orchestrator) buildTierRaftMembers(tierCfg system.TierConfig, nscs []sy
 			Address: hraft.ServerAddress(addr),
 		})
 	}
-	for _, secID := range tierCfg.FollowerNodeIDs(nscs) {
+	for _, secID := range system.FollowerNodeIDs(placements, nscs) {
 		if addr, ok := factories.NodeAddressResolver(secID); ok {
 			members = append(members, hraft.Server{
 				ID:      hraft.ServerID(secID),
@@ -1269,7 +1278,9 @@ func mapTierTypeToFactory(t system.TierType) string {
 }
 
 // buildTierParams builds a params map from a TierConfig suitable for factory consumption.
-func buildTierParams(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg system.TierConfig, localNodeID string) map[string]string { //nolint:gocognit // flat type-switch mapping
+func buildTierParams(sys *system.System, vaultCfg system.VaultConfig, tierCfg system.TierConfig, localNodeID string) map[string]string { //nolint:gocognit // flat type-switch mapping
+	cfg := &sys.Config
+	rt := &sys.Runtime
 	params := make(map[string]string)
 
 	switch tierCfg.Type {
@@ -1279,7 +1290,7 @@ func buildTierParams(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg sy
 		}
 
 	case system.TierTypeFile:
-		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.StorageClass); fs != nil {
+		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.StorageClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 
@@ -1312,11 +1323,11 @@ func buildTierParams(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg sy
 			}
 		}
 		// Cloud tiers also need a local file storage for active chunks.
-		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
+		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.ActiveChunkClass); fs != nil {
 			params["dir"] = filepath.Join(fs.Path, "vaults", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 		// Cache directory for locally-cached GLCB blobs (avoids cloud range requests).
-		if fs := findLocalFileStorage(cfg, localNodeID, tierCfg.CacheClass); fs != nil {
+		if fs := findLocalFileStorage(rt, localNodeID, tierCfg.CacheClass); fs != nil {
 			params["cache_dir"] = filepath.Join(fs.Path, "cache", vaultCfg.ID.String(), tierCfg.ID.String())
 		}
 		if tierCfg.CacheEviction != "" {
@@ -1334,11 +1345,11 @@ func buildTierParams(cfg *system.Config, vaultCfg system.VaultConfig, tierCfg sy
 }
 
 // findLocalFileStorage finds a FileStorage on the given node with the given storage class.
-func findLocalFileStorage(cfg *system.Config, nodeID string, storageClass uint32) *system.FileStorage {
+func findLocalFileStorage(rt *system.Runtime, nodeID string, storageClass uint32) *system.FileStorage {
 	if storageClass == 0 {
 		return nil
 	}
-	for _, nsc := range cfg.NodeStorageConfigs {
+	for _, nsc := range rt.NodeStorageConfigs {
 		if nsc.NodeID != nodeID {
 			continue
 		}

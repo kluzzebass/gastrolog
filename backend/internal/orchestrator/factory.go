@@ -98,17 +98,17 @@ type Factories struct {
 // been constructed and registered while others were not. Callers must discard
 // the orchestrator on error and create a fresh one. Do not attempt to recover
 // or retry with the same orchestrator instance.
-func (o *Orchestrator) ApplyConfig(cfg *system.Config, factories Factories) error {
-	if cfg == nil {
+func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) error {
+	if sys == nil {
 		return nil
 	}
 
-	if err := o.applyVaults(cfg, factories); err != nil {
+	if err := o.applyVaults(sys, factories); err != nil {
 		return err
 	}
 	// Retention and rotation are now applied per-vault inside initVault
 	// via applyTierPolicies. No separate pass needed.
-	if err := o.applyIngesters(cfg, factories); err != nil {
+	if err := o.applyIngesters(sys, factories); err != nil {
 		return err
 	}
 
@@ -126,7 +126,8 @@ func (o *Orchestrator) ApplyConfig(cfg *system.Config, factories Factories) erro
 
 // applyVaults creates tier instances for each vault in the config,
 // compiles filters, and registers vaults.
-func (o *Orchestrator) applyVaults(cfg *system.Config, factories Factories) error {
+func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) error {
+	cfg := &sys.Config
 	vaultIDs := make(map[uuid.UUID]bool)
 
 	for _, vaultCfg := range cfg.Vaults {
@@ -135,14 +136,14 @@ func (o *Orchestrator) applyVaults(cfg *system.Config, factories Factories) erro
 		}
 		vaultIDs[vaultCfg.ID] = true
 
-		if err := o.initVault(cfg, vaultCfg, factories); err != nil {
+		if err := o.initVault(sys, vaultCfg, factories); err != nil {
 			return err
 		}
 	}
 
 	// Compile filters at startup so vaults can receive records immediately.
 	// The rotation sweep also reconciles every 15s as a safety net.
-	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+	if err := o.reloadFiltersFromRoutes(sys); err != nil {
 		return err
 	}
 	return nil
@@ -151,10 +152,10 @@ func (o *Orchestrator) applyVaults(cfg *system.Config, factories Factories) erro
 // initVault creates tier instances for a single vault and registers it.
 // Returns nil on success and on recoverable init failures (vault is skipped).
 // Returns an error only for structural config problems.
-func (o *Orchestrator) initVault(cfg *system.Config, vaultCfg system.VaultConfig, factories Factories) error {
+func (o *Orchestrator) initVault(sys *system.System, vaultCfg system.VaultConfig, factories Factories) error {
 	alertKey := fmt.Sprintf("vault-init:%s", vaultCfg.ID)
 
-	tiers, err := o.buildTierInstances(cfg, vaultCfg, factories)
+	tiers, err := o.buildTierInstances(sys, vaultCfg, factories)
 	if err != nil {
 		o.logger.Error("vault failed to initialize, skipping",
 			"id", vaultCfg.ID, "name", vaultCfg.Name, "error", err)
@@ -195,7 +196,8 @@ func (o *Orchestrator) startRetentionSweep() error {
 }
 
 // applyIngesters creates and registers ingesters from the system.
-func (o *Orchestrator) applyIngesters(cfg *system.Config, factories Factories) error {
+func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) error {
+	cfg := &sys.Config
 	ingesterIDs := make(map[uuid.UUID]bool)
 
 	for _, recvCfg := range cfg.Ingesters {

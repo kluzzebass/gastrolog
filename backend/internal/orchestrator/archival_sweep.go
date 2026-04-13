@@ -67,7 +67,7 @@ func (o *Orchestrator) startArchivalSweep() error {
 func (o *Orchestrator) archivalSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 
-	if err != nil || cfg == nil {
+	if err != nil || sys == nil {
 		return
 	}
 
@@ -196,7 +196,7 @@ func (o *Orchestrator) startReconcileSweep() error {
 func (o *Orchestrator) reconcileSweepAll() {
 	sys, err := o.loadSystem(context.Background())
 
-	if err != nil || cfg == nil {
+	if err != nil || sys == nil {
 		return
 	}
 
@@ -218,7 +218,7 @@ func (o *Orchestrator) reconcileSweepAll() {
 			if tierCfg == nil || tierCfg.CloudServiceID == nil {
 				continue
 			}
-			cs := findCloudService(cfg, *tierCfg.CloudServiceID)
+			cs := findCloudService(&sys.Config, *tierCfg.CloudServiceID)
 			if cs == nil {
 				continue
 			}

@@ -140,12 +140,13 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 		if !tierIDs[t.ID] {
 			continue
 		}
-		leaderNodeID := t.LeaderNodeID(nscs)
+		ps, _ := s.cfgStore.GetTierPlacements(ctx, t.ID)
+		leaderNodeID := system.LeaderNodeID(ps, nscs)
 		if leaderNodeID != "" && leaderNodeID != s.localNodeID && !seen[leaderNodeID] {
 			seen[leaderNodeID] = true
 			nodes = append(nodes, leaderNodeID)
 		}
-		for _, sid := range t.FollowerNodeIDs(nscs) {
+		for _, sid := range system.FollowerNodeIDs(ps, nscs) {
 			if sid != s.localNodeID && !seen[sid] {
 				seen[sid] = true
 				nodes = append(nodes, sid)

@@ -138,12 +138,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	defer func() { _ = proxy.Close() }()
 
 	// Non-blocking: try local FSM, bootstrap, or return nil for replication cases.
-	appCfg, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterTLS, nodeID)
+	appSys, fromLocalFSM, err := loadLocalConfig(ctx, logger, cfg, cfgStore, clusterTLS, nodeID)
 	if err != nil {
 		return err
 	}
 
-	asyncNodeConfig := fromLocalFSM || appCfg == nil
+	asyncNodeConfig := fromLocalFSM || appSys == nil
 	homeDir, socketPath, err := finalizeNodeSetup(ctx, logger, cfgStore, nodeID, cfg.ConfigType, cfg.NodeName, asyncNodeConfig, hd)
 	if err != nil {
 		return err
@@ -210,7 +210,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	orch.OnTierDrainComplete = makeTierDrainCompleteHandler(cfgStore, logger, factories)
 
-	if err := startOrchestrator(ctx, logger, orch, appCfg, factories); err != nil {
+	if err := startOrchestrator(ctx, logger, orch, appSys, factories); err != nil {
 		return err
 	}
 	close(orchReady)
@@ -262,7 +262,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 
 	// For replication cases: block until server settings replicate from the leader.
-	if err := awaitReplication(ctx, appCfg, cfg.ConfigType, cfgStore, logger); err != nil {
+	if err := awaitReplication(ctx, appSys, cfg.ConfigType, cfgStore, logger); err != nil {
 		return err
 	}
 
@@ -466,13 +466,13 @@ func nonRaftApplyHook(configType string, handle func(raftfsm.Notification)) func
 }
 
 // startOrchestrator applies config, rebuilds missing indexes, and starts the orchestrator.
-func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestrator.Orchestrator, appCfg *system.Config, factories orchestrator.Factories) error {
-	if appCfg != nil {
+func startOrchestrator(ctx context.Context, logger *slog.Logger, orch *orchestrator.Orchestrator, appSys *system.System, factories orchestrator.Factories) error {
+	if appSys != nil {
 		logger.Info("loaded config",
-			"ingesters", len(appCfg.Ingesters),
-			"vaults", len(appCfg.Vaults))
+			"ingesters", len(appSys.Config.Ingesters),
+			"vaults", len(appSys.Config.Vaults))
 	}
-	if err := orch.ApplyConfig(appCfg, factories); err != nil {
+	if err := orch.ApplyConfig(appSys, factories); err != nil {
 		return err
 	}
 	logger.Info("checking for missing indexes")
@@ -567,7 +567,7 @@ func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, e
 }
 
 // loadLocalConfig attempts to load config from the local FSM or bootstrap.
-func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.Config, bool, error) {
+func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cfgStore system.Store, clusterTLS *cluster.ClusterTLS, nodeID string) (*system.System, bool, error) {
 	if err := requestClusterMembership(ctx, logger, cfg, clusterTLS, nodeID); err != nil {
 		return nil, false, err
 	}
@@ -599,11 +599,11 @@ func loadLocalConfig(ctx context.Context, logger *slog.Logger, cfg RunConfig, cf
 	}
 
 	logger.Info("loading config", "type", cfg.ConfigType)
-	appCfg, err := ensureConfig(ctx, logger, cfgStore)
+	appSys, err := ensureConfig(ctx, logger, cfgStore)
 	if err != nil {
 		return nil, false, err
 	}
-	return appCfg, false, nil
+	return appSys, false, nil
 }
 
 // requestClusterMembership asks the cluster leader to add this node as a Raft
@@ -662,8 +662,8 @@ func logNodeIdentity(logger *slog.Logger, nodeID, nodeName string) {
 
 // awaitReplication blocks until server settings replicate from the leader.
 // No-op when config was loaded locally.
-func awaitReplication(ctx context.Context, appCfg *system.Config, configType string, cfgStore system.Store, logger *slog.Logger) error {
-	if appCfg != nil || configType != "raft" {
+func awaitReplication(ctx context.Context, appSys *system.System, configType string, cfgStore system.Store, logger *slog.Logger) error {
+	if appSys != nil || configType != "raft" {
 		return nil
 	}
 	return waitForServerSettings(ctx, cfgStore, 60*time.Second, logger)
@@ -785,7 +785,7 @@ func persistNodeName(logger *slog.Logger, configType string, hd home.Dir, nodeNa
 	}
 }
 
-func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore system.Store) (*system.Config, error) {
+func ensureConfig(ctx context.Context, logger *slog.Logger, cfgStore system.Store) (*system.System, error) {
 	cfg, err := cfgStore.Load(ctx)
 	if err != nil {
 		return nil, err

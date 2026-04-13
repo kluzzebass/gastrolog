@@ -77,7 +77,7 @@ func (o *Orchestrator) DrainTier(ctx context.Context, vaultID, tierID uuid.UUID,
 	// Validate mode-specific requirements.
 	switch mode {
 	case TierDrainDecommission:
-		_, _, err := resolveNextTierInChain(cfg, vaultID, tierID)
+		_, _, err := resolveNextTierInChain(&sys.Config, vaultID, tierID)
 		if err != nil {
 			o.mu.Unlock()
 			// Terminal tier — just expire all chunks instead of transitioning.
@@ -177,7 +177,7 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 	}
 
 	// Transfer all sealed chunks.
-	if !o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID) {
+	if !o.drainTierChunks(ctx, sys, vaultID, tierID, tier, mode, targetNodeID) {
 		return // context cancelled or error — defer handles cleanup
 	}
 
@@ -186,14 +186,14 @@ func (o *Orchestrator) tierDrainWorker(ctx context.Context, vaultID, tierID uuid
 		if err := tier.Chunks.Seal(); err != nil {
 			o.logger.Warn("tier drain: final seal failed", "vault", vaultID, "tier", tierID, "error", err)
 		}
-		o.drainTierChunks(ctx, cfg, vaultID, tierID, tier, mode, targetNodeID)
+		o.drainTierChunks(ctx, sys, vaultID, tierID, tier, mode, targetNodeID)
 	}
 
 	success = true
 }
 
 // drainTierChunks transfers all sealed chunks from the tier. Returns false if cancelled.
-func (o *Orchestrator) drainTierChunks(ctx context.Context, cfg *system.Config, vaultID, tierID uuid.UUID, tier *TierInstance, mode TierDrainMode, targetNodeID string) bool {
+func (o *Orchestrator) drainTierChunks(ctx context.Context, sys *system.System, vaultID, tierID uuid.UUID, tier *TierInstance, mode TierDrainMode, targetNodeID string) bool {
 	metas, err := tier.Chunks.List()
 	if err != nil {
 		o.logger.Error("tier drain: list chunks failed", "vault", vaultID, "tier", tierID, "error", err)
@@ -210,7 +210,7 @@ func (o *Orchestrator) drainTierChunks(ctx context.Context, cfg *system.Config, 
 		default:
 		}
 
-		if err := o.drainOneChunk(ctx, cfg, vaultID, tierID, tier, meta.ID, mode, targetNodeID); err != nil {
+		if err := o.drainOneChunk(ctx, sys, vaultID, tierID, tier, meta.ID, mode, targetNodeID); err != nil {
 			o.logger.Error("tier drain: chunk transfer failed",
 				"vault", vaultID, "tier", tierID, "chunk", meta.ID, "error", err)
 			continue // best effort — try the rest
@@ -237,7 +237,7 @@ func drainCursorToRecords(cursor chunk.RecordCursor) ([]chunk.Record, error) {
 }
 
 // drainOneChunk transfers a single chunk and deletes the source.
-func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *system.Config, vaultID, tierID uuid.UUID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
+func (o *Orchestrator) drainOneChunk(ctx context.Context, sys *system.System, vaultID, tierID uuid.UUID, tier *TierInstance, chunkID chunk.ChunkID, mode TierDrainMode, targetNodeID string) error {
 	cursor, err := tier.Chunks.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -246,7 +246,7 @@ func (o *Orchestrator) drainOneChunk(ctx context.Context, cfg *system.Config, va
 
 	switch mode {
 	case TierDrainDecommission:
-		if err := o.drainChunkToNextTier(ctx, cfg, vaultID, tierID, cursor); err != nil {
+		if err := o.drainChunkToNextTier(ctx, sys, vaultID, tierID, cursor); err != nil {
 			return err
 		}
 
@@ -359,12 +359,12 @@ func (o *Orchestrator) IsTierDraining(vaultID, tierID uuid.UUID) bool {
 
 // drainChunkToNextTier streams a chunk to the next tier in the vault chain.
 // If the tier is terminal, returns nil (chunk will just be deleted).
-func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, cfg *system.Config, vaultID, tierID uuid.UUID, cursor chunk.RecordCursor) error {
-	nextTierID, nextTierCfg, _ := resolveNextTierInChain(cfg, vaultID, tierID)
+func (o *Orchestrator) drainChunkToNextTier(ctx context.Context, sys *system.System, vaultID, tierID uuid.UUID, cursor chunk.RecordCursor) error {
+	nextTierID, nextTierCfg, _ := resolveNextTierInChain(&sys.Config, vaultID, tierID)
 	if nextTierCfg == nil {
 		return nil // terminal tier — caller deletes the chunk
 	}
-	nextLeader := nextTierCfg.LeaderNodeID(cfg.NodeStorageConfigs)
+	nextLeader := system.LeaderNodeID(sys.Runtime.TierPlacements[nextTierCfg.ID], sys.Runtime.NodeStorageConfigs)
 	remote := nextLeader != "" && nextLeader != o.localNodeID
 
 	if remote {

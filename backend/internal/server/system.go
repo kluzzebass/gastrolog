@@ -309,11 +309,12 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		return fmt.Errorf("list tiers: %w", err)
 	}
 	for _, tier := range tiers {
+		tierPlacements, _ := s.sysStore.GetTierPlacements(ctx, tier.ID)
 		var placements []*apiv1.TierPlacement
-		for _, p := range tier.Placements {
+		for _, p := range tierPlacements {
 			placements = append(placements, &apiv1.TierPlacement{
-				StorageId:  p.StorageID,
-				Leader: p.Leader,
+				StorageId: p.StorageID,
+				Leader:    p.Leader,
 			})
 		}
 		tc := &apiv1.TierConfig{
@@ -480,7 +481,7 @@ func (s *SystemServer) GetSettings(
 		Cluster: &apiv1.ClusterSettings{
 			BroadcastInterval: ss.Cluster.BroadcastInterval,
 		},
-		SetupWizardDismissed: ss.SetupWizardDismissed,
+		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
 		NodeId:               s.localNodeID,
 	}
 
@@ -708,9 +709,7 @@ func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *system.ServerSetting
 			return err
 		}
 	}
-	if msg.SetupWizardDismissed != nil {
-		ss.SetupWizardDismissed = *msg.SetupWizardDismissed
-	}
+	// SetupWizardDismissed handled via SetSetupWizardDismissed in PutSettings
 	return nil
 }
 

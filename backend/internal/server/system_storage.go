@@ -198,12 +198,9 @@ func (s *SystemServer) PutTier(
 	}
 	cfg.ID = id
 
-	// Placements are system-managed by the placement manager.
-	// Preserve existing placements on updates; leave empty on create.
-	cfg.Placements = nil
-	if existing, _ := s.sysStore.GetTier(ctx, id); existing != nil {
-		cfg.Placements = existing.Placements
-	}
+	// Placements are system-managed (in Runtime, not Config).
+	// PutTier only stores the config portion. Placements are
+	// managed separately via SetTierPlacements.
 
 	if err := s.sysStore.PutTier(ctx, cfg); err != nil {
 		return nil, errInternal(err)

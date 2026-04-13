@@ -82,11 +82,12 @@ type sweepTarget struct {
 //     the leader has removed. No independent rule evaluation.
 func (o *Orchestrator) retentionSweepAll() {
 	sys, err := o.loadSystem(context.Background())
+	cfg := &sys.Config
 	if err != nil {
 		o.logger.Error("retention: failed to load config", "error", err)
 		return
 	}
-	if sys == nil {
+	if cfg == nil {
 		return
 	}
 
@@ -162,7 +163,7 @@ func (o *Orchestrator) retentionSweepAll() {
 // enforceMemoryBudgets checks memory tiers for budget overruns and transitions
 // the oldest sealed chunks to the next tier. Only runs on leaders.
 func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
-	if sys == nil {
+	if cfg == nil {
 		return
 	}
 	type budgetTarget struct {

@@ -25,8 +25,12 @@ func (o *Orchestrator) rotationSweep() {
 	sys, err := o.loadSystem(context.Background())
 	if err != nil {
 		o.logger.Error("rotation sweep: failed to load config", "error", err)
-		// Fall through with nil cfg — skip policy/cron reconciliation
+		// Fall through with nil sys — skip policy/cron reconciliation
 		// but still check rotation triggers with whatever policies are set.
+	}
+	var cfg *system.Config
+	if sys != nil {
+		cfg = &sys.Config
 	}
 
 	type sealEvent struct {
@@ -59,7 +63,7 @@ func (o *Orchestrator) rotationSweep() {
 			// Apply rotation policy + reconcile cron job + refresh replication targets.
 			if cfg != nil && vaultCfg != nil {
 				tierCfg := findTierConfig(cfg.Tiers, tier.TierID)
-				o.applyRotationFromConfig(cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
+				o.applyRotationFromConfig(sys, cfg, *vaultCfg, tier, tierCfg, activeCronJobs)
 			}
 
 			// Check for time-based rotation triggers.
@@ -92,7 +96,7 @@ func (o *Orchestrator) rotationSweep() {
 	// Reconcile filters from routes (safety net — dispatch also reloads
 	// on config changes for immediate effect).
 	if cfg != nil {
-		o.reconcileFilters(cfg)
+		o.reconcileFilters(sys)
 	}
 
 	// Schedule compression + index builds outside the outer lock.
@@ -102,10 +106,10 @@ func (o *Orchestrator) rotationSweep() {
 }
 
 // reconcileFilters recompiles the filter set from config under a write lock.
-func (o *Orchestrator) reconcileFilters(cfg *system.Config) {
+func (o *Orchestrator) reconcileFilters(sys *system.System) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+	if err := o.reloadFiltersFromRoutes(sys); err != nil {
 		o.logger.Warn("rotation sweep: filter reconciliation failed", "error", err)
 	}
 }
@@ -113,7 +117,7 @@ func (o *Orchestrator) reconcileFilters(cfg *system.Config) {
 // applyRotationFromConfig resolves the rotation policy for a leader tier
 // from the current config and applies it. Also ensures the cron job exists
 // if configured. Called each tick by rotationSweep.
-func (o *Orchestrator) applyRotationFromConfig(
+func (o *Orchestrator) applyRotationFromConfig(sys *system.System, 
 	cfg *system.Config,
 	vaultCfg system.VaultConfig,
 	tier *TierInstance,
@@ -124,7 +128,7 @@ func (o *Orchestrator) applyRotationFromConfig(
 		return
 	}
 	// Refresh replication targets from current system.
-	tier.FollowerTargets = tierCfg.FollowerTargets(cfg.NodeStorageConfigs)
+	tier.FollowerTargets = system.FollowerTargets(sys.Runtime.TierPlacements[tierCfg.ID], sys.Runtime.NodeStorageConfigs)
 
 	if tierCfg.RotationPolicyID == nil {
 		return

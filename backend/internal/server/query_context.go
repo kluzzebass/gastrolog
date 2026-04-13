@@ -245,7 +245,8 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID)
 		if tc == nil {
 			continue
 		}
-		leaderNodeID := tc.LeaderNodeID(nscs)
+		placements, _ := s.cfgStore.GetTierPlacements(ctx, tc.ID)
+		leaderNodeID := system.LeaderNodeID(placements, nscs)
 		if leaderNodeID != "" && leaderNodeID != s.localNodeID {
 			return leaderNodeID
 		}

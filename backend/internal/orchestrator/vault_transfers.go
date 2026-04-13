@@ -103,11 +103,11 @@ func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) 
 	if o.sysLoader == nil {
 		return "", errors.New("config loader not configured")
 	}
-	cfg, err := o.sysLoader.Load(ctx)
+	sys, err := o.sysLoader.Load(ctx)
 	if err != nil {
 		return "", fmt.Errorf("load config: %w", err)
 	}
-	for _, v := range cfg.Vaults {
+	for _, v := range sys.Config.Vaults {
 		if v.ID == vaultID {
 			return "", nil
 		}
@@ -210,7 +210,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, target
 	o.draining[vaultID] = ds
 
 	// Rebuild filters — draining vault will forward to targetNodeID.
-	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+	if err := o.reloadFiltersFromRoutes(sys); err != nil {
 		delete(o.draining, vaultID)
 		cancel()
 		o.mu.Unlock()
@@ -355,7 +355,7 @@ func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID uuid.UUID) error
 	ds.Cancel()
 	delete(o.draining, vaultID)
 
-	if err := o.reloadFiltersFromRoutes(cfg); err != nil {
+	if err := o.reloadFiltersFromRoutes(sys); err != nil {
 		o.logger.Warn("cancel drain: failed to reload filters", "vault", vaultID, "error", err)
 	}
 	o.mu.Unlock()

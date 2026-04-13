@@ -498,14 +498,14 @@ func (s *VaultServer) lookupCloudServiceForChunk(ctx context.Context, vaultID uu
 		return nil
 	}
 	// Find vault → tiers → cloud service.
-	for i := range cfg.Tiers {
-		t := &cfg.Tiers[i]
+	for i := range cfg.Config.Tiers {
+		t := &cfg.Config.Tiers[i]
 		if t.VaultID != vaultID || t.CloudServiceID == nil {
 			continue
 		}
-		for j := range cfg.CloudServices {
-			if cfg.CloudServices[j].ID == *t.CloudServiceID {
-				return &cfg.CloudServices[j]
+		for j := range cfg.Config.CloudServices {
+			if cfg.Config.CloudServices[j].ID == *t.CloudServiceID {
+				return &cfg.Config.CloudServices[j]
 			}
 		}
 	}

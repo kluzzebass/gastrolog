@@ -32,7 +32,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 		return
 	}
 
-	nextTierID, nextTierCfg := r.resolveNextTier(cfg)
+	nextTierID, nextTierCfg := r.resolveNextTier(&sys.Config)
 	if nextTierCfg == nil {
 		return // logged inside resolveNextTier
 	}
@@ -51,7 +51,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 	}
 	defer func() { _ = cursor.Close() }()
 
-	nextLeaderNodeID := nextTierCfg.LeaderNodeID(cfg.NodeStorageConfigs)
+	nextLeaderNodeID := system.LeaderNodeID(sys.Runtime.TierPlacements[nextTierCfg.ID], sys.Runtime.NodeStorageConfigs)
 	remote := nextLeaderNodeID != "" && nextLeaderNodeID != r.orch.localNodeID
 
 	var streamErr error

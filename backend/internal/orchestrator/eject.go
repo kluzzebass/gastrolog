@@ -46,7 +46,7 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
 		return
 	}
 
-	routes := r.resolveEjectRoutes(cfg, id, routeIDs)
+	routes := r.resolveEjectRoutes(sys, id, routeIDs)
 	if routes == nil {
 		return // logged inside resolveEjectRoutes
 	}
@@ -83,10 +83,10 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
 
 // resolveEjectRoutes compiles each route's filter and resolves destinations.
 // Returns nil if resolution fails (errors are logged).
-func (r *retentionRunner) resolveEjectRoutes(cfg *system.Config, id chunk.ChunkID, routeIDs []uuid.UUID) []resolvedRoute {
+func (r *retentionRunner) resolveEjectRoutes(sys *system.System, id chunk.ChunkID, routeIDs []uuid.UUID) []resolvedRoute {
 	var routes []resolvedRoute
 	for _, routeID := range routeIDs {
-		route := findRoute(cfg.Routes, routeID)
+		route := findRoute(sys.Config.Routes, routeID)
 		if route == nil {
 			r.logger.Error("retention eject: route not found",
 				"vault", r.vaultID, "chunk", id.String(), "route", routeID)
@@ -98,7 +98,7 @@ func (r *retentionRunner) resolveEjectRoutes(cfg *system.Config, id chunk.ChunkI
 			continue
 		}
 
-		resolved := r.resolveOneRoute(cfg, routeID, route)
+		resolved := r.resolveOneRoute(sys, routeID, route)
 		if resolved == nil {
 			return nil // compile error, logged inside
 		}
@@ -120,7 +120,8 @@ func (r *retentionRunner) resolveEjectRoutes(cfg *system.Config, id chunk.ChunkI
 
 // resolveOneRoute compiles a single route's filter and resolves its destinations.
 // Returns nil on compile error (logged).
-func (r *retentionRunner) resolveOneRoute(cfg *system.Config, routeID uuid.UUID, route *system.RouteConfig) *resolvedRoute {
+func (r *retentionRunner) resolveOneRoute(sys *system.System, routeID uuid.UUID, route *system.RouteConfig) *resolvedRoute {
+	cfg := &sys.Config
 	var cf *CompiledFilter
 	if route.FilterID != nil {
 		filterExpr := resolveFilterExpr(cfg, *route.FilterID)
@@ -135,7 +136,7 @@ func (r *retentionRunner) resolveOneRoute(cfg *system.Config, routeID uuid.UUID,
 
 	var targets []ejectTarget
 	for _, destID := range route.Destinations {
-		nodeID := resolveVaultNodeID(cfg, destID)
+		nodeID := resolveVaultNodeID(sys, destID)
 		if nodeID == r.orch.localNodeID {
 			nodeID = ""
 		}
