@@ -25,10 +25,10 @@ func FuzzNodeStatsDeserialize(f *testing.F) {
 		RaftState:   "Leader",
 		ApiAddress:  ":4564",
 		Vaults: []*gastrologv1.VaultStats{
-			{Id: "abc", Name: "default", RecordCount: 1000, DataBytes: 999},
+			{Id: []byte("abc"), Name: "default", RecordCount: 1000, DataBytes: 999},
 		},
 		Ingesters: []*gastrologv1.IngesterNodeStats{
-			{Id: "ing-1", Name: "syslog", MessagesIngested: 500, Running: true},
+			{Id: []byte("ing-1"), Name: "syslog", MessagesIngested: 500, Running: true},
 		},
 	}
 	validBytes, _ := proto.Marshal(valid)
@@ -51,7 +51,7 @@ func FuzzNodeStatsDeserialize(f *testing.F) {
 		// Exercise the PeerState path that processes incoming NodeStats.
 		ps := NewPeerState(30 * time.Second)
 		msg := &gastrologv1.BroadcastMessage{
-			SenderId:  "fuzz-sender",
+			SenderId:  []byte("fuzz-sender"),
 			Timestamp: timestamppb.Now(),
 			Payload:   &gastrologv1.BroadcastMessage_NodeStats{NodeStats: &ns},
 		}

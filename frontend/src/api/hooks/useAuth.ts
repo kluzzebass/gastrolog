@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { authClient, getToken, getRefreshToken, setToken, setRefreshToken } from "../client";
+import { decode } from "../glid";
 
 export function useAuthStatus() {
   return useQuery({
@@ -130,7 +131,7 @@ export function useCreateUser() {
 export function useResetPassword() {
   return useMutation({
     mutationFn: async (args: { id: string; newPassword: string }) => {
-      return authClient.resetPassword(args);
+      return authClient.resetPassword({ id: decode(args.id), newPassword: args.newPassword });
     },
   });
 }
@@ -139,7 +140,7 @@ export function useUpdateUserRole() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { id: string; role: string }) => {
-      return authClient.updateUserRole(args);
+      return authClient.updateUserRole({ id: decode(args.id), role: args.role });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
@@ -149,7 +150,7 @@ export function useRenameUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { id: string; newUsername: string }) => {
-      return authClient.renameUser(args);
+      return authClient.renameUser({ id: decode(args.id), newUsername: args.newUsername });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });
@@ -159,7 +160,7 @@ export function useDeleteUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      return authClient.deleteUser({ id });
+      return authClient.deleteUser({ id: decode(id) });
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: ["users"] }),
   });

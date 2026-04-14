@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
@@ -49,7 +50,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   const filterOptions = [
     { value: "", label: "(none)" },
     ...filters
-      .map((f) => ({ value: f.id, label: f.name || f.id }))
+      .map((f) => ({ value: encode(f.id), label: f.name || encode(f.id) }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   ];
 
@@ -60,7 +61,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
   ];
 
   const defaults = (id: string) => {
-    const route = routes.find((r) => r.id === id);
+    const route = routes.find((r) => encode(r.id) === id);
     if (!route)
       return {
         name: "",
@@ -72,8 +73,8 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       };
     return {
       name: route.name,
-      filterId: route.filterId,
-      destinations: route.destinations.map((d) => ({ vaultId: d.vaultId })),
+      filterId: encode(route.filterId),
+      destinations: route.destinations.map((d) => ({ vaultId: encode(d.vaultId) })),
       distribution: route.distribution || "fanout",
       enabled: route.enabled,
       ejectOnly: route.ejectOnly,
@@ -203,7 +204,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
           <DestinationsEditor
             destinations={newDestinations}
             onChange={setNewDestinations}
-            vaults={vaults}
+            vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
             dark={dark}
           />
           <Checkbox
@@ -216,11 +217,11 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
       )}
 
       {sortByName(routes).map((route) => {
-        const id = route.id;
+        const id = encode(route.id);
         const edit = getEdit(id);
-        const filterName = filters.find((f) => f.id === route.filterId)?.name;
+        const filterName = filters.find((f) => encode(f.id) === encode(route.filterId))?.name;
         const destNames = route.destinations
-          .map((d) => vaults.find((v) => v.id === d.vaultId)?.name || d.vaultId)
+          .map((d) => vaults.find((v) => encode(v.id) === encode(d.vaultId))?.name || encode(d.vaultId))
           .join(", ");
         return (
           <SettingsCard
@@ -285,7 +286,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
               <DestinationsEditor
                 destinations={edit.destinations}
                 onChange={(dests) => setEdit(id, { destinations: dests })}
-                vaults={vaults}
+                vaults={vaults.map((v) => ({ id: encode(v.id), name: v.name }))}
                 dark={dark}
               />
               <Checkbox

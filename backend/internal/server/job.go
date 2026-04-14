@@ -48,12 +48,12 @@ func (s *JobServer) GetJob(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetJobRequest],
 ) (*connect.Response[apiv1.GetJobResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
 	// Check local scheduler first.
-	info, ok := s.scheduler.GetJob(req.Msg.Id)
+	info, ok := s.scheduler.GetJob(string(req.Msg.Id))
 	if ok {
 		return connect.NewResponse(&apiv1.GetJobResponse{
 			Job: JobInfoToProto(info.Snapshot(), s.localNodeID),
@@ -64,7 +64,7 @@ func (s *JobServer) GetJob(
 	if s.peerJobs != nil {
 		for _, peerJobList := range s.peerJobs.GetAll() {
 			for _, job := range peerJobList {
-				if job.Id == req.Msg.Id {
+				if string(job.Id) == string(req.Msg.Id) {
 					return connect.NewResponse(&apiv1.GetJobResponse{Job: job}), nil
 				}
 			}
@@ -151,7 +151,7 @@ func (s *JobServer) allJobs() []*apiv1.Job {
 			return c
 		}
 		// By node ID to group same-node jobs together.
-		return cmp.Compare(a.NodeId, b.NodeId)
+		return cmp.Compare(string(a.NodeId), string(b.NodeId))
 	})
 
 	return all
@@ -160,11 +160,11 @@ func (s *JobServer) allJobs() []*apiv1.Job {
 // JobInfoToProto converts an orchestrator.JobInfo to a proto Job message.
 func JobInfoToProto(info orchestrator.JobInfo, nodeID string) *apiv1.Job {
 	pj := &apiv1.Job{
-		Id:          info.ID,
+		Id:          []byte(info.ID),
 		Name:        info.Name,
 		Description: info.Description,
 		Schedule:    info.Schedule,
-		NodeId:      nodeID,
+		NodeId:      []byte(nodeID),
 	}
 
 	if info.Schedule == "once" {

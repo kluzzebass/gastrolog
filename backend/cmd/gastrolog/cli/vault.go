@@ -43,16 +43,16 @@ func newVaultListCmd() *cobra.Command {
 			// Count tiers per vault from the tier configs.
 			tierCount := make(map[string]int)
 			for _, t := range resp.Msg.Tiers {
-				if t.VaultId != "" {
-					tierCount[t.VaultId]++
+				if len(t.VaultId) != 0 {
+					tierCount[string(t.VaultId)]++
 				}
 			}
 			var rows [][]string
 			for _, v := range resp.Msg.Vaults {
 				rows = append(rows, []string{
-					v.Id, v.Name,
+					glid.FromBytes(v.Id).String(), v.Name,
 					strconv.FormatBool(v.Enabled),
-					strconv.Itoa(tierCount[v.Id]),
+					strconv.Itoa(tierCount[string(v.Id)]),
 				})
 			}
 			p.table([]string{"ID", "NAME", "ENABLED", "TIERS"}, rows)
@@ -81,7 +81,7 @@ func newVaultGetCmd() *cobra.Command {
 				return err
 			}
 			for _, v := range resp.Msg.Vaults {
-				if v.Id == id {
+				if glid.FromBytes(v.Id).String() == id {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(v)
@@ -98,14 +98,14 @@ func newVaultGetCmd() *cobra.Command {
 // vaultDetailPairs builds the key-value pairs for vault detail rendering.
 func vaultDetailPairs(v *v1.VaultConfig, allTiers []*v1.TierConfig) [][2]string {
 	pairs := [][2]string{
-		{"ID", v.Id},
+		{"ID", glid.FromBytes(v.Id).String()},
 		{"Name", v.Name},
 		{"Enabled", strconv.FormatBool(v.Enabled)},
 	}
 	var idx int
 	for _, t := range allTiers {
-		if t.VaultId == v.Id {
-			pairs = append(pairs, [2]string{"Tier[" + strconv.Itoa(idx) + "]", t.Id})
+		if string(t.VaultId) == string(v.Id) {
+			pairs = append(pairs, [2]string{"Tier[" + strconv.Itoa(idx) + "]", glid.FromBytes(t.Id).String()})
 			idx++
 		}
 	}
@@ -123,7 +123,7 @@ func newVaultCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.VaultConfig{
-				Id:      glid.New().String(),
+				Id:      glid.New().ToProto(),
 				Name:    name,
 				Enabled: true,
 			}
@@ -153,7 +153,7 @@ func newVaultCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s vault %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s vault %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -175,12 +175,12 @@ func newVaultDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.vaults, "vault")
+			idBytes, err := resolveToProto(args[0], r.vaults, "vault")
 			if err != nil {
 				return err
 			}
 			_, err = client.System.DeleteVault(context.Background(), connect.NewRequest(&v1.DeleteVaultRequest{
-				Id:    id,
+				Id:    idBytes,
 				Force: force,
 			}))
 			if err != nil {

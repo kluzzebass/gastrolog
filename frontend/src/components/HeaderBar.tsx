@@ -9,6 +9,7 @@ import { useAlerts } from "../api/hooks/useAlerts";
 import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import { formatBytes } from "../utils/units";
 import type { ClusterNode } from "../api/gen/gastrolog/v1/lifecycle_pb";
+import { encode } from "../api/glid";
 
 interface HeaderBarProps {
   dark: boolean;
@@ -34,7 +35,7 @@ export function HeaderBar({
   const c = useThemeClass(dark);
   const { data: cluster, isLoading } = useClusterStatus();
   const nodes = (cluster?.nodes ?? []).toSorted((a, b) =>
-    (a.name || a.id).localeCompare(b.name || b.id),
+    (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)),
   );
 
   // Inspector glow: briefly flash when system status data arrives.
@@ -289,9 +290,9 @@ function HoverStat({
           onMouseLeave={hideTooltip}
         >
           {nodes.map((node) => (
-            <div key={node.id} className="flex items-baseline justify-between gap-4 py-0.5">
+            <div key={encode(node.id)} className="flex items-baseline justify-between gap-4 py-0.5">
               <span className={`text-[0.75em] truncate max-w-24 ${c("text-text-muted", "text-light-text-muted")}`}>
-                {node.name || node.id.slice(0, 8)}
+                {node.name || encode(node.id).slice(0, 8)}
               </span>
               <span className={`text-[0.75em] font-mono shrink-0 ${c("text-text-bright", "text-light-text-bright")}`}>
                 {node.stats ? renderNodeValue(node) : "—"}

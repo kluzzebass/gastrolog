@@ -7,29 +7,38 @@ const mocks = installMockClients();
 
 import { RoutesSettings } from "./RoutesSettings";
 
+/** Create a distinct 16-byte Uint8Array test ID from a small number. */
+function testId(n: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(16);
+  bytes[15] = n;
+  return bytes;
+}
+
+const ZERO_ID = new Uint8Array(16);
+
 const sampleConfig = {
   routes: [
     {
-      id: "r1",
+      id: testId(1),
       name: "default-route",
-      filterId: "f1",
-      destinations: [{ vaultId: "v1" }],
+      filterId: testId(10),
+      destinations: [{ vaultId: testId(20) }],
       distribution: "fanout",
       enabled: true,
     },
     {
-      id: "r2",
+      id: testId(2),
       name: "backup-route",
-      filterId: "",
-      destinations: [{ vaultId: "v2" }],
+      filterId: ZERO_ID,
+      destinations: [{ vaultId: testId(21) }],
       distribution: "failover",
       enabled: false,
     },
   ],
-  filters: [{ id: "f1", name: "prod-filter" }],
+  filters: [{ id: testId(10), name: "prod-filter" }],
   vaults: [
-    { id: "v1", name: "vault-alpha" },
-    { id: "v2", name: "vault-beta" },
+    { id: testId(20), name: "vault-alpha" },
+    { id: testId(21), name: "vault-beta" },
   ],
   ingesters: [],
   nodeConfigs: [],
@@ -154,7 +163,7 @@ describe("RoutesSettings", () => {
   test("opens add form via Add Route button", async () => {
     m(mocks.systemClient, "generateName").mockResolvedValueOnce({ name: "lucky-panda" });
     const qc = createTestQueryClient();
-    qc.setQueryData(["system"], { routes: [], filters: [], vaults: [{ id: "v1", name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
+    qc.setQueryData(["system"], { routes: [], filters: [], vaults: [{ id: testId(20), name: "vault-alpha" }], ingesters: [], nodeConfigs: [] });
 
     const { getByText } = render(<RoutesSettings dark />, {
       wrapper: settingsWrapper(qc),

@@ -102,11 +102,11 @@ func NewPauseCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.vaults, "vault")
+			idBytes, err := resolveToProto(args[0], r.vaults, "vault")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.PauseVault(context.Background(), connect.NewRequest(&v1.PauseVaultRequest{Id: id}))
+			_, err = client.System.PauseVault(context.Background(), connect.NewRequest(&v1.PauseVaultRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}
@@ -128,11 +128,11 @@ func NewResumeCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.vaults, "vault")
+			idBytes, err := resolveToProto(args[0], r.vaults, "vault")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.ResumeVault(context.Background(), connect.NewRequest(&v1.ResumeVaultRequest{Id: id}))
+			_, err = client.System.ResumeVault(context.Background(), connect.NewRequest(&v1.ResumeVaultRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}

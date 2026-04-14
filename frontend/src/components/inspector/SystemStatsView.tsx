@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import type { ClusterNode } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 import type { NodeStats } from "../../api/gen/gastrolog/v1/cluster_pb";
@@ -205,7 +206,7 @@ export function ClusterSummaryView({
   let leaderName = "";
 
   for (const node of nodes) {
-    if (node.isLeader) leaderName = node.name || node.id;
+    if (node.isLeader) leaderName = node.name || encode(node.id);
     const s = node.stats;
     if (!s) continue;
     totalCpu += s.cpuPercent;

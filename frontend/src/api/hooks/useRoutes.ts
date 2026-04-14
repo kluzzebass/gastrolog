@@ -1,5 +1,6 @@
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
+import { decode } from "../glid";
 
 export function usePutRoute() {
   return useSystemMutation(
@@ -14,10 +15,10 @@ export function usePutRoute() {
     }) => {
       return systemClient.putRoute({
         config: {
-          id: args.id,
+          id: decode(args.id),
           name: args.name,
-          filterId: args.filterId,
-          destinations: args.destinations.map((vaultId) => ({ vaultId })),
+          filterId: decode(args.filterId),
+          destinations: args.destinations.map((vaultId) => ({ vaultId: decode(vaultId) })),
           distribution: args.distribution,
           enabled: args.enabled,
           ejectOnly: args.ejectOnly,
@@ -29,6 +30,6 @@ export function usePutRoute() {
 
 export function useDeleteRoute() {
   return useSystemMutation(async (id: string) => {
-    return systemClient.deleteRoute({ id });
+    return systemClient.deleteRoute({ id: decode(id) });
   });
 }

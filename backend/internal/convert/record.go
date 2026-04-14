@@ -26,8 +26,8 @@ import (
 func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 	er := &gastrologv1.ExportRecord{
 		Raw:        rec.Raw,
-		VaultId:    rec.VaultID.String(),
-		ChunkId:    rec.Ref.ChunkID.String(),
+		VaultId:    rec.VaultID.ToProto(),
+		ChunkId:    glid.GLID(rec.Ref.ChunkID).ToProto(),
 		Pos:        rec.Ref.Pos,
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterId: rec.EventID.IngesterID[:],
@@ -68,11 +68,11 @@ func ExportToRecord(er *gastrologv1.ExportRecord) chunk.Record {
 		rec.Attrs = make(chunk.Attributes, len(er.GetAttrs()))
 		maps.Copy(rec.Attrs, er.GetAttrs())
 	}
-	if er.GetVaultId() != "" {
-		rec.VaultID, _ = glid.ParseUUID(er.GetVaultId())
+	if len(er.GetVaultId()) >= glid.Size {
+		rec.VaultID = glid.FromBytes(er.GetVaultId())
 	}
-	if er.GetChunkId() != "" {
-		rec.Ref.ChunkID, _ = chunk.ParseChunkID(er.GetChunkId())
+	if len(er.GetChunkId()) >= glid.Size {
+		rec.Ref.ChunkID = chunk.ChunkID(glid.FromBytes(er.GetChunkId()))
 		rec.Ref.Pos = er.GetPos()
 	}
 	rec.EventID.IngestSeq = er.GetIngestSeq()

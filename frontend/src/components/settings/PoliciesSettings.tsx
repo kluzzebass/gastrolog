@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState, useReducer } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import {
@@ -152,7 +153,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
   const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
-    const pol = policies.find((p) => p.id === id);
+    const pol = policies.find((p) => encode(p.id) === id);
     if (!pol) return { name: "", maxBytes: "", maxRecords: "", maxAge: "", cron: "" };
     return {
       name: pol.name,
@@ -186,7 +187,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
     },
     onDeleteSuccess: (id) => {
       const referencedBy = tiers
-        .filter((t) => t.rotationPolicyId === id)
+        .filter((t) => encode(t.rotationPolicyId) === id)
         .map((t) => t.name || t.id);
       if (referencedBy.length > 0) {
         addToast(
@@ -303,7 +304,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
       )}
 
       {sortByName(policies).map((pol) => {
-        const id = pol.id;
+        const id = encode(pol.id);
         const edit = getEdit(id);
         const refs = tierRefsForRotationPolicy(tiers, id, vaults);
         return (

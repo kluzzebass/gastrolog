@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
@@ -75,7 +76,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
   const routes = config?.routes ?? [];
 
   const defaults = (id: string) => {
-    const fc = filters.find((f) => f.id === id);
+    const fc = filters.find((f) => encode(f.id) === id);
     if (!fc) return { name: "", expression: "" };
     return { name: fc.name, expression: fc.expression };
   };
@@ -169,7 +170,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
       )}
 
       {sortByName(filters).map((fc) => {
-        const id = fc.id;
+        const id = encode(fc.id);
         const edit = getEdit(id);
         const refs = routeRefsForFilter(routes, id);
         return (

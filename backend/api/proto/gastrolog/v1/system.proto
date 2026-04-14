@@ -165,27 +165,27 @@ message GetSystemResponse {
 }
 
 message RetentionRule {
-  string retention_policy_id = 1;
+  bytes retention_policy_id = 1;
   string action = 2;              // "expire", "eject", "transition", or "archive"
-  string destination_id = 3;      // deprecated — was target vault for action=migrate
-  repeated string eject_route_ids = 4; // target routes, only for action=eject
+  bytes destination_id = 3;      // deprecated — was target vault for action=migrate
+  repeated bytes eject_route_ids = 4; // target routes, only for action=eject
   string archive_storage_class = 5;    // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
 }
 
 message VaultConfig {
-  string id = 1;
+  bytes id = 1;
   bool enabled = 7;
   string name = 8;
 }
 
 message RouteDestination {
-  string vault_id = 1;
+  bytes vault_id = 1;
 }
 
 message RouteConfig {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
-  string filter_id = 3;                       // references FilterConfig.id
+  bytes filter_id = 3;                       // references FilterConfig.id
   repeated RouteDestination destinations = 4;
   string distribution = 5;                     // "fanout" (default), "round-robin", or "failover"
   bool enabled = 6;
@@ -193,17 +193,17 @@ message RouteConfig {
 }
 
 message IngesterConfig {
-  string id = 1;
+  bytes id = 1;
   string type = 2;
   map<string, string> params = 3;
   bool enabled = 4;
   string name = 5;
-  string node_id = 6;
+  bytes node_id = 6;
 }
 
 message FilterConfig {
   string expression = 1;
-  string id = 2;
+  bytes id = 2;
   string name = 3;
 }
 
@@ -212,7 +212,7 @@ message RotationPolicyConfig {
   int64 max_records = 2;
   int64 max_age_seconds = 3;
   string cron = 4;
-  string id = 5;
+  bytes id = 5;
   string name = 6;
 }
 
@@ -220,7 +220,7 @@ message RetentionPolicyConfig {
   int64 max_age_seconds = 1;
   int64 max_bytes = 2;
   int64 max_chunks = 3;
-  string id = 4;
+  bytes id = 4;
   string name = 5;
 }
 
@@ -231,19 +231,19 @@ message ListIngestersResponse {
 }
 
 message IngesterInfo {
-  string id = 1;
+  bytes id = 1;
   string type = 2;
   bool running = 3;
   string name = 4;
-  string node_id = 5;
+  bytes node_id = 5;
 }
 
 message GetIngesterStatusRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message GetIngesterStatusResponse {
-  string id = 1;
+  bytes id = 1;
   string type = 2;
   bool running = 3;
   int64 messages_ingested = 4;
@@ -260,7 +260,7 @@ message PutFilterResponse {
 }
 
 message DeleteFilterRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteFilterResponse {
@@ -276,7 +276,7 @@ message PutRotationPolicyResponse {
 }
 
 message DeleteRotationPolicyRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteRotationPolicyResponse {
@@ -292,7 +292,7 @@ message PutRetentionPolicyResponse {
 }
 
 message DeleteRetentionPolicyRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteRetentionPolicyResponse {
@@ -308,7 +308,7 @@ message PutVaultResponse {
 }
 
 message DeleteVaultRequest {
-  string id = 1;
+  bytes id = 1;
   bool force = 2;
   // When true, the vault's data directory is also deleted from disk.
   // Only meaningful for file vaults. Defaults to false (preserve data).
@@ -328,7 +328,7 @@ message PutRouteResponse {
 }
 
 message DeleteRouteRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteRouteResponse {
@@ -344,7 +344,7 @@ message PutIngesterResponse {
 }
 
 message DeleteIngesterRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteIngesterResponse {
@@ -370,7 +370,7 @@ message MaxMindSettings {
   bool auto_download = 1;
   bool license_configured = 2;   // read-only: true when account_id + license_key are both set
   string last_update = 3;         // read-only: RFC3339 timestamp of last successful download
-  string account_id = 4;          // only populated when include_secrets
+  bytes account_id = 4;          // only populated when include_secrets
   string license_key = 5;         // only populated when include_secrets
 }
 
@@ -411,7 +411,7 @@ message LookupSettings {
 message MMDBLookupEntry {
   string name = 1;     // registry name (e.g. "geoip", "asn", "custom-geo")
   string db_type = 2;  // "city" or "asn" — determines which fields are decoded
-  string file_id = 3;  // managed file ID (UUID); empty = use auto-downloaded database
+  bytes file_id = 3;  // managed file ID (UUID); empty = use auto-downloaded database
 }
 
 // HTTPLookupParam defines a named parameter for an HTTP lookup table.
@@ -437,7 +437,7 @@ message HTTPLookupEntry {
 // The JSON file is memory-mapped and queried via JSONPath expressions at lookup time.
 message JSONFileLookupEntry {
   string name = 1;                            // registry name (e.g. "hosts")
-  string file_id = 2;                        // managed file ID (UUID)
+  bytes file_id = 2;                        // managed file ID (UUID)
   string query = 3;                          // JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
   repeated string response_paths = 4;        // optional: JSONPath to extract from results; empty = flatten
   repeated HTTPLookupParam parameters = 5;   // ordered param definitions for query template placeholders
@@ -447,7 +447,7 @@ message JSONFileLookupEntry {
 // The CSV is loaded into memory and keyed by a configurable column.
 message CSVLookupEntry {
   string name = 1;                       // registry name (e.g. "assets")
-  string file_id = 2;                   // managed file ID (UUID)
+  bytes file_id = 2;                   // managed file ID (UUID)
   string key_column = 3;                // column header for lookup key; empty = first column
   repeated string value_columns = 4;    // columns to include in output; empty = all non-key
 }
@@ -463,7 +463,7 @@ message GetSettingsResponse {
   TLSSettings tls = 4;
   LookupSettings lookup = 5;
   bool setup_wizard_dismissed = 6;
-  string node_id = 7;
+  bytes node_id = 7;
   string node_name = 8;
   ClusterSettings cluster = 9;
   MaxMindSettings maxmind = 10;
@@ -506,7 +506,7 @@ message PutTLSSettings {
 
 message PutMaxMindSettings {
   optional bool auto_download = 1;
-  optional string account_id = 2;
+  optional bytes account_id = 2;
   optional string license_key = 3;
 }
 
@@ -596,16 +596,16 @@ message ListCertificatesResponse {
 }
 
 message CertificateInfo {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
 }
 
 message GetCertificateRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message GetCertificateResponse {
-  string id = 1;
+  bytes id = 1;
   string name = 7;
   string cert_pem = 2;
   // key_pem is never populated in responses; private keys must not be exposed via API.
@@ -615,7 +615,7 @@ message GetCertificateResponse {
 }
 
 message PutCertificateRequest {
-  string id = 1;
+  bytes id = 1;
   string name = 7;
   string cert_pem = 2;
   string key_pem = 3;  // When updating, empty means keep existing key.
@@ -629,7 +629,7 @@ message PutCertificateResponse {
 }
 
 message DeleteCertificateRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteCertificateResponse {
@@ -637,7 +637,7 @@ message DeleteCertificateResponse {
 }
 
 message PauseVaultRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message PauseVaultResponse {
@@ -645,7 +645,7 @@ message PauseVaultResponse {
 }
 
 message ResumeVaultRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message ResumeVaultResponse {
@@ -657,7 +657,7 @@ message TestIngesterRequest {
   map<string, string> params = 2;
   // Optional ingester ID — when set, the trial-bind port check skips
   // addresses held by this ingester (it's already running on them).
-  string id = 3;
+  bytes id = 3;
 }
 
 message TestIngesterResponse {
@@ -666,7 +666,7 @@ message TestIngesterResponse {
 }
 
 message TriggerIngesterRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message TriggerIngesterResponse {}
@@ -692,7 +692,7 @@ message GetIngesterDefaultsResponse {
 }
 
 message NodeConfig {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
 }
 
@@ -708,20 +708,20 @@ enum TierType {
 // TierConfig defines a storage tier owned by exactly one vault. Tiers are
 // ordered within a vault by their position field (0 = hottest / first).
 message TierConfig {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   TierType type = 3;
-  string rotation_policy_id = 4;
+  bytes rotation_policy_id = 4;
   repeated RetentionRule retention_rules = 5;
   uint64 memory_budget_bytes = 6;
   uint32 storage_class = 7;
-  string cloud_service_id = 8;
+  bytes cloud_service_id = 8;
   uint32 active_chunk_class = 9;
   uint32 cache_class = 10;
   uint32 replication_factor = 12;   // desired RF (1 = no replication, default)
   string path = 14;                       // direct path for JSONL sinks
   repeated TierPlacement placements = 15; // system-managed: file storage assignments by placement manager
-  string vault_id = 16;                   // owning vault — exactly one vault per tier
+  bytes vault_id = 16;                   // owning vault — exactly one vault per tier
   uint32 position = 17;                   // 0-based order within the vault's tier chain
   string cache_eviction = 18;             // "lru" (default) or "ttl"
   string cache_budget = 19;              // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
@@ -731,7 +731,7 @@ message TierConfig {
 // TierPlacement assigns one replica of a tier to a specific file storage.
 // The node is derived from the file storage's NodeStorageConfig.
 message TierPlacement {
-  string storage_id = 1;   // references FileStorage.id
+  bytes storage_id = 1;   // references FileStorage.id
   bool leader = 2;         // true = this storage bootstraps the Raft group (initial leader)
 }
 
@@ -775,13 +775,13 @@ message GetRouteStatsResponse {
 }
 
 message VaultRouteStats {
-  string vault_id = 1;
+  bytes vault_id = 1;
   int64 records_matched = 2;   // records routed to this vault
   int64 records_forwarded = 3; // subset sent to a remote node
 }
 
 message PerRouteStats {
-  string route_id = 1;
+  bytes route_id = 1;
   int64 records_matched = 2;   // records matched by this route
   int64 records_forwarded = 3; // subset sent to remote nodes
 }
@@ -789,7 +789,7 @@ message PerRouteStats {
 // --- Managed Files ---
 
 message ManagedFileInfo {
-  string id = 1;
+  bytes id = 1;
   string name = 2;          // original filename
   string sha256 = 3;        // hex-encoded content hash
   int64 size = 4;           // file size in bytes
@@ -803,7 +803,7 @@ message ListManagedFilesResponse {
 }
 
 message DeleteManagedFileRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteManagedFileResponse {}
@@ -826,7 +826,7 @@ message TestHTTPLookupResult {
 }
 
 message PreviewCSVLookupRequest {
-  string file_id = 1;                    // managed file ID (UUID)
+  bytes file_id = 1;                    // managed file ID (UUID)
   string key_column = 2;                 // column to use as key; empty = first column
   repeated string value_columns = 3;     // columns to include; empty = all non-key
   int32 max_rows = 4;                    // maximum sample rows to return; 0 = default (10)
@@ -855,7 +855,7 @@ message PutCloudServiceResponse {
 }
 
 message DeleteCloudServiceRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteCloudServiceResponse {
@@ -883,7 +883,7 @@ message PutTierResponse {
 }
 
 message DeleteTierRequest {
-  string id = 1;
+  bytes id = 1;
   reserved 2;       // was delete_data
   bool drain = 3;   // When true, drain chunks to the next tier before deleting.
 }

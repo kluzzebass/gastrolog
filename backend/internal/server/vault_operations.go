@@ -122,7 +122,7 @@ func (s *VaultServer) ReindexVault(
 	})
 	s.orch.Scheduler().Describe(jobName, fmt.Sprintf("Rebuild all indexes for '%s'", s.vaultName(ctx, vaultID)))
 
-	return connect.NewResponse(&apiv1.ReindexVaultResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.ReindexVaultResponse{JobId: []byte(jobID)}), nil
 }
 
 // MigrateVault moves a vault to a new name, type, and/or location.
@@ -204,7 +204,7 @@ func (s *VaultServer) MigrateVault(
 		CleanupSrc:  s.makeCleanupFunc(srcID, ""),
 	})
 
-	return connect.NewResponse(&apiv1.MigrateVaultResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.MigrateVaultResponse{JobId: []byte(jobID)}), nil
 }
 
 // MergeVaults moves all chunks from a source vault into a destination vault,
@@ -254,7 +254,7 @@ func (s *VaultServer) MergeVaults(
 		CleanupSrc:  s.makeCleanupFunc(srcID, ""),
 	})
 
-	return connect.NewResponse(&apiv1.MergeVaultsResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.MergeVaultsResponse{JobId: []byte(jobID)}), nil
 }
 
 // ExportVault streams all records from a vault.
@@ -425,7 +425,7 @@ func (s *VaultServer) ArchiveChunk(
 	if connErr != nil {
 		return nil, connErr
 	}
-	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
+	chunkID, err := parseProtoChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}
@@ -456,7 +456,7 @@ func (s *VaultServer) RestoreChunk(
 	if connErr != nil {
 		return nil, connErr
 	}
-	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
+	chunkID, err := parseProtoChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
 	}

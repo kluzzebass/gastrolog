@@ -58,6 +58,6 @@ func (p *PeerJobState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
 		if msg.Timestamp != nil {
 			received = msg.Timestamp.AsTime()
 		}
-		p.Update(msg.SenderId, nj.Jobs, received)
+		p.Update(string(msg.SenderId), nj.Jobs, received)
 	}
 }

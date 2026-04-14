@@ -249,10 +249,10 @@ func (x *GetSystemResponse) GetTiers() []*TierConfig {
 
 type RetentionRule struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
-	RetentionPolicyId   string                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
+	RetentionPolicyId   []byte                 `protobuf:"bytes,1,opt,name=retention_policy_id,json=retentionPolicyId,proto3" json:"retention_policy_id,omitempty"`
 	Action              string                 `protobuf:"bytes,2,opt,name=action,proto3" json:"action,omitempty"`                                                        // "expire", "eject", "transition", or "archive"
-	DestinationId       string                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`                     // deprecated — was target vault for action=migrate
-	EjectRouteIds       []string               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"`                   // target routes, only for action=eject
+	DestinationId       []byte                 `protobuf:"bytes,3,opt,name=destination_id,json=destinationId,proto3" json:"destination_id,omitempty"`                     // deprecated — was target vault for action=migrate
+	EjectRouteIds       [][]byte               `protobuf:"bytes,4,rep,name=eject_route_ids,json=ejectRouteIds,proto3" json:"eject_route_ids,omitempty"`                   // target routes, only for action=eject
 	ArchiveStorageClass string                 `protobuf:"bytes,5,opt,name=archive_storage_class,json=archiveStorageClass,proto3" json:"archive_storage_class,omitempty"` // target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
 	unknownFields       protoimpl.UnknownFields
 	sizeCache           protoimpl.SizeCache
@@ -288,11 +288,11 @@ func (*RetentionRule) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *RetentionRule) GetRetentionPolicyId() string {
+func (x *RetentionRule) GetRetentionPolicyId() []byte {
 	if x != nil {
 		return x.RetentionPolicyId
 	}
-	return ""
+	return nil
 }
 
 func (x *RetentionRule) GetAction() string {
@@ -302,14 +302,14 @@ func (x *RetentionRule) GetAction() string {
 	return ""
 }
 
-func (x *RetentionRule) GetDestinationId() string {
+func (x *RetentionRule) GetDestinationId() []byte {
 	if x != nil {
 		return x.DestinationId
 	}
-	return ""
+	return nil
 }
 
-func (x *RetentionRule) GetEjectRouteIds() []string {
+func (x *RetentionRule) GetEjectRouteIds() [][]byte {
 	if x != nil {
 		return x.EjectRouteIds
 	}
@@ -325,7 +325,7 @@ func (x *RetentionRule) GetArchiveStorageClass() string {
 
 type VaultConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Name          string                 `protobuf:"bytes,8,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -362,11 +362,11 @@ func (*VaultConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *VaultConfig) GetId() string {
+func (x *VaultConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *VaultConfig) GetEnabled() bool {
@@ -385,7 +385,7 @@ func (x *VaultConfig) GetName() string {
 
 type RouteDestination struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -420,18 +420,18 @@ func (*RouteDestination) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *RouteDestination) GetVaultId() string {
+func (x *RouteDestination) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 type RouteConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	FilterId      string                 `protobuf:"bytes,3,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"` // references FilterConfig.id
+	FilterId      []byte                 `protobuf:"bytes,3,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"` // references FilterConfig.id
 	Destinations  []*RouteDestination    `protobuf:"bytes,4,rep,name=destinations,proto3" json:"destinations,omitempty"`
 	Distribution  string                 `protobuf:"bytes,5,opt,name=distribution,proto3" json:"distribution,omitempty"` // "fanout" (default), "round-robin", or "failover"
 	Enabled       bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
@@ -470,11 +470,11 @@ func (*RouteConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *RouteConfig) GetId() string {
+func (x *RouteConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *RouteConfig) GetName() string {
@@ -484,11 +484,11 @@ func (x *RouteConfig) GetName() string {
 	return ""
 }
 
-func (x *RouteConfig) GetFilterId() string {
+func (x *RouteConfig) GetFilterId() []byte {
 	if x != nil {
 		return x.FilterId
 	}
-	return ""
+	return nil
 }
 
 func (x *RouteConfig) GetDestinations() []*RouteDestination {
@@ -521,12 +521,12 @@ func (x *RouteConfig) GetEjectOnly() bool {
 
 type IngesterConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Params        map[string]string      `protobuf:"bytes,3,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
-	NodeId        string                 `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -561,11 +561,11 @@ func (*IngesterConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *IngesterConfig) GetId() string {
+func (x *IngesterConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *IngesterConfig) GetType() string {
@@ -596,17 +596,17 @@ func (x *IngesterConfig) GetName() string {
 	return ""
 }
 
-func (x *IngesterConfig) GetNodeId() string {
+func (x *IngesterConfig) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type FilterConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Expression    string                 `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`
-	Id            string                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -649,11 +649,11 @@ func (x *FilterConfig) GetExpression() string {
 	return ""
 }
 
-func (x *FilterConfig) GetId() string {
+func (x *FilterConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *FilterConfig) GetName() string {
@@ -669,7 +669,7 @@ type RotationPolicyConfig struct {
 	MaxRecords    int64                  `protobuf:"varint,2,opt,name=max_records,json=maxRecords,proto3" json:"max_records,omitempty"`
 	MaxAgeSeconds int64                  `protobuf:"varint,3,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
 	Cron          string                 `protobuf:"bytes,4,opt,name=cron,proto3" json:"cron,omitempty"`
-	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,6,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -733,11 +733,11 @@ func (x *RotationPolicyConfig) GetCron() string {
 	return ""
 }
 
-func (x *RotationPolicyConfig) GetId() string {
+func (x *RotationPolicyConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *RotationPolicyConfig) GetName() string {
@@ -752,7 +752,7 @@ type RetentionPolicyConfig struct {
 	MaxAgeSeconds int64                  `protobuf:"varint,1,opt,name=max_age_seconds,json=maxAgeSeconds,proto3" json:"max_age_seconds,omitempty"`
 	MaxBytes      int64                  `protobuf:"varint,2,opt,name=max_bytes,json=maxBytes,proto3" json:"max_bytes,omitempty"`
 	MaxChunks     int64                  `protobuf:"varint,3,opt,name=max_chunks,json=maxChunks,proto3" json:"max_chunks,omitempty"`
-	Id            string                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,4,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -809,11 +809,11 @@ func (x *RetentionPolicyConfig) GetMaxChunks() int64 {
 	return 0
 }
 
-func (x *RetentionPolicyConfig) GetId() string {
+func (x *RetentionPolicyConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *RetentionPolicyConfig) GetName() string {
@@ -905,11 +905,11 @@ func (x *ListIngestersResponse) GetIngesters() []*IngesterInfo {
 
 type IngesterInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Running       bool                   `protobuf:"varint,3,opt,name=running,proto3" json:"running,omitempty"`
 	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	NodeId        string                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,5,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -944,11 +944,11 @@ func (*IngesterInfo) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *IngesterInfo) GetId() string {
+func (x *IngesterInfo) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *IngesterInfo) GetType() string {
@@ -972,16 +972,16 @@ func (x *IngesterInfo) GetName() string {
 	return ""
 }
 
-func (x *IngesterInfo) GetNodeId() string {
+func (x *IngesterInfo) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type GetIngesterStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1016,16 +1016,16 @@ func (*GetIngesterStatusRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *GetIngesterStatusRequest) GetId() string {
+func (x *GetIngesterStatusRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type GetIngesterStatusResponse struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id               []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Type             string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
 	Running          bool                   `protobuf:"varint,3,opt,name=running,proto3" json:"running,omitempty"`
 	MessagesIngested int64                  `protobuf:"varint,4,opt,name=messages_ingested,json=messagesIngested,proto3" json:"messages_ingested,omitempty"`
@@ -1065,11 +1065,11 @@ func (*GetIngesterStatusResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *GetIngesterStatusResponse) GetId() string {
+func (x *GetIngesterStatusResponse) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *GetIngesterStatusResponse) GetType() string {
@@ -1197,7 +1197,7 @@ func (x *PutFilterResponse) GetSystem() *GetSystemResponse {
 
 type DeleteFilterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1232,11 +1232,11 @@ func (*DeleteFilterRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *DeleteFilterRequest) GetId() string {
+func (x *DeleteFilterRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteFilterResponse struct {
@@ -1373,7 +1373,7 @@ func (x *PutRotationPolicyResponse) GetSystem() *GetSystemResponse {
 
 type DeleteRotationPolicyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1408,11 +1408,11 @@ func (*DeleteRotationPolicyRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *DeleteRotationPolicyRequest) GetId() string {
+func (x *DeleteRotationPolicyRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteRotationPolicyResponse struct {
@@ -1549,7 +1549,7 @@ func (x *PutRetentionPolicyResponse) GetSystem() *GetSystemResponse {
 
 type DeleteRetentionPolicyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1584,11 +1584,11 @@ func (*DeleteRetentionPolicyRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{25}
 }
 
-func (x *DeleteRetentionPolicyRequest) GetId() string {
+func (x *DeleteRetentionPolicyRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteRetentionPolicyResponse struct {
@@ -1725,7 +1725,7 @@ func (x *PutVaultResponse) GetSystem() *GetSystemResponse {
 
 type DeleteVaultRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id    []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Force bool                   `protobuf:"varint,2,opt,name=force,proto3" json:"force,omitempty"`
 	// When true, the vault's data directory is also deleted from disk.
 	// Only meaningful for file vaults. Defaults to false (preserve data).
@@ -1764,11 +1764,11 @@ func (*DeleteVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{29}
 }
 
-func (x *DeleteVaultRequest) GetId() string {
+func (x *DeleteVaultRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *DeleteVaultRequest) GetForce() bool {
@@ -1919,7 +1919,7 @@ func (x *PutRouteResponse) GetSystem() *GetSystemResponse {
 
 type DeleteRouteRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1954,11 +1954,11 @@ func (*DeleteRouteRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *DeleteRouteRequest) GetId() string {
+func (x *DeleteRouteRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteRouteResponse struct {
@@ -2095,7 +2095,7 @@ func (x *PutIngesterResponse) GetSystem() *GetSystemResponse {
 
 type DeleteIngesterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2130,11 +2130,11 @@ func (*DeleteIngesterRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *DeleteIngesterRequest) GetId() string {
+func (x *DeleteIngesterRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteIngesterResponse struct {
@@ -2314,7 +2314,7 @@ type MaxMindSettings struct {
 	AutoDownload      bool                   `protobuf:"varint,1,opt,name=auto_download,json=autoDownload,proto3" json:"auto_download,omitempty"`
 	LicenseConfigured bool                   `protobuf:"varint,2,opt,name=license_configured,json=licenseConfigured,proto3" json:"license_configured,omitempty"` // read-only: true when account_id + license_key are both set
 	LastUpdate        string                 `protobuf:"bytes,3,opt,name=last_update,json=lastUpdate,proto3" json:"last_update,omitempty"`                       // read-only: RFC3339 timestamp of last successful download
-	AccountId         string                 `protobuf:"bytes,4,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`                          // only populated when include_secrets
+	AccountId         []byte                 `protobuf:"bytes,4,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`                          // only populated when include_secrets
 	LicenseKey        string                 `protobuf:"bytes,5,opt,name=license_key,json=licenseKey,proto3" json:"license_key,omitempty"`                       // only populated when include_secrets
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
@@ -2371,11 +2371,11 @@ func (x *MaxMindSettings) GetLastUpdate() string {
 	return ""
 }
 
-func (x *MaxMindSettings) GetAccountId() string {
+func (x *MaxMindSettings) GetAccountId() []byte {
 	if x != nil {
 		return x.AccountId
 	}
-	return ""
+	return nil
 }
 
 func (x *MaxMindSettings) GetLicenseKey() string {
@@ -2698,7 +2698,7 @@ type MMDBLookupEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                   // registry name (e.g. "geoip", "asn", "custom-geo")
 	DbType        string                 `protobuf:"bytes,2,opt,name=db_type,json=dbType,proto3" json:"db_type,omitempty"` // "city" or "asn" — determines which fields are decoded
-	FileId        string                 `protobuf:"bytes,3,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"` // managed file ID (UUID); empty = use auto-downloaded database
+	FileId        []byte                 `protobuf:"bytes,3,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"` // managed file ID (UUID); empty = use auto-downloaded database
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2747,11 +2747,11 @@ func (x *MMDBLookupEntry) GetDbType() string {
 	return ""
 }
 
-func (x *MMDBLookupEntry) GetFileId() string {
+func (x *MMDBLookupEntry) GetFileId() []byte {
 	if x != nil {
 		return x.FileId
 	}
-	return ""
+	return nil
 }
 
 // HTTPLookupParam defines a named parameter for an HTTP lookup table.
@@ -2914,7 +2914,7 @@ func (x *HTTPLookupEntry) GetParameters() []*HTTPLookupParam {
 type JSONFileLookupEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                        // registry name (e.g. "hosts")
-	FileId        string                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                      // managed file ID (UUID)
+	FileId        []byte                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                      // managed file ID (UUID)
 	Query         string                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"`                                      // JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
 	ResponsePaths []string               `protobuf:"bytes,4,rep,name=response_paths,json=responsePaths,proto3" json:"response_paths,omitempty"` // optional: JSONPath to extract from results; empty = flatten
 	Parameters    []*HTTPLookupParam     `protobuf:"bytes,5,rep,name=parameters,proto3" json:"parameters,omitempty"`                            // ordered param definitions for query template placeholders
@@ -2959,11 +2959,11 @@ func (x *JSONFileLookupEntry) GetName() string {
 	return ""
 }
 
-func (x *JSONFileLookupEntry) GetFileId() string {
+func (x *JSONFileLookupEntry) GetFileId() []byte {
 	if x != nil {
 		return x.FileId
 	}
-	return ""
+	return nil
 }
 
 func (x *JSONFileLookupEntry) GetQuery() string {
@@ -2992,7 +2992,7 @@ func (x *JSONFileLookupEntry) GetParameters() []*HTTPLookupParam {
 type CSVLookupEntry struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                     // registry name (e.g. "assets")
-	FileId        string                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID (UUID)
+	FileId        []byte                 `protobuf:"bytes,2,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID (UUID)
 	KeyColumn     string                 `protobuf:"bytes,3,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`          // column header for lookup key; empty = first column
 	ValueColumns  []string               `protobuf:"bytes,4,rep,name=value_columns,json=valueColumns,proto3" json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
 	unknownFields protoimpl.UnknownFields
@@ -3036,11 +3036,11 @@ func (x *CSVLookupEntry) GetName() string {
 	return ""
 }
 
-func (x *CSVLookupEntry) GetFileId() string {
+func (x *CSVLookupEntry) GetFileId() []byte {
 	if x != nil {
 		return x.FileId
 	}
-	return ""
+	return nil
 }
 
 func (x *CSVLookupEntry) GetKeyColumn() string {
@@ -3109,7 +3109,7 @@ type GetSettingsResponse struct {
 	Tls                  *TLSSettings           `protobuf:"bytes,4,opt,name=tls,proto3" json:"tls,omitempty"`
 	Lookup               *LookupSettings        `protobuf:"bytes,5,opt,name=lookup,proto3" json:"lookup,omitempty"`
 	SetupWizardDismissed bool                   `protobuf:"varint,6,opt,name=setup_wizard_dismissed,json=setupWizardDismissed,proto3" json:"setup_wizard_dismissed,omitempty"`
-	NodeId               string                 `protobuf:"bytes,7,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId               []byte                 `protobuf:"bytes,7,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	NodeName             string                 `protobuf:"bytes,8,opt,name=node_name,json=nodeName,proto3" json:"node_name,omitempty"`
 	Cluster              *ClusterSettings       `protobuf:"bytes,9,opt,name=cluster,proto3" json:"cluster,omitempty"`
 	Maxmind              *MaxMindSettings       `protobuf:"bytes,10,opt,name=maxmind,proto3" json:"maxmind,omitempty"`
@@ -3189,11 +3189,11 @@ func (x *GetSettingsResponse) GetSetupWizardDismissed() bool {
 	return false
 }
 
-func (x *GetSettingsResponse) GetNodeId() string {
+func (x *GetSettingsResponse) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 func (x *GetSettingsResponse) GetNodeName() string {
@@ -3536,7 +3536,7 @@ func (x *PutTLSSettings) GetHttpsPort() string {
 type PutMaxMindSettings struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AutoDownload  *bool                  `protobuf:"varint,1,opt,name=auto_download,json=autoDownload,proto3,oneof" json:"auto_download,omitempty"`
-	AccountId     *string                `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3,oneof" json:"account_id,omitempty"`
+	AccountId     []byte                 `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3,oneof" json:"account_id,omitempty"`
 	LicenseKey    *string                `protobuf:"bytes,3,opt,name=license_key,json=licenseKey,proto3,oneof" json:"license_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3579,11 +3579,11 @@ func (x *PutMaxMindSettings) GetAutoDownload() bool {
 	return false
 }
 
-func (x *PutMaxMindSettings) GetAccountId() string {
-	if x != nil && x.AccountId != nil {
-		return *x.AccountId
+func (x *PutMaxMindSettings) GetAccountId() []byte {
+	if x != nil {
+		return x.AccountId
 	}
-	return ""
+	return nil
 }
 
 func (x *PutMaxMindSettings) GetLicenseKey() string {
@@ -4572,7 +4572,7 @@ func (x *ListCertificatesResponse) GetCertificates() []*CertificateInfo {
 
 type CertificateInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4608,11 +4608,11 @@ func (*CertificateInfo) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{80}
 }
 
-func (x *CertificateInfo) GetId() string {
+func (x *CertificateInfo) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *CertificateInfo) GetName() string {
@@ -4624,7 +4624,7 @@ func (x *CertificateInfo) GetName() string {
 
 type GetCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4659,16 +4659,16 @@ func (*GetCertificateRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{81}
 }
 
-func (x *GetCertificateRequest) GetId() string {
+func (x *GetCertificateRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type GetCertificateResponse struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
-	Id      string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id      []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name    string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
 	CertPem string                 `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
 	// key_pem is never populated in responses; private keys must not be exposed via API.
@@ -4709,11 +4709,11 @@ func (*GetCertificateResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{82}
 }
 
-func (x *GetCertificateResponse) GetId() string {
+func (x *GetCertificateResponse) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *GetCertificateResponse) GetName() string {
@@ -4753,7 +4753,7 @@ func (x *GetCertificateResponse) GetKeyFile() string {
 
 type PutCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,7,opt,name=name,proto3" json:"name,omitempty"`
 	CertPem       string                 `protobuf:"bytes,2,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
 	KeyPem        string                 `protobuf:"bytes,3,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"` // When updating, empty means keep existing key.
@@ -4794,11 +4794,11 @@ func (*PutCertificateRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{83}
 }
 
-func (x *PutCertificateRequest) GetId() string {
+func (x *PutCertificateRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutCertificateRequest) GetName() string {
@@ -4889,7 +4889,7 @@ func (x *PutCertificateResponse) GetSystem() *GetSystemResponse {
 
 type DeleteCertificateRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -4924,11 +4924,11 @@ func (*DeleteCertificateRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{85}
 }
 
-func (x *DeleteCertificateRequest) GetId() string {
+func (x *DeleteCertificateRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteCertificateResponse struct {
@@ -4977,7 +4977,7 @@ func (x *DeleteCertificateResponse) GetSystem() *GetSystemResponse {
 
 type PauseVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5012,11 +5012,11 @@ func (*PauseVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{87}
 }
 
-func (x *PauseVaultRequest) GetId() string {
+func (x *PauseVaultRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type PauseVaultResponse struct {
@@ -5065,7 +5065,7 @@ func (x *PauseVaultResponse) GetSystem() *GetSystemResponse {
 
 type ResumeVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5100,11 +5100,11 @@ func (*ResumeVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{89}
 }
 
-func (x *ResumeVaultRequest) GetId() string {
+func (x *ResumeVaultRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type ResumeVaultResponse struct {
@@ -5157,7 +5157,7 @@ type TestIngesterRequest struct {
 	Params map[string]string      `protobuf:"bytes,2,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Optional ingester ID — when set, the trial-bind port check skips
 	// addresses held by this ingester (it's already running on them).
-	Id            string `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte `protobuf:"bytes,3,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5206,11 +5206,11 @@ func (x *TestIngesterRequest) GetParams() map[string]string {
 	return nil
 }
 
-func (x *TestIngesterRequest) GetId() string {
+func (x *TestIngesterRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type TestIngesterResponse struct {
@@ -5267,7 +5267,7 @@ func (x *TestIngesterResponse) GetMessage() string {
 
 type TriggerIngesterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5302,11 +5302,11 @@ func (*TriggerIngesterRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{93}
 }
 
-func (x *TriggerIngesterRequest) GetId() string {
+func (x *TriggerIngesterRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type TriggerIngesterResponse struct {
@@ -5575,7 +5575,7 @@ func (x *GetIngesterDefaultsResponse) GetTypes() map[string]*IngesterTypeDefault
 
 type NodeConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5611,11 +5611,11 @@ func (*NodeConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{100}
 }
 
-func (x *NodeConfig) GetId() string {
+func (x *NodeConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *NodeConfig) GetName() string {
@@ -5629,20 +5629,20 @@ func (x *NodeConfig) GetName() string {
 // ordered within a vault by their position field (0 = hottest / first).
 type TierConfig struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id                []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name              string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Type              TierType               `protobuf:"varint,3,opt,name=type,proto3,enum=gastrolog.v1.TierType" json:"type,omitempty"`
-	RotationPolicyId  string                 `protobuf:"bytes,4,opt,name=rotation_policy_id,json=rotationPolicyId,proto3" json:"rotation_policy_id,omitempty"`
+	RotationPolicyId  []byte                 `protobuf:"bytes,4,opt,name=rotation_policy_id,json=rotationPolicyId,proto3" json:"rotation_policy_id,omitempty"`
 	RetentionRules    []*RetentionRule       `protobuf:"bytes,5,rep,name=retention_rules,json=retentionRules,proto3" json:"retention_rules,omitempty"`
 	MemoryBudgetBytes uint64                 `protobuf:"varint,6,opt,name=memory_budget_bytes,json=memoryBudgetBytes,proto3" json:"memory_budget_bytes,omitempty"`
 	StorageClass      uint32                 `protobuf:"varint,7,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
-	CloudServiceId    string                 `protobuf:"bytes,8,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
+	CloudServiceId    []byte                 `protobuf:"bytes,8,opt,name=cloud_service_id,json=cloudServiceId,proto3" json:"cloud_service_id,omitempty"`
 	ActiveChunkClass  uint32                 `protobuf:"varint,9,opt,name=active_chunk_class,json=activeChunkClass,proto3" json:"active_chunk_class,omitempty"`
 	CacheClass        uint32                 `protobuf:"varint,10,opt,name=cache_class,json=cacheClass,proto3" json:"cache_class,omitempty"`
 	ReplicationFactor uint32                 `protobuf:"varint,12,opt,name=replication_factor,json=replicationFactor,proto3" json:"replication_factor,omitempty"` // desired RF (1 = no replication, default)
 	Path              string                 `protobuf:"bytes,14,opt,name=path,proto3" json:"path,omitempty"`                                                     // direct path for JSONL sinks
 	Placements        []*TierPlacement       `protobuf:"bytes,15,rep,name=placements,proto3" json:"placements,omitempty"`                                         // system-managed: file storage assignments by placement manager
-	VaultId           string                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                // owning vault — exactly one vault per tier
+	VaultId           []byte                 `protobuf:"bytes,16,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`                                // owning vault — exactly one vault per tier
 	Position          uint32                 `protobuf:"varint,17,opt,name=position,proto3" json:"position,omitempty"`                                            // 0-based order within the vault's tier chain
 	CacheEviction     string                 `protobuf:"bytes,18,opt,name=cache_eviction,json=cacheEviction,proto3" json:"cache_eviction,omitempty"`              // "lru" (default) or "ttl"
 	CacheBudget       string                 `protobuf:"bytes,19,opt,name=cache_budget,json=cacheBudget,proto3" json:"cache_budget,omitempty"`                    // max cache size (e.g. "1GB", "500MB"; default: "1GiB")
@@ -5681,11 +5681,11 @@ func (*TierConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{101}
 }
 
-func (x *TierConfig) GetId() string {
+func (x *TierConfig) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *TierConfig) GetName() string {
@@ -5702,11 +5702,11 @@ func (x *TierConfig) GetType() TierType {
 	return TierType_TIER_TYPE_UNSPECIFIED
 }
 
-func (x *TierConfig) GetRotationPolicyId() string {
+func (x *TierConfig) GetRotationPolicyId() []byte {
 	if x != nil {
 		return x.RotationPolicyId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierConfig) GetRetentionRules() []*RetentionRule {
@@ -5730,11 +5730,11 @@ func (x *TierConfig) GetStorageClass() uint32 {
 	return 0
 }
 
-func (x *TierConfig) GetCloudServiceId() string {
+func (x *TierConfig) GetCloudServiceId() []byte {
 	if x != nil {
 		return x.CloudServiceId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierConfig) GetActiveChunkClass() uint32 {
@@ -5772,11 +5772,11 @@ func (x *TierConfig) GetPlacements() []*TierPlacement {
 	return nil
 }
 
-func (x *TierConfig) GetVaultId() string {
+func (x *TierConfig) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierConfig) GetPosition() uint32 {
@@ -5811,7 +5811,7 @@ func (x *TierConfig) GetCacheTtl() string {
 // The node is derived from the file storage's NodeStorageConfig.
 type TierPlacement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	StorageId     string                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
+	StorageId     []byte                 `protobuf:"bytes,1,opt,name=storage_id,json=storageId,proto3" json:"storage_id,omitempty"` // references FileStorage.id
 	Leader        bool                   `protobuf:"varint,2,opt,name=leader,proto3" json:"leader,omitempty"`                       // true = this storage bootstraps the Raft group (initial leader)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5847,11 +5847,11 @@ func (*TierPlacement) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{102}
 }
 
-func (x *TierPlacement) GetStorageId() string {
+func (x *TierPlacement) GetStorageId() []byte {
 	if x != nil {
 		return x.StorageId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierPlacement) GetLeader() bool {
@@ -6237,7 +6237,7 @@ func (x *GetRouteStatsResponse) GetRouteStats() []*PerRouteStats {
 
 type VaultRouteStats struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	VaultId          string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId          []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	RecordsMatched   int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"`       // records routed to this vault
 	RecordsForwarded int64                  `protobuf:"varint,3,opt,name=records_forwarded,json=recordsForwarded,proto3" json:"records_forwarded,omitempty"` // subset sent to a remote node
 	unknownFields    protoimpl.UnknownFields
@@ -6274,11 +6274,11 @@ func (*VaultRouteStats) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{111}
 }
 
-func (x *VaultRouteStats) GetVaultId() string {
+func (x *VaultRouteStats) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 func (x *VaultRouteStats) GetRecordsMatched() int64 {
@@ -6297,7 +6297,7 @@ func (x *VaultRouteStats) GetRecordsForwarded() int64 {
 
 type PerRouteStats struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	RouteId          string                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
+	RouteId          []byte                 `protobuf:"bytes,1,opt,name=route_id,json=routeId,proto3" json:"route_id,omitempty"`
 	RecordsMatched   int64                  `protobuf:"varint,2,opt,name=records_matched,json=recordsMatched,proto3" json:"records_matched,omitempty"`       // records matched by this route
 	RecordsForwarded int64                  `protobuf:"varint,3,opt,name=records_forwarded,json=recordsForwarded,proto3" json:"records_forwarded,omitempty"` // subset sent to remote nodes
 	unknownFields    protoimpl.UnknownFields
@@ -6334,11 +6334,11 @@ func (*PerRouteStats) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{112}
 }
 
-func (x *PerRouteStats) GetRouteId() string {
+func (x *PerRouteStats) GetRouteId() []byte {
 	if x != nil {
 		return x.RouteId
 	}
-	return ""
+	return nil
 }
 
 func (x *PerRouteStats) GetRecordsMatched() int64 {
@@ -6357,7 +6357,7 @@ func (x *PerRouteStats) GetRecordsForwarded() int64 {
 
 type ManagedFileInfo struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // original filename
 	Sha256        string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`                           // hex-encoded content hash
 	Size          int64                  `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`                              // file size in bytes
@@ -6396,11 +6396,11 @@ func (*ManagedFileInfo) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{113}
 }
 
-func (x *ManagedFileInfo) GetId() string {
+func (x *ManagedFileInfo) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *ManagedFileInfo) GetName() string {
@@ -6513,7 +6513,7 @@ func (x *ListManagedFilesResponse) GetFiles() []*ManagedFileInfo {
 
 type DeleteManagedFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6548,11 +6548,11 @@ func (*DeleteManagedFileRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{116}
 }
 
-func (x *DeleteManagedFileRequest) GetId() string {
+func (x *DeleteManagedFileRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteManagedFileResponse struct {
@@ -6765,7 +6765,7 @@ func (x *TestHTTPLookupResult) GetFields() map[string]string {
 
 type PreviewCSVLookupRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID (UUID)
+	FileId        []byte                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`                   // managed file ID (UUID)
 	KeyColumn     string                 `protobuf:"bytes,2,opt,name=key_column,json=keyColumn,proto3" json:"key_column,omitempty"`          // column to use as key; empty = first column
 	ValueColumns  []string               `protobuf:"bytes,3,rep,name=value_columns,json=valueColumns,proto3" json:"value_columns,omitempty"` // columns to include; empty = all non-key
 	MaxRows       int32                  `protobuf:"varint,4,opt,name=max_rows,json=maxRows,proto3" json:"max_rows,omitempty"`               // maximum sample rows to return; 0 = default (10)
@@ -6803,11 +6803,11 @@ func (*PreviewCSVLookupRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{121}
 }
 
-func (x *PreviewCSVLookupRequest) GetFileId() string {
+func (x *PreviewCSVLookupRequest) GetFileId() []byte {
 	if x != nil {
 		return x.FileId
 	}
-	return ""
+	return nil
 }
 
 func (x *PreviewCSVLookupRequest) GetKeyColumn() string {
@@ -7041,7 +7041,7 @@ func (x *PutCloudServiceResponse) GetSystem() *GetSystemResponse {
 
 type DeleteCloudServiceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -7076,11 +7076,11 @@ func (*DeleteCloudServiceRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{126}
 }
 
-func (x *DeleteCloudServiceRequest) GetId() string {
+func (x *DeleteCloudServiceRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteCloudServiceResponse struct {
@@ -7305,7 +7305,7 @@ func (x *PutTierResponse) GetSystem() *GetSystemResponse {
 
 type DeleteTierRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Drain         bool                   `protobuf:"varint,3,opt,name=drain,proto3" json:"drain,omitempty"` // When true, drain chunks to the next tier before deleting.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -7341,11 +7341,11 @@ func (*DeleteTierRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_system_proto_rawDescGZIP(), []int{132}
 }
 
-func (x *DeleteTierRequest) GetId() string {
+func (x *DeleteTierRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *DeleteTierRequest) GetDrain() bool {
@@ -7420,33 +7420,33 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x14node_storage_configs\x18\v \x03(\v2\x1f.gastrolog.v1.NodeStorageConfigR\x12nodeStorageConfigs\x12.\n" +
 	"\x05tiers\x18\f \x03(\v2\x18.gastrolog.v1.TierConfigR\x05tiers\"\xda\x01\n" +
 	"\rRetentionRule\x12.\n" +
-	"\x13retention_policy_id\x18\x01 \x01(\tR\x11retentionPolicyId\x12\x16\n" +
+	"\x13retention_policy_id\x18\x01 \x01(\fR\x11retentionPolicyId\x12\x16\n" +
 	"\x06action\x18\x02 \x01(\tR\x06action\x12%\n" +
-	"\x0edestination_id\x18\x03 \x01(\tR\rdestinationId\x12&\n" +
-	"\x0feject_route_ids\x18\x04 \x03(\tR\rejectRouteIds\x122\n" +
+	"\x0edestination_id\x18\x03 \x01(\fR\rdestinationId\x12&\n" +
+	"\x0feject_route_ids\x18\x04 \x03(\fR\rejectRouteIds\x122\n" +
 	"\x15archive_storage_class\x18\x05 \x01(\tR\x13archiveStorageClass\"K\n" +
 	"\vVaultConfig\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x18\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\b \x01(\tR\x04name\"-\n" +
 	"\x10RouteDestination\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\"\xef\x01\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\xef\x01\n" +
 	"\vRouteConfig\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
-	"\tfilter_id\x18\x03 \x01(\tR\bfilterId\x12B\n" +
+	"\tfilter_id\x18\x03 \x01(\fR\bfilterId\x12B\n" +
 	"\fdestinations\x18\x04 \x03(\v2\x1e.gastrolog.v1.RouteDestinationR\fdestinations\x12\"\n" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
 	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1d\n" +
 	"\n" +
 	"eject_only\x18\a \x01(\bR\tejectOnly\"\xf8\x01\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
 	"\x06params\x18\x03 \x03(\v2(.gastrolog.v1.IngesterConfig.ParamsEntryR\x06params\x12\x18\n" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\x05 \x01(\tR\x04name\x12\x17\n" +
-	"\anode_id\x18\x06 \x01(\tR\x06nodeId\x1a9\n" +
+	"\anode_id\x18\x06 \x01(\fR\x06nodeId\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"R\n" +
@@ -7454,7 +7454,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
 	"expression\x12\x0e\n" +
-	"\x02id\x18\x02 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x02 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\"\xb4\x01\n" +
 	"\x14RotationPolicyConfig\x12\x1b\n" +
 	"\tmax_bytes\x18\x01 \x01(\x03R\bmaxBytes\x12\x1f\n" +
@@ -7462,28 +7462,28 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"maxRecords\x12&\n" +
 	"\x0fmax_age_seconds\x18\x03 \x01(\x03R\rmaxAgeSeconds\x12\x12\n" +
 	"\x04cron\x18\x04 \x01(\tR\x04cron\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x05 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x06 \x01(\tR\x04name\"\x9f\x01\n" +
 	"\x15RetentionPolicyConfig\x12&\n" +
 	"\x0fmax_age_seconds\x18\x01 \x01(\x03R\rmaxAgeSeconds\x12\x1b\n" +
 	"\tmax_bytes\x18\x02 \x01(\x03R\bmaxBytes\x12\x1d\n" +
 	"\n" +
 	"max_chunks\x18\x03 \x01(\x03R\tmaxChunks\x12\x0e\n" +
-	"\x02id\x18\x04 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x04 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x05 \x01(\tR\x04name\"\x16\n" +
 	"\x14ListIngestersRequest\"Q\n" +
 	"\x15ListIngestersResponse\x128\n" +
 	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"y\n" +
 	"\fIngesterInfo\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\arunning\x18\x03 \x01(\bR\arunning\x12\x12\n" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x17\n" +
-	"\anode_id\x18\x05 \x01(\tR\x06nodeId\"*\n" +
+	"\anode_id\x18\x05 \x01(\fR\x06nodeId\"*\n" +
 	"\x18GetIngesterStatusRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xc5\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xc5\x01\n" +
 	"\x19GetIngesterStatusResponse\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
 	"\arunning\x18\x03 \x01(\bR\arunning\x12+\n" +
 	"\x11messages_ingested\x18\x04 \x01(\x03R\x10messagesIngested\x12\x16\n" +
@@ -7494,7 +7494,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x11PutFilterResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"%\n" +
 	"\x13DeleteFilterRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"O\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"O\n" +
 	"\x14DeleteFilterResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"V\n" +
 	"\x18PutRotationPolicyRequest\x12:\n" +
@@ -7502,7 +7502,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x19PutRotationPolicyResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"-\n" +
 	"\x1bDeleteRotationPolicyRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"W\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"W\n" +
 	"\x1cDeleteRotationPolicyResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"X\n" +
 	"\x19PutRetentionPolicyRequest\x12;\n" +
@@ -7510,7 +7510,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x1aPutRetentionPolicyResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\".\n" +
 	"\x1cDeleteRetentionPolicyRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"X\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"X\n" +
 	"\x1dDeleteRetentionPolicyResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"D\n" +
 	"\x0fPutVaultRequest\x121\n" +
@@ -7518,7 +7518,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x10PutVaultResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"[\n" +
 	"\x12DeleteVaultRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x14\n" +
 	"\x05force\x18\x02 \x01(\bR\x05force\x12\x1f\n" +
 	"\vdelete_data\x18\x03 \x01(\bR\n" +
 	"deleteData\"N\n" +
@@ -7529,7 +7529,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x10PutRouteResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"$\n" +
 	"\x12DeleteRouteRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"N\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"N\n" +
 	"\x13DeleteRouteResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"J\n" +
 	"\x12PutIngesterRequest\x124\n" +
@@ -7537,7 +7537,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x13PutIngesterResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"'\n" +
 	"\x15DeleteIngesterRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"Q\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"Q\n" +
 	"\x16DeleteIngesterResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"=\n" +
 	"\x12GetSettingsRequest\x12'\n" +
@@ -7556,7 +7556,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vlast_update\x18\x03 \x01(\tR\n" +
 	"lastUpdate\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x04 \x01(\tR\taccountId\x12\x1f\n" +
+	"account_id\x18\x04 \x01(\fR\taccountId\x12\x1f\n" +
 	"\vlicense_key\x18\x05 \x01(\tR\n" +
 	"licenseKey\"\xf4\x01\n" +
 	"\fAuthSettings\x12%\n" +
@@ -7585,7 +7585,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0fMMDBLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
 	"\adb_type\x18\x02 \x01(\tR\x06dbType\x12\x17\n" +
-	"\afile_id\x18\x03 \x01(\tR\x06fileId\"G\n" +
+	"\afile_id\x18\x03 \x01(\fR\x06fileId\"G\n" +
 	"\x0fHTTPLookupParam\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\"\x86\x03\n" +
@@ -7606,7 +7606,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xbe\x01\n" +
 	"\x13JSONFileLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
-	"\afile_id\x18\x02 \x01(\tR\x06fileId\x12\x14\n" +
+	"\afile_id\x18\x02 \x01(\fR\x06fileId\x12\x14\n" +
 	"\x05query\x18\x03 \x01(\tR\x05query\x12%\n" +
 	"\x0eresponse_paths\x18\x04 \x03(\tR\rresponsePaths\x12=\n" +
 	"\n" +
@@ -7614,7 +7614,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"parameters\"\x81\x01\n" +
 	"\x0eCSVLookupEntry\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x17\n" +
-	"\afile_id\x18\x02 \x01(\tR\x06fileId\x12\x1d\n" +
+	"\afile_id\x18\x02 \x01(\fR\x06fileId\x12\x1d\n" +
 	"\n" +
 	"key_column\x18\x03 \x01(\tR\tkeyColumn\x12#\n" +
 	"\rvalue_columns\x18\x04 \x03(\tR\fvalueColumns\"@\n" +
@@ -7627,7 +7627,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x03tls\x18\x04 \x01(\v2\x19.gastrolog.v1.TLSSettingsR\x03tls\x124\n" +
 	"\x06lookup\x18\x05 \x01(\v2\x1c.gastrolog.v1.LookupSettingsR\x06lookup\x124\n" +
 	"\x16setup_wizard_dismissed\x18\x06 \x01(\bR\x14setupWizardDismissed\x12\x17\n" +
-	"\anode_id\x18\a \x01(\tR\x06nodeId\x12\x1b\n" +
+	"\anode_id\x18\a \x01(\fR\x06nodeId\x12\x1b\n" +
 	"\tnode_name\x18\b \x01(\tR\bnodeName\x127\n" +
 	"\acluster\x18\t \x01(\v2\x1d.gastrolog.v1.ClusterSettingsR\acluster\x127\n" +
 	"\amaxmind\x18\n" +
@@ -7677,7 +7677,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x12PutMaxMindSettings\x12(\n" +
 	"\rauto_download\x18\x01 \x01(\bH\x00R\fautoDownload\x88\x01\x01\x12\"\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tH\x01R\taccountId\x88\x01\x01\x12$\n" +
+	"account_id\x18\x02 \x01(\fH\x01R\taccountId\x88\x01\x01\x12$\n" +
 	"\vlicense_key\x18\x03 \x01(\tH\x02R\n" +
 	"licenseKey\x88\x01\x01B\x10\n" +
 	"\x0e_auto_downloadB\r\n" +
@@ -7742,19 +7742,19 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x18ListCertificatesResponse\x12A\n" +
 	"\fcertificates\x18\x01 \x03(\v2\x1d.gastrolog.v1.CertificateInfoR\fcertificates\"5\n" +
 	"\x0fCertificateInfo\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"'\n" +
 	"\x15GetCertificateRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xa8\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xa8\x01\n" +
 	"\x16GetCertificateResponse\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\a \x01(\tR\x04name\x12\x19\n" +
 	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1b\n" +
 	"\tcert_file\x18\x04 \x01(\tR\bcertFile\x12\x19\n" +
 	"\bkey_file\x18\x05 \x01(\tR\akeyFile\"\xcd\x01\n" +
 	"\x15PutCertificateRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\a \x01(\tR\x04name\x12\x19\n" +
 	"\bcert_pem\x18\x02 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x03 \x01(\tR\x06keyPem\x12\x1b\n" +
@@ -7764,21 +7764,21 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x16PutCertificateResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"*\n" +
 	"\x18DeleteCertificateRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"T\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"T\n" +
 	"\x19DeleteCertificateResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"#\n" +
 	"\x11PauseVaultRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"M\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"M\n" +
 	"\x12PauseVaultResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"$\n" +
 	"\x12ResumeVaultRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"N\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"N\n" +
 	"\x13ResumeVaultResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"\xbb\x01\n" +
 	"\x13TestIngesterRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12E\n" +
 	"\x06params\x18\x02 \x03(\v2-.gastrolog.v1.TestIngesterRequest.ParamsEntryR\x06params\x12\x0e\n" +
-	"\x02id\x18\x03 \x01(\tR\x02id\x1a9\n" +
+	"\x02id\x18\x03 \x01(\fR\x02id\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"J\n" +
@@ -7786,7 +7786,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"(\n" +
 	"\x16TriggerIngesterRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x19\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\x19\n" +
 	"\x17TriggerIngesterResponse\"\xb3\x01\n" +
 	"\x17TestCloudServiceRequest\x12\x12\n" +
 	"\x04type\x18\x01 \x01(\tR\x04type\x12I\n" +
@@ -7811,18 +7811,18 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\v2\".gastrolog.v1.IngesterTypeDefaultsR\x05value:\x028\x01\"0\n" +
 	"\n" +
 	"NodeConfig\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"\xbc\x05\n" +
 	"\n" +
 	"TierConfig\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12*\n" +
 	"\x04type\x18\x03 \x01(\x0e2\x16.gastrolog.v1.TierTypeR\x04type\x12,\n" +
-	"\x12rotation_policy_id\x18\x04 \x01(\tR\x10rotationPolicyId\x12D\n" +
+	"\x12rotation_policy_id\x18\x04 \x01(\fR\x10rotationPolicyId\x12D\n" +
 	"\x0fretention_rules\x18\x05 \x03(\v2\x1b.gastrolog.v1.RetentionRuleR\x0eretentionRules\x12.\n" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytes\x12#\n" +
 	"\rstorage_class\x18\a \x01(\rR\fstorageClass\x12(\n" +
-	"\x10cloud_service_id\x18\b \x01(\tR\x0ecloudServiceId\x12,\n" +
+	"\x10cloud_service_id\x18\b \x01(\fR\x0ecloudServiceId\x12,\n" +
 	"\x12active_chunk_class\x18\t \x01(\rR\x10activeChunkClass\x12\x1f\n" +
 	"\vcache_class\x18\n" +
 	" \x01(\rR\n" +
@@ -7832,14 +7832,14 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\n" +
 	"placements\x18\x0f \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
 	"placements\x12\x19\n" +
-	"\bvault_id\x18\x10 \x01(\tR\avaultId\x12\x1a\n" +
+	"\bvault_id\x18\x10 \x01(\fR\avaultId\x12\x1a\n" +
 	"\bposition\x18\x11 \x01(\rR\bposition\x12%\n" +
 	"\x0ecache_eviction\x18\x12 \x01(\tR\rcacheEviction\x12!\n" +
 	"\fcache_budget\x18\x13 \x01(\tR\vcacheBudget\x12\x1b\n" +
 	"\tcache_ttl\x18\x14 \x01(\tR\bcacheTtl\"F\n" +
 	"\rTierPlacement\x12\x1d\n" +
 	"\n" +
-	"storage_id\x18\x01 \x01(\tR\tstorageId\x12\x16\n" +
+	"storage_id\x18\x01 \x01(\fR\tstorageId\x12\x16\n" +
 	"\x06leader\x18\x02 \x01(\bR\x06leader\"H\n" +
 	"\x14PutNodeConfigRequest\x120\n" +
 	"\x06config\x18\x01 \x01(\v2\x18.gastrolog.v1.NodeConfigR\x06config\"P\n" +
@@ -7862,15 +7862,15 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\vroute_stats\x18\x06 \x03(\v2\x1b.gastrolog.v1.PerRouteStatsR\n" +
 	"routeStats\"\x82\x01\n" +
 	"\x0fVaultRouteStats\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12'\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12'\n" +
 	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
 	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x80\x01\n" +
 	"\rPerRouteStats\x12\x19\n" +
-	"\broute_id\x18\x01 \x01(\tR\arouteId\x12'\n" +
+	"\broute_id\x18\x01 \x01(\fR\arouteId\x12'\n" +
 	"\x0frecords_matched\x18\x02 \x01(\x03R\x0erecordsMatched\x12+\n" +
 	"\x11records_forwarded\x18\x03 \x01(\x03R\x10recordsForwarded\"\x82\x01\n" +
 	"\x0fManagedFileInfo\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x1f\n" +
@@ -7880,7 +7880,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x18ListManagedFilesResponse\x123\n" +
 	"\x05files\x18\x01 \x03(\v2\x1d.gastrolog.v1.ManagedFileInfoR\x05files\"*\n" +
 	"\x18DeleteManagedFileRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x1b\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\x1b\n" +
 	"\x19DeleteManagedFileResponse\"\xd2\x01\n" +
 	"\x15TestHTTPLookupRequest\x125\n" +
 	"\x06config\x18\x01 \x01(\v2\x1d.gastrolog.v1.HTTPLookupEntryR\x06config\x12G\n" +
@@ -7900,7 +7900,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x91\x01\n" +
 	"\x17PreviewCSVLookupRequest\x12\x17\n" +
-	"\afile_id\x18\x01 \x01(\tR\x06fileId\x12\x1d\n" +
+	"\afile_id\x18\x01 \x01(\fR\x06fileId\x12\x1d\n" +
 	"\n" +
 	"key_column\x18\x02 \x01(\tR\tkeyColumn\x12#\n" +
 	"\rvalue_columns\x18\x03 \x03(\tR\fvalueColumns\x12\x19\n" +
@@ -7920,7 +7920,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x17PutCloudServiceResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"+\n" +
 	"\x19DeleteCloudServiceRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"U\n" +
 	"\x1aDeleteCloudServiceResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"V\n" +
 	"\x1bSetNodeStorageConfigRequest\x127\n" +
@@ -7932,7 +7932,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x0fPutTierResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system\"?\n" +
 	"\x11DeleteTierRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x14\n" +
 	"\x05drain\x18\x03 \x01(\bR\x05drainJ\x04\b\x02\x10\x03\"M\n" +
 	"\x12DeleteTierResponse\x127\n" +
 	"\x06system\x18\x01 \x01(\v2\x1f.gastrolog.v1.GetSystemResponseR\x06system*y\n" +

@@ -3,6 +3,7 @@ import { vaultClient, systemClient } from "../client";
 import { VaultInfo, ChunkMeta, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useSystemMutation } from "./useSystem";
+import { decode, encode } from "../glid";
 
 export function useVaults() {
   return useQuery({
@@ -20,7 +21,7 @@ export function useVault(id: string) {
   return useQuery({
     queryKey: ["vault", id],
     queryFn: async () => {
-      const response = await vaultClient.getVault({ id });
+      const response = await vaultClient.getVault({ id: decode(id) });
       return response.vault;
     },
     staleTime: 0,
@@ -70,16 +71,17 @@ export function useChunks(vaultId: string) {
         ["chunks", vaultId],
         (old: ChunkMeta[] | undefined) => {
           if (!old) return old; // full fetch hasn't completed — don't seed cache with active-only data (missing replicaCount)
-          const freshById = new Map(resp.chunks.map((c) => [c.id, c]));
+          const freshById = new Map(resp.chunks.map((c) => [encode(c.id), c]));
           // Merge: for chunks in both old and poll, update only the
           // fields the active-only poll is authoritative for (growing
           // stats). Preserve everything else (replica_count, compressed,
           // cloud_backed, etc.) from the full-refetch cache entry,
           // since those require the fan-out/dedup path to be accurate.
           const merged = old.map((c) => {
-            const fresh = freshById.get(c.id);
+            const cid = encode(c.id);
+            const fresh = freshById.get(cid);
             if (!fresh) return c;
-            freshById.delete(c.id);
+            freshById.delete(cid);
             const patched = c.clone();
             patched.recordCount = fresh.recordCount;
             patched.bytes = fresh.bytes;
@@ -110,7 +112,7 @@ export function useIndexes(vaultId: string, chunkId: string) {
     queryFn: async () => {
       const response = await vaultClient.getIndexes({
         vault: vaultId,
-        chunkId,
+        chunkId: decode(chunkId),
       });
       return response;
     },
@@ -224,7 +226,7 @@ export function usePutVault() {
     }) => {
       return systemClient.putVault({
         config: {
-          id: args.id,
+          id: decode(args.id),
           name: args.name,
           enabled: args.enabled ?? true,
         },
@@ -259,7 +261,7 @@ export function useTestCloudService() {
 export function useDeleteVault() {
   return useSystemMutation(
     async (args: { id: string; force?: boolean; deleteData?: boolean }) => {
-      return systemClient.deleteVault({ id: args.id, force: args.force ?? false, deleteData: args.deleteData ?? false });
+      return systemClient.deleteVault({ id: decode(args.id), force: args.force ?? false, deleteData: args.deleteData ?? false });
     },
     [["vaults"], ["stats"]],
   );
@@ -271,7 +273,7 @@ export function useArchiveChunk() {
     mutationFn: async (args: { vaultId: string; chunkId: string; storageClass?: string }) => {
       await vaultClient.archiveChunk({
         vault: args.vaultId,
-        chunkId: args.chunkId,
+        chunkId: decode(args.chunkId),
         storageClass: args.storageClass ?? "",
       });
     },
@@ -287,7 +289,7 @@ export function useRestoreChunk() {
     mutationFn: async (args: { vaultId: string; chunkId: string; restoreTier?: string; restoreDays?: number }) => {
       await vaultClient.restoreChunk({
         vault: args.vaultId,
-        chunkId: args.chunkId,
+        chunkId: decode(args.chunkId),
         restoreTier: args.restoreTier ?? "Standard",
         restoreDays: args.restoreDays ?? 7,
       });

@@ -22,14 +22,14 @@ func (s *SystemServer) PutRotationPolicy(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
 	}
 
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -72,11 +72,11 @@ func (s *SystemServer) DeleteRotationPolicy(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteRotationPolicyRequest],
 ) (*connect.Response[apiv1.DeleteRotationPolicyResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -114,14 +114,14 @@ func (s *SystemServer) PutRetentionPolicy(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
 	}
 
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -161,11 +161,11 @@ func (s *SystemServer) DeleteRetentionPolicy(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteRetentionPolicyRequest],
 ) (*connect.Response[apiv1.DeleteRetentionPolicyResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}

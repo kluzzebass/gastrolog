@@ -166,9 +166,9 @@ message Record {
 }
 
 message RecordRef {
-  string chunk_id = 1;
+  bytes chunk_id = 1;
   uint64 pos = 2;
-  string vault_id = 3; // Vault this record belongs to
+  bytes vault_id = 3; // Vault this record belongs to
 }
 
 // ResumeToken encodes pagination state for multi-vault queries.
@@ -190,8 +190,8 @@ message InnerVaultToken {
 }
 
 message VaultPosition {
-  string vault_id = 1;
-  string chunk_id = 2;
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
   uint64 position = 3; // MaxUint64 indicates chunk is exhausted
   // resume_ts is used instead of position for chunks without TS indexes
   // (e.g., cloud-backed). On resume, the scanner re-reads the chunk and
@@ -200,19 +200,19 @@ message VaultPosition {
 }
 
 message ChunkPlan {
-  string chunk_id = 1;
+  bytes chunk_id = 1;
   bool sealed = 2;
   int64 record_count = 3;
   repeated PipelineStep steps = 4;
   string scan_mode = 5; // "sequential", "index-driven", or "skipped"
   int64 estimated_records = 6;
   repeated string runtime_filters = 7;
-  string vault_id = 8;
+  bytes vault_id = 8;
   google.protobuf.Timestamp write_start = 9;
   google.protobuf.Timestamp write_end = 10;
   string skip_reason = 11;
   repeated BranchPlan branch_plans = 12;
-  string node_id = 13; // Node that owns this chunk's vault
+  bytes node_id = 13; // Node that owns this chunk's vault
 }
 
 message BranchPlan {
@@ -312,5 +312,5 @@ message ExportToVaultRequest {
 }
 
 message ExportToVaultResponse {
-  string job_id = 1;
+  bytes job_id = 1;
 }

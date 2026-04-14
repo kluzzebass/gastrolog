@@ -96,7 +96,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	var imported int
 
 	for _, f := range doc.Filters {
-		ensureID(f.Name, r.filters, &f.Id)
+		ensureProtoID(f.Name, r.filters, &f.Id)
 		_, err := client.System.PutFilter(ctx, connect.NewRequest(&v1.PutFilterRequest{
 			Config: f,
 		}))
@@ -107,7 +107,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	for _, p := range doc.RotationPolicies {
-		ensureID(p.Name, r.rotationPolicies, &p.Id)
+		ensureProtoID(p.Name, r.rotationPolicies, &p.Id)
 		_, err := client.System.PutRotationPolicy(ctx, connect.NewRequest(&v1.PutRotationPolicyRequest{
 			Config: p,
 		}))
@@ -118,7 +118,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	for _, p := range doc.RetentionPolicies {
-		ensureID(p.Name, r.retentionPolicies, &p.Id)
+		ensureProtoID(p.Name, r.retentionPolicies, &p.Id)
 		_, err := client.System.PutRetentionPolicy(ctx, connect.NewRequest(&v1.PutRetentionPolicyRequest{
 			Config: p,
 		}))
@@ -129,7 +129,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	for _, v := range doc.Vaults {
-		ensureID(v.Name, r.vaults, &v.Id)
+		ensureProtoID(v.Name, r.vaults, &v.Id)
 		_, err := client.System.PutVault(ctx, connect.NewRequest(&v1.PutVaultRequest{
 			Config: v,
 		}))
@@ -140,7 +140,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	for _, ig := range doc.Ingesters {
-		ensureID(ig.Name, r.ingesters, &ig.Id)
+		ensureProtoID(ig.Name, r.ingesters, &ig.Id)
 		_, err := client.System.PutIngester(ctx, connect.NewRequest(&v1.PutIngesterRequest{
 			Config: ig,
 		}))
@@ -151,7 +151,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	}
 
 	for _, n := range doc.Nodes {
-		ensureID(n.Name, r.nodes, &n.Id)
+		ensureProtoID(n.Name, r.nodes, &n.Id)
 		_, err := client.System.PutNodeConfig(ctx, connect.NewRequest(&v1.PutNodeConfigRequest{
 			Config: n,
 		}))
@@ -164,7 +164,7 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 	for _, c := range doc.Certificates {
 		ensureID(c.Name, r.certs, &c.ID)
 		_, err := client.System.PutCertificate(ctx, connect.NewRequest(&v1.PutCertificateRequest{
-			Id:       c.ID,
+			Id:       []byte(c.ID),
 			Name:     c.Name,
 			CertFile: c.CertFile,
 			KeyFile:  c.KeyFile,
@@ -201,6 +201,17 @@ func ensureID(name string, existing map[string]string, id *string) {
 		*id = existingID
 	} else if *id == "" {
 		*id = glid.New().String()
+	}
+}
+
+// ensureProtoID works like ensureID but for proto []byte ID fields.
+func ensureProtoID(name string, existing map[string]string, id *[]byte) {
+	if existingID, ok := existing[strings.ToLower(name)]; ok {
+		if parsed, err := glid.ParseUUID(existingID); err == nil {
+			*id = parsed.ToProto()
+		}
+	} else if len(*id) == 0 {
+		*id = glid.New().ToProto()
 	}
 }
 
@@ -361,7 +372,7 @@ func buildMaxMindSettings(mm *maxmindExport) *v1.PutMaxMindSettings {
 		pmm.AutoDownload = &mm.AutoDownload
 	}
 	if mm.AccountID != "" {
-		pmm.AccountId = &mm.AccountID
+		pmm.AccountId = []byte(mm.AccountID)
 	}
 	if mm.LicenseKey != "" {
 		pmm.LicenseKey = &mm.LicenseKey

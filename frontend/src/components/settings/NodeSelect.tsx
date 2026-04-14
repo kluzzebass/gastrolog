@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useEffect } from "react";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { FormField, SelectInput } from "./FormField";
@@ -17,7 +18,7 @@ export function NodeSelect({
 }>) {
   const { data: clusterStatus } = useClusterStatus();
 
-  const localNodeId = clusterStatus?.localNodeId ?? "";
+  const localNodeId = clusterStatus?.localNodeId ? encode(clusterStatus.localNodeId) : "";
 
   // Auto-select the local node when value is empty and we know who we are.
   useEffect(() => {
@@ -32,7 +33,7 @@ export function NodeSelect({
   if (nodes.length === 0) return null;
 
   const options = nodes
-    .map((n) => ({ value: n.id, label: n.name || n.id }))
+    .map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
   return (

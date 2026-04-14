@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 )
 
 // NewArchiveCommand returns the "archive" command.
@@ -34,10 +36,14 @@ func NewArchiveCommand() *cobra.Command {
 				return err
 			}
 
+			chunkID, parseErr := chunk.ParseChunkID(args[0])
+			if parseErr != nil {
+				return fmt.Errorf("invalid chunk ID: %w", parseErr)
+			}
 			_, err = client.Vault.ArchiveChunk(context.Background(),
 				connect.NewRequest(&v1.ArchiveChunkRequest{
 					Vault:        vaultID,
-					ChunkId:      args[0],
+					ChunkId:      glid.GLID(chunkID).ToProto(),
 					StorageClass: storageClass,
 				}))
 			if err != nil {
@@ -77,10 +83,14 @@ func NewRestoreCommand() *cobra.Command {
 				return err
 			}
 
+			chunkID, parseErr := chunk.ParseChunkID(args[0])
+			if parseErr != nil {
+				return fmt.Errorf("invalid chunk ID: %w", parseErr)
+			}
 			_, err = client.Vault.RestoreChunk(context.Background(),
 				connect.NewRequest(&v1.RestoreChunkRequest{
 					Vault:       vaultID,
-					ChunkId:     args[0],
+					ChunkId:     glid.GLID(chunkID).ToProto(),
 					RestoreTier: restoreTier,
 					RestoreDays: restoreDays,
 				}))

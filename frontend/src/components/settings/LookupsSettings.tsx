@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useConfig, useGenerateName } from "../../api/hooks/useSystem";
@@ -34,7 +35,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
       (data.lookup?.mmdbLookups ?? []).map((m) => ({
         name: m.name,
         dbType: m.dbType,
-        fileId: m.fileId,
+        fileId: encode(m.fileId),
       })),
     );
     setHttpLookups(
@@ -52,7 +53,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
     setJsonFileLookups(
       (data.lookup?.jsonFileLookups ?? []).map((j) => ({
         name: j.name,
-        fileId: j.fileId,
+        fileId: encode(j.fileId),
         query: j.query,
         responsePaths: [...j.responsePaths],
         parameters: j.parameters.map((p) => ({ name: p.name, description: p.description })),
@@ -61,7 +62,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
     setCsvLookups(
       (data.lookup?.csvLookups ?? []).map((c) => ({
         name: c.name,
-        fileId: c.fileId,
+        fileId: encode(c.fileId),
         keyColumn: c.keyColumn,
         valueColumns: [...c.valueColumns],
       })),

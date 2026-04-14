@@ -49,8 +49,8 @@ func newClusterStatusCmd() *cobra.Command {
 
 			pairs := [][2]string{
 				{"Cluster Enabled", strconv.FormatBool(msg.ClusterEnabled)},
-				{"Local Node", msg.LocalNodeId},
-				{"Leader", msg.LeaderId},
+				{"Local Node", string(msg.LocalNodeId)},
+				{"Leader", string(msg.LeaderId)},
 				{"Leader Address", msg.LeaderAddress},
 			}
 			if msg.ClusterAddress != "" {
@@ -70,7 +70,7 @@ func newClusterStatusCmd() *cobra.Command {
 						role += " *"
 					}
 					rows = append(rows, []string{
-						n.Id, n.Name, n.Address, role,
+						string(n.Id), n.Name, n.Address, role,
 						clusterSuffrageStr(n.Suffrage),
 					})
 				}
@@ -175,7 +175,7 @@ func newClusterRemoveNodeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{NodeId: id}))
+			_, err = client.Lifecycle.RemoveNode(context.Background(), connect.NewRequest(&v1.RemoveNodeRequest{NodeId: []byte(id)}))
 			if err != nil {
 				return err
 			}
@@ -244,7 +244,7 @@ func setNodeSuffrage(cmd *cobra.Command, nameOrID string, voter bool) error {
 		return err
 	}
 	_, err = client.Lifecycle.SetNodeSuffrage(context.Background(), connect.NewRequest(&v1.SetNodeSuffrageRequest{
-		NodeId: id,
+		NodeId: []byte(id),
 		Voter:  voter,
 	}))
 	if err != nil {

@@ -41,7 +41,7 @@ func newFilterListCmd() *cobra.Command {
 			}
 			var rows [][]string
 			for _, f := range resp.Msg.Filters {
-				rows = append(rows, []string{f.Id, f.Name, f.Expression})
+				rows = append(rows, []string{glid.FromBytes(f.Id).String(), f.Name, f.Expression})
 			}
 			p.table([]string{"ID", "NAME", "EXPRESSION"}, rows)
 			return nil
@@ -68,14 +68,18 @@ func newFilterGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			idBytes, parseErr := glid.ParseUUID(id)
+			if parseErr != nil {
+				return parseErr
+			}
 			for _, f := range resp.Msg.Filters {
-				if f.Id == id {
+				if string(f.Id) == string(idBytes.ToProto()) {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(f)
 					}
 					p.kv([][2]string{
-						{"ID", f.Id},
+						{"ID", glid.FromBytes(f.Id).String()},
 						{"Name", f.Name},
 						{"Expression", f.Expression},
 					})
@@ -98,7 +102,7 @@ func newFilterCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.FilterConfig{
-				Id:         glid.New().String(),
+				Id:         glid.New().ToProto(),
 				Name:       name,
 				Expression: "*",
 			}
@@ -128,7 +132,7 @@ func newFilterCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s filter %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s filter %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -149,11 +153,11 @@ func newFilterDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.filters, "filter")
+			idBytes, err := resolveToProto(args[0], r.filters, "filter")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteFilter(context.Background(), connect.NewRequest(&v1.DeleteFilterRequest{Id: id}))
+			_, err = client.System.DeleteFilter(context.Background(), connect.NewRequest(&v1.DeleteFilterRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}

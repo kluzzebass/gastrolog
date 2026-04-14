@@ -66,7 +66,7 @@ func (f *TierApplyForwarder) forwardToLeader(data []byte) error {
 	defer cancel()
 
 	req := &gastrologv1.ForwardTierApplyRequest{
-		GroupId: f.groupID,
+		GroupId: []byte(f.groupID),
 		Command: data,
 	}
 	resp := &gastrologv1.ForwardTierApplyResponse{}

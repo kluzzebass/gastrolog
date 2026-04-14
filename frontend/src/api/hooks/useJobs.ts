@@ -4,6 +4,7 @@ import { ConnectError, Code } from "@connectrpc/connect";
 import { jobClient } from "../client";
 import { JobStatus } from "../gen/gastrolog/v1/job_pb";
 import type { Job } from "../gen/gastrolog/v1/job_pb";
+import { decode } from "../glid";
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
@@ -153,7 +154,7 @@ export function useJob(jobId: string | null) {
   return useQuery({
     queryKey: ["job", jobId],
     queryFn: async () => {
-      const response = await jobClient.getJob({ id: jobId! });
+      const response = await jobClient.getJob({ id: decode(jobId!) });
       return response.job;
     },
     enabled: !!jobId,

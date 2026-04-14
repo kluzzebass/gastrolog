@@ -50,38 +50,38 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 
 	cfg := resp.Msg
 	for _, f := range cfg.Filters {
-		r.filters[strings.ToLower(f.Name)] = f.Id
+		r.filters[strings.ToLower(f.Name)] = glid.FromBytes(f.Id).String()
 	}
 	for _, p := range cfg.RotationPolicies {
-		r.rotationPolicies[strings.ToLower(p.Name)] = p.Id
+		r.rotationPolicies[strings.ToLower(p.Name)] = glid.FromBytes(p.Id).String()
 	}
 	for _, p := range cfg.RetentionPolicies {
-		r.retentionPolicies[strings.ToLower(p.Name)] = p.Id
+		r.retentionPolicies[strings.ToLower(p.Name)] = glid.FromBytes(p.Id).String()
 	}
 	for _, t := range cfg.Tiers {
-		r.tiers[strings.ToLower(t.Name)] = t.Id
+		r.tiers[strings.ToLower(t.Name)] = glid.FromBytes(t.Id).String()
 	}
 	for _, v := range cfg.Vaults {
-		r.vaults[strings.ToLower(v.Name)] = v.Id
+		r.vaults[strings.ToLower(v.Name)] = glid.FromBytes(v.Id).String()
 	}
 	for _, i := range cfg.Ingesters {
-		r.ingesters[strings.ToLower(i.Name)] = i.Id
+		r.ingesters[strings.ToLower(i.Name)] = glid.FromBytes(i.Id).String()
 	}
 	for _, n := range cfg.NodeConfigs {
-		r.nodes[strings.ToLower(n.Name)] = n.Id
+		r.nodes[strings.ToLower(n.Name)] = glid.FromBytes(n.Id).String()
 	}
 	for _, rt := range cfg.Routes {
-		r.routes[strings.ToLower(rt.Name)] = rt.Id
+		r.routes[strings.ToLower(rt.Name)] = glid.FromBytes(rt.Id).String()
 	}
 	for _, cs := range cfg.CloudServices {
-		r.cloudServices[strings.ToLower(cs.Name)] = cs.Id
+		r.cloudServices[strings.ToLower(cs.Name)] = glid.FromBytes(cs.Id).String()
 	}
 
 	// Certs via ListCertificates.
 	certResp, err := client.System.ListCertificates(ctx, connect.NewRequest(&v1.ListCertificatesRequest{}))
 	if err == nil {
 		for _, c := range certResp.Msg.Certificates {
-			r.certs[strings.ToLower(c.Name)] = c.Id
+			r.certs[strings.ToLower(c.Name)] = glid.FromBytes(c.Id).String()
 		}
 	}
 
@@ -89,7 +89,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 	userResp, err := client.Auth.ListUsers(ctx, connect.NewRequest(&v1.ListUsersRequest{}))
 	if err == nil {
 		for _, u := range userResp.Msg.Users {
-			r.users[strings.ToLower(u.Username)] = u.Id
+			r.users[strings.ToLower(u.Username)] = glid.FromBytes(u.Id).String()
 		}
 	}
 
@@ -107,6 +107,20 @@ func resolve(nameOrID string, m map[string]string, entityType string) (string, e
 		return "", fmt.Errorf("%s %q not found", entityType, nameOrID)
 	}
 	return id, nil
+}
+
+// resolveToProto resolves a name or UUID string and returns the raw bytes
+// suitable for proto []byte ID fields.
+func resolveToProto(nameOrID string, m map[string]string, entityType string) ([]byte, error) {
+	idStr, err := resolve(nameOrID, m, entityType)
+	if err != nil {
+		return nil, err
+	}
+	id, err := glid.ParseUUID(idStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid %s ID %q: %w", entityType, idStr, err)
+	}
+	return id.ToProto(), nil
 }
 
 // parseParams converts a slice of "key=value" strings into a map.

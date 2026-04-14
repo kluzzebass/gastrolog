@@ -80,7 +80,7 @@ func (s *QueryServer) ExportToVault(
 		}
 		fwdResp, fwdErr := s.remoteSearcher.ExportToVault(ctx, nodeID, &apiv1.ForwardExportToVaultRequest{
 			Expression:    req.Msg.Expression,
-			TargetVaultId: targetVaultID.String(),
+			TargetVaultId: targetVaultID.ToProto(),
 		})
 		if fwdErr != nil {
 			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("forward to %s: %w", nodeID, fwdErr))
@@ -96,7 +96,7 @@ func (s *QueryServer) ExportToVault(
 		s.runExportJob(jobCtx, job, q, pipeline, targetVaultID)
 	})
 
-	return connect.NewResponse(&apiv1.ExportToVaultResponse{JobId: jobID}), nil
+	return connect.NewResponse(&apiv1.ExportToVaultResponse{JobId: []byte(jobID)}), nil
 }
 
 // RunExportJob is the public entry point for export jobs forwarded from remote

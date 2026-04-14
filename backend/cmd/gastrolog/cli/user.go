@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 )
 
 func newUserRegisterCmd() *cobra.Command {
@@ -82,7 +83,7 @@ func newUserListCmd() *cobra.Command {
 			var rows [][]string
 			for _, u := range resp.Msg.Users {
 				rows = append(rows, []string{
-					u.Id, u.Username, u.Role,
+					glid.FromBytes(u.Id).String(), u.Username, u.Role,
 					formatTimestamp(u.CreatedAt),
 				})
 			}
@@ -112,13 +113,13 @@ func newUserGetCmd() *cobra.Command {
 				return err
 			}
 			for _, u := range resp.Msg.Users {
-				if u.Id == id {
+				if glid.FromBytes(u.Id).String() == id {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(u)
 					}
 					p.kv([][2]string{
-						{"ID", u.Id},
+						{"ID", glid.FromBytes(u.Id).String()},
 						{"Username", u.Username},
 						{"Role", u.Role},
 						{"Created", formatTimestamp(u.CreatedAt)},
@@ -150,7 +151,7 @@ func newUserCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created user %q (%s) with role %s\n", resp.Msg.User.Username, resp.Msg.User.Id, resp.Msg.User.Role)
+			fmt.Printf("Created user %q (%s) with role %s\n", resp.Msg.User.Username, glid.FromBytes(resp.Msg.User.Id), resp.Msg.User.Role)
 			return nil
 		},
 	}
@@ -173,11 +174,11 @@ func newUserDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.users, "user")
+			idBytes, err := resolveToProto(args[0], r.users, "user")
 			if err != nil {
 				return err
 			}
-			_, err = client.Auth.DeleteUser(context.Background(), connect.NewRequest(&v1.DeleteUserRequest{Id: id}))
+			_, err = client.Auth.DeleteUser(context.Background(), connect.NewRequest(&v1.DeleteUserRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}
@@ -200,12 +201,12 @@ func newUserResetPasswordCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.users, "user")
+			idBytes, err := resolveToProto(args[0], r.users, "user")
 			if err != nil {
 				return err
 			}
 			_, err = client.Auth.ResetPassword(context.Background(), connect.NewRequest(&v1.ResetPasswordRequest{
-				Id:          id,
+				Id:          idBytes,
 				NewPassword: password,
 			}))
 			if err != nil {

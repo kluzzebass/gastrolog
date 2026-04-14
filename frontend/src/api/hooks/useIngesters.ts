@@ -3,6 +3,7 @@ import { systemClient } from "../client";
 import { IngesterConfig, GetIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useSystemMutation } from "./useSystem";
+import { decode } from "../glid";
 
 export function useIngesters() {
   return useQuery({
@@ -20,7 +21,7 @@ export function useIngesterStatus(id: string) {
   return useQuery({
     queryKey: ["ingester-status", id],
     queryFn: async () => {
-      const response = await systemClient.getIngesterStatus({ id });
+      const response = await systemClient.getIngesterStatus({ id: decode(id) });
       return response;
     },
     structuralSharing: protoSharing(GetIngesterStatusResponse.equals),
@@ -51,12 +52,12 @@ export function usePutIngester() {
     }) => {
       return systemClient.putIngester({
         config: {
-          id: args.id,
+          id: decode(args.id),
           name: args.name,
           type: args.type,
           enabled: args.enabled,
           params: stripEmptyParams(args.params),
-          nodeId: args.nodeId ?? "",
+          nodeId: args.nodeId ? decode(args.nodeId) : new Uint8Array(16),
         },
       });
     },
@@ -66,7 +67,7 @@ export function usePutIngester() {
 export function useDeleteIngester() {
   return useSystemMutation(
     async (id: string) => {
-      return systemClient.deleteIngester({ id });
+      return systemClient.deleteIngester({ id: decode(id) });
     },
   );
 }
@@ -77,7 +78,7 @@ export function useTestIngester() {
       const response = await systemClient.testIngester({
         type: args.type,
         params: stripEmptyParams(args.params),
-        id: args.id ?? "",
+        id: args.id ? decode(args.id) : new Uint8Array(16),
       });
       return response;
     },
@@ -102,7 +103,7 @@ export function useCheckListenAddrs(type: string, params: Record<string, string>
       const response = await systemClient.testIngester({
         type,
         params: stripped,
-        id,
+        id: id ? decode(id) : new Uint8Array(16),
       });
       return response;
     },

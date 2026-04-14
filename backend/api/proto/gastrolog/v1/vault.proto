@@ -77,19 +77,19 @@ message ListVaultsResponse {
 }
 
 message VaultInfo {
-  string id = 1;
+  bytes id = 1;
   string type = 2;
   string filter = 3;
   int64 chunk_count = 4;
   int64 record_count = 5;
   bool enabled = 6;
   string name = 7;
-  string node_id = 8;
+  bytes node_id = 8;
   bool remote = 9; // True if vault lives on another node
 }
 
 message GetVaultRequest {
-  string id = 1;
+  bytes id = 1;
 }
 
 message GetVaultResponse {
@@ -112,7 +112,7 @@ message ListChunksResponse {
 }
 
 message ChunkMeta {
-  string id = 1;
+  bytes id = 1;
   google.protobuf.Timestamp write_start = 2;
   google.protobuf.Timestamp write_end = 3;
   bool sealed = 4;
@@ -125,7 +125,7 @@ message ChunkMeta {
   bool cloud_backed = 11; // true = chunk lives in cloud storage (S3/Azure/GCS)
   bool archived = 12;     // true = chunk is in offline storage tier (Glacier, etc.)
   int32 num_frames = 13;  // seekable zstd frame count (cloud chunks, 0 = unknown)
-  string tier_id = 14;    // which tier this chunk belongs to
+  bytes tier_id = 14;    // which tier this chunk belongs to
   string tier_type = 15;  // tier type: "memory", "file", "cloud"
   bool retention_pending = 16; // true = chunk is marked for retention processing
   string storage_class = 17;  // current cloud storage class (e.g. "GLACIER", "cold", "Archive")
@@ -134,7 +134,7 @@ message ChunkMeta {
 
 message GetChunkRequest {
   string vault = 1;
-  string chunk_id = 2;
+  bytes chunk_id = 2;
 }
 
 message GetChunkResponse {
@@ -143,7 +143,7 @@ message GetChunkResponse {
 
 message GetIndexesRequest {
   string vault = 1;
-  string chunk_id = 2;
+  bytes chunk_id = 2;
 }
 
 message GetIndexesResponse {
@@ -160,7 +160,7 @@ message IndexInfo {
 
 message AnalyzeChunkRequest {
   string vault = 1;
-  string chunk_id = 2; // If empty, analyze all chunks
+  bytes chunk_id = 2; // If empty, analyze all chunks
 }
 
 message AnalyzeChunkResponse {
@@ -168,7 +168,7 @@ message AnalyzeChunkResponse {
 }
 
 message ChunkAnalysis {
-  string chunk_id = 1;
+  bytes chunk_id = 1;
   bool sealed = 2;
   int64 record_count = 3;
   repeated IndexAnalysis indexes = 4;
@@ -216,7 +216,7 @@ message ProcessMemoryStats {
 
 // VaultStats provides per-vault statistics.
 message VaultStats {
-  string id = 1;
+  bytes id = 1;
   string type = 2;
   int64 chunk_count = 3;
   int64 sealed_chunks = 4;
@@ -235,7 +235,7 @@ message ReindexVaultRequest {
 }
 
 message ReindexVaultResponse {
-  string job_id = 4;
+  bytes job_id = 4;
 }
 
 message ValidateVaultRequest {
@@ -248,7 +248,7 @@ message ValidateVaultResponse {
 }
 
 message ChunkValidation {
-  string chunk_id = 1;
+  bytes chunk_id = 1;
   bool valid = 2;
   repeated string issues = 3;
 }
@@ -264,7 +264,7 @@ message MigrateVaultRequest {
 }
 
 message MigrateVaultResponse {
-  string job_id = 3;
+  bytes job_id = 3;
 }
 
 // ExportVault streams all records from a vault.
@@ -287,8 +287,8 @@ message ExportRecord {
   bytes raw = 4;
 
   // Record reference (populated by ForwardSearch, empty for import/export).
-  string vault_id = 5;
-  string chunk_id = 6;
+  bytes vault_id = 5;
+  bytes chunk_id = 6;
   uint64 pos = 7;
 
   // Original write timestamp. Populated during cross-node migration to
@@ -316,7 +316,7 @@ message MergeVaultsRequest {
 }
 
 message MergeVaultsResponse {
-  string job_id = 3;
+  bytes job_id = 3;
 }
 
 message SealVaultRequest {
@@ -330,7 +330,7 @@ message SealVaultResponse {
 
 message ArchiveChunkRequest {
   string vault = 1;
-  string chunk_id = 2;
+  bytes chunk_id = 2;
   string storage_class = 3; // Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
 }
 
@@ -338,7 +338,7 @@ message ArchiveChunkResponse {}
 
 message RestoreChunkRequest {
   string vault = 1;
-  string chunk_id = 2;
+  bytes chunk_id = 2;
   string restore_tier = 3; // "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
   int32 restore_days = 4;  // How long restored copy stays readable (S3 only, 0 = provider default)
 }

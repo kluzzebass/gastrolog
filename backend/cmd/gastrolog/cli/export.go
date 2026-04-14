@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 )
 
 // exportDoc is the JSON structure for config export/import.
@@ -158,7 +159,7 @@ func settingsToExport(sc *v1.GetSettingsResponse) (auth *authExport, query *quer
 	if mm := sc.GetMaxmind(); mm != nil {
 		me := maxmindExport{
 			AutoDownload: mm.GetAutoDownload(),
-			AccountID:    mm.GetAccountId(),
+			AccountID:    string(mm.GetAccountId()),
 			LicenseKey:   mm.GetLicenseKey(),
 			LastUpdate:   mm.GetLastUpdate(),
 		}
@@ -201,7 +202,7 @@ func newExportCmd() *cobra.Command {
 					return fmt.Errorf("get certificate %s: %w", c.Id, err)
 				}
 				certs = append(certs, &certExport{
-					ID:       detail.Msg.Id,
+					ID:       glid.FromBytes(detail.Msg.Id).String(),
 					Name:     detail.Msg.Name,
 					CertFile: detail.Msg.CertFile,
 					KeyFile:  detail.Msg.KeyFile,
@@ -215,7 +216,7 @@ func newExportCmd() *cobra.Command {
 			var users []*userExport
 			for _, u := range userResp.Msg.Users {
 				users = append(users, &userExport{
-					ID:       u.Id,
+					ID:       glid.FromBytes(u.Id).String(),
 					Username: u.Username,
 					Role:     u.Role,
 				})

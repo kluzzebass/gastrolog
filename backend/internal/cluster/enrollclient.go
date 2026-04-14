@@ -76,7 +76,7 @@ func Enroll(ctx context.Context, leaderAddr, tokenSecret, caHash, nodeID, nodeAd
 
 	req := &gastrologv1.EnrollRequest{
 		TokenSecret: tokenSecret,
-		NodeId:      nodeID,
+		NodeId:      []byte(nodeID),
 		NodeAddr:    nodeAddr,
 	}
 	resp := &gastrologv1.EnrollResponse{}

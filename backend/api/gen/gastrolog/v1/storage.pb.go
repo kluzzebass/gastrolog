@@ -26,7 +26,7 @@ const (
 // Multiple file storages can share the same storage class (they form a pool).
 type FileStorage struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id                []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	StorageClass      uint32                 `protobuf:"varint,2,opt,name=storage_class,json=storageClass,proto3" json:"storage_class,omitempty"`
 	Name              string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Path              string                 `protobuf:"bytes,4,opt,name=path,proto3" json:"path,omitempty"`
@@ -65,11 +65,11 @@ func (*FileStorage) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *FileStorage) GetId() string {
+func (x *FileStorage) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *FileStorage) GetStorageClass() uint32 {
@@ -103,7 +103,7 @@ func (x *FileStorage) GetMemoryBudgetBytes() uint64 {
 // NodeStorageConfig declares all locally-attached storage available on a node.
 type NodeStorageConfig struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	FileStorages  []*FileStorage         `protobuf:"bytes,2,rep,name=file_storages,json=fileStorages,proto3" json:"file_storages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -139,11 +139,11 @@ func (*NodeStorageConfig) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *NodeStorageConfig) GetNodeId() string {
+func (x *NodeStorageConfig) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 func (x *NodeStorageConfig) GetFileStorages() []*FileStorage {
@@ -213,7 +213,7 @@ func (x *CloudStorageTransition) GetStorageClass() string {
 // local storage, referenced by storage class.
 type CloudService struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id               []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Provider         string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
 	Bucket           string                 `protobuf:"bytes,4,opt,name=bucket,proto3" json:"bucket,omitempty"`
@@ -268,11 +268,11 @@ func (*CloudService) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_storage_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *CloudService) GetId() string {
+func (x *CloudService) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *CloudService) GetName() string {
@@ -400,19 +400,19 @@ const file_gastrolog_v1_storage_proto_rawDesc = "" +
 	"\n" +
 	"\x1agastrolog/v1/storage.proto\x12\fgastrolog.v1\"\xa0\x01\n" +
 	"\vFileStorage\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\rR\fstorageClass\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12\x12\n" +
 	"\x04path\x18\x04 \x01(\tR\x04path\x12.\n" +
 	"\x13memory_budget_bytes\x18\x06 \x01(\x04R\x11memoryBudgetBytesJ\x04\b\x05\x10\x06\"l\n" +
 	"\x11NodeStorageConfig\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12>\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12>\n" +
 	"\rfile_storages\x18\x02 \x03(\v2\x19.gastrolog.v1.FileStorageR\ffileStorages\"S\n" +
 	"\x16CloudStorageTransition\x12\x14\n" +
 	"\x05after\x18\x01 \x01(\tR\x05after\x12#\n" +
 	"\rstorage_class\x18\x02 \x01(\tR\fstorageClass\"\x95\x05\n" +
 	"\fCloudService\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1a\n" +
 	"\bprovider\x18\x03 \x01(\tR\bprovider\x12\x16\n" +
 	"\x06bucket\x18\x04 \x01(\tR\x06bucket\x12\x16\n" +

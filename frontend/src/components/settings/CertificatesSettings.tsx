@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useReducer } from "react";
 import { unzipSync, decompressSync } from "fflate";
 
@@ -193,7 +194,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast("Certificate PEM is required", "error");
       return;
     }
-    const certName = certs.find((c) => c.id === id)?.name ?? "";
+    const certName = certs.find((c) => encode(c.id) === id)?.name ?? "";
     const displayName = certName || id;
     try {
       await putCert.mutateAsync({
@@ -218,7 +219,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
       addToast("Certificate and key file paths are required", "error");
       return;
     }
-    const certName = certs.find((c) => c.id === id)?.name ?? "";
+    const certName = certs.find((c) => encode(c.id) === id)?.name ?? "";
     const displayName = certName || id;
     try {
       await putCert.mutateAsync({
@@ -239,7 +240,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const handleDelete = async (id: string) => {
-    const certName = certs.find((c) => c.id === id)?.name ?? id;
+    const certName = certs.find((c) => encode(c.id) === id)?.name ?? id;
     try {
       await deleteCert.mutateAsync(id);
       addToast(`Certificate "${certName}" deleted`, "info");
@@ -252,7 +253,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const startAddPem = () => dispatch({ type: "startAdd", source: "pem" });
   const startAddFiles = () => dispatch({ type: "startAdd", source: "files" });
 
-  if (expanded && certData?.id === expanded && syncedCertId !== expanded) {
+  if (expanded && certData && encode(certData.id) === expanded && syncedCertId !== expanded) {
     dispatch({
       type: "syncFromCert",
       certPem: certData.certPem,
@@ -314,7 +315,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
   };
 
-  const isExpandedFileBased = expanded && certData?.id === expanded && !!(certData.certFile && certData.keyFile);
+  const isExpandedFileBased = expanded && certData && encode(certData.id) === expanded && !!(certData.certFile && certData.keyFile);
 
   if (isLoading) {
     return <LoadingPlaceholder dark={dark} />;
@@ -402,27 +403,27 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
         <div className="flex flex-col gap-3">
           {sortByName(certs).map((cert) => (
             <SettingsCard
-              key={cert.id}
-              id={cert.name || cert.id}
-              typeBadge={defaultCert === cert.id ? "default" : undefined}
+              key={encode(cert.id)}
+              id={cert.name || encode(cert.id)}
+              typeBadge={defaultCert === encode(cert.id) ? "default" : undefined}
               dark={dark}
-              expanded={expanded === cert.id}
+              expanded={expanded === encode(cert.id)}
               onToggle={() => {
-                if (expanded === cert.id) {
+                if (expanded === encode(cert.id)) {
                   dispatch({ type: "setExpanded", value: null });
                 } else {
-                  dispatch({ type: "clearForExpand", expandId: cert.id });
+                  dispatch({ type: "clearForExpand", expandId: encode(cert.id) });
                 }
               }}
-              onDelete={() => handleDelete(cert.id)}
+              onDelete={() => handleDelete(encode(cert.id))}
               deleteLabel="Delete"
               footer={
-                expanded === cert.id ? (
+                expanded === encode(cert.id) ? (
                   <Button
                     onClick={() =>
                       isExpandedFileBased
-                        ? handleSaveEditFiles(cert.id)
-                        : handleSaveEditPem(cert.id)
+                        ? handleSaveEditFiles(encode(cert.id))
+                        : handleSaveEditPem(encode(cert.id))
                     }
                     disabled={putCert.isPending}
                   >
@@ -431,32 +432,32 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
                 ) : undefined
               }
             >
-              {expanded === cert.id && (
+              {expanded === encode(cert.id) && (
                 isExpandedFileBased ? (
                   <FilesCertForm
                     dark={dark}
-                    name={cert.name || cert.id}
+                    name={cert.name || encode(cert.id)}
                     certFile={certFile}
                     keyFile={keyFile}
                     setAsDefault={setAsDefault}
                     setCertFile={setCertFile}
                     setKeyFile={setKeyFile}
                     setSetAsDefault={setSetAsDefault}
-                    onSave={() => handleSaveEditFiles(cert.id)}
+                    onSave={() => handleSaveEditFiles(encode(cert.id))}
                     saving={putCert.isPending}
                     hideActions
                   />
                 ) : (
                   <PemCertForm
                     dark={dark}
-                    name={cert.name || cert.id}
+                    name={cert.name || encode(cert.id)}
                     certPem={certPem}
                     keyPem={keyPem}
                     setAsDefault={setAsDefault}
                     setCertPem={setCertPem}
                     setKeyPem={setKeyPem}
                     setSetAsDefault={setSetAsDefault}
-                    onSave={() => handleSaveEditPem(cert.id)}
+                    onSave={() => handleSaveEditPem(encode(cert.id))}
                     saving={putCert.isPending}
                     onDrop={handleDrop}
                     onDragOver={handleDragOver}

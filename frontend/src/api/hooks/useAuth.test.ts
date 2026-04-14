@@ -1,4 +1,5 @@
 /* eslint-disable sonarjs/no-hardcoded-passwords */
+import { decode } from "../glid";
 import { describe, test, expect, beforeEach } from "bun:test";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
@@ -115,6 +116,6 @@ describe("useDeleteUser", () => {
       await result.current.mutateAsync("u1");
     });
 
-    expect(m(mocks.authClient, "deleteUser")).toHaveBeenCalledWith({ id: "u1" });
+    expect(m(mocks.authClient, "deleteUser")).toHaveBeenCalledWith({ id: decode("u1") });
   });
 });

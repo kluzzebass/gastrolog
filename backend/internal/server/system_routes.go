@@ -21,15 +21,15 @@ func (s *SystemServer) PutRoute(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
 	}
 
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -45,8 +45,8 @@ func (s *SystemServer) PutRoute(
 
 	// Validate filter_id references an existing filter (if non-empty).
 	var filterID *glid.GLID
-	if req.Msg.Config.FilterId != "" {
-		fid, connErr := parseUUID(req.Msg.Config.FilterId)
+	if len(req.Msg.Config.FilterId) != 0 {
+		fid, connErr := parseProtoID(req.Msg.Config.FilterId)
 		if connErr != nil {
 			return nil, connErr
 		}
@@ -56,7 +56,7 @@ func (s *SystemServer) PutRoute(
 		}
 		if fc == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("filter %q not found", req.Msg.Config.FilterId))
+				fmt.Errorf("filter %q not found", fid))
 		}
 		filterID = &fid
 	}
@@ -64,7 +64,7 @@ func (s *SystemServer) PutRoute(
 	// Validate all destination vault IDs reference existing vaults.
 	var destinations []glid.GLID
 	for _, dest := range req.Msg.Config.Destinations {
-		vid, connErr := parseUUID(dest.VaultId)
+		vid, connErr := parseProtoID(dest.VaultId)
 		if connErr != nil {
 			return nil, connErr
 		}
@@ -74,7 +74,7 @@ func (s *SystemServer) PutRoute(
 		}
 		if vc == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("destination vault %q not found", dest.VaultId))
+				fmt.Errorf("destination vault %q not found", vid))
 		}
 		destinations = append(destinations, vid)
 	}
@@ -115,11 +115,11 @@ func (s *SystemServer) DeleteRoute(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteRouteRequest],
 ) (*connect.Response[apiv1.DeleteRouteResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}

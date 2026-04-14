@@ -32,19 +32,16 @@ func (s *QueryServer) GetContext(
 	}
 
 	ref := req.Msg.Ref
-	if ref == nil || ref.VaultId == "" || ref.ChunkId == "" {
+	if ref == nil || len(ref.VaultId) == 0 || len(ref.ChunkId) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ref must include vault_id, chunk_id, and pos"))
 	}
 
-	vaultID, connErr := parseUUID(ref.VaultId)
-	if connErr != nil {
-		return nil, connErr
-	}
+	vaultID := glid.FromBytes(ref.VaultId)
 
-	chunkID, err := chunk.ParseChunkID(ref.ChunkId)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: %w", err))
+	if len(ref.ChunkId) != glid.Size {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid chunk_id: expected %d bytes, got %d", glid.Size, len(ref.ChunkId)))
 	}
+	chunkID := chunk.ChunkID(glid.FromBytes(ref.ChunkId))
 
 	// Step 1: Read the anchor record from its owning vault.
 	anchor, err := s.readAnchor(ctx, vaultID, chunkID, ref.Pos)
@@ -64,8 +61,8 @@ func (s *QueryServer) GetContext(
 
 	isAnchor := func(rec *apiv1.Record) bool {
 		return rec.Ref != nil &&
-			rec.Ref.VaultId == ref.VaultId &&
-			rec.Ref.ChunkId == ref.ChunkId &&
+			string(rec.Ref.VaultId) == string(ref.VaultId) &&
+			string(rec.Ref.ChunkId) == string(ref.ChunkId) &&
 			rec.Ref.Pos == ref.Pos
 	}
 
@@ -101,8 +98,8 @@ func (s *QueryServer) GetContext(
 func (s *QueryServer) readAnchor(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64) (*apiv1.Record, error) {
 	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
 		resp, err := s.remoteSearcher.GetContext(ctx, nodeID, &apiv1.ForwardGetContextRequest{
-			VaultId: vaultID.String(),
-			ChunkId: chunkID.String(),
+			VaultId: vaultID.ToProto(),
+			ChunkId: glid.GLID(chunkID).ToProto(),
 			Pos:     pos,
 		})
 		if err != nil {

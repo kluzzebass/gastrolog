@@ -60,8 +60,8 @@ func (s *QueryServer) Explain(
 
 	for _, cp := range plan.ChunkPlans {
 		chunkPlan := &apiv1.ChunkPlan{
-			VaultId:          cp.VaultID.String(),
-			ChunkId:          cp.ChunkID.String(),
+			VaultId:          cp.VaultID.ToProto(),
+			ChunkId:          glid.GLID(cp.ChunkID).ToProto(),
 			Sealed:           cp.Sealed,
 			RecordCount:      int64(cp.RecordCount),
 			ScanMode:         cp.ScanMode,
@@ -69,7 +69,7 @@ func (s *QueryServer) Explain(
 			RuntimeFilters:   []string{cp.RuntimeFilter},
 			Steps:            PipelineStepsToProto(cp.Pipeline),
 			SkipReason:       cp.SkipReason,
-			NodeId:           vaultNodeID(cp.VaultID),
+			NodeId:           []byte(vaultNodeID(cp.VaultID)),
 		}
 		if !cp.WriteStart.IsZero() {
 			chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)
@@ -107,13 +107,13 @@ func (s *QueryServer) collectRemoteExplain(ctx context.Context, q query.Query, r
 	byNode := s.remoteVaultsByNode(ctx, selectedVaults)
 	queryExpr := q.String()
 	for nodeID, vaultIDs := range byNode {
-		vaultStrs := make([]string, len(vaultIDs))
+		vaultBytes := make([][]byte, len(vaultIDs))
 		for i, v := range vaultIDs {
-			vaultStrs[i] = v.String()
+			vaultBytes[i] = v.ToProto()
 		}
 		remote, err := s.remoteSearcher.Explain(ctx, nodeID, &apiv1.ForwardExplainRequest{
 			Query:    queryExpr,
-			VaultIds: vaultStrs,
+			VaultIds: vaultBytes,
 		})
 		if err != nil {
 			s.logger.Warn("explain: remote node failed", "node", nodeID, "err", err)

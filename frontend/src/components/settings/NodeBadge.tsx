@@ -1,6 +1,7 @@
 import { useConfig } from "../../api/hooks";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useSettings } from "../../api/hooks/useSettings";
+import { encode } from "../../api/glid";
 import { Badge } from "../Badge";
 
 export function NodeBadge({
@@ -18,9 +19,9 @@ export function NodeBadge({
     (config?.nodeConfigs && config.nodeConfigs.length > 1);
   if (!multiNode) return null;
 
-  const localNodeId = settings?.nodeId ?? "";
+  const localNodeId = settings?.nodeId ? encode(settings.nodeId) : "";
   const isLocal = nodeId === localNodeId;
-  const node = config?.nodeConfigs.find((n) => n.id === nodeId);
+  const node = config?.nodeConfigs.find((n) => encode(n.id) === nodeId);
   const label = node?.name || nodeId;
 
   return (

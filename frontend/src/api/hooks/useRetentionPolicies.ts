@@ -1,5 +1,6 @@
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
+import { decode } from "../glid";
 
 export function usePutRetentionPolicy() {
   return useSystemMutation(
@@ -12,7 +13,7 @@ export function usePutRetentionPolicy() {
     }) => {
       return systemClient.putRetentionPolicy({
         config: {
-          id: args.id,
+          id: decode(args.id),
           name: args.name,
           maxAgeSeconds: args.maxAgeSeconds,
           maxBytes: args.maxBytes,
@@ -25,6 +26,6 @@ export function usePutRetentionPolicy() {
 
 export function useDeleteRetentionPolicy() {
   return useSystemMutation(async (id: string) => {
-    return systemClient.deleteRetentionPolicy({ id });
+    return systemClient.deleteRetentionPolicy({ id: decode(id) });
   });
 }

@@ -16,7 +16,7 @@ func FuzzEnrollRequestDeserialize(f *testing.F) {
 	// Seed with a valid request.
 	valid := &gastrologv1.EnrollRequest{
 		TokenSecret: "secret-token-abc123",
-		NodeId:      "node-joining-1",
+		NodeId:      []byte("node-joining-1"),
 		NodeAddr:    "10.0.0.5:4565",
 	}
 	validBytes, _ := proto.Marshal(valid)
@@ -29,7 +29,7 @@ func FuzzEnrollRequestDeserialize(f *testing.F) {
 	// Seed with oversized values.
 	big := &gastrologv1.EnrollRequest{
 		TokenSecret: string(make([]byte, 4096)),
-		NodeId:      string(make([]byte, 1024)),
+		NodeId:      make([]byte, 1024),
 		NodeAddr:    string(make([]byte, 1024)),
 	}
 	bigBytes, _ := proto.Marshal(big)

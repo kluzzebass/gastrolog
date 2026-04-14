@@ -1,3 +1,4 @@
+import { encode } from "../../../api/glid";
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { useCertificates } from "../../../api/hooks/useCertificates";
@@ -17,7 +18,7 @@ export function DockerForm({
   const certOptions = [
     { value: "", label: "(none)" },
     ...certs
-      .map((c) => ({ value: c.id, label: c.name || c.id }))
+      .map((c) => ({ value: encode(c.id), label: c.name || encode(c.id) }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   ];
   const set = (key: string, value: string) =>

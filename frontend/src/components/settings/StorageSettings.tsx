@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useReducer, useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { buildNodeNameMap, resolveNodeName } from "../../utils/nodeNames";
@@ -102,7 +103,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   const cloudServices = config?.cloudServices ?? [];
   const nodeStorageConfigs = config?.nodeStorageConfigs ?? [];
   const nodeConfigs = config?.nodeConfigs ?? [];
-  const localNodeId = settingsData?.nodeId ?? "";
+  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
 
   const existingNames = new Set(cloudServices.map((s) => s.name));
   const effectiveName = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
@@ -136,14 +137,14 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   // ─── Add/Remove file storage on any node ────────────────────
 
   const handleRemoveStorage = async (nodeId: string, storageId: string) => {
-    const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
+    const nsc = nodeStorageConfigs.find((n) => encode(n.nodeId) === nodeId);
     const currentStorages = nsc?.fileStorages ?? [];
-    const updated = currentStorages.filter((a) => a.id !== storageId);
+    const updated = currentStorages.filter((a) => encode(a.id) !== storageId);
     try {
       await setNodeStorage.mutateAsync({
         nodeId,
         fileStorages: updated.map((a) => ({
-          id: a.id,
+          id: encode(a.id),
           storageClass: a.storageClass,
           name: a.name,
           path: a.path,
@@ -157,12 +158,12 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const handleUpdateStorage = async (nodeId: string, storageId: string, edit: { name: string; path: string; storageClass: string }) => {
-    const nsc = nodeStorageConfigs.find((n) => n.nodeId === nodeId);
+    const nsc = nodeStorageConfigs.find((n) => encode(n.nodeId) === nodeId);
     const currentStorages = nsc?.fileStorages ?? [];
     const updated = currentStorages.map((a) => {
-      if (a.id !== storageId) return { id: a.id, storageClass: a.storageClass, name: a.name, path: a.path, memoryBudgetBytes: a.memoryBudgetBytes };
+      if (encode(a.id) !== storageId) return { id: encode(a.id), storageClass: a.storageClass, name: a.name, path: a.path, memoryBudgetBytes: a.memoryBudgetBytes };
       return {
-        id: a.id,
+        id: encode(a.id),
         storageClass: parseInt(edit.storageClass, 10) || 0,
         name: edit.name,
         path: edit.path,
@@ -216,10 +217,10 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
       memoryBudgetBytes: BigInt(0),
     };
 
-    const nsc = nodeStorageConfigs.find((n) => n.nodeId === targetNodeId);
+    const nsc = nodeStorageConfigs.find((n) => encode(n.nodeId) === targetNodeId);
     const existingStorages = nsc?.fileStorages ?? [];
     const updated = [...existingStorages.map((a) => ({
-      id: a.id,
+      id: encode(a.id),
       storageClass: a.storageClass,
       name: a.name,
       path: a.path,
@@ -306,10 +307,10 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
           const allStorages = nodeStorageConfigs.flatMap((nsc) =>
             nsc.fileStorages.map(( fs) => ({
               fs,
-              nodeId: nsc.nodeId,
-              nodeName: resolveNodeName(nodeNameMap, nsc.nodeId),
+              nodeId: encode(nsc.nodeId),
+              nodeName: resolveNodeName(nodeNameMap, encode(nsc.nodeId)),
             })),
-          ).sort((a, b) => (a.fs.name || a.fs.id).localeCompare(b.fs.name || b.fs.id));
+          ).sort((a, b) => (a.fs.name || encode(a.fs.id)).localeCompare(b.fs.name || encode(b.fs.id)));
 
           if (!isLoading && allStorages.length === 0 && !addingStorage) {
             return (
@@ -323,12 +324,12 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
             <div className="flex flex-col gap-2">
               {allStorages.map(({ fs, nodeId, nodeName }) => (
                 <FileStorageCard
-                  key={fs.id}
+                  key={encode(fs.id)}
                   fs={fs}
                   nodeName={nodeName}
                   dark={dark}
-                  expanded={isExpanded(`storage-${fs.id}`)}
-                  onToggle={() => toggleCard(`storage-${fs.id}`)}
+                  expanded={isExpanded(`storage-${encode(fs.id)}`)}
+                  onToggle={() => toggleCard(`storage-${encode(fs.id)}`)}
                   onSave={async (storageId, edit) => {
                     await handleUpdateStorage(nodeId, storageId, edit);
                   }}
@@ -407,11 +408,11 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
           {sortByName(cloudServices).map((svc) => (
             <CloudServiceCard
-              key={svc.id}
+              key={encode(svc.id)}
               service={svc}
               dark={dark}
-              expanded={isExpanded(svc.id)}
-              onToggle={() => toggleCard(svc.id)}
+              expanded={isExpanded(encode(svc.id))}
+              onToggle={() => toggleCard(encode(svc.id))}
             />
           ))}
         </SettingsSection>

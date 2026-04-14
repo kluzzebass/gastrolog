@@ -1,3 +1,4 @@
+import { encode } from "../../../api/glid";
 import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../../api/hooks/useUploadManagedFile";
 
@@ -112,7 +113,7 @@ function paramsEqual(a: LookupParamDraft[], b: { name: string; description: stri
 }
 
 export function mmdbLookupEqual(draft: MMDBLookupDraft, saved: MMDBLookupEntry): boolean {
-  return draft.name === saved.name && draft.dbType === saved.dbType && draft.fileId === saved.fileId;
+  return draft.name === saved.name && draft.dbType === saved.dbType && draft.fileId === encode(saved.fileId);
 }
 
 export function httpLookupEqual(draft: HTTPLookupDraft, saved: HTTPLookupEntry): boolean {
@@ -137,7 +138,7 @@ export function httpLookupEqual(draft: HTTPLookupDraft, saved: HTTPLookupEntry):
 export function csvLookupEqual(draft: CSVLookupDraft, saved: CSVLookupEntry): boolean {
   return (
     draft.name === saved.name &&
-    draft.fileId === saved.fileId &&
+    draft.fileId === encode(saved.fileId) &&
     draft.keyColumn === saved.keyColumn &&
     arraysEqual(draft.valueColumns, saved.valueColumns)
   );
@@ -146,7 +147,7 @@ export function csvLookupEqual(draft: CSVLookupDraft, saved: CSVLookupEntry): bo
 export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileLookupEntry): boolean {
   if (
     draft.name !== saved.name ||
-    draft.fileId !== saved.fileId ||
+    draft.fileId !== encode(saved.fileId) ||
     draft.query !== saved.query ||
     !arraysEqual(draft.responsePaths, saved.responsePaths)
   ) return false;

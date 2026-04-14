@@ -758,3 +758,82 @@ export class MultiRaftInstallSnapshotResponse extends Message<MultiRaftInstallSn
   }
 }
 
+/**
+ * BatchHeartbeat coalesces heartbeat AppendEntries from multiple groups into
+ * a single RPC per peer. Each entry is a standard AppendEntriesRequest with
+ * empty log entries (heartbeat). Reduces per-tick RPC count from N (one per
+ * group) to 1 (one per peer).
+ *
+ * @generated from message gastrolog.v1.MultiRaftBatchHeartbeatRequest
+ */
+export class MultiRaftBatchHeartbeatRequest extends Message<MultiRaftBatchHeartbeatRequest> {
+  /**
+   * @generated from field: repeated gastrolog.v1.MultiRaftAppendEntriesRequest heartbeats = 1;
+   */
+  heartbeats: MultiRaftAppendEntriesRequest[] = [];
+
+  constructor(data?: PartialMessage<MultiRaftBatchHeartbeatRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MultiRaftBatchHeartbeatRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "heartbeats", kind: "message", T: MultiRaftAppendEntriesRequest, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MultiRaftBatchHeartbeatRequest {
+    return new MultiRaftBatchHeartbeatRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MultiRaftBatchHeartbeatRequest {
+    return new MultiRaftBatchHeartbeatRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MultiRaftBatchHeartbeatRequest {
+    return new MultiRaftBatchHeartbeatRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MultiRaftBatchHeartbeatRequest | PlainMessage<MultiRaftBatchHeartbeatRequest> | undefined, b: MultiRaftBatchHeartbeatRequest | PlainMessage<MultiRaftBatchHeartbeatRequest> | undefined): boolean {
+    return proto3.util.equals(MultiRaftBatchHeartbeatRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.MultiRaftBatchHeartbeatResponse
+ */
+export class MultiRaftBatchHeartbeatResponse extends Message<MultiRaftBatchHeartbeatResponse> {
+  /**
+   * @generated from field: repeated gastrolog.v1.MultiRaftAppendEntriesResponse responses = 1;
+   */
+  responses: MultiRaftAppendEntriesResponse[] = [];
+
+  constructor(data?: PartialMessage<MultiRaftBatchHeartbeatResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.MultiRaftBatchHeartbeatResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "responses", kind: "message", T: MultiRaftAppendEntriesResponse, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MultiRaftBatchHeartbeatResponse {
+    return new MultiRaftBatchHeartbeatResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): MultiRaftBatchHeartbeatResponse {
+    return new MultiRaftBatchHeartbeatResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): MultiRaftBatchHeartbeatResponse {
+    return new MultiRaftBatchHeartbeatResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: MultiRaftBatchHeartbeatResponse | PlainMessage<MultiRaftBatchHeartbeatResponse> | undefined, b: MultiRaftBatchHeartbeatResponse | PlainMessage<MultiRaftBatchHeartbeatResponse> | undefined): boolean {
+    return proto3.util.equals(MultiRaftBatchHeartbeatResponse, a, b);
+  }
+}
+

@@ -52,7 +52,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 		for _, vid := range vaultIDs {
 			wg.Go(func() {
 				recCh, hist, _, eCh, getToken := s.remoteSearcher.SearchStream(ctx, nodeID, &apiv1.ForwardSearchRequest{
-					VaultId:     vid.String(),
+					VaultId:     vid.ToProto(),
 					Query:       queryExpr,
 					ResumeToken: remoteTokens[vid],
 				})
@@ -381,7 +381,7 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	for i, f := range fetches {
 		wg.Go(func() {
 			responses[i], fetchErrors[i] = s.remoteSearcher.Search(ctx, f.nodeID, &apiv1.ForwardSearchRequest{
-				VaultId: f.vid.String(),
+				VaultId: f.vid.ToProto(),
 				Query:   remoteExpr,
 			})
 		})

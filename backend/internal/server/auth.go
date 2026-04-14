@@ -498,10 +498,7 @@ func (s *AuthServer) UpdateUserRole(
 	ctx context.Context,
 	req *connect.Request[apiv1.UpdateUserRoleRequest],
 ) (*connect.Response[apiv1.UpdateUserRoleResponse], error) {
-	userID, connErr := parseUUID(req.Msg.Id)
-	if connErr != nil {
-		return nil, connErr
-	}
+	userID := glid.FromBytes(req.Msg.Id)
 	role := req.Msg.Role
 
 	if role != "admin" && role != "user" {
@@ -545,10 +542,7 @@ func (s *AuthServer) ResetPassword(
 	ctx context.Context,
 	req *connect.Request[apiv1.ResetPasswordRequest],
 ) (*connect.Response[apiv1.ResetPasswordResponse], error) {
-	userID, connErr := parseUUID(req.Msg.Id)
-	if connErr != nil {
-		return nil, connErr
-	}
+	userID := glid.FromBytes(req.Msg.Id)
 	newPassword := req.Msg.NewPassword
 
 	if err := validatePassword(newPassword, s.loadPasswordPolicy(ctx)); err != nil {
@@ -588,10 +582,7 @@ func (s *AuthServer) RenameUser(
 	ctx context.Context,
 	req *connect.Request[apiv1.RenameUserRequest],
 ) (*connect.Response[apiv1.RenameUserResponse], error) {
-	userID, connErr := parseUUID(req.Msg.Id)
-	if connErr != nil {
-		return nil, connErr
-	}
+	userID := glid.FromBytes(req.Msg.Id)
 	newUsername := req.Msg.NewUsername
 
 	if !usernameRe.MatchString(newUsername) {
@@ -645,10 +636,7 @@ func (s *AuthServer) DeleteUser(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteUserRequest],
 ) (*connect.Response[apiv1.DeleteUserResponse], error) {
-	userID, connErr := parseUUID(req.Msg.Id)
-	if connErr != nil {
-		return nil, connErr
-	}
+	userID := glid.FromBytes(req.Msg.Id)
 
 	// Prevent self-deletion.
 	if claims := auth.ClaimsFromContext(ctx); claims != nil && claims.UserID == userID.String() {
@@ -698,7 +686,7 @@ func (s *AuthServer) Logout(
 // userToProto converts a system.User to a proto UserInfo, stripping the password hash.
 func userToProto(u system.User) *apiv1.UserInfo {
 	return &apiv1.UserInfo{
-		Id:        u.ID.String(),
+		Id:        u.ID.ToProto(),
 		Username:  u.Username,
 		Role:      u.Role,
 		CreatedAt: u.CreatedAt.Unix(),

@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { JobStatus } from "../../api/gen/gastrolog/v1/job_pb";
@@ -39,14 +40,14 @@ export function JobCard({
 }: Readonly<JobCardProps>) {
   return (
     <ExpandableCard
-      id={job.description || job.name || job.id}
+      id={job.description || job.name || encode(job.id)}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       status={
         <span className="flex items-center gap-1.5">
           <StatusBadge status={job.status} dark={dark} />
-          {showNodeBadge && <NodeBadge nodeId={job.nodeId} dark={dark} />}
+          {showNodeBadge && <NodeBadge nodeId={encode(job.nodeId)} dark={dark} />}
         </span>
       }
       headerRight={<TaskProgress job={job} dark={dark} />}
@@ -94,7 +95,7 @@ export function ScheduledJobsTable({
 
       {jobs.map((job) => (
         <div
-          key={job.id}
+          key={encode(job.id)}
           className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.85em] border-b last:border-b-0 ${c(
             "border-ink-border-subtle",
             "border-light-border-subtle",
@@ -103,10 +104,10 @@ export function ScheduledJobsTable({
           <span
             className={`flex items-center gap-2 min-w-0 ${c("text-text-bright", "text-light-text-bright")}`}
           >
-            <span className="font-mono truncate" title={job.description || job.name || job.id}>
-              {job.description || job.name || job.id}
+            <span className="font-mono truncate" title={job.description || job.name || encode(job.id)}>
+              {job.description || job.name || encode(job.id)}
             </span>
-            {showNodeBadge && <NodeBadge nodeId={job.nodeId} dark={dark} />}
+            {showNodeBadge && <NodeBadge nodeId={encode(job.nodeId)} dark={dark} />}
           </span>
           <span
             className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}

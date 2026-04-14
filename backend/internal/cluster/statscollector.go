@@ -129,7 +129,7 @@ func (c *StatsCollector) Run(ctx context.Context) {
 			stats := c.CollectLocal()
 			if c.cfg.Broadcaster != nil {
 				c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
-					SenderId:  c.cfg.NodeID,
+					SenderId:  []byte(c.cfg.NodeID),
 					Timestamp: timestamppb.Now(),
 					Payload:   &gastrologv1.BroadcastMessage_NodeStats{NodeStats: stats},
 				})
@@ -175,7 +175,7 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 		// Vault snapshots.
 		for _, v := range c.cfg.Stats.VaultSnapshots() {
 			stats.Vaults = append(stats.Vaults, &gastrologv1.VaultStats{
-				Id:           v.ID,
+				Id:           []byte(v.ID),
 				Name:         v.Name,
 				RecordCount:  v.RecordCount,
 				ChunkCount:   int64(v.ChunkCount),
@@ -189,7 +189,7 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 		for _, id := range c.cfg.Stats.IngesterIDs() {
 			name, msgs, bytes, errs, running := c.cfg.Stats.IngesterStats(id)
 			stats.Ingesters = append(stats.Ingesters, &gastrologv1.IngesterNodeStats{
-				Id:               id,
+				Id:               []byte(id),
 				Name:             name,
 				MessagesIngested: uint64(msgs),  //nolint:gosec
 				BytesIngested:    uint64(bytes),  //nolint:gosec
@@ -206,14 +206,14 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 		stats.RouteStatsFilterActive = rs.FilterActive
 		for _, vs := range rs.VaultStats {
 			stats.RouteVaultStats = append(stats.RouteVaultStats, &gastrologv1.VaultRouteStats{
-				VaultId:          vs.VaultID,
+				VaultId:          []byte(vs.VaultID),
 				RecordsMatched:   vs.Matched,
 				RecordsForwarded: vs.Forwarded,
 			})
 		}
 		for _, ps := range rs.RouteStats {
 			stats.RoutePerRouteStats = append(stats.RoutePerRouteStats, &gastrologv1.PerRouteStats{
-				RouteId:          ps.RouteID,
+				RouteId:          []byte(ps.RouteID),
 				RecordsMatched:   ps.Matched,
 				RecordsForwarded: ps.Forwarded,
 			})
@@ -229,7 +229,7 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 	if c.cfg.Alerts != nil {
 		for _, a := range c.cfg.Alerts.ActiveAlerts() {
 			stats.Alerts = append(stats.Alerts, &gastrologv1.SystemAlert{
-				Id:        a.ID,
+				Id:        []byte(a.ID),
 				Severity:  gastrologv1.AlertSeverity(a.Severity), //nolint:gosec // bounded enum
 				Source:    a.Source,
 				Message:   a.Message,
@@ -262,7 +262,7 @@ func (c *StatsCollector) BroadcastJobs(ctx context.Context) {
 		return
 	}
 	c.cfg.Broadcaster.Send(ctx, &gastrologv1.BroadcastMessage{
-		SenderId:  c.cfg.NodeID,
+		SenderId:  []byte(c.cfg.NodeID),
 		Timestamp: timestamppb.Now(),
 		Payload: &gastrologv1.BroadcastMessage_NodeJobs{NodeJobs: &gastrologv1.NodeJobs{
 			Jobs: c.cfg.Jobs.ListJobsProto(),

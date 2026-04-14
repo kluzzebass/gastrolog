@@ -152,7 +152,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	// Create a filter first, then a vault that uses it.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "catch-all", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -160,7 +160,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:      vaultID.String(),
+			Id:      vaultID.Bytes(),
 			Name:    "test-vault",
 			Enabled: true,
 		},
@@ -185,7 +185,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	// Non-force delete should fail.
 	_, err = client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
-		Id: vaultID.String(),
+		Id: vaultID.Bytes(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for non-force delete of non-empty vault")
@@ -196,7 +196,7 @@ func TestDeleteVaultForce(t *testing.T) {
 
 	// Force delete should succeed.
 	_, err = client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
-		Id:    vaultID.String(),
+		Id:    vaultID.Bytes(),
 		Force: true,
 	}))
 	if err != nil {
@@ -221,7 +221,7 @@ func TestDeleteVaultNotFound(t *testing.T) {
 
 	nonexistentID := glid.New()
 	_, err := client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
-		Id: nonexistentID.String(),
+		Id: nonexistentID.Bytes(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -244,7 +244,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	// Create a filter and a vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "catch-all-2", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "catch-all-2", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -252,7 +252,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:      vaultID.String(),
+			Id:      vaultID.Bytes(),
 			Name:    "pause-vault",
 			Enabled: true,
 		},
@@ -264,11 +264,11 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	// Route the catch-all filter to the vault so Ingest delivers records.
 	_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Id:       glid.New().String(),
+			Id:       glid.New().Bytes(),
 			Name:     "test-route",
-			FilterId: filterID.String(),
+			FilterId: filterID.Bytes(),
 			Destinations: []*gastrologv1.RouteDestination{
-				{VaultId: vaultID.String()},
+				{VaultId: vaultID.Bytes()},
 			},
 			Enabled: true,
 		},
@@ -279,7 +279,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	// Pause the vault via RPC.
 	_, err = client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
-		Id: vaultID.String(),
+		Id: vaultID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatalf("PauseVault: %v", err)
@@ -296,7 +296,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 		&http.Client{Transport: &embeddedTransport{handler: handler}},
 		"http://embedded",
 	)
-	vaultResp, err := vaultClient.GetVault(ctx, connect.NewRequest(&gastrologv1.GetVaultRequest{Id: vaultID.String()}))
+	vaultResp, err := vaultClient.GetVault(ctx, connect.NewRequest(&gastrologv1.GetVaultRequest{Id: vaultID.Bytes()}))
 	if err != nil {
 		t.Fatalf("GetVault: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 
 	// Resume via RPC.
 	_, err = client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
-		Id: vaultID.String(),
+		Id: vaultID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatalf("ResumeVault: %v", err)
@@ -328,7 +328,7 @@ func TestPauseVaultNotFoundRPC(t *testing.T) {
 
 	nonexistentID := glid.New()
 	_, err := client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
-		Id: nonexistentID.String(),
+		Id: nonexistentID.Bytes(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -344,7 +344,7 @@ func TestResumeVaultNotFoundRPC(t *testing.T) {
 
 	nonexistentID := glid.New()
 	_, err := client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
-		Id: nonexistentID.String(),
+		Id: nonexistentID.Bytes(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -364,7 +364,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	// Create a filter and vault.
 	_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "catch-all-3", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "catch-all-3", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -372,7 +372,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	_, err = client.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 		Config: &gastrologv1.VaultConfig{
-			Id:      vaultID.String(),
+			Id:      vaultID.Bytes(),
 			Name:    "persist-vault",
 			Enabled: true,
 		},
@@ -383,7 +383,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	// Pause and check config persistence.
 	_, err = client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
-		Id: vaultID.String(),
+		Id: vaultID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatalf("PauseVault: %v", err)
@@ -399,7 +399,7 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 
 	// Resume and check config persistence.
 	_, err = client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
-		Id: vaultID.String(),
+		Id: vaultID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatalf("ResumeVault: %v", err)
@@ -569,13 +569,13 @@ func TestDuplicateEntityNames(t *testing.T) {
 		nodeA := glid.New()
 		nodeB := glid.New()
 		_, err := client.PutNodeConfig(ctx, connect.NewRequest(&gastrologv1.PutNodeConfigRequest{
-			Config: &gastrologv1.NodeConfig{Id: nodeA.String(), Name: "alpha"},
+			Config: &gastrologv1.NodeConfig{Id: nodeA.Bytes(), Name: "alpha"},
 		}))
 		if err != nil {
 			t.Fatalf("first PutNodeConfig: %v", err)
 		}
 		_, err = client.PutNodeConfig(ctx, connect.NewRequest(&gastrologv1.PutNodeConfigRequest{
-			Config: &gastrologv1.NodeConfig{Id: nodeB.String(), Name: "alpha"},
+			Config: &gastrologv1.NodeConfig{Id: nodeB.Bytes(), Name: "alpha"},
 		}))
 		if err == nil {
 			t.Fatal("expected error for duplicate node name")
@@ -589,13 +589,13 @@ func TestDuplicateEntityNames(t *testing.T) {
 		// Creating with an explicit ID, then updating with the same ID and name should work.
 		id := glid.New()
 		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Id: id.String(), Name: "self-update", Expression: "*"},
+			Config: &gastrologv1.FilterConfig{Id: id.Bytes(), Name: "self-update", Expression: "*"},
 		}))
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
 		_, err = client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-			Config: &gastrologv1.FilterConfig{Id: id.String(), Name: "self-update", Expression: "level=error"},
+			Config: &gastrologv1.FilterConfig{Id: id.Bytes(), Name: "self-update", Expression: "level=error"},
 		}))
 		if err != nil {
 			t.Fatalf("update self should be allowed: %v", err)
@@ -610,7 +610,7 @@ func TestDuplicateEntityNames(t *testing.T) {
 					{Name: "duped", UrlTemplate: "http://example.com/{ip}"},
 				},
 				CsvLookups: []*gastrologv1.CSVLookupEntry{
-					{Name: "duped", FileId: glid.New().String()},
+					{Name: "duped", FileId: glid.New().Bytes()},
 				},
 			},
 		}))
@@ -678,7 +678,7 @@ func TestDeleteIngesterNotFound(t *testing.T) {
 
 	nonexistentID := glid.New()
 	_, err := client.DeleteIngester(ctx, connect.NewRequest(&gastrologv1.DeleteIngesterRequest{
-		Id: nonexistentID.String(),
+		Id: nonexistentID.Bytes(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent ingester")
@@ -722,7 +722,7 @@ func TestListIngestersRemoteRunning(t *testing.T) {
 
 	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
 		remoteIngID.String(): {
-			Id: remoteIngID.String(), Running: true,
+			Id: remoteIngID.Bytes(), Running: true,
 			MessagesIngested: 42, BytesIngested: 1024, Errors: 1,
 		},
 	}}
@@ -741,7 +741,7 @@ func TestListIngestersRemoteRunning(t *testing.T) {
 
 	var found *gastrologv1.IngesterInfo
 	for _, ing := range resp.Msg.Ingesters {
-		if ing.Id == remoteIngID.String() {
+		if glid.FromBytes(ing.Id) == remoteIngID {
 			found = ing
 		}
 	}
@@ -770,7 +770,7 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 
 	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
 		remoteIngID.String(): {
-			Id: remoteIngID.String(), Running: true,
+			Id: remoteIngID.Bytes(), Running: true,
 			MessagesIngested: 42, BytesIngested: 1024, Errors: 1,
 		},
 	}}
@@ -783,7 +783,7 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 
 	resp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
-		Id: remoteIngID.String(),
+		Id: remoteIngID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -833,7 +833,7 @@ func TestGetIngesterStatusLocal(t *testing.T) {
 	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
 
 	resp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
-		Id: ingID.String(),
+		Id: ingID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -878,7 +878,7 @@ func TestListIngestersNoPeerStats(t *testing.T) {
 
 	var found *gastrologv1.IngesterInfo
 	for _, ing := range resp.Msg.Ingesters {
-		if ing.Id == remoteIngID.String() {
+		if glid.FromBytes(ing.Id) == remoteIngID {
 			found = ing
 		}
 	}
@@ -891,7 +891,7 @@ func TestListIngestersNoPeerStats(t *testing.T) {
 
 	// GetIngesterStatus should also work without error.
 	statusResp, err := client.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
-		Id: remoteIngID.String(),
+		Id: remoteIngID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -979,14 +979,14 @@ func TestPutIngesterListenAddrUpdateSelf(t *testing.T) {
 	}
 
 	// Find the created ingester's ID.
-	var ingID string
+	var ingID []byte
 	for _, ing := range resp.Msg.System.Ingesters {
 		if ing.Name == "syslog-self" {
 			ingID = ing.Id
 			break
 		}
 	}
-	if ingID == "" {
+	if len(ingID) == 0 {
 		t.Fatal("ingester not found in config response")
 	}
 
@@ -1104,8 +1104,8 @@ func TestGetRouteStats(t *testing.T) {
 		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
 	}
 	vs := resp.Msg.VaultStats[0]
-	if vs.VaultId != vaultID.String() {
-		t.Errorf("expected vault %s, got %s", vaultID, vs.VaultId)
+	if glid.FromBytes(vs.VaultId) != vaultID {
+		t.Errorf("expected vault %s, got %s", vaultID, glid.FromBytes(vs.VaultId))
 	}
 	if vs.RecordsMatched != 5 {
 		t.Errorf("expected 5 matched, got %d", vs.RecordsMatched)

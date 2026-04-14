@@ -63,11 +63,11 @@ message GetClusterStatusRequest {}
 
 message GetClusterStatusResponse {
   bool cluster_enabled = 1;
-  string leader_id = 2;
+  bytes leader_id = 2;
   string leader_address = 3;
   repeated ClusterNode nodes = 4;
   RaftStats local_stats = 5;
-  string local_node_id = 6;
+  bytes local_node_id = 6;
   string join_token = 7;
   string cluster_address = 8;
 }
@@ -90,7 +90,7 @@ message RaftStats {
 }
 
 message ClusterNode {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   string address = 3;            // cluster/Raft address (e.g. ":4566")
   ClusterNodeRole role = 4;
@@ -115,7 +115,7 @@ enum ClusterNodeSuffrage {
 }
 
 message SetNodeSuffrageRequest {
-  string node_id = 1;
+  bytes node_id = 1;
   bool voter = 2; // true = promote to voter, false = demote to nonvoter
 }
 
@@ -129,7 +129,7 @@ message JoinClusterRequest {
 message JoinClusterResponse {}
 
 message RemoveNodeRequest {
-  string node_id = 1; // ID of the node to evict from the cluster
+  bytes node_id = 1; // ID of the node to evict from the cluster
 }
 
 message RemoveNodeResponse {}

@@ -189,9 +189,9 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
  */
 export class RetentionRule extends Message<RetentionRule> {
   /**
-   * @generated from field: string retention_policy_id = 1;
+   * @generated from field: bytes retention_policy_id = 1;
    */
-  retentionPolicyId = "";
+  retentionPolicyId = new Uint8Array(0);
 
   /**
    * "expire", "eject", "transition", or "archive"
@@ -203,16 +203,16 @@ export class RetentionRule extends Message<RetentionRule> {
   /**
    * deprecated — was target vault for action=migrate
    *
-   * @generated from field: string destination_id = 3;
+   * @generated from field: bytes destination_id = 3;
    */
-  destinationId = "";
+  destinationId = new Uint8Array(0);
 
   /**
    * target routes, only for action=eject
    *
-   * @generated from field: repeated string eject_route_ids = 4;
+   * @generated from field: repeated bytes eject_route_ids = 4;
    */
-  ejectRouteIds: string[] = [];
+  ejectRouteIds: Uint8Array[] = [];
 
   /**
    * target class for archive (e.g. "GLACIER", "DEEP_ARCHIVE")
@@ -229,10 +229,10 @@ export class RetentionRule extends Message<RetentionRule> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RetentionRule";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "retention_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "retention_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "action", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "destination_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "eject_route_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 3, name: "destination_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "eject_route_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 5, name: "archive_storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -258,9 +258,9 @@ export class RetentionRule extends Message<RetentionRule> {
  */
 export class VaultConfig extends Message<VaultConfig> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: bool enabled = 7;
@@ -280,7 +280,7 @@ export class VaultConfig extends Message<VaultConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.VaultConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 8, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
@@ -307,9 +307,9 @@ export class VaultConfig extends Message<VaultConfig> {
  */
 export class RouteDestination extends Message<RouteDestination> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<RouteDestination>) {
     super();
@@ -319,7 +319,7 @@ export class RouteDestination extends Message<RouteDestination> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RouteDestination";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RouteDestination {
@@ -344,9 +344,9 @@ export class RouteDestination extends Message<RouteDestination> {
  */
 export class RouteConfig extends Message<RouteConfig> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -356,9 +356,9 @@ export class RouteConfig extends Message<RouteConfig> {
   /**
    * references FilterConfig.id
    *
-   * @generated from field: string filter_id = 3;
+   * @generated from field: bytes filter_id = 3;
    */
-  filterId = "";
+  filterId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.RouteDestination destinations = 4;
@@ -392,9 +392,9 @@ export class RouteConfig extends Message<RouteConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RouteConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "filter_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "filter_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 4, name: "destinations", kind: "message", T: RouteDestination, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
@@ -423,9 +423,9 @@ export class RouteConfig extends Message<RouteConfig> {
  */
 export class IngesterConfig extends Message<IngesterConfig> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string type = 2;
@@ -448,9 +448,9 @@ export class IngesterConfig extends Message<IngesterConfig> {
   name = "";
 
   /**
-   * @generated from field: string node_id = 6;
+   * @generated from field: bytes node_id = 6;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<IngesterConfig>) {
     super();
@@ -460,12 +460,12 @@ export class IngesterConfig extends Message<IngesterConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.IngesterConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 4, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterConfig {
@@ -495,9 +495,9 @@ export class FilterConfig extends Message<FilterConfig> {
   expression = "";
 
   /**
-   * @generated from field: string id = 2;
+   * @generated from field: bytes id = 2;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 3;
@@ -513,7 +513,7 @@ export class FilterConfig extends Message<FilterConfig> {
   static readonly typeName = "gastrolog.v1.FilterConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -559,9 +559,9 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
   cron = "";
 
   /**
-   * @generated from field: string id = 5;
+   * @generated from field: bytes id = 5;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 6;
@@ -580,7 +580,7 @@ export class RotationPolicyConfig extends Message<RotationPolicyConfig> {
     { no: 2, name: "max_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "cron", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -621,9 +621,9 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
   maxChunks = protoInt64.zero;
 
   /**
-   * @generated from field: string id = 4;
+   * @generated from field: bytes id = 4;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 5;
@@ -641,7 +641,7 @@ export class RetentionPolicyConfig extends Message<RetentionPolicyConfig> {
     { no: 1, name: "max_age_seconds", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 2, name: "max_bytes", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "max_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 4, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -735,9 +735,9 @@ export class ListIngestersResponse extends Message<ListIngestersResponse> {
  */
 export class IngesterInfo extends Message<IngesterInfo> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string type = 2;
@@ -755,9 +755,9 @@ export class IngesterInfo extends Message<IngesterInfo> {
   name = "";
 
   /**
-   * @generated from field: string node_id = 5;
+   * @generated from field: bytes node_id = 5;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<IngesterInfo>) {
     super();
@@ -767,11 +767,11 @@ export class IngesterInfo extends Message<IngesterInfo> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.IngesterInfo";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 5, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {
@@ -796,9 +796,9 @@ export class IngesterInfo extends Message<IngesterInfo> {
  */
 export class GetIngesterStatusRequest extends Message<GetIngesterStatusRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<GetIngesterStatusRequest>) {
     super();
@@ -808,7 +808,7 @@ export class GetIngesterStatusRequest extends Message<GetIngesterStatusRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetIngesterStatusRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIngesterStatusRequest {
@@ -833,9 +833,9 @@ export class GetIngesterStatusRequest extends Message<GetIngesterStatusRequest> 
  */
 export class GetIngesterStatusResponse extends Message<GetIngesterStatusResponse> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string type = 2;
@@ -870,7 +870,7 @@ export class GetIngesterStatusResponse extends Message<GetIngesterStatusResponse
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetIngesterStatusResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "messages_ingested", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -974,9 +974,9 @@ export class PutFilterResponse extends Message<PutFilterResponse> {
  */
 export class DeleteFilterRequest extends Message<DeleteFilterRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteFilterRequest>) {
     super();
@@ -986,7 +986,7 @@ export class DeleteFilterRequest extends Message<DeleteFilterRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteFilterRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteFilterRequest {
@@ -1122,9 +1122,9 @@ export class PutRotationPolicyResponse extends Message<PutRotationPolicyResponse
  */
 export class DeleteRotationPolicyRequest extends Message<DeleteRotationPolicyRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRotationPolicyRequest>) {
     super();
@@ -1134,7 +1134,7 @@ export class DeleteRotationPolicyRequest extends Message<DeleteRotationPolicyReq
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRotationPolicyRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRotationPolicyRequest {
@@ -1270,9 +1270,9 @@ export class PutRetentionPolicyResponse extends Message<PutRetentionPolicyRespon
  */
 export class DeleteRetentionPolicyRequest extends Message<DeleteRetentionPolicyRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRetentionPolicyRequest>) {
     super();
@@ -1282,7 +1282,7 @@ export class DeleteRetentionPolicyRequest extends Message<DeleteRetentionPolicyR
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRetentionPolicyRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRetentionPolicyRequest {
@@ -1418,9 +1418,9 @@ export class PutVaultResponse extends Message<PutVaultResponse> {
  */
 export class DeleteVaultRequest extends Message<DeleteVaultRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: bool force = 2;
@@ -1443,7 +1443,7 @@ export class DeleteVaultRequest extends Message<DeleteVaultRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "force", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "delete_data", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
@@ -1581,9 +1581,9 @@ export class PutRouteResponse extends Message<PutRouteResponse> {
  */
 export class DeleteRouteRequest extends Message<DeleteRouteRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRouteRequest>) {
     super();
@@ -1593,7 +1593,7 @@ export class DeleteRouteRequest extends Message<DeleteRouteRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRouteRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRouteRequest {
@@ -1729,9 +1729,9 @@ export class PutIngesterResponse extends Message<PutIngesterResponse> {
  */
 export class DeleteIngesterRequest extends Message<DeleteIngesterRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteIngesterRequest>) {
     super();
@@ -1741,7 +1741,7 @@ export class DeleteIngesterRequest extends Message<DeleteIngesterRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteIngesterRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteIngesterRequest {
@@ -1930,9 +1930,9 @@ export class MaxMindSettings extends Message<MaxMindSettings> {
   /**
    * only populated when include_secrets
    *
-   * @generated from field: string account_id = 4;
+   * @generated from field: bytes account_id = 4;
    */
-  accountId = "";
+  accountId = new Uint8Array(0);
 
   /**
    * only populated when include_secrets
@@ -1952,7 +1952,7 @@ export class MaxMindSettings extends Message<MaxMindSettings> {
     { no: 1, name: "auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "license_configured", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "last_update", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "account_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "account_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "license_key", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -2249,9 +2249,9 @@ export class MMDBLookupEntry extends Message<MMDBLookupEntry> {
   /**
    * managed file ID (UUID); empty = use auto-downloaded database
    *
-   * @generated from field: string file_id = 3;
+   * @generated from field: bytes file_id = 3;
    */
-  fileId = "";
+  fileId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<MMDBLookupEntry>) {
     super();
@@ -2263,7 +2263,7 @@ export class MMDBLookupEntry extends Message<MMDBLookupEntry> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "db_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MMDBLookupEntry {
@@ -2447,9 +2447,9 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
   /**
    * managed file ID (UUID)
    *
-   * @generated from field: string file_id = 2;
+   * @generated from field: bytes file_id = 2;
    */
-  fileId = "";
+  fileId = new Uint8Array(0);
 
   /**
    * JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
@@ -2481,7 +2481,7 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
   static readonly typeName = "gastrolog.v1.JSONFileLookupEntry";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "response_paths", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 5, name: "parameters", kind: "message", T: HTTPLookupParam, repeated: true },
@@ -2521,9 +2521,9 @@ export class CSVLookupEntry extends Message<CSVLookupEntry> {
   /**
    * managed file ID (UUID)
    *
-   * @generated from field: string file_id = 2;
+   * @generated from field: bytes file_id = 2;
    */
-  fileId = "";
+  fileId = new Uint8Array(0);
 
   /**
    * column header for lookup key; empty = first column
@@ -2548,7 +2548,7 @@ export class CSVLookupEntry extends Message<CSVLookupEntry> {
   static readonly typeName = "gastrolog.v1.CSVLookupEntry";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
@@ -2644,9 +2644,9 @@ export class GetSettingsResponse extends Message<GetSettingsResponse> {
   setupWizardDismissed = false;
 
   /**
-   * @generated from field: string node_id = 7;
+   * @generated from field: bytes node_id = 7;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   /**
    * @generated from field: string node_name = 8;
@@ -2677,7 +2677,7 @@ export class GetSettingsResponse extends Message<GetSettingsResponse> {
     { no: 4, name: "tls", kind: "message", T: TLSSettings },
     { no: 5, name: "lookup", kind: "message", T: LookupSettings },
     { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 7, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 8, name: "node_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 9, name: "cluster", kind: "message", T: ClusterSettings },
     { no: 10, name: "maxmind", kind: "message", T: MaxMindSettings },
@@ -2967,9 +2967,9 @@ export class PutMaxMindSettings extends Message<PutMaxMindSettings> {
   autoDownload?: boolean;
 
   /**
-   * @generated from field: optional string account_id = 2;
+   * @generated from field: optional bytes account_id = 2;
    */
-  accountId?: string;
+  accountId?: Uint8Array;
 
   /**
    * @generated from field: optional string license_key = 3;
@@ -2985,7 +2985,7 @@ export class PutMaxMindSettings extends Message<PutMaxMindSettings> {
   static readonly typeName = "gastrolog.v1.PutMaxMindSettings";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "auto_download", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 2, name: "account_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 2, name: "account_id", kind: "scalar", T: 12 /* ScalarType.BYTES */, opt: true },
     { no: 3, name: "license_key", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
   ]);
 
@@ -3845,9 +3845,9 @@ export class ListCertificatesResponse extends Message<ListCertificatesResponse> 
  */
 export class CertificateInfo extends Message<CertificateInfo> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -3862,7 +3862,7 @@ export class CertificateInfo extends Message<CertificateInfo> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.CertificateInfo";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -3888,9 +3888,9 @@ export class CertificateInfo extends Message<CertificateInfo> {
  */
 export class GetCertificateRequest extends Message<GetCertificateRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<GetCertificateRequest>) {
     super();
@@ -3900,7 +3900,7 @@ export class GetCertificateRequest extends Message<GetCertificateRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetCertificateRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetCertificateRequest {
@@ -3925,9 +3925,9 @@ export class GetCertificateRequest extends Message<GetCertificateRequest> {
  */
 export class GetCertificateResponse extends Message<GetCertificateResponse> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 7;
@@ -3964,7 +3964,7 @@ export class GetCertificateResponse extends Message<GetCertificateResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetCertificateResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "cert_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "key_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -3994,9 +3994,9 @@ export class GetCertificateResponse extends Message<GetCertificateResponse> {
  */
 export class PutCertificateRequest extends Message<PutCertificateRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 7;
@@ -4038,7 +4038,7 @@ export class PutCertificateRequest extends Message<PutCertificateRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutCertificateRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "cert_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "key_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -4106,9 +4106,9 @@ export class PutCertificateResponse extends Message<PutCertificateResponse> {
  */
 export class DeleteCertificateRequest extends Message<DeleteCertificateRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteCertificateRequest>) {
     super();
@@ -4118,7 +4118,7 @@ export class DeleteCertificateRequest extends Message<DeleteCertificateRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteCertificateRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCertificateRequest {
@@ -4180,9 +4180,9 @@ export class DeleteCertificateResponse extends Message<DeleteCertificateResponse
  */
 export class PauseVaultRequest extends Message<PauseVaultRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<PauseVaultRequest>) {
     super();
@@ -4192,7 +4192,7 @@ export class PauseVaultRequest extends Message<PauseVaultRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PauseVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PauseVaultRequest {
@@ -4254,9 +4254,9 @@ export class PauseVaultResponse extends Message<PauseVaultResponse> {
  */
 export class ResumeVaultRequest extends Message<ResumeVaultRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ResumeVaultRequest>) {
     super();
@@ -4266,7 +4266,7 @@ export class ResumeVaultRequest extends Message<ResumeVaultRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ResumeVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ResumeVaultRequest {
@@ -4341,9 +4341,9 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
    * Optional ingester ID — when set, the trial-bind port check skips
    * addresses held by this ingester (it's already running on them).
    *
-   * @generated from field: string id = 3;
+   * @generated from field: bytes id = 3;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<TestIngesterRequest>) {
     super();
@@ -4355,7 +4355,7 @@ export class TestIngesterRequest extends Message<TestIngesterRequest> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
-    { no: 3, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TestIngesterRequest {
@@ -4423,9 +4423,9 @@ export class TestIngesterResponse extends Message<TestIngesterResponse> {
  */
 export class TriggerIngesterRequest extends Message<TriggerIngesterRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<TriggerIngesterRequest>) {
     super();
@@ -4435,7 +4435,7 @@ export class TriggerIngesterRequest extends Message<TriggerIngesterRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TriggerIngesterRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TriggerIngesterRequest {
@@ -4682,9 +4682,9 @@ export class GetIngesterDefaultsResponse extends Message<GetIngesterDefaultsResp
  */
 export class NodeConfig extends Message<NodeConfig> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -4699,7 +4699,7 @@ export class NodeConfig extends Message<NodeConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.NodeConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -4728,9 +4728,9 @@ export class NodeConfig extends Message<NodeConfig> {
  */
 export class TierConfig extends Message<TierConfig> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -4743,9 +4743,9 @@ export class TierConfig extends Message<TierConfig> {
   type = TierType.UNSPECIFIED;
 
   /**
-   * @generated from field: string rotation_policy_id = 4;
+   * @generated from field: bytes rotation_policy_id = 4;
    */
-  rotationPolicyId = "";
+  rotationPolicyId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.RetentionRule retention_rules = 5;
@@ -4763,9 +4763,9 @@ export class TierConfig extends Message<TierConfig> {
   storageClass = 0;
 
   /**
-   * @generated from field: string cloud_service_id = 8;
+   * @generated from field: bytes cloud_service_id = 8;
    */
-  cloudServiceId = "";
+  cloudServiceId = new Uint8Array(0);
 
   /**
    * @generated from field: uint32 active_chunk_class = 9;
@@ -4801,9 +4801,9 @@ export class TierConfig extends Message<TierConfig> {
   /**
    * owning vault — exactly one vault per tier
    *
-   * @generated from field: string vault_id = 16;
+   * @generated from field: bytes vault_id = 16;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * 0-based order within the vault's tier chain
@@ -4841,20 +4841,20 @@ export class TierConfig extends Message<TierConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "type", kind: "enum", T: proto3.getEnumType(TierType) },
-    { no: 4, name: "rotation_policy_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "rotation_policy_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 5, name: "retention_rules", kind: "message", T: RetentionRule, repeated: true },
     { no: 6, name: "memory_budget_bytes", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 7, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
-    { no: 8, name: "cloud_service_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "cloud_service_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 9, name: "active_chunk_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 10, name: "cache_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 12, name: "replication_factor", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 14, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 15, name: "placements", kind: "message", T: TierPlacement, repeated: true },
-    { no: 16, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 17, name: "position", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 18, name: "cache_eviction", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 19, name: "cache_budget", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -4888,9 +4888,9 @@ export class TierPlacement extends Message<TierPlacement> {
   /**
    * references FileStorage.id
    *
-   * @generated from field: string storage_id = 1;
+   * @generated from field: bytes storage_id = 1;
    */
-  storageId = "";
+  storageId = new Uint8Array(0);
 
   /**
    * true = this storage bootstraps the Raft group (initial leader)
@@ -4907,7 +4907,7 @@ export class TierPlacement extends Message<TierPlacement> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierPlacement";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "storage_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "storage_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "leader", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -5259,9 +5259,9 @@ export class GetRouteStatsResponse extends Message<GetRouteStatsResponse> {
  */
 export class VaultRouteStats extends Message<VaultRouteStats> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * records routed to this vault
@@ -5285,7 +5285,7 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.VaultRouteStats";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
@@ -5312,9 +5312,9 @@ export class VaultRouteStats extends Message<VaultRouteStats> {
  */
 export class PerRouteStats extends Message<PerRouteStats> {
   /**
-   * @generated from field: string route_id = 1;
+   * @generated from field: bytes route_id = 1;
    */
-  routeId = "";
+  routeId = new Uint8Array(0);
 
   /**
    * records matched by this route
@@ -5338,7 +5338,7 @@ export class PerRouteStats extends Message<PerRouteStats> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PerRouteStats";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "route_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "route_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records_matched", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "records_forwarded", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
   ]);
@@ -5365,9 +5365,9 @@ export class PerRouteStats extends Message<PerRouteStats> {
  */
 export class ManagedFileInfo extends Message<ManagedFileInfo> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * original filename
@@ -5405,7 +5405,7 @@ export class ManagedFileInfo extends Message<ManagedFileInfo> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ManagedFileInfo";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "sha256", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -5502,9 +5502,9 @@ export class ListManagedFilesResponse extends Message<ListManagedFilesResponse> 
  */
 export class DeleteManagedFileRequest extends Message<DeleteManagedFileRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteManagedFileRequest>) {
     super();
@@ -5514,7 +5514,7 @@ export class DeleteManagedFileRequest extends Message<DeleteManagedFileRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteManagedFileRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteManagedFileRequest {
@@ -5727,9 +5727,9 @@ export class PreviewCSVLookupRequest extends Message<PreviewCSVLookupRequest> {
   /**
    * managed file ID (UUID)
    *
-   * @generated from field: string file_id = 1;
+   * @generated from field: bytes file_id = 1;
    */
-  fileId = "";
+  fileId = new Uint8Array(0);
 
   /**
    * column to use as key; empty = first column
@@ -5760,7 +5760,7 @@ export class PreviewCSVLookupRequest extends Message<PreviewCSVLookupRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PreviewCSVLookupRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
     { no: 4, name: "max_rows", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
@@ -5972,9 +5972,9 @@ export class PutCloudServiceResponse extends Message<PutCloudServiceResponse> {
  */
 export class DeleteCloudServiceRequest extends Message<DeleteCloudServiceRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteCloudServiceRequest>) {
     super();
@@ -5984,7 +5984,7 @@ export class DeleteCloudServiceRequest extends Message<DeleteCloudServiceRequest
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteCloudServiceRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCloudServiceRequest {
@@ -6194,9 +6194,9 @@ export class PutTierResponse extends Message<PutTierResponse> {
  */
 export class DeleteTierRequest extends Message<DeleteTierRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * When true, drain chunks to the next tier before deleting.
@@ -6213,7 +6213,7 @@ export class DeleteTierRequest extends Message<DeleteTierRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteTierRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 

@@ -20,6 +20,7 @@ import { SystemStatsView, ClusterSummaryView } from "./SystemStatsView";
 import { RouteStatsView } from "./RouteStatsView";
 import { groupByNode } from "./groupByNode";
 import type { EntityType } from "./InspectorDialog";
+import { encode } from "../../api/glid";
 
 interface EntityListPaneProps {
   entityType: EntityType;
@@ -68,19 +69,19 @@ function useNodeContext() {
   const { data: settingsData } = useSettings();
   const { data: config } = useConfig();
   const { data: cluster } = useClusterStatus();
-  const localNodeId = settingsData?.nodeId ?? "";
+  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
   const clusterEnabled = cluster?.clusterEnabled ?? false;
   const multiNode = clusterEnabled || (config?.nodeConfigs && config.nodeConfigs.length > 1);
 
   const nodeNames = new Map<string, string>();
   if (config?.nodeConfigs) {
     for (const nc of config.nodeConfigs) {
-      if (nc.name) nodeNames.set(nc.id, nc.name);
+      if (nc.name) nodeNames.set(encode(nc.id), nc.name);
     }
   }
   if (cluster?.nodes) {
     for (const n of cluster.nodes) {
-      if (n.name) nodeNames.set(n.id, n.name);
+      if (n.name) nodeNames.set(encode(n.id), n.name);
     }
   }
 
@@ -88,12 +89,12 @@ function useNodeContext() {
 }
 
 /** Build vault ID → "cloud" map from config tiers. */
-function buildCloudProviderMap(config: { vaults: { id: string }[]; tiers: { id: string; vaultId: string; cloudServiceId: string }[] } | undefined): Map<string, string> {
+function buildCloudProviderMap(config: { vaults: { id: Uint8Array }[]; tiers: { id: Uint8Array; vaultId: Uint8Array; cloudServiceId: Uint8Array }[] } | undefined): Map<string, string> {
   const map = new Map<string, string>();
   if (!config) return map;
   for (const tier of config.tiers) {
-    if (tier.cloudServiceId && tier.vaultId) {
-      map.set(tier.vaultId, "cloud");
+    if (encode(tier.cloudServiceId) && encode(tier.vaultId)) {
+      map.set(encode(tier.vaultId), "cloud");
     }
   }
   return map;
@@ -112,27 +113,27 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
   if (expandTarget && expandTarget !== consumedTarget && vaults && vaults.length > 0) {
     setConsumedTarget(expandTarget);
-    const match = vaults.find((v) => (v.name || v.id) === expandTarget);
-    if (match) add(match.id);
+    const match = vaults.find((v) => (v.name || encode(v.id)) === expandTarget);
+    if (match) add(encode(match.id));
   }
 
   if (isLoading) return <Loading dark={dark} />;
   if (!vaults || vaults.length === 0) return <Empty dark={dark}>No vaults configured.</Empty>;
 
-  const sorted = [...vaults].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  const sorted = [...vaults].sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)));
 
   return (
     <div className="flex flex-col gap-3">
       <EntityHeader title="Vaults" helpTopicId="inspector-vaults" dark={dark} />
       {sorted.map((vault) => (
         <VaultCard
-          key={vault.id}
+          key={encode(vault.id)}
           vault={vault}
-          cloudProvider={cloudProviders.get(vault.id)}
+          cloudProvider={cloudProviders.get(encode(vault.id))}
           dark={dark}
-          expanded={expanded.has(vault.id)}
-          onToggle={() => toggle(vault.id)}
-          onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vault.id) : undefined}
+          expanded={expanded.has(encode(vault.id))}
+          onToggle={() => toggle(encode(vault.id))}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || encode(vault.id)) : undefined}
         />
       ))}
     </div>
@@ -149,26 +150,26 @@ function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: 
   const [consumedTarget, setConsumedTarget] = useState<string | null>(null);
   if (expandTarget && expandTarget !== consumedTarget && ingesters && ingesters.length > 0) {
     setConsumedTarget(expandTarget);
-    const match = ingesters.find((i) => (i.name || i.id) === expandTarget);
-    if (match) add(match.id);
+    const match = ingesters.find((i) => (i.name || encode(i.id)) === expandTarget);
+    if (match) add(encode(match.id));
   }
 
   if (isLoading) return <Loading dark={dark} />;
   if (!ingesters || ingesters.length === 0) return <Empty dark={dark}>No ingesters configured.</Empty>;
 
-  const sorted = [...ingesters].sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+  const sorted = [...ingesters].sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)));
 
   return (
     <div className="flex flex-col gap-3">
       <EntityHeader title="Ingesters" helpTopicId="inspector-ingesters" dark={dark} />
       {sorted.map((ing) => (
         <IngesterCard
-          key={ing.id}
+          key={encode(ing.id)}
           ingester={ing}
           dark={dark}
-          expanded={expanded.has(ing.id)}
-          onToggle={() => toggle(ing.id)}
-          onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || ing.id) : undefined}
+          expanded={expanded.has(encode(ing.id))}
+          onToggle={() => toggle(encode(ing.id))}
+          onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || encode(ing.id)) : undefined}
         />
       ))}
     </div>
@@ -213,7 +214,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
             <ScheduledHeader dark={dark} />
             <div className="flex flex-col">
               {scheduled.map((job) => (
-                <ScheduledRow key={job.id} job={job} dark={dark} />
+                <ScheduledRow key={encode(job.id)} job={job} dark={dark} />
               ))}
             </div>
           </section>
@@ -223,7 +224,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
             <SectionLabel dark={dark}>Tasks</SectionLabel>
             <div className="flex flex-col gap-1">
               {tasks.map((job) => (
-                <JobRow key={job.id} job={job} dark={dark} />
+                <JobRow key={encode(job.id)} job={job} dark={dark} />
               ))}
             </div>
           </section>
@@ -279,7 +280,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
               {nodeScheduled.length > 0 && <ScheduledHeader dark={dark} />}
               {nodeScheduled.map((job, i) => (
                 <div
-                  key={job.id}
+                  key={encode(job.id)}
                   className={i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}
                 >
                   <ScheduledRow job={job} dark={dark} />
@@ -292,7 +293,7 @@ function JobsList({ dark }: Readonly<{ dark: boolean }>) {
               )}
               {nodeTasks.map((job, i) => (
                 <div
-                  key={job.id}
+                  key={encode(job.id)}
                   className={i > 0 ? `border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}` : ""}
                 >
                   <JobRow job={job} dark={dark} />
@@ -312,7 +313,7 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
   return (
     <div className="flex items-center gap-3 px-4 py-2.5 text-[0.85em]">
       <span className={`font-mono font-medium truncate ${c("text-text-bright", "text-light-text-bright")}`}>
-        {job.description || job.name || job.id}
+        {job.description || job.name || encode(job.id)}
       </span>
       <JobStatusBadge status={job.status} dark={dark} />
       {Number(job.chunksTotal) > 0 && (
@@ -352,9 +353,9 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
     <div className={`${scheduledGrid} px-4 py-2 text-[0.85em]`}>
       <span
         className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-        title={job.description || job.name || job.id}
+        title={job.description || job.name || encode(job.id)}
       >
-        {job.description || job.name || job.id}
+        {job.description || job.name || encode(job.id)}
       </span>
       <span className={`font-mono text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
         {job.schedule}
@@ -398,7 +399,7 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
 
   // Single-node: show local stats directly.
   if (!multiNode) {
-    const localStats = cluster?.nodes.find((n) => n.id === localNodeId)?.stats ?? null;
+    const localStats = cluster?.nodes.find((n) => encode(n.id) === localNodeId)?.stats ?? null;
     return (
       <div className="flex flex-col gap-3">
         <EntityHeader title="System" helpTopicId="inspector-system" dark={dark} />
@@ -410,8 +411,8 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
   // Multi-node: one ExpandableCard per node.
   const nodes = cluster?.nodes
     ? [...cluster.nodes].sort((a, b) => {
-        if (a.id === localNodeId) return -1;
-        if (b.id === localNodeId) return 1;
+        if (encode(a.id) === localNodeId) return -1;
+        if (encode(b.id) === localNodeId) return 1;
         return (a.name || "").localeCompare(b.name || "");
       })
     : [];
@@ -437,16 +438,17 @@ function SystemList({ dark }: Readonly<{ dark: boolean }>) {
       )}
       {nodes.length === 0 && <Empty dark={dark}>No cluster data available.</Empty>}
       {nodes.map((node) => {
-        const isLocal = node.id === localNodeId;
+        const nid = encode(node.id);
+        const isLocal = nid === localNodeId;
         return (
           <ExpandableCard
-            key={node.id}
-            id={node.name || node.id}
+            key={nid}
+            id={node.name || nid}
             dark={dark}
             monoTitle={false}
-            expanded={expandedNodes[node.id] ?? isLocal}
+            expanded={expandedNodes[nid] ?? isLocal}
             onToggle={() =>
-              setExpandedNodes((prev) => ({ ...prev, [node.id]: !(prev[node.id] ?? isLocal) }))
+              setExpandedNodes((prev) => ({ ...prev, [nid]: !(prev[nid] ?? isLocal) }))
             }
             headerRight={
               isLocal ? <Badge variant="copper" dark={dark}>this node</Badge> : undefined

@@ -25,7 +25,7 @@ func NewPutCloudService(cs system.CloudService) *gastrologv1.SystemCommand {
 func NewDeleteCloudService(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteCloudService{
-			DeleteCloudService: &gastrologv1.DeleteCloudServiceCommand{Id: id.String()},
+			DeleteCloudService: &gastrologv1.DeleteCloudServiceCommand{Id: id.ToProto()},
 		},
 	}
 }
@@ -37,5 +37,5 @@ func ExtractPutCloudService(cmd *gastrologv1.PutCloudServiceCommand) (system.Clo
 
 // ExtractDeleteCloudService extracts the UUID from a DeleteCloudServiceCommand.
 func ExtractDeleteCloudService(cmd *gastrologv1.DeleteCloudServiceCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }

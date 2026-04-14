@@ -797,9 +797,9 @@ export class Record extends Message<Record> {
  */
 export class RecordRef extends Message<RecordRef> {
   /**
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: uint64 pos = 2;
@@ -809,9 +809,9 @@ export class RecordRef extends Message<RecordRef> {
   /**
    * Vault this record belongs to
    *
-   * @generated from field: string vault_id = 3;
+   * @generated from field: bytes vault_id = 3;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<RecordRef>) {
     super();
@@ -821,9 +821,9 @@ export class RecordRef extends Message<RecordRef> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RecordRef";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
-    { no: 3, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RecordRef {
@@ -944,14 +944,14 @@ export class InnerVaultToken extends Message<InnerVaultToken> {
  */
 export class VaultPosition extends Message<VaultPosition> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * MaxUint64 indicates chunk is exhausted
@@ -977,8 +977,8 @@ export class VaultPosition extends Message<VaultPosition> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.VaultPosition";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "position", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 4, name: "resume_ts", kind: "message", T: Timestamp },
   ]);
@@ -1005,9 +1005,9 @@ export class VaultPosition extends Message<VaultPosition> {
  */
 export class ChunkPlan extends Message<ChunkPlan> {
   /**
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: bool sealed = 2;
@@ -1042,9 +1042,9 @@ export class ChunkPlan extends Message<ChunkPlan> {
   runtimeFilters: string[] = [];
 
   /**
-   * @generated from field: string vault_id = 8;
+   * @generated from field: bytes vault_id = 8;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * @generated from field: google.protobuf.Timestamp write_start = 9;
@@ -1069,9 +1069,9 @@ export class ChunkPlan extends Message<ChunkPlan> {
   /**
    * Node that owns this chunk's vault
    *
-   * @generated from field: string node_id = 13;
+   * @generated from field: bytes node_id = 13;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ChunkPlan>) {
     super();
@@ -1081,19 +1081,19 @@ export class ChunkPlan extends Message<ChunkPlan> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkPlan";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "steps", kind: "message", T: PipelineStep, repeated: true },
     { no: 5, name: "scan_mode", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "estimated_records", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 7, name: "runtime_filters", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 8, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 9, name: "write_start", kind: "message", T: Timestamp },
     { no: 10, name: "write_end", kind: "message", T: Timestamp },
     { no: 11, name: "skip_reason", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 12, name: "branch_plans", kind: "message", T: BranchPlan, repeated: true },
-    { no: 13, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 13, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ChunkPlan {
@@ -1976,9 +1976,9 @@ export class ExportToVaultRequest extends Message<ExportToVaultRequest> {
  */
 export class ExportToVaultResponse extends Message<ExportToVaultResponse> {
   /**
-   * @generated from field: string job_id = 1;
+   * @generated from field: bytes job_id = 1;
    */
-  jobId = "";
+  jobId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ExportToVaultResponse>) {
     super();
@@ -1988,7 +1988,7 @@ export class ExportToVaultResponse extends Message<ExportToVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ExportToVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "job_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ExportToVaultResponse {

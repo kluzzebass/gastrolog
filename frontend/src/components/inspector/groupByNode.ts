@@ -1,3 +1,5 @@
+import { encode, isZero } from "../../api/glid";
+
 interface NodeGroup<T> {
   nodeId: string;
   nodeName: string;
@@ -9,7 +11,7 @@ interface NodeGroup<T> {
  * Items with empty nodeId fall back to localNodeId (defensive; backend should always populate).
  * Groups are sorted with local node first, then alphabetically by name.
  */
-export function groupByNode<T extends { nodeId: string }>(
+export function groupByNode<T extends { nodeId: Uint8Array }>(
   items: T[],
   nodeNames: Map<string, string>,
   localNodeId: string,
@@ -17,7 +19,7 @@ export function groupByNode<T extends { nodeId: string }>(
   const groups = new Map<string, T[]>();
 
   for (const item of items) {
-    const nodeId = item.nodeId || localNodeId;
+    const nodeId = isZero(item.nodeId) ? localNodeId : encode(item.nodeId);
     let group = groups.get(nodeId);
     if (!group) {
       group = [];

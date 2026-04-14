@@ -43,7 +43,7 @@ func newNodeListCmd() *cobra.Command {
 			}
 			var rows [][]string
 			for _, n := range resp.Msg.NodeConfigs {
-				rows = append(rows, []string{n.Id, n.Name})
+				rows = append(rows, []string{glid.FromBytes(n.Id).String(), n.Name})
 			}
 			p.table([]string{"ID", "NAME"}, rows)
 			return nil
@@ -70,14 +70,18 @@ func newNodeGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			idBytes, parseErr := glid.ParseUUID(id)
+			if parseErr != nil {
+				return parseErr
+			}
 			for _, n := range resp.Msg.NodeConfigs {
-				if n.Id == id {
+				if string(n.Id) == string(idBytes.ToProto()) {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(n)
 					}
 					p.kv([][2]string{
-						{"ID", n.Id},
+						{"ID", glid.FromBytes(n.Id).String()},
 						{"Name", n.Name},
 					})
 					return nil
@@ -105,7 +109,7 @@ func newNodeRenameCmd() *cobra.Command {
 			}
 			_, err = client.System.PutNodeConfig(context.Background(), connect.NewRequest(&v1.PutNodeConfigRequest{
 				Config: &v1.NodeConfig{
-					Id:   id,
+					Id:   []byte(id),
 					Name: args[1],
 				},
 			}))
@@ -146,16 +150,16 @@ func newNodeAddStorageCmd() *cobra.Command {
 			}
 			var existing []*v1.FileStorage
 			for _, nsc := range resp.Msg.NodeStorageConfigs {
-				if nsc.NodeId == nodeID {
+				if string(nsc.NodeId) == nodeID {
 					existing = nsc.FileStorages
 					break
 				}
 			}
 
 			// Append new storage.
-			fsID := glid.New().String()
+			newFsID := glid.New()
 			existing = append(existing, &v1.FileStorage{
-				Id:           fsID,
+				Id:           newFsID.ToProto(),
 				Name:         name,
 				Path:         path,
 				StorageClass: storageClass,
@@ -163,14 +167,14 @@ func newNodeAddStorageCmd() *cobra.Command {
 
 			_, err = client.System.SetNodeStorageConfig(context.Background(), connect.NewRequest(&v1.SetNodeStorageConfigRequest{
 				Config: &v1.NodeStorageConfig{
-					NodeId:       nodeID,
+					NodeId:       []byte(nodeID),
 					FileStorages: existing,
 				},
 			}))
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Added file storage %q to node %s (id=%s, class=%d, path=%s)\n", name, args[0], fsID, storageClass, path)
+			fmt.Printf("Added file storage %q to node %s (id=%s, class=%d, path=%s)\n", name, args[0], newFsID, storageClass, path)
 			return nil
 		},
 	}
@@ -207,7 +211,7 @@ func newNodeListStorageCmd() *cobra.Command {
 			// Build node name lookup.
 			nodeNames := make(map[string]string)
 			for _, n := range resp.Msg.NodeConfigs {
-				nodeNames[n.Id] = n.Name
+				nodeNames[string(n.Id)] = n.Name
 			}
 
 			p := newPrinter(outputFormat(cmd))
@@ -216,16 +220,17 @@ func newNodeListStorageCmd() *cobra.Command {
 			}
 			var rows [][]string
 			for _, nsc := range resp.Msg.NodeStorageConfigs {
-				if filterNodeID != "" && nsc.NodeId != filterNodeID {
+				if filterNodeID != "" && string(nsc.NodeId) != filterNodeID {
 					continue
 				}
-				nodeName := nodeNames[nsc.NodeId]
-				if nodeName == "" {
-					nodeName = nsc.NodeId[:8]
+				nscNodeStr := string(nsc.NodeId)
+				nodeName := nodeNames[nscNodeStr]
+				if nodeName == "" && len(nscNodeStr) > 8 {
+					nodeName = nscNodeStr[:8]
 				}
 				for _, fs := range nsc.FileStorages {
 					rows = append(rows, []string{
-						nodeName, fs.Id, fs.Name,
+						nodeName, glid.FromBytes(fs.Id).String(), fs.Name,
 						strconv.FormatUint(uint64(fs.StorageClass), 10),
 						fs.Path,
 					})

@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useRouteStats } from "../../api/hooks/useRouteStats";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -19,14 +20,16 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
   const vaultNames = new Map<string, string>();
   if (config?.vaults) {
     for (const v of config.vaults) {
-      vaultNames.set(v.id, v.name || v.id.slice(0, 8));
+      const vid = encode(v.id);
+      vaultNames.set(vid, v.name || vid.slice(0, 8));
     }
   }
 
   const routeNames = new Map<string, string>();
   if (config?.routes) {
     for (const r of config.routes) {
-      routeNames.set(r.id, r.name || r.id.slice(0, 8));
+      const rid = encode(r.id);
+      routeNames.set(rid, r.name || rid.slice(0, 8));
     }
   }
 
@@ -98,16 +101,18 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
               <span className="text-right">Matched</span>
               <span className="text-right">Forwarded</span>
             </div>
-            {sorted.map((vs) => (
+            {sorted.map((vs) => {
+              const vsId = encode(vs.vaultId);
+              return (
               <div
-                key={vs.vaultId}
+                key={vsId}
                 className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
               >
                 <span
                   className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                  title={vs.vaultId}
+                  title={vsId}
                 >
-                  {vaultNames.get(vs.vaultId) ?? vs.vaultId.slice(0, 8)}
+                  {vaultNames.get(vsId) ?? vsId.slice(0, 8)}
                 </span>
                 <span
                   className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
@@ -126,7 +131,8 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   )}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
@@ -149,16 +155,18 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
               <span className="text-right">Matched</span>
               <span className="text-right">Forwarded</span>
             </div>
-            {sortedRoutes.map((rs) => (
+            {sortedRoutes.map((rs) => {
+              const rsId = encode(rs.routeId);
+              return (
               <div
-                key={rs.routeId}
+                key={rsId}
                 className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2.5 text-[0.85em] border-b last:border-b-0 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
               >
                 <span
                   className={`font-mono truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                  title={rs.routeId}
+                  title={rsId}
                 >
-                  {routeNames.get(rs.routeId) ?? rs.routeId.slice(0, 8)}
+                  {routeNames.get(rsId) ?? rsId.slice(0, 8)}
                 </span>
                 <span
                   className={`font-mono text-right ${c("text-text-muted", "text-light-text-muted")}`}
@@ -177,7 +185,8 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                   )}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

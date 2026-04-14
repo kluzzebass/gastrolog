@@ -27,7 +27,7 @@ func NewPutTier(tier system.TierConfig) *gastrologv1.SystemCommand {
 func NewDeleteTier(id glid.GLID, drain bool) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteTier{
-			DeleteTier: &gastrologv1.DeleteTierCommand{Id: id.String(), Drain: drain},
+			DeleteTier: &gastrologv1.DeleteTierCommand{Id: id.ToProto(), Drain: drain},
 		},
 	}
 }
@@ -44,7 +44,7 @@ func ExtractPutTierPlacements(cmd *gastrologv1.PutTierCommand) []system.TierPlac
 
 // ExtractDeleteTier extracts the UUID from a DeleteTierCommand.
 func ExtractDeleteTier(cmd *gastrologv1.DeleteTierCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // NewSetTierPlacements creates a SystemCommand for SetTierPlacements.
@@ -52,14 +52,14 @@ func NewSetTierPlacements(tierID glid.GLID, placements []system.TierPlacement) *
 	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
 	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.TierPlacement{
-			StorageId: p.StorageID,
+			StorageId: []byte(p.StorageID),
 			Leader:    p.Leader,
 		}
 	}
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_SetTierPlacements{
 			SetTierPlacements: &gastrologv1.SetTierPlacementsCommand{
-				TierId:     tierID.String(),
+				TierId:     tierID.ToProto(),
 				Placements: pbPlacements,
 			},
 		},
@@ -77,14 +77,11 @@ func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
 
 // ExtractSetTierPlacements converts a SetTierPlacementsCommand back.
 func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (glid.GLID, []system.TierPlacement, error) {
-	tierID, err := glid.ParseUUID(cmd.GetTierId())
-	if err != nil {
-		return glid.GLID{}, nil, err
-	}
+	tierID := glid.FromBytes(cmd.GetTierId())
 	placements := make([]system.TierPlacement, len(cmd.GetPlacements()))
 	for i, p := range cmd.GetPlacements() {
 		placements[i] = system.TierPlacement{
-			StorageID: p.GetStorageId(),
+			StorageID: string(p.GetStorageId()),
 			Leader:    p.GetLeader(),
 		}
 	}

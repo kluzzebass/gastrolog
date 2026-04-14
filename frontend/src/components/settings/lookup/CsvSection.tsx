@@ -1,3 +1,4 @@
+import { encode } from "../../../api/glid";
 import { useState, useEffect, useRef } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
@@ -96,7 +97,7 @@ function CsvFileFields({
           inputId={inputId}
           accept=".csv,.tsv"
           label=".csv file"
-          currentFile={fileId ? managedFiles.find((f) => f.id === fileId) : undefined}
+          currentFile={fileId ? managedFiles.find((f) => encode(f.id) === fileId) : undefined}
           pickableFiles={managedFiles.filter((f) => f.name.endsWith(".csv") || f.name.endsWith(".tsv"))}
           uploadFile={uploadFile}
           addToast={addToast}
@@ -321,7 +322,7 @@ export function CsvCards({
   return (
     <>
       {lookups.map((cv, i) => {
-        const resolvedFile = managedFiles.find((f) => f.id === cv.fileId);
+        const resolvedFile = cv.fileId ? managedFiles.find((f) => encode(f.id) === cv.fileId) : undefined;
         return (
           <SettingsCard
             key={`csv-${i}`}

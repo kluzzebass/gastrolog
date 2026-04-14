@@ -250,9 +250,9 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterId: rec.EventID.IngesterID[:],
 		Ref: &apiv1.RecordRef{
-			ChunkId: rec.Ref.ChunkID.String(),
+			ChunkId: glid.GLID(rec.Ref.ChunkID).ToProto(),
 			Pos:     rec.Ref.Pos,
-			VaultId: rec.VaultID.String(),
+			VaultId: rec.VaultID.ToProto(),
 		},
 	}
 	if !rec.SourceTS.IsZero() {
@@ -275,7 +275,7 @@ func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 		rec.Attrs = make(map[string]string, len(er.Attrs))
 		maps.Copy(rec.Attrs, er.Attrs)
 	}
-	if er.VaultId != "" {
+	if len(er.VaultId) != 0 {
 		rec.Ref = &apiv1.RecordRef{
 			VaultId: er.VaultId,
 			ChunkId: er.ChunkId,
@@ -328,14 +328,8 @@ func VaultTokenToPositions(data []byte) ([]query.MultiVaultPosition, error) {
 	}
 	positions := make([]query.MultiVaultPosition, len(inner.Positions))
 	for i, pos := range inner.Positions {
-		chunkID, err := chunk.ParseChunkID(pos.ChunkId)
-		if err != nil {
-			return nil, err
-		}
-		vaultID, err := glid.ParseUUID(pos.VaultId)
-		if err != nil {
-			return nil, err
-		}
+		chunkID := chunk.ChunkID(glid.FromBytes(pos.ChunkId))
+		vaultID := glid.FromBytes(pos.VaultId)
 		mvp := query.MultiVaultPosition{
 			VaultID:  vaultID,
 			ChunkID:  chunkID,
@@ -359,8 +353,8 @@ func PositionsToVaultToken(positions []query.MultiVaultPosition) []byte {
 	}
 	for i, pos := range positions {
 		vp := &apiv1.VaultPosition{
-			VaultId:  pos.VaultID.String(),
-			ChunkId:  pos.ChunkID.String(),
+			VaultId:  pos.VaultID.ToProto(),
+			ChunkId:  glid.GLID(pos.ChunkID).ToProto(),
 			Position: pos.Position,
 		}
 		if !pos.ResumeTS.IsZero() {

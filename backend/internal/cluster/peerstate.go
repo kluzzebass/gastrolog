@@ -69,7 +69,7 @@ func (p *PeerState) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
 			continue
 		}
 		for _, vs := range e.stats.Vaults {
-			if vs.Id == vaultID {
+			if string(vs.Id) == vaultID {
 				return vs
 			}
 		}
@@ -88,7 +88,7 @@ func (p *PeerState) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNo
 			continue
 		}
 		for _, is := range e.stats.Ingesters {
-			if is.Id == ingesterID {
+			if string(is.Id) == ingesterID {
 				return is
 			}
 		}
@@ -118,9 +118,10 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 			filterActive = true
 		}
 		for _, vs := range e.stats.RouteVaultStats {
-			existing, ok := vaultMap[vs.VaultId]
+			key := string(vs.VaultId)
+			existing, ok := vaultMap[key]
 			if !ok {
-				vaultMap[vs.VaultId] = &gastrologv1.VaultRouteStats{
+				vaultMap[key] = &gastrologv1.VaultRouteStats{
 					VaultId:          vs.VaultId,
 					RecordsMatched:   vs.RecordsMatched,
 					RecordsForwarded: vs.RecordsForwarded,
@@ -131,9 +132,10 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 			}
 		}
 		for _, rs := range e.stats.RoutePerRouteStats {
-			existing, ok := routeMap[rs.RouteId]
+			rkey := string(rs.RouteId)
+			existing, ok := routeMap[rkey]
 			if !ok {
-				routeMap[rs.RouteId] = &gastrologv1.PerRouteStats{
+				routeMap[rkey] = &gastrologv1.PerRouteStats{
 					RouteId:          rs.RouteId,
 					RecordsMatched:   rs.RecordsMatched,
 					RecordsForwarded: rs.RecordsForwarded,
@@ -176,6 +178,6 @@ func (p *PeerState) HandleBroadcast(msg *gastrologv1.BroadcastMessage) {
 		if msg.Timestamp != nil {
 			received = msg.Timestamp.AsTime()
 		}
-		p.Update(msg.SenderId, ns, received)
+		p.Update(string(msg.SenderId), ns, received)
 	}
 }

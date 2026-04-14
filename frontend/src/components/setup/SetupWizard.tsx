@@ -137,11 +137,11 @@ export function SetupWizard() {
     // Pre-compute IDs and derived values outside try/catch so the React
     // Compiler can analyze conditional/logical expressions (it can't
     // optimize value blocks inside try/catch).
-    const filterId = crypto.randomUUID();
-    const vaultId = crypto.randomUUID();
-    const ingesterId = crypto.randomUUID();
-    const rotationId = hasRotation ? crypto.randomUUID() : "";
-    const retentionId = hasRetention ? crypto.randomUUID() : "";
+    const filterIdBytes = crypto.getRandomValues(new Uint8Array(16));
+    const vaultIdBytes = crypto.getRandomValues(new Uint8Array(16));
+    const ingesterIdBytes = crypto.getRandomValues(new Uint8Array(16));
+    const rotationIdBytes = hasRotation ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
+    const retentionIdBytes = hasRetention ? crypto.getRandomValues(new Uint8Array(16)) : new Uint8Array(16);
 
     // Setup wizard should create a TierConfig with the rotation/retention
     // policies and vault type, with vaultId pointing to this vault.
@@ -150,14 +150,14 @@ export function SetupWizard() {
     // Build policy promises outside try so the compiler can optimize conditionals.
     const policyPromises: Promise<unknown>[] = [
       systemClient.putFilter({
-        config: { id: filterId, name: "catch-all", expression: "*" },
+        config: { id: filterIdBytes, name: "catch-all", expression: "*" },
       }),
     ];
-    if (rotationId) {
+    if (hasRotation) {
       policyPromises.push(
         systemClient.putRotationPolicy({
           config: {
-            id: rotationId,
+            id: rotationIdBytes,
             name: rotationName,
             maxAgeSeconds: parseDurationToSeconds(rotation.maxAge),
             maxBytes: rotationMaxBytes,
@@ -167,11 +167,11 @@ export function SetupWizard() {
         }),
       );
     }
-    if (retentionId) {
+    if (hasRetention) {
       policyPromises.push(
         systemClient.putRetentionPolicy({
           config: {
-            id: retentionId,
+            id: retentionIdBytes,
             name: retentionName,
             maxChunks: retentionMaxChunks,
             maxAgeSeconds: parseDurationToSeconds(retentionMaxAge),
@@ -188,7 +188,7 @@ export function SetupWizard() {
       // 2. Create vault (tier assignment will be handled in a follow-up).
       await systemClient.putVault({
         config: {
-          id: vaultId,
+          id: vaultIdBytes,
           name: vaultName,
           enabled: true,
         },
@@ -198,17 +198,17 @@ export function SetupWizard() {
       await Promise.all([
         systemClient.putRoute({
           config: {
-            id: crypto.randomUUID(),
+            id: crypto.getRandomValues(new Uint8Array(16)),
             name: "default",
-            filterId,
-            destinations: [{ vaultId }],
+            filterId: filterIdBytes,
+            destinations: [{ vaultId: vaultIdBytes }],
             distribution: "fanout",
             enabled: true,
           },
         }),
         systemClient.putIngester({
           config: {
-            id: ingesterId,
+            id: ingesterIdBytes,
             name: ingesterName,
             type: ingester.type,
             enabled: true,

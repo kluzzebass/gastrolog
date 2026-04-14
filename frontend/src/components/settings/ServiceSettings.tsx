@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useReducer, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
@@ -124,7 +125,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
     dispatch({ type: "set", field, value });
 
   const certs = certData?.certificates ?? [];
-  const certIdSet = new Set(certs.map((c) => c.id));
+  const certIdSet = new Set(certs.map((c) => encode(c.id)));
 
   if (data && !s.initialized) {
     dispatch({ type: "init", data });
@@ -472,9 +473,9 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                 >
                   <option value="">-- none --</option>
                   {certs
-                    .toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
+                    .toSorted((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
                     .map((cert) => (
-                    <option key={cert.id} value={cert.id}>
+                    <option key={encode(cert.id)} value={encode(cert.id)}>
                       {cert.name || cert.id}
                     </option>
                   ))}

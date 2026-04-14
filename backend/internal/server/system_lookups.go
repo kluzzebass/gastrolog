@@ -24,7 +24,7 @@ func (s *SystemServer) ListManagedFiles(
 	out := make([]*apiv1.ManagedFileInfo, len(files))
 	for i, f := range files {
 		out[i] = &apiv1.ManagedFileInfo{
-			Id:         f.ID.String(),
+			Id:         f.ID.ToProto(),
 			Name:       f.Name,
 			Sha256:     f.SHA256,
 			Size:       f.Size,
@@ -40,11 +40,11 @@ func (s *SystemServer) DeleteManagedFile(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteManagedFileRequest],
 ) (*connect.Response[apiv1.DeleteManagedFileResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -64,7 +64,7 @@ func (s *SystemServer) loadConfigManagedFiles(ctx context.Context, resp *apiv1.G
 	}
 	for _, f := range files {
 		resp.ManagedFiles = append(resp.ManagedFiles, &apiv1.ManagedFileInfo{
-			Id:         f.ID.String(),
+			Id:         f.ID.ToProto(),
 			Name:       f.Name,
 			Sha256:     f.SHA256,
 			Size:       f.Size,

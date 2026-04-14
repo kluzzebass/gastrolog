@@ -45,7 +45,7 @@ func newRotationPolicyListCmd() *cobra.Command {
 			var rows [][]string
 			for _, rp := range resp.Msg.RotationPolicies {
 				rows = append(rows, []string{
-					rp.Id, rp.Name,
+					glid.FromBytes(rp.Id).String(), rp.Name,
 					formatInt64(rp.MaxBytes),
 					formatInt64(rp.MaxAgeSeconds),
 					formatInt64(rp.MaxRecords),
@@ -78,13 +78,13 @@ func newRotationPolicyGetCmd() *cobra.Command {
 				return err
 			}
 			for _, rp := range resp.Msg.RotationPolicies {
-				if rp.Id == id {
+				if glid.FromBytes(rp.Id).String() == id {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(rp)
 					}
 					p.kv([][2]string{
-						{"ID", rp.Id},
+						{"ID", glid.FromBytes(rp.Id).String()},
 						{"Name", rp.Name},
 						{"Max Bytes", formatInt64(rp.MaxBytes)},
 						{"Max Age (s)", formatInt64(rp.MaxAgeSeconds)},
@@ -110,7 +110,7 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.RotationPolicyConfig{
-				Id:   glid.New().String(),
+				Id:   glid.New().ToProto(),
 				Name: name,
 			}
 			verb := "Created"
@@ -153,7 +153,7 @@ func newRotationPolicyCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s rotation policy %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s rotation policy %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -177,11 +177,11 @@ func newRotationPolicyDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.rotationPolicies, "rotation policy")
+			idBytes, err := resolveToProto(args[0], r.rotationPolicies, "rotation policy")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteRotationPolicy(context.Background(), connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: id}))
+			_, err = client.System.DeleteRotationPolicy(context.Background(), connect.NewRequest(&v1.DeleteRotationPolicyRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}

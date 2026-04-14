@@ -195,6 +195,54 @@ func ParseAny(s string) (GLID, error) {
 	return GLID(u), nil
 }
 
+// --- Proto boundary helpers ---
+// These simplify the conversion between glid.GLID and proto []byte fields.
+
+// ToProto converts a GLID to the proto wire format ([]byte).
+// Alias for Bytes() — exists for readability at proto boundaries.
+func (g GLID) ToProto() []byte { return g[:] }
+
+// OptionalToProto converts a *GLID to proto bytes. Returns nil for nil pointer.
+func OptionalToProto(g *GLID) []byte {
+	if g == nil {
+		return nil
+	}
+	return g[:]
+}
+
+// SliceToProto converts []GLID to [][]byte for repeated proto fields.
+func SliceToProto(ids []GLID) [][]byte {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([][]byte, len(ids))
+	for i, id := range ids {
+		out[i] = id[:]
+	}
+	return out
+}
+
+// SliceFromProto converts [][]byte from repeated proto fields to []GLID.
+func SliceFromProto(bs [][]byte) []GLID {
+	if len(bs) == 0 {
+		return nil
+	}
+	out := make([]GLID, len(bs))
+	for i, b := range bs {
+		out[i] = FromBytes(b)
+	}
+	return out
+}
+
+// OptionalFromProto converts proto bytes to *GLID. Returns nil for nil/empty input.
+func OptionalFromProto(b []byte) *GLID {
+	if len(b) < Size {
+		return nil
+	}
+	g := FromBytes(b)
+	return &g
+}
+
 var (
 	ErrInvalidLength = errors.New("invalid GLID length")
 	ErrInvalidFormat = errors.New("invalid GLID format")

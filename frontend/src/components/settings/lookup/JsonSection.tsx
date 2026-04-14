@@ -1,3 +1,4 @@
+import { encode } from "../../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings } from "../../../api/hooks/useSettings";
@@ -73,7 +74,7 @@ export function JsonAddForm({
           inputId="new-json-upload"
           accept=".json"
           label=".json file"
-          currentFile={draft.fileId ? managedFiles.find((f) => f.id === draft.fileId) : undefined}
+          currentFile={draft.fileId ? managedFiles.find((f) => encode(f.id) === draft.fileId) : undefined}
           pickableFiles={managedFiles.filter((f) => f.name.endsWith(".json"))}
           uploadFile={uploadFile}
           addToast={addToast}
@@ -116,7 +117,7 @@ export function JsonCards({
   return (
     <>
       {lookups.map((j, i) => {
-        const resolvedFile = managedFiles.find((f) => f.id === j.fileId);
+        const resolvedFile = managedFiles.find((f) => encode(f.id) === j.fileId);
         return (
           <SettingsCard
             key={`json-${i}`}

@@ -47,9 +47,9 @@ func newIngesterListCmd() *cobra.Command {
 			var rows [][]string
 			for _, ig := range resp.Msg.Ingesters {
 				rows = append(rows, []string{
-					ig.Id, ig.Name, ig.Type,
+					glid.FromBytes(ig.Id).String(), ig.Name, ig.Type,
 					strconv.FormatBool(ig.Enabled),
-					ig.NodeId,
+					string(ig.NodeId),
 				})
 			}
 			p.table([]string{"ID", "NAME", "TYPE", "ENABLED", "NODE"}, rows)
@@ -73,22 +73,22 @@ func newIngesterGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.ingesters, "ingester")
+			idBytes, err := resolveToProto(args[0], r.ingesters, "ingester")
 			if err != nil {
 				return err
 			}
 			for _, ig := range resp.Msg.Ingesters {
-				if ig.Id == id {
+				if string(ig.Id) == string(idBytes) {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(ig)
 					}
 					pairs := [][2]string{
-						{"ID", ig.Id},
+						{"ID", glid.FromBytes(ig.Id).String()},
 						{"Name", ig.Name},
 						{"Type", ig.Type},
 						{"Enabled", strconv.FormatBool(ig.Enabled)},
-						{"Node", ig.NodeId},
+						{"Node", string(ig.NodeId)},
 					}
 					for k, v := range ig.Params {
 						pairs = append(pairs, [2]string{"Param: " + k, v})
@@ -114,7 +114,7 @@ func newIngesterCreateCmd() *cobra.Command {
 
 			// Upsert: if an ingester with this name exists, start from its config.
 			cfg := &v1.IngesterConfig{
-				Id:      glid.New().String(),
+				Id:      glid.New().ToProto(),
 				Name:    name,
 				Enabled: true, // default for new ingesters
 			}
@@ -139,7 +139,8 @@ func newIngesterCreateCmd() *cobra.Command {
 				cfg.Enabled, _ = cmd.Flags().GetBool("enabled")
 			}
 			if cmd.Flags().Changed("node-id") {
-				cfg.NodeId, _ = cmd.Flags().GetString("node-id")
+				nid, _ := cmd.Flags().GetString("node-id")
+				cfg.NodeId = []byte(nid)
 			}
 			if cmd.Flags().Changed("param") {
 				params, _ := cmd.Flags().GetStringSlice("param")
@@ -159,7 +160,7 @@ func newIngesterCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s ingester %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s ingester %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -183,11 +184,11 @@ func newIngesterDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.ingesters, "ingester")
+			idBytes, err := resolveToProto(args[0], r.ingesters, "ingester")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteIngester(context.Background(), connect.NewRequest(&v1.DeleteIngesterRequest{Id: id}))
+			_, err = client.System.DeleteIngester(context.Background(), connect.NewRequest(&v1.DeleteIngesterRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}
@@ -208,11 +209,11 @@ func newIngesterStatusCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.ingesters, "ingester")
+			idBytes, err := resolveToProto(args[0], r.ingesters, "ingester")
 			if err != nil {
 				return err
 			}
-			resp, err := client.System.GetIngesterStatus(context.Background(), connect.NewRequest(&v1.GetIngesterStatusRequest{Id: id}))
+			resp, err := client.System.GetIngesterStatus(context.Background(), connect.NewRequest(&v1.GetIngesterStatusRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}
@@ -221,7 +222,7 @@ func newIngesterStatusCmd() *cobra.Command {
 				return p.json(resp.Msg)
 			}
 			p.kv([][2]string{
-				{"ID", resp.Msg.Id},
+				{"ID", glid.FromBytes(resp.Msg.Id).String()},
 				{"Type", resp.Msg.Type},
 				{"Running", strconv.FormatBool(resp.Msg.Running)},
 				{"Messages Ingested", strconv.FormatInt(resp.Msg.MessagesIngested, 10)},

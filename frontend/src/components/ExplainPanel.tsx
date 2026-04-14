@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { ChunkPlan, BranchPlan, PipelineStep, QueryPipelineStage } from "../api/client";
 import { formatChunkId } from "../utils";
+import { encode } from "../api/glid";
 import { NodeBadge } from "./settings/NodeBadge";
 import {
   type Range,
@@ -95,7 +96,7 @@ export function ExplainPanel({
         <div className="flex flex-col gap-2">
           {chunks.map((plan, i) => (
             <ExplainChunk
-              key={plan.chunkId}
+              key={encode(plan.chunkId)}
               plan={plan}
               dark={dark}
               collapsed={!!collapsed[i]}
@@ -420,15 +421,15 @@ function ExplainChunk({
           >
             &#x25B6;
           </span>
-          {plan.vaultId && (
+          {encode(plan.vaultId) && (
             <span
               className={`text-xs px-1.5 py-0.5 rounded font-medium ${c("bg-ink-border-subtle/40 text-text-normal", "bg-light-border/40 text-light-text-normal")}`}
-              title={`Vault: ${plan.vaultId}`}
+              title={`Vault: ${encode(plan.vaultId)}`}
             >
-              {plan.vaultId}
+              {encode(plan.vaultId)}
             </span>
           )}
-          {plan.nodeId && <NodeBadge nodeId={plan.nodeId} dark={dark} />}
+          {encode(plan.nodeId) && <NodeBadge nodeId={encode(plan.nodeId)} dark={dark} />}
           <span
             className={`font-mono text-sm font-medium ${
               isSkipped
@@ -436,7 +437,7 @@ function ExplainChunk({
                 : c("text-text-bright", "text-light-text-bright")
             }`}
           >
-            {formatChunkId(plan.chunkId)}
+            {formatChunkId(encode(plan.chunkId))}
           </span>
           <span
             className={`text-xs px-1.5 py-0.5 rounded uppercase tracking-wider font-semibold ${

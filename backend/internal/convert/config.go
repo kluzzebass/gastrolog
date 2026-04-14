@@ -7,12 +7,9 @@ package convert
 // each field mapping. See gastrolog-2f8et.
 
 import (
-	"gastrolog/internal/glid"
-	"fmt"
-
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/system"
-
 )
 
 // ---------------------------------------------------------------------------
@@ -29,7 +26,7 @@ func CloudServiceToProto(cs system.CloudService) *gastrologv1.CloudService {
 		}
 	}
 	return &gastrologv1.CloudService{
-		Id:                cs.ID.String(),
+		Id:                cs.ID.ToProto(),
 		Name:              cs.Name,
 		Provider:          cs.Provider,
 		Bucket:            cs.Bucket,
@@ -51,13 +48,10 @@ func CloudServiceToProto(cs system.CloudService) *gastrologv1.CloudService {
 }
 
 // CloudServiceFromProto converts a proto CloudService to system.CloudService.
-// The ID field is best-effort parsed; an empty or invalid ID yields glid.Nil
-// (callers typically override it afterward for creation flows).
 func CloudServiceFromProto(p *gastrologv1.CloudService) system.CloudService {
 	if p == nil {
 		return system.CloudService{}
 	}
-	id, _ := glid.ParseUUID(p.GetId())
 	transitions := make([]system.CloudStorageTransition, len(p.GetTransitions()))
 	for i, t := range p.GetTransitions() {
 		transitions[i] = system.CloudStorageTransition{
@@ -66,7 +60,7 @@ func CloudServiceFromProto(p *gastrologv1.CloudService) system.CloudService {
 		}
 	}
 	return system.CloudService{
-		ID:                id,
+		ID:                glid.FromBytes(p.GetId()),
 		Name:              p.GetName(),
 		Provider:          p.GetProvider(),
 		Bucket:            p.GetBucket(),
@@ -96,7 +90,7 @@ func NodeStorageConfigToProto(cfg system.NodeStorageConfig) *gastrologv1.NodeSto
 	storages := make([]*gastrologv1.FileStorage, len(cfg.FileStorages))
 	for i, fs := range cfg.FileStorages {
 		storages[i] = &gastrologv1.FileStorage{
-			Id:                fs.ID.String(),
+			Id:                fs.ID.ToProto(),
 			StorageClass:      fs.StorageClass,
 			Name:              fs.Name,
 			Path:              fs.Path,
@@ -104,7 +98,7 @@ func NodeStorageConfigToProto(cfg system.NodeStorageConfig) *gastrologv1.NodeSto
 		}
 	}
 	return &gastrologv1.NodeStorageConfig{
-		NodeId:       cfg.NodeID,
+		NodeId:       []byte(cfg.NodeID),
 		FileStorages: storages,
 	}
 }
@@ -115,7 +109,7 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 		return system.NodeStorageConfig{}
 	}
 	cfg := system.NodeStorageConfig{
-		NodeID: p.GetNodeId(),
+		NodeID: string(p.GetNodeId()),
 	}
 	for _, a := range p.GetFileStorages() {
 		fs := system.FileStorage{
@@ -124,10 +118,8 @@ func NodeStorageConfigFromProto(p *gastrologv1.NodeStorageConfig) system.NodeSto
 			Path:              a.GetPath(),
 			MemoryBudgetBytes: a.GetMemoryBudgetBytes(),
 		}
-		if a.GetId() != "" {
-			if id, err := glid.ParseUUID(a.GetId()); err == nil {
-				fs.ID = id
-			}
+		if len(a.GetId()) > 0 {
+			fs.ID = glid.FromBytes(a.GetId())
 		}
 		cfg.FileStorages = append(cfg.FileStorages, fs)
 	}
@@ -144,25 +136,21 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
 	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.TierPlacement{
-			StorageId: p.StorageID,
+			StorageId: []byte(p.StorageID),
 			Leader:    p.Leader,
 		}
 	}
 	rules := make([]*gastrologv1.RetentionRule, len(t.RetentionRules))
 	for i, r := range t.RetentionRules {
-		ejectRouteIDs := make([]string, len(r.EjectRouteIDs))
-		for j, id := range r.EjectRouteIDs {
-			ejectRouteIDs[j] = id.String()
-		}
 		rules[i] = &gastrologv1.RetentionRule{
-			RetentionPolicyId: r.RetentionPolicyID.String(),
+			RetentionPolicyId: r.RetentionPolicyID.ToProto(),
 			Action:            string(r.Action),
-			EjectRouteIds:     ejectRouteIDs,
+			EjectRouteIds:     glid.SliceToProto(r.EjectRouteIDs),
 		}
 	}
 
 	pb := &gastrologv1.TierConfig{
-		Id:                t.ID.String(),
+		Id:                t.ID.ToProto(),
 		Name:              t.Name,
 		Type:              TierTypeToProto(t.Type),
 		RetentionRules:    rules,
@@ -173,18 +161,14 @@ func TierConfigToProto(t system.TierConfig, placements []system.TierPlacement) *
 		ReplicationFactor: t.ReplicationFactor,
 		Path:              t.Path,
 		Placements:        pbPlacements,
-		VaultId:           t.VaultID.String(),
+		VaultId:           t.VaultID.ToProto(),
 		Position:          t.Position,
 		CacheEviction:     t.CacheEviction,
 		CacheBudget:       t.CacheBudget,
 		CacheTtl:          t.CacheTTL,
 	}
-	if t.RotationPolicyID != nil {
-		pb.RotationPolicyId = t.RotationPolicyID.String()
-	}
-	if t.CloudServiceID != nil {
-		pb.CloudServiceId = t.CloudServiceID.String()
-	}
+	pb.RotationPolicyId = glid.OptionalToProto(t.RotationPolicyID)
+	pb.CloudServiceId = glid.OptionalToProto(t.CloudServiceID)
 	return pb
 }
 
@@ -193,14 +177,8 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 	if p == nil {
 		return system.TierConfig{}, nil
 	}
-	// ID and VaultID are best-effort parsed: empty values yield glid.Nil.
-	// Callers that need a valid ID (e.g., the server handler) typically
-	// override cfg.ID afterward. VaultID may be empty during tier creation
-	// when the vault is assigned separately.
-	id, _ := glid.ParseUUID(p.GetId())
-
 	cfg := system.TierConfig{
-		ID:                id,
+		ID:                glid.FromBytes(p.GetId()),
 		Name:              p.GetName(),
 		Type:              TierTypeFromProto(p.GetType()),
 		MemoryBudgetBytes: p.GetMemoryBudgetBytes(),
@@ -213,47 +191,16 @@ func TierConfigFromProto(p *gastrologv1.TierConfig) (system.TierConfig, error) {
 		CacheEviction:     p.GetCacheEviction(),
 		CacheBudget:       p.GetCacheBudget(),
 		CacheTTL:          p.GetCacheTtl(),
-	}
-
-	if p.GetVaultId() != "" {
-		vaultID, err := glid.ParseUUID(p.GetVaultId())
-		if err != nil {
-			return system.TierConfig{}, fmt.Errorf("invalid vault_id: %w", err)
-		}
-		cfg.VaultID = vaultID
-	}
-
-	if p.GetRotationPolicyId() != "" {
-		rpID, err := glid.ParseUUID(p.GetRotationPolicyId())
-		if err != nil {
-			return system.TierConfig{}, fmt.Errorf("invalid rotation_policy_id: %w", err)
-		}
-		cfg.RotationPolicyID = &rpID
-	}
-
-	if p.GetCloudServiceId() != "" {
-		csID, err := glid.ParseUUID(p.GetCloudServiceId())
-		if err != nil {
-			return system.TierConfig{}, fmt.Errorf("invalid cloud_service_id: %w", err)
-		}
-		cfg.CloudServiceID = &csID
+		VaultID:           glid.FromBytes(p.GetVaultId()),
+		RotationPolicyID:  glid.OptionalFromProto(p.GetRotationPolicyId()),
+		CloudServiceID:    glid.OptionalFromProto(p.GetCloudServiceId()),
 	}
 
 	for _, r := range p.GetRetentionRules() {
-		rpID, err := glid.ParseUUID(r.GetRetentionPolicyId())
-		if err != nil {
-			return system.TierConfig{}, fmt.Errorf("invalid retention_policy_id in rule: %w", err)
-		}
 		rule := system.RetentionRule{
-			RetentionPolicyID: rpID,
+			RetentionPolicyID: glid.FromBytes(r.GetRetentionPolicyId()),
 			Action:            system.RetentionAction(r.GetAction()),
-		}
-		for _, eid := range r.GetEjectRouteIds() {
-			routeID, err := glid.ParseUUID(eid)
-			if err != nil {
-				return system.TierConfig{}, fmt.Errorf("invalid eject_route_id: %w", err)
-			}
-			rule.EjectRouteIDs = append(rule.EjectRouteIDs, routeID)
+			EjectRouteIDs:     glid.SliceFromProto(r.GetEjectRouteIds()),
 		}
 		cfg.RetentionRules = append(cfg.RetentionRules, rule)
 	}
@@ -269,7 +216,7 @@ func TierPlacementsFromProto(p *gastrologv1.TierConfig) []system.TierPlacement {
 	var placements []system.TierPlacement
 	for _, pp := range p.GetPlacements() {
 		placements = append(placements, system.TierPlacement{
-			StorageID: pp.GetStorageId(),
+			StorageID: string(pp.GetStorageId()),
 			Leader:    pp.GetLeader(),
 		})
 	}

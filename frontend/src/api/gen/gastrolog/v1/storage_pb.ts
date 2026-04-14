@@ -15,9 +15,9 @@ import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
  */
 export class FileStorage extends Message<FileStorage> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: uint32 storage_class = 2;
@@ -47,7 +47,7 @@ export class FileStorage extends Message<FileStorage> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.FileStorage";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "storage_class", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 3, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "path", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -78,9 +78,9 @@ export class FileStorage extends Message<FileStorage> {
  */
 export class NodeStorageConfig extends Message<NodeStorageConfig> {
   /**
-   * @generated from field: string node_id = 1;
+   * @generated from field: bytes node_id = 1;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.FileStorage file_storages = 2;
@@ -95,7 +95,7 @@ export class NodeStorageConfig extends Message<NodeStorageConfig> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.NodeStorageConfig";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "file_storages", kind: "message", T: FileStorage, repeated: true },
   ]);
 
@@ -176,9 +176,9 @@ export class CloudStorageTransition extends Message<CloudStorageTransition> {
  */
 export class CloudService extends Message<CloudService> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -287,7 +287,7 @@ export class CloudService extends Message<CloudService> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.CloudService";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "provider", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "bucket", kind: "scalar", T: 9 /* ScalarType.STRING */ },

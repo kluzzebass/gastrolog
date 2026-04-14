@@ -271,7 +271,7 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 			existing, ok := vaultMap[id]
 			if !ok {
 				vaultMap[id] = &gastrologv1.VaultRouteStats{
-					VaultId:          id,
+					VaultId:          vaultID.ToProto(),
 					RecordsMatched:   vs.Matched.Load(),
 					RecordsForwarded: vs.Forwarded.Load(),
 				}
@@ -285,7 +285,7 @@ func (p *mnPeerRouteStats) AggregateRouteStats() (ingested, dropped, routed int6
 			existing, ok := routeMap[id]
 			if !ok {
 				routeMap[id] = &gastrologv1.PerRouteStats{
-					RouteId:          id,
+					RouteId:          routeID.ToProto(),
 					RecordsMatched:   ps.Matched.Load(),
 					RecordsForwarded: ps.Forwarded.Load(),
 				}
@@ -321,7 +321,7 @@ func (p *mnPeerIngesterStats) FindIngesterStats(ingesterID string) *gastrologv1.
 			continue
 		}
 		return &gastrologv1.IngesterNodeStats{
-			Id:               ingesterID,
+			Id:               id.ToProto(),
 			Running:          orch.IsIngesterRunning(id),
 			MessagesIngested: uint64(stats.MessagesIngested.Load()), //nolint:gosec
 			BytesIngested:    uint64(stats.BytesIngested.Load()),    //nolint:gosec
@@ -353,7 +353,7 @@ func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStat
 				return nil
 			}
 			stat := &gastrologv1.VaultStats{
-				Id:         vaultID,
+				Id:         id.ToProto(),
 				ChunkCount: int64(len(metas)),
 				Enabled:    orch.IsVaultEnabled(vid),
 			}
@@ -384,9 +384,9 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
 
-	vaultID, err := glid.ParseUUID(req.GetVaultId())
-	if err != nil {
-		return nil, fmt.Errorf("invalid vault_id: %w", err)
+	vaultID := glid.FromBytes(req.GetVaultId())
+	if vaultID.IsZero() {
+		return nil, fmt.Errorf("invalid vault_id: empty or too short")
 	}
 
 	// Match production behavior: only search primary tiers on this node.
@@ -459,9 +459,9 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
-	vaultID, err := glid.ParseUUID(req.GetVaultId())
-	if err != nil {
-		errCh <- fmt.Errorf("invalid vault_id: %w", err)
+	vaultID := glid.FromBytes(req.GetVaultId())
+	if vaultID.IsZero() {
+		errCh <- fmt.Errorf("invalid vault_id: empty or too short")
 		close(recCh)
 		close(errCh)
 		return recCh, nil, nil, errCh, func() []byte { return nil }
@@ -550,13 +550,13 @@ func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, re
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
 
-	vaultID, err := glid.ParseUUID(req.GetVaultId())
-	if err != nil {
-		return nil, fmt.Errorf("invalid vault_id: %w", err)
+	vaultID := glid.FromBytes(req.GetVaultId())
+	if vaultID.IsZero() {
+		return nil, fmt.Errorf("invalid vault_id: empty or too short")
 	}
-	chunkID, err := chunk.ParseChunkID(req.GetChunkId())
-	if err != nil {
-		return nil, fmt.Errorf("invalid chunk_id: %w", err)
+	chunkID := chunk.ChunkID(glid.FromBytes(req.GetChunkId()))
+	if glid.GLID(chunkID).IsZero() {
+		return nil, fmt.Errorf("invalid chunk_id: empty or too short")
 	}
 
 	eng := orch.MultiVaultQueryEngine()
@@ -592,24 +592,25 @@ func (d *directRemoteSearcher) Explain(ctx context.Context, nodeID string, req *
 	var allChunks []*gastrologv1.ChunkPlan
 	var totalChunks int32
 
-	for _, vaultStr := range req.GetVaultIds() {
-		scopedExpr := fmt.Sprintf("vault_id=%s %s", vaultStr, req.GetQuery())
+	for _, vaultBytes := range req.GetVaultIds() {
+		vid := glid.FromBytes(vaultBytes)
+		scopedExpr := fmt.Sprintf("vault_id=%s %s", vid, req.GetQuery())
 		q, _, err := server.ParseExpression(scopedExpr)
 		if err != nil {
-			return nil, fmt.Errorf("parse query for vault %s: %w", vaultStr, err)
+			return nil, fmt.Errorf("parse query for vault %s: %w", vid, err)
 		}
 
 		eng := orch.MultiVaultQueryEngine()
 		plan, err := eng.Explain(ctx, q)
 		if err != nil {
-			return nil, fmt.Errorf("explain vault %s: %w", vaultStr, err)
+			return nil, fmt.Errorf("explain vault %s: %w", vid, err)
 		}
 
 		totalChunks += int32(plan.TotalChunks) //nolint:gosec // G115: chunk count fits in int32
 		for _, cp := range plan.ChunkPlans {
 			chunkPlan := &gastrologv1.ChunkPlan{
-				VaultId:          cp.VaultID.String(),
-				ChunkId:          cp.ChunkID.String(),
+				VaultId:          cp.VaultID.ToProto(),
+				ChunkId:          glid.GLID(cp.ChunkID).ToProto(),
 				Sealed:           cp.Sealed,
 				RecordCount:      int64(cp.RecordCount),
 				ScanMode:         cp.ScanMode,
@@ -617,7 +618,7 @@ func (d *directRemoteSearcher) Explain(ctx context.Context, nodeID string, req *
 				RuntimeFilters:   []string{cp.RuntimeFilter},
 				Steps:            server.PipelineStepsToProto(cp.Pipeline),
 				SkipReason:       cp.SkipReason,
-				NodeId:           nodeID,
+				NodeId:           []byte(nodeID),
 			}
 			if !cp.WriteStart.IsZero() {
 				chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)
@@ -658,11 +659,11 @@ func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *g
 
 	// Build a scoped query for the requested vaults.
 	var scopedExpr string
-	for _, vid := range req.GetVaultIds() {
+	for _, vidBytes := range req.GetVaultIds() {
 		if scopedExpr != "" {
 			scopedExpr += " OR "
 		}
-		scopedExpr += "vault_id=" + vid
+		scopedExpr += "vault_id=" + glid.FromBytes(vidBytes).String()
 	}
 	if req.GetQuery() != "" {
 		if len(req.GetVaultIds()) > 1 {
@@ -715,7 +716,7 @@ func (d *directRemoteSearcher) Follow(ctx context.Context, nodeID string, req *g
 }
 
 func (d *directRemoteSearcher) ExportToVault(_ context.Context, _ string, _ *gastrologv1.ForwardExportToVaultRequest) (*gastrologv1.ForwardExportToVaultResponse, error) {
-	return &gastrologv1.ForwardExportToVaultResponse{JobId: "test-export-job"}, nil
+	return &gastrologv1.ForwardExportToVaultResponse{JobId: []byte("test-export-job")}, nil
 }
 
 // directUnaryForwarder implements routing.UnaryForwarder for multi-node tests
@@ -997,17 +998,17 @@ func TestMultiNode_GetJobCrossNode(t *testing.T) {
 
 	mockPeers := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{
 		"node-B": {
-			{Id: "job-on-B", Name: "compact-B", NodeId: "node-B",
+			{Id: []byte("job-on-B"), Name: "compact-B", NodeId: []byte("node-B"),
 				Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
 		},
 	}}
 	jobSrv := server.NewJobServer(h.Node(t, "node-A").orch.Scheduler(), "node-A", mockPeers)
 
-	resp, err := jobSrv.GetJob(context.Background(), connect.NewRequest(&gastrologv1.GetJobRequest{Id: "job-on-B"}))
+	resp, err := jobSrv.GetJob(context.Background(), connect.NewRequest(&gastrologv1.GetJobRequest{Id: []byte("job-on-B")}))
 	if err != nil {
 		t.Fatalf("GetJob for peer job: %v", err)
 	}
-	if resp.Msg.Job.NodeId != "node-B" {
+	if string(resp.Msg.Job.NodeId) != "node-B" {
 		t.Errorf("expected NodeId node-B, got %q", resp.Msg.Job.NodeId)
 	}
 }
@@ -1146,11 +1147,11 @@ func TestMultiNode_GetChunkRemote(t *testing.T) {
 	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetChunk with")
 	}
-	chunkID := metas[0].ID.String()
+	chunkGLID := glid.GLID(metas[0].ID)
 
 	resp, err := h.vaultClient.GetChunk(context.Background(), connect.NewRequest(&gastrologv1.GetChunkRequest{
 		Vault:   remoteVaultID,
-		ChunkId: chunkID,
+		ChunkId: chunkGLID.ToProto(),
 	}))
 	if err != nil {
 		t.Fatalf("GetChunk on remote vault: %v", err)
@@ -1158,8 +1159,8 @@ func TestMultiNode_GetChunkRemote(t *testing.T) {
 	if resp.Msg.Chunk == nil {
 		t.Error("expected chunk metadata, got nil")
 	}
-	if resp.Msg.Chunk.Id != chunkID {
-		t.Errorf("expected chunk ID %q, got %q", chunkID, resp.Msg.Chunk.Id)
+	if glid.FromBytes(resp.Msg.Chunk.Id) != chunkGLID {
+		t.Errorf("expected chunk ID %q, got %q", chunkGLID, glid.FromBytes(resp.Msg.Chunk.Id))
 	}
 	if resp.Msg.Chunk.RecordCount != 3 {
 		t.Errorf("expected 3 records in chunk, got %d", resp.Msg.Chunk.RecordCount)
@@ -1240,9 +1241,9 @@ func TestMultiNode_GetVaultRemote(t *testing.T) {
 
 	addMNRecords(t, h.Node(t, "data-1"), "D1", 5, nil)
 
-	remoteVaultID := h.Node(t, "data-1").vaultID.String()
+	remoteVaultGLID := h.Node(t, "data-1").vaultID
 	resp, err := h.vaultClient.GetVault(context.Background(), connect.NewRequest(&gastrologv1.GetVaultRequest{
-		Id: remoteVaultID,
+		Id: remoteVaultGLID.ToProto(),
 	}))
 	if err != nil {
 		t.Fatalf("GetVault on remote vault: %v", err)
@@ -1250,8 +1251,8 @@ func TestMultiNode_GetVaultRemote(t *testing.T) {
 	if resp.Msg.Vault == nil {
 		t.Fatal("expected vault info, got nil")
 	}
-	if resp.Msg.Vault.Id != remoteVaultID {
-		t.Errorf("expected vault ID %q, got %q", remoteVaultID, resp.Msg.Vault.Id)
+	if glid.FromBytes(resp.Msg.Vault.Id) != remoteVaultGLID {
+		t.Errorf("expected vault ID %q, got %q", remoteVaultGLID, glid.FromBytes(resp.Msg.Vault.Id))
 	}
 	if !resp.Msg.Vault.Remote {
 		t.Error("expected Remote=true for remote vault")
@@ -1272,7 +1273,7 @@ func TestMultiNode_ReindexVaultRemote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReindexVault on remote vault: %v", err)
 	}
-	if resp.Msg.JobId == "" {
+	if len(resp.Msg.JobId) == 0 {
 		t.Error("expected non-empty job ID from remote reindex")
 	}
 }
@@ -1334,7 +1335,7 @@ func TestMultiNode_RouteStatsAggregated(t *testing.T) {
 	// Build a map for easier assertions.
 	vsMap := make(map[string]int64)
 	for _, vs := range resp.Msg.VaultStats {
-		vsMap[vs.VaultId] = vs.RecordsMatched
+		vsMap[glid.FromBytes(vs.VaultId).String()] = vs.RecordsMatched
 	}
 	if vsMap[d1.vaultID.String()] != 3 {
 		t.Errorf("data-1 vault matched = %d, want 3", vsMap[d1.vaultID.String()])
@@ -1392,7 +1393,7 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 
 	rsMap := make(map[string]int64)
 	for _, rs := range resp.Msg.RouteStats {
-		rsMap[rs.RouteId] = rs.RecordsMatched
+		rsMap[glid.FromBytes(rs.RouteId).String()] = rs.RecordsMatched
 	}
 	if rsMap[routeA.String()] != 5 {
 		t.Errorf("route A matched = %d, want 5", rsMap[routeA.String()])
@@ -1426,7 +1427,7 @@ func TestMultiNode_ExplainCrossNode(t *testing.T) {
 	// Verify chunks span both nodes.
 	nodesSeen := make(map[string]bool)
 	for _, cp := range resp.Msg.Chunks {
-		nodesSeen[cp.NodeId] = true
+		nodesSeen[string(cp.NodeId)] = true
 	}
 	if !nodesSeen["data-1"] {
 		t.Error("expected chunk plan from data-1")
@@ -1479,14 +1480,14 @@ func TestMultiNode_FollowCrossNode(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	vaultID := h.Node(t, "data-1").vaultID.String()
+	vaultGLID := h.Node(t, "data-1").vaultID
 
 	// Call the directRemoteSearcher's Follow directly.
 	searcher := &directRemoteSearcher{nodes: map[string]*orchestrator.Orchestrator{
 		"data-1": h.Node(t, "data-1").orch,
 	}}
 	followRecCh, followErrCh := searcher.Follow(ctx, "data-1", &gastrologv1.ForwardFollowRequest{
-		VaultIds: []string{vaultID},
+		VaultIds: [][]byte{vaultGLID.ToProto()},
 	})
 
 	// Add records after follow starts.
@@ -1610,8 +1611,8 @@ func TestMultiNode_GetStatsForSpecificRemoteVault(t *testing.T) {
 	if len(resp.Msg.VaultStats) != 1 {
 		t.Fatalf("expected 1 vault stat, got %d", len(resp.Msg.VaultStats))
 	}
-	if resp.Msg.VaultStats[0].Id != remoteVaultID {
-		t.Errorf("expected vault %s, got %s", remoteVaultID, resp.Msg.VaultStats[0].Id)
+	if glid.FromBytes(resp.Msg.VaultStats[0].Id).String() != remoteVaultID {
+		t.Errorf("expected vault %s, got %s", remoteVaultID, glid.FromBytes(resp.Msg.VaultStats[0].Id))
 	}
 }
 
@@ -1633,7 +1634,7 @@ func TestMultiNode_ListVaultsCrossNode(t *testing.T) {
 
 	vaultMap := make(map[string]*gastrologv1.VaultInfo)
 	for _, v := range resp.Msg.Vaults {
-		vaultMap[v.Id] = v
+		vaultMap[glid.FromBytes(v.Id).String()] = v
 	}
 
 	d1Vault := vaultMap[h.Node(t, "data-1").vaultID.String()]
@@ -1670,11 +1671,9 @@ func TestMultiNode_GetIndexesRemote(t *testing.T) {
 	if len(metas) == 0 {
 		t.Fatal("no chunks to test GetIndexes with")
 	}
-	chunkID := metas[0].ID.String()
-
 	resp, err := h.vaultClient.GetIndexes(context.Background(), connect.NewRequest(&gastrologv1.GetIndexesRequest{
 		Vault:   remoteVaultID,
-		ChunkId: chunkID,
+		ChunkId: glid.GLID(metas[0].ID).ToProto(),
 	}))
 	if err != nil {
 		t.Fatalf("GetIndexes on remote vault: %v", err)
@@ -1713,11 +1712,11 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 		t.Fatalf("expected 1 ingester, got %d", len(resp.Msg.Ingesters))
 	}
 	ing := resp.Msg.Ingesters[0]
-	if ing.Id != ingID.String() {
-		t.Errorf("ingester ID = %q, want %q", ing.Id, ingID.String())
+	if glid.FromBytes(ing.Id) != ingID {
+		t.Errorf("ingester ID = %q, want %q", glid.FromBytes(ing.Id), ingID)
 	}
-	if ing.NodeId != "data-1" {
-		t.Errorf("ingester NodeId = %q, want data-1", ing.NodeId)
+	if string(ing.NodeId) != "data-1" {
+		t.Errorf("ingester NodeId = %q, want data-1", string(ing.NodeId))
 	}
 	if ing.Name != "test-ing" {
 		t.Errorf("ingester Name = %q, want test-ing", ing.Name)
@@ -1748,7 +1747,7 @@ func TestMultiNode_GetIngesterStatusCrossNode(t *testing.T) {
 	}
 
 	resp, err := h.configClient.GetIngesterStatus(ctx, connect.NewRequest(&gastrologv1.GetIngesterStatusRequest{
-		Id: ingID.String(),
+		Id: ingID.Bytes(),
 	}))
 	if err != nil {
 		t.Fatalf("GetIngesterStatus: %v", err)
@@ -1775,8 +1774,8 @@ func TestMultiNode_ListJobsCrossNode(t *testing.T) {
 
 	// Inject a peer job from data-1.
 	h.peerJobs.peers["data-1"] = []*gastrologv1.Job{
-		{Id: "remote-compact", Name: "compact", Description: "compact data-1 vault", NodeId: "data-1", Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
-		{Id: "remote-retain", Name: "retain", Description: "retain data-1 vault", NodeId: "data-1", Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
+		{Id: []byte("remote-compact"), Name: "compact", Description: "compact data-1 vault", NodeId: []byte("data-1"), Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
+		{Id: []byte("remote-retain"), Name: "retain", Description: "retain data-1 vault", NodeId: []byte("data-1"), Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
 	}
 
 	resp, err := h.jobSrv.ListJobs(context.Background(), connect.NewRequest(&gastrologv1.ListJobsRequest{}))
@@ -1787,8 +1786,8 @@ func TestMultiNode_ListJobsCrossNode(t *testing.T) {
 	// Should include both the peer jobs (local scheduler may also have jobs).
 	peerJobIDs := make(map[string]bool)
 	for _, j := range resp.Msg.Jobs {
-		if j.NodeId == "data-1" {
-			peerJobIDs[j.Id] = true
+		if string(j.NodeId) == "data-1" {
+			peerJobIDs[string(j.Id)] = true
 		}
 	}
 	if !peerJobIDs["remote-compact"] {

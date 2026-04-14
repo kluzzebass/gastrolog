@@ -3,6 +3,7 @@ import { Dialog } from "./Dialog";
 import { useConfig, useExportToVault } from "../api/hooks";
 import { useToast } from "./Toast";
 import { useThemeClass } from "../hooks/useThemeClass";
+import { encode } from "../api/glid";
 
 interface ExportToVaultDialogProps {
   dark: boolean;
@@ -72,7 +73,7 @@ export function ExportToVaultDialog({
       >
         <option value="">Select a vault...</option>
         {vaults.map((v) => (
-          <option key={v.id} value={v.id}>
+          <option key={encode(v.id)} value={encode(v.id)}>
             {v.name}
           </option>
         ))}

@@ -22,8 +22,8 @@ func (s *SystemServer) PutVault(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -77,11 +77,11 @@ func (s *SystemServer) DeleteVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteVaultRequest],
 ) (*connect.Response[apiv1.DeleteVaultResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -157,11 +157,11 @@ func (s *SystemServer) PauseVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.PauseVaultRequest],
 ) (*connect.Response[apiv1.PauseVaultResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -194,11 +194,11 @@ func (s *SystemServer) ResumeVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.ResumeVaultRequest],
 ) (*connect.Response[apiv1.ResumeVaultResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -226,10 +226,7 @@ func (s *SystemServer) ResumeVault(
 
 // protoToVaultConfig converts a proto VaultConfig to a system.VaultConfig.
 func protoToVaultConfig(p *apiv1.VaultConfig) (system.VaultConfig, error) {
-	id, err := glid.ParseUUID(p.Id)
-	if err != nil {
-		return system.VaultConfig{}, fmt.Errorf("invalid vault ID: %w", err)
-	}
+	id := glid.FromBytes(p.Id)
 	cfg := system.VaultConfig{
 		ID:      id,
 		Name:    p.Name,

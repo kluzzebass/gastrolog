@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useClusterStatus } from "../../api/hooks/useClusterStatus";
 import { useConfig } from "../../api/hooks/useSystem";
@@ -101,7 +102,7 @@ export function InspectorDialog({
   const { data: cluster } = useClusterStatus();
   const { data: settingsData } = useSettings();
   const { data: config } = useConfig();
-  const localNodeId = settingsData?.nodeId ?? "";
+  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
   const clusterEnabled = cluster?.clusterEnabled ?? false;
   const multiNode = clusterEnabled || (config?.nodeConfigs && config.nodeConfigs.length > 1);
 
@@ -134,8 +135,8 @@ export function InspectorDialog({
   // Node list for node names.
   const nodes = cluster?.nodes
     ? [...cluster.nodes].sort((a, b) => {
-        if (a.id === localNodeId) return -1;
-        if (b.id === localNodeId) return 1;
+        if (encode(a.id) === localNodeId) return -1;
+        if (encode(b.id) === localNodeId) return 1;
         return (a.name || "").localeCompare(b.name || "");
       })
     : [];
@@ -177,12 +178,13 @@ export function InspectorDialog({
           {mode === "nodes" ? (
             // Nodes mode: show node list.
             nodes.map((node) => {
-              const isActive = selectedNodeId === node.id;
-              const isLocal = node.id === localNodeId;
+              const nid = encode(node.id);
+              const isActive = selectedNodeId === nid;
+              const isLocal = nid === localNodeId;
               return (
                 <button
-                  key={node.id}
-                  onClick={() => onNavigate(encodeParam({ mode: "nodes", nodeId: node.id }))}
+                  key={nid}
+                  onClick={() => onNavigate(encodeParam({ mode: "nodes", nodeId: nid }))}
                   className={`flex items-center gap-2 w-full text-left px-2 py-1.5 rounded text-[0.85em] transition-colors ${
                     isActive
                       ? "bg-copper/15 text-copper"
@@ -194,7 +196,7 @@ export function InspectorDialog({
                 >
                   <ClusterIcon className="w-3.5 h-3.5 shrink-0" />
                   <span className="whitespace-nowrap truncate">
-                    {node.name || node.id.slice(0, 8)}
+                    {node.name || nid.slice(0, 8)}
                   </span>
                   <span className="ml-auto flex items-center gap-1">
                     {!isLocal && !node.stats && (

@@ -49,8 +49,8 @@ func fullyPopulatedExportRecord() *gastrologv1.ExportRecord {
 		IngestTs:   timestamppb.New(time.Date(2025, 6, 15, 10, 30, 1, 0, time.UTC)),
 		WriteTs:    timestamppb.New(time.Date(2025, 6, 15, 10, 30, 2, 0, time.UTC)),
 		Attrs:      map[string]string{"host": "web-1", "level": "error"},
-		VaultId:    rec.VaultID.String(),
-		ChunkId:    rec.Ref.ChunkID.String(), // base32hex, not UUID format
+		VaultId:    rec.VaultID.ToProto(),
+		ChunkId:    glid.GLID(rec.Ref.ChunkID).ToProto(),
 		Pos:        99,
 		IngestSeq:  42,
 		IngesterId: ingesterID[:],
@@ -73,11 +73,11 @@ func TestRecordToExport_AllFields(t *testing.T) {
 	if er.WriteTs.AsTime() != rec.WriteTS {
 		t.Errorf("WriteTs: got %v, want %v", er.WriteTs.AsTime(), rec.WriteTS)
 	}
-	if er.VaultId != rec.VaultID.String() {
-		t.Errorf("VaultId: got %q, want %q", er.VaultId, rec.VaultID.String())
+	if glid.FromBytes(er.VaultId) != rec.VaultID {
+		t.Errorf("VaultId: got %x, want %x", er.VaultId, rec.VaultID.ToProto())
 	}
-	if er.ChunkId != rec.Ref.ChunkID.String() {
-		t.Errorf("ChunkId: got %q, want %q", er.ChunkId, rec.Ref.ChunkID.String())
+	if chunk.ChunkID(glid.FromBytes(er.ChunkId)) != rec.Ref.ChunkID {
+		t.Errorf("ChunkId: got %x, want %x", er.ChunkId, glid.GLID(rec.Ref.ChunkID).ToProto())
 	}
 	if er.Pos != rec.Ref.Pos {
 		t.Errorf("Pos: got %d, want %d", er.Pos, rec.Ref.Pos)
@@ -111,11 +111,11 @@ func TestExportToRecord_AllFields(t *testing.T) {
 	if !rec.WriteTS.Equal(er.WriteTs.AsTime()) {
 		t.Errorf("WriteTS: got %v, want %v", rec.WriteTS, er.WriteTs.AsTime())
 	}
-	if rec.VaultID.String() != er.VaultId {
-		t.Errorf("VaultID: got %q, want %q", rec.VaultID, er.VaultId)
+	if rec.VaultID != glid.FromBytes(er.VaultId) {
+		t.Errorf("VaultID: got %v, want %x", rec.VaultID, er.VaultId)
 	}
-	if rec.Ref.ChunkID.String() != er.ChunkId {
-		t.Errorf("ChunkID: got %q, want %q", rec.Ref.ChunkID, er.ChunkId)
+	if rec.Ref.ChunkID != chunk.ChunkID(glid.FromBytes(er.ChunkId)) {
+		t.Errorf("ChunkID: got %v, want %x", rec.Ref.ChunkID, er.ChunkId)
 	}
 	if rec.Ref.Pos != er.Pos {
 		t.Errorf("Pos: got %d, want %d", rec.Ref.Pos, er.Pos)
@@ -193,11 +193,11 @@ func TestRoundTrip_ExportToRecordToExport(t *testing.T) {
 	if reexported.WriteTs.AsTime() != orig.WriteTs.AsTime() {
 		t.Errorf("WriteTs: got %v, want %v", reexported.WriteTs.AsTime(), orig.WriteTs.AsTime())
 	}
-	if reexported.VaultId != orig.VaultId {
-		t.Errorf("VaultId: got %q, want %q", reexported.VaultId, orig.VaultId)
+	if glid.FromBytes(reexported.VaultId) != glid.FromBytes(orig.VaultId) {
+		t.Errorf("VaultId: got %x, want %x", reexported.VaultId, orig.VaultId)
 	}
-	if reexported.ChunkId != orig.ChunkId {
-		t.Errorf("ChunkId: got %q, want %q", reexported.ChunkId, orig.ChunkId)
+	if glid.FromBytes(reexported.ChunkId) != glid.FromBytes(orig.ChunkId) {
+		t.Errorf("ChunkId: got %x, want %x", reexported.ChunkId, orig.ChunkId)
 	}
 	if reexported.Pos != orig.Pos {
 		t.Errorf("Pos: got %d, want %d", reexported.Pos, orig.Pos)

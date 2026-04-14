@@ -214,8 +214,8 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 			totalChunks += int32(plan.TotalChunks) //nolint:gosec // G115: chunk count fits in int32
 			for _, cp := range plan.ChunkPlans {
 				chunkPlan := &gastrologv1.ChunkPlan{
-					VaultId:          cp.VaultID.String(),
-					ChunkId:          cp.ChunkID.String(),
+					VaultId:          cp.VaultID.ToProto(),
+					ChunkId:          glid.GLID(cp.ChunkID).ToProto(),
 					Sealed:           cp.Sealed,
 					RecordCount:      int64(cp.RecordCount),
 					ScanMode:         cp.ScanMode,
@@ -223,7 +223,7 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 					RuntimeFilters:   []string{cp.RuntimeFilter},
 					Steps:            server.PipelineStepsToProto(cp.Pipeline),
 					SkipReason:       cp.SkipReason,
-					NodeId:           localNodeID,
+					NodeId:           []byte(localNodeID),
 				}
 				if !cp.WriteStart.IsZero() {
 					chunkPlan.WriteStart = timestamppb.New(cp.WriteStart)

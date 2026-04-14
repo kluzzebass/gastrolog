@@ -82,8 +82,8 @@ func TestForwardEntryToProto(t *testing.T) {
 
 	msg := forwardEntryToProto(entry)
 
-	if msg.GetVaultId() != vaultID.String() {
-		t.Errorf("vault_id = %q, want %q", msg.GetVaultId(), vaultID.String())
+	if glid.FromBytes(msg.GetVaultId()) != vaultID {
+		t.Errorf("vault_id = %q, want %q", msg.GetVaultId(), vaultID)
 	}
 	if string(msg.GetRaw()) != "test record" {
 		t.Errorf("raw = %q, want %q", msg.GetRaw(), "test record")

@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { FormField, TextInput, SelectInput } from "./FormField";
 import { Button } from "./Buttons";
@@ -137,7 +138,7 @@ export function MergeVaultForm({
               { value: "", label: "(select)" },
               ...vaults
                 .filter((s) => s.id !== vault.id)
-                .map((s) => ({ value: s.id, label: s.name || s.id }))
+                .map((s) => ({ value: encode(s.id), label: s.name || encode(s.id) }))
                 .sort((a, b) => a.label.localeCompare(b.label)),
             ]}
             dark={dark}

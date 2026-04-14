@@ -46,7 +46,7 @@ func (s *SystemServer) ListCertificates(
 	}
 	infos := make([]*apiv1.CertificateInfo, len(certs))
 	for i, c := range certs {
-		infos[i] = &apiv1.CertificateInfo{Id: c.ID.String(), Name: c.Name}
+		infos[i] = &apiv1.CertificateInfo{Id: c.ID.ToProto(), Name: c.Name}
 	}
 	return connect.NewResponse(&apiv1.ListCertificatesResponse{Certificates: infos}), nil
 }
@@ -70,11 +70,11 @@ func (s *SystemServer) GetCertificate(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetCertificateRequest],
 ) (*connect.Response[apiv1.GetCertificateResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -87,7 +87,7 @@ func (s *SystemServer) GetCertificate(
 		return nil, connect.NewError(connect.CodeNotFound, errors.New("certificate not found"))
 	}
 	return connect.NewResponse(&apiv1.GetCertificateResponse{
-		Id:       pem.ID.String(),
+		Id:       pem.ID.ToProto(),
 		Name:     pem.Name,
 		CertPem:  pem.CertPEM,
 		KeyPem:   "", // Never expose private keys via API
@@ -105,7 +105,7 @@ func (s *SystemServer) PutCertificate(
 		return nil, errRequired("name")
 	}
 
-	existing, err := s.loadExistingCert(ctx, req.Msg.Id, req.Msg.Name)
+	existing, err := s.loadExistingCert(ctx, string(req.Msg.Id), req.Msg.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +123,7 @@ func (s *SystemServer) PutCertificate(
 		return nil, err
 	}
 
-	certID, err := resolveCertID(existing.ID, req.Msg.Id)
+	certID, err := resolveCertID(existing.ID, string(req.Msg.Id))
 	if err != nil {
 		return nil, errInvalidArg(err)
 	}
@@ -253,11 +253,11 @@ func (s *SystemServer) DeleteCertificate(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteCertificateRequest],
 ) (*connect.Response[apiv1.DeleteCertificateResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}

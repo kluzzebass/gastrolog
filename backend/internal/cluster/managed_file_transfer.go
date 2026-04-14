@@ -52,7 +52,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 	}
 
 	// Send the request.
-	if err := stream.SendMsg(&gastrologv1.PullManagedFileRequest{FileId: fileID}); err != nil {
+	if err := stream.SendMsg(&gastrologv1.PullManagedFileRequest{FileId: []byte(fileID)}); err != nil {
 		lt.peers.Invalidate(nodeID)
 		return fmt.Errorf("send pull request to %s: %w", nodeID, err)
 	}
@@ -135,5 +135,10 @@ func (lt *ManagedFileTransferrer) ListPeerFiles(ctx context.Context, nodeID stri
 		return nil, fmt.Errorf("list peer files on %s: %w", nodeID, err)
 	}
 
-	return resp.GetFileIds(), nil
+	bids := resp.GetFileIds()
+	ids := make([]string, len(bids))
+	for i, b := range bids {
+		ids[i] = string(b)
+	}
+	return ids, nil
 }

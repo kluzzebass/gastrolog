@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutNodeConfig } from "../../api/hooks/useSystem";
@@ -44,18 +45,18 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
   const removeNode = useRemoveNode();
   const { addToast } = useToast();
 
-  const localNodeId = settingsData?.nodeId ?? "";
+  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
   const clusterEnabled = clusterData?.clusterEnabled ?? false;
 
   const nodeConfigMap = new Map(
-    (configData?.nodeConfigs ?? []).map((nc) => [nc.id, nc]),
+    (configData?.nodeConfigs ?? []).map((nc) => [encode(nc.id), nc]),
   );
 
   let nodes: { id: string; name: string; role: ClusterNodeRole; suffrage: ClusterNodeSuffrage; isLeader: boolean; hasStats: boolean }[];
   if (clusterEnabled) {
     nodes = (clusterData?.nodes ?? []).map((cn) => ({
-      id: cn.id,
-      name: nodeConfigMap.get(cn.id)?.name ?? cn.name,
+      id: encode(cn.id),
+      name: nodeConfigMap.get(encode(cn.id))?.name ?? cn.name,
       role: cn.role,
       suffrage: cn.suffrage,
       isLeader: cn.isLeader,

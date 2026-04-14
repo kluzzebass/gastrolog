@@ -43,7 +43,7 @@ func (s *VaultServer) GetVault(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetVaultRequest],
 ) (*connect.Response[apiv1.GetVaultResponse], error) {
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -129,7 +129,7 @@ func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]glid.GLID, error) {
 
 func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, metas []chunk.ChunkMeta) *apiv1.VaultStats {
 	stat := &apiv1.VaultStats{
-		Id:         vaultID.String(),
+		Id:         vaultID.ToProto(),
 		ChunkCount: int64(len(metas)),
 		Enabled:    s.orch.IsVaultEnabled(vaultID),
 	}
@@ -324,7 +324,7 @@ func (s *VaultServer) buildVaultInfo(ctx context.Context, id glid.GLID) *apiv1.V
 // (if remote).
 func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[glid.GLID]struct{}) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
-		Id:      cfg.ID.String(),
+		Id:      cfg.ID.ToProto(),
 		Name:    cfg.Name,
 		Enabled: cfg.Enabled,
 	}
@@ -371,7 +371,7 @@ func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id glid.GLID)
 // Used as fallback when the config store is unavailable or missing the entry.
 func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
-		Id:      id.String(),
+		Id:      id.ToProto(),
 		Enabled: s.orch.IsVaultEnabled(id),
 	}
 
@@ -392,7 +392,7 @@ func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *api
 
 func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 	pb := &apiv1.ChunkMeta{
-		Id:          meta.ID.String(),
+		Id:          glid.GLID(meta.ID).ToProto(),
 		WriteStart:  timestamppb.New(meta.WriteStart),
 		WriteEnd:    timestamppb.New(meta.WriteEnd),
 		Sealed:      meta.Sealed,
@@ -417,7 +417,7 @@ func ChunkMetaToProto(meta chunk.ChunkMeta) *apiv1.ChunkMeta {
 // TieredChunkMetaToProto converts a TieredChunkMeta to a proto ChunkMeta with tier info.
 func TieredChunkMetaToProto(meta orchestrator.TieredChunkMeta) *apiv1.ChunkMeta {
 	pb := ChunkMetaToProto(meta.ChunkMeta)
-	pb.TierId = meta.TierID.String()
+	pb.TierId = meta.TierID.ToProto()
 	pb.TierType = meta.TierType
 	return pb
 }
@@ -425,7 +425,7 @@ func TieredChunkMetaToProto(meta orchestrator.TieredChunkMeta) *apiv1.ChunkMeta 
 // ChunkAnalysisToProto converts an analyzer.ChunkAnalysis to a proto ChunkAnalysis.
 func ChunkAnalysisToProto(ca analyzer.ChunkAnalysis) *apiv1.ChunkAnalysis {
 	protoAnalysis := &apiv1.ChunkAnalysis{
-		ChunkId:     ca.ChunkID.String(),
+		ChunkId:     glid.GLID(ca.ChunkID).ToProto(),
 		Sealed:      ca.Sealed,
 		RecordCount: ca.ChunkRecords,
 		Indexes:     make([]*apiv1.IndexAnalysis, 0),

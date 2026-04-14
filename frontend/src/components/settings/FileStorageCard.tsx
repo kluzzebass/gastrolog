@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import type { FileStorage } from "../../api/gen/gastrolog/v1/storage_pb";
 import { useEditState } from "../../hooks/useEditState";
 import { SettingsCard } from "./SettingsCard";
@@ -38,23 +39,23 @@ export function FileStorageCard({
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
-  const edit = getEdit(fs.id);
+  const edit = getEdit(encode(fs.id));
 
   return (
     <SettingsCard
-      id={fs.name || fs.id}
+      id={fs.name || encode(fs.id)}
       typeBadge={`class ${fs.storageClass}`}
       secondaryBadge={nodeName}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
-      onDelete={() => onDelete(fs.id)}
+      onDelete={() => onDelete(encode(fs.id))}
       deleteLabel="Remove"
       footer={
         <>
-          {isDirty(fs.id) && (
+          {isDirty(encode(fs.id)) && (
             <Button
-              onClick={() => clearEdit(fs.id)}
+              onClick={() => clearEdit(encode(fs.id))}
               disabled={saving}
               dark={dark}
               variant="ghost"
@@ -64,10 +65,10 @@ export function FileStorageCard({
           )}
           <Button
             onClick={async () => {
-              await onSave(fs.id, edit);
-              clearEdit(fs.id);
+              await onSave(encode(fs.id), edit);
+              clearEdit(encode(fs.id));
             }}
-            disabled={!isDirty(fs.id) || saving}
+            disabled={!isDirty(encode(fs.id)) || saving}
             dark={dark}
           >
             {saving ? "Saving..." : "Save"}
@@ -79,7 +80,7 @@ export function FileStorageCard({
         <FormField label="Name" dark={dark}>
           <TextInput
             value={edit.name}
-            onChange={(v) => setEdit(fs.id, { name: v })}
+            onChange={(v) => setEdit(encode(fs.id), { name: v })}
             dark={dark}
           />
         </FormField>
@@ -87,7 +88,7 @@ export function FileStorageCard({
         <FormField label="Path" dark={dark}>
           <TextInput
             value={edit.path}
-            onChange={(v) => setEdit(fs.id, { path: v })}
+            onChange={(v) => setEdit(encode(fs.id), { path: v })}
             dark={dark}
             mono
           />
@@ -96,7 +97,7 @@ export function FileStorageCard({
         <FormField label="Storage Class" dark={dark} description="Numeric rank. Lower = faster (e.g. 1 for NVMe, 3 for HDD).">
           <SpinnerInput
             value={edit.storageClass}
-            onChange={(v) => setEdit(fs.id, { storageClass: v })}
+            onChange={(v) => setEdit(encode(fs.id), { storageClass: v })}
             dark={dark}
             min={0}
           />

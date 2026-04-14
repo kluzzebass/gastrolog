@@ -12,6 +12,7 @@ import { CopyButton } from "./CopyButton";
 import { ContextRecord } from "./ContextRecord";
 import { useDetailPanel } from "../hooks/useDetailPanel";
 import { useConfig } from "../api/hooks";
+import { encode } from "../api/glid";
 
 const MAX_DISPLAY_LINES = 100;
 
@@ -196,8 +197,9 @@ function ReferenceSection({
 }>) {
   const { headerCls, keyCls, borderCls } = styles;
   const { data: config } = useConfig();
-  const vaultId = record.ref?.vaultId ?? "";
-  const vaultName = config?.vaults.find((v) => v.id === vaultId)?.name;
+  const vaultId = record.ref?.vaultId ? encode(record.ref.vaultId) : "";
+  const chunkId = record.ref?.chunkId ? encode(record.ref.chunkId) : "";
+  const vaultName = config?.vaults.find((v) => encode(v.id) === vaultId)?.name;
 
   return (
     <>
@@ -225,8 +227,8 @@ function ReferenceSection({
       <tr>
         <td className={`${keyCls} ${borderCls}`}>chunk_id</td>
         <ValueCell
-          value={record.ref?.chunkId ? formatChunkId(record.ref.chunkId) : "N/A"}
-          onClick={record.ref?.chunkId ? () => onChunkSelect(record.ref!.chunkId) : undefined}
+          value={chunkId ? formatChunkId(chunkId) : "N/A"}
+          onClick={chunkId ? () => onChunkSelect(chunkId) : undefined}
           styles={styles}
         />
       </tr>
@@ -234,8 +236,8 @@ function ReferenceSection({
         <td className={`${keyCls} ${borderCls}`}>pos</td>
         <ValueCell
           value={record.ref?.pos.toString() ?? "N/A"}
-          onClick={record.ref?.chunkId
-            ? () => onPosSelect(record.ref!.chunkId, record.ref!.pos.toString())
+          onClick={chunkId
+            ? () => onPosSelect(chunkId, record.ref!.pos.toString())
             : undefined}
           styles={styles}
         />

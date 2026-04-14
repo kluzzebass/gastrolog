@@ -1,5 +1,6 @@
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
+import { decode } from "../glid";
 
 export function usePutRotationPolicy() {
   return useSystemMutation(
@@ -13,7 +14,7 @@ export function usePutRotationPolicy() {
     }) => {
       return systemClient.putRotationPolicy({
         config: {
-          id: args.id,
+          id: decode(args.id),
           name: args.name,
           maxBytes: args.maxBytes,
           maxRecords: args.maxRecords,
@@ -27,6 +28,6 @@ export function usePutRotationPolicy() {
 
 export function useDeleteRotationPolicy() {
   return useSystemMutation(async (id: string) => {
-    return systemClient.deleteRotationPolicy({ id });
+    return systemClient.deleteRotationPolicy({ id: decode(id) });
   });
 }

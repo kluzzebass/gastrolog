@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import type { CloudService } from "../../api/gen/gastrolog/v1/storage_pb";
 import { useState } from "react";
 import {
@@ -94,7 +95,7 @@ export function CloudServiceCard({
   });
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
-  const edit = getEdit(service.id);
+  const edit = getEdit(encode(service.id));
 
   const { handleSave, handleDelete } = useCrudHandlers({
     mutation: putCloudService,
@@ -128,12 +129,12 @@ export function CloudServiceCard({
 
   return (
     <SettingsCard
-      id={service.name || service.id}
+      id={service.name || encode(service.id)}
       typeBadge={providerLabel(service.provider)}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
-      onDelete={() => handleDelete(service.id)}
+      onDelete={() => handleDelete(encode(service.id))}
       deleteLabel="Delete"
       footer={
         <div className="flex items-center gap-3">
@@ -171,8 +172,8 @@ export function CloudServiceCard({
             </span>
           )}
           <Button
-            onClick={() => handleSave(service.id, edit)}
-            disabled={putCloudService.isPending || !isDirty(service.id)}
+            onClick={() => handleSave(encode(service.id), edit)}
+            disabled={putCloudService.isPending || !isDirty(encode(service.id))}
           >
             {putCloudService.isPending ? "Saving..." : "Save"}
           </Button>
@@ -183,14 +184,14 @@ export function CloudServiceCard({
         <FormField label="Name" dark={dark}>
           <TextInput
             value={edit.name}
-            onChange={(v) => setEdit(service.id, { name: v })}
+            onChange={(v) => setEdit(encode(service.id), { name: v })}
             dark={dark}
           />
         </FormField>
         <FormField label="Provider" dark={dark}>
           <SelectInput
             value={edit.provider}
-            onChange={(v) => setEdit(service.id, { provider: v })}
+            onChange={(v) => setEdit(encode(service.id), { provider: v })}
             options={providerOptions}
             dark={dark}
           />
@@ -198,7 +199,7 @@ export function CloudServiceCard({
 
           <CloudServiceFields
           values={edit}
-          onChange={(patch) => setEdit(service.id, patch)}
+          onChange={(patch) => setEdit(encode(service.id), patch)}
           dark={dark}
         />
       </div>

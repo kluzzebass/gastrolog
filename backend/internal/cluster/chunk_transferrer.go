@@ -80,7 +80,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 		return fmt.Errorf("open import stream to %s: %w", nodeID, err)
 	}
 
-	vid := vaultID.String()
+	vid := vaultID.ToProto()
 	for {
 		rec, iterErr := next()
 		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
@@ -131,7 +131,7 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 	}
 
 	req := &gastrologv1.ForwardRecordsRequest{
-		VaultId: vaultID.String(),
+		VaultId: vaultID.ToProto(),
 		Records: exportRecs,
 	}
 	resp := &gastrologv1.ForwardRecordsResponse{}
@@ -171,8 +171,8 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 		}
 	}()
 
-	vid := vaultID.String()
-	tid := tierID.String()
+	vid := vaultID.ToProto()
+	tid := tierID.ToProto()
 	for {
 		rec, iterErr := next()
 		if errors.Is(iterErr, chunk.ErrNoMoreRecords) {
@@ -212,7 +212,7 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error {
 	const pollInterval = 100 * time.Millisecond
 
-	vid := vaultID.String()
+	vid := vaultID.ToProto()
 	for {
 		conn, err := ct.peers.Conn(nodeID)
 		if err == nil {

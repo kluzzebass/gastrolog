@@ -21,8 +21,8 @@ func (s *SystemServer) PutFilter(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -33,7 +33,7 @@ func (s *SystemServer) PutFilter(
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter expression: %w", err))
 	}
 
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -65,11 +65,11 @@ func (s *SystemServer) DeleteFilter(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteFilterRequest],
 ) (*connect.Response[apiv1.DeleteFilterResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}

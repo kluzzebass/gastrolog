@@ -185,7 +185,7 @@ func (s *LifecycleServer) GetClusterStatus(
 		}
 
 		node := &apiv1.ClusterNode{
-			Id:       srv.ID,
+			Id:       []byte(srv.ID),
 			Name:     nameByID[srv.ID],
 			Address:  srv.Address,
 			Role:     role,
@@ -221,11 +221,11 @@ func (s *LifecycleServer) GetClusterStatus(
 
 	resp := &apiv1.GetClusterStatusResponse{
 		ClusterEnabled: true,
-		LeaderId:       leaderID,
+		LeaderId:       []byte(leaderID),
 		LeaderAddress:  leaderAddr,
 		Nodes:          nodes,
 		LocalStats:     buildRaftStats(s.cluster.LocalStats()),
-		LocalNodeId:    s.nodeID,
+		LocalNodeId:    []byte(s.nodeID),
 		ClusterAddress: clusterAddr,
 	}
 
@@ -246,7 +246,7 @@ func (s *LifecycleServer) SetNodeSuffrage(
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("cluster not enabled"))
 	}
 
-	nodeID := req.Msg.NodeId
+	nodeID := string(req.Msg.NodeId)
 	if nodeID == "" {
 		return nil, errRequired("node_id")
 	}
@@ -319,7 +319,7 @@ func (s *LifecycleServer) RemoveNode(
 	if s.removeNodeFn == nil {
 		return nil, connect.NewError(connect.CodeFailedPrecondition, errors.New("node removal not available"))
 	}
-	nodeID := req.Msg.NodeId
+	nodeID := string(req.Msg.NodeId)
 	if nodeID == "" {
 		return nil, errRequired("node_id")
 	}
@@ -420,7 +420,7 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
 		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:          vaultID.String(),
+			VaultId:          vaultID.ToProto(),
 			RecordsMatched:   vs.Matched.Load(),
 			RecordsForwarded: vs.Forwarded.Load(),
 		}
@@ -429,7 +429,7 @@ func (s *LifecycleServer) buildRouteStats() *apiv1.GetRouteStatsResponse {
 	routeMap := make(map[string]*apiv1.PerRouteStats)
 	for routeID, ps := range s.orch.PerRouteStatsList() {
 		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:          routeID.String(),
+			RouteId:          routeID.ToProto(),
 			RecordsMatched:   ps.Matched.Load(),
 			RecordsForwarded: ps.Forwarded.Load(),
 		}

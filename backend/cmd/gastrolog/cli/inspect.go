@@ -13,6 +13,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/server"
 	"gastrolog/internal/units"
 )
@@ -74,14 +76,14 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 
 	chunksByTier := make(map[string][]*v1.ChunkMeta)
 	for _, c := range chunksResp.Msg.Chunks {
-		chunksByTier[c.TierId] = append(chunksByTier[c.TierId], c)
+		chunksByTier[string(c.TierId)] = append(chunksByTier[string(c.TierId)], c)
 	}
 
 	vaultName := resolveVaultName(cfgResp.Msg.Vaults, vaultID, args[0])
 	fmt.Printf("Vault: %s (%s)\n\n", vaultName, vaultID)
 
 	for _, tier := range vaultTiers {
-		printTierSection(tier, chunksByTier[tier.Id])
+		printTierSection(tier, chunksByTier[string(tier.Id)])
 	}
 
 	return nil
@@ -90,7 +92,7 @@ func runInspectVault(cmd *cobra.Command, args []string) error {
 func collectVaultTiers(tiers []*v1.TierConfig, vaultID string) []*v1.TierConfig {
 	var out []*v1.TierConfig
 	for _, t := range tiers {
-		if t.VaultId == vaultID {
+		if string(t.VaultId) == vaultID {
 			out = append(out, t)
 		}
 	}
@@ -102,7 +104,7 @@ func collectVaultTiers(tiers []*v1.TierConfig, vaultID string) []*v1.TierConfig 
 
 func resolveVaultName(vaults []*v1.VaultConfig, vaultID, fallback string) string {
 	for _, v := range vaults {
-		if v.Id == vaultID {
+		if string(v.Id) == vaultID {
 			return v.Name
 		}
 	}
@@ -126,7 +128,8 @@ func printTierSection(tier *v1.TierConfig, chunks []*v1.ChunkMeta) {
 	})
 
 	for _, c := range chunks {
-		short := c.Id
+		idStr := glid.FromBytes(c.Id).String()
+		short := idStr
 		if len(short) > 12 {
 			short = short[:12]
 		}
@@ -163,8 +166,12 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	chunkID, parseErr := chunk.ParseChunkID(args[0])
+	if parseErr != nil {
+		return fmt.Errorf("invalid chunk ID: %w", parseErr)
+	}
 	resp, err := client.Vault.GetChunk(context.Background(),
-		connect.NewRequest(&v1.GetChunkRequest{Vault: vaultID, ChunkId: args[0]}))
+		connect.NewRequest(&v1.GetChunkRequest{Vault: vaultID, ChunkId: glid.GLID(chunkID).ToProto()}))
 	if err != nil {
 		return err
 	}
@@ -174,7 +181,7 @@ func runInspectChunk(cmd *cobra.Command, args []string) error {
 		return newPrinter("json").json(c)
 	}
 
-	tierName := resolveTierName(client, c.TierId)
+	tierName := resolveTierName(client, string(c.TierId))
 	pairs := buildChunkKV(c, tierName)
 	newPrinter(outputFormat(cmd)).kv(pairs)
 	return nil
@@ -189,7 +196,7 @@ func resolveTierName(client *server.Client, tierID string) string {
 		return tierID
 	}
 	for _, t := range cfgResp.Msg.Tiers {
-		if t.Id == tierID {
+		if string(t.Id) == tierID {
 			return fmt.Sprintf("%s (%s)", t.Name, strings.TrimPrefix(t.Type.String(), "TIER_TYPE_"))
 		}
 	}
@@ -198,7 +205,7 @@ func resolveTierName(client *server.Client, tierID string) string {
 
 func buildChunkKV(c *v1.ChunkMeta, tierName string) [][2]string {
 	pairs := [][2]string{
-		{"Chunk ID", c.Id},
+		{"Chunk ID", glid.FromBytes(c.Id).String()},
 		{"Tier", tierName},
 		{"Status", chunkBadges(c)},
 		{"Records", strconv.FormatInt(c.RecordCount, 10)},

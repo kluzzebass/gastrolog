@@ -44,7 +44,7 @@ func newTierListCmd() *cobra.Command {
 			var rows [][]string
 			for _, t := range resp.Msg.Tiers {
 				rows = append(rows, []string{
-					t.Id, t.Name, tierTypeName(t.Type),
+					glid.FromBytes(t.Id).String(), t.Name, tierTypeName(t.Type),
 					strconv.FormatUint(uint64(t.ReplicationFactor), 10),
 				})
 			}
@@ -65,7 +65,7 @@ func newTierCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.TierConfig{
-				Id:                glid.New().String(),
+				Id:                glid.New().ToProto(),
 				Name:              name,
 				Type:              v1.TierType_TIER_TYPE_FILE,
 				ReplicationFactor: 1,
@@ -104,7 +104,7 @@ func newTierCreateCmd() *cobra.Command {
 
 			// Add tier to vault's tier list (tiers must always belong to a vault).
 			if cmd.Flags().Changed("vault") {
-				if err := addTierToVault(ctx, cmd, client, cfg.Id); err != nil {
+				if err := addTierToVault(ctx, cmd, client, string(cfg.Id)); err != nil {
 					return err
 				}
 			}
@@ -112,7 +112,7 @@ func newTierCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s tier %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s tier %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -187,18 +187,17 @@ func applyTierFlags(ctx context.Context, cmd *cobra.Command, client *server.Clie
 func resolveCloudService(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.TierConfig) error {
 	csName, _ := cmd.Flags().GetString("cloud-service")
 	if csName == "" {
-		cfg.CloudServiceId = ""
+		cfg.CloudServiceId = nil
 		return nil
 	}
 	r, err := newResolver(ctx, client)
 	if err != nil {
 		return err
 	}
-	csID, err := resolve(csName, r.cloudServices, "cloud service")
+	cfg.CloudServiceId, err = resolveToProto(csName, r.cloudServices, "cloud service")
 	if err != nil {
 		return err
 	}
-	cfg.CloudServiceId = csID
 	return nil
 }
 
@@ -207,18 +206,17 @@ func resolveCloudService(ctx context.Context, cmd *cobra.Command, client *server
 func resolveRotationPolicy(ctx context.Context, cmd *cobra.Command, client *server.Client, cfg *v1.TierConfig) error {
 	rotPolicy, _ := cmd.Flags().GetString("rotation-policy")
 	if rotPolicy == "" {
-		cfg.RotationPolicyId = ""
+		cfg.RotationPolicyId = nil
 		return nil
 	}
 	r, err := newResolver(ctx, client)
 	if err != nil {
 		return err
 	}
-	rpID, err := resolve(rotPolicy, r.rotationPolicies, "rotation policy")
+	cfg.RotationPolicyId, err = resolveToProto(rotPolicy, r.rotationPolicies, "rotation policy")
 	if err != nil {
 		return err
 	}
-	cfg.RotationPolicyId = rpID
 	return nil
 }
 
@@ -234,12 +232,12 @@ func resolveRetentionPolicy(ctx context.Context, cmd *cobra.Command, client *ser
 	if err != nil {
 		return err
 	}
-	retID, err := resolve(retPolicy, r.retentionPolicies, "retention policy")
+	retIDBytes, err := resolveToProto(retPolicy, r.retentionPolicies, "retention policy")
 	if err != nil {
 		return err
 	}
 	cfg.RetentionRules = []*v1.RetentionRule{{
-		RetentionPolicyId: retID,
+		RetentionPolicyId: retIDBytes,
 	}}
 	return nil
 }
@@ -261,20 +259,20 @@ func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	}
 	// Find the tier config to update.
 	for _, t := range resp.Msg.Tiers {
-		if t.Id != tierID {
+		if string(t.Id) != tierID {
 			continue
 		}
-		if t.VaultId == vaultID {
+		if string(t.VaultId) == vaultID {
 			return nil // already assigned to this vault
 		}
 		// Count existing tiers for this vault to determine position.
 		var maxPos uint32
 		for _, other := range resp.Msg.Tiers {
-			if other.VaultId == vaultID && other.Position >= maxPos {
+			if string(other.VaultId) == vaultID && other.Position >= maxPos {
 				maxPos = other.Position + 1
 			}
 		}
-		t.VaultId = vaultID
+		t.VaultId = []byte(vaultID)
 		t.Position = maxPos
 		_, err = client.System.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{Config: t}))
 		if err != nil {
@@ -302,12 +300,12 @@ before deleting — no data is lost but the operation is asynchronous.`,
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.tiers, "tier")
+			idBytes, err := resolveToProto(args[0], r.tiers, "tier")
 			if err != nil {
 				return err
 			}
 			_, err = client.System.DeleteTier(context.Background(), connect.NewRequest(&v1.DeleteTierRequest{
-				Id:    id,
+				Id:    idBytes,
 				Drain: drain,
 			}))
 			if err != nil {

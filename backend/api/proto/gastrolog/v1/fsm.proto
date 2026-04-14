@@ -56,19 +56,19 @@ message SystemCommand {
 // --- Filters ---
 
 message PutFilterCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   string expression = 3;
 }
 
 message DeleteFilterCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Rotation Policies ---
 
 message PutRotationPolicyCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   optional string max_bytes = 3;
   optional string max_age = 4;
@@ -77,13 +77,13 @@ message PutRotationPolicyCommand {
 }
 
 message DeleteRotationPolicyCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Retention Policies ---
 
 message PutRetentionPolicyCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   optional string max_age = 3;
   optional string max_bytes = 4;
@@ -91,7 +91,7 @@ message PutRetentionPolicyCommand {
 }
 
 message DeleteRetentionPolicyCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Vaults ---
@@ -99,13 +99,13 @@ message DeleteRetentionPolicyCommand {
 // RetentionRule for vault commands. Separate from config.proto's RetentionRule
 // to avoid naming collisions and to match Go types exactly.
 message PutVaultCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   bool enabled = 7;
 }
 
 message DeleteVaultCommand {
-  string id = 1;
+  bytes id = 1;
   // When true, the vault's data directory is deleted from disk on the owning node.
   bool delete_data = 2;
 }
@@ -113,16 +113,16 @@ message DeleteVaultCommand {
 // --- Ingesters ---
 
 message PutIngesterCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   string type = 3;
   bool enabled = 4;
   map<string, string> params = 5;
-  string node_id = 6;
+  bytes node_id = 6;
 }
 
 message DeleteIngesterCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Settings ---
@@ -139,7 +139,7 @@ message DeleteSettingCommand {
 // --- Certificates ---
 
 message PutCertificateCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
   string cert_pem = 3;
   string key_pem = 4;
@@ -148,13 +148,13 @@ message PutCertificateCommand {
 }
 
 message DeleteCertificateCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Users ---
 
 message CreateUserCommand {
-  string id = 1;
+  bytes id = 1;
   string username = 2;
   string password_hash = 3;
   string role = 4;
@@ -165,61 +165,61 @@ message CreateUserCommand {
 }
 
 message UpdatePasswordCommand {
-  string id = 1;
+  bytes id = 1;
   string password_hash = 2;
 }
 
 message UpdateUserRoleCommand {
-  string id = 1;
+  bytes id = 1;
   string role = 2;
 }
 
 message UpdateUsernameCommand {
-  string id = 1;
+  bytes id = 1;
   string username = 2;
 }
 
 message DeleteUserCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 message InvalidateTokensCommand {
-  string id = 1;
+  bytes id = 1;
   google.protobuf.Timestamp at = 2;
 }
 
 message PutUserPreferencesCommand {
-  string id = 1;
+  bytes id = 1;
   string preferences = 2;
 }
 
 // --- Refresh Tokens ---
 
 message CreateRefreshTokenCommand {
-  string id = 1;
-  string user_id = 2;
+  bytes id = 1;
+  bytes user_id = 2;
   string token_hash = 3;
   google.protobuf.Timestamp expires_at = 4;
   google.protobuf.Timestamp created_at = 5;
 }
 
 message DeleteRefreshTokenCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 message DeleteUserRefreshTokensCommand {
-  string user_id = 1;
+  bytes user_id = 1;
 }
 
 // --- Nodes ---
 
 message PutNodeConfigCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
 }
 
 message DeleteNodeConfigCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Cluster TLS ---
@@ -235,23 +235,23 @@ message PutClusterTLSCommand {
 // --- Routes ---
 
 message PutRouteCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;
-  string filter_id = 3;
-  repeated string destination_ids = 4;
+  bytes filter_id = 3;
+  repeated bytes destination_ids = 4;
   string distribution = 5;
   bool enabled = 6;
   bool eject_only = 7;
 }
 
 message DeleteRouteCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Managed Files ---
 
 message PutManagedFileCommand {
-  string id = 1;
+  bytes id = 1;
   string name = 2;          // original filename
   string sha256 = 3;        // hex-encoded content hash
   int64 size = 4;           // file size in bytes
@@ -259,7 +259,7 @@ message PutManagedFileCommand {
 }
 
 message DeleteManagedFileCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Cloud Services ---
@@ -272,7 +272,7 @@ message PutCloudServiceCommand {
 }
 
 message DeleteCloudServiceCommand {
-  string id = 1;
+  bytes id = 1;
 }
 
 // --- Node Storage ---
@@ -290,14 +290,14 @@ message PutTierCommand {
 }
 
 message DeleteTierCommand {
-  string id = 1;
+  bytes id = 1;
   bool drain = 2; // When true, drain chunks to the next tier before deleting.
 }
 
 // --- Tier Placements ---
 
 message SetTierPlacementsCommand {
-  string tier_id = 1;
+  bytes tier_id = 1;
   repeated TierPlacement placements = 2;
 }
 

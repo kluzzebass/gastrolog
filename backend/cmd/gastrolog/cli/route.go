@@ -47,10 +47,10 @@ func newRouteListCmd() *cobra.Command {
 			for _, r := range resp.Msg.Routes {
 				dests := make([]string, len(r.Destinations))
 				for i, d := range r.Destinations {
-					dests[i] = d.VaultId
+					dests[i] = glid.FromBytes(d.VaultId).String()
 				}
 				rows = append(rows, []string{
-					r.Id, r.Name, r.FilterId,
+					glid.FromBytes(r.Id).String(), r.Name, glid.FromBytes(r.FilterId).String(),
 					strings.Join(dests, ","),
 					r.Distribution,
 					strconv.FormatBool(r.Enabled),
@@ -82,19 +82,19 @@ func newRouteGetCmd() *cobra.Command {
 				return err
 			}
 			for _, rt := range resp.Msg.Routes {
-				if rt.Id == id {
+				if glid.FromBytes(rt.Id).String() == id {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(rt)
 					}
 					dests := make([]string, len(rt.Destinations))
 					for i, d := range rt.Destinations {
-						dests[i] = d.VaultId
+						dests[i] = glid.FromBytes(d.VaultId).String()
 					}
 					p.kv([][2]string{
-						{"ID", rt.Id},
+						{"ID", glid.FromBytes(rt.Id).String()},
 						{"Name", rt.Name},
-						{"Filter", rt.FilterId},
+						{"Filter", glid.FromBytes(rt.FilterId).String()},
 						{"Destinations", strings.Join(dests, ", ")},
 						{"Distribution", rt.Distribution},
 						{"Enabled", strconv.FormatBool(rt.Enabled)},
@@ -118,7 +118,7 @@ func newRouteCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.RouteConfig{
-				Id:           glid.New().String(),
+				Id:           glid.New().ToProto(),
 				Name:         name,
 				Distribution: "fanout",
 				Enabled:      true,
@@ -156,7 +156,7 @@ func newRouteCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s route %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s route %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -183,23 +183,23 @@ func resolveRouteFilterAndDestinations(ctx context.Context, cmd *cobra.Command, 
 	if cmd.Flags().Changed("filter") {
 		filterName, _ := cmd.Flags().GetString("filter")
 		if filterName != "" {
-			cfg.FilterId, err = resolve(filterName, r.filters, "filter")
+			cfg.FilterId, err = resolveToProto(filterName, r.filters, "filter")
 			if err != nil {
 				return err
 			}
 		} else {
-			cfg.FilterId = ""
+			cfg.FilterId = nil
 		}
 	}
 	if cmd.Flags().Changed("destination") {
 		destNames, _ := cmd.Flags().GetStringSlice("destination")
 		var dests []*v1.RouteDestination
 		for _, d := range destNames {
-			vaultID, err := resolve(d, r.vaults, "vault")
+			vaultIDBytes, err := resolveToProto(d, r.vaults, "vault")
 			if err != nil {
 				return err
 			}
-			dests = append(dests, &v1.RouteDestination{VaultId: vaultID})
+			dests = append(dests, &v1.RouteDestination{VaultId: vaultIDBytes})
 		}
 		cfg.Destinations = dests
 	}
@@ -217,11 +217,11 @@ func newRouteDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.routes, "route")
+			idBytes, err := resolveToProto(args[0], r.routes, "route")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteRoute(context.Background(), connect.NewRequest(&v1.DeleteRouteRequest{Id: id}))
+			_, err = client.System.DeleteRoute(context.Background(), connect.NewRequest(&v1.DeleteRouteRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}

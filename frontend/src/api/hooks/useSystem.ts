@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { systemClient } from "../client";
 import { GetSystemResponse } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing } from "./protoSharing";
+import { decode } from "../glid";
 
 /**
  * Config version tracking for cache coherence.
@@ -92,7 +93,7 @@ export function useConfig() {
 export function usePutNodeConfig() {
   return useSystemMutation(
     async (args: { id: string; name: string }) => {
-      return systemClient.putNodeConfig({ config: { id: args.id, name: args.name } });
+      return systemClient.putNodeConfig({ config: { id: decode(args.id), name: args.name } });
     },
     [["settings"]],
   );

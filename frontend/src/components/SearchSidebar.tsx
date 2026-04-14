@@ -10,6 +10,7 @@ import type { ResizeProps } from "../hooks/usePanelResize";
 import { useThemeClass } from "../hooks/useThemeClass";
 import { SEVERITY_LEVELS, SEVERITIES } from "../lib/severity";
 import { LoadingPlaceholder } from "./LoadingPlaceholder";
+import { encode } from "../api/glid";
 
 interface SearchSidebarProps {
   dark: boolean;
@@ -119,15 +120,15 @@ export function SearchSidebar({
             {vaultsLoading ? (
               <LoadingPlaceholder dark={dark} className="px-2.5 py-1.5" />
             ) : (
-              vaults?.toSorted((a, b) => (a.name || a.id).localeCompare(b.name || b.id)).map((vault) => (
+              vaults?.toSorted((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id))).map((vault) => (
                 <VaultButton
-                  key={vault.id}
-                  label={vault.name || vault.id}
+                  key={encode(vault.id)}
+                  label={vault.name || encode(vault.id)}
                   count={vault.recordCount.toLocaleString()}
-                  active={selectedVault === vault.id}
-                  onClick={() => onVaultSelect(vault.id)}
+                  active={selectedVault === encode(vault.id)}
+                  onClick={() => onVaultSelect(encode(vault.id))}
                   dark={dark}
-                  nodeId={vault.nodeId}
+                  nodeId={encode(vault.nodeId)}
                   remote={vault.remote}
                 />
               ))

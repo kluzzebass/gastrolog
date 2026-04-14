@@ -27,7 +27,7 @@ import (
 )
 
 // waitForJob polls the JobService until the job completes or fails, returning the final job state.
-func waitForJob(t *testing.T, jobClient gastrologv1connect.JobServiceClient, jobID string) *gastrologv1.Job {
+func waitForJob(t *testing.T, jobClient gastrologv1connect.JobServiceClient, jobID []byte) *gastrologv1.Job {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(10 * time.Second)
@@ -109,7 +109,7 @@ func TestReindexVault(t *testing.T) {
 		t.Fatalf("ReindexVault: %v", err)
 	}
 
-	if resp.Msg.JobId == "" {
+	if len(resp.Msg.JobId) == 0 {
 		t.Fatal("expected non-empty job_id")
 	}
 
@@ -230,8 +230,8 @@ func TestGetStatsDetailed(t *testing.T) {
 	}
 
 	vs := resp.Msg.VaultStats[0]
-	if vs.Id != clients.defaultID.String() {
-		t.Errorf("expected vault ID %q, got %q", clients.defaultID.String(), vs.Id)
+	if glid.FromBytes(vs.Id) != clients.defaultID {
+		t.Errorf("expected vault ID %q, got %q", clients.defaultID, glid.FromBytes(vs.Id))
 	}
 	if vs.ChunkCount != 3 {
 		t.Errorf("vault stat: expected 3 chunks, got %d", vs.ChunkCount)
@@ -368,7 +368,7 @@ func TestMigrateVault(t *testing.T) {
 		t.Fatalf("MigrateVault: %v", err)
 	}
 
-	if resp.Msg.JobId == "" {
+	if len(resp.Msg.JobId) == 0 {
 		t.Fatal("expected non-empty job_id")
 	}
 
@@ -389,7 +389,7 @@ func TestMigrateVault(t *testing.T) {
 
 	// Source should be gone after job completes.
 	_, err = tc.vault.GetVault(ctx, connect.NewRequest(&gastrologv1.GetVaultRequest{
-		Id: tc.defaultID.String(),
+		Id: tc.defaultID.Bytes(),
 	}))
 	if err == nil {
 		t.Error("expected source vault to be deleted after migration")
@@ -403,7 +403,7 @@ func TestMigrateVault(t *testing.T) {
 	var dstID string
 	for _, s := range listResp.Msg.Vaults {
 		if s.Name == "migrated" {
-			dstID = s.Id
+			dstID = glid.FromBytes(s.Id).String()
 			break
 		}
 	}
@@ -670,7 +670,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	}
 
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "merge-catch-all", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "merge-catch-all", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -682,7 +682,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	}{{srcID, "merge-src"}, {dstID, "merge-dst"}} {
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:      v.id.String(),
+				Id:      v.id.Bytes(),
 				Name:    v.name,
 				Enabled: true,
 			},
@@ -695,12 +695,12 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	// Route the catch-all filter to both vaults so Ingest delivers records.
 	_, err = cfgClient.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Id:       glid.New().String(),
+			Id:       glid.New().Bytes(),
 			Name:     "merge-route",
-			FilterId: filterID.String(),
+			FilterId: filterID.Bytes(),
 			Destinations: []*gastrologv1.RouteDestination{
-				{VaultId: srcID.String()},
-				{VaultId: dstID.String()},
+				{VaultId: srcID.Bytes()},
+				{VaultId: dstID.Bytes()},
 			},
 			Enabled: true,
 		},
@@ -743,7 +743,7 @@ func TestMergeVaultsMemory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MergeVaults: %v", err)
 	}
-	if resp.Msg.JobId == "" {
+	if len(resp.Msg.JobId) == 0 {
 		t.Fatal("expected non-empty job_id")
 	}
 
@@ -801,7 +801,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 	dstID := glid.New()
 
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
-		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "file-merge-filter", Expression: "*"},
+		Config: &gastrologv1.FilterConfig{Id: filterID.Bytes(), Name: "file-merge-filter", Expression: "*"},
 	}))
 	if err != nil {
 		t.Fatalf("PutFilter: %v", err)
@@ -828,7 +828,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 		}
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
 			Config: &gastrologv1.VaultConfig{
-				Id:      v.id.String(),
+				Id:      v.id.Bytes(),
 				Name:    v.name,
 				Enabled: true,
 			},
@@ -890,7 +890,7 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MergeVaults: %v", err)
 	}
-	if resp.Msg.JobId == "" {
+	if len(resp.Msg.JobId) == 0 {
 		t.Fatal("expected non-empty job_id")
 	}
 

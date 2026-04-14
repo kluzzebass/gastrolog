@@ -79,9 +79,9 @@ proto3.util.setEnumType(JobKind, "gastrolog.v1.JobKind", [
  */
 export class Job extends Message<Job> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -166,9 +166,9 @@ export class Job extends Message<Job> {
   /**
    * origin node (empty in single-node mode)
    *
-   * @generated from field: string node_id = 16;
+   * @generated from field: bytes node_id = 16;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<Job>) {
     super();
@@ -178,7 +178,7 @@ export class Job extends Message<Job> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.Job";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "status", kind: "enum", T: proto3.getEnumType(JobStatus) },
     { no: 11, name: "kind", kind: "enum", T: proto3.getEnumType(JobKind) },
@@ -193,7 +193,7 @@ export class Job extends Message<Job> {
     { no: 12, name: "schedule", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 13, name: "last_run", kind: "message", T: Timestamp },
     { no: 14, name: "next_run", kind: "message", T: Timestamp },
-    { no: 16, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 16, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Job {
@@ -218,9 +218,9 @@ export class Job extends Message<Job> {
  */
 export class GetJobRequest extends Message<GetJobRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<GetJobRequest>) {
     super();
@@ -230,7 +230,7 @@ export class GetJobRequest extends Message<GetJobRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetJobRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetJobRequest {

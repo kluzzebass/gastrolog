@@ -302,9 +302,9 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
   clusterEnabled = false;
 
   /**
-   * @generated from field: string leader_id = 2;
+   * @generated from field: bytes leader_id = 2;
    */
-  leaderId = "";
+  leaderId = new Uint8Array(0);
 
   /**
    * @generated from field: string leader_address = 3;
@@ -322,9 +322,9 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
   localStats?: RaftStats;
 
   /**
-   * @generated from field: string local_node_id = 6;
+   * @generated from field: bytes local_node_id = 6;
    */
-  localNodeId = "";
+  localNodeId = new Uint8Array(0);
 
   /**
    * @generated from field: string join_token = 7;
@@ -345,11 +345,11 @@ export class GetClusterStatusResponse extends Message<GetClusterStatusResponse> 
   static readonly typeName = "gastrolog.v1.GetClusterStatusResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "cluster_enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
-    { no: 2, name: "leader_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "leader_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "leader_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "nodes", kind: "message", T: ClusterNode, repeated: true },
     { no: 5, name: "local_stats", kind: "message", T: RaftStats },
-    { no: 6, name: "local_node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "local_node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "join_token", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 8, name: "cluster_address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
@@ -486,9 +486,9 @@ export class RaftStats extends Message<RaftStats> {
  */
 export class ClusterNode extends Message<ClusterNode> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -544,7 +544,7 @@ export class ClusterNode extends Message<ClusterNode> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ClusterNode";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "address", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "role", kind: "enum", T: proto3.getEnumType(ClusterNodeRole) },
@@ -577,9 +577,9 @@ export class ClusterNode extends Message<ClusterNode> {
  */
 export class SetNodeSuffrageRequest extends Message<SetNodeSuffrageRequest> {
   /**
-   * @generated from field: string node_id = 1;
+   * @generated from field: bytes node_id = 1;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   /**
    * true = promote to voter, false = demote to nonvoter
@@ -596,7 +596,7 @@ export class SetNodeSuffrageRequest extends Message<SetNodeSuffrageRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SetNodeSuffrageRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "voter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -733,9 +733,9 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
   /**
    * ID of the node to evict from the cluster
    *
-   * @generated from field: string node_id = 1;
+   * @generated from field: bytes node_id = 1;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<RemoveNodeRequest>) {
     super();
@@ -745,7 +745,7 @@ export class RemoveNodeRequest extends Message<RemoveNodeRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RemoveNodeRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RemoveNodeRequest {

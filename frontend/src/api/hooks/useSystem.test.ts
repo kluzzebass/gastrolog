@@ -8,6 +8,7 @@ const mocks = installMockClients();
 
 import { useConfig, useGenerateName } from "./useSystem";
 import { GetSystemResponse } from "../gen/gastrolog/v1/system_pb";
+import { decode } from "../glid";
 
 beforeEach(() => {
   m(mocks.systemClient, "getSystem").mockClear();
@@ -17,7 +18,7 @@ beforeEach(() => {
 describe("useConfig", () => {
   test("fetches config and returns data", async () => {
     const fakeConfig = new GetSystemResponse({
-      vaults: [{ id: "v1", name: "default", enabled: true }],
+      vaults: [{ id: decode("v1"), name: "default", enabled: true }],
     });
     m(mocks.systemClient, "getSystem").mockResolvedValueOnce(fakeConfig);
 

@@ -1,3 +1,4 @@
+import { encode } from "../../../api/glid";
 import { FormField, TextInput, SelectInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
 import { useCertificates } from "../../../api/hooks/useCertificates";
@@ -19,7 +20,7 @@ export function RelpForm({
   const certOptions = [
     { value: "", label: "(none)" },
     ...certs
-      .map((c) => ({ value: c.name || c.id, label: c.name || c.id }))
+      .map((c) => ({ value: c.name || encode(c.id), label: c.name || encode(c.id) }))
       .sort((a, b) => a.label.localeCompare(b.label)),
   ];
 

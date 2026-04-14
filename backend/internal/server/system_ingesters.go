@@ -50,10 +50,10 @@ func (s *SystemServer) ListIngesters(
 		}
 		_, isLocal := localIDs[ing.ID]
 		info := &apiv1.IngesterInfo{
-			Id:     ing.ID.String(),
+			Id:     ing.ID.ToProto(),
 			Name:   ing.Name,
 			Type:   ing.Type,
-			NodeId: nodeID,
+			NodeId: []byte(nodeID),
 		}
 		if isLocal {
 			info.Running = s.orch.IsRunning()
@@ -72,11 +72,11 @@ func (s *SystemServer) GetIngesterStatus(
 	ctx context.Context,
 	req *connect.Request[apiv1.GetIngesterStatusRequest],
 ) (*connect.Response[apiv1.GetIngesterStatusResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -124,8 +124,8 @@ func (s *SystemServer) PutIngester(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -134,7 +134,7 @@ func (s *SystemServer) PutIngester(
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("ingester type required"))
 	}
 
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -154,7 +154,7 @@ func (s *SystemServer) PutIngester(
 		Type:    req.Msg.Config.Type,
 		Enabled: req.Msg.Config.Enabled,
 		Params:  req.Msg.Config.Params,
-		NodeID:  req.Msg.Config.NodeId,
+		NodeID:  string(req.Msg.Config.NodeId),
 	}
 
 	// Auto-assign local node ID when not specified.
@@ -304,11 +304,11 @@ func (s *SystemServer) DeleteIngester(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteIngesterRequest],
 ) (*connect.Response[apiv1.DeleteIngesterResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -389,8 +389,8 @@ func (s *SystemServer) TestIngester(
 	if reg.ListenAddrs != nil {
 		addrs := reg.ListenAddrs(req.Msg.Params)
 		// Skip trial bind if this ingester is already running (it holds its ports).
-		if req.Msg.Id != "" {
-			if id, err := glid.ParseUUID(req.Msg.Id); err == nil && s.orch.GetIngesterStats(id) != nil {
+		if len(req.Msg.Id) != 0 {
+			if id, connErr := parseProtoID(req.Msg.Id); connErr == nil && s.orch.GetIngesterStats(id) != nil {
 				return connect.NewResponse(&apiv1.TestIngesterResponse{
 					Success: true,
 					Message: "ports held by running ingester",
@@ -420,7 +420,7 @@ func (s *SystemServer) TriggerIngester(
 	_ context.Context,
 	req *connect.Request[apiv1.TriggerIngesterRequest],
 ) (*connect.Response[apiv1.TriggerIngesterResponse], error) {
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}

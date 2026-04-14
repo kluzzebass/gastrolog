@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useReducer } from "react";
 import { formatDateOnly } from "../../utils/temporal";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
@@ -99,7 +100,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
   const { adding, newUsername, newPassword, newRole, showNewPw } = addForm;
 
   const defaults = (id: string): UserEdit => {
-    const user = users?.find((u) => u.id === id);
+    const user = users?.find((u) => encode(u.id) === id);
     if (!user) return { username: "", role: "user", newPassword: "", showPassword: false };
     return { username: user.username, role: user.role, newPassword: "", showPassword: false };
   };
@@ -109,7 +110,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
   const isSaving = renameUser.isPending || updateUserRole.isPending || resetPassword.isPending;
 
   const handleSave = async (id: string) => {
-    const user = users?.find((u) => u.id === id);
+    const user = users?.find((u) => encode(u.id) === id);
     if (!user) return;
     const edit = getEdit(id);
     const displayName = edit.username || user.username;
@@ -220,20 +221,20 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
 
       {users?.toSorted((a, b) => a.username.localeCompare(b.username)).map((user) => {
         const isSelf = currentUser?.username === user.username;
-        const edit = getEdit(user.id);
+        const edit = getEdit(encode(user.id));
         return (
           <SettingsCard
-            key={user.id}
+            key={encode(user.id)}
             id={user.username}
             typeBadge={user.role}
             dark={dark}
-            expanded={isExpanded(user.id)}
-            onToggle={() => toggleCard(user.id)}
-            onDelete={isSelf ? undefined : () => handleDeleteUser(user)}
+            expanded={isExpanded(encode(user.id))}
+            onToggle={() => toggleCard(encode(user.id))}
+            onDelete={isSelf ? undefined : () => handleDeleteUser({ id: encode(user.id), username: user.username })}
             footer={
               <Button
-                onClick={() => handleSave(user.id)}
-                disabled={isSaving || !isDirty(user.id)}
+                onClick={() => handleSave(encode(user.id))}
+                disabled={isSaving || !isDirty(encode(user.id))}
               >
                 {isSaving ? "Saving..." : "Save"}
               </Button>
@@ -244,7 +245,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                 <FormField label="Username" dark={dark}>
                   <TextInput
                     value={edit.username}
-                    onChange={(v) => setEdit(user.id, { username: v })}
+                    onChange={(v) => setEdit(encode(user.id), { username: v })}
                     dark={dark}
                     mono
                   />
@@ -252,7 +253,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                 <FormField label="Role" dark={dark}>
                   <SelectInput
                     value={edit.role}
-                    onChange={(v) => setEdit(user.id, { role: v })}
+                    onChange={(v) => setEdit(encode(user.id), { role: v })}
                     options={roleOptions}
                     dark={dark}
                     disabled={isSelf}
@@ -262,9 +263,9 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
               <FormField label="Reset Password" dark={dark}>
                 <PasswordInput
                   value={edit.newPassword}
-                  onChange={(v) => setEdit(user.id, { newPassword: v })}
+                  onChange={(v) => setEdit(encode(user.id), { newPassword: v })}
                   show={edit.showPassword}
-                  onToggle={() => setEdit(user.id, { showPassword: !edit.showPassword })}
+                  onToggle={() => setEdit(encode(user.id), { showPassword: !edit.showPassword })}
                   placeholder="leave blank to keep current"
                   dark={dark}
                 />

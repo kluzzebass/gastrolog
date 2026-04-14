@@ -7,6 +7,7 @@ const mocks = installMockClients();
 
 import { useVaults, useVault, useStats, useSealVault, useDeleteVault } from "./useVaults";
 import { VaultInfo, GetStatsResponse } from "../gen/gastrolog/v1/vault_pb";
+import { decode } from "../glid";
 
 beforeEach(() => {
   m(mocks.vaultClient, "listVaults").mockClear();
@@ -19,8 +20,8 @@ beforeEach(() => {
 describe("useVaults", () => {
   test("fetches vault list", async () => {
     const vaults = [
-      new VaultInfo({ id: "v1", name: "logs", type: "file", enabled: true }),
-      new VaultInfo({ id: "v2", name: "metrics", type: "file", enabled: false }),
+      new VaultInfo({ id: decode("v1"), name: "logs", type: "file", enabled: true }),
+      new VaultInfo({ id: decode("v2"), name: "metrics", type: "file", enabled: false }),
     ];
     m(mocks.vaultClient, "listVaults").mockResolvedValueOnce({ vaults });
 
@@ -34,7 +35,7 @@ describe("useVaults", () => {
 
 describe("useVault", () => {
   test("fetches single vault when enabled", async () => {
-    const vault = new VaultInfo({ id: "v1", name: "logs" });
+    const vault = new VaultInfo({ id: decode("v1"), name: "logs" });
     m(mocks.vaultClient, "getVault").mockResolvedValueOnce({ vault });
 
     const { result } = renderHook(() => useVault("v1"), { wrapper: wrapper() });
@@ -89,7 +90,7 @@ describe("useDeleteVault", () => {
     });
 
     expect(m(mocks.systemClient, "deleteVault")).toHaveBeenCalledWith({
-      id: "v1",
+      id: decode("v1"),
       force: true,
       deleteData: false,
     });

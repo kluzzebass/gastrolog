@@ -568,7 +568,7 @@ type UserInfo struct {
 	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	CreatedAt     int64                  `protobuf:"varint,3,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"` // unix timestamp
 	UpdatedAt     int64                  `protobuf:"varint,4,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"` // unix timestamp
-	Id            string                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,5,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -631,11 +631,11 @@ func (x *UserInfo) GetUpdatedAt() int64 {
 	return 0
 }
 
-func (x *UserInfo) GetId() string {
+func (x *UserInfo) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type CreateUserRequest struct {
@@ -824,7 +824,7 @@ func (x *ListUsersResponse) GetUsers() []*UserInfo {
 
 type UpdateUserRoleRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"` // "admin" or "user"
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -860,11 +860,11 @@ func (*UpdateUserRoleRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *UpdateUserRoleRequest) GetId() string {
+func (x *UpdateUserRoleRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *UpdateUserRoleRequest) GetRole() string {
@@ -920,7 +920,7 @@ func (x *UpdateUserRoleResponse) GetUser() *UserInfo {
 
 type ResetPasswordRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	NewPassword   string                 `protobuf:"bytes,2,opt,name=new_password,json=newPassword,proto3" json:"new_password,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -956,11 +956,11 @@ func (*ResetPasswordRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *ResetPasswordRequest) GetId() string {
+func (x *ResetPasswordRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *ResetPasswordRequest) GetNewPassword() string {
@@ -1008,7 +1008,7 @@ func (*ResetPasswordResponse) Descriptor() ([]byte, []int) {
 
 type RenameUserRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	NewUsername   string                 `protobuf:"bytes,2,opt,name=new_username,json=newUsername,proto3" json:"new_username,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1044,11 +1044,11 @@ func (*RenameUserRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *RenameUserRequest) GetId() string {
+func (x *RenameUserRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *RenameUserRequest) GetNewUsername() string {
@@ -1104,7 +1104,7 @@ func (x *RenameUserResponse) GetUser() *UserInfo {
 
 type DeleteUserRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1139,11 +1139,11 @@ func (*DeleteUserRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_auth_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *DeleteUserRequest) GetId() string {
+func (x *DeleteUserRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteUserResponse struct {
@@ -1307,7 +1307,7 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"created_at\x18\x03 \x01(\x03R\tcreatedAt\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x04 \x01(\x03R\tupdatedAt\x12\x0e\n" +
-	"\x02id\x18\x05 \x01(\tR\x02id\"_\n" +
+	"\x02id\x18\x05 \x01(\fR\x02id\"_\n" +
 	"\x11CreateUserRequest\x12\x1a\n" +
 	"\busername\x18\x01 \x01(\tR\busername\x12\x1a\n" +
 	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x12\n" +
@@ -1318,21 +1318,21 @@ const file_gastrolog_v1_auth_proto_rawDesc = "" +
 	"\x11ListUsersResponse\x12,\n" +
 	"\x05users\x18\x01 \x03(\v2\x16.gastrolog.v1.UserInfoR\x05users\";\n" +
 	"\x15UpdateUserRoleRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\"D\n" +
 	"\x16UpdateUserRoleResponse\x12*\n" +
 	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"I\n" +
 	"\x14ResetPasswordRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12!\n" +
 	"\fnew_password\x18\x02 \x01(\tR\vnewPassword\"\x17\n" +
 	"\x15ResetPasswordResponse\"F\n" +
 	"\x11RenameUserRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12!\n" +
 	"\fnew_username\x18\x02 \x01(\tR\vnewUsername\"@\n" +
 	"\x12RenameUserResponse\x12*\n" +
 	"\x04user\x18\x01 \x01(\v2\x16.gastrolog.v1.UserInfoR\x04user\"#\n" +
 	"\x11DeleteUserRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x14\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\x14\n" +
 	"\x12DeleteUserResponse\"4\n" +
 	"\rLogoutRequest\x12#\n" +
 	"\rrefresh_token\x18\x01 \x01(\tR\frefreshToken\"\x10\n" +

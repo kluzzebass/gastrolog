@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState, useReducer } from "react";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
 import { useConfig, usePutIngester, useDeleteIngester, useGenerateName, useIngesterDefaults, useCheckListenAddrs } from "../../api/hooks";
@@ -102,7 +103,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
     setConsumedExpandTarget(expandTarget);
     const match = configIngesters.find((i) => (i.name || i.id) === expandTarget);
     if (match) {
-      setExpandedCards((prev) => ({ ...prev, [match.id]: true }));
+      setExpandedCards((prev) => ({ ...prev, [encode(match.id)]: true }));
     }
     onExpandTargetConsumed?.();
   }
@@ -115,9 +116,9 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const newListenError = newAddrConflict ?? newPortError;
 
   const defaults = (id: string) => {
-    const ing = ingesters.find((i) => i.id === id);
+    const ing = ingesters.find((i) => encode(i.id) === id);
     if (!ing) return { name: "", enabled: true, params: {} as Record<string, string>, nodeId: "" };
-    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeId: ing.nodeId };
+    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeId: encode(ing.nodeId) };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -214,19 +215,19 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
 
       {sortByName(ingesters).map((ing) => (
         <IngesterCard
-          key={ing.id}
+          key={encode(ing.id)}
           ing={ing}
           allIngesters={ingesters}
           allDefaults={allDefaults}
           dark={dark}
-          expanded={isExpanded(ing.id)}
-          onToggle={() => toggleCard(ing.id)}
-          onDelete={() => handleDelete(ing.id)}
+          expanded={isExpanded(encode(ing.id))}
+          onToggle={() => toggleCard(encode(ing.id))}
+          onDelete={() => handleDelete(encode(ing.id))}
           onSave={(id) => saveIngester(id, { ...getEdit(id), type: ing.type })}
           isSaving={putIngester.isPending}
-          edit={getEdit(ing.id)}
-          setEdit={(patch) => setEdit(ing.id, patch)}
-          isDirty={isDirty(ing.id)}
+          edit={getEdit(encode(ing.id))}
+          setEdit={(patch) => setEdit(encode(ing.id), patch)}
+          isDirty={isDirty(encode(ing.id))}
           onOpenInspector={onOpenInspector}
         />
       ))}
@@ -263,14 +264,14 @@ function IngesterCard({
   isDirty: boolean;
   onOpenInspector?: (inspectorParam: string) => void;
 }>) {
-  const addrConflict = listenAddrConflict(ing.id, ing.type, edit.params, edit.nodeId, allIngesters, allDefaults);
-  const portCheck = useCheckListenAddrs(ing.type, edit.params, ing.id);
+  const addrConflict = listenAddrConflict(encode(ing.id), ing.type, edit.params, edit.nodeId, allIngesters, allDefaults);
+  const portCheck = useCheckListenAddrs(ing.type, edit.params, encode(ing.id));
   const portError = !addrConflict && portCheck.data && !portCheck.data.success ? portCheck.data.message : null;
   const listenError = addrConflict ?? portError;
 
   return (
     <SettingsCard
-      id={ing.name || ing.id}
+      id={ing.name || encode(ing.id)}
       typeBadge={ing.type}
       dark={dark}
       expanded={expanded}
@@ -278,7 +279,7 @@ function IngesterCard({
       onDelete={onDelete}
       headerRight={
         <span className="flex items-center gap-2">
-          <NodeBadge nodeId={ing.nodeId} dark={dark} />
+          <NodeBadge nodeId={encode(ing.nodeId)} dark={dark} />
           {!ing.enabled && (
             <Badge variant="ghost" dark={dark}>disabled</Badge>
           )}
@@ -291,7 +292,7 @@ function IngesterCard({
       }
       footer={
         <Button
-          onClick={() => onSave(ing.id)}
+          onClick={() => onSave(encode(ing.id))}
           disabled={isSaving || !isDirty || !!listenError || !isIngesterParamsValid(ing.type, edit.params)}
         >
           {isSaving ? "Saving..." : "Save"}
@@ -322,8 +323,8 @@ function IngesterCard({
           params={edit.params}
           onChange={(p) => setEdit({ params: p })}
           dark={dark}
-          ingesterId={ing.id}
-          ingesterNodeId={ing.nodeId}
+          ingesterId={encode(ing.id)}
+          ingesterNodeId={encode(ing.nodeId)}
         />
         {listenError && (
           <p className={`text-[0.8em] text-severity-error`}>

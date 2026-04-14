@@ -292,7 +292,7 @@ func TestContextHelpers(t *testing.T) {
 func TestNewRespWrapper(t *testing.T) {
 	original := &apiv1.ListChunksResponse{
 		Chunks: []*apiv1.ChunkMeta{
-			{Id: "test-chunk"},
+			{Id: []byte("test-chunk")},
 		},
 	}
 	data, err := proto.Marshal(original)
@@ -310,7 +310,7 @@ func TestNewRespWrapper(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ListChunksResponse, got %T", resp.Any())
 	}
-	if len(msg.GetChunks()) != 1 || msg.GetChunks()[0].GetId() != "test-chunk" {
+	if len(msg.GetChunks()) != 1 || string(msg.GetChunks()[0].GetId()) != "test-chunk" {
 		t.Errorf("unexpected response: %v", msg)
 	}
 }

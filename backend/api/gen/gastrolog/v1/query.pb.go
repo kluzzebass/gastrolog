@@ -918,9 +918,9 @@ func (x *Record) GetIngesterId() []byte {
 
 type RecordRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Pos           uint64                 `protobuf:"varint,2,opt,name=pos,proto3" json:"pos,omitempty"`
-	VaultId       string                 `protobuf:"bytes,3,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"` // Vault this record belongs to
+	VaultId       []byte                 `protobuf:"bytes,3,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"` // Vault this record belongs to
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -955,11 +955,11 @@ func (*RecordRef) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *RecordRef) GetChunkId() string {
+func (x *RecordRef) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 func (x *RecordRef) GetPos() uint64 {
@@ -969,11 +969,11 @@ func (x *RecordRef) GetPos() uint64 {
 	return 0
 }
 
-func (x *RecordRef) GetVaultId() string {
+func (x *RecordRef) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 // ResumeToken encodes pagination state for multi-vault queries.
@@ -1089,8 +1089,8 @@ func (x *InnerVaultToken) GetPositions() []*VaultPosition {
 
 type VaultPosition struct {
 	state    protoimpl.MessageState `protogen:"open.v1"`
-	VaultId  string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkId  string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	VaultId  []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId  []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Position uint64                 `protobuf:"varint,3,opt,name=position,proto3" json:"position,omitempty"` // MaxUint64 indicates chunk is exhausted
 	// resume_ts is used instead of position for chunks without TS indexes
 	// (e.g., cloud-backed). On resume, the scanner re-reads the chunk and
@@ -1130,18 +1130,18 @@ func (*VaultPosition) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *VaultPosition) GetVaultId() string {
+func (x *VaultPosition) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
-func (x *VaultPosition) GetChunkId() string {
+func (x *VaultPosition) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 func (x *VaultPosition) GetPosition() uint64 {
@@ -1160,19 +1160,19 @@ func (x *VaultPosition) GetResumeTs() *timestamppb.Timestamp {
 
 type ChunkPlan struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId          string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId          []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Sealed           bool                   `protobuf:"varint,2,opt,name=sealed,proto3" json:"sealed,omitempty"`
 	RecordCount      int64                  `protobuf:"varint,3,opt,name=record_count,json=recordCount,proto3" json:"record_count,omitempty"`
 	Steps            []*PipelineStep        `protobuf:"bytes,4,rep,name=steps,proto3" json:"steps,omitempty"`
 	ScanMode         string                 `protobuf:"bytes,5,opt,name=scan_mode,json=scanMode,proto3" json:"scan_mode,omitempty"` // "sequential", "index-driven", or "skipped"
 	EstimatedRecords int64                  `protobuf:"varint,6,opt,name=estimated_records,json=estimatedRecords,proto3" json:"estimated_records,omitempty"`
 	RuntimeFilters   []string               `protobuf:"bytes,7,rep,name=runtime_filters,json=runtimeFilters,proto3" json:"runtime_filters,omitempty"`
-	VaultId          string                 `protobuf:"bytes,8,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId          []byte                 `protobuf:"bytes,8,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	WriteStart       *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=write_start,json=writeStart,proto3" json:"write_start,omitempty"`
 	WriteEnd         *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=write_end,json=writeEnd,proto3" json:"write_end,omitempty"`
 	SkipReason       string                 `protobuf:"bytes,11,opt,name=skip_reason,json=skipReason,proto3" json:"skip_reason,omitempty"`
 	BranchPlans      []*BranchPlan          `protobuf:"bytes,12,rep,name=branch_plans,json=branchPlans,proto3" json:"branch_plans,omitempty"`
-	NodeId           string                 `protobuf:"bytes,13,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // Node that owns this chunk's vault
+	NodeId           []byte                 `protobuf:"bytes,13,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // Node that owns this chunk's vault
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1207,11 +1207,11 @@ func (*ChunkPlan) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *ChunkPlan) GetChunkId() string {
+func (x *ChunkPlan) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 func (x *ChunkPlan) GetSealed() bool {
@@ -1256,11 +1256,11 @@ func (x *ChunkPlan) GetRuntimeFilters() []string {
 	return nil
 }
 
-func (x *ChunkPlan) GetVaultId() string {
+func (x *ChunkPlan) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 func (x *ChunkPlan) GetWriteStart() *timestamppb.Timestamp {
@@ -1291,11 +1291,11 @@ func (x *ChunkPlan) GetBranchPlans() []*BranchPlan {
 	return nil
 }
 
-func (x *ChunkPlan) GetNodeId() string {
+func (x *ChunkPlan) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type BranchPlan struct {
@@ -2268,7 +2268,7 @@ func (x *ExportToVaultRequest) GetTarget() string {
 
 type ExportToVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         []byte                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2303,11 +2303,11 @@ func (*ExportToVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_query_proto_rawDescGZIP(), []int{34}
 }
 
-func (x *ExportToVaultResponse) GetJobId() string {
+func (x *ExportToVaultResponse) GetJobId() []byte {
 	if x != nil {
 		return x.JobId
 	}
-	return ""
+	return nil
 }
 
 var File_gastrolog_v1_query_proto protoreflect.FileDescriptor
@@ -2396,9 +2396,9 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"S\n" +
 	"\tRecordRef\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x10\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x02 \x01(\x04R\x03pos\x12\x19\n" +
-	"\bvault_id\x18\x03 \x01(\tR\avaultId\"\x9c\x02\n" +
+	"\bvault_id\x18\x03 \x01(\fR\avaultId\"\x9c\x02\n" +
 	"\vResumeToken\x12M\n" +
 	"\fvault_tokens\x18\x02 \x03(\v2*.gastrolog.v1.ResumeToken.VaultTokensEntryR\vvaultTokens\x12=\n" +
 	"\ffrozen_start\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\vfrozenStart\x129\n" +
@@ -2410,19 +2410,19 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\x0fInnerVaultToken\x129\n" +
 	"\tpositions\x18\x01 \x03(\v2\x1b.gastrolog.v1.VaultPositionR\tpositions\"\x9a\x01\n" +
 	"\rVaultPosition\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x1a\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12\x1a\n" +
 	"\bposition\x18\x03 \x01(\x04R\bposition\x127\n" +
 	"\tresume_ts\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\bresumeTs\"\x8e\x04\n" +
 	"\tChunkPlan\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x12\x16\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x12\x16\n" +
 	"\x06sealed\x18\x02 \x01(\bR\x06sealed\x12!\n" +
 	"\frecord_count\x18\x03 \x01(\x03R\vrecordCount\x120\n" +
 	"\x05steps\x18\x04 \x03(\v2\x1a.gastrolog.v1.PipelineStepR\x05steps\x12\x1b\n" +
 	"\tscan_mode\x18\x05 \x01(\tR\bscanMode\x12+\n" +
 	"\x11estimated_records\x18\x06 \x01(\x03R\x10estimatedRecords\x12'\n" +
 	"\x0fruntime_filters\x18\a \x03(\tR\x0eruntimeFilters\x12\x19\n" +
-	"\bvault_id\x18\b \x01(\tR\avaultId\x12;\n" +
+	"\bvault_id\x18\b \x01(\fR\avaultId\x12;\n" +
 	"\vwrite_start\x18\t \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"writeStart\x127\n" +
 	"\twrite_end\x18\n" +
@@ -2430,7 +2430,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\vskip_reason\x18\v \x01(\tR\n" +
 	"skipReason\x12;\n" +
 	"\fbranch_plans\x18\f \x03(\v2\x18.gastrolog.v1.BranchPlanR\vbranchPlans\x12\x17\n" +
-	"\anode_id\x18\r \x01(\tR\x06nodeId\"\xc6\x01\n" +
+	"\anode_id\x18\r \x01(\fR\x06nodeId\"\xc6\x01\n" +
 	"\n" +
 	"BranchPlan\x12\x1e\n" +
 	"\n" +
@@ -2520,7 +2520,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"expression\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\".\n" +
 	"\x15ExportToVaultResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId2\xeb\x05\n" +
+	"\x06job_id\x18\x01 \x01(\fR\x05jobId2\xeb\x05\n" +
 	"\fQueryService\x12E\n" +
 	"\x06Search\x12\x1b.gastrolog.v1.SearchRequest\x1a\x1c.gastrolog.v1.SearchResponse0\x01\x12E\n" +
 	"\x06Follow\x12\x1b.gastrolog.v1.FollowRequest\x1a\x1c.gastrolog.v1.FollowResponse0\x01\x12F\n" +

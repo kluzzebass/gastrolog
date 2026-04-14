@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatDateTimestamp } from "../../utils/temporal";
@@ -195,7 +196,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
             ) : undefined}
           >
             <div className="flex flex-col gap-3">
-              <VersionRow file={latest} label="current" dark={dark} onDelete={() => handleDelete(latest.id, latest.name)} />
+              <VersionRow file={latest} label="current" dark={dark} onDelete={() => handleDelete(encode(latest.id), latest.name)} />
 
               {older.length > 0 && (
                 <div className="flex flex-col gap-2">
@@ -203,7 +204,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
                     Previous versions ({older.length})
                   </span>
                   {older.map((v) => (
-                    <VersionRow key={v.id} file={v} dark={dark} onDelete={() => handleDelete(v.id, v.name)} />
+                    <VersionRow key={encode(v.id)} file={v} dark={dark} onDelete={() => handleDelete(encode(v.id), v.name)} />
                   ))}
                 </div>
               )}

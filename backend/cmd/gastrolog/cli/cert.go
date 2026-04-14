@@ -42,7 +42,7 @@ func newCertListCmd() *cobra.Command {
 			}
 			var rows [][]string
 			for _, c := range resp.Msg.Certificates {
-				rows = append(rows, []string{c.Id, c.Name})
+				rows = append(rows, []string{glid.FromBytes(c.Id).String(), c.Name})
 			}
 			p.table([]string{"ID", "NAME"}, rows)
 			return nil
@@ -65,7 +65,11 @@ func newCertGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			resp, err := client.System.GetCertificate(context.Background(), connect.NewRequest(&v1.GetCertificateRequest{Id: id}))
+			idBytes, parseErr := glid.ParseUUID(id)
+			if parseErr != nil {
+				return parseErr
+			}
+			resp, err := client.System.GetCertificate(context.Background(), connect.NewRequest(&v1.GetCertificateRequest{Id: idBytes.ToProto()}))
 			if err != nil {
 				return err
 			}
@@ -75,7 +79,7 @@ func newCertGetCmd() *cobra.Command {
 				return p.json(cert)
 			}
 			pairs := [][2]string{
-				{"ID", cert.Id},
+				{"ID", glid.FromBytes(cert.Id).String()},
 				{"Name", cert.Name},
 				{"Cert File", cert.CertFile},
 				{"Key File", cert.KeyFile},
@@ -118,9 +122,9 @@ func newCertCreateCmd() *cobra.Command {
 			}
 
 			client := clientFromCmd(cmd)
-			id := glid.New().String()
+			newID := glid.New()
 			_, err := client.System.PutCertificate(context.Background(), connect.NewRequest(&v1.PutCertificateRequest{
-				Id:           id,
+				Id:           newID.ToProto(),
 				Name:         name,
 				CertPem:      certPem,
 				KeyPem:       keyPem,
@@ -131,7 +135,7 @@ func newCertCreateCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Printf("Created certificate %q (%s)\n", name, id)
+			fmt.Printf("Created certificate %q (%s)\n", name, newID)
 			return nil
 		},
 	}
@@ -156,11 +160,11 @@ func newCertDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.certs, "certificate")
+			idBytes, err := resolveToProto(args[0], r.certs, "certificate")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteCertificate(context.Background(), connect.NewRequest(&v1.DeleteCertificateRequest{Id: id}))
+			_, err = client.System.DeleteCertificate(context.Background(), connect.NewRequest(&v1.DeleteCertificateRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}

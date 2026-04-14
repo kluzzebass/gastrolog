@@ -1,6 +1,7 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
+import { decode } from "../glid";
 
 export function useSettings() {
   return useQuery({
@@ -151,7 +152,7 @@ export function usePreviewCSVLookup() {
   return useMutation({
     mutationFn: async (args: PreviewCSVLookupArgs) => {
       const response = await systemClient.previewCSVLookup({
-        fileId: args.fileId,
+        fileId: decode(args.fileId),
         keyColumn: args.keyColumn ?? "",
         valueColumns: args.valueColumns ?? [],
         maxRows: args.maxRows ?? 10,

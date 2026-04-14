@@ -151,11 +151,11 @@ func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaul
 		exports[i] = convert.RecordToExport(rec)
 	}
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
-		VaultId: vaultID.String(),
-		TierId:  tierID.String(),
+		VaultId: vaultID.ToProto(),
+		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_Append{
 			Append: &gastrologv1.TierReplicationAppend{
-				ChunkId: chunkID.String(),
+				ChunkId: glid.GLID(chunkID).ToProto(),
 				Records: exports,
 			},
 		},
@@ -165,11 +165,11 @@ func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaul
 // SealTier tells a follower to seal its active chunk.
 func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
-		VaultId: vaultID.String(),
-		TierId:  tierID.String(),
+		VaultId: vaultID.ToProto(),
+		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_Seal{
 			Seal: &gastrologv1.TierReplicationSeal{
-				ChunkId: chunkID.String(),
+				ChunkId: glid.GLID(chunkID).ToProto(),
 			},
 		},
 	})
@@ -182,11 +182,11 @@ func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, 
 		exports[i] = convert.RecordToExport(rec)
 	}
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
-		VaultId: vaultID.String(),
-		TierId:  tierID.String(),
+		VaultId: vaultID.ToProto(),
+		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_ImportSealed{
 			ImportSealed: &gastrologv1.TierReplicationImport{
-				ChunkId: chunkID.String(),
+				ChunkId: glid.GLID(chunkID).ToProto(),
 				Records: exports,
 			},
 		},
@@ -196,11 +196,11 @@ func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, 
 // DeleteChunk tells a follower to delete a sealed chunk.
 func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
-		VaultId: vaultID.String(),
-		TierId:  tierID.String(),
+		VaultId: vaultID.ToProto(),
+		TierId:  tierID.ToProto(),
 		Command: &gastrologv1.TierReplicationCommand_DeleteChunk{
 			DeleteChunk: &gastrologv1.TierReplicationDelete{
-				ChunkId: chunkID.String(),
+				ChunkId: glid.GLID(chunkID).ToProto(),
 			},
 		},
 	})

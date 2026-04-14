@@ -405,11 +405,11 @@ func (*GetClusterStatusRequest) Descriptor() ([]byte, []int) {
 type GetClusterStatusResponse struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ClusterEnabled bool                   `protobuf:"varint,1,opt,name=cluster_enabled,json=clusterEnabled,proto3" json:"cluster_enabled,omitempty"`
-	LeaderId       string                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
+	LeaderId       []byte                 `protobuf:"bytes,2,opt,name=leader_id,json=leaderId,proto3" json:"leader_id,omitempty"`
 	LeaderAddress  string                 `protobuf:"bytes,3,opt,name=leader_address,json=leaderAddress,proto3" json:"leader_address,omitempty"`
 	Nodes          []*ClusterNode         `protobuf:"bytes,4,rep,name=nodes,proto3" json:"nodes,omitempty"`
 	LocalStats     *RaftStats             `protobuf:"bytes,5,opt,name=local_stats,json=localStats,proto3" json:"local_stats,omitempty"`
-	LocalNodeId    string                 `protobuf:"bytes,6,opt,name=local_node_id,json=localNodeId,proto3" json:"local_node_id,omitempty"`
+	LocalNodeId    []byte                 `protobuf:"bytes,6,opt,name=local_node_id,json=localNodeId,proto3" json:"local_node_id,omitempty"`
 	JoinToken      string                 `protobuf:"bytes,7,opt,name=join_token,json=joinToken,proto3" json:"join_token,omitempty"`
 	ClusterAddress string                 `protobuf:"bytes,8,opt,name=cluster_address,json=clusterAddress,proto3" json:"cluster_address,omitempty"`
 	unknownFields  protoimpl.UnknownFields
@@ -453,11 +453,11 @@ func (x *GetClusterStatusResponse) GetClusterEnabled() bool {
 	return false
 }
 
-func (x *GetClusterStatusResponse) GetLeaderId() string {
+func (x *GetClusterStatusResponse) GetLeaderId() []byte {
 	if x != nil {
 		return x.LeaderId
 	}
-	return ""
+	return nil
 }
 
 func (x *GetClusterStatusResponse) GetLeaderAddress() string {
@@ -481,11 +481,11 @@ func (x *GetClusterStatusResponse) GetLocalStats() *RaftStats {
 	return nil
 }
 
-func (x *GetClusterStatusResponse) GetLocalNodeId() string {
+func (x *GetClusterStatusResponse) GetLocalNodeId() []byte {
 	if x != nil {
 		return x.LocalNodeId
 	}
-	return ""
+	return nil
 }
 
 func (x *GetClusterStatusResponse) GetJoinToken() string {
@@ -638,7 +638,7 @@ func (x *RaftStats) GetProtocolVersion() uint32 {
 
 type ClusterNode struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"` // cluster/Raft address (e.g. ":4566")
 	Role          ClusterNodeRole        `protobuf:"varint,4,opt,name=role,proto3,enum=gastrolog.v1.ClusterNodeRole" json:"role,omitempty"`
@@ -681,11 +681,11 @@ func (*ClusterNode) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ClusterNode) GetId() string {
+func (x *ClusterNode) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *ClusterNode) GetName() string {
@@ -746,7 +746,7 @@ func (x *ClusterNode) GetPprofAddress() string {
 
 type SetNodeSuffrageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	Voter         bool                   `protobuf:"varint,2,opt,name=voter,proto3" json:"voter,omitempty"` // true = promote to voter, false = demote to nonvoter
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -782,11 +782,11 @@ func (*SetNodeSuffrageRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *SetNodeSuffrageRequest) GetNodeId() string {
+func (x *SetNodeSuffrageRequest) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 func (x *SetNodeSuffrageRequest) GetVoter() bool {
@@ -922,7 +922,7 @@ func (*JoinClusterResponse) Descriptor() ([]byte, []int) {
 
 type RemoveNodeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // ID of the node to evict from the cluster
+	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"` // ID of the node to evict from the cluster
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -957,11 +957,11 @@ func (*RemoveNodeRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_lifecycle_proto_rawDescGZIP(), []int{12}
 }
 
-func (x *RemoveNodeRequest) GetNodeId() string {
+func (x *RemoveNodeRequest) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type RemoveNodeResponse struct {
@@ -1130,12 +1130,12 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\x17GetClusterStatusRequest\"\xde\x02\n" +
 	"\x18GetClusterStatusResponse\x12'\n" +
 	"\x0fcluster_enabled\x18\x01 \x01(\bR\x0eclusterEnabled\x12\x1b\n" +
-	"\tleader_id\x18\x02 \x01(\tR\bleaderId\x12%\n" +
+	"\tleader_id\x18\x02 \x01(\fR\bleaderId\x12%\n" +
 	"\x0eleader_address\x18\x03 \x01(\tR\rleaderAddress\x12/\n" +
 	"\x05nodes\x18\x04 \x03(\v2\x19.gastrolog.v1.ClusterNodeR\x05nodes\x128\n" +
 	"\vlocal_stats\x18\x05 \x01(\v2\x17.gastrolog.v1.RaftStatsR\n" +
 	"localStats\x12\"\n" +
-	"\rlocal_node_id\x18\x06 \x01(\tR\vlocalNodeId\x12\x1d\n" +
+	"\rlocal_node_id\x18\x06 \x01(\fR\vlocalNodeId\x12\x1d\n" +
 	"\n" +
 	"join_token\x18\a \x01(\tR\tjoinToken\x12'\n" +
 	"\x0fcluster_address\x18\b \x01(\tR\x0eclusterAddress\"\xb1\x03\n" +
@@ -1155,7 +1155,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"\tnum_peers\x18\v \x01(\rR\bnumPeers\x12)\n" +
 	"\x10protocol_version\x18\f \x01(\rR\x0fprotocolVersion\"\xcf\x02\n" +
 	"\vClusterNode\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aaddress\x18\x03 \x01(\tR\aaddress\x121\n" +
 	"\x04role\x18\x04 \x01(\x0e2\x1d.gastrolog.v1.ClusterNodeRoleR\x04role\x12=\n" +
@@ -1166,7 +1166,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"apiAddress\x12#\n" +
 	"\rpprof_address\x18\t \x01(\tR\fpprofAddress\"G\n" +
 	"\x16SetNodeSuffrageRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x14\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x14\n" +
 	"\x05voter\x18\x02 \x01(\bR\x05voter\"\x19\n" +
 	"\x17SetNodeSuffrageResponse\"Z\n" +
 	"\x12JoinClusterRequest\x12%\n" +
@@ -1175,7 +1175,7 @@ const file_gastrolog_v1_lifecycle_proto_rawDesc = "" +
 	"join_token\x18\x02 \x01(\tR\tjoinToken\"\x15\n" +
 	"\x13JoinClusterResponse\",\n" +
 	"\x11RemoveNodeRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x14\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\"\x14\n" +
 	"\x12RemoveNodeResponse\"\x1a\n" +
 	"\x18WatchSystemStatusRequest\"\xc0\x02\n" +
 	"\x19WatchSystemStatusResponse\x12@\n" +

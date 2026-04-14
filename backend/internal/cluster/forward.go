@@ -96,28 +96,25 @@ type ManagedFileIDsLister func() []string
 
 // ── ID parse helpers ────────────────────────────────────────────────
 
-func parseVaultID(raw string) (glid.GLID, error) {
-	id, err := glid.ParseUUID(raw)
-	if err != nil {
-		return glid.Nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+func parseVaultID(raw []byte) (glid.GLID, error) {
+	if len(raw) < glid.Size {
+		return glid.Nil, status.Error(codes.InvalidArgument, "invalid vault_id: too short")
 	}
-	return id, nil
+	return glid.FromBytes(raw), nil
 }
 
-func parseTierID(raw string) (glid.GLID, error) {
-	id, err := glid.ParseUUID(raw)
-	if err != nil {
-		return glid.Nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+func parseTierID(raw []byte) (glid.GLID, error) {
+	if len(raw) < glid.Size {
+		return glid.Nil, status.Error(codes.InvalidArgument, "invalid tier_id: too short")
 	}
-	return id, nil
+	return glid.FromBytes(raw), nil
 }
 
-func parseChunkID(raw string) (chunk.ChunkID, error) {
-	id, err := chunk.ParseChunkID(raw)
-	if err != nil {
-		return chunk.ChunkID{}, status.Errorf(codes.InvalidArgument, "invalid chunk_id: %v", err)
+func parseChunkID(raw []byte) (chunk.ChunkID, error) {
+	if len(raw) < glid.Size {
+		return chunk.ChunkID{}, status.Error(codes.InvalidArgument, "invalid chunk_id: too short")
 	}
-	return id, nil
+	return chunk.ChunkID(glid.FromBytes(raw)), nil
 }
 
 // SetRecordAppender injects the callback for writing forwarded records.
@@ -273,7 +270,7 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			return err
 		}
 
-		vaultID, err := glid.ParseUUID(msg.GetVaultId())
+		vaultID, err := parseVaultID(msg.GetVaultId())
 		if err != nil {
 			continue
 		}
@@ -330,7 +327,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	// creates a new sealed chunk in the vault (used by TransferRecords for
 	// cross-node chunk migration).
 	var tierID glid.GLID
-	if first.GetTierId() != "" {
+	if len(first.GetTierId()) >= glid.Size {
 		tierID, err = parseTierID(first.GetTierId())
 		if err != nil {
 			return err
@@ -392,14 +389,7 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
 	}
 
-	vaultIDs := make([]glid.GLID, 0, len(req.GetVaultIds()))
-	for _, raw := range req.GetVaultIds() {
-		id, err := glid.ParseUUID(raw)
-		if err != nil {
-			return status.Errorf(codes.InvalidArgument, "invalid vault_id %q: %v", raw, err)
-		}
-		vaultIDs = append(vaultIDs, id)
-	}
+	vaultIDs := glid.SliceFromProto(req.GetVaultIds())
 
 	records, err := s.followExecutor(stream.Context(), vaultIDs, req.GetQuery())
 	if err != nil {
@@ -624,7 +614,7 @@ func (s *Server) forwardAnalyzeChunk(ctx context.Context, req *gastrologv1.Forwa
 	if err != nil {
 		return nil, err
 	}
-	analyses, err := s.analyzeChunkExecutor(ctx, vaultID, req.GetChunkId())
+	analyses, err := s.analyzeChunkExecutor(ctx, vaultID, string(req.GetChunkId()))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "analyze chunk: %v", err)
 	}
@@ -679,7 +669,7 @@ func (s *Server) forwardReindexVault(ctx context.Context, req *gastrologv1.Forwa
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "reindex vault: %v", err)
 	}
-	return &gastrologv1.ForwardReindexVaultResponse{JobId: jobID}, nil
+	return &gastrologv1.ForwardReindexVaultResponse{JobId: []byte(jobID)}, nil
 }
 
 // forwardExportToVault handles the ForwardExportToVault RPC. Runs an
@@ -688,15 +678,12 @@ func (s *Server) forwardExportToVault(ctx context.Context, req *gastrologv1.Forw
 	if s.exportToVaultExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "export to vault executor not configured")
 	}
-	vaultID, err := glid.ParseUUID(req.GetTargetVaultId())
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid target_vault_id: %v", err)
-	}
+	vaultID := glid.FromBytes(req.GetTargetVaultId())
 	jobID, err := s.exportToVaultExecutor(ctx, req.GetExpression(), vaultID)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "export to vault: %v", err)
 	}
-	return &gastrologv1.ForwardExportToVaultResponse{JobId: jobID}, nil
+	return &gastrologv1.ForwardExportToVaultResponse{JobId: []byte(jobID)}, nil
 }
 
 // forwardExplain handles the ForwardExplain RPC. Returns the explain plan
@@ -707,10 +694,7 @@ func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExp
 	}
 	vaultIDs := make([]glid.GLID, 0, len(req.GetVaultIds()))
 	for _, vs := range req.GetVaultIds() {
-		vid, err := glid.ParseUUID(vs)
-		if err != nil {
-			return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id %q: %v", vs, err)
-		}
+		vid := glid.FromBytes(vs)
 		vaultIDs = append(vaultIDs, vid)
 	}
 	chunks, totalChunks, err := s.explainExecutor(ctx, vaultIDs, req.GetQuery())
@@ -742,7 +726,7 @@ func (s *Server) forwardTierApply(ctx context.Context, req *gastrologv1.ForwardT
 	if s.tierApplyFn == nil {
 		return nil, status.Error(codes.Unavailable, "tier apply function not configured")
 	}
-	if err := s.tierApplyFn(ctx, req.GetGroupId(), req.GetCommand()); err != nil {
+	if err := s.tierApplyFn(ctx, string(req.GetGroupId()), req.GetCommand()); err != nil {
 		return nil, status.Errorf(codes.Internal, "tier apply: %v", err)
 	}
 	return &gastrologv1.ForwardTierApplyResponse{}, nil
@@ -754,7 +738,7 @@ func (s *Server) forwardRemoveNode(ctx context.Context, req *gastrologv1.Forward
 	if s.removeNodeFn == nil {
 		return nil, status.Error(codes.Unavailable, "remove node not configured")
 	}
-	if err := s.removeNodeFn(ctx, req.GetNodeId()); err != nil {
+	if err := s.removeNodeFn(ctx, string(req.GetNodeId())); err != nil {
 		return nil, status.Errorf(codes.Internal, "remove node: %v", err)
 	}
 	return &gastrologv1.ForwardRemoveNodeResponse{}, nil
@@ -766,7 +750,7 @@ func (s *Server) forwardSetNodeSuffrage(ctx context.Context, req *gastrologv1.Fo
 	if s.setNodeSuffrageFn == nil {
 		return nil, status.Error(codes.Unavailable, "set node suffrage not configured")
 	}
-	if err := s.setNodeSuffrageFn(ctx, req.GetNodeId(), req.GetNodeAddr(), req.GetVoter()); err != nil {
+	if err := s.setNodeSuffrageFn(ctx, string(req.GetNodeId()), req.GetNodeAddr(), req.GetVoter()); err != nil {
 		return nil, status.Errorf(codes.Internal, "set node suffrage: %v", err)
 	}
 	return &gastrologv1.ForwardSetNodeSuffrageResponse{}, nil
@@ -789,7 +773,12 @@ func (s *Server) listPeerManagedFiles(_ context.Context, _ *gastrologv1.ListPeer
 	if s.managedFileIDs == nil {
 		return &gastrologv1.ListPeerManagedFilesResponse{}, nil
 	}
-	return &gastrologv1.ListPeerManagedFilesResponse{FileIds: s.managedFileIDs()}, nil
+	ids := s.managedFileIDs()
+	bids := make([][]byte, len(ids))
+	for i, id := range ids {
+		bids[i] = []byte(id)
+	}
+	return &gastrologv1.ListPeerManagedFilesResponse{FileIds: bids}, nil
 }
 
 // pullManagedFileStreamHandler handles the server-streaming PullManagedFile RPC.
@@ -805,7 +794,7 @@ func pullManagedFileStreamHandler(srv any, stream grpc.ServerStream) error {
 		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
 	}
 
-	name, rc, sha256hex, err := s.managedFileReader(req.GetFileId())
+	name, rc, sha256hex, err := s.managedFileReader(string(req.GetFileId()))
 	if err != nil {
 		return status.Errorf(codes.NotFound, "open managed file %s: %v", req.GetFileId(), err)
 	}
@@ -1363,7 +1352,7 @@ func NewForwardRemoveNodeClient(cc grpc.ClientConnInterface) *ForwardRemoveNodeC
 
 // ForwardRemoveNode asks the leader to remove a node from the cluster.
 func (c *ForwardRemoveNodeClient) ForwardRemoveNode(ctx context.Context, nodeID string) error {
-	req := &gastrologv1.ForwardRemoveNodeRequest{NodeId: nodeID}
+	req := &gastrologv1.ForwardRemoveNodeRequest{NodeId: []byte(nodeID)}
 	out := &gastrologv1.ForwardRemoveNodeResponse{}
 	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardRemoveNode", req, out)
 }
@@ -1380,7 +1369,7 @@ func NewForwardSetNodeSuffrageClient(cc grpc.ClientConnInterface) *ForwardSetNod
 
 // ForwardSetNodeSuffrage asks the leader to change a node's suffrage.
 func (c *ForwardSetNodeSuffrageClient) ForwardSetNodeSuffrage(ctx context.Context, nodeID, nodeAddr string, voter bool) error {
-	req := &gastrologv1.ForwardSetNodeSuffrageRequest{NodeId: nodeID, NodeAddr: nodeAddr, Voter: voter}
+	req := &gastrologv1.ForwardSetNodeSuffrageRequest{NodeId: []byte(nodeID), NodeAddr: nodeAddr, Voter: voter}
 	out := &gastrologv1.ForwardSetNodeSuffrageResponse{}
 	return c.cc.Invoke(ctx, "/gastrolog.v1.ClusterService/ForwardSetNodeSuffrage", req, out)
 }

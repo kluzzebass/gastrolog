@@ -55,7 +55,7 @@ func (s *VaultServer) ListChunks(
 		remoteNodes := s.remoteTierNodes(ctx, vaultID)
 		for _, nodeID := range remoteNodes {
 			remote, err := s.remoteChunkLister.ListChunks(ctx, nodeID, &apiv1.ForwardListChunksRequest{
-				VaultId: vaultID.String(),
+				VaultId: vaultID.ToProto(),
 			})
 			if err != nil {
 				s.logger.Warn("ListChunks: remote node failed", "node", nodeID, "vault", vaultID, "error", err)
@@ -79,20 +79,21 @@ func dedupChunks(chunks []*apiv1.ChunkMeta) []*apiv1.ChunkMeta {
 	best := make(map[string]*apiv1.ChunkMeta, len(chunks))
 	replicaCount := make(map[string]int32, len(chunks))
 	for _, c := range chunks {
-		replicaCount[c.Id]++
-		existing, ok := best[c.Id]
+		key := string(c.Id)
+		replicaCount[key]++
+		existing, ok := best[key]
 		if !ok {
-			best[c.Id] = c
+			best[key] = c
 			continue
 		}
 		// Prefer the more-advanced version: sealed + compressed > sealed > unsealed.
 		if moreAuthoritative(c, existing) {
-			best[c.Id] = c
+			best[key] = c
 		}
 	}
 	out := make([]*apiv1.ChunkMeta, 0, len(best))
 	for _, c := range best {
-		c.ReplicaCount = replicaCount[c.Id]
+		c.ReplicaCount = replicaCount[string(c.Id)]
 		out = append(out, c)
 	}
 	return out
@@ -170,7 +171,7 @@ func (s *VaultServer) GetChunk(
 		return nil, connErr
 	}
 
-	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
+	chunkID, err := parseProtoChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, errInvalidArg(err)
 	}
@@ -199,7 +200,7 @@ func (s *VaultServer) GetIndexes(
 		return nil, connErr
 	}
 
-	chunkID, err := chunk.ParseChunkID(req.Msg.ChunkId)
+	chunkID, err := parseProtoChunkID(req.Msg.ChunkId)
 	if err != nil {
 		return nil, errInvalidArg(err)
 	}
@@ -247,8 +248,8 @@ func (s *VaultServer) AnalyzeChunk(
 
 	var analyses []analyzer.ChunkAnalysis
 
-	if req.Msg.ChunkId != "" {
-		chunkID, parseErr := chunk.ParseChunkID(req.Msg.ChunkId)
+	if len(req.Msg.ChunkId) != 0 {
+		chunkID, parseErr := parseProtoChunkID(req.Msg.ChunkId)
 		if parseErr != nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument, parseErr)
 		}
@@ -317,7 +318,7 @@ func ValidateVaultLocal(orch *orchestrator.Orchestrator, vaultID glid.GLID, meta
 // validateChunk checks a single chunk's cursor readability and index completeness.
 func validateChunk(orch *orchestrator.Orchestrator, vaultID glid.GLID, meta chunk.ChunkMeta) *apiv1.ChunkValidation {
 	cv := &apiv1.ChunkValidation{
-		ChunkId: meta.ID.String(),
+		ChunkId: glid.GLID(meta.ID).ToProto(),
 		Valid:   true,
 	}
 

@@ -16,7 +16,7 @@ func FuzzProtoToVaultConfig(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, id, name string, enabled bool, tierID string) {
 		pb := &apiv1.VaultConfig{
-			Id:      id,
+			Id:      []byte(id),
 			Name:    name,
 			Enabled: enabled,
 		}

@@ -159,7 +159,7 @@ func (s *SystemServer) loadSystemVaults(ctx context.Context, resp *apiv1.GetSyst
 
 func vaultConfigToProto(vaultCfg system.VaultConfig) *apiv1.VaultConfig {
 	return &apiv1.VaultConfig{
-		Id:      vaultCfg.ID.String(),
+		Id:      vaultCfg.ID.ToProto(),
 		Name:    vaultCfg.Name,
 		Enabled: vaultCfg.Enabled,
 	}
@@ -172,12 +172,12 @@ func (s *SystemServer) loadSystemIngesters(ctx context.Context, resp *apiv1.GetS
 	}
 	for _, ing := range ingesters {
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
-			Id:      ing.ID.String(),
+			Id:      ing.ID.ToProto(),
 			Name:    ing.Name,
 			Type:    ing.Type,
 			Params:  ing.Params,
 			Enabled: ing.Enabled,
-			NodeId:  ing.NodeID,
+			NodeId:  []byte(ing.NodeID),
 		})
 	}
 	return nil
@@ -190,7 +190,7 @@ func (s *SystemServer) loadConfigFilters(ctx context.Context, resp *apiv1.GetSys
 	}
 	for _, fc := range filters {
 		resp.Filters = append(resp.Filters, &apiv1.FilterConfig{
-			Id:         fc.ID.String(),
+			Id:         fc.ID.ToProto(),
 			Name:       fc.Name,
 			Expression: fc.Expression,
 		})
@@ -205,7 +205,7 @@ func (s *SystemServer) loadConfigRotationPolicies(ctx context.Context, resp *api
 	}
 	for _, pol := range policies {
 		p := rotationPolicyToProto(pol)
-		p.Id = pol.ID.String()
+		p.Id = pol.ID.ToProto()
 		p.Name = pol.Name
 		resp.RotationPolicies = append(resp.RotationPolicies, p)
 	}
@@ -219,7 +219,7 @@ func (s *SystemServer) loadConfigRetentionPolicies(ctx context.Context, resp *ap
 	}
 	for _, pol := range retPolicies {
 		p := retentionPolicyToProto(pol)
-		p.Id = pol.ID.String()
+		p.Id = pol.ID.ToProto()
 		p.Name = pol.Name
 		resp.RetentionPolicies = append(resp.RetentionPolicies, p)
 	}
@@ -233,18 +233,18 @@ func (s *SystemServer) loadConfigRoutes(ctx context.Context, resp *apiv1.GetSyst
 	}
 	for _, rt := range routes {
 		prt := &apiv1.RouteConfig{
-			Id:           rt.ID.String(),
+			Id:           rt.ID.ToProto(),
 			Name:         rt.Name,
 			Distribution: string(rt.Distribution),
 			Enabled:      rt.Enabled,
 			EjectOnly:    rt.EjectOnly,
 		}
 		if rt.FilterID != nil {
-			prt.FilterId = rt.FilterID.String()
+			prt.FilterId = rt.FilterID.ToProto()
 		}
 		for _, destID := range rt.Destinations {
 			prt.Destinations = append(prt.Destinations, &apiv1.RouteDestination{
-				VaultId: destID.String(),
+				VaultId: destID.ToProto(),
 			})
 		}
 		resp.Routes = append(resp.Routes, prt)
@@ -259,7 +259,7 @@ func (s *SystemServer) loadConfigNodeConfigs(ctx context.Context, resp *apiv1.Ge
 	}
 	for _, n := range nodes {
 		resp.NodeConfigs = append(resp.NodeConfigs, &apiv1.NodeConfig{
-			Id:   n.ID.String(),
+			Id:   n.ID.ToProto(),
 			Name: n.Name,
 		})
 	}
@@ -280,7 +280,7 @@ func (s *SystemServer) loadConfigCloudServices(ctx context.Context, resp *apiv1.
 			}
 		}
 		resp.CloudServices = append(resp.CloudServices, &apiv1.CloudService{
-			Id:                cs.ID.String(),
+			Id:                cs.ID.ToProto(),
 			Name:              cs.Name,
 			Provider:          cs.Provider,
 			Bucket:            cs.Bucket,
@@ -313,12 +313,12 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 		var placements []*apiv1.TierPlacement
 		for _, p := range tierPlacements {
 			placements = append(placements, &apiv1.TierPlacement{
-				StorageId: p.StorageID,
+				StorageId: []byte(p.StorageID),
 				Leader:    p.Leader,
 			})
 		}
 		tc := &apiv1.TierConfig{
-			Id:                tier.ID.String(),
+			Id:                tier.ID.ToProto(),
 			Name:              tier.Name,
 			Type:              tierTypeToProto(tier.Type),
 			MemoryBudgetBytes: tier.MemoryBudgetBytes,
@@ -328,25 +328,25 @@ func (s *SystemServer) loadSystemTiers(ctx context.Context, resp *apiv1.GetSyste
 			ReplicationFactor: tier.ReplicationFactor,
 			Path:              tier.Path,
 			Placements:        placements,
-			VaultId:           tier.VaultID.String(),
+			VaultId:           tier.VaultID.ToProto(),
 			Position:          tier.Position,
 			CacheEviction:     tier.CacheEviction,
 			CacheBudget:  tier.CacheBudget,
 			CacheTtl:          tier.CacheTTL,
 		}
 		if tier.RotationPolicyID != nil {
-			tc.RotationPolicyId = tier.RotationPolicyID.String()
+			tc.RotationPolicyId = tier.RotationPolicyID.ToProto()
 		}
 		if tier.CloudServiceID != nil {
-			tc.CloudServiceId = tier.CloudServiceID.String()
+			tc.CloudServiceId = tier.CloudServiceID.ToProto()
 		}
 		for _, r := range tier.RetentionRules {
 			pb := &apiv1.RetentionRule{
-				RetentionPolicyId: r.RetentionPolicyID.String(),
+				RetentionPolicyId: r.RetentionPolicyID.ToProto(),
 				Action:            string(r.Action),
 			}
 			for _, eid := range r.EjectRouteIDs {
-				pb.EjectRouteIds = append(pb.EjectRouteIds, eid.String())
+				pb.EjectRouteIds = append(pb.EjectRouteIds, eid.ToProto())
 			}
 			tc.RetentionRules = append(tc.RetentionRules, pb)
 		}
@@ -379,7 +379,7 @@ func (s *SystemServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 		storages := make([]*apiv1.FileStorage, len(nsc.FileStorages))
 		for i, a := range nsc.FileStorages {
 			storages[i] = &apiv1.FileStorage{
-				Id:                a.ID.String(),
+				Id:                a.ID.ToProto(),
 				StorageClass:      a.StorageClass,
 				Name:              a.Name,
 				Path:              a.Path,
@@ -387,7 +387,7 @@ func (s *SystemServer) loadConfigNodeStorageConfigs(ctx context.Context, resp *a
 			}
 		}
 		resp.NodeStorageConfigs = append(resp.NodeStorageConfigs, &apiv1.NodeStorageConfig{
-			NodeId: nsc.NodeID,
+			NodeId: []byte(nsc.NodeID),
 			FileStorages:  storages,
 		})
 	}
@@ -451,7 +451,7 @@ func (s *SystemServer) GetSettings(
 	}
 
 	if req.Msg.IncludeSecrets {
-		mm.AccountId = ss.MaxMind.AccountID
+		mm.AccountId = []byte(ss.MaxMind.AccountID)
 		mm.LicenseKey = ss.MaxMind.LicenseKey
 	}
 
@@ -482,7 +482,7 @@ func (s *SystemServer) GetSettings(
 			BroadcastInterval: ss.Cluster.BroadcastInterval,
 		},
 		SetupWizardDismissed: func() bool { v, _ := s.sysStore.GetSetupWizardDismissed(ctx); return v }(),
-		NodeId:               s.localNodeID,
+		NodeId:               []byte(s.localNodeID),
 	}
 
 	if nodeUUID, err := glid.ParseUUID(s.localNodeID); err == nil {
@@ -593,14 +593,11 @@ func (s *SystemServer) PutNodeConfig(
 	}
 
 	// Use the ID from the request if provided, otherwise fall back to the local node.
-	idStr := cfg.GetId()
-	if idStr == "" {
-		idStr = s.localNodeID
+	idBytes := cfg.GetId()
+	if len(idBytes) == 0 {
+		idBytes = []byte(s.localNodeID)
 	}
-	nodeUUID, err := glid.ParseUUID(idStr)
-	if err != nil {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("parse node ID: %w", err))
-	}
+	nodeUUID := glid.FromBytes(idBytes)
 
 	// Reject duplicate names.
 	nodes, err := s.sysStore.ListNodes(ctx)
@@ -807,7 +804,7 @@ func mergeMaxMind(mm *apiv1.PutMaxMindSettings, cfg *system.MaxMindConfig) {
 		cfg.AutoDownload = *mm.AutoDownload
 	}
 	if mm.AccountId != nil {
-		cfg.AccountID = *mm.AccountId
+		cfg.AccountID = string(mm.AccountId)
 	}
 	if mm.LicenseKey != nil {
 		cfg.LicenseKey = *mm.LicenseKey
@@ -874,7 +871,7 @@ func jsonFileLookupsToProto(lookups []system.JSONFileLookupConfig) []*apiv1.JSON
 		}
 		out[i] = &apiv1.JSONFileLookupEntry{
 			Name:          l.Name,
-			FileId:        l.FileID,
+			FileId:        []byte(l.FileID),
 			Query:         l.Query,
 			ResponsePaths: l.ResponsePaths,
 			Parameters:    params,
@@ -886,7 +883,7 @@ func jsonFileLookupsToProto(lookups []system.JSONFileLookupConfig) []*apiv1.JSON
 func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []system.JSONFileLookupConfig {
 	out := make([]system.JSONFileLookupConfig, 0, len(entries))
 	for _, e := range entries {
-		if e.Name == "" || e.FileId == "" {
+		if e.Name == "" || len(e.FileId) == 0 {
 			continue
 		}
 		params := make([]system.HTTPLookupParam, len(e.Parameters))
@@ -895,7 +892,7 @@ func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []system.JSO
 		}
 		out = append(out, system.JSONFileLookupConfig{
 			Name:          e.Name,
-			FileID:        e.FileId,
+			FileID:        string(e.FileId),
 			Query:         e.Query,
 			ResponsePaths: e.ResponsePaths,
 			Parameters:    params,
@@ -913,7 +910,7 @@ func mmdbLookupsToProto(lookups []system.MMDBLookupConfig) []*apiv1.MMDBLookupEn
 		out[i] = &apiv1.MMDBLookupEntry{
 			Name:   l.Name,
 			DbType: l.DBType,
-			FileId: l.FileID,
+			FileId: []byte(l.FileID),
 		}
 	}
 	return out
@@ -928,7 +925,7 @@ func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []system.MMDBLookupC
 		out = append(out, system.MMDBLookupConfig{
 			Name:   e.Name,
 			DBType: e.DbType,
-			FileID: e.FileId,
+			FileID: string(e.FileId),
 		})
 	}
 	return out
@@ -942,7 +939,7 @@ func csvLookupsToProto(lookups []system.CSVLookupConfig) []*apiv1.CSVLookupEntry
 	for i, l := range lookups {
 		out[i] = &apiv1.CSVLookupEntry{
 			Name:         l.Name,
-			FileId:       l.FileID,
+			FileId:       []byte(l.FileID),
 			KeyColumn:    l.KeyColumn,
 			ValueColumns: l.ValueColumns,
 		}
@@ -953,12 +950,12 @@ func csvLookupsToProto(lookups []system.CSVLookupConfig) []*apiv1.CSVLookupEntry
 func csvLookupsFromProto(entries []*apiv1.CSVLookupEntry) []system.CSVLookupConfig {
 	out := make([]system.CSVLookupConfig, 0, len(entries))
 	for _, e := range entries {
-		if e.Name == "" || e.FileId == "" {
+		if e.Name == "" || len(e.FileId) == 0 {
 			continue
 		}
 		out = append(out, system.CSVLookupConfig{
 			Name:         e.Name,
-			FileID:       e.FileId,
+			FileID:       string(e.FileId),
 			KeyColumn:    e.KeyColumn,
 			ValueColumns: e.ValueColumns,
 		})
@@ -1087,7 +1084,7 @@ func (s *SystemServer) PreviewCSVLookup(
 	ctx context.Context,
 	req *connect.Request[apiv1.PreviewCSVLookupRequest],
 ) (*connect.Response[apiv1.PreviewCSVLookupResponse], error) {
-	fileID := req.Msg.GetFileId()
+	fileID := string(req.Msg.GetFileId())
 	if fileID == "" {
 		return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
 			Error: "file_id is required",

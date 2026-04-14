@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
@@ -32,14 +33,14 @@ export function VaultCard({
 }: Readonly<VaultCardProps>) {
   // Use ListChunks data (fans out to leader nodes, authoritative per chunk).
   // ListVaults stats rely on periodic peer broadcasts and flicker.
-  const { data: chunks } = useChunks(vault.id);
+  const { data: chunks } = useChunks(encode(vault.id));
   const chunkCount = chunks?.length ?? 0;
   const recordCount = (chunks ?? []).reduce((sum, c) => sum + Number(c.recordCount), 0);
 
   return (
     <ExpandableCard
-      key={vault.id}
-      id={vault.name || vault.id}
+      key={encode(vault.id)}
+      id={vault.name || encode(vault.id)}
       typeBadge={vault.type}
       secondaryBadge={cloudProvider}
       dark={dark}
@@ -64,8 +65,8 @@ export function VaultCard({
         </span>
       }
     >
-      <VaultActions vaultId={vault.id} dark={dark} />
-      <ChunkList vaultId={vault.id} dark={dark} />
+      <VaultActions vaultId={encode(vault.id)} dark={dark} />
+      <ChunkList vaultId={encode(vault.id)} dark={dark} />
     </ExpandableCard>
   );
 }
@@ -130,10 +131,10 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   // Build tier position map from vault config for labeling.
   // Tiers own their vault association via vaultId + position fields.
   const vaultTiers = (config?.tiers ?? [])
-    .filter((t) => t.vaultId === vaultId)
+    .filter((t) => encode(t.vaultId) === vaultId)
     .toSorted((a, b) => a.position - b.position);
   const tierPositions = new Map<string, number>(
-    vaultTiers.map((t) => [t.id, t.position + 1]),
+    vaultTiers.map((t) => [encode(t.id), t.position + 1]),
   );
 
   if (isLoading) {
@@ -153,12 +154,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   // Group chunks by tier, then sort within each tier by time (newest first).
   const tierGroups = new Map<string, { tierType: string; chunks: ChunkMeta[] }>();
   for (const chunk of dedupedChunks) {
-    const key = chunk.tierId || "unknown";
+    const key = encode(chunk.tierId) || "unknown";
     const existing = tierGroups.get(key);
     if (existing) {
       existing.chunks.push(chunk);
     } else {
-      tierGroups.set(key, { tierType: chunk.tierType || "unknown", chunks: [chunk] });
+      tierGroups.set(key, { tierType: chunk.tierType ?? "unknown", chunks: [chunk] });
     }
   }
 
@@ -172,12 +173,12 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     const tierTypeMap: Record<number, string> = { 1: "memory", 2: "file", 3: "cloud", 4: "jsonl" };
     const nscs = config?.nodeStorageConfigs ?? [];
     return vaultTiers
-      .filter((tc) => !localTierIds.has(tc.id))
+      .filter((tc) => !localTierIds.has(encode(tc.id)))
       .map((tc) => {
         const pnId = leaderNodeId(tc, nscs);
         return {
-          id: tc.id,
-          pos: tierPositions.get(tc.id) ?? 0,
+          id: encode(tc.id),
+          pos: tierPositions.get(encode(tc.id)) ?? 0,
           type: tierTypeMap[tc.type] ?? "unknown",
           nodeName: pnId ? resolveNodeName(nodeNameMap, pnId) : "",
           rf: tc.replicationFactor || 1,
@@ -199,7 +200,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   return (
     <div>
       {/* Build a unified tier list: local tiers with chunks + remote tiers without */}
-      {vaultTiers.map((vt) => vt.id).map((tierId) => {
+      {vaultTiers.map((vt) => encode(vt.id)).map((tierId) => {
         const pos = tierPositions.get(tierId) ?? 0;
         const group = tierGroups.get(tierId);
         const remote = remoteTierInfo.find((rt) => rt.id === tierId);
@@ -224,7 +225,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                     const name = resolveNodeName(nodeNameMap, id);
                     let fallbackClass = 0;
                     if (remote.storageClass > 0) {
-                      const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
+                      const nsc = (config?.nodeStorageConfigs ?? []).find((n) => encode(n.nodeId) === id);
                       const hasExact = nsc?.fileStorages.some((a) => a.storageClass === remote.storageClass);
                       if (!hasExact && nsc && nsc.fileStorages.length > 0) {
                         fallbackClass = nsc.fileStorages[0]!.storageClass;
@@ -249,7 +250,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         if (!group) return null;
 
         const label = `Tier ${String(pos)}: ${group.tierType}`;
-        const tierCfg = config?.tiers.find((t) => t.id === tierId);
+        const tierCfg = config?.tiers.find((t) => encode(t.id) === tierId);
         const nscs = config?.nodeStorageConfigs ?? [];
         const rf = tierCfg?.replicationFactor || 1;
         const secondaries = tierCfg ? followerNodeIds(tierCfg, nscs) : [];
@@ -279,7 +280,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                   const requiredClass = tierCfg?.storageClass ?? 0;
                   let fallbackClass = 0;
                   if (requiredClass > 0) {
-                    const nsc = (config?.nodeStorageConfigs ?? []).find((n) => n.nodeId === id);
+                    const nsc = (config?.nodeStorageConfigs ?? []).find((n) => encode(n.nodeId) === id);
                     const hasExact = nsc?.fileStorages.some((a) => a.storageClass === requiredClass);
                     if (!hasExact && nsc && nsc.fileStorages.length > 0) {
                       fallbackClass = nsc.fileStorages[0]!.storageClass;
@@ -319,18 +320,18 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
                 const endTs = chunk.ingestEnd ?? chunk.writeEnd;
                 const start = startTs ? instantToDate(protoToInstant(startTs)) : undefined;
                 const end = endTs ? instantToDate(protoToInstant(endTs)) : undefined;
-                const isExpanded = expandedChunk === chunk.id;
+                const isExpanded = expandedChunk === encode(chunk.id);
 
                 const replicas = chunk.replicaCount || 1;
                 return (
                   <ChunkRow
-                    key={chunk.id}
+                    key={encode(chunk.id)}
                     chunk={chunk}
                     vaultId={vaultId}
                     start={start}
                     end={end}
                     isExpanded={isExpanded}
-                    onToggle={() => setExpandedChunk(isExpanded ? null : chunk.id)}
+                    onToggle={() => setExpandedChunk(isExpanded ? null : encode(chunk.id))}
                     dark={dark}
                     c={c}
                     replicas={replicas}
@@ -392,7 +393,7 @@ function ChunkRow({
             </span>
             <span
               className={`font-mono truncate block max-w-36 ${c("text-text-muted", "text-light-text-muted")}`}
-              title={chunk.id}
+              title={encode(chunk.id)}
             >
               {chunk.id}
             </span>
@@ -491,7 +492,7 @@ function ChunkDetail({
 }>) {
   const c = useThemeClass(dark);
   // Skip index fetch for cloud-backed chunks — they don't have local indexes.
-  const { data, isLoading } = useIndexes(vaultId, chunk.cloudBacked ? "" : chunk.id);
+  const { data, isLoading } = useIndexes(vaultId, chunk.cloudBacked ? "" : encode(chunk.id));
 
   const logicalBytes = Number(chunk.bytes);
   const diskBytes = Number(chunk.diskBytes);
@@ -608,10 +609,10 @@ function ChunkDetail({
                 {chunk.storageClass || "standard"}
               </span>
               {!chunk.archived && (
-                <ArchiveButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+                <ArchiveButton vaultId={vaultId} chunkId={encode(chunk.id)} dark={dark} />
               )}
               {chunk.archived && (
-                <RestoreButton vaultId={vaultId} chunkId={chunk.id} dark={dark} />
+                <RestoreButton vaultId={vaultId} chunkId={encode(chunk.id)} dark={dark} />
               )}
             </div>
           </div>

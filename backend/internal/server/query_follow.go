@@ -99,17 +99,17 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 	var wg sync.WaitGroup
 
 	for nodeID, vaultIDs := range byNode {
-		vaultStrs := make([]string, len(vaultIDs))
+		vaultBytes := make([][]byte, len(vaultIDs))
 		for i, v := range vaultIDs {
-			vaultStrs[i] = v.String()
+			vaultBytes[i] = v.ToProto()
 		}
 
 		wg.Add(1)
-		go func(nodeID string, vaultStrs []string) {
+		go func(nodeID string, vaultBytes [][]byte) {
 			defer wg.Done()
 
 			recCh, errCh := s.remoteSearcher.Follow(ctx, nodeID, &apiv1.ForwardFollowRequest{
-				VaultIds: vaultStrs,
+				VaultIds: vaultBytes,
 				Query:    queryExpr,
 			})
 
@@ -132,7 +132,7 @@ func (s *QueryServer) startRemoteFollows(ctx context.Context, q query.Query) <-c
 					return
 				}
 			}
-		}(nodeID, vaultStrs)
+		}(nodeID, vaultBytes)
 	}
 
 	// Close merged channel when all remote streams end.

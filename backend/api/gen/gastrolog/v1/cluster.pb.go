@@ -158,7 +158,7 @@ func (*ForwardApplyResponse) Descriptor() ([]byte, []int) {
 type EnrollRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TokenSecret   string                 `protobuf:"bytes,1,opt,name=token_secret,json=tokenSecret,proto3" json:"token_secret,omitempty"`
-	NodeId        string                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,2,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	NodeAddr      string                 `protobuf:"bytes,3,opt,name=node_addr,json=nodeAddr,proto3" json:"node_addr,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -201,11 +201,11 @@ func (x *EnrollRequest) GetTokenSecret() string {
 	return ""
 }
 
-func (x *EnrollRequest) GetNodeId() string {
+func (x *EnrollRequest) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 func (x *EnrollRequest) GetNodeAddr() string {
@@ -362,7 +362,7 @@ func (*BroadcastResponse) Descriptor() ([]byte, []int) {
 // new variants without breaking existing receivers.
 type BroadcastMessage struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
-	SenderId  string                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
+	SenderId  []byte                 `protobuf:"bytes,1,opt,name=sender_id,json=senderId,proto3" json:"sender_id,omitempty"`
 	Timestamp *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
 	// Types that are valid to be assigned to Payload:
 	//
@@ -403,11 +403,11 @@ func (*BroadcastMessage) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *BroadcastMessage) GetSenderId() string {
+func (x *BroadcastMessage) GetSenderId() []byte {
 	if x != nil {
 		return x.SenderId
 	}
-	return ""
+	return nil
 }
 
 func (x *BroadcastMessage) GetTimestamp() *timestamppb.Timestamp {
@@ -842,7 +842,7 @@ func (x *NodeStats) GetAlerts() []*SystemAlert {
 // the condition has resolved.
 type SystemAlert struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // stable key for dedup (e.g. "vault-init:$vaultID")
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // stable key for dedup (e.g. "vault-init:$vaultID")
 	Severity      AlertSeverity          `protobuf:"varint,2,opt,name=severity,proto3,enum=gastrolog.v1.AlertSeverity" json:"severity,omitempty"`
 	Source        string                 `protobuf:"bytes,3,opt,name=source,proto3" json:"source,omitempty"` // component name (e.g. "orchestrator", "forwarder")
 	Message       string                 `protobuf:"bytes,4,opt,name=message,proto3" json:"message,omitempty"`
@@ -882,11 +882,11 @@ func (*SystemAlert) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *SystemAlert) GetId() string {
+func (x *SystemAlert) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *SystemAlert) GetSeverity() AlertSeverity {
@@ -927,7 +927,7 @@ func (x *SystemAlert) GetLastSeen() *timestamppb.Timestamp {
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
 type IngesterNodeStats struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
-	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id               []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	MessagesIngested uint64                 `protobuf:"varint,2,opt,name=messages_ingested,json=messagesIngested,proto3" json:"messages_ingested,omitempty"`
 	BytesIngested    uint64                 `protobuf:"varint,3,opt,name=bytes_ingested,json=bytesIngested,proto3" json:"bytes_ingested,omitempty"`
 	Errors           uint64                 `protobuf:"varint,4,opt,name=errors,proto3" json:"errors,omitempty"`
@@ -967,11 +967,11 @@ func (*IngesterNodeStats) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *IngesterNodeStats) GetId() string {
+func (x *IngesterNodeStats) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *IngesterNodeStats) GetMessagesIngested() uint64 {
@@ -1015,7 +1015,7 @@ func (x *IngesterNodeStats) GetName() string {
 // chunk.
 type ForwardRecordsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1051,11 +1051,11 @@ func (*ForwardRecordsRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *ForwardRecordsRequest) GetVaultId() string {
+func (x *ForwardRecordsRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 func (x *ForwardRecordsRequest) GetRecords() []*ExportRecord {
@@ -1114,7 +1114,7 @@ func (x *ForwardRecordsResponse) GetRecordsWritten() int64 {
 // runs retention and chunk lifecycle) is not the tier Raft leader.
 type ForwardTierApplyRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	GroupId       string                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"` // tier Raft group ID (= tier UUID)
+	GroupId       []byte                 `protobuf:"bytes,1,opt,name=group_id,json=groupId,proto3" json:"group_id,omitempty"` // tier Raft group ID (= tier UUID)
 	Command       []byte                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"`                // pre-marshaled tier FSM command
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1150,11 +1150,11 @@ func (*ForwardTierApplyRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *ForwardTierApplyRequest) GetGroupId() string {
+func (x *ForwardTierApplyRequest) GetGroupId() []byte {
 	if x != nil {
 		return x.GroupId
 	}
-	return ""
+	return nil
 }
 
 func (x *ForwardTierApplyRequest) GetCommand() []byte {
@@ -1205,8 +1205,8 @@ func (*ForwardTierApplyResponse) Descriptor() ([]byte, []int) {
 // operation. New command types can be added without changing framing.
 type TierReplicationCommand struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
-	VaultId string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	TierId  string                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
+	VaultId []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	TierId  []byte                 `protobuf:"bytes,2,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
 	// Types that are valid to be assigned to Command:
 	//
 	//	*TierReplicationCommand_Append
@@ -1248,18 +1248,18 @@ func (*TierReplicationCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *TierReplicationCommand) GetVaultId() string {
+func (x *TierReplicationCommand) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
-func (x *TierReplicationCommand) GetTierId() string {
+func (x *TierReplicationCommand) GetTierId() []byte {
 	if x != nil {
 		return x.TierId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierReplicationCommand) GetCommand() isTierReplicationCommand_Command {
@@ -1336,7 +1336,7 @@ func (*TierReplicationCommand_DeleteChunk) isTierReplicationCommand_Command() {}
 // TierReplicationAppend forwards records to the follower's active chunk.
 type TierReplicationAppend struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // leader's active chunk ID
+	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // leader's active chunk ID
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1372,11 +1372,11 @@ func (*TierReplicationAppend) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *TierReplicationAppend) GetChunkId() string {
+func (x *TierReplicationAppend) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierReplicationAppend) GetRecords() []*ExportRecord {
@@ -1389,7 +1389,7 @@ func (x *TierReplicationAppend) GetRecords() []*ExportRecord {
 // TierReplicationSeal tells the follower to seal its active chunk.
 type TierReplicationSeal struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // expected active chunk ID
+	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // expected active chunk ID
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1424,18 +1424,18 @@ func (*TierReplicationSeal) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *TierReplicationSeal) GetChunkId() string {
+func (x *TierReplicationSeal) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 // TierReplicationImport sends the canonical sealed chunk. The follower
 // replaces any forwarded version with this authoritative copy.
 type TierReplicationImport struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Records       []*ExportRecord        `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1471,11 +1471,11 @@ func (*TierReplicationImport) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *TierReplicationImport) GetChunkId() string {
+func (x *TierReplicationImport) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 func (x *TierReplicationImport) GetRecords() []*ExportRecord {
@@ -1489,7 +1489,7 @@ func (x *TierReplicationImport) GetRecords() []*ExportRecord {
 // (e.g. after retention expiry or tier transition on the leader).
 type TierReplicationDelete struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	ChunkId       string                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,1,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1524,11 +1524,11 @@ func (*TierReplicationDelete) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *TierReplicationDelete) GetChunkId() string {
+func (x *TierReplicationDelete) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 // TierReplicationAck is sent follower → leader after each command.
@@ -1536,7 +1536,7 @@ type TierReplicationAck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
 	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
-	ChunkId       string                 `protobuf:"bytes,3,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // echoes the chunk_id from the command
+	ChunkId       []byte                 `protobuf:"bytes,3,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // echoes the chunk_id from the command
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1585,18 +1585,18 @@ func (x *TierReplicationAck) GetError() string {
 	return ""
 }
 
-func (x *TierReplicationAck) GetChunkId() string {
+func (x *TierReplicationAck) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 // ForwardSearchRequest is sent to the node that owns a remote vault,
 // asking it to execute a search locally and return matching records.
 type ForwardSearchRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	ResumeToken   []byte                 `protobuf:"bytes,3,opt,name=resume_token,json=resumeToken,proto3" json:"resume_token,omitempty"` // resume token for pagination across pages
 	unknownFields protoimpl.UnknownFields
@@ -1633,11 +1633,11 @@ func (*ForwardSearchRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *ForwardSearchRequest) GetVaultId() string {
+func (x *ForwardSearchRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 func (x *ForwardSearchRequest) GetQuery() string {
@@ -1734,8 +1734,8 @@ func (x *ForwardSearchResponse) GetHistogram() []*HistogramBucket {
 // a specific record in one of its local vaults.
 type ForwardGetContextRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	Pos           uint64                 `protobuf:"varint,3,opt,name=pos,proto3" json:"pos,omitempty"`
 	Before        int32                  `protobuf:"varint,4,opt,name=before,proto3" json:"before,omitempty"`
 	After         int32                  `protobuf:"varint,5,opt,name=after,proto3" json:"after,omitempty"`
@@ -1773,18 +1773,18 @@ func (*ForwardGetContextRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *ForwardGetContextRequest) GetVaultId() string {
+func (x *ForwardGetContextRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
-func (x *ForwardGetContextRequest) GetChunkId() string {
+func (x *ForwardGetContextRequest) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 func (x *ForwardGetContextRequest) GetPos() uint64 {
@@ -1873,7 +1873,7 @@ func (x *ForwardGetContextResponse) GetAfter() []*ExportRecord {
 // remote vaults in the inspector.
 type ForwardListChunksRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1908,11 +1908,11 @@ func (*ForwardListChunksRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{25}
 }
 
-func (x *ForwardListChunksRequest) GetVaultId() string {
+func (x *ForwardListChunksRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 type ForwardListChunksResponse struct {
@@ -1963,8 +1963,8 @@ func (x *ForwardListChunksResponse) GetChunks() []*ChunkMeta {
 // a specific chunk in one of its local vaults.
 type ForwardGetIndexesRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1999,18 +1999,18 @@ func (*ForwardGetIndexesRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{27}
 }
 
-func (x *ForwardGetIndexesRequest) GetVaultId() string {
+func (x *ForwardGetIndexesRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
-func (x *ForwardGetIndexesRequest) GetChunkId() string {
+func (x *ForwardGetIndexesRequest) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 type ForwardGetIndexesResponse struct {
@@ -2069,7 +2069,7 @@ func (x *ForwardGetIndexesResponse) GetIndexes() []*IndexInfo {
 // chunk and index integrity.
 type ForwardValidateVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2104,11 +2104,11 @@ func (*ForwardValidateVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{29}
 }
 
-func (x *ForwardValidateVaultRequest) GetVaultId() string {
+func (x *ForwardValidateVaultRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 type ForwardValidateVaultResponse struct {
@@ -2167,8 +2167,8 @@ func (x *ForwardValidateVaultResponse) GetChunks() []*ChunkValidation {
 // chunk in one of its local vaults.
 type ForwardGetChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2203,18 +2203,18 @@ func (*ForwardGetChunkRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{31}
 }
 
-func (x *ForwardGetChunkRequest) GetVaultId() string {
+func (x *ForwardGetChunkRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
-func (x *ForwardGetChunkRequest) GetChunkId() string {
+func (x *ForwardGetChunkRequest) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 type ForwardGetChunkResponse struct {
@@ -2265,8 +2265,8 @@ func (x *ForwardGetChunkResponse) GetChunk() *ChunkMeta {
 // vault (or specific chunk) and return the results.
 type ForwardAnalyzeChunkRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
-	ChunkId       string                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // empty = analyze all chunks
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	ChunkId       []byte                 `protobuf:"bytes,2,opt,name=chunk_id,json=chunkId,proto3" json:"chunk_id,omitempty"` // empty = analyze all chunks
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2301,18 +2301,18 @@ func (*ForwardAnalyzeChunkRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *ForwardAnalyzeChunkRequest) GetVaultId() string {
+func (x *ForwardAnalyzeChunkRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
-func (x *ForwardAnalyzeChunkRequest) GetChunkId() string {
+func (x *ForwardAnalyzeChunkRequest) GetChunkId() []byte {
 	if x != nil {
 		return x.ChunkId
 	}
-	return ""
+	return nil
 }
 
 type ForwardAnalyzeChunkResponse struct {
@@ -2362,7 +2362,7 @@ func (x *ForwardAnalyzeChunkResponse) GetAnalyses() []*ChunkAnalysis {
 // ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
 type ForwardSealVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2397,11 +2397,11 @@ func (*ForwardSealVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{35}
 }
 
-func (x *ForwardSealVaultRequest) GetVaultId() string {
+func (x *ForwardSealVaultRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 type ForwardSealVaultResponse struct {
@@ -2443,7 +2443,7 @@ func (*ForwardSealVaultResponse) Descriptor() ([]byte, []int) {
 // ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
 type ForwardReindexVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2478,16 +2478,16 @@ func (*ForwardReindexVaultRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *ForwardReindexVaultRequest) GetVaultId() string {
+func (x *ForwardReindexVaultRequest) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 type ForwardReindexVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         []byte                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2522,11 +2522,11 @@ func (*ForwardReindexVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{38}
 }
 
-func (x *ForwardReindexVaultResponse) GetJobId() string {
+func (x *ForwardReindexVaultResponse) GetJobId() []byte {
 	if x != nil {
 		return x.JobId
 	}
-	return ""
+	return nil
 }
 
 // ForwardExportToVaultRequest asks a remote node to run an export-to-vault job.
@@ -2534,7 +2534,7 @@ func (x *ForwardReindexVaultResponse) GetJobId() string {
 type ForwardExportToVaultRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Expression    string                 `protobuf:"bytes,1,opt,name=expression,proto3" json:"expression,omitempty"`                              // Query expression (export op stripped)
-	TargetVaultId string                 `protobuf:"bytes,2,opt,name=target_vault_id,json=targetVaultId,proto3" json:"target_vault_id,omitempty"` // Target vault UUID (already resolved)
+	TargetVaultId []byte                 `protobuf:"bytes,2,opt,name=target_vault_id,json=targetVaultId,proto3" json:"target_vault_id,omitempty"` // Target vault UUID (already resolved)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2576,16 +2576,16 @@ func (x *ForwardExportToVaultRequest) GetExpression() string {
 	return ""
 }
 
-func (x *ForwardExportToVaultRequest) GetTargetVaultId() string {
+func (x *ForwardExportToVaultRequest) GetTargetVaultId() []byte {
 	if x != nil {
 		return x.TargetVaultId
 	}
-	return ""
+	return nil
 }
 
 type ForwardExportToVaultResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	JobId         []byte                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2620,11 +2620,11 @@ func (*ForwardExportToVaultResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{40}
 }
 
-func (x *ForwardExportToVaultResponse) GetJobId() string {
+func (x *ForwardExportToVaultResponse) GetJobId() []byte {
 	if x != nil {
 		return x.JobId
 	}
-	return ""
+	return nil
 }
 
 // NotifyEvictionRequest is sent by the leader to a node that has been removed
@@ -2714,7 +2714,7 @@ func (*NotifyEvictionResponse) Descriptor() ([]byte, []int) {
 // and sends the eviction notification.
 type ForwardRemoveNodeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2749,11 +2749,11 @@ func (*ForwardRemoveNodeRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{43}
 }
 
-func (x *ForwardRemoveNodeRequest) GetNodeId() string {
+func (x *ForwardRemoveNodeRequest) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type ForwardRemoveNodeResponse struct {
@@ -2796,7 +2796,7 @@ func (*ForwardRemoveNodeResponse) Descriptor() ([]byte, []int) {
 // promote or demote a node's voting status.
 type ForwardSetNodeSuffrageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	NodeId        string                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,1,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	NodeAddr      string                 `protobuf:"bytes,2,opt,name=node_addr,json=nodeAddr,proto3" json:"node_addr,omitempty"`
 	Voter         bool                   `protobuf:"varint,3,opt,name=voter,proto3" json:"voter,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -2833,11 +2833,11 @@ func (*ForwardSetNodeSuffrageRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{45}
 }
 
-func (x *ForwardSetNodeSuffrageRequest) GetNodeId() string {
+func (x *ForwardSetNodeSuffrageRequest) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 func (x *ForwardSetNodeSuffrageRequest) GetNodeAddr() string {
@@ -2895,7 +2895,7 @@ func (*ForwardSetNodeSuffrageResponse) Descriptor() ([]byte, []int) {
 type ForwardExplainRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`
-	VaultIds      []string               `protobuf:"bytes,2,rep,name=vault_ids,json=vaultIds,proto3" json:"vault_ids,omitempty"` // batch all vaults for this node in one RPC
+	VaultIds      [][]byte               `protobuf:"bytes,2,rep,name=vault_ids,json=vaultIds,proto3" json:"vault_ids,omitempty"` // batch all vaults for this node in one RPC
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2937,7 +2937,7 @@ func (x *ForwardExplainRequest) GetQuery() string {
 	return ""
 }
 
-func (x *ForwardExplainRequest) GetVaultIds() []string {
+func (x *ForwardExplainRequest) GetVaultIds() [][]byte {
 	if x != nil {
 		return x.VaultIds
 	}
@@ -3001,7 +3001,7 @@ func (x *ForwardExplainResponse) GetTotalChunks() int32 {
 // records as they arrive. The coordinator merges local and remote streams.
 type ForwardFollowRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultIds      []string               `protobuf:"bytes,1,rep,name=vault_ids,json=vaultIds,proto3" json:"vault_ids,omitempty"`
+	VaultIds      [][]byte               `protobuf:"bytes,1,rep,name=vault_ids,json=vaultIds,proto3" json:"vault_ids,omitempty"`
 	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -3037,7 +3037,7 @@ func (*ForwardFollowRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{49}
 }
 
-func (x *ForwardFollowRequest) GetVaultIds() []string {
+func (x *ForwardFollowRequest) GetVaultIds() [][]byte {
 	if x != nil {
 		return x.VaultIds
 	}
@@ -3100,9 +3100,9 @@ func (x *ForwardFollowResponse) GetRecords() []*ExportRecord {
 // vault_id is set on every message; the server validates consistency.
 type ImportRecordMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	VaultId       string                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
+	VaultId       []byte                 `protobuf:"bytes,1,opt,name=vault_id,json=vaultId,proto3" json:"vault_id,omitempty"`
 	Record        *ExportRecord          `protobuf:"bytes,2,opt,name=record,proto3" json:"record,omitempty"`
-	TierId        string                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"` // optional: route to a specific tier's active chunk (StreamToTier)
+	TierId        []byte                 `protobuf:"bytes,3,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"` // optional: route to a specific tier's active chunk (StreamToTier)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3137,11 +3137,11 @@ func (*ImportRecordMessage) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{51}
 }
 
-func (x *ImportRecordMessage) GetVaultId() string {
+func (x *ImportRecordMessage) GetVaultId() []byte {
 	if x != nil {
 		return x.VaultId
 	}
-	return ""
+	return nil
 }
 
 func (x *ImportRecordMessage) GetRecord() *ExportRecord {
@@ -3151,17 +3151,17 @@ func (x *ImportRecordMessage) GetRecord() *ExportRecord {
 	return nil
 }
 
-func (x *ImportRecordMessage) GetTierId() string {
+func (x *ImportRecordMessage) GetTierId() []byte {
 	if x != nil {
 		return x.TierId
 	}
-	return ""
+	return nil
 }
 
 // PullManagedFileRequest asks a peer to stream a managed file's contents.
 type PullManagedFileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileId        string                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
+	FileId        []byte                 `protobuf:"bytes,1,opt,name=file_id,json=fileId,proto3" json:"file_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3196,11 +3196,11 @@ func (*PullManagedFileRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{52}
 }
 
-func (x *PullManagedFileRequest) GetFileId() string {
+func (x *PullManagedFileRequest) GetFileId() []byte {
 	if x != nil {
 		return x.FileId
 	}
-	return ""
+	return nil
 }
 
 // PullManagedFileChunk carries a chunk of file data during streaming transfer.
@@ -3305,7 +3305,7 @@ func (*ListPeerManagedFilesRequest) Descriptor() ([]byte, []int) {
 // ListPeerManagedFilesResponse returns the file IDs present on a peer.
 type ListPeerManagedFilesResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	FileIds       []string               `protobuf:"bytes,1,rep,name=file_ids,json=fileIds,proto3" json:"file_ids,omitempty"`
+	FileIds       [][]byte               `protobuf:"bytes,1,rep,name=file_ids,json=fileIds,proto3" json:"file_ids,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3340,7 +3340,7 @@ func (*ListPeerManagedFilesResponse) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_cluster_proto_rawDescGZIP(), []int{55}
 }
 
-func (x *ListPeerManagedFilesResponse) GetFileIds() []string {
+func (x *ListPeerManagedFilesResponse) GetFileIds() [][]byte {
 	if x != nil {
 		return x.FileIds
 	}
@@ -3441,7 +3441,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x14ForwardApplyResponse\"h\n" +
 	"\rEnrollRequest\x12!\n" +
 	"\ftoken_secret\x18\x01 \x01(\tR\vtokenSecret\x12\x17\n" +
-	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12\x1b\n" +
+	"\anode_id\x18\x02 \x01(\fR\x06nodeId\x12\x1b\n" +
 	"\tnode_addr\x18\x03 \x01(\tR\bnodeAddr\"\x82\x01\n" +
 	"\x0eEnrollResponse\x12\x1e\n" +
 	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12(\n" +
@@ -3451,7 +3451,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\amessage\x18\x01 \x01(\v2\x1e.gastrolog.v1.BroadcastMessageR\amessage\"\x13\n" +
 	"\x11BroadcastResponse\"\xe5\x01\n" +
 	"\x10BroadcastMessage\x12\x1b\n" +
-	"\tsender_id\x18\x01 \x01(\tR\bsenderId\x128\n" +
+	"\tsender_id\x18\x01 \x01(\fR\bsenderId\x128\n" +
 	"\ttimestamp\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\ttimestamp\x128\n" +
 	"\n" +
 	"node_stats\x18\n" +
@@ -3506,7 +3506,7 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x12forwarded_received\x18# \x01(\x03R\x11forwardedReceived\x121\n" +
 	"\x06alerts\x18$ \x03(\v2\x19.gastrolog.v1.SystemAlertR\x06alerts\"\xfc\x01\n" +
 	"\vSystemAlert\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x127\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x127\n" +
 	"\bseverity\x18\x02 \x01(\x0e2\x1b.gastrolog.v1.AlertSeverityR\bseverity\x12\x16\n" +
 	"\x06source\x18\x03 \x01(\tR\x06source\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\x129\n" +
@@ -3514,24 +3514,24 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"first_seen\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tfirstSeen\x127\n" +
 	"\tlast_seen\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\blastSeen\"\xbd\x01\n" +
 	"\x11IngesterNodeStats\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12+\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12+\n" +
 	"\x11messages_ingested\x18\x02 \x01(\x04R\x10messagesIngested\x12%\n" +
 	"\x0ebytes_ingested\x18\x03 \x01(\x04R\rbytesIngested\x12\x16\n" +
 	"\x06errors\x18\x04 \x01(\x04R\x06errors\x12\x18\n" +
 	"\arunning\x18\x05 \x01(\bR\arunning\x12\x12\n" +
 	"\x04name\x18\x06 \x01(\tR\x04name\"t\n" +
 	"\x15ForwardRecordsRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x124\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecordsJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05\"A\n" +
 	"\x16ForwardRecordsResponse\x12'\n" +
 	"\x0frecords_written\x18\x01 \x01(\x03R\x0erecordsWritten\"N\n" +
 	"\x17ForwardTierApplyRequest\x12\x19\n" +
-	"\bgroup_id\x18\x01 \x01(\tR\agroupId\x12\x18\n" +
+	"\bgroup_id\x18\x01 \x01(\fR\agroupId\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\fR\acommand\"\x1a\n" +
 	"\x18ForwardTierApplyResponse\"\xe5\x02\n" +
 	"\x16TierReplicationCommand\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\tR\x06tierId\x12=\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x17\n" +
+	"\atier_id\x18\x02 \x01(\fR\x06tierId\x12=\n" +
 	"\x06append\x18\n" +
 	" \x01(\v2#.gastrolog.v1.TierReplicationAppendH\x00R\x06append\x127\n" +
 	"\x04seal\x18\v \x01(\v2!.gastrolog.v1.TierReplicationSealH\x00R\x04seal\x12J\n" +
@@ -3539,21 +3539,21 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\fdelete_chunk\x18\r \x01(\v2#.gastrolog.v1.TierReplicationDeleteH\x00R\vdeleteChunkB\t\n" +
 	"\acommand\"h\n" +
 	"\x15TierReplicationAppend\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x124\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"0\n" +
 	"\x13TierReplicationSeal\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\tR\achunkId\"h\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"h\n" +
 	"\x15TierReplicationImport\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\tR\achunkId\x124\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\x124\n" +
 	"\arecords\x18\x02 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"2\n" +
 	"\x15TierReplicationDelete\x12\x19\n" +
-	"\bchunk_id\x18\x01 \x01(\tR\achunkId\"U\n" +
+	"\bchunk_id\x18\x01 \x01(\fR\achunkId\"U\n" +
 	"\x12TierReplicationAck\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x14\n" +
 	"\x05error\x18\x02 \x01(\tR\x05error\x12\x19\n" +
-	"\bchunk_id\x18\x03 \x01(\tR\achunkId\"j\n" +
+	"\bchunk_id\x18\x03 \x01(\fR\achunkId\"j\n" +
 	"\x14ForwardSearchRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x14\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\x12!\n" +
 	"\fresume_token\x18\x03 \x01(\fR\vresumeToken\"\x86\x02\n" +
 	"\x15ForwardSearchResponse\x124\n" +
@@ -3563,8 +3563,8 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\ftable_result\x18\x04 \x01(\v2\x19.gastrolog.v1.TableResultR\vtableResult\x12;\n" +
 	"\thistogram\x18\x05 \x03(\v2\x1d.gastrolog.v1.HistogramBucketR\thistogram\"\x90\x01\n" +
 	"\x18ForwardGetContextRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\tR\achunkId\x12\x10\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\x12\x10\n" +
 	"\x03pos\x18\x03 \x01(\x04R\x03pos\x12\x16\n" +
 	"\x06before\x18\x04 \x01(\x05R\x06before\x12\x14\n" +
 	"\x05after\x18\x05 \x01(\x05R\x05after\"\xb5\x01\n" +
@@ -3573,79 +3573,79 @@ const file_gastrolog_v1_cluster_proto_rawDesc = "" +
 	"\x06anchor\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06anchor\x120\n" +
 	"\x05after\x18\x03 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\x05after\"5\n" +
 	"\x18ForwardListChunksRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\"L\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"L\n" +
 	"\x19ForwardListChunksResponse\x12/\n" +
 	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkMetaR\x06chunks\"P\n" +
 	"\x18ForwardGetIndexesRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"f\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"f\n" +
 	"\x19ForwardGetIndexesResponse\x12\x16\n" +
 	"\x06sealed\x18\x01 \x01(\bR\x06sealed\x121\n" +
 	"\aindexes\x18\x02 \x03(\v2\x17.gastrolog.v1.IndexInfoR\aindexes\"8\n" +
 	"\x1bForwardValidateVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\"k\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"k\n" +
 	"\x1cForwardValidateVaultResponse\x12\x14\n" +
 	"\x05valid\x18\x01 \x01(\bR\x05valid\x125\n" +
 	"\x06chunks\x18\x02 \x03(\v2\x1d.gastrolog.v1.ChunkValidationR\x06chunks\"N\n" +
 	"\x16ForwardGetChunkRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"H\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"H\n" +
 	"\x17ForwardGetChunkResponse\x12-\n" +
 	"\x05chunk\x18\x01 \x01(\v2\x17.gastrolog.v1.ChunkMetaR\x05chunk\"R\n" +
 	"\x1aForwardAnalyzeChunkRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x12\x19\n" +
-	"\bchunk_id\x18\x02 \x01(\tR\achunkId\"V\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x12\x19\n" +
+	"\bchunk_id\x18\x02 \x01(\fR\achunkId\"V\n" +
 	"\x1bForwardAnalyzeChunkResponse\x127\n" +
 	"\banalyses\x18\x01 \x03(\v2\x1b.gastrolog.v1.ChunkAnalysisR\banalyses\"4\n" +
 	"\x17ForwardSealVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\"\x1a\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"\x1a\n" +
 	"\x18ForwardSealVaultResponse\"7\n" +
 	"\x1aForwardReindexVaultRequest\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\"4\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\"4\n" +
 	"\x1bForwardReindexVaultResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"e\n" +
+	"\x06job_id\x18\x01 \x01(\fR\x05jobId\"e\n" +
 	"\x1bForwardExportToVaultRequest\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x01 \x01(\tR\n" +
 	"expression\x12&\n" +
-	"\x0ftarget_vault_id\x18\x02 \x01(\tR\rtargetVaultId\"5\n" +
+	"\x0ftarget_vault_id\x18\x02 \x01(\fR\rtargetVaultId\"5\n" +
 	"\x1cForwardExportToVaultResponse\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"/\n" +
+	"\x06job_id\x18\x01 \x01(\fR\x05jobId\"/\n" +
 	"\x15NotifyEvictionRequest\x12\x16\n" +
 	"\x06reason\x18\x01 \x01(\tR\x06reason\"\x18\n" +
 	"\x16NotifyEvictionResponse\"3\n" +
 	"\x18ForwardRemoveNodeRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"\x1b\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\"\x1b\n" +
 	"\x19ForwardRemoveNodeResponse\"k\n" +
 	"\x1dForwardSetNodeSuffrageRequest\x12\x17\n" +
-	"\anode_id\x18\x01 \x01(\tR\x06nodeId\x12\x1b\n" +
+	"\anode_id\x18\x01 \x01(\fR\x06nodeId\x12\x1b\n" +
 	"\tnode_addr\x18\x02 \x01(\tR\bnodeAddr\x12\x14\n" +
 	"\x05voter\x18\x03 \x01(\bR\x05voter\" \n" +
 	"\x1eForwardSetNodeSuffrageResponse\"J\n" +
 	"\x15ForwardExplainRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x1b\n" +
-	"\tvault_ids\x18\x02 \x03(\tR\bvaultIds\"l\n" +
+	"\tvault_ids\x18\x02 \x03(\fR\bvaultIds\"l\n" +
 	"\x16ForwardExplainResponse\x12/\n" +
 	"\x06chunks\x18\x01 \x03(\v2\x17.gastrolog.v1.ChunkPlanR\x06chunks\x12!\n" +
 	"\ftotal_chunks\x18\x02 \x01(\x05R\vtotalChunks\"I\n" +
 	"\x14ForwardFollowRequest\x12\x1b\n" +
-	"\tvault_ids\x18\x01 \x03(\tR\bvaultIds\x12\x14\n" +
+	"\tvault_ids\x18\x01 \x03(\fR\bvaultIds\x12\x14\n" +
 	"\x05query\x18\x02 \x01(\tR\x05query\"M\n" +
 	"\x15ForwardFollowResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\"\x83\x01\n" +
 	"\x13ImportRecordMessage\x12\x19\n" +
-	"\bvault_id\x18\x01 \x01(\tR\avaultId\x122\n" +
+	"\bvault_id\x18\x01 \x01(\fR\avaultId\x122\n" +
 	"\x06record\x18\x02 \x01(\v2\x1a.gastrolog.v1.ExportRecordR\x06record\x12\x17\n" +
-	"\atier_id\x18\x03 \x01(\tR\x06tierIdJ\x04\b\x04\x10\x05\"1\n" +
+	"\atier_id\x18\x03 \x01(\fR\x06tierIdJ\x04\b\x04\x10\x05\"1\n" +
 	"\x16PullManagedFileRequest\x12\x17\n" +
-	"\afile_id\x18\x01 \x01(\tR\x06fileId\"V\n" +
+	"\afile_id\x18\x01 \x01(\fR\x06fileId\"V\n" +
 	"\x14PullManagedFileChunk\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06sha256\x18\x03 \x01(\tR\x06sha256\"\x1d\n" +
 	"\x1bListPeerManagedFilesRequest\"9\n" +
 	"\x1cListPeerManagedFilesResponse\x12\x19\n" +
-	"\bfile_ids\x18\x01 \x03(\tR\afileIds\"\xac\x01\n" +
+	"\bfile_ids\x18\x01 \x03(\fR\afileIds\"\xac\x01\n" +
 	"\x0fForwardRPCFrame\x12\x1c\n" +
 	"\tprocedure\x18\x01 \x01(\tR\tprocedure\x12\x18\n" +
 	"\apayload\x18\x02 \x01(\fR\apayload\x12\x1d\n" +

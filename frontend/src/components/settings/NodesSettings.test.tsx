@@ -8,7 +8,15 @@ const mocks = installMockClients();
 import { NodesSettings } from "./NodesSettings";
 import { ClusterNodeRole, ClusterNodeSuffrage } from "../../api/gen/gastrolog/v1/lifecycle_pb";
 
-const localNodeId = "node-local";
+/** Create a distinct 16-byte Uint8Array test ID from a small number. */
+function testId(n: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(16);
+  bytes[15] = n;
+  return bytes;
+}
+
+const localNodeId = testId(1);
+const remoteNodeId = testId(2);
 
 const sampleSettings = {
   nodeId: localNodeId,
@@ -18,7 +26,7 @@ const sampleSettings = {
 const sampleConfig = {
   nodeConfigs: [
     { id: localNodeId, name: "my-node" },
-    { id: "node-remote", name: "remote-node" },
+    { id: remoteNodeId, name: "remote-node" },
   ],
   routes: [],
   filters: [],
@@ -38,7 +46,7 @@ const sampleCluster = {
       stats: { vaultCount: 2 },
     },
     {
-      id: "node-remote",
+      id: remoteNodeId,
       name: "remote-node",
       role: ClusterNodeRole.FOLLOWER,
       suffrage: ClusterNodeSuffrage.VOTER,
@@ -237,7 +245,7 @@ describe("NodesSettings", () => {
 
   test("empty state when no nodes", () => {
     const qc = createTestQueryClient();
-    qc.setQueryData(["settings"], { nodeId: "", nodeName: "" });
+    qc.setQueryData(["settings"], { nodeId: new Uint8Array(0), nodeName: "" });
     qc.setQueryData(["system"], { ...sampleConfig, nodeConfigs: [] });
     qc.setQueryData(["clusterStatus"], { clusterEnabled: false, nodes: [] });
 

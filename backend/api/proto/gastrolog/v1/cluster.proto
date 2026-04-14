@@ -21,7 +21,7 @@ message ForwardApplyResponse {}
 // The token_secret proves the node is authorized to join.
 message EnrollRequest {
   string token_secret = 1;
-  string node_id = 2;
+  bytes node_id = 2;
   string node_addr = 3;
 }
 
@@ -43,7 +43,7 @@ message BroadcastResponse {}
 // The oneof payload makes it extensible — new message types are added as
 // new variants without breaking existing receivers.
 message BroadcastMessage {
-  string sender_id = 1;
+  bytes sender_id = 1;
   google.protobuf.Timestamp timestamp = 2;
 
   oneof payload {
@@ -117,7 +117,7 @@ message NodeStats {
 // multiple alerts. They auto-clear when the component that raised them detects
 // the condition has resolved.
 message SystemAlert {
-  string id = 1;                           // stable key for dedup (e.g. "vault-init:$vaultID")
+  bytes id = 1;                           // stable key for dedup (e.g. "vault-init:$vaultID")
   AlertSeverity severity = 2;
   string source = 3;                       // component name (e.g. "orchestrator", "forwarder")
   string message = 4;
@@ -133,7 +133,7 @@ enum AlertSeverity {
 
 // IngesterNodeStats reports per-ingester statistics on a cluster node.
 message IngesterNodeStats {
-  string id = 1;
+  bytes id = 1;
   uint64 messages_ingested = 2;
   uint64 bytes_ingested = 3;
   uint64 errors = 4;
@@ -146,7 +146,7 @@ message IngesterNodeStats {
 // remote vault. Records are appended to the destination vault's active
 // chunk.
 message ForwardRecordsRequest {
-  string vault_id = 1;
+  bytes vault_id = 1;
   repeated ExportRecord records = 2;
   reserved 3, 4; // was tier_id, chunk_id (gastrolog-572d7)
 }
@@ -159,7 +159,7 @@ message ForwardRecordsResponse {
 // tier Raft leader to apply. Used when the config placement leader (which
 // runs retention and chunk lifecycle) is not the tier Raft leader.
 message ForwardTierApplyRequest {
-  string group_id = 1; // tier Raft group ID (= tier UUID)
+  bytes group_id = 1; // tier Raft group ID (= tier UUID)
   bytes command = 2;   // pre-marshaled tier FSM command
 }
 
@@ -177,8 +177,8 @@ message ForwardTierApplyResponse {}
 // tier_id identify the target tier; the oneof command determines the
 // operation. New command types can be added without changing framing.
 message TierReplicationCommand {
-  string vault_id = 1;
-  string tier_id = 2;
+  bytes vault_id = 1;
+  bytes tier_id = 2;
 
   oneof command {
     TierReplicationAppend append = 10;
@@ -190,39 +190,39 @@ message TierReplicationCommand {
 
 // TierReplicationAppend forwards records to the follower's active chunk.
 message TierReplicationAppend {
-  string chunk_id = 1;               // leader's active chunk ID
+  bytes chunk_id = 1;               // leader's active chunk ID
   repeated ExportRecord records = 2;
 }
 
 // TierReplicationSeal tells the follower to seal its active chunk.
 message TierReplicationSeal {
-  string chunk_id = 1; // expected active chunk ID
+  bytes chunk_id = 1; // expected active chunk ID
 }
 
 // TierReplicationImport sends the canonical sealed chunk. The follower
 // replaces any forwarded version with this authoritative copy.
 message TierReplicationImport {
-  string chunk_id = 1;
+  bytes chunk_id = 1;
   repeated ExportRecord records = 2;
 }
 
 // TierReplicationDelete tells the follower to delete a sealed chunk
 // (e.g. after retention expiry or tier transition on the leader).
 message TierReplicationDelete {
-  string chunk_id = 1;
+  bytes chunk_id = 1;
 }
 
 // TierReplicationAck is sent follower → leader after each command.
 message TierReplicationAck {
   bool ok = 1;
   string error = 2;
-  string chunk_id = 3; // echoes the chunk_id from the command
+  bytes chunk_id = 3; // echoes the chunk_id from the command
 }
 
 // ForwardSearchRequest is sent to the node that owns a remote vault,
 // asking it to execute a search locally and return matching records.
 message ForwardSearchRequest {
-  string vault_id = 1;
+  bytes vault_id = 1;
   string query = 2;
   bytes resume_token = 3; // resume token for pagination across pages
 }
@@ -238,8 +238,8 @@ message ForwardSearchResponse {
 // ForwardGetContextRequest asks a remote node to return records surrounding
 // a specific record in one of its local vaults.
 message ForwardGetContextRequest {
-  string vault_id = 1;
-  string chunk_id = 2;
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
   uint64 pos = 3;
   int32 before = 4;
   int32 after = 5;
@@ -255,7 +255,7 @@ message ForwardGetContextResponse {
 // local vaults. Used by the coordinating node to show chunk details for
 // remote vaults in the inspector.
 message ForwardListChunksRequest {
-  string vault_id = 1;
+  bytes vault_id = 1;
 }
 
 message ForwardListChunksResponse {
@@ -265,8 +265,8 @@ message ForwardListChunksResponse {
 // ForwardGetIndexesRequest asks a remote node to return index status for
 // a specific chunk in one of its local vaults.
 message ForwardGetIndexesRequest {
-  string vault_id = 1;
-  string chunk_id = 2;
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
 }
 
 message ForwardGetIndexesResponse {
@@ -277,7 +277,7 @@ message ForwardGetIndexesResponse {
 // ForwardValidateVaultRequest asks a remote node to validate a vault's
 // chunk and index integrity.
 message ForwardValidateVaultRequest {
-  string vault_id = 1;
+  bytes vault_id = 1;
 }
 
 message ForwardValidateVaultResponse {
@@ -288,8 +288,8 @@ message ForwardValidateVaultResponse {
 // ForwardGetChunkRequest asks a remote node to return details for a specific
 // chunk in one of its local vaults.
 message ForwardGetChunkRequest {
-  string vault_id = 1;
-  string chunk_id = 2;
+  bytes vault_id = 1;
+  bytes chunk_id = 2;
 }
 
 message ForwardGetChunkResponse {
@@ -299,8 +299,8 @@ message ForwardGetChunkResponse {
 // ForwardAnalyzeChunkRequest asks a remote node to run index analysis on a
 // vault (or specific chunk) and return the results.
 message ForwardAnalyzeChunkRequest {
-  string vault_id = 1;
-  string chunk_id = 2; // empty = analyze all chunks
+  bytes vault_id = 1;
+  bytes chunk_id = 2; // empty = analyze all chunks
 }
 
 message ForwardAnalyzeChunkResponse {
@@ -309,29 +309,29 @@ message ForwardAnalyzeChunkResponse {
 
 // ForwardSealVaultRequest asks a remote node to seal the active chunk of a vault.
 message ForwardSealVaultRequest {
-  string vault_id = 1;
+  bytes vault_id = 1;
 }
 
 message ForwardSealVaultResponse {}
 
 // ForwardReindexVaultRequest asks a remote node to rebuild all indexes for a vault.
 message ForwardReindexVaultRequest {
-  string vault_id = 1;
+  bytes vault_id = 1;
 }
 
 message ForwardReindexVaultResponse {
-  string job_id = 1;
+  bytes job_id = 1;
 }
 
 // ForwardExportToVaultRequest asks a remote node to run an export-to-vault job.
 // The remote node owns the target vault and runs the export locally.
 message ForwardExportToVaultRequest {
   string expression = 1;   // Query expression (export op stripped)
-  string target_vault_id = 2;  // Target vault UUID (already resolved)
+  bytes target_vault_id = 2;  // Target vault UUID (already resolved)
 }
 
 message ForwardExportToVaultResponse {
-  string job_id = 1;
+  bytes job_id = 1;
 }
 
 // NotifyEvictionRequest is sent by the leader to a node that has been removed
@@ -346,7 +346,7 @@ message NotifyEvictionResponse {}
 // a node from the cluster. The leader executes the Raft membership change
 // and sends the eviction notification.
 message ForwardRemoveNodeRequest {
-  string node_id = 1;
+  bytes node_id = 1;
 }
 
 message ForwardRemoveNodeResponse {}
@@ -354,7 +354,7 @@ message ForwardRemoveNodeResponse {}
 // ForwardSetNodeSuffrageRequest is sent by a follower to the leader to
 // promote or demote a node's voting status.
 message ForwardSetNodeSuffrageRequest {
-  string node_id = 1;
+  bytes node_id = 1;
   string node_addr = 2;
   bool voter = 3;
 }
@@ -365,7 +365,7 @@ message ForwardSetNodeSuffrageResponse {}
 // one or more of its local vaults.
 message ForwardExplainRequest {
   string query = 1;
-  repeated string vault_ids = 2;  // batch all vaults for this node in one RPC
+  repeated bytes vault_ids = 2;  // batch all vaults for this node in one RPC
 }
 
 message ForwardExplainResponse {
@@ -377,7 +377,7 @@ message ForwardExplainResponse {
 // node's local vaults. The remote node runs eng.Follow() and streams new
 // records as they arrive. The coordinator merges local and remote streams.
 message ForwardFollowRequest {
-  repeated string vault_ids = 1;
+  repeated bytes vault_ids = 1;
   string query = 2;
 }
 
@@ -389,9 +389,9 @@ message ForwardFollowResponse {
 // ImportRecordMessage carries a single record for client-streaming import.
 // vault_id is set on every message; the server validates consistency.
 message ImportRecordMessage {
-  string vault_id = 1;
+  bytes vault_id = 1;
   ExportRecord record = 2;
-  string tier_id = 3;   // optional: route to a specific tier's active chunk (StreamToTier)
+  bytes tier_id = 3;   // optional: route to a specific tier's active chunk (StreamToTier)
   reserved 4;           // was chunk_id (gastrolog-63rnl)
 }
 
@@ -399,7 +399,7 @@ message ImportRecordMessage {
 
 // PullManagedFileRequest asks a peer to stream a managed file's contents.
 message PullManagedFileRequest {
-  string file_id = 1;
+  bytes file_id = 1;
 }
 
 // PullManagedFileChunk carries a chunk of file data during streaming transfer.
@@ -415,7 +415,7 @@ message ListPeerManagedFilesRequest {}
 
 // ListPeerManagedFilesResponse returns the file IDs present on a peer.
 message ListPeerManagedFilesResponse {
-  repeated string file_ids = 1;
+  repeated bytes file_ids = 1;
 }
 
 // ForwardRPCFrame carries a single frame in a generic ForwardRPC

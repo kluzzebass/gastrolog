@@ -79,9 +79,9 @@ export class ListVaultsResponse extends Message<ListVaultsResponse> {
  */
 export class VaultInfo extends Message<VaultInfo> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string type = 2;
@@ -114,9 +114,9 @@ export class VaultInfo extends Message<VaultInfo> {
   name = "";
 
   /**
-   * @generated from field: string node_id = 8;
+   * @generated from field: bytes node_id = 8;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   /**
    * True if vault lives on another node
@@ -133,14 +133,14 @@ export class VaultInfo extends Message<VaultInfo> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.VaultInfo";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "filter", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "chunk_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 5, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 8, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 8, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 9, name: "remote", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -166,9 +166,9 @@ export class VaultInfo extends Message<VaultInfo> {
  */
 export class GetVaultRequest extends Message<GetVaultRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<GetVaultRequest>) {
     super();
@@ -178,7 +178,7 @@ export class GetVaultRequest extends Message<GetVaultRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.GetVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetVaultRequest {
@@ -326,9 +326,9 @@ export class ListChunksResponse extends Message<ListChunksResponse> {
  */
 export class ChunkMeta extends Message<ChunkMeta> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: google.protobuf.Timestamp write_start = 2;
@@ -403,9 +403,9 @@ export class ChunkMeta extends Message<ChunkMeta> {
   /**
    * which tier this chunk belongs to
    *
-   * @generated from field: string tier_id = 14;
+   * @generated from field: bytes tier_id = 14;
    */
-  tierId = "";
+  tierId = new Uint8Array(0);
 
   /**
    * tier type: "memory", "file", "cloud"
@@ -443,7 +443,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkMeta";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "write_start", kind: "message", T: Timestamp },
     { no: 3, name: "write_end", kind: "message", T: Timestamp },
     { no: 4, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
@@ -456,7 +456,7 @@ export class ChunkMeta extends Message<ChunkMeta> {
     { no: 11, name: "cloud_backed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 12, name: "archived", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 13, name: "num_frames", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
-    { no: 14, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 14, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 15, name: "tier_type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 16, name: "retention_pending", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 17, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -490,9 +490,9 @@ export class GetChunkRequest extends Message<GetChunkRequest> {
   vault = "";
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<GetChunkRequest>) {
     super();
@@ -503,7 +503,7 @@ export class GetChunkRequest extends Message<GetChunkRequest> {
   static readonly typeName = "gastrolog.v1.GetChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetChunkRequest {
@@ -570,9 +570,9 @@ export class GetIndexesRequest extends Message<GetIndexesRequest> {
   vault = "";
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<GetIndexesRequest>) {
     super();
@@ -583,7 +583,7 @@ export class GetIndexesRequest extends Message<GetIndexesRequest> {
   static readonly typeName = "gastrolog.v1.GetIndexesRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): GetIndexesRequest {
@@ -713,9 +713,9 @@ export class AnalyzeChunkRequest extends Message<AnalyzeChunkRequest> {
   /**
    * If empty, analyze all chunks
    *
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<AnalyzeChunkRequest>) {
     super();
@@ -726,7 +726,7 @@ export class AnalyzeChunkRequest extends Message<AnalyzeChunkRequest> {
   static readonly typeName = "gastrolog.v1.AnalyzeChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AnalyzeChunkRequest {
@@ -788,9 +788,9 @@ export class AnalyzeChunkResponse extends Message<AnalyzeChunkResponse> {
  */
 export class ChunkAnalysis extends Message<ChunkAnalysis> {
   /**
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: bool sealed = 2;
@@ -815,7 +815,7 @@ export class ChunkAnalysis extends Message<ChunkAnalysis> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkAnalysis";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "sealed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "record_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "indexes", kind: "message", T: IndexAnalysis, repeated: true },
@@ -1161,9 +1161,9 @@ export class ProcessMemoryStats extends Message<ProcessMemoryStats> {
  */
 export class VaultStats extends Message<VaultStats> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string type = 2;
@@ -1228,7 +1228,7 @@ export class VaultStats extends Message<VaultStats> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.VaultStats";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "chunk_count", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "sealed_chunks", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -1301,9 +1301,9 @@ export class ReindexVaultRequest extends Message<ReindexVaultRequest> {
  */
 export class ReindexVaultResponse extends Message<ReindexVaultResponse> {
   /**
-   * @generated from field: string job_id = 4;
+   * @generated from field: bytes job_id = 4;
    */
-  jobId = "";
+  jobId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ReindexVaultResponse>) {
     super();
@@ -1313,7 +1313,7 @@ export class ReindexVaultResponse extends Message<ReindexVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ReindexVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 4, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "job_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ReindexVaultResponse {
@@ -1418,9 +1418,9 @@ export class ValidateVaultResponse extends Message<ValidateVaultResponse> {
  */
 export class ChunkValidation extends Message<ChunkValidation> {
   /**
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: bool valid = 2;
@@ -1440,7 +1440,7 @@ export class ChunkValidation extends Message<ChunkValidation> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ChunkValidation";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "valid", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 3, name: "issues", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
@@ -1527,9 +1527,9 @@ export class MigrateVaultRequest extends Message<MigrateVaultRequest> {
  */
 export class MigrateVaultResponse extends Message<MigrateVaultResponse> {
   /**
-   * @generated from field: string job_id = 3;
+   * @generated from field: bytes job_id = 3;
    */
-  jobId = "";
+  jobId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<MigrateVaultResponse>) {
     super();
@@ -1539,7 +1539,7 @@ export class MigrateVaultResponse extends Message<MigrateVaultResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.MigrateVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 3, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "job_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MigrateVaultResponse {
@@ -1672,14 +1672,14 @@ export class ExportRecord extends Message<ExportRecord> {
   /**
    * Record reference (populated by ForwardSearch, empty for import/export).
    *
-   * @generated from field: string vault_id = 5;
+   * @generated from field: bytes vault_id = 5;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: string chunk_id = 6;
+   * @generated from field: bytes chunk_id = 6;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: uint64 pos = 7;
@@ -1722,8 +1722,8 @@ export class ExportRecord extends Message<ExportRecord> {
     { no: 2, name: "ingest_ts", kind: "message", T: Timestamp },
     { no: 3, name: "attrs", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 4, name: "raw", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
-    { no: 5, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 6, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 8, name: "write_ts", kind: "message", T: Timestamp },
     { no: 9, name: "ingest_seq", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
@@ -1877,9 +1877,9 @@ export class MergeVaultsRequest extends Message<MergeVaultsRequest> {
  */
 export class MergeVaultsResponse extends Message<MergeVaultsResponse> {
   /**
-   * @generated from field: string job_id = 3;
+   * @generated from field: bytes job_id = 3;
    */
-  jobId = "";
+  jobId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<MergeVaultsResponse>) {
     super();
@@ -1889,7 +1889,7 @@ export class MergeVaultsResponse extends Message<MergeVaultsResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.MergeVaultsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 3, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "job_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): MergeVaultsResponse {
@@ -2003,9 +2003,9 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   vault = "";
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * Target: "GLACIER", "DEEP_ARCHIVE", "Archive"
@@ -2023,7 +2023,7 @@ export class ArchiveChunkRequest extends Message<ArchiveChunkRequest> {
   static readonly typeName = "gastrolog.v1.ArchiveChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "storage_class", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -2085,9 +2085,9 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   vault = "";
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * "Expedited"/"Standard"/"Bulk" (S3), "High"/"Standard" (Azure)
@@ -2112,7 +2112,7 @@ export class RestoreChunkRequest extends Message<RestoreChunkRequest> {
   static readonly typeName = "gastrolog.v1.RestoreChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "vault", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "restore_tier", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "restore_days", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
   ]);

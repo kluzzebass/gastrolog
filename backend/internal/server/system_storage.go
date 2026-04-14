@@ -24,14 +24,14 @@ func (s *SystemServer) PutCloudService(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
 	}
 
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -65,11 +65,11 @@ func (s *SystemServer) DeleteCloudService(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteCloudServiceRequest],
 ) (*connect.Response[apiv1.DeleteCloudServiceResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -116,7 +116,7 @@ func (s *SystemServer) SetNodeStorageConfig(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.NodeId == "" {
+	if len(req.Msg.Config.NodeId) == 0 {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("node_id required"))
 	}
 
@@ -151,10 +151,10 @@ func (s *SystemServer) PutTier(
 	if req.Msg.Config == nil {
 		return nil, errRequired("config")
 	}
-	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = glid.New().String()
+	if len(req.Msg.Config.Id) == 0 {
+		req.Msg.Config.Id = glid.New().ToProto()
 	}
-	id, connErr := parseUUID(req.Msg.Config.Id)
+	id, connErr := parseProtoID(req.Msg.Config.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -173,8 +173,8 @@ func (s *SystemServer) PutTier(
 	}
 
 	// Validate referenced rotation policy exists (if set).
-	if req.Msg.Config.RotationPolicyId != "" {
-		rpID, connErr := parseUUID(req.Msg.Config.RotationPolicyId)
+	if len(req.Msg.Config.RotationPolicyId) != 0 {
+		rpID, connErr := parseProtoID(req.Msg.Config.RotationPolicyId)
 		if connErr != nil {
 			return nil, connErr
 		}
@@ -184,7 +184,7 @@ func (s *SystemServer) PutTier(
 		}
 		if rp == nil {
 			return nil, connect.NewError(connect.CodeInvalidArgument,
-				fmt.Errorf("rotation policy %q not found", req.Msg.Config.RotationPolicyId))
+				fmt.Errorf("rotation policy %q not found", rpID))
 		}
 	}
 
@@ -223,11 +223,11 @@ func (s *SystemServer) DeleteTier(
 	ctx context.Context,
 	req *connect.Request[apiv1.DeleteTierRequest],
 ) (*connect.Response[apiv1.DeleteTierResponse], error) {
-	if req.Msg.Id == "" {
+	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
 
-	id, connErr := parseUUID(req.Msg.Id)
+	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
@@ -269,7 +269,7 @@ func (s *SystemServer) DeleteTier(
 // validateCloudTierFields checks that a cloud tier has all required fields and
 // that the referenced cloud service exists.
 func (s *SystemServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.TierConfig) *connect.Error {
-	if cfg.CloudServiceId == "" {
+	if len(cfg.CloudServiceId) == 0 {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("cloud_service_id required for cloud tiers"))
 	}
 	if cfg.ActiveChunkClass == 0 {
@@ -278,7 +278,7 @@ func (s *SystemServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.T
 	if cfg.CacheClass == 0 {
 		return connect.NewError(connect.CodeInvalidArgument, errors.New("cache_class required for cloud tiers"))
 	}
-	csID, connErr := parseUUID(cfg.CloudServiceId)
+	csID, connErr := parseProtoID(cfg.CloudServiceId)
 	if connErr != nil {
 		return connErr
 	}
@@ -288,7 +288,7 @@ func (s *SystemServer) validateCloudTierFields(ctx context.Context, cfg *apiv1.T
 	}
 	if cs == nil {
 		return connect.NewError(connect.CodeInvalidArgument,
-			fmt.Errorf("cloud service %q not found", cfg.CloudServiceId))
+			fmt.Errorf("cloud service %q not found", csID))
 	}
 	return nil
 }

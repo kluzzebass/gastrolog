@@ -1,3 +1,4 @@
+import { decode } from "../../../api/glid";
 import { useState } from "react";
 import { FormField, TextInput, NumberInput } from "../FormField";
 import { useThemeClass } from "../../../hooks/useThemeClass";
@@ -28,7 +29,7 @@ export function ScatterboxForm({
     if (!ingesterId) return;
     try {
       await systemClient.triggerIngester(
-        { id: ingesterId },
+        { id: decode(ingesterId) },
         ingesterNodeId ? { headers: { "X-Target-Node": ingesterNodeId } } : {},
       );
       setTriggerState("sent");

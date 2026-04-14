@@ -7,9 +7,10 @@ import { CogIcon } from "../icons";
 import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 import { CrossLinkBadge } from "./CrossLinkBadge";
+import { encode } from "../../api/glid";
 
 interface IngesterCardProps {
-  ingester: { id: string; name: string; type: string; running: boolean; nodeId: string };
+  ingester: { id: Uint8Array; name: string; type: string; running: boolean; nodeId: Uint8Array };
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -25,16 +26,17 @@ export function IngesterCard({
   showNodeBadge = true,
   onOpenSettings,
 }: Readonly<IngesterCardProps>) {
+  const ingId = encode(ingester.id);
   return (
     <ExpandableCard
-      id={ingester.name || ingester.id}
+      id={ingester.name || ingId}
       typeBadge={ingester.type}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          {showNodeBadge && <NodeBadge nodeId={ingester.nodeId} dark={dark} />}
+          {showNodeBadge && <NodeBadge nodeId={encode(ingester.nodeId)} dark={dark} />}
           {ingester.running ? (
             <Badge variant="info" dark={dark}>running</Badge>
           ) : (
@@ -48,7 +50,7 @@ export function IngesterCard({
         </span>
       }
     >
-      <IngesterDetail id={ingester.id} dark={dark} />
+      <IngesterDetail id={ingId} dark={dark} />
     </ExpandableCard>
   );
 }

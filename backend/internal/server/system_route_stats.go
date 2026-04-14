@@ -6,6 +6,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 )
 
 // GetRouteStats returns live routing statistics aggregated across the cluster.
@@ -25,7 +26,7 @@ func (s *SystemServer) GetRouteStats(
 	vaultMap := make(map[string]*apiv1.VaultRouteStats)
 	for vaultID, vs := range s.orch.VaultRouteStatsList() {
 		vaultMap[vaultID.String()] = &apiv1.VaultRouteStats{
-			VaultId:          vaultID.String(),
+			VaultId:          vaultID.ToProto(),
 			RecordsMatched:   vs.Matched.Load(),
 			RecordsForwarded: vs.Forwarded.Load(),
 		}
@@ -35,7 +36,7 @@ func (s *SystemServer) GetRouteStats(
 	routeMap := make(map[string]*apiv1.PerRouteStats)
 	for routeID, ps := range s.orch.PerRouteStatsList() {
 		routeMap[routeID.String()] = &apiv1.PerRouteStats{
-			RouteId:          routeID.String(),
+			RouteId:          routeID.ToProto(),
 			RecordsMatched:   ps.Matched.Load(),
 			RecordsForwarded: ps.Forwarded.Load(),
 		}
@@ -72,9 +73,10 @@ func (s *SystemServer) GetRouteStats(
 
 func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.VaultRouteStats) {
 	for _, vs := range stats {
-		existing, ok := m[vs.VaultId]
+		key := glid.FromBytes(vs.VaultId).String()
+		existing, ok := m[key]
 		if !ok {
-			m[vs.VaultId] = vs
+			m[key] = vs
 			continue
 		}
 		existing.RecordsMatched += vs.RecordsMatched
@@ -84,9 +86,10 @@ func mergeVaultRouteStats(m map[string]*apiv1.VaultRouteStats, stats []*apiv1.Va
 
 func mergePerRouteStats(m map[string]*apiv1.PerRouteStats, stats []*apiv1.PerRouteStats) {
 	for _, rs := range stats {
-		existing, ok := m[rs.RouteId]
+		key := glid.FromBytes(rs.RouteId).String()
+		existing, ok := m[key]
 		if !ok {
-			m[rs.RouteId] = rs
+			m[key] = rs
 			continue
 		}
 		existing.RecordsMatched += rs.RecordsMatched

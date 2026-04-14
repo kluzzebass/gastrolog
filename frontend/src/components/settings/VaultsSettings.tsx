@@ -1,3 +1,4 @@
+import { encode, decode } from "../../api/glid";
 import { useReducer, useState } from "react";
 import { protoInt64 } from "@bufbuild/protobuf";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
@@ -515,7 +516,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const storageClassOptions = (() => {
     const classNodes = new Map<number, string[]>();
     for (const nsc of config?.nodeStorageConfigs ?? []) {
-      const nodeName = resolveNodeName(nodeNameMap, nsc.nodeId);
+      const nodeName = resolveNodeName(nodeNameMap, encode(nsc.nodeId));
       for (const fs of nsc.fileStorages) {
         const nodes = classNodes.get(fs.storageClass);
         if (nodes) {
@@ -555,20 +556,20 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   // Derive cloud storage options
   const cloudServiceOptions = (config?.cloudServices ?? [])
     .slice()
-    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
-    .map((cs) => ({ value: cs.id, label: cs.name || cs.id }));
+    .sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
+    .map((cs) => ({ value: encode(cs.id), label: cs.name || encode(cs.id) }));
 
   // Derive rotation policy options
   const rotationPolicyOptions = (config?.rotationPolicies ?? [])
     .slice()
-    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
-    .map((rp) => ({ value: rp.id, label: rp.name || rp.id }));
+    .sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
+    .map((rp) => ({ value: encode(rp.id), label: rp.name || encode(rp.id) }));
 
   // Derive retention policy options
   const retentionPolicyOptions = (config?.retentionPolicies ?? [])
     .slice()
-    .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
-    .map((rp) => ({ value: rp.id, label: rp.name || rp.id }));
+    .sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
+    .map((rp) => ({ value: encode(rp.id), label: rp.name || encode(rp.id) }));
 
   // Validation: at least one tier, all tiers complete, no name conflict
   const allTiersComplete = addForm.tiers.length > 0 && addForm.tiers.every((t) => isTierComplete(t, cloudServiceOptions.length > 0));
@@ -580,7 +581,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     setConsumedExpandTarget(expandTarget);
     const match = configVaults.find((s) => (s.name || s.id) === expandTarget);
     if (match) {
-      setExpandedCards((prev) => ({ ...prev, [match.id]: true }));
+      setExpandedCards((prev) => ({ ...prev, [encode(match.id)]: true }));
     }
     onExpandTargetConsumed?.();
   }
@@ -592,24 +593,22 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     // Build tier configs outside try/catch (React Compiler can't optimize
     // conditional expressions inside try/catch).
     const tierConfigs = addForm.tiers.map((tier, i) => {
-      const tierId = crypto.randomUUID();
       return new TierConfig({
-        id: tierId,
         name: tier.type,
         type: tierTypeEnum(tier.type),
-        vaultId,
+        vaultId: decode(vaultId),
         position: i,
         storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
-        cloudServiceId: tier.type === "cloud" ? tier.cloudServiceId : "",
+        cloudServiceId: tier.type === "cloud" ? decode(tier.cloudServiceId) : new Uint8Array(16),
         activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
         cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
         cacheEviction: tier.type === "cloud" ? (tier.cacheEviction || "lru") : "",
         cacheBudget: tier.type === "cloud" ? (tier.cacheBudget || "") : "",
         cacheTtl: tier.type === "cloud" ? (tier.cacheTTL || "") : "",
         memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
-        rotationPolicyId: tier.rotationPolicyId,
+        rotationPolicyId: decode(tier.rotationPolicyId),
         retentionRules: tier.retentionPolicyId
-          ? [new RetentionRule({ retentionPolicyId: tier.retentionPolicyId, action: retentionActionForPosition(i, addForm.tiers.length) })]
+          ? [new RetentionRule({ retentionPolicyId: decode(tier.retentionPolicyId), action: retentionActionForPosition(i, addForm.tiers.length) })]
           : [],
         replicationFactor: parseInt(tier.replicationFactor, 10) || 1,
       });
@@ -704,7 +703,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                   cloudServiceOptions={cloudServiceOptions}
                   rotationPolicyOptions={rotationPolicyOptions}
                   retentionPolicyOptions={retentionPolicyOptions}
-                  nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: n.id, label: n.name || n.id })).sort((a, b) => a.label.localeCompare(b.label))}
+                  nodeOptions={(config?.nodeConfigs ?? []).map((n) => ({ value: encode(n.id), label: n.name || encode(n.id) })).sort((a, b) => a.label.localeCompare(b.label))}
                   vaultName={addForm.name || addForm.namePlaceholder || ""}
                   maxRF={maxRFForTier(tier)}
                   onUpdate={(patch) =>
@@ -720,7 +719,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
 
       {sortByName(vaults).map((vault) => (
         <VaultSettingsCard
-          key={vault.id}
+          key={encode(vault.id)}
           vault={vault}
           vaults={vaults}
           tiers={tiers}
@@ -732,8 +731,8 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
           rotationPolicyOptions={rotationPolicyOptions}
           retentionPolicyOptions={retentionPolicyOptions}
           dark={dark}
-          expanded={isExpanded(vault.id)}
-          onToggle={() => toggleCard(vault.id)}
+          expanded={isExpanded(encode(vault.id))}
+          onToggle={() => toggleCard(encode(vault.id))}
           onOpenInspector={onOpenInspector}
         />
       ))}

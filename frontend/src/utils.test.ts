@@ -114,40 +114,40 @@ describe("relativeTime", () => {
 describe("sameRecord", () => {
   test("both null", () => expect(sameRecord(null, null)).toBe(true));
   test("same reference", () => {
-    const r = new Record({ ref: new RecordRef({ chunkId: "a", pos: 0n, vaultId: "s" }) });
+    const r = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1]), pos: 0n, vaultId: new Uint8Array([2]) }) });
     expect(sameRecord(r, r)).toBe(true);
   });
   test("a null", () => {
-    const r = new Record({ ref: new RecordRef({ chunkId: "a", pos: 0n, vaultId: "s" }) });
+    const r = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1]), pos: 0n, vaultId: new Uint8Array([2]) }) });
     expect(sameRecord(null, r)).toBe(false);
   });
   test("b null", () => {
-    const r = new Record({ ref: new RecordRef({ chunkId: "a", pos: 0n, vaultId: "s" }) });
+    const r = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1]), pos: 0n, vaultId: new Uint8Array([2]) }) });
     expect(sameRecord(r, null)).toBe(false);
   });
   test("same ref values", () => {
-    const a = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s1" }) });
-    const b = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s1" }) });
+    const a = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
+    const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
     expect(sameRecord(a, b)).toBe(true);
   });
   test("different chunk", () => {
-    const a = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s1" }) });
-    const b = new Record({ ref: new RecordRef({ chunkId: "c2", pos: 5n, vaultId: "s1" }) });
+    const a = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
+    const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([5, 6]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
     expect(sameRecord(a, b)).toBe(false);
   });
   test("different pos", () => {
-    const a = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s1" }) });
-    const b = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 6n, vaultId: "s1" }) });
+    const a = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
+    const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 6n, vaultId: new Uint8Array([3, 4]) }) });
     expect(sameRecord(a, b)).toBe(false);
   });
   test("different vault", () => {
-    const a = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s1" }) });
-    const b = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s2" }) });
+    const a = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
+    const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([5, 6]) }) });
     expect(sameRecord(a, b)).toBe(false);
   });
   test("missing ref on a", () => {
     const a = new Record({});
-    const b = new Record({ ref: new RecordRef({ chunkId: "c1", pos: 5n, vaultId: "s1" }) });
+    const b = new Record({ ref: new RecordRef({ chunkId: new Uint8Array([1, 2]), pos: 5n, vaultId: new Uint8Array([3, 4]) }) });
     expect(sameRecord(a, b)).toBe(false);
   });
 });

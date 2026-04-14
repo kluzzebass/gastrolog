@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useVaults, useIngesters } from "../../api/hooks";
@@ -21,18 +22,18 @@ interface NodeDetailPaneProps {
 
 export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDetailPaneProps>) {
   const { data: settingsData } = useSettings();
-  const localNodeId = settingsData?.nodeId ?? "";
+  const localNodeId = settingsData?.nodeId ? encode(settingsData.nodeId) : "";
 
   const { data: cluster } = useClusterStatus();
   const { data: config } = useConfig();
-  const nodeInfo = cluster?.nodes.find((n) => n.id === nodeId);
+  const nodeInfo = cluster?.nodes.find((n) => encode(n.id) === nodeId);
 
   // Build vault ID → cloud tier type map from config tiers.
   const cloudProviders = new Map<string, string>();
   if (config) {
     for (const tier of config.tiers) {
-      if (tier.cloudServiceId && tier.vaultId) {
-        cloudProviders.set(tier.vaultId, "cloud");
+      if (encode(tier.cloudServiceId) && encode(tier.vaultId)) {
+        cloudProviders.set(encode(tier.vaultId), "cloud");
       }
     }
   }
@@ -42,9 +43,9 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const { data: allIngesters } = useIngesters();
   const { jobs } = useWatchJobs({ onError: toastError });
 
-  const vaults = (allVaults ?? []).filter((v) => (v.nodeId || localNodeId) === nodeId);
-  const ingesters = (allIngesters ?? []).filter((i) => (i.nodeId || localNodeId) === nodeId);
-  const nodeJobs = jobs.filter((j) => (j.nodeId || localNodeId) === nodeId);
+  const vaults = (allVaults ?? []).filter((v) => (encode(v.nodeId) || localNodeId) === nodeId);
+  const ingesters = (allIngesters ?? []).filter((i) => (encode(i.nodeId) || localNodeId) === nodeId);
+  const nodeJobs = jobs.filter((j) => (encode(j.nodeId) || localNodeId) === nodeId);
   const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
   const scheduled = nodeJobs.filter((j) => j.kind === JobKind.SCHEDULED);
 
@@ -70,18 +71,21 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
         ) : (
           <div className="flex flex-col gap-2">
             {[...vaults]
-              .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id))
-              .map((vault) => (
+              .sort((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
+              .map((vault) => {
+                const vid = encode(vault.id);
+                return (
                 <VaultCard
-                  key={vault.id}
+                  key={vid}
                   vault={vault}
-                  cloudProvider={cloudProviders.get(vault.id)}
+                  cloudProvider={cloudProviders.get(vid)}
                   dark={dark}
-                  expanded={!!expandedVaults[vault.id]}
-                  onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vault.id]: !prev[vault.id] }))}
-                  onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vault.id) : undefined}
+                  expanded={!!expandedVaults[vid]}
+                  onToggle={() => setExpandedVaults((prev) => ({ ...prev, [vid]: !prev[vid] }))}
+                  onOpenSettings={onOpenSettings ? () => onOpenSettings("vaults", vault.name || vid) : undefined}
                 />
-              ))}
+                );
+              })}
           </div>
         )}
       </Section>
@@ -92,17 +96,20 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
           <EmptyMessage dark={dark}>No ingesters on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
-            {ingesters.map((ing) => (
+            {ingesters.map((ing) => {
+              const iid = encode(ing.id);
+              return (
               <IngesterCard
-                key={ing.id}
+                key={iid}
                 ingester={ing}
                 dark={dark}
-                expanded={!!expandedIngesters[ing.id]}
-                onToggle={() => setExpandedIngesters((prev) => ({ ...prev, [ing.id]: !prev[ing.id] }))}
+                expanded={!!expandedIngesters[iid]}
+                onToggle={() => setExpandedIngesters((prev) => ({ ...prev, [iid]: !prev[iid] }))}
                 showNodeBadge={false}
-                onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || ing.id) : undefined}
+                onOpenSettings={onOpenSettings ? () => onOpenSettings("ingesters", ing.name || iid) : undefined}
               />
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>
@@ -122,16 +129,19 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
           <EmptyMessage dark={dark}>No tasks on this node.</EmptyMessage>
         ) : (
           <div className="flex flex-col gap-2">
-            {tasks.map((job) => (
+            {tasks.map((job) => {
+              const jid = encode(job.id);
+              return (
               <JobCard
-                key={job.id}
+                key={jid}
                 job={job}
                 dark={dark}
-                expanded={!!expandedJobs[job.id]}
-                onToggle={() => setExpandedJobs((prev) => ({ ...prev, [job.id]: !prev[job.id] }))}
+                expanded={!!expandedJobs[jid]}
+                onToggle={() => setExpandedJobs((prev) => ({ ...prev, [jid]: !prev[jid] }))}
                 showNodeBadge={false}
               />
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>

@@ -56,7 +56,7 @@ func UnmarshalSnapshot(b []byte) (*gastrologv1.SystemSnapshot, error) {
 
 func putFilterCmd(cfg system.FilterConfig) *gastrologv1.PutFilterCommand {
 	return &gastrologv1.PutFilterCommand{
-		Id:         cfg.ID.String(),
+		Id:         cfg.ID.ToProto(),
 		Name:       cfg.Name,
 		Expression: cfg.Expression,
 	}
@@ -73,19 +73,15 @@ func NewPutFilter(cfg system.FilterConfig) *gastrologv1.SystemCommand {
 func NewDeleteFilter(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteFilter{
-			DeleteFilter: &gastrologv1.DeleteFilterCommand{Id: id.String()},
+			DeleteFilter: &gastrologv1.DeleteFilterCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutFilter converts a PutFilterCommand back to a FilterConfig.
 func ExtractPutFilter(cmd *gastrologv1.PutFilterCommand) (system.FilterConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.FilterConfig{}, fmt.Errorf("parse filter id: %w", err)
-	}
 	return system.FilterConfig{
-		ID:         id,
+		ID:         glid.FromBytes(cmd.GetId()),
 		Name:       cmd.GetName(),
 		Expression: cmd.GetExpression(),
 	}, nil
@@ -93,7 +89,7 @@ func ExtractPutFilter(cmd *gastrologv1.PutFilterCommand) (system.FilterConfig, e
 
 // ExtractDeleteFilter extracts the UUID from a DeleteFilterCommand.
 func ExtractDeleteFilter(cmd *gastrologv1.DeleteFilterCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +98,7 @@ func ExtractDeleteFilter(cmd *gastrologv1.DeleteFilterCommand) (glid.GLID, error
 
 func putRotationPolicyCmd(cfg system.RotationPolicyConfig) *gastrologv1.PutRotationPolicyCommand {
 	return &gastrologv1.PutRotationPolicyCommand{
-		Id:         cfg.ID.String(),
+		Id:         cfg.ID.ToProto(),
 		Name:       cfg.Name,
 		MaxBytes:   cfg.MaxBytes,
 		MaxAge:     cfg.MaxAge,
@@ -124,19 +120,15 @@ func NewPutRotationPolicy(cfg system.RotationPolicyConfig) *gastrologv1.SystemCo
 func NewDeleteRotationPolicy(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteRotationPolicy{
-			DeleteRotationPolicy: &gastrologv1.DeleteRotationPolicyCommand{Id: id.String()},
+			DeleteRotationPolicy: &gastrologv1.DeleteRotationPolicyCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutRotationPolicy converts a PutRotationPolicyCommand back to a RotationPolicyConfig.
 func ExtractPutRotationPolicy(cmd *gastrologv1.PutRotationPolicyCommand) (system.RotationPolicyConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.RotationPolicyConfig{}, fmt.Errorf("parse rotation policy id: %w", err)
-	}
 	return system.RotationPolicyConfig{
-		ID:         id,
+		ID:         glid.FromBytes(cmd.GetId()),
 		Name:       cmd.GetName(),
 		MaxBytes:   cmd.MaxBytes,
 		MaxAge:     cmd.MaxAge,
@@ -147,7 +139,7 @@ func ExtractPutRotationPolicy(cmd *gastrologv1.PutRotationPolicyCommand) (system
 
 // ExtractDeleteRotationPolicy extracts the UUID from a DeleteRotationPolicyCommand.
 func ExtractDeleteRotationPolicy(cmd *gastrologv1.DeleteRotationPolicyCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -156,7 +148,7 @@ func ExtractDeleteRotationPolicy(cmd *gastrologv1.DeleteRotationPolicyCommand) (
 
 func putRetentionPolicyCmd(cfg system.RetentionPolicyConfig) *gastrologv1.PutRetentionPolicyCommand {
 	return &gastrologv1.PutRetentionPolicyCommand{
-		Id:        cfg.ID.String(),
+		Id:        cfg.ID.ToProto(),
 		Name:      cfg.Name,
 		MaxAge:    cfg.MaxAge,
 		MaxBytes:  cfg.MaxBytes,
@@ -177,19 +169,15 @@ func NewPutRetentionPolicy(cfg system.RetentionPolicyConfig) *gastrologv1.System
 func NewDeleteRetentionPolicy(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteRetentionPolicy{
-			DeleteRetentionPolicy: &gastrologv1.DeleteRetentionPolicyCommand{Id: id.String()},
+			DeleteRetentionPolicy: &gastrologv1.DeleteRetentionPolicyCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutRetentionPolicy converts a PutRetentionPolicyCommand back to a RetentionPolicyConfig.
 func ExtractPutRetentionPolicy(cmd *gastrologv1.PutRetentionPolicyCommand) (system.RetentionPolicyConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.RetentionPolicyConfig{}, fmt.Errorf("parse retention policy id: %w", err)
-	}
 	return system.RetentionPolicyConfig{
-		ID:        id,
+		ID:        glid.FromBytes(cmd.GetId()),
 		Name:      cmd.GetName(),
 		MaxAge:    cmd.MaxAge,
 		MaxBytes:  cmd.MaxBytes,
@@ -199,7 +187,7 @@ func ExtractPutRetentionPolicy(cmd *gastrologv1.PutRetentionPolicyCommand) (syst
 
 // ExtractDeleteRetentionPolicy extracts the UUID from a DeleteRetentionPolicyCommand.
 func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +196,7 @@ func ExtractDeleteRetentionPolicy(cmd *gastrologv1.DeleteRetentionPolicyCommand)
 
 func putVaultCmd(cfg system.VaultConfig) *gastrologv1.PutVaultCommand {
 	return &gastrologv1.PutVaultCommand{
-		Id:      cfg.ID.String(),
+		Id:      cfg.ID.ToProto(),
 		Name:    cfg.Name,
 		Enabled: cfg.Enabled,
 	}
@@ -225,20 +213,15 @@ func NewPutVault(cfg system.VaultConfig) *gastrologv1.SystemCommand {
 func NewDeleteVault(id glid.GLID, deleteData bool) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteVault{
-			DeleteVault: &gastrologv1.DeleteVaultCommand{Id: id.String(), DeleteData: deleteData},
+			DeleteVault: &gastrologv1.DeleteVaultCommand{Id: id.ToProto(), DeleteData: deleteData},
 		},
 	}
 }
 
 // ExtractPutVault converts a PutVaultCommand back to a VaultConfig.
 func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (system.VaultConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.VaultConfig{}, fmt.Errorf("parse vault id: %w", err)
-	}
-
 	return system.VaultConfig{
-		ID:      id,
+		ID:      glid.FromBytes(cmd.GetId()),
 		Name:    cmd.GetName(),
 		Enabled: cmd.GetEnabled(),
 	}, nil
@@ -246,7 +229,7 @@ func ExtractPutVault(cmd *gastrologv1.PutVaultCommand) (system.VaultConfig, erro
 
 // ExtractDeleteVault extracts the UUID from a DeleteVaultCommand.
 func ExtractDeleteVault(cmd *gastrologv1.DeleteVaultCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -255,12 +238,12 @@ func ExtractDeleteVault(cmd *gastrologv1.DeleteVaultCommand) (glid.GLID, error) 
 
 func putIngesterCmd(cfg system.IngesterConfig) *gastrologv1.PutIngesterCommand {
 	return &gastrologv1.PutIngesterCommand{
-		Id:      cfg.ID.String(),
+		Id:      cfg.ID.ToProto(),
 		Name:    cfg.Name,
 		Type:    cfg.Type,
 		Enabled: cfg.Enabled,
 		Params:  cfg.Params,
-		NodeId:  cfg.NodeID,
+		NodeId:  []byte(cfg.NodeID),
 	}
 }
 
@@ -275,30 +258,26 @@ func NewPutIngester(cfg system.IngesterConfig) *gastrologv1.SystemCommand {
 func NewDeleteIngester(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteIngester{
-			DeleteIngester: &gastrologv1.DeleteIngesterCommand{Id: id.String()},
+			DeleteIngester: &gastrologv1.DeleteIngesterCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutIngester converts a PutIngesterCommand back to an IngesterConfig.
 func ExtractPutIngester(cmd *gastrologv1.PutIngesterCommand) (system.IngesterConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.IngesterConfig{}, fmt.Errorf("parse ingester id: %w", err)
-	}
 	return system.IngesterConfig{
-		ID:      id,
+		ID:      glid.FromBytes(cmd.GetId()),
 		Name:    cmd.GetName(),
 		Type:    cmd.GetType(),
 		Enabled: cmd.GetEnabled(),
 		Params:  nilIfEmpty(cmd.GetParams()),
-		NodeID:  cmd.GetNodeId(),
+		NodeID:  string(cmd.GetNodeId()),
 	}, nil
 }
 
 // ExtractDeleteIngester extracts the UUID from a DeleteIngesterCommand.
 func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -306,15 +285,11 @@ func ExtractDeleteIngester(cmd *gastrologv1.DeleteIngesterCommand) (glid.GLID, e
 // ---------------------------------------------------------------------------
 
 func putRouteCmd(cfg system.RouteConfig) *gastrologv1.PutRouteCommand {
-	dests := make([]string, len(cfg.Destinations))
-	for i, d := range cfg.Destinations {
-		dests[i] = d.String()
-	}
 	return &gastrologv1.PutRouteCommand{
-		Id:             cfg.ID.String(),
+		Id:             cfg.ID.ToProto(),
 		Name:           cfg.Name,
-		FilterId:       uuidPtrToString(cfg.FilterID),
-		DestinationIds: dests,
+		FilterId:       glid.OptionalToProto(cfg.FilterID),
+		DestinationIds: glid.SliceToProto(cfg.Destinations),
 		Distribution:   string(cfg.Distribution),
 		Enabled:        cfg.Enabled,
 		EjectOnly:      cfg.EjectOnly,
@@ -332,34 +307,18 @@ func NewPutRoute(cfg system.RouteConfig) *gastrologv1.SystemCommand {
 func NewDeleteRoute(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteRoute{
-			DeleteRoute: &gastrologv1.DeleteRouteCommand{Id: id.String()},
+			DeleteRoute: &gastrologv1.DeleteRouteCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutRoute converts a PutRouteCommand back to a RouteConfig.
 func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (system.RouteConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.RouteConfig{}, fmt.Errorf("parse route id: %w", err)
-	}
-	filterID, err := parseOptionalUUID(cmd.GetFilterId())
-	if err != nil {
-		return system.RouteConfig{}, fmt.Errorf("parse route filter_id: %w", err)
-	}
-	var dests []glid.GLID
-	for _, d := range cmd.GetDestinationIds() {
-		did, err := glid.ParseUUID(d)
-		if err != nil {
-			return system.RouteConfig{}, fmt.Errorf("parse route destination: %w", err)
-		}
-		dests = append(dests, did)
-	}
 	return system.RouteConfig{
-		ID:           id,
+		ID:           glid.FromBytes(cmd.GetId()),
 		Name:         cmd.GetName(),
-		FilterID:     filterID,
-		Destinations: dests,
+		FilterID:     glid.OptionalFromProto(cmd.GetFilterId()),
+		Destinations: glid.SliceFromProto(cmd.GetDestinationIds()),
 		Distribution: system.DistributionMode(cmd.GetDistribution()),
 		Enabled:      cmd.GetEnabled(),
 		EjectOnly:    cmd.GetEjectOnly(),
@@ -368,7 +327,7 @@ func ExtractPutRoute(cmd *gastrologv1.PutRouteCommand) (system.RouteConfig, erro
 
 // ExtractDeleteRoute extracts the UUID from a DeleteRouteCommand.
 func ExtractDeleteRoute(cmd *gastrologv1.DeleteRouteCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -377,7 +336,7 @@ func ExtractDeleteRoute(cmd *gastrologv1.DeleteRouteCommand) (glid.GLID, error) 
 
 func putManagedFileCmd(cfg system.ManagedFileConfig) *gastrologv1.PutManagedFileCommand {
 	return &gastrologv1.PutManagedFileCommand{
-		Id:         cfg.ID.String(),
+		Id:         cfg.ID.ToProto(),
 		Name:       cfg.Name,
 		Sha256:     cfg.SHA256,
 		Size:       cfg.Size,
@@ -396,23 +355,19 @@ func NewPutManagedFile(cfg system.ManagedFileConfig) *gastrologv1.SystemCommand 
 func NewDeleteManagedFile(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteManagedFile{
-			DeleteManagedFile: &gastrologv1.DeleteManagedFileCommand{Id: id.String()},
+			DeleteManagedFile: &gastrologv1.DeleteManagedFileCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutManagedFile converts a PutManagedFileCommand back to a ManagedFileConfig.
 func ExtractPutManagedFile(cmd *gastrologv1.PutManagedFileCommand) (system.ManagedFileConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.ManagedFileConfig{}, fmt.Errorf("parse managed file id: %w", err)
-	}
 	var uploadedAt time.Time
 	if cmd.GetUploadedAt() != "" {
 		uploadedAt, _ = time.Parse(time.RFC3339Nano, cmd.GetUploadedAt())
 	}
 	return system.ManagedFileConfig{
-		ID:         id,
+		ID:         glid.FromBytes(cmd.GetId()),
 		Name:       cmd.GetName(),
 		SHA256:     cmd.GetSha256(),
 		Size:       cmd.GetSize(),
@@ -422,7 +377,7 @@ func ExtractPutManagedFile(cmd *gastrologv1.PutManagedFileCommand) (system.Manag
 
 // ExtractDeleteManagedFile extracts the UUID from a DeleteManagedFileCommand.
 func ExtractDeleteManagedFile(cmd *gastrologv1.DeleteManagedFileCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -506,7 +461,7 @@ func ExtractPutSetting(cmd *gastrologv1.PutSettingCommand) (key, value string) {
 
 func putCertificateCmd(cert system.CertPEM) *gastrologv1.PutCertificateCommand {
 	return &gastrologv1.PutCertificateCommand{
-		Id:       cert.ID.String(),
+		Id:       cert.ID.ToProto(),
 		Name:     cert.Name,
 		CertPem:  cert.CertPEM,
 		KeyPem:   cert.KeyPEM,
@@ -528,19 +483,15 @@ func NewPutCertificate(cert system.CertPEM) *gastrologv1.SystemCommand {
 func NewDeleteCertificate(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteCertificate{
-			DeleteCertificate: &gastrologv1.DeleteCertificateCommand{Id: id.String()},
+			DeleteCertificate: &gastrologv1.DeleteCertificateCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutCertificate converts a PutCertificateCommand back to a CertPEM.
 func ExtractPutCertificate(cmd *gastrologv1.PutCertificateCommand) (system.CertPEM, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.CertPEM{}, fmt.Errorf("parse certificate id: %w", err)
-	}
 	return system.CertPEM{
-		ID:       id,
+		ID:       glid.FromBytes(cmd.GetId()),
 		Name:     cmd.GetName(),
 		CertPEM:  cmd.GetCertPem(),
 		KeyPEM:   cmd.GetKeyPem(),
@@ -551,7 +502,7 @@ func ExtractPutCertificate(cmd *gastrologv1.PutCertificateCommand) (system.CertP
 
 // ExtractDeleteCertificate extracts the UUID from a DeleteCertificateCommand.
 func ExtractDeleteCertificate(cmd *gastrologv1.DeleteCertificateCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -560,7 +511,7 @@ func ExtractDeleteCertificate(cmd *gastrologv1.DeleteCertificateCommand) (glid.G
 
 func createUserCmd(u system.User) *gastrologv1.CreateUserCommand {
 	return &gastrologv1.CreateUserCommand{
-		Id:                 u.ID.String(),
+		Id:                 u.ID.ToProto(),
 		Username:           u.Username,
 		PasswordHash:       u.PasswordHash,
 		Role:               u.Role,
@@ -583,7 +534,7 @@ func NewUpdatePassword(id glid.GLID, passwordHash string) *gastrologv1.SystemCom
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_UpdatePassword{
 			UpdatePassword: &gastrologv1.UpdatePasswordCommand{
-				Id:           id.String(),
+				Id:           id.ToProto(),
 				PasswordHash: passwordHash,
 			},
 		},
@@ -595,7 +546,7 @@ func NewUpdateUserRole(id glid.GLID, role string) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_UpdateUserRole{
 			UpdateUserRole: &gastrologv1.UpdateUserRoleCommand{
-				Id:   id.String(),
+				Id:   id.ToProto(),
 				Role: role,
 			},
 		},
@@ -607,7 +558,7 @@ func NewUpdateUsername(id glid.GLID, username string) *gastrologv1.SystemCommand
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_UpdateUsername{
 			UpdateUsername: &gastrologv1.UpdateUsernameCommand{
-				Id:       id.String(),
+				Id:       id.ToProto(),
 				Username: username,
 			},
 		},
@@ -618,7 +569,7 @@ func NewUpdateUsername(id glid.GLID, username string) *gastrologv1.SystemCommand
 func NewDeleteUser(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteUser{
-			DeleteUser: &gastrologv1.DeleteUserCommand{Id: id.String()},
+			DeleteUser: &gastrologv1.DeleteUserCommand{Id: id.ToProto()},
 		},
 	}
 }
@@ -628,7 +579,7 @@ func NewInvalidateTokens(id glid.GLID, at time.Time) *gastrologv1.SystemCommand 
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_InvalidateTokens{
 			InvalidateTokens: &gastrologv1.InvalidateTokensCommand{
-				Id: id.String(),
+				Id: id.ToProto(),
 				At: timestamppb.New(at),
 			},
 		},
@@ -640,7 +591,7 @@ func NewPutUserPreferences(id glid.GLID, prefs string) *gastrologv1.SystemComman
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_PutUserPreferences{
 			PutUserPreferences: &gastrologv1.PutUserPreferencesCommand{
-				Id:          id.String(),
+				Id:          id.ToProto(),
 				Preferences: prefs,
 			},
 		},
@@ -649,12 +600,8 @@ func NewPutUserPreferences(id glid.GLID, prefs string) *gastrologv1.SystemComman
 
 // ExtractCreateUser converts a CreateUserCommand back to a User.
 func ExtractCreateUser(cmd *gastrologv1.CreateUserCommand) (system.User, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.User{}, fmt.Errorf("parse user id: %w", err)
-	}
 	return system.User{
-		ID:                 id,
+		ID:                 glid.FromBytes(cmd.GetId()),
 		Username:           cmd.GetUsername(),
 		PasswordHash:       cmd.GetPasswordHash(),
 		Role:               cmd.GetRole(),
@@ -667,37 +614,32 @@ func ExtractCreateUser(cmd *gastrologv1.CreateUserCommand) (system.User, error) 
 
 // ExtractUpdatePassword returns the user ID and new password hash.
 func ExtractUpdatePassword(cmd *gastrologv1.UpdatePasswordCommand) (glid.GLID, string, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	return id, cmd.GetPasswordHash(), err
+	return glid.FromBytes(cmd.GetId()), cmd.GetPasswordHash(), nil
 }
 
 // ExtractUpdateUserRole returns the user ID and new role.
 func ExtractUpdateUserRole(cmd *gastrologv1.UpdateUserRoleCommand) (glid.GLID, string, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	return id, cmd.GetRole(), err
+	return glid.FromBytes(cmd.GetId()), cmd.GetRole(), nil
 }
 
 // ExtractUpdateUsername returns the user ID and new username.
 func ExtractUpdateUsername(cmd *gastrologv1.UpdateUsernameCommand) (glid.GLID, string, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	return id, cmd.GetUsername(), err
+	return glid.FromBytes(cmd.GetId()), cmd.GetUsername(), nil
 }
 
 // ExtractDeleteUser extracts the UUID from a DeleteUserCommand.
 func ExtractDeleteUser(cmd *gastrologv1.DeleteUserCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ExtractInvalidateTokens returns the user ID and invalidation time.
 func ExtractInvalidateTokens(cmd *gastrologv1.InvalidateTokensCommand) (glid.GLID, time.Time, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	return id, cmd.GetAt().AsTime(), err
+	return glid.FromBytes(cmd.GetId()), cmd.GetAt().AsTime(), nil
 }
 
 // ExtractPutUserPreferences returns the user ID and preferences JSON.
 func ExtractPutUserPreferences(cmd *gastrologv1.PutUserPreferencesCommand) (glid.GLID, string, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	return id, cmd.GetPreferences(), err
+	return glid.FromBytes(cmd.GetId()), cmd.GetPreferences(), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -706,8 +648,8 @@ func ExtractPutUserPreferences(cmd *gastrologv1.PutUserPreferencesCommand) (glid
 
 func createRefreshTokenCmd(t system.RefreshToken) *gastrologv1.CreateRefreshTokenCommand {
 	return &gastrologv1.CreateRefreshTokenCommand{
-		Id:        t.ID.String(),
-		UserId:    t.UserID.String(),
+		Id:        t.ID.ToProto(),
+		UserId:    t.UserID.ToProto(),
 		TokenHash: t.TokenHash,
 		ExpiresAt: timestamppb.New(t.ExpiresAt),
 		CreatedAt: timestamppb.New(t.CreatedAt),
@@ -727,7 +669,7 @@ func NewCreateRefreshToken(t system.RefreshToken) *gastrologv1.SystemCommand {
 func NewDeleteRefreshToken(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteRefreshToken{
-			DeleteRefreshToken: &gastrologv1.DeleteRefreshTokenCommand{Id: id.String()},
+			DeleteRefreshToken: &gastrologv1.DeleteRefreshTokenCommand{Id: id.ToProto()},
 		},
 	}
 }
@@ -737,7 +679,7 @@ func NewDeleteUserRefreshTokens(userID glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteUserRefreshTokens{
 			DeleteUserRefreshTokens: &gastrologv1.DeleteUserRefreshTokensCommand{
-				UserId: userID.String(),
+				UserId: userID.ToProto(),
 			},
 		},
 	}
@@ -745,17 +687,9 @@ func NewDeleteUserRefreshTokens(userID glid.GLID) *gastrologv1.SystemCommand {
 
 // ExtractCreateRefreshToken converts a CreateRefreshTokenCommand back to a RefreshToken.
 func ExtractCreateRefreshToken(cmd *gastrologv1.CreateRefreshTokenCommand) (system.RefreshToken, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.RefreshToken{}, fmt.Errorf("parse refresh token id: %w", err)
-	}
-	userID, err := glid.ParseUUID(cmd.GetUserId())
-	if err != nil {
-		return system.RefreshToken{}, fmt.Errorf("parse refresh token user id: %w", err)
-	}
 	return system.RefreshToken{
-		ID:        id,
-		UserID:    userID,
+		ID:        glid.FromBytes(cmd.GetId()),
+		UserID:    glid.FromBytes(cmd.GetUserId()),
 		TokenHash: cmd.GetTokenHash(),
 		ExpiresAt: cmd.GetExpiresAt().AsTime(),
 		CreatedAt: cmd.GetCreatedAt().AsTime(),
@@ -764,12 +698,12 @@ func ExtractCreateRefreshToken(cmd *gastrologv1.CreateRefreshTokenCommand) (syst
 
 // ExtractDeleteRefreshToken extracts the UUID from a DeleteRefreshTokenCommand.
 func ExtractDeleteRefreshToken(cmd *gastrologv1.DeleteRefreshTokenCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ExtractDeleteUserRefreshTokens extracts the user UUID from a DeleteUserRefreshTokensCommand.
 func ExtractDeleteUserRefreshTokens(cmd *gastrologv1.DeleteUserRefreshTokensCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetUserId())
+	return glid.FromBytes(cmd.GetUserId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -778,7 +712,7 @@ func ExtractDeleteUserRefreshTokens(cmd *gastrologv1.DeleteUserRefreshTokensComm
 
 func putNodeConfigCmd(node system.NodeConfig) *gastrologv1.PutNodeConfigCommand {
 	return &gastrologv1.PutNodeConfigCommand{
-		Id:   node.ID.String(),
+		Id:   node.ID.ToProto(),
 		Name: node.Name,
 	}
 }
@@ -794,26 +728,22 @@ func NewPutNodeConfig(node system.NodeConfig) *gastrologv1.SystemCommand {
 func NewDeleteNodeConfig(id glid.GLID) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteNodeConfig{
-			DeleteNodeConfig: &gastrologv1.DeleteNodeConfigCommand{Id: id.String()},
+			DeleteNodeConfig: &gastrologv1.DeleteNodeConfigCommand{Id: id.ToProto()},
 		},
 	}
 }
 
 // ExtractPutNodeConfig converts a PutNodeConfigCommand back to a NodeConfig.
 func ExtractPutNodeConfig(cmd *gastrologv1.PutNodeConfigCommand) (system.NodeConfig, error) {
-	id, err := glid.ParseUUID(cmd.GetId())
-	if err != nil {
-		return system.NodeConfig{}, fmt.Errorf("parse node id: %w", err)
-	}
 	return system.NodeConfig{
-		ID:   id,
+		ID:   glid.FromBytes(cmd.GetId()),
 		Name: cmd.GetName(),
 	}, nil
 }
 
 // ExtractDeleteNodeConfig extracts the UUID from a DeleteNodeConfigCommand.
 func ExtractDeleteNodeConfig(cmd *gastrologv1.DeleteNodeConfigCommand) (glid.GLID, error) {
-	return glid.ParseUUID(cmd.GetId())
+	return glid.FromBytes(cmd.GetId()), nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1090,24 +1020,6 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-func uuidPtrToString(id *glid.GLID) string {
-	if id == nil {
-		return ""
-	}
-	return id.String()
-}
-
-func parseOptionalUUID(s string) (*glid.GLID, error) {
-	if s == "" {
-		return nil, nil
-	}
-	id, err := glid.ParseUUID(s)
-	if err != nil {
-		return nil, err
-	}
-	return &id, nil
-}
 
 func nilIfEmpty(m map[string]string) map[string]string {
 	if len(m) == 0 {

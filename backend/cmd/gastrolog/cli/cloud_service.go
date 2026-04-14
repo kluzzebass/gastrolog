@@ -43,7 +43,7 @@ func newCloudServiceListCmd() *cobra.Command {
 			var rows [][]string
 			for _, cs := range resp.Msg.CloudServices {
 				rows = append(rows, []string{
-					cs.Id, cs.Name, cs.Provider, cs.Bucket, cs.Region, cs.Endpoint,
+					glid.FromBytes(cs.Id).String(), cs.Name, cs.Provider, cs.Bucket, cs.Region, cs.Endpoint,
 				})
 			}
 			p.table([]string{"ID", "NAME", "PROVIDER", "BUCKET", "REGION", "ENDPOINT"}, rows)
@@ -67,12 +67,12 @@ func newCloudServiceGetCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.cloudServices, "cloud service")
+			idBytes, err := resolveToProto(args[0], r.cloudServices, "cloud service")
 			if err != nil {
 				return err
 			}
 			for _, cs := range resp.Msg.CloudServices {
-				if cs.Id == id {
+				if string(cs.Id) == string(idBytes) {
 					return printCloudService(cmd, cs)
 				}
 			}
@@ -92,7 +92,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.CloudService{
-				Id:   glid.New().String(),
+				Id:   glid.New().ToProto(),
 				Name: name,
 			}
 			verb := "Created"
@@ -155,11 +155,11 @@ func newCloudServiceDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.cloudServices, "cloud service")
+			idBytes, err := resolveToProto(args[0], r.cloudServices, "cloud service")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteCloudService(context.Background(), connect.NewRequest(&v1.DeleteCloudServiceRequest{Id: id}))
+			_, err = client.System.DeleteCloudService(context.Background(), connect.NewRequest(&v1.DeleteCloudServiceRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}
@@ -175,7 +175,7 @@ func printCloudService(cmd *cobra.Command, cs *v1.CloudService) error {
 		return p.json(cs)
 	}
 	pairs := [][2]string{
-		{"ID", cs.Id},
+		{"ID", glid.FromBytes(cs.Id).String()},
 		{"Name", cs.Name},
 		{"Provider", cs.Provider},
 		{"Bucket", cs.Bucket},

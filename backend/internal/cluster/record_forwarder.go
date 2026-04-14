@@ -369,7 +369,7 @@ func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream gr
 
 	for _, g := range groups {
 		msg := &gastrologv1.ForwardRecordsRequest{
-			VaultId: g.vaultID.String(),
+			VaultId: g.vaultID.ToProto(),
 			Records: g.records,
 		}
 		if err := stream.SendMsg(msg); err != nil {

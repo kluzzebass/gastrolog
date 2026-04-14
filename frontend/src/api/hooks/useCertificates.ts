@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
+import { decode } from "../glid";
 
 export function useCertificates() {
   return useQuery({
@@ -17,7 +18,7 @@ export function useCertificate(id: string | null) {
     queryKey: ["certificate", id],
     queryFn: async () => {
       if (!id) return null;
-      const response = await systemClient.getCertificate({ id });
+      const response = await systemClient.getCertificate({ id: decode(id) });
       return response;
     },
     enabled: !!id,
@@ -36,7 +37,7 @@ export function usePutCertificate() {
       setAsDefault?: boolean;
     }) => {
       return systemClient.putCertificate({
-        id: args.id,
+        id: decode(args.id),
         name: args.name,
         certPem: args.certPem ?? "",
         keyPem: args.keyPem ?? "",
@@ -52,7 +53,7 @@ export function usePutCertificate() {
 export function useDeleteCertificate() {
   return useSystemMutation(
     async (id: string) => {
-      return systemClient.deleteCertificate({ id });
+      return systemClient.deleteCertificate({ id: decode(id) });
     },
     [["certificates"], ["settings"]],
   );

@@ -318,9 +318,9 @@ export class SystemCommand extends Message<SystemCommand> {
  */
 export class PutFilterCommand extends Message<PutFilterCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -340,7 +340,7 @@ export class PutFilterCommand extends Message<PutFilterCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutFilterCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
@@ -367,9 +367,9 @@ export class PutFilterCommand extends Message<PutFilterCommand> {
  */
 export class DeleteFilterCommand extends Message<DeleteFilterCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteFilterCommand>) {
     super();
@@ -379,7 +379,7 @@ export class DeleteFilterCommand extends Message<DeleteFilterCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteFilterCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteFilterCommand {
@@ -404,9 +404,9 @@ export class DeleteFilterCommand extends Message<DeleteFilterCommand> {
  */
 export class PutRotationPolicyCommand extends Message<PutRotationPolicyCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -441,7 +441,7 @@ export class PutRotationPolicyCommand extends Message<PutRotationPolicyCommand> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutRotationPolicyCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "max_bytes", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
@@ -471,9 +471,9 @@ export class PutRotationPolicyCommand extends Message<PutRotationPolicyCommand> 
  */
 export class DeleteRotationPolicyCommand extends Message<DeleteRotationPolicyCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRotationPolicyCommand>) {
     super();
@@ -483,7 +483,7 @@ export class DeleteRotationPolicyCommand extends Message<DeleteRotationPolicyCom
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRotationPolicyCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRotationPolicyCommand {
@@ -508,9 +508,9 @@ export class DeleteRotationPolicyCommand extends Message<DeleteRotationPolicyCom
  */
 export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -540,7 +540,7 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutRetentionPolicyCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "max_age", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "max_bytes", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
@@ -569,9 +569,9 @@ export class PutRetentionPolicyCommand extends Message<PutRetentionPolicyCommand
  */
 export class DeleteRetentionPolicyCommand extends Message<DeleteRetentionPolicyCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRetentionPolicyCommand>) {
     super();
@@ -581,7 +581,7 @@ export class DeleteRetentionPolicyCommand extends Message<DeleteRetentionPolicyC
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRetentionPolicyCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRetentionPolicyCommand {
@@ -609,9 +609,9 @@ export class DeleteRetentionPolicyCommand extends Message<DeleteRetentionPolicyC
  */
 export class PutVaultCommand extends Message<PutVaultCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -631,7 +631,7 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutVaultCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 7, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
@@ -658,9 +658,9 @@ export class PutVaultCommand extends Message<PutVaultCommand> {
  */
 export class DeleteVaultCommand extends Message<DeleteVaultCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * When true, the vault's data directory is deleted from disk on the owning node.
@@ -677,7 +677,7 @@ export class DeleteVaultCommand extends Message<DeleteVaultCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteVaultCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "delete_data", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -703,9 +703,9 @@ export class DeleteVaultCommand extends Message<DeleteVaultCommand> {
  */
 export class PutIngesterCommand extends Message<PutIngesterCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -728,9 +728,9 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
   params: { [key: string]: string } = {};
 
   /**
-   * @generated from field: string node_id = 6;
+   * @generated from field: bytes node_id = 6;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<PutIngesterCommand>) {
     super();
@@ -740,12 +740,12 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutIngesterCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "type", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
-    { no: 6, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutIngesterCommand {
@@ -770,9 +770,9 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
  */
 export class DeleteIngesterCommand extends Message<DeleteIngesterCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteIngesterCommand>) {
     super();
@@ -782,7 +782,7 @@ export class DeleteIngesterCommand extends Message<DeleteIngesterCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteIngesterCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteIngesterCommand {
@@ -887,9 +887,9 @@ export class DeleteSettingCommand extends Message<DeleteSettingCommand> {
  */
 export class PutCertificateCommand extends Message<PutCertificateCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -924,7 +924,7 @@ export class PutCertificateCommand extends Message<PutCertificateCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutCertificateCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "cert_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "key_pem", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -954,9 +954,9 @@ export class PutCertificateCommand extends Message<PutCertificateCommand> {
  */
 export class DeleteCertificateCommand extends Message<DeleteCertificateCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteCertificateCommand>) {
     super();
@@ -966,7 +966,7 @@ export class DeleteCertificateCommand extends Message<DeleteCertificateCommand> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteCertificateCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCertificateCommand {
@@ -991,9 +991,9 @@ export class DeleteCertificateCommand extends Message<DeleteCertificateCommand> 
  */
 export class CreateUserCommand extends Message<CreateUserCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string username = 2;
@@ -1038,7 +1038,7 @@ export class CreateUserCommand extends Message<CreateUserCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.CreateUserCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "password_hash", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -1070,9 +1070,9 @@ export class CreateUserCommand extends Message<CreateUserCommand> {
  */
 export class UpdatePasswordCommand extends Message<UpdatePasswordCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string password_hash = 2;
@@ -1087,7 +1087,7 @@ export class UpdatePasswordCommand extends Message<UpdatePasswordCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.UpdatePasswordCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "password_hash", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -1113,9 +1113,9 @@ export class UpdatePasswordCommand extends Message<UpdatePasswordCommand> {
  */
 export class UpdateUserRoleCommand extends Message<UpdateUserRoleCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string role = 2;
@@ -1130,7 +1130,7 @@ export class UpdateUserRoleCommand extends Message<UpdateUserRoleCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.UpdateUserRoleCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -1156,9 +1156,9 @@ export class UpdateUserRoleCommand extends Message<UpdateUserRoleCommand> {
  */
 export class UpdateUsernameCommand extends Message<UpdateUsernameCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string username = 2;
@@ -1173,7 +1173,7 @@ export class UpdateUsernameCommand extends Message<UpdateUsernameCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.UpdateUsernameCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -1199,9 +1199,9 @@ export class UpdateUsernameCommand extends Message<UpdateUsernameCommand> {
  */
 export class DeleteUserCommand extends Message<DeleteUserCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteUserCommand>) {
     super();
@@ -1211,7 +1211,7 @@ export class DeleteUserCommand extends Message<DeleteUserCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteUserCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteUserCommand {
@@ -1236,9 +1236,9 @@ export class DeleteUserCommand extends Message<DeleteUserCommand> {
  */
 export class InvalidateTokensCommand extends Message<InvalidateTokensCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: google.protobuf.Timestamp at = 2;
@@ -1253,7 +1253,7 @@ export class InvalidateTokensCommand extends Message<InvalidateTokensCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.InvalidateTokensCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "at", kind: "message", T: Timestamp },
   ]);
 
@@ -1279,9 +1279,9 @@ export class InvalidateTokensCommand extends Message<InvalidateTokensCommand> {
  */
 export class PutUserPreferencesCommand extends Message<PutUserPreferencesCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string preferences = 2;
@@ -1296,7 +1296,7 @@ export class PutUserPreferencesCommand extends Message<PutUserPreferencesCommand
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutUserPreferencesCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "preferences", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -1322,14 +1322,14 @@ export class PutUserPreferencesCommand extends Message<PutUserPreferencesCommand
  */
 export class CreateRefreshTokenCommand extends Message<CreateRefreshTokenCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
-   * @generated from field: string user_id = 2;
+   * @generated from field: bytes user_id = 2;
    */
-  userId = "";
+  userId = new Uint8Array(0);
 
   /**
    * @generated from field: string token_hash = 3;
@@ -1354,8 +1354,8 @@ export class CreateRefreshTokenCommand extends Message<CreateRefreshTokenCommand
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.CreateRefreshTokenCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "user_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "user_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "token_hash", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "expires_at", kind: "message", T: Timestamp },
     { no: 5, name: "created_at", kind: "message", T: Timestamp },
@@ -1383,9 +1383,9 @@ export class CreateRefreshTokenCommand extends Message<CreateRefreshTokenCommand
  */
 export class DeleteRefreshTokenCommand extends Message<DeleteRefreshTokenCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRefreshTokenCommand>) {
     super();
@@ -1395,7 +1395,7 @@ export class DeleteRefreshTokenCommand extends Message<DeleteRefreshTokenCommand
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRefreshTokenCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRefreshTokenCommand {
@@ -1420,9 +1420,9 @@ export class DeleteRefreshTokenCommand extends Message<DeleteRefreshTokenCommand
  */
 export class DeleteUserRefreshTokensCommand extends Message<DeleteUserRefreshTokensCommand> {
   /**
-   * @generated from field: string user_id = 1;
+   * @generated from field: bytes user_id = 1;
    */
-  userId = "";
+  userId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteUserRefreshTokensCommand>) {
     super();
@@ -1432,7 +1432,7 @@ export class DeleteUserRefreshTokensCommand extends Message<DeleteUserRefreshTok
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteUserRefreshTokensCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "user_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "user_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteUserRefreshTokensCommand {
@@ -1457,9 +1457,9 @@ export class DeleteUserRefreshTokensCommand extends Message<DeleteUserRefreshTok
  */
 export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -1474,7 +1474,7 @@ export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutNodeConfigCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -1500,9 +1500,9 @@ export class PutNodeConfigCommand extends Message<PutNodeConfigCommand> {
  */
 export class DeleteNodeConfigCommand extends Message<DeleteNodeConfigCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteNodeConfigCommand>) {
     super();
@@ -1512,7 +1512,7 @@ export class DeleteNodeConfigCommand extends Message<DeleteNodeConfigCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteNodeConfigCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteNodeConfigCommand {
@@ -1598,9 +1598,9 @@ export class PutClusterTLSCommand extends Message<PutClusterTLSCommand> {
  */
 export class PutRouteCommand extends Message<PutRouteCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string name = 2;
@@ -1608,14 +1608,14 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
   name = "";
 
   /**
-   * @generated from field: string filter_id = 3;
+   * @generated from field: bytes filter_id = 3;
    */
-  filterId = "";
+  filterId = new Uint8Array(0);
 
   /**
-   * @generated from field: repeated string destination_ids = 4;
+   * @generated from field: repeated bytes destination_ids = 4;
    */
-  destinationIds: string[] = [];
+  destinationIds: Uint8Array[] = [];
 
   /**
    * @generated from field: string distribution = 5;
@@ -1640,10 +1640,10 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutRouteCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "filter_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "destination_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 3, name: "filter_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 4, name: "destination_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 5, name: "distribution", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "eject_only", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
@@ -1671,9 +1671,9 @@ export class PutRouteCommand extends Message<PutRouteCommand> {
  */
 export class DeleteRouteCommand extends Message<DeleteRouteCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteRouteCommand>) {
     super();
@@ -1683,7 +1683,7 @@ export class DeleteRouteCommand extends Message<DeleteRouteCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteRouteCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteRouteCommand {
@@ -1708,9 +1708,9 @@ export class DeleteRouteCommand extends Message<DeleteRouteCommand> {
  */
 export class PutManagedFileCommand extends Message<PutManagedFileCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * original filename
@@ -1748,7 +1748,7 @@ export class PutManagedFileCommand extends Message<PutManagedFileCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutManagedFileCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "sha256", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
@@ -1777,9 +1777,9 @@ export class PutManagedFileCommand extends Message<PutManagedFileCommand> {
  */
 export class DeleteManagedFileCommand extends Message<DeleteManagedFileCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteManagedFileCommand>) {
     super();
@@ -1789,7 +1789,7 @@ export class DeleteManagedFileCommand extends Message<DeleteManagedFileCommand> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteManagedFileCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteManagedFileCommand {
@@ -1855,9 +1855,9 @@ export class PutCloudServiceCommand extends Message<PutCloudServiceCommand> {
  */
 export class DeleteCloudServiceCommand extends Message<DeleteCloudServiceCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteCloudServiceCommand>) {
     super();
@@ -1867,7 +1867,7 @@ export class DeleteCloudServiceCommand extends Message<DeleteCloudServiceCommand
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteCloudServiceCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteCloudServiceCommand {
@@ -1970,9 +1970,9 @@ export class PutTierCommand extends Message<PutTierCommand> {
  */
 export class DeleteTierCommand extends Message<DeleteTierCommand> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * When true, drain chunks to the next tier before deleting.
@@ -1989,7 +1989,7 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteTierCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "drain", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
@@ -2015,9 +2015,9 @@ export class DeleteTierCommand extends Message<DeleteTierCommand> {
  */
 export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> {
   /**
-   * @generated from field: string tier_id = 1;
+   * @generated from field: bytes tier_id = 1;
    */
-  tierId = "";
+  tierId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.TierPlacement placements = 2;
@@ -2032,7 +2032,7 @@ export class SetTierPlacementsCommand extends Message<SetTierPlacementsCommand> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SetTierPlacementsCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "placements", kind: "message", T: TierPlacement, repeated: true },
   ]);
 

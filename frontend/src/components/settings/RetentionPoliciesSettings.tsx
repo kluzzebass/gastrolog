@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState, useReducer } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useExpandedCards } from "../../hooks/useExpandedCards";
@@ -101,7 +102,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
   const vaults = config?.vaults ?? [];
 
   const defaults = (id: string): PolicyEdit => {
-    const pol = policies.find((p) => p.id === id);
+    const pol = policies.find((p) => encode(p.id) === id);
     if (!pol) return { name: "", maxAge: "", maxBytes: "", maxChunks: "" };
     return {
       name: pol.name,
@@ -129,7 +130,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
     },
     onDeleteSuccess: (id) => {
       const referencedBy = tiers
-        .filter((t) => t.retentionRules.some((r: { retentionPolicyId: string }) => r.retentionPolicyId === id))
+        .filter((t) => t.retentionRules.some((r) => encode(r.retentionPolicyId) === id))
         .map((t) => t.name || t.id);
       if (referencedBy.length > 0) {
         addToast(
@@ -237,7 +238,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
       )}
 
       {sortByName(policies).map((pol) => {
-        const id = pol.id;
+        const id = encode(pol.id);
         const edit = getEdit(id);
         const refs = tierRuleRefsFor(tiers, id, vaults);
         return (

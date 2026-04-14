@@ -488,9 +488,9 @@ export class UserInfo extends Message<UserInfo> {
   updatedAt = protoInt64.zero;
 
   /**
-   * @generated from field: string id = 5;
+   * @generated from field: bytes id = 5;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<UserInfo>) {
     super();
@@ -504,7 +504,7 @@ export class UserInfo extends Message<UserInfo> {
     { no: 2, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "created_at", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 4, name: "updated_at", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 5, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): UserInfo {
@@ -685,9 +685,9 @@ export class ListUsersResponse extends Message<ListUsersResponse> {
  */
 export class UpdateUserRoleRequest extends Message<UpdateUserRoleRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * "admin" or "user"
@@ -704,7 +704,7 @@ export class UpdateUserRoleRequest extends Message<UpdateUserRoleRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.UpdateUserRoleRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "role", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -767,9 +767,9 @@ export class UpdateUserRoleResponse extends Message<UpdateUserRoleResponse> {
  */
 export class ResetPasswordRequest extends Message<ResetPasswordRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string new_password = 2;
@@ -784,7 +784,7 @@ export class ResetPasswordRequest extends Message<ResetPasswordRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ResetPasswordRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "new_password", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -841,9 +841,9 @@ export class ResetPasswordResponse extends Message<ResetPasswordResponse> {
  */
 export class RenameUserRequest extends Message<RenameUserRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: string new_username = 2;
@@ -858,7 +858,7 @@ export class RenameUserRequest extends Message<RenameUserRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RenameUserRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "new_username", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -921,9 +921,9 @@ export class RenameUserResponse extends Message<RenameUserResponse> {
  */
 export class DeleteUserRequest extends Message<DeleteUserRequest> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   constructor(data?: PartialMessage<DeleteUserRequest>) {
     super();
@@ -933,7 +933,7 @@ export class DeleteUserRequest extends Message<DeleteUserRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteUserRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteUserRequest {

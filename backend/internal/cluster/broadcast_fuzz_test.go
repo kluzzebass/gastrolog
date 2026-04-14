@@ -16,7 +16,7 @@ import (
 func FuzzBroadcastMessageDeserialize(f *testing.F) {
 	// Seed: valid BroadcastMessage with NodeStats payload.
 	statsMsg := &gastrologv1.BroadcastMessage{
-		SenderId:  "node-1",
+		SenderId:  []byte("node-1"),
 		Timestamp: timestamppb.Now(),
 		Payload: &gastrologv1.BroadcastMessage_NodeStats{
 			NodeStats: &gastrologv1.NodeStats{
@@ -31,12 +31,12 @@ func FuzzBroadcastMessageDeserialize(f *testing.F) {
 
 	// Seed: valid BroadcastMessage with NodeJobs payload.
 	jobsMsg := &gastrologv1.BroadcastMessage{
-		SenderId:  "node-2",
+		SenderId:  []byte("node-2"),
 		Timestamp: timestamppb.Now(),
 		Payload: &gastrologv1.BroadcastMessage_NodeJobs{
 			NodeJobs: &gastrologv1.NodeJobs{
 				Jobs: []*gastrologv1.Job{
-					{Id: "job-1"},
+					{Id: []byte("job-1")},
 				},
 			},
 		},
@@ -50,7 +50,7 @@ func FuzzBroadcastMessageDeserialize(f *testing.F) {
 
 	// Seed: no payload (nil oneof).
 	noPaylod := &gastrologv1.BroadcastMessage{
-		SenderId:  "node-3",
+		SenderId:  []byte("node-3"),
 		Timestamp: timestamppb.Now(),
 	}
 	noPayloadBytes, _ := proto.Marshal(noPaylod)

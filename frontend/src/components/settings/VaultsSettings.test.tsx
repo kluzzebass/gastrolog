@@ -7,28 +7,35 @@ const mocks = installMockClients();
 
 import { VaultsSettings } from "./VaultsSettings";
 
+/** Create a distinct 16-byte Uint8Array test ID from a small number. */
+function testId(n: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(16);
+  bytes[15] = n;
+  return bytes;
+}
+
 const sampleConfig = {
   vaults: [
     {
-      id: "v1",
+      id: testId(1),
       name: "vault-alpha",
       enabled: true,
     },
     {
-      id: "v2",
+      id: testId(2),
       name: "vault-beta",
       enabled: false,
     },
   ],
   tiers: [
-    { id: "t1", name: "local-tier", type: 2 /* FILE */, vaultId: "v1", position: 0, rotationPolicyId: "p1", retentionRules: [{ retentionPolicyId: "rp1" }], placements: [], replicationFactor: 1 },
+    { id: testId(10), name: "local-tier", type: 2 /* FILE */, vaultId: testId(1), position: 0, rotationPolicyId: testId(20), retentionRules: [{ retentionPolicyId: testId(30) }], placements: [], replicationFactor: 1 },
   ],
-  rotationPolicies: [{ id: "p1", name: "daily" }],
-  retentionPolicies: [{ id: "rp1", name: "30-day" }],
+  rotationPolicies: [{ id: testId(20), name: "daily" }],
+  retentionPolicies: [{ id: testId(30), name: "30-day" }],
   routes: [],
   filters: [],
   ingesters: [],
-  nodeConfigs: [{ id: "n1", name: "node-1" }],
+  nodeConfigs: [{ id: testId(40), name: "node-1" }],
 };
 
 beforeEach(() => {
@@ -289,18 +296,18 @@ import { TierConfig, RetentionRule, TierType } from "../../api/gen/gastrolog/v1/
 // Config with a vault that has two tiers — enough to test multi-tier updates.
 // Uses real TierConfig proto instances so .clone() works in updateExistingTiers.
 const twoTierConfig = {
-  vaults: [{ id: "v1", name: "vault-alpha", enabled: true }],
+  vaults: [{ id: testId(1), name: "vault-alpha", enabled: true }],
   tiers: [
-    new TierConfig({ id: "t1", name: "memory", type: TierType.MEMORY, vaultId: "v1", position: 0, rotationPolicyId: "p1", retentionRules: [new RetentionRule({ retentionPolicyId: "rp1", action: "transition" })], replicationFactor: 1 }),
-    new TierConfig({ id: "t2", name: "file", type: TierType.FILE, vaultId: "v1", position: 1, rotationPolicyId: "", retentionRules: [], replicationFactor: 1, storageClass: 1 }),
+    new TierConfig({ id: testId(10), name: "memory", type: TierType.MEMORY, vaultId: testId(1), position: 0, rotationPolicyId: testId(20), retentionRules: [new RetentionRule({ retentionPolicyId: testId(30), action: "transition" })], replicationFactor: 1 }),
+    new TierConfig({ id: testId(11), name: "file", type: TierType.FILE, vaultId: testId(1), position: 1, retentionRules: [], replicationFactor: 1, storageClass: 1 }),
   ],
-  rotationPolicies: [{ id: "p1", name: "daily" }],
-  retentionPolicies: [{ id: "rp1", name: "30-day" }],
+  rotationPolicies: [{ id: testId(20), name: "daily" }],
+  retentionPolicies: [{ id: testId(30), name: "30-day" }],
   routes: [],
   filters: [],
   ingesters: [],
-  nodeConfigs: [{ id: "n1", name: "node-1" }],
-  nodeStorageConfigs: [{ nodeId: "n1", fileStorages: [{ id: "fs1", storageClass: 1 }] }],
+  nodeConfigs: [{ id: testId(40), name: "node-1" }],
+  nodeStorageConfigs: [{ nodeId: testId(40), fileStorages: [{ id: testId(50), storageClass: 1 }] }],
 };
 
 /** Expand vault-alpha and return helpers. */

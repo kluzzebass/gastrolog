@@ -43,14 +43,8 @@ func tierReplicationStreamHandler(srv any, stream grpc.ServerStream) error {
 }
 
 func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.TierReplicationCommand) *gastrologv1.TierReplicationAck {
-	vaultID, err := glid.ParseUUID(msg.GetVaultId())
-	if err != nil {
-		return &gastrologv1.TierReplicationAck{Ok: false, Error: "invalid vault_id: " + err.Error()}
-	}
-	tierID, err := glid.ParseUUID(msg.GetTierId())
-	if err != nil {
-		return &gastrologv1.TierReplicationAck{Ok: false, Error: "invalid tier_id: " + err.Error()}
-	}
+	vaultID := glid.FromBytes(msg.GetVaultId())
+	tierID := glid.FromBytes(msg.GetTierId())
 
 	switch cmd := msg.Command.(type) {
 	case *gastrologv1.TierReplicationCommand_Append:
@@ -72,10 +66,8 @@ func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID gl
 	}
 
 	chunkID := chunk.ChunkID{}
-	if cmd.GetChunkId() != "" {
-		if parsed, err := chunk.ParseChunkID(cmd.GetChunkId()); err == nil {
-			chunkID = parsed
-		}
+	if len(cmd.GetChunkId()) >= glid.Size {
+		chunkID = chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
 	}
 
 	for _, er := range cmd.GetRecords() {
@@ -98,10 +90,8 @@ func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid
 	}
 
 	chunkID := chunk.ChunkID{}
-	if cmd.GetChunkId() != "" {
-		if parsed, err := chunk.ParseChunkID(cmd.GetChunkId()); err == nil {
-			chunkID = parsed
-		}
+	if len(cmd.GetChunkId()) >= glid.Size {
+		chunkID = chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
 	}
 
 	if err := s.sealTierExecutor(ctx, vaultID, tierID, chunkID); err != nil {
@@ -120,10 +110,7 @@ func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID gl
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "tier importer not configured"}
 	}
 
-	chunkID, err := chunk.ParseChunkID(cmd.GetChunkId())
-	if err != nil {
-		return &gastrologv1.TierReplicationAck{Ok: false, Error: "invalid chunk_id: " + err.Error()}
-	}
+	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
 
 	records := make([]chunk.Record, 0, len(cmd.GetRecords()))
 	for _, er := range cmd.GetRecords() {
@@ -156,10 +143,7 @@ func (s *Server) handleReplicationDelete(ctx context.Context, vaultID, tierID gl
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "delete executor not configured"}
 	}
 
-	chunkID, err := chunk.ParseChunkID(cmd.GetChunkId())
-	if err != nil {
-		return &gastrologv1.TierReplicationAck{Ok: false, Error: "invalid chunk_id: " + err.Error()}
-	}
+	chunkID := chunk.ChunkID(glid.FromBytes(cmd.GetChunkId()))
 
 	if err := s.deleteChunkExecutor(ctx, vaultID, tierID, chunkID); err != nil {
 		return &gastrologv1.TierReplicationAck{

@@ -1,6 +1,7 @@
 import { useClusterStatus } from "./useClusterStatus";
 import { AlertSeverity } from "../gen/gastrolog/v1/cluster_pb";
 import type { SystemAlert } from "../gen/gastrolog/v1/cluster_pb";
+import { encode } from "../glid";
 
 export interface NodeAlert extends SystemAlert {
   nodeId: string;
@@ -15,8 +16,9 @@ export function useAlerts() {
   for (const node of cluster.nodes) {
     for (const a of node.stats?.alerts ?? []) {
       const na = a.clone() as NodeAlert;
-      na.nodeId = node.id;
-      na.nodeName = node.name || node.id.slice(0, 8);
+      const nid = encode(node.id);
+      na.nodeId = nid;
+      na.nodeName = node.name || nid.slice(0, 8);
       alerts.push(na);
     }
   }

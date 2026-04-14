@@ -13,11 +13,11 @@ func TestDedupChunksCollapsesReplicas(t *testing.T) {
 	t.Parallel()
 
 	input := []*apiv1.ChunkMeta{
-		{Id: "chunk-a", RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: "chunk-a", RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: "chunk-a", RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: "chunk-b", RecordCount: 50, Sealed: true, Compressed: true},
-		{Id: "chunk-b", RecordCount: 50, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-a"), RecordCount: 100, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-a"), RecordCount: 100, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-a"), RecordCount: 100, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-b"), RecordCount: 50, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-b"), RecordCount: 50, Sealed: true, Compressed: true},
 	}
 
 	out := dedupChunks(input)
@@ -27,7 +27,7 @@ func TestDedupChunksCollapsesReplicas(t *testing.T) {
 
 	byID := make(map[string]*apiv1.ChunkMeta)
 	for _, c := range out {
-		byID[c.Id] = c
+		byID[string(c.Id)] = c
 	}
 	if byID["chunk-a"].ReplicaCount != 3 {
 		t.Errorf("chunk-a replica count = %d, want 3", byID["chunk-a"].ReplicaCount)
@@ -46,8 +46,8 @@ func TestDedupChunksPrefersSealedAndCompressed(t *testing.T) {
 	// Order matters: put the partial version first to confirm the
 	// authoritative version replaces it.
 	input := []*apiv1.ChunkMeta{
-		{Id: "chunk-x", RecordCount: 50, Sealed: false, Compressed: false},
-		{Id: "chunk-x", RecordCount: 100, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false},
+		{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true},
 	}
 
 	out := dedupChunks(input)
@@ -73,8 +73,8 @@ func TestDedupChunksPrefersSealedOverUnsealed(t *testing.T) {
 
 	// Put authoritative first — the partial should NOT replace it.
 	input := []*apiv1.ChunkMeta{
-		{Id: "chunk-x", RecordCount: 100, Sealed: true, Compressed: true},
-		{Id: "chunk-x", RecordCount: 50, Sealed: false, Compressed: false},
+		{Id: []byte("chunk-x"), RecordCount: 100, Sealed: true, Compressed: true},
+		{Id: []byte("chunk-x"), RecordCount: 50, Sealed: false, Compressed: false},
 	}
 
 	out := dedupChunks(input)
@@ -101,7 +101,7 @@ func TestDedupChunksEmptyInput(t *testing.T) {
 func TestDedupChunksSingleEntryReplicaCount(t *testing.T) {
 	t.Parallel()
 	input := []*apiv1.ChunkMeta{
-		{Id: "solo", RecordCount: 10, Sealed: true},
+		{Id: []byte("solo"), RecordCount: 10, Sealed: true},
 	}
 	out := dedupChunks(input)
 	if len(out) != 1 {

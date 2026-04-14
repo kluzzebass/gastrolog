@@ -22,8 +22,8 @@ func TestConnectMuxDispatch(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.Handle(gastrologv1connect.NewVaultServiceHandler(&fakeVaultService{
 		chunks: []*apiv1.ChunkMeta{
-			{Id: "chunk-1", RecordCount: 100},
-			{Id: "chunk-2", RecordCount: 200},
+			{Id: []byte("chunk-1"), RecordCount: 100},
+			{Id: []byte("chunk-2"), RecordCount: 200},
 		},
 	}))
 

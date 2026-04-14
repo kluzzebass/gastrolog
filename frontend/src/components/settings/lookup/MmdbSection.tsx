@@ -1,3 +1,4 @@
+import { encode } from "../../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings } from "../../../api/hooks/useSettings";
@@ -69,7 +70,7 @@ export function MmdbAddForm({
           inputId="new-mmdb-upload"
           accept=".mmdb"
           label={draft.dbType === "city" ? "GeoIP City .mmdb" : "ASN .mmdb"}
-          currentFile={draft.fileId ? managedFiles.find((f) => f.id === draft.fileId) : undefined}
+          currentFile={draft.fileId ? managedFiles.find((f) => encode(f.id) === draft.fileId) : undefined}
           pickableFiles={managedFiles.filter((f) => f.name.endsWith(".mmdb"))}
           uploadFile={uploadFile}
           addToast={addToast}
@@ -105,7 +106,7 @@ export function MmdbCards({
   return (
     <>
       {lookups.map((m, i) => {
-        const resolvedFile = m.fileId ? managedFiles.find((f) => f.id === m.fileId) : undefined;
+        const resolvedFile = m.fileId ? managedFiles.find((f) => encode(f.id) === m.fileId) : undefined;
         let dbLabel = m.dbType;
         if (m.dbType === "city") dbLabel = "GeoIP City";
         else if (m.dbType === "asn") dbLabel = "ASN";

@@ -1,3 +1,5 @@
+import { encode } from "../../../api/glid";
+
 // Returns true when the params are valid enough to save.
 const VALID_MAP: Record<string, (params: Record<string, string>) => boolean> = {
   tail: (p) => !!p["paths"],
@@ -68,7 +70,7 @@ export function listenAddrConflict(
   selfType: string,
   selfParams: Record<string, string>,
   selfNodeId: string,
-  allIngesters: readonly { id: string; type: string; params: { [key: string]: string }; nodeId: string }[],
+  allIngesters: readonly { id: Uint8Array; type: string; params: { [key: string]: string }; nodeId: Uint8Array }[],
   allDefaults: Record<string, Record<string, string>>,
 ): string | null {
   const selfDefaults = allDefaults[selfType] ?? {};
@@ -76,8 +78,8 @@ export function listenAddrConflict(
   if (wanted.length === 0) return null;
 
   for (const other of allIngesters) {
-    if (other.id === selfId) continue;
-    if (other.nodeId !== selfNodeId) continue;
+    if (encode(other.id) === selfId) continue;
+    if (encode(other.nodeId) !== selfNodeId) continue;
     const otherDefaults = allDefaults[other.type] ?? {};
     const otherAddrs = getListenAddrs(other.type, other.params, otherDefaults);
     const conflict = findAddrOverlap(wanted, otherAddrs);

@@ -43,7 +43,7 @@ func newRetentionPolicyListCmd() *cobra.Command {
 			var rows [][]string
 			for _, rp := range resp.Msg.RetentionPolicies {
 				rows = append(rows, []string{
-					rp.Id, rp.Name,
+					glid.FromBytes(rp.Id).String(), rp.Name,
 					formatInt64(rp.MaxAgeSeconds),
 					formatInt64(rp.MaxBytes),
 					formatInt64(rp.MaxChunks),
@@ -75,13 +75,13 @@ func newRetentionPolicyGetCmd() *cobra.Command {
 				return err
 			}
 			for _, rp := range resp.Msg.RetentionPolicies {
-				if rp.Id == id {
+				if glid.FromBytes(rp.Id).String() == id {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(rp)
 					}
 					p.kv([][2]string{
-						{"ID", rp.Id},
+						{"ID", glid.FromBytes(rp.Id).String()},
 						{"Name", rp.Name},
 						{"Max Age (s)", formatInt64(rp.MaxAgeSeconds)},
 						{"Max Bytes", formatInt64(rp.MaxBytes)},
@@ -106,7 +106,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.RetentionPolicyConfig{
-				Id:   glid.New().String(),
+				Id:   glid.New().ToProto(),
 				Name: name,
 			}
 			verb := "Created"
@@ -146,7 +146,7 @@ func newRetentionPolicyCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s retention policy %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s retention policy %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
@@ -169,11 +169,11 @@ func newRetentionPolicyDeleteCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			id, err := resolve(args[0], r.retentionPolicies, "retention policy")
+			idBytes, err := resolveToProto(args[0], r.retentionPolicies, "retention policy")
 			if err != nil {
 				return err
 			}
-			_, err = client.System.DeleteRetentionPolicy(context.Background(), connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: id}))
+			_, err = client.System.DeleteRetentionPolicy(context.Background(), connect.NewRequest(&v1.DeleteRetentionPolicyRequest{Id: idBytes}))
 			if err != nil {
 				return err
 			}

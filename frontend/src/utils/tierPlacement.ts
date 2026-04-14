@@ -4,45 +4,47 @@
  * TierConfig.followerNodeIds fields.
  */
 
+import { encode } from "../api/glid";
+
 interface Placement {
-  storageId: string;
+  storageId: Uint8Array;
   leader: boolean;
 }
 
 interface StorageRef {
-  id: string;
+  id: Uint8Array;
 }
 
 interface NSC {
-  nodeId: string;
+  nodeId: Uint8Array;
   fileStorages: StorageRef[];
 }
 
-/** Returns the node ID that owns the given file storage, or "" if not found. */
+/** Returns the encoded node ID that owns the given file storage, or "" if not found. */
 export function nodeIdForStorage(storageId: string, nscs: readonly NSC[]): string {
   for (const nsc of nscs) {
-    if (nsc.fileStorages.some((a) => a.id === storageId)) return nsc.nodeId;
+    if (nsc.fileStorages.some((a) => encode(a.id) === storageId)) return encode(nsc.nodeId);
   }
   return "";
 }
 
-/** Returns the node ID of the leader placement, or "" if none. */
+/** Returns the encoded node ID of the leader placement, or "" if none. */
 export function leaderNodeId(
   tier: { placements: readonly Placement[] },
   nscs: readonly NSC[],
 ): string {
   const p = tier.placements.find((pl) => pl.leader);
   if (!p) return "";
-  return nodeIdForStorage(p.storageId, nscs);
+  return nodeIdForStorage(encode(p.storageId), nscs);
 }
 
-/** Returns the node IDs of all follower (non-leader) placements. */
+/** Returns the encoded node IDs of all follower (non-leader) placements. */
 export function followerNodeIds(
   tier: { placements: readonly Placement[] },
   nscs: readonly NSC[],
 ): string[] {
   return tier.placements
     .filter((pl) => !pl.leader)
-    .map((pl) => nodeIdForStorage(pl.storageId, nscs))
+    .map((pl) => nodeIdForStorage(encode(pl.storageId), nscs))
     .filter((id) => id !== "");
 }

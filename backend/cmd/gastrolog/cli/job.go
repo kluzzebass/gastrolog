@@ -42,7 +42,7 @@ func newJobListCmd() *cobra.Command {
 			var rows [][]string
 			for _, j := range resp.Msg.Jobs {
 				rows = append(rows, []string{
-					j.Id, j.Name, jobStatusStr(j.Status), j.Kind.String(), j.Description,
+					string(j.Id), j.Name, jobStatusStr(j.Status), j.Kind.String(), j.Description,
 				})
 			}
 			p.table([]string{"ID", "NAME", "STATUS", "KIND", "DESCRIPTION"}, rows)
@@ -58,7 +58,7 @@ func newJobGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Job.GetJob(context.Background(), connect.NewRequest(&v1.GetJobRequest{Id: args[0]}))
+			resp, err := client.Job.GetJob(context.Background(), connect.NewRequest(&v1.GetJobRequest{Id: []byte(args[0])}))
 			if err != nil {
 				return err
 			}
@@ -71,7 +71,7 @@ func newJobGetCmd() *cobra.Command {
 				return p.json(j)
 			}
 			pairs := [][2]string{
-				{"ID", j.Id},
+				{"ID", string(j.Id)},
 				{"Name", j.Name},
 				{"Status", jobStatusStr(j.Status)},
 				{"Kind", j.Kind.String()},
@@ -94,8 +94,8 @@ func newJobGetCmd() *cobra.Command {
 			if j.NextRun != nil {
 				pairs = append(pairs, [2]string{"Next Run", j.NextRun.AsTime().String()})
 			}
-			if j.NodeId != "" {
-				pairs = append(pairs, [2]string{"Node", j.NodeId})
+			if len(j.NodeId) != 0 {
+				pairs = append(pairs, [2]string{"Node", string(j.NodeId)})
 			}
 			p.kv(pairs)
 			return nil

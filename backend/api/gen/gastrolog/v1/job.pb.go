@@ -128,7 +128,7 @@ func (JobKind) EnumDescriptor() ([]byte, []int) {
 
 type Job struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
-	Id           string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id           []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name         string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Status       JobStatus              `protobuf:"varint,3,opt,name=status,proto3,enum=gastrolog.v1.JobStatus" json:"status,omitempty"`
 	Kind         JobKind                `protobuf:"varint,11,opt,name=kind,proto3,enum=gastrolog.v1.JobKind" json:"kind,omitempty"`
@@ -144,7 +144,7 @@ type Job struct {
 	Schedule      string                 `protobuf:"bytes,12,opt,name=schedule,proto3" json:"schedule,omitempty"`              // cron expression (scheduled jobs only)
 	LastRun       *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=last_run,json=lastRun,proto3" json:"last_run,omitempty"` // last execution time
 	NextRun       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=next_run,json=nextRun,proto3" json:"next_run,omitempty"` // next scheduled execution time
-	NodeId        string                 `protobuf:"bytes,16,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // origin node (empty in single-node mode)
+	NodeId        []byte                 `protobuf:"bytes,16,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // origin node (empty in single-node mode)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -179,11 +179,11 @@ func (*Job) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_job_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Job) GetId() string {
+func (x *Job) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *Job) GetName() string {
@@ -284,16 +284,16 @@ func (x *Job) GetNextRun() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *Job) GetNodeId() string {
+func (x *Job) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type GetJobRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -328,11 +328,11 @@ func (*GetJobRequest) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_job_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *GetJobRequest) GetId() string {
+func (x *GetJobRequest) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type GetJobResponse struct {
@@ -545,7 +545,7 @@ const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\n" +
 	"\x16gastrolog/v1/job.proto\x12\fgastrolog.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe6\x04\n" +
 	"\x03Job\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12/\n" +
 	"\x06status\x18\x03 \x01(\x0e2\x17.gastrolog.v1.JobStatusR\x06status\x12)\n" +
 	"\x04kind\x18\v \x01(\x0e2\x15.gastrolog.v1.JobKindR\x04kind\x12 \n" +
@@ -563,9 +563,9 @@ const file_gastrolog_v1_job_proto_rawDesc = "" +
 	"\bschedule\x18\f \x01(\tR\bschedule\x125\n" +
 	"\blast_run\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\alastRun\x125\n" +
 	"\bnext_run\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\anextRun\x12\x17\n" +
-	"\anode_id\x18\x10 \x01(\tR\x06nodeId\"\x1f\n" +
+	"\anode_id\x18\x10 \x01(\fR\x06nodeId\"\x1f\n" +
 	"\rGetJobRequest\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"5\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"5\n" +
 	"\x0eGetJobResponse\x12#\n" +
 	"\x03job\x18\x01 \x01(\v2\x11.gastrolog.v1.JobR\x03job\"\x11\n" +
 	"\x0fListJobsRequest\"9\n" +

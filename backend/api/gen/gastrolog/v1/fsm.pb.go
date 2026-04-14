@@ -684,7 +684,7 @@ func (*SystemCommand_SetSetupWizardDismissed) isSystemCommand_Command() {}
 
 type PutFilterCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Expression    string                 `protobuf:"bytes,3,opt,name=expression,proto3" json:"expression,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -721,11 +721,11 @@ func (*PutFilterCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *PutFilterCommand) GetId() string {
+func (x *PutFilterCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutFilterCommand) GetName() string {
@@ -744,7 +744,7 @@ func (x *PutFilterCommand) GetExpression() string {
 
 type DeleteFilterCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -779,16 +779,16 @@ func (*DeleteFilterCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *DeleteFilterCommand) GetId() string {
+func (x *DeleteFilterCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type PutRotationPolicyCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	MaxBytes      *string                `protobuf:"bytes,3,opt,name=max_bytes,json=maxBytes,proto3,oneof" json:"max_bytes,omitempty"`
 	MaxAge        *string                `protobuf:"bytes,4,opt,name=max_age,json=maxAge,proto3,oneof" json:"max_age,omitempty"`
@@ -828,11 +828,11 @@ func (*PutRotationPolicyCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *PutRotationPolicyCommand) GetId() string {
+func (x *PutRotationPolicyCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutRotationPolicyCommand) GetName() string {
@@ -872,7 +872,7 @@ func (x *PutRotationPolicyCommand) GetCron() string {
 
 type DeleteRotationPolicyCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -907,16 +907,16 @@ func (*DeleteRotationPolicyCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *DeleteRotationPolicyCommand) GetId() string {
+func (x *DeleteRotationPolicyCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type PutRetentionPolicyCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	MaxAge        *string                `protobuf:"bytes,3,opt,name=max_age,json=maxAge,proto3,oneof" json:"max_age,omitempty"`
 	MaxBytes      *string                `protobuf:"bytes,4,opt,name=max_bytes,json=maxBytes,proto3,oneof" json:"max_bytes,omitempty"`
@@ -955,11 +955,11 @@ func (*PutRetentionPolicyCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *PutRetentionPolicyCommand) GetId() string {
+func (x *PutRetentionPolicyCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutRetentionPolicyCommand) GetName() string {
@@ -992,7 +992,7 @@ func (x *PutRetentionPolicyCommand) GetMaxChunks() int64 {
 
 type DeleteRetentionPolicyCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1027,18 +1027,18 @@ func (*DeleteRetentionPolicyCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *DeleteRetentionPolicyCommand) GetId() string {
+func (x *DeleteRetentionPolicyCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 // RetentionRule for vault commands. Separate from config.proto's RetentionRule
 // to avoid naming collisions and to match Go types exactly.
 type PutVaultCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Enabled       bool                   `protobuf:"varint,7,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1075,11 +1075,11 @@ func (*PutVaultCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *PutVaultCommand) GetId() string {
+func (x *PutVaultCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutVaultCommand) GetName() string {
@@ -1098,7 +1098,7 @@ func (x *PutVaultCommand) GetEnabled() bool {
 
 type DeleteVaultCommand struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	Id    string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id    []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	// When true, the vault's data directory is deleted from disk on the owning node.
 	DeleteData    bool `protobuf:"varint,2,opt,name=delete_data,json=deleteData,proto3" json:"delete_data,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1135,11 +1135,11 @@ func (*DeleteVaultCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{8}
 }
 
-func (x *DeleteVaultCommand) GetId() string {
+func (x *DeleteVaultCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *DeleteVaultCommand) GetDeleteData() bool {
@@ -1151,12 +1151,12 @@ func (x *DeleteVaultCommand) GetDeleteData() bool {
 
 type PutIngesterCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
 	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	Params        map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	NodeId        string                 `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	NodeId        []byte                 `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1191,11 +1191,11 @@ func (*PutIngesterCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *PutIngesterCommand) GetId() string {
+func (x *PutIngesterCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutIngesterCommand) GetName() string {
@@ -1226,16 +1226,16 @@ func (x *PutIngesterCommand) GetParams() map[string]string {
 	return nil
 }
 
-func (x *PutIngesterCommand) GetNodeId() string {
+func (x *PutIngesterCommand) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
 	}
-	return ""
+	return nil
 }
 
 type DeleteIngesterCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1270,11 +1270,11 @@ func (*DeleteIngesterCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{10}
 }
 
-func (x *DeleteIngesterCommand) GetId() string {
+func (x *DeleteIngesterCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type PutSettingCommand struct {
@@ -1375,7 +1375,7 @@ func (x *DeleteSettingCommand) GetKey() string {
 
 type PutCertificateCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	CertPem       string                 `protobuf:"bytes,3,opt,name=cert_pem,json=certPem,proto3" json:"cert_pem,omitempty"`
 	KeyPem        string                 `protobuf:"bytes,4,opt,name=key_pem,json=keyPem,proto3" json:"key_pem,omitempty"`
@@ -1415,11 +1415,11 @@ func (*PutCertificateCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{13}
 }
 
-func (x *PutCertificateCommand) GetId() string {
+func (x *PutCertificateCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutCertificateCommand) GetName() string {
@@ -1459,7 +1459,7 @@ func (x *PutCertificateCommand) GetKeyFile() string {
 
 type DeleteCertificateCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1494,16 +1494,16 @@ func (*DeleteCertificateCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{14}
 }
 
-func (x *DeleteCertificateCommand) GetId() string {
+func (x *DeleteCertificateCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type CreateUserCommand struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
-	Id                 string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id                 []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Username           string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
 	PasswordHash       string                 `protobuf:"bytes,3,opt,name=password_hash,json=passwordHash,proto3" json:"password_hash,omitempty"`
 	Role               string                 `protobuf:"bytes,4,opt,name=role,proto3" json:"role,omitempty"`
@@ -1545,11 +1545,11 @@ func (*CreateUserCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{15}
 }
 
-func (x *CreateUserCommand) GetId() string {
+func (x *CreateUserCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *CreateUserCommand) GetUsername() string {
@@ -1603,7 +1603,7 @@ func (x *CreateUserCommand) GetUpdatedAt() *timestamppb.Timestamp {
 
 type UpdatePasswordCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	PasswordHash  string                 `protobuf:"bytes,2,opt,name=password_hash,json=passwordHash,proto3" json:"password_hash,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1639,11 +1639,11 @@ func (*UpdatePasswordCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{16}
 }
 
-func (x *UpdatePasswordCommand) GetId() string {
+func (x *UpdatePasswordCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *UpdatePasswordCommand) GetPasswordHash() string {
@@ -1655,7 +1655,7 @@ func (x *UpdatePasswordCommand) GetPasswordHash() string {
 
 type UpdateUserRoleCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1691,11 +1691,11 @@ func (*UpdateUserRoleCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{17}
 }
 
-func (x *UpdateUserRoleCommand) GetId() string {
+func (x *UpdateUserRoleCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *UpdateUserRoleCommand) GetRole() string {
@@ -1707,7 +1707,7 @@ func (x *UpdateUserRoleCommand) GetRole() string {
 
 type UpdateUsernameCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Username      string                 `protobuf:"bytes,2,opt,name=username,proto3" json:"username,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1743,11 +1743,11 @@ func (*UpdateUsernameCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *UpdateUsernameCommand) GetId() string {
+func (x *UpdateUsernameCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *UpdateUsernameCommand) GetUsername() string {
@@ -1759,7 +1759,7 @@ func (x *UpdateUsernameCommand) GetUsername() string {
 
 type DeleteUserCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1794,16 +1794,16 @@ func (*DeleteUserCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *DeleteUserCommand) GetId() string {
+func (x *DeleteUserCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type InvalidateTokensCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	At            *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1839,11 +1839,11 @@ func (*InvalidateTokensCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *InvalidateTokensCommand) GetId() string {
+func (x *InvalidateTokensCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *InvalidateTokensCommand) GetAt() *timestamppb.Timestamp {
@@ -1855,7 +1855,7 @@ func (x *InvalidateTokensCommand) GetAt() *timestamppb.Timestamp {
 
 type PutUserPreferencesCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Preferences   string                 `protobuf:"bytes,2,opt,name=preferences,proto3" json:"preferences,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1891,11 +1891,11 @@ func (*PutUserPreferencesCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{21}
 }
 
-func (x *PutUserPreferencesCommand) GetId() string {
+func (x *PutUserPreferencesCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutUserPreferencesCommand) GetPreferences() string {
@@ -1907,8 +1907,8 @@ func (x *PutUserPreferencesCommand) GetPreferences() string {
 
 type CreateRefreshTokenCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	UserId        string                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	UserId        []byte                 `protobuf:"bytes,2,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	TokenHash     string                 `protobuf:"bytes,3,opt,name=token_hash,json=tokenHash,proto3" json:"token_hash,omitempty"`
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
@@ -1946,18 +1946,18 @@ func (*CreateRefreshTokenCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{22}
 }
 
-func (x *CreateRefreshTokenCommand) GetId() string {
+func (x *CreateRefreshTokenCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
-func (x *CreateRefreshTokenCommand) GetUserId() string {
+func (x *CreateRefreshTokenCommand) GetUserId() []byte {
 	if x != nil {
 		return x.UserId
 	}
-	return ""
+	return nil
 }
 
 func (x *CreateRefreshTokenCommand) GetTokenHash() string {
@@ -1983,7 +1983,7 @@ func (x *CreateRefreshTokenCommand) GetCreatedAt() *timestamppb.Timestamp {
 
 type DeleteRefreshTokenCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2018,16 +2018,16 @@ func (*DeleteRefreshTokenCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{23}
 }
 
-func (x *DeleteRefreshTokenCommand) GetId() string {
+func (x *DeleteRefreshTokenCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type DeleteUserRefreshTokensCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	UserId        string                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
+	UserId        []byte                 `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2062,16 +2062,16 @@ func (*DeleteUserRefreshTokensCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{24}
 }
 
-func (x *DeleteUserRefreshTokensCommand) GetUserId() string {
+func (x *DeleteUserRefreshTokensCommand) GetUserId() []byte {
 	if x != nil {
 		return x.UserId
 	}
-	return ""
+	return nil
 }
 
 type PutNodeConfigCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2107,11 +2107,11 @@ func (*PutNodeConfigCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{25}
 }
 
-func (x *PutNodeConfigCommand) GetId() string {
+func (x *PutNodeConfigCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutNodeConfigCommand) GetName() string {
@@ -2123,7 +2123,7 @@ func (x *PutNodeConfigCommand) GetName() string {
 
 type DeleteNodeConfigCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2158,11 +2158,11 @@ func (*DeleteNodeConfigCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{26}
 }
 
-func (x *DeleteNodeConfigCommand) GetId() string {
+func (x *DeleteNodeConfigCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type PutClusterTLSCommand struct {
@@ -2243,10 +2243,10 @@ func (x *PutClusterTLSCommand) GetJoinToken() string {
 
 type PutRouteCommand struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	Id             string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id             []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name           string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	FilterId       string                 `protobuf:"bytes,3,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"`
-	DestinationIds []string               `protobuf:"bytes,4,rep,name=destination_ids,json=destinationIds,proto3" json:"destination_ids,omitempty"`
+	FilterId       []byte                 `protobuf:"bytes,3,opt,name=filter_id,json=filterId,proto3" json:"filter_id,omitempty"`
+	DestinationIds [][]byte               `protobuf:"bytes,4,rep,name=destination_ids,json=destinationIds,proto3" json:"destination_ids,omitempty"`
 	Distribution   string                 `protobuf:"bytes,5,opt,name=distribution,proto3" json:"distribution,omitempty"`
 	Enabled        bool                   `protobuf:"varint,6,opt,name=enabled,proto3" json:"enabled,omitempty"`
 	EjectOnly      bool                   `protobuf:"varint,7,opt,name=eject_only,json=ejectOnly,proto3" json:"eject_only,omitempty"`
@@ -2284,11 +2284,11 @@ func (*PutRouteCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{28}
 }
 
-func (x *PutRouteCommand) GetId() string {
+func (x *PutRouteCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutRouteCommand) GetName() string {
@@ -2298,14 +2298,14 @@ func (x *PutRouteCommand) GetName() string {
 	return ""
 }
 
-func (x *PutRouteCommand) GetFilterId() string {
+func (x *PutRouteCommand) GetFilterId() []byte {
 	if x != nil {
 		return x.FilterId
 	}
-	return ""
+	return nil
 }
 
-func (x *PutRouteCommand) GetDestinationIds() []string {
+func (x *PutRouteCommand) GetDestinationIds() [][]byte {
 	if x != nil {
 		return x.DestinationIds
 	}
@@ -2335,7 +2335,7 @@ func (x *PutRouteCommand) GetEjectOnly() bool {
 
 type DeleteRouteCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2370,16 +2370,16 @@ func (*DeleteRouteCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{29}
 }
 
-func (x *DeleteRouteCommand) GetId() string {
+func (x *DeleteRouteCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 type PutManagedFileCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`                               // original filename
 	Sha256        string                 `protobuf:"bytes,3,opt,name=sha256,proto3" json:"sha256,omitempty"`                           // hex-encoded content hash
 	Size          int64                  `protobuf:"varint,4,opt,name=size,proto3" json:"size,omitempty"`                              // file size in bytes
@@ -2418,11 +2418,11 @@ func (*PutManagedFileCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{30}
 }
 
-func (x *PutManagedFileCommand) GetId() string {
+func (x *PutManagedFileCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *PutManagedFileCommand) GetName() string {
@@ -2455,7 +2455,7 @@ func (x *PutManagedFileCommand) GetUploadedAt() string {
 
 type DeleteManagedFileCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2490,11 +2490,11 @@ func (*DeleteManagedFileCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{31}
 }
 
-func (x *DeleteManagedFileCommand) GetId() string {
+func (x *DeleteManagedFileCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 // PutCloudServiceCommand carries the full API CloudService from storage.proto.
@@ -2546,7 +2546,7 @@ func (x *PutCloudServiceCommand) GetCloudService() *CloudService {
 
 type DeleteCloudServiceCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2581,11 +2581,11 @@ func (*DeleteCloudServiceCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{33}
 }
 
-func (x *DeleteCloudServiceCommand) GetId() string {
+func (x *DeleteCloudServiceCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 // SetNodeStorageConfigCommand carries the full API NodeStorageConfig from storage.proto.
@@ -2680,7 +2680,7 @@ func (x *PutTierCommand) GetTier() *TierConfig {
 
 type DeleteTierCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
 	Drain         bool                   `protobuf:"varint,2,opt,name=drain,proto3" json:"drain,omitempty"` // When true, drain chunks to the next tier before deleting.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2716,11 +2716,11 @@ func (*DeleteTierCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{36}
 }
 
-func (x *DeleteTierCommand) GetId() string {
+func (x *DeleteTierCommand) GetId() []byte {
 	if x != nil {
 		return x.Id
 	}
-	return ""
+	return nil
 }
 
 func (x *DeleteTierCommand) GetDrain() bool {
@@ -2732,7 +2732,7 @@ func (x *DeleteTierCommand) GetDrain() bool {
 
 type SetTierPlacementsCommand struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	TierId        string                 `protobuf:"bytes,1,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
+	TierId        []byte                 `protobuf:"bytes,1,opt,name=tier_id,json=tierId,proto3" json:"tier_id,omitempty"`
 	Placements    []*TierPlacement       `protobuf:"bytes,2,rep,name=placements,proto3" json:"placements,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2768,11 +2768,11 @@ func (*SetTierPlacementsCommand) Descriptor() ([]byte, []int) {
 	return file_gastrolog_v1_fsm_proto_rawDescGZIP(), []int{37}
 }
 
-func (x *SetTierPlacementsCommand) GetTierId() string {
+func (x *SetTierPlacementsCommand) GetTierId() []byte {
 	if x != nil {
 		return x.TierId
 	}
-	return ""
+	return nil
 }
 
 func (x *SetTierPlacementsCommand) GetPlacements() []*TierPlacement {
@@ -3061,15 +3061,15 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x1aset_setup_wizard_dismissed\x18& \x01(\v2,.gastrolog.v1.SetSetupWizardDismissedCommandH\x00R\x17setSetupWizardDismissedB\t\n" +
 	"\acommand\"V\n" +
 	"\x10PutFilterCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x03 \x01(\tR\n" +
 	"expression\"%\n" +
 	"\x13DeleteFilterCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xf0\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xf0\x01\n" +
 	"\x18PutRotationPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
 	"\tmax_bytes\x18\x03 \x01(\tH\x00R\bmaxBytes\x88\x01\x01\x12\x1c\n" +
 	"\amax_age\x18\x04 \x01(\tH\x01R\x06maxAge\x88\x01\x01\x12$\n" +
@@ -3083,9 +3083,9 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\f_max_recordsB\a\n" +
 	"\x05_cron\"-\n" +
 	"\x1bDeleteRotationPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xcc\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xcc\x01\n" +
 	"\x19PutRetentionPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1c\n" +
 	"\amax_age\x18\x03 \x01(\tH\x00R\x06maxAge\x88\x01\x01\x12 \n" +
 	"\tmax_bytes\x18\x04 \x01(\tH\x01R\bmaxBytes\x88\x01\x01\x12\"\n" +
@@ -3097,43 +3097,43 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"_max_bytesB\r\n" +
 	"\v_max_chunks\".\n" +
 	"\x1cDeleteRetentionPolicyCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"O\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"O\n" +
 	"\x0fPutVaultCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\"E\n" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1f\n" +
 	"\vdelete_data\x18\x02 \x01(\bR\n" +
 	"deleteData\"\x80\x02\n" +
 	"\x12PutIngesterCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x18\n" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12D\n" +
 	"\x06params\x18\x05 \x03(\v2,.gastrolog.v1.PutIngesterCommand.ParamsEntryR\x06params\x12\x17\n" +
-	"\anode_id\x18\x06 \x01(\tR\x06nodeId\x1a9\n" +
+	"\anode_id\x18\x06 \x01(\fR\x06nodeId\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +
 	"\x15DeleteIngesterCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\";\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\";\n" +
 	"\x11PutSettingCommand\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value\"(\n" +
 	"\x14DeleteSettingCommand\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\"\xa7\x01\n" +
 	"\x15PutCertificateCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x19\n" +
 	"\bcert_pem\x18\x03 \x01(\tR\acertPem\x12\x17\n" +
 	"\akey_pem\x18\x04 \x01(\tR\x06keyPem\x12\x1b\n" +
 	"\tcert_file\x18\x05 \x01(\tR\bcertFile\x12\x19\n" +
 	"\bkey_file\x18\x06 \x01(\tR\akeyFile\"*\n" +
 	"\x18DeleteCertificateCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xde\x02\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xde\x02\n" +
 	"\x11CreateUserCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\x12#\n" +
 	"\rpassword_hash\x18\x03 \x01(\tR\fpasswordHash\x12\x12\n" +
 	"\x04role\x18\x04 \x01(\tR\x04role\x12 \n" +
@@ -3144,25 +3144,25 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
 	"updated_at\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"L\n" +
 	"\x15UpdatePasswordCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12#\n" +
 	"\rpassword_hash\x18\x02 \x01(\tR\fpasswordHash\";\n" +
 	"\x15UpdateUserRoleCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04role\x18\x02 \x01(\tR\x04role\"C\n" +
 	"\x15UpdateUsernameCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1a\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1a\n" +
 	"\busername\x18\x02 \x01(\tR\busername\"#\n" +
 	"\x11DeleteUserCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"U\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"U\n" +
 	"\x17InvalidateTokensCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12*\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\"M\n" +
 	"\x19PutUserPreferencesCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12 \n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12 \n" +
 	"\vpreferences\x18\x02 \x01(\tR\vpreferences\"\xd9\x01\n" +
 	"\x19CreateRefreshTokenCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x17\n" +
-	"\auser_id\x18\x02 \x01(\tR\x06userId\x12\x1d\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x17\n" +
+	"\auser_id\x18\x02 \x01(\fR\x06userId\x12\x1d\n" +
 	"\n" +
 	"token_hash\x18\x03 \x01(\tR\ttokenHash\x129\n" +
 	"\n" +
@@ -3170,14 +3170,14 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\"+\n" +
 	"\x19DeleteRefreshTokenCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"9\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"9\n" +
 	"\x1eDeleteUserRefreshTokensCommand\x12\x17\n" +
-	"\auser_id\x18\x01 \x01(\tR\x06userId\":\n" +
+	"\auser_id\x18\x01 \x01(\fR\x06userId\":\n" +
 	"\x14PutNodeConfigCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\")\n" +
 	"\x17DeleteNodeConfigCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\xc5\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\xc5\x01\n" +
 	"\x14PutClusterTLSCommand\x12\x1e\n" +
 	"\vca_cert_pem\x18\x01 \x01(\fR\tcaCertPem\x12\x1c\n" +
 	"\n" +
@@ -3187,38 +3187,38 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\n" +
 	"join_token\x18\x05 \x01(\tR\tjoinToken\"\xd8\x01\n" +
 	"\x0fPutRouteCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
-	"\tfilter_id\x18\x03 \x01(\tR\bfilterId\x12'\n" +
-	"\x0fdestination_ids\x18\x04 \x03(\tR\x0edestinationIds\x12\"\n" +
+	"\tfilter_id\x18\x03 \x01(\fR\bfilterId\x12'\n" +
+	"\x0fdestination_ids\x18\x04 \x03(\fR\x0edestinationIds\x12\"\n" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
 	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1d\n" +
 	"\n" +
 	"eject_only\x18\a \x01(\bR\tejectOnly\"$\n" +
 	"\x12DeleteRouteCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"\x88\x01\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"\x88\x01\n" +
 	"\x15PutManagedFileCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
 	"\x06sha256\x18\x03 \x01(\tR\x06sha256\x12\x12\n" +
 	"\x04size\x18\x04 \x01(\x03R\x04size\x12\x1f\n" +
 	"\vuploaded_at\x18\x05 \x01(\tR\n" +
 	"uploadedAt\"*\n" +
 	"\x18DeleteManagedFileCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"Y\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"Y\n" +
 	"\x16PutCloudServiceCommand\x12?\n" +
 	"\rcloud_service\x18\x01 \x01(\v2\x1a.gastrolog.v1.CloudServiceR\fcloudService\"+\n" +
 	"\x19DeleteCloudServiceCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\"a\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"a\n" +
 	"\x1bSetNodeStorageConfigCommand\x12B\n" +
 	"\fnode_storage\x18\x01 \x01(\v2\x1f.gastrolog.v1.NodeStorageConfigR\vnodeStorage\">\n" +
 	"\x0ePutTierCommand\x12,\n" +
 	"\x04tier\x18\x01 \x01(\v2\x18.gastrolog.v1.TierConfigR\x04tier\"9\n" +
 	"\x11DeleteTierCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\x12\x14\n" +
 	"\x05drain\x18\x02 \x01(\bR\x05drain\"p\n" +
 	"\x18SetTierPlacementsCommand\x12\x17\n" +
-	"\atier_id\x18\x01 \x01(\tR\x06tierId\x12;\n" +
+	"\atier_id\x18\x01 \x01(\fR\x06tierId\x12;\n" +
 	"\n" +
 	"placements\x18\x02 \x03(\v2\x1b.gastrolog.v1.TierPlacementR\n" +
 	"placements\">\n" +

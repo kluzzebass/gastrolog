@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { describe, test, expect, beforeEach } from "bun:test";
 import { render, fireEvent, waitFor } from "@testing-library/react";
 import { installMockClients, m } from "../../../test/api-mock";
@@ -7,15 +8,22 @@ const mocks = installMockClients();
 
 import { CertificatesSettings } from "./CertificatesSettings";
 
+/** Create a distinct 16-byte Uint8Array test ID from a small number. */
+function testId(n: number): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(16);
+  bytes[15] = n;
+  return bytes;
+}
+
 const sampleCerts = {
   certificates: [
-    { id: "c1", name: "prod-cert" },
-    { id: "c2", name: "staging-cert" },
+    { id: testId(1), name: "prod-cert" },
+    { id: testId(2), name: "staging-cert" },
   ],
 };
 
 const sampleSettings = {
-  tls: { defaultCert: "c1" },
+  tls: { defaultCert: encode(testId(1)) },
 };
 
 beforeEach(() => {
@@ -122,6 +130,13 @@ describe("CertificatesSettings", () => {
 
   test("deletes certificate via confirm flow", async () => {
     m(mocks.systemClient, "deleteCertificate").mockResolvedValueOnce({});
+    m(mocks.systemClient, "getCertificate").mockResolvedValueOnce({
+      id: testId(1),
+      name: "prod-cert",
+      certPem: "",
+      certFile: "",
+      keyFile: "",
+    });
     const qc = createTestQueryClient();
     qc.setQueryData(["certificates"], sampleCerts);
     qc.setQueryData(["settings"], sampleSettings);

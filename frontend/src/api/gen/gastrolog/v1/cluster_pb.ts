@@ -120,9 +120,9 @@ export class EnrollRequest extends Message<EnrollRequest> {
   tokenSecret = "";
 
   /**
-   * @generated from field: string node_id = 2;
+   * @generated from field: bytes node_id = 2;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   /**
    * @generated from field: string node_addr = 3;
@@ -138,7 +138,7 @@ export class EnrollRequest extends Message<EnrollRequest> {
   static readonly typeName = "gastrolog.v1.EnrollRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "token_secret", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "node_addr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -289,9 +289,9 @@ export class BroadcastResponse extends Message<BroadcastResponse> {
  */
 export class BroadcastMessage extends Message<BroadcastMessage> {
   /**
-   * @generated from field: string sender_id = 1;
+   * @generated from field: bytes sender_id = 1;
    */
-  senderId = "";
+  senderId = new Uint8Array(0);
 
   /**
    * @generated from field: google.protobuf.Timestamp timestamp = 2;
@@ -323,7 +323,7 @@ export class BroadcastMessage extends Message<BroadcastMessage> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.BroadcastMessage";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "sender_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "sender_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "timestamp", kind: "message", T: Timestamp },
     { no: 10, name: "node_stats", kind: "message", T: NodeStats, oneof: "payload" },
     { no: 11, name: "node_jobs", kind: "message", T: NodeJobs, oneof: "payload" },
@@ -665,9 +665,9 @@ export class SystemAlert extends Message<SystemAlert> {
   /**
    * stable key for dedup (e.g. "vault-init:$vaultID")
    *
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: gastrolog.v1.AlertSeverity severity = 2;
@@ -704,7 +704,7 @@ export class SystemAlert extends Message<SystemAlert> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.SystemAlert";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "severity", kind: "enum", T: proto3.getEnumType(AlertSeverity) },
     { no: 3, name: "source", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 4, name: "message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
@@ -736,9 +736,9 @@ export class SystemAlert extends Message<SystemAlert> {
  */
 export class IngesterNodeStats extends Message<IngesterNodeStats> {
   /**
-   * @generated from field: string id = 1;
+   * @generated from field: bytes id = 1;
    */
-  id = "";
+  id = new Uint8Array(0);
 
   /**
    * @generated from field: uint64 messages_ingested = 2;
@@ -773,7 +773,7 @@ export class IngesterNodeStats extends Message<IngesterNodeStats> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.IngesterNodeStats";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "messages_ingested", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 3, name: "bytes_ingested", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 4, name: "errors", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
@@ -808,9 +808,9 @@ export class IngesterNodeStats extends Message<IngesterNodeStats> {
  */
 export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
@@ -825,7 +825,7 @@ export class ForwardRecordsRequest extends Message<ForwardRecordsRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardRecordsRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
   ]);
 
@@ -894,9 +894,9 @@ export class ForwardTierApplyRequest extends Message<ForwardTierApplyRequest> {
   /**
    * tier Raft group ID (= tier UUID)
    *
-   * @generated from field: string group_id = 1;
+   * @generated from field: bytes group_id = 1;
    */
-  groupId = "";
+  groupId = new Uint8Array(0);
 
   /**
    * pre-marshaled tier FSM command
@@ -913,7 +913,7 @@ export class ForwardTierApplyRequest extends Message<ForwardTierApplyRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardTierApplyRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "group_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "group_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "command", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
@@ -974,14 +974,14 @@ export class ForwardTierApplyResponse extends Message<ForwardTierApplyResponse> 
  */
 export class TierReplicationCommand extends Message<TierReplicationCommand> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: string tier_id = 2;
+   * @generated from field: bytes tier_id = 2;
    */
-  tierId = "";
+  tierId = new Uint8Array(0);
 
   /**
    * @generated from oneof gastrolog.v1.TierReplicationCommand.command
@@ -1020,8 +1020,8 @@ export class TierReplicationCommand extends Message<TierReplicationCommand> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierReplicationCommand";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 10, name: "append", kind: "message", T: TierReplicationAppend, oneof: "command" },
     { no: 11, name: "seal", kind: "message", T: TierReplicationSeal, oneof: "command" },
     { no: 12, name: "import_sealed", kind: "message", T: TierReplicationImport, oneof: "command" },
@@ -1054,9 +1054,9 @@ export class TierReplicationAppend extends Message<TierReplicationAppend> {
   /**
    * leader's active chunk ID
    *
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
@@ -1071,7 +1071,7 @@ export class TierReplicationAppend extends Message<TierReplicationAppend> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierReplicationAppend";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
   ]);
 
@@ -1101,9 +1101,9 @@ export class TierReplicationSeal extends Message<TierReplicationSeal> {
   /**
    * expected active chunk ID
    *
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<TierReplicationSeal>) {
     super();
@@ -1113,7 +1113,7 @@ export class TierReplicationSeal extends Message<TierReplicationSeal> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierReplicationSeal";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationSeal {
@@ -1141,9 +1141,9 @@ export class TierReplicationSeal extends Message<TierReplicationSeal> {
  */
 export class TierReplicationImport extends Message<TierReplicationImport> {
   /**
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: repeated gastrolog.v1.ExportRecord records = 2;
@@ -1158,7 +1158,7 @@ export class TierReplicationImport extends Message<TierReplicationImport> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierReplicationImport";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "records", kind: "message", T: ExportRecord, repeated: true },
   ]);
 
@@ -1187,9 +1187,9 @@ export class TierReplicationImport extends Message<TierReplicationImport> {
  */
 export class TierReplicationDelete extends Message<TierReplicationDelete> {
   /**
-   * @generated from field: string chunk_id = 1;
+   * @generated from field: bytes chunk_id = 1;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<TierReplicationDelete>) {
     super();
@@ -1199,7 +1199,7 @@ export class TierReplicationDelete extends Message<TierReplicationDelete> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.TierReplicationDelete";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationDelete {
@@ -1238,9 +1238,9 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
   /**
    * echoes the chunk_id from the command
    *
-   * @generated from field: string chunk_id = 3;
+   * @generated from field: bytes chunk_id = 3;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<TierReplicationAck>) {
     super();
@@ -1252,7 +1252,7 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "ok", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 2, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 3, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): TierReplicationAck {
@@ -1280,9 +1280,9 @@ export class TierReplicationAck extends Message<TierReplicationAck> {
  */
 export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * @generated from field: string query = 2;
@@ -1304,7 +1304,7 @@ export class ForwardSearchRequest extends Message<ForwardSearchRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardSearchRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "resume_token", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
@@ -1399,14 +1399,14 @@ export class ForwardSearchResponse extends Message<ForwardSearchResponse> {
  */
 export class ForwardGetContextRequest extends Message<ForwardGetContextRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   /**
    * @generated from field: uint64 pos = 3;
@@ -1431,8 +1431,8 @@ export class ForwardGetContextRequest extends Message<ForwardGetContextRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardGetContextRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "pos", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 4, name: "before", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
     { no: 5, name: "after", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
@@ -1513,9 +1513,9 @@ export class ForwardGetContextResponse extends Message<ForwardGetContextResponse
  */
 export class ForwardListChunksRequest extends Message<ForwardListChunksRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardListChunksRequest>) {
     super();
@@ -1525,7 +1525,7 @@ export class ForwardListChunksRequest extends Message<ForwardListChunksRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardListChunksRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardListChunksRequest {
@@ -1590,14 +1590,14 @@ export class ForwardListChunksResponse extends Message<ForwardListChunksResponse
  */
 export class ForwardGetIndexesRequest extends Message<ForwardGetIndexesRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardGetIndexesRequest>) {
     super();
@@ -1607,8 +1607,8 @@ export class ForwardGetIndexesRequest extends Message<ForwardGetIndexesRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardGetIndexesRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetIndexesRequest {
@@ -1679,9 +1679,9 @@ export class ForwardGetIndexesResponse extends Message<ForwardGetIndexesResponse
  */
 export class ForwardValidateVaultRequest extends Message<ForwardValidateVaultRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardValidateVaultRequest>) {
     super();
@@ -1691,7 +1691,7 @@ export class ForwardValidateVaultRequest extends Message<ForwardValidateVaultReq
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardValidateVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardValidateVaultRequest {
@@ -1762,14 +1762,14 @@ export class ForwardValidateVaultResponse extends Message<ForwardValidateVaultRe
  */
 export class ForwardGetChunkRequest extends Message<ForwardGetChunkRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardGetChunkRequest>) {
     super();
@@ -1779,8 +1779,8 @@ export class ForwardGetChunkRequest extends Message<ForwardGetChunkRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardGetChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardGetChunkRequest {
@@ -1845,16 +1845,16 @@ export class ForwardGetChunkResponse extends Message<ForwardGetChunkResponse> {
  */
 export class ForwardAnalyzeChunkRequest extends Message<ForwardAnalyzeChunkRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * empty = analyze all chunks
    *
-   * @generated from field: string chunk_id = 2;
+   * @generated from field: bytes chunk_id = 2;
    */
-  chunkId = "";
+  chunkId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardAnalyzeChunkRequest>) {
     super();
@@ -1864,8 +1864,8 @@ export class ForwardAnalyzeChunkRequest extends Message<ForwardAnalyzeChunkReque
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardAnalyzeChunkRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "chunk_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "chunk_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardAnalyzeChunkRequest {
@@ -1929,9 +1929,9 @@ export class ForwardAnalyzeChunkResponse extends Message<ForwardAnalyzeChunkResp
  */
 export class ForwardSealVaultRequest extends Message<ForwardSealVaultRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardSealVaultRequest>) {
     super();
@@ -1941,7 +1941,7 @@ export class ForwardSealVaultRequest extends Message<ForwardSealVaultRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardSealVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardSealVaultRequest {
@@ -1999,9 +1999,9 @@ export class ForwardSealVaultResponse extends Message<ForwardSealVaultResponse> 
  */
 export class ForwardReindexVaultRequest extends Message<ForwardReindexVaultRequest> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardReindexVaultRequest>) {
     super();
@@ -2011,7 +2011,7 @@ export class ForwardReindexVaultRequest extends Message<ForwardReindexVaultReque
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardReindexVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReindexVaultRequest {
@@ -2036,9 +2036,9 @@ export class ForwardReindexVaultRequest extends Message<ForwardReindexVaultReque
  */
 export class ForwardReindexVaultResponse extends Message<ForwardReindexVaultResponse> {
   /**
-   * @generated from field: string job_id = 1;
+   * @generated from field: bytes job_id = 1;
    */
-  jobId = "";
+  jobId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardReindexVaultResponse>) {
     super();
@@ -2048,7 +2048,7 @@ export class ForwardReindexVaultResponse extends Message<ForwardReindexVaultResp
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardReindexVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "job_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardReindexVaultResponse {
@@ -2085,9 +2085,9 @@ export class ForwardExportToVaultRequest extends Message<ForwardExportToVaultReq
   /**
    * Target vault UUID (already resolved)
    *
-   * @generated from field: string target_vault_id = 2;
+   * @generated from field: bytes target_vault_id = 2;
    */
-  targetVaultId = "";
+  targetVaultId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardExportToVaultRequest>) {
     super();
@@ -2098,7 +2098,7 @@ export class ForwardExportToVaultRequest extends Message<ForwardExportToVaultReq
   static readonly typeName = "gastrolog.v1.ForwardExportToVaultRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "expression", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "target_vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "target_vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExportToVaultRequest {
@@ -2123,9 +2123,9 @@ export class ForwardExportToVaultRequest extends Message<ForwardExportToVaultReq
  */
 export class ForwardExportToVaultResponse extends Message<ForwardExportToVaultResponse> {
   /**
-   * @generated from field: string job_id = 1;
+   * @generated from field: bytes job_id = 1;
    */
-  jobId = "";
+  jobId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardExportToVaultResponse>) {
     super();
@@ -2135,7 +2135,7 @@ export class ForwardExportToVaultResponse extends Message<ForwardExportToVaultRe
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardExportToVaultResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "job_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "job_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExportToVaultResponse {
@@ -2235,9 +2235,9 @@ export class NotifyEvictionResponse extends Message<NotifyEvictionResponse> {
  */
 export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> {
   /**
-   * @generated from field: string node_id = 1;
+   * @generated from field: bytes node_id = 1;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ForwardRemoveNodeRequest>) {
     super();
@@ -2247,7 +2247,7 @@ export class ForwardRemoveNodeRequest extends Message<ForwardRemoveNodeRequest> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardRemoveNodeRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardRemoveNodeRequest {
@@ -2306,9 +2306,9 @@ export class ForwardRemoveNodeResponse extends Message<ForwardRemoveNodeResponse
  */
 export class ForwardSetNodeSuffrageRequest extends Message<ForwardSetNodeSuffrageRequest> {
   /**
-   * @generated from field: string node_id = 1;
+   * @generated from field: bytes node_id = 1;
    */
-  nodeId = "";
+  nodeId = new Uint8Array(0);
 
   /**
    * @generated from field: string node_addr = 2;
@@ -2328,7 +2328,7 @@ export class ForwardSetNodeSuffrageRequest extends Message<ForwardSetNodeSuffrag
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardSetNodeSuffrageRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "node_addr", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 3, name: "voter", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
@@ -2396,9 +2396,9 @@ export class ForwardExplainRequest extends Message<ForwardExplainRequest> {
   /**
    * batch all vaults for this node in one RPC
    *
-   * @generated from field: repeated string vault_ids = 2;
+   * @generated from field: repeated bytes vault_ids = 2;
    */
-  vaultIds: string[] = [];
+  vaultIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<ForwardExplainRequest>) {
     super();
@@ -2409,7 +2409,7 @@ export class ForwardExplainRequest extends Message<ForwardExplainRequest> {
   static readonly typeName = "gastrolog.v1.ForwardExplainRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 2, name: "vault_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 2, name: "vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ForwardExplainRequest {
@@ -2483,9 +2483,9 @@ export class ForwardExplainResponse extends Message<ForwardExplainResponse> {
  */
 export class ForwardFollowRequest extends Message<ForwardFollowRequest> {
   /**
-   * @generated from field: repeated string vault_ids = 1;
+   * @generated from field: repeated bytes vault_ids = 1;
    */
-  vaultIds: string[] = [];
+  vaultIds: Uint8Array[] = [];
 
   /**
    * @generated from field: string query = 2;
@@ -2500,7 +2500,7 @@ export class ForwardFollowRequest extends Message<ForwardFollowRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ForwardFollowRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 1, name: "vault_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 2, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
@@ -2568,9 +2568,9 @@ export class ForwardFollowResponse extends Message<ForwardFollowResponse> {
  */
 export class ImportRecordMessage extends Message<ImportRecordMessage> {
   /**
-   * @generated from field: string vault_id = 1;
+   * @generated from field: bytes vault_id = 1;
    */
-  vaultId = "";
+  vaultId = new Uint8Array(0);
 
   /**
    * @generated from field: gastrolog.v1.ExportRecord record = 2;
@@ -2580,9 +2580,9 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
   /**
    * optional: route to a specific tier's active chunk (StreamToTier)
    *
-   * @generated from field: string tier_id = 3;
+   * @generated from field: bytes tier_id = 3;
    */
-  tierId = "";
+  tierId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<ImportRecordMessage>) {
     super();
@@ -2592,9 +2592,9 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ImportRecordMessage";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "vault_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "vault_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "record", kind: "message", T: ExportRecord },
-    { no: 3, name: "tier_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "tier_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ImportRecordMessage {
@@ -2621,9 +2621,9 @@ export class ImportRecordMessage extends Message<ImportRecordMessage> {
  */
 export class PullManagedFileRequest extends Message<PullManagedFileRequest> {
   /**
-   * @generated from field: string file_id = 1;
+   * @generated from field: bytes file_id = 1;
    */
-  fileId = "";
+  fileId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<PullManagedFileRequest>) {
     super();
@@ -2633,7 +2633,7 @@ export class PullManagedFileRequest extends Message<PullManagedFileRequest> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PullManagedFileRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "file_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 1, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PullManagedFileRequest {
@@ -2751,9 +2751,9 @@ export class ListPeerManagedFilesRequest extends Message<ListPeerManagedFilesReq
  */
 export class ListPeerManagedFilesResponse extends Message<ListPeerManagedFilesResponse> {
   /**
-   * @generated from field: repeated string file_ids = 1;
+   * @generated from field: repeated bytes file_ids = 1;
    */
-  fileIds: string[] = [];
+  fileIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<ListPeerManagedFilesResponse>) {
     super();
@@ -2763,7 +2763,7 @@ export class ListPeerManagedFilesResponse extends Message<ListPeerManagedFilesRe
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.ListPeerManagedFilesResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "file_ids", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 1, name: "file_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): ListPeerManagedFilesResponse {

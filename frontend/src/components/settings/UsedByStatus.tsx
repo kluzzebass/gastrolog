@@ -1,4 +1,5 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { encode } from "../../api/glid";
 
 interface UsedByStatusProps {
   dark: boolean;
@@ -41,10 +42,10 @@ export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusPr
 }
 
 interface Route {
-  id: string;
+  id: Uint8Array;
   name: string;
-  filterId: string;
-  destinations: { vaultId: string }[];
+  filterId: Uint8Array;
+  destinations: { vaultId: Uint8Array }[];
 }
 
 export function routeRefsForFilter(
@@ -52,28 +53,29 @@ export function routeRefsForFilter(
   filterId: string,
 ): string[] {
   return routes
-    .filter((r) => r.filterId === filterId)
-    .map((r) => r.name || r.id);
+    .filter((r) => encode(r.filterId) === filterId)
+    .map((r) => r.name || encode(r.id));
 }
 
 interface Tier {
-  id: string;
+  id: Uint8Array;
   name: string;
-  vaultId: string;
+  vaultId: Uint8Array;
   position: number;
-  rotationPolicyId: string;
-  retentionRules: { retentionPolicyId: string }[];
+  rotationPolicyId: Uint8Array;
+  retentionRules: { retentionPolicyId: Uint8Array }[];
 }
 
 interface VaultRef {
-  id: string;
+  id: Uint8Array;
   name: string;
 }
 
 function tierLabel(tier: Tier, vaults: VaultRef[]): string | null {
-  const vault = vaults.find((v) => v.id === tier.vaultId);
+  const vaultId = encode(tier.vaultId);
+  const vault = vaults.find((v) => encode(v.id) === vaultId);
   if (!vault) return null;
-  return `${vault.name || vault.id}/tier ${String(tier.position + 1)}`;
+  return `${vault.name || vaultId}/tier ${String(tier.position + 1)}`;
 }
 
 export function tierRefsForRotationPolicy(
@@ -82,7 +84,7 @@ export function tierRefsForRotationPolicy(
   vaults: VaultRef[] = [],
 ): string[] {
   return tiers
-    .filter((t) => t.rotationPolicyId === rotationPolicyId)
+    .filter((t) => encode(t.rotationPolicyId) === rotationPolicyId)
     .map((t) => tierLabel(t, vaults))
     .filter((label): label is string => label !== null);
 }
@@ -95,7 +97,7 @@ export function tierRuleRefsFor(
   return tiers
     .filter((t) =>
       t.retentionRules.some(
-        (r) => r.retentionPolicyId === retentionPolicyId,
+        (r) => encode(r.retentionPolicyId) === retentionPolicyId,
       ),
     )
     .map((t) => tierLabel(t, vaults))

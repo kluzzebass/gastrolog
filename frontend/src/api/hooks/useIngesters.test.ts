@@ -13,6 +13,7 @@ import {
   useTestIngester,
 } from "./useIngesters";
 import { IngesterConfig } from "../gen/gastrolog/v1/system_pb";
+import { decode } from "../glid";
 
 beforeEach(() => {
   m(mocks.systemClient, "listIngesters").mockClear();
@@ -25,7 +26,7 @@ beforeEach(() => {
 describe("useIngesters", () => {
   test("fetches ingester list", async () => {
     const ingesters = [
-      new IngesterConfig({ id: "i1", name: "syslog", type: "syslog", enabled: true }),
+      new IngesterConfig({ id: decode("i1"), name: "syslog", type: "syslog", enabled: true }),
     ];
     m(mocks.systemClient, "listIngesters").mockResolvedValueOnce({ ingesters });
 
@@ -93,7 +94,7 @@ describe("useDeleteIngester", () => {
       await result.current.mutateAsync("i1");
     });
 
-    expect(m(mocks.systemClient, "deleteIngester")).toHaveBeenCalledWith({ id: "i1" });
+    expect(m(mocks.systemClient, "deleteIngester")).toHaveBeenCalledWith({ id: decode("i1") });
     expect(qc.getQueryState(["system"])?.isInvalidated).toBe(true);
   });
 });

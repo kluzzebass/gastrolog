@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/units"
 )
 
@@ -47,7 +48,7 @@ func newFileListCmd() *cobra.Command {
 			var rows [][]string
 			for _, f := range resp.Msg.Files {
 				rows = append(rows, []string{
-					f.Id, f.Name, units.FormatBytesDisplay(f.Size), f.Sha256[:12], f.UploadedAt,
+					glid.FromBytes(f.Id).String(), f.Name, units.FormatBytesDisplay(f.Size), f.Sha256[:12], f.UploadedAt,
 				})
 			}
 			p.table([]string{"ID", "NAME", "SIZE", "SHA256", "UPLOADED"}, rows)
@@ -125,7 +126,11 @@ func newFileDeleteCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			_, err := client.System.DeleteManagedFile(context.Background(), connect.NewRequest(&v1.DeleteManagedFileRequest{Id: args[0]}))
+			idBytes, parseErr := glid.ParseUUID(args[0])
+			if parseErr != nil {
+				return fmt.Errorf("invalid file ID: %w", parseErr)
+			}
+			_, err := client.System.DeleteManagedFile(context.Background(), connect.NewRequest(&v1.DeleteManagedFileRequest{Id: idBytes.ToProto()}))
 			if err != nil {
 				return err
 			}

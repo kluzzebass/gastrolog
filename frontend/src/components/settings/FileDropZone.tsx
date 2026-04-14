@@ -1,3 +1,4 @@
+import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { formatDateOnly } from "../../utils/temporal";
@@ -146,8 +147,8 @@ export function FileDropZone({
           ) : (
             filteredPickable.map((f) => (
               <button
-                key={f.id}
-                onClick={() => onFileSelected?.(f.id)}
+                key={encode(f.id)}
+                onClick={() => onFileSelected?.(encode(f.id))}
                 className={`flex items-center gap-2 px-2 py-1.5 rounded text-left text-[0.8em] transition-colors ${c(
                   "hover:bg-ink-hover",
                   "hover:bg-light-hover",

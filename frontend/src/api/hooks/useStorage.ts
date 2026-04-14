@@ -3,6 +3,7 @@ import { useSystemMutation } from "./useSystem";
 import type { CloudService } from "../gen/gastrolog/v1/storage_pb";
 import type { NodeStorageConfig } from "../gen/gastrolog/v1/storage_pb";
 import type { TierConfig } from "../gen/gastrolog/v1/system_pb";
+import { decode } from "../glid";
 
 export function usePutCloudService() {
   return useSystemMutation(
@@ -27,7 +28,7 @@ export function usePutCloudService() {
     }) => {
       return systemClient.putCloudService({
         config: {
-          id: args.id,
+          id: decode(args.id),
           name: args.name,
           provider: args.provider,
           bucket: args.bucket,
@@ -57,7 +58,7 @@ export function usePutCloudService() {
 export function useDeleteCloudService() {
   return useSystemMutation(
     async (args: { id: string }) => {
-      return systemClient.deleteCloudService({ id: args.id });
+      return systemClient.deleteCloudService({ id: decode(args.id) });
     },
     [],
   );
@@ -77,8 +78,11 @@ export function useSetNodeStorageConfig() {
     }) => {
       return systemClient.setNodeStorageConfig({
         config: {
-          nodeId: args.nodeId,
-          fileStorages: args.fileStorages,
+          nodeId: decode(args.nodeId),
+          fileStorages: args.fileStorages.map((fs) => ({
+            ...fs,
+            id: decode(fs.id),
+          })),
         } as NodeStorageConfig,
       });
     },
@@ -100,7 +104,7 @@ export function usePutTier() {
 export function useDeleteTier() {
   return useSystemMutation(
     async (args: { id: string; drain?: boolean }) => {
-      return systemClient.deleteTier({ id: args.id, drain: args.drain });
+      return systemClient.deleteTier({ id: decode(args.id), drain: args.drain });
     },
     [["vaults"], ["stats"]],
   );

@@ -1,5 +1,13 @@
 import { Record as ProtoRecord } from "./api/client";
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 
 export type Theme = "dark" | "light" | "system";
 export type Palette = "observatory" | "nord" | "solarized" | "dracula" | "catppuccin" | "gruvbox" | "tokyonight" | "rosepine" | "everforest" | "synthwave";
@@ -63,7 +71,7 @@ export function sameRecord(
     br = b.ref;
   if (!ar || !br) return false;
   return (
-    ar.chunkId === br.chunkId && ar.pos === br.pos && ar.vaultId === br.vaultId
+    bytesEqual(ar.chunkId, br.chunkId) && ar.pos === br.pos && bytesEqual(ar.vaultId, br.vaultId)
   );
 }
 
