@@ -1,11 +1,18 @@
 package cli
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
+
+	"gastrolog/internal/glid"
+
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 // printer handles table or JSON output.
@@ -18,15 +25,111 @@ func newPrinter(format string) *printer {
 	return &printer{format: format, w: os.Stdout}
 }
 
-// json marshals v as indented JSON.
+// json marshals v as indented JSON. For proto messages, uses protojson then
+// post-processes to convert GLID byte fields (base64) to base32hex strings
+// so the output is human-readable and round-trippable through the CLI.
 func (p *printer) json(v any) error {
+	// Single proto message.
+	if msg, ok := v.(proto.Message); ok {
+		return p.writeProtoJSON(msg)
+	}
+	// Try to handle slices of proto messages via encoding/json + post-processing.
 	enc := json.NewEncoder(p.w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(v)
+	// Marshal, then decode and convert GLID fields.
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	converted := convertGLIDFields(raw)
+	var indented json.RawMessage
+	if err := json.Unmarshal(converted, &indented); err != nil {
+		return enc.Encode(v) // fallback
+	}
+	return enc.Encode(indented)
+}
+
+func (p *printer) writeProtoJSON(msg proto.Message) error {
+	b, err := protojson.MarshalOptions{Indent: "  "}.Marshal(msg)
+	if err != nil {
+		return err
+	}
+	converted := convertGLIDFields(b)
+	_, err = p.w.Write(converted)
+	if err == nil {
+		_, err = fmt.Fprintln(p.w)
+	}
+	return err
+}
+
+// convertGLIDFields walks a JSON value and converts base64 strings that
+// decode to exactly 16 bytes (GLID size) in fields named *_id or "id"
+// to their base32hex representation.
+func convertGLIDFields(data []byte) []byte {
+	var v any
+	if err := json.Unmarshal(data, &v); err != nil {
+		return data
+	}
+	walkJSON(v, "")
+	out, err := json.Marshal(v)
+	if err != nil {
+		return data
+	}
+	return out
+}
+
+func walkJSON(v any, key string) {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, child := range val {
+			if s, ok := child.(string); ok && isIDField(k) {
+				if converted, ok := tryConvertGLID(s); ok {
+					val[k] = converted
+				}
+			} else {
+				walkJSON(child, k)
+			}
+		}
+	case []any:
+		for _, item := range val {
+			walkJSON(item, key)
+		}
+	}
+}
+
+func isIDField(name string) bool {
+	lower := strings.ToLower(name)
+	return lower == "id" || strings.HasSuffix(lower, "_id") ||
+		strings.HasSuffix(lower, "Id") || // camelCase from protojson
+		lower == "sender_id" || lower == "senderid" ||
+		lower == "node_id" || lower == "nodeid"
+}
+
+// tryConvertGLID attempts to decode a base64 string as a 16-byte GLID.
+// Returns the base32hex representation if successful.
+func tryConvertGLID(s string) (string, bool) {
+	if s == "" {
+		return "", false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		// Try base64 URL-safe and raw variants.
+		decoded, err = base64.RawStdEncoding.DecodeString(s)
+		if err != nil {
+			return "", false
+		}
+	}
+	if len(decoded) != glid.Size {
+		return "", false
+	}
+	g := glid.FromBytes(decoded)
+	if g.IsZero() {
+		return "", false
+	}
+	return g.String(), true
 }
 
 // table writes rows using tabwriter. header is the first row.
-// rows is a slice of slices; each inner slice is a row of strings.
 func (p *printer) table(header []string, rows [][]string) {
 	tw := tabwriter.NewWriter(p.w, 0, 4, 2, ' ', 0)
 	for i, h := range header {
