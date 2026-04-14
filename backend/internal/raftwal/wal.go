@@ -208,9 +208,17 @@ func (w *WAL) GroupStore(name string) *GroupStore {
 	return &GroupStore{wal: w, groupID: gid}
 }
 
-// Close flushes pending writes and closes the WAL.
+// Close flushes pending writes and closes the WAL. Safe to call multiple times.
 func (w *WAL) Close() error {
-	close(w.done)
+	w.mu.Lock()
+	select {
+	case <-w.done:
+		w.mu.Unlock()
+		return nil // already closed
+	default:
+		close(w.done)
+	}
+	w.mu.Unlock()
 	w.wg.Wait()
 	// Drain any ops that were enqueued but never processed.
 	for {
