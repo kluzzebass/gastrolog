@@ -8,6 +8,7 @@
         "@bufbuild/protobuf": "1",
         "@connectrpc/connect": "1",
         "@connectrpc/connect-web": "1",
+        "@re-dev/react-truncate": "^0.6.0",
         "@tailwindcss/vite": "^4.1.18",
         "@tanstack/react-query": "^5.90.20",
         "@tanstack/react-router": "^1.158.1",
@@ -234,6 +235,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@mermaid-js/parser": ["@mermaid-js/parser@0.6.3", "", { "dependencies": { "langium": "3.3.1" } }, "sha512-lnjOhe7zyHjc+If7yT4zoedx2vo4sHaTmtkl1+or8BRTnCtDmcTpAjpzDSfCZrshM5bCoz0GyidzadJAH1xobA=="],
+
+    "@re-dev/react-truncate": ["@re-dev/react-truncate@0.6.0", "", { "peerDependencies": { "react": ">=19.0.0 || >=18.0.0 || >=17.0.0 || >=16.0.0", "react-dom": ">=19.0.0 || >=18.0.0 || >=17.0.0 || >=16.0.0" } }, "sha512-wO+MMHvbNtFKQgWIie4upsih49xKDBYVTFAGyNnCwUpTCS5Bn6EB9wxA+Z9vRNoSqL0XWdIDtgOH1y9NHoKZRw=="],
 
     "@rolldown/pluginutils": ["@rolldown/pluginutils@1.0.0-rc.2", "", {}, "sha512-izyXV/v+cHiRfozX62W9htOAvwMo4/bXKDrQ+vom1L1qRuexPock/7VZDAhnpHCLNejd3NJ6hiab+tO0D44Rgw=="],
 
