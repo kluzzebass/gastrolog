@@ -78,7 +78,7 @@ func newIngesterGetCmd() *cobra.Command {
 				return err
 			}
 			for _, ig := range resp.Msg.Ingesters {
-				if string(ig.Id) == string(idBytes) {
+				if glid.FromBytes(ig.Id) == glid.FromBytes(idBytes) {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(ig)

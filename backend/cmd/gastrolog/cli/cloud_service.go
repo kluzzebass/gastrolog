@@ -72,7 +72,7 @@ func newCloudServiceGetCmd() *cobra.Command {
 				return err
 			}
 			for _, cs := range resp.Msg.CloudServices {
-				if string(cs.Id) == string(idBytes) {
+				if glid.FromBytes(cs.Id) == glid.FromBytes(idBytes) {
 					return printCloudService(cmd, cs)
 				}
 			}

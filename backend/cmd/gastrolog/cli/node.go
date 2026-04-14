@@ -75,7 +75,7 @@ func newNodeGetCmd() *cobra.Command {
 				return parseErr
 			}
 			for _, n := range resp.Msg.NodeConfigs {
-				if string(n.Id) == string(idBytes.ToProto()) {
+				if glid.FromBytes(n.Id) == idBytes {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(n)
@@ -107,9 +107,13 @@ func newNodeRenameCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			idBytes, parseErr := glid.ParseUUID(id)
+			if parseErr != nil {
+				return parseErr
+			}
 			_, err = client.System.PutNodeConfig(context.Background(), connect.NewRequest(&v1.PutNodeConfigRequest{
 				Config: &v1.NodeConfig{
-					Id:   []byte(id),
+					Id:   idBytes.ToProto(),
 					Name: args[1],
 				},
 			}))
@@ -150,7 +154,7 @@ func newNodeAddStorageCmd() *cobra.Command {
 			}
 			var existing []*v1.FileStorage
 			for _, nsc := range resp.Msg.NodeStorageConfigs {
-				if string(nsc.NodeId) == nodeID {
+				if glid.FromBytes(nsc.NodeId).String() == nodeID {
 					existing = nsc.FileStorages
 					break
 				}
@@ -211,7 +215,7 @@ func newNodeListStorageCmd() *cobra.Command {
 			// Build node name lookup.
 			nodeNames := make(map[string]string)
 			for _, n := range resp.Msg.NodeConfigs {
-				nodeNames[string(n.Id)] = n.Name
+				nodeNames[glid.FromBytes(n.Id).String()] = n.Name
 			}
 
 			p := newPrinter(outputFormat(cmd))

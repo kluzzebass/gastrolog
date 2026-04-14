@@ -59,7 +59,11 @@ func newJobGetCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client := clientFromCmd(cmd)
-			resp, err := client.Job.GetJob(context.Background(), connect.NewRequest(&v1.GetJobRequest{Id: []byte(args[0])}))
+			jobID, parseErr := glid.ParseUUID(args[0])
+			if parseErr != nil {
+				return fmt.Errorf("invalid job ID %q: %w", args[0], parseErr)
+			}
+			resp, err := client.Job.GetJob(context.Background(), connect.NewRequest(&v1.GetJobRequest{Id: jobID.ToProto()}))
 			if err != nil {
 				return err
 			}

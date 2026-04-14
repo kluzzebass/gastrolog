@@ -44,7 +44,7 @@ func newVaultListCmd() *cobra.Command {
 			tierCount := make(map[string]int)
 			for _, t := range resp.Msg.Tiers {
 				if len(t.VaultId) != 0 {
-					tierCount[string(t.VaultId)]++
+					tierCount[glid.FromBytes(t.VaultId).String()]++
 				}
 			}
 			var rows [][]string
@@ -52,7 +52,7 @@ func newVaultListCmd() *cobra.Command {
 				rows = append(rows, []string{
 					glid.FromBytes(v.Id).String(), v.Name,
 					strconv.FormatBool(v.Enabled),
-					strconv.Itoa(tierCount[string(v.Id)]),
+					strconv.Itoa(tierCount[glid.FromBytes(v.Id).String()]),
 				})
 			}
 			p.table([]string{"ID", "NAME", "ENABLED", "TIERS"}, rows)
@@ -103,8 +103,9 @@ func vaultDetailPairs(v *v1.VaultConfig, allTiers []*v1.TierConfig) [][2]string 
 		{"Enabled", strconv.FormatBool(v.Enabled)},
 	}
 	var idx int
+	vaultIDStr := glid.FromBytes(v.Id).String()
 	for _, t := range allTiers {
-		if string(t.VaultId) == string(v.Id) {
+		if glid.FromBytes(t.VaultId).String() == vaultIDStr {
 			pairs = append(pairs, [2]string{"Tier[" + strconv.Itoa(idx) + "]", glid.FromBytes(t.Id).String()})
 			idx++
 		}

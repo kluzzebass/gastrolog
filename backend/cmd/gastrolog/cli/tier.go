@@ -104,7 +104,7 @@ func newTierCreateCmd() *cobra.Command {
 
 			// Add tier to vault's tier list (tiers must always belong to a vault).
 			if cmd.Flags().Changed("vault") {
-				if err := addTierToVault(ctx, cmd, client, string(cfg.Id)); err != nil {
+				if err := addTierToVault(ctx, cmd, client, glid.FromBytes(cfg.Id).String()); err != nil {
 					return err
 				}
 			}
@@ -249,7 +249,7 @@ func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	if err != nil {
 		return err
 	}
-	vaultID, err := resolve(vaultName, r.vaults, "vault")
+	vaultIDBytes, err := resolveToProto(vaultName, r.vaults, "vault")
 	if err != nil {
 		return err
 	}
@@ -259,20 +259,20 @@ func addTierToVault(ctx context.Context, cmd *cobra.Command, client *server.Clie
 	}
 	// Find the tier config to update.
 	for _, t := range resp.Msg.Tiers {
-		if string(t.Id) != tierID {
+		if glid.FromBytes(t.Id).String() != tierID {
 			continue
 		}
-		if string(t.VaultId) == vaultID {
+		if glid.FromBytes(t.VaultId) == glid.FromBytes(vaultIDBytes) {
 			return nil // already assigned to this vault
 		}
 		// Count existing tiers for this vault to determine position.
 		var maxPos uint32
 		for _, other := range resp.Msg.Tiers {
-			if string(other.VaultId) == vaultID && other.Position >= maxPos {
+			if glid.FromBytes(other.VaultId) == glid.FromBytes(vaultIDBytes) && other.Position >= maxPos {
 				maxPos = other.Position + 1
 			}
 		}
-		t.VaultId = []byte(vaultID)
+		t.VaultId = vaultIDBytes
 		t.Position = maxPos
 		_, err = client.System.PutTier(ctx, connect.NewRequest(&v1.PutTierRequest{Config: t}))
 		if err != nil {

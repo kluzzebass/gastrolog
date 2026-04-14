@@ -73,7 +73,7 @@ func newFilterGetCmd() *cobra.Command {
 				return parseErr
 			}
 			for _, f := range resp.Msg.Filters {
-				if string(f.Id) == string(idBytes.ToProto()) {
+				if glid.FromBytes(f.Id) == idBytes {
 					p := newPrinter(outputFormat(cmd))
 					if outputFormat(cmd) == "json" {
 						return p.json(f)

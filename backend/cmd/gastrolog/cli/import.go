@@ -163,8 +163,12 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 
 	for _, c := range doc.Certificates {
 		ensureID(c.Name, r.certs, &c.ID)
+		certIDBytes, parseErr := glid.ParseUUID(c.ID)
+		if parseErr != nil {
+			return imported, fmt.Errorf("import certificate %q: invalid ID %q: %w", c.Name, c.ID, parseErr)
+		}
 		_, err := client.System.PutCertificate(ctx, connect.NewRequest(&v1.PutCertificateRequest{
-			Id:       []byte(c.ID),
+			Id:       certIDBytes.ToProto(),
 			Name:     c.Name,
 			CertFile: c.CertFile,
 			KeyFile:  c.KeyFile,
