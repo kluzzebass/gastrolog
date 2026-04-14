@@ -1,4 +1,5 @@
-import { encode, truncGlid } from "../../api/glid";
+import { encode } from "../../api/glid";
+import { MiddleTruncate } from "../MiddleTruncate";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
@@ -391,12 +392,10 @@ function ChunkRow({
             >
               {"\u25B6"}
             </span>
-            <span
-              className={`font-mono block ${c("text-text-muted", "text-light-text-muted")}`}
-              title={encode(chunk.id)}
-            >
-              {truncGlid(encode(chunk.id))}
-            </span>
+            <MiddleTruncate
+              text={encode(chunk.id)}
+              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
+            />
           </span>
         </td>
         <td className="px-2 py-2">

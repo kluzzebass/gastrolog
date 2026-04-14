@@ -97,15 +97,6 @@ export function encodeString(s: string): Uint8Array<ArrayBuffer> {
   return textEncoder.encode(s);
 }
 
-/** Middle-truncate a GLID string for display: "06eos1f0…kot8" (keeps
- *  timestamp prefix and random suffix, elides the middle). Full ID
- *  should be in a title/tooltip. */
-export function truncGlid(s: string, maxLen = 16): string {
-  if (s.length <= maxLen) return s;
-  const half = Math.floor((maxLen - 1) / 2);
-  return s.slice(0, half) + "\u2026" + s.slice(s.length - half);
-}
-
 /** Check if bytes represent the zero GLID. */
 export function isZero(bytes: Uint8Array): boolean {
   if (bytes.length < SIZE) return true;
