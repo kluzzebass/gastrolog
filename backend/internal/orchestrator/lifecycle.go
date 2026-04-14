@@ -423,19 +423,24 @@ func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID uuid.UUID
 		if !meta.Sealed {
 			continue
 		}
-		complete, err := tier.Indexes.IndexesComplete(meta.ID)
-		if err != nil {
-			return err
+		if meta.CloudBacked && tier.IsFollower {
+			continue // no local data — adopted via RegisterCloudChunk
 		}
-		if !complete {
-			o.logger.Info("rebuilding missing indexes",
-				"vault", vaultID, "tier", tier.TierID, "chunk", meta.ID.String())
-			name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, tier.TierID, meta.ID)
-			if err := o.scheduler.RunOnce(name, tier.Indexes.BuildIndexes, ctx, meta.ID); err != nil {
-				o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
-			}
-			o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
-		}
+		o.scheduleIndexRebuildIfNeeded(ctx, vaultID, tier, meta)
 	}
 	return nil
+}
+
+func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID uuid.UUID, tier *TierInstance, meta chunk.ChunkMeta) {
+	complete, err := tier.Indexes.IndexesComplete(meta.ID)
+	if err != nil || complete {
+		return
+	}
+	o.logger.Info("rebuilding missing indexes",
+		"vault", vaultID, "tier", tier.TierID, "chunk", meta.ID.String())
+	name := fmt.Sprintf("index-rebuild:%s:%s:%s", vaultID, tier.TierID, meta.ID)
+	if err := o.scheduler.RunOnce(name, tier.Indexes.BuildIndexes, ctx, meta.ID); err != nil {
+		o.logger.Warn("failed to schedule index rebuild", "name", name, "error", err)
+	}
+	o.scheduler.Describe(name, fmt.Sprintf("Rebuild missing indexes for chunk %s", meta.ID))
 }
