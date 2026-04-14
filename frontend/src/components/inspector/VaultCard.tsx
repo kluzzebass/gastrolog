@@ -395,7 +395,7 @@ function ChunkRow({
               className={`font-mono truncate block max-w-36 ${c("text-text-muted", "text-light-text-muted")}`}
               title={encode(chunk.id)}
             >
-              {chunk.id}
+              {encode(chunk.id)}
             </span>
           </span>
         </td>
@@ -513,7 +513,7 @@ function ChunkDetail({
         <div
           className={`font-mono text-[0.85em] select-all ${c("text-text-muted", "text-light-text-muted")}`}
         >
-          {chunk.id}
+          {encode(chunk.id)}
         </div>
       </div>
 
