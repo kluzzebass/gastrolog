@@ -3,7 +3,7 @@ import { useSystemMutation } from "./useSystem";
 import type { CloudService } from "../gen/gastrolog/v1/storage_pb";
 import type { NodeStorageConfig } from "../gen/gastrolog/v1/storage_pb";
 import type { TierConfig } from "../gen/gastrolog/v1/system_pb";
-import { decode } from "../glid";
+import { decode, encodeString } from "../glid";
 
 export function usePutCloudService() {
   return useSystemMutation(
@@ -78,7 +78,7 @@ export function useSetNodeStorageConfig() {
     }) => {
       return systemClient.setNodeStorageConfig({
         config: {
-          nodeId: decode(args.nodeId),
+          nodeId: encodeString(args.nodeId),
           fileStorages: args.fileStorages.map((fs) => ({
             ...fs,
             id: decode(fs.id),

@@ -89,6 +89,14 @@ export function decode(s: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+const textEncoder = new TextEncoder();
+
+/** Encode a string identifier as UTF-8 bytes for proto bytes fields that
+ *  store string-form IDs (NodeID, StorageID) rather than raw 16-byte GLIDs. */
+export function encodeString(s: string): Uint8Array<ArrayBuffer> {
+  return textEncoder.encode(s);
+}
+
 /** Check if bytes represent the zero GLID. */
 export function isZero(bytes: Uint8Array): boolean {
   if (bytes.length < SIZE) return true;

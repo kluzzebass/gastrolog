@@ -3,7 +3,7 @@ import { systemClient } from "../client";
 import { IngesterConfig, GetIngesterStatusResponse } from "../gen/gastrolog/v1/system_pb";
 import { protoSharing, protoArraySharing } from "./protoSharing";
 import { useSystemMutation } from "./useSystem";
-import { decode } from "../glid";
+import { decode, encodeString } from "../glid";
 
 export function useIngesters() {
   return useQuery({
@@ -57,7 +57,7 @@ export function usePutIngester() {
           type: args.type,
           enabled: args.enabled,
           params: stripEmptyParams(args.params),
-          nodeId: args.nodeId ? decode(args.nodeId) : new Uint8Array(16),
+          nodeId: args.nodeId ? encodeString(args.nodeId) : new Uint8Array(0),
         },
       });
     },
