@@ -128,7 +128,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		_ = proxy.Close()
 		return err
 	}
-	// Shutdown order matters: config Raft must stop BEFORE the cluster
+	// Shutdown order matters: system Raft must stop BEFORE the cluster
 	// server, because the Raft follower reads from the transport's rpcChan.
 	// Closing the transport first causes a nil-channel deadlock in Raft.
 	// Defers run LIFO, so cluster Stop is registered first (runs last).
@@ -195,7 +195,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	var searchForwarder *cluster.SearchForwarder
 	var recordForwarder *cluster.RecordForwarder
 	var routingForwarder *routing.Forwarder
-	if _, ok := rawStore.(*raftConfigStore); ok && clusterSrv != nil {
+	if _, ok := rawStore.(*raftSystemStore); ok && clusterSrv != nil {
 		searchForwarder, recordForwarder = wireClusterForwarding(clusterSrv, orch, orchReady, nodeID, logger, alertCollector)
 		routingForwarder = routing.NewForwarder(clusterSrv.PeerConns())
 	}
@@ -468,7 +468,7 @@ func wireManagedFileTransfer(clusterSrv *cluster.Server, httpSrv *server.Server,
 	}
 }
 
-// nonRaftApplyHook returns the dispatcher callback for non-raft config stores.
+// nonRaftApplyHook returns the dispatcher callback for non-raft system stores.
 func nonRaftApplyHook(configType string, handle func(raftfsm.Notification)) func(raftfsm.Notification) {
 	if configType != "raft" {
 		return handle
@@ -740,7 +740,7 @@ func waitForQuorum(ctx context.Context, cfgStore system.Store, logger *slog.Logg
 	if p, ok := cfgStore.(*system.StoreProxy); ok {
 		inner = p.Inner()
 	}
-	rcs, ok := inner.(*raftConfigStore)
+	rcs, ok := inner.(*raftSystemStore)
 	if !ok {
 		return nil
 	}
@@ -759,7 +759,7 @@ func waitForFSMCatchup(ctx context.Context, cfgStore system.Store, timeout time.
 	if p, ok := cfgStore.(*system.StoreProxy); ok {
 		inner = p.Inner()
 	}
-	rcs, ok := inner.(*raftConfigStore)
+	rcs, ok := inner.(*raftSystemStore)
 	if !ok {
 		return nil
 	}
@@ -980,7 +980,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 		_ = deps.Broadcaster.Close()
 	}
 
-	// Shutdown order: tier Raft → config Raft → gRPC server.
+	// Shutdown order: tier Raft → system Raft → gRPC server.
 	// Raft must shut down WHILE the transport is alive, otherwise the
 	// leader's replication goroutines block on dead gRPC connections.
 	if deps.GroupMgr != nil {
@@ -994,7 +994,7 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 	}
 
 	if deps.ConfigStore != nil {
-		deps.Logger.Info("shutting down config raft")
+		deps.Logger.Info("shutting down system raft")
 		_ = deps.ConfigStore.Close()
 	}
 
@@ -1037,7 +1037,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	})
 
 	var resolver func(string) (string, bool)
-	if rcs, ok := rawStore.(*raftConfigStore); ok {
+	if rcs, ok := rawStore.(*raftSystemStore); ok {
 		resolver = func(nodeID string) (string, bool) {
 			future := rcs.raft.GetConfiguration()
 			if future.Error() != nil {
@@ -1139,7 +1139,7 @@ func openConfigStore(configType string, opts raftStoreOpts) (system.Store, error
 	case "memory":
 		return sysmem.NewStore(), nil
 	case "raft":
-		return openRaftConfigStore(opts)
+		return openRaftSystemStore(opts)
 	default:
 		return nil, fmt.Errorf("unknown config store type: %q", configType)
 	}

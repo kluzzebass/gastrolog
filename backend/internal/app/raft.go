@@ -39,9 +39,9 @@ type raftStoreOpts struct {
 	transport hraft.Transport
 }
 
-// raftConfigStore wraps a raftstore.Store with cleanup logic for the
+// raftSystemStore wraps a raftstore.Store with cleanup logic for the
 // underlying raft instance, forwarder, and boltdb store.
-type raftConfigStore struct {
+type raftSystemStore struct {
 	system.Store
 	raftStore *raftstore.Store
 	raft      *hraft.Raft
@@ -51,7 +51,7 @@ type raftConfigStore struct {
 
 // WaitForLeader polls until any node in the cluster becomes leader or the
 // context is cancelled.
-func (s *raftConfigStore) WaitForLeader(ctx context.Context, logger *slog.Logger) error {
+func (s *raftSystemStore) WaitForLeader(ctx context.Context, logger *slog.Logger) error {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	remind := time.NewTicker(10 * time.Second)
@@ -102,7 +102,7 @@ func (s *raftConfigStore) WaitForLeader(ctx context.Context, logger *slog.Logger
 //     in steady state) and accept any value as long as it's stable.
 //
 // Assumes a leader has already been elected (call WaitForLeader first).
-func (s *raftConfigStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
+func (s *raftSystemStore) WaitForFSMCatchup(ctx context.Context, timeout time.Duration, logger *slog.Logger) error {
 	if s.raft.State() == hraft.Leader {
 		return s.raft.Barrier(timeout).Error()
 	}
@@ -164,7 +164,7 @@ func (s *raftConfigStore) WaitForFSMCatchup(ctx context.Context, timeout time.Du
 	}
 }
 
-func (s *raftConfigStore) Close() error {
+func (s *raftSystemStore) Close() error {
 	if s.forwarder != nil {
 		_ = s.forwarder.Close()
 	}
@@ -180,8 +180,8 @@ func (s *raftConfigStore) Close() error {
 	return err
 }
 
-// openRaftConfigStore creates a raft-backed config store with WAL persistence.
-func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
+// openRaftSystemStore creates a raft-backed system store with WAL persistence.
+func openRaftSystemStore(opts raftStoreOpts) (*raftSystemStore, error) {
 	raftDir := opts.Home.RaftDir()
 	if err := os.MkdirAll(raftDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create raft directory: %w", err)
@@ -230,7 +230,7 @@ func openRaftConfigStore(opts raftStoreOpts) (*raftConfigStore, error) {
 	fwd := cluster.NewForwarder(r, opts.ClusterTLS)
 	store.SetForwarder(fwd)
 
-	return &raftConfigStore{
+	return &raftSystemStore{
 		Store:     store,
 		raftStore: store,
 		raft:      r,
