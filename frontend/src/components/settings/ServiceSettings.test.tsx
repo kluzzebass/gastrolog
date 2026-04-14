@@ -7,6 +7,12 @@ const mocks = installMockClients();
 
 import { ServiceSettings } from "./ServiceSettings";
 
+function testId(n: number): Uint8Array {
+  const bytes = new Uint8Array(16);
+  bytes[15] = n;
+  return bytes;
+}
+
 const sampleSettings = {
   auth: {
     tokenDuration: "15m",
@@ -129,7 +135,7 @@ describe("ServiceSettings", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], sampleSettings);
     qc.setQueryData(["certificates"], {
-      certificates: [{ id: "c1", name: "my-cert" }],
+      certificates: [{ id: testId(1), name: "my-cert" }],
     });
 
     const { getByText } = render(<ServiceSettings dark />, {
