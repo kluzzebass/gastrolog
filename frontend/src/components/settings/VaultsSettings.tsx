@@ -579,7 +579,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
   const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
   if (expandTarget && expandTarget !== consumedExpandTarget && configVaults && configVaults.length > 0) {
     setConsumedExpandTarget(expandTarget);
-    const match = configVaults.find((s) => (s.name || s.id) === expandTarget);
+    const match = configVaults.find((s) => (s.name || encode(s.id)) === expandTarget);
     if (match) {
       setExpandedCards((prev) => ({ ...prev, [encode(match.id)]: true }));
     }

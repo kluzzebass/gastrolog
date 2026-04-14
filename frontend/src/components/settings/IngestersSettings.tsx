@@ -101,7 +101,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const [consumedExpandTarget, setConsumedExpandTarget] = useState<string | null>(null);
   if (expandTarget && expandTarget !== consumedExpandTarget && configIngesters && configIngesters.length > 0) {
     setConsumedExpandTarget(expandTarget);
-    const match = configIngesters.find((i) => (i.name || i.id) === expandTarget);
+    const match = configIngesters.find((i) => (i.name || encode(i.id)) === expandTarget);
     if (match) {
       setExpandedCards((prev) => ({ ...prev, [encode(match.id)]: true }));
     }
@@ -284,7 +284,7 @@ function IngesterCard({
             <Badge variant="ghost" dark={dark}>disabled</Badge>
           )}
           {onOpenInspector && (
-            <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:ingesters:${ing.name || ing.id}`)}>
+            <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:ingesters:${ing.name || encode(ing.id)}`)}>
               <PulseIcon className="w-3 h-3" />
             </CrossLinkBadge>
           )}

@@ -1,6 +1,7 @@
 import { useThemeClass } from "../hooks/useThemeClass";
 import { AlertSeverity } from "../api/gen/gastrolog/v1/cluster_pb";
 import type { NodeAlert } from "../api/hooks/useAlerts";
+import { encode } from "../api/glid";
 
 interface AlertPanelProps {
   alerts: NodeAlert[];
@@ -69,7 +70,7 @@ export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>)
         <div className="max-h-80 overflow-y-auto">
           {alerts.map((a) => (
             <div
-              key={`${a.nodeId}:${a.id}`}
+              key={`${a.nodeId}:${encode(a.id)}`}
               className={`flex gap-3 px-4 py-3 border-b last:border-b-0 ${c(
                 "border-ink-border-subtle",
                 "border-light-border-subtle",

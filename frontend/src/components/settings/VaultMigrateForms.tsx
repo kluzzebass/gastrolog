@@ -137,7 +137,7 @@ export function MergeVaultForm({
             options={[
               { value: "", label: "(select)" },
               ...vaults
-                .filter((s) => s.id !== vault.id)
+                .filter((s) => encode(s.id) !== encode(vault.id))
                 .map((s) => ({ value: encode(s.id), label: s.name || encode(s.id) }))
                 .sort((a, b) => a.label.localeCompare(b.label)),
             ]}

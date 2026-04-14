@@ -462,7 +462,7 @@ function ContextList({
 }>) {
   return records?.map((rec) => (
     <ContextRecord
-      key={`${prefix}-${rec.ref?.chunkId}-${rec.ref?.pos}`}
+      key={`${prefix}-${rec.ref?.chunkId ? encode(rec.ref.chunkId) : ""}-${rec.ref?.pos}`}
       record={rec}
       isAnchor={false}
       dark={dark}

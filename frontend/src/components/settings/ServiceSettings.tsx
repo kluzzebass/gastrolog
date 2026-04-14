@@ -476,7 +476,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                     .toSorted((a, b) => (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)))
                     .map((cert) => (
                     <option key={encode(cert.id)} value={encode(cert.id)}>
-                      {cert.name || cert.id}
+                      {cert.name || encode(cert.id)}
                     </option>
                   ))}
                 </select>

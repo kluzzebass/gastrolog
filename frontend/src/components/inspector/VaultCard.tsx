@@ -108,7 +108,7 @@ function VaultActions({
             } else {
               const issues = result.chunks
                 .filter((ch) => !ch.valid)
-                .map((ch) => `${ch.chunkId}: ${ch.issues.join(", ")}`)
+                .map((ch) => `${encode(ch.chunkId)}: ${ch.issues.join(", ")}`)
                 .join("; ");
               addToast(`Validation failed: ${issues}`, "error");
             }

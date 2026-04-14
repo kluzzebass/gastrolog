@@ -188,7 +188,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
     onDeleteSuccess: (id) => {
       const referencedBy = tiers
         .filter((t) => encode(t.rotationPolicyId) === id)
-        .map((t) => t.name || t.id);
+        .map((t) => t.name || encode(t.id));
       if (referencedBy.length > 0) {
         addToast(
           `Policy "${id}" deleted (was used by tiers: ${referencedBy.join(", ")})`,

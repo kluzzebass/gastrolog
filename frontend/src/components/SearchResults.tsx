@@ -2,6 +2,7 @@ import type { RefObject } from "react";
 import { Record as ProtoRecord } from "../api/client";
 import { TableResult } from "../api/gen/gastrolog/v1/query_pb";
 import { sameRecord } from "../utils";
+import { encode } from "../api/glid";
 import { EmptyState } from "./EmptyState";
 import { LogEntry, type OrderByTS } from "./LogEntry";
 import { VirtualLogList } from "./VirtualLogList";
@@ -189,7 +190,7 @@ export function SearchResults({
                 const selected = sameRecord(selectedRecord, record);
                 return (
                   <LogEntry
-                    key={record.ref ? `${record.ref.vaultId}:${record.ref.chunkId}:${record.ref.pos}` : `follow-${i}`}
+                    key={record.ref ? `${encode(record.ref.vaultId)}:${encode(record.ref.chunkId)}:${record.ref.pos}` : `follow-${i}`}
                     ref={selected ? selectedRowRef : undefined}
                     record={record}
                     tokens={tokens}

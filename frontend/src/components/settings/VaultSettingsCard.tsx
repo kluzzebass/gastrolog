@@ -507,7 +507,7 @@ export function VaultSettingsCard({
             </span>
           )}
           {onOpenInspector && (
-            <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:vaults:${vault.name || vault.id}`)}>
+            <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:vaults:${vault.name || encode(vault.id)}`)}>
               <PulseIcon className="w-3 h-3" />
             </CrossLinkBadge>
           )}
@@ -860,7 +860,7 @@ export function VaultSettingsCard({
             onSubmit={async () => {
               const trimmedName = migrateTarget.name.trim();
               if (!trimmedName) return;
-              const srcLabel = vault.name || vault.id;
+              const srcLabel = vault.name || encode(vault.id);
               if (!confirm(`Migrate "${srcLabel}" to "${trimmedName}"? This will immediately disable "${srcLabel}" and delete it after all records are moved.`)) return;
               const destType = migrateTarget.type || undefined;
               const params: Record<string, string> = {};
@@ -895,7 +895,7 @@ export function VaultSettingsCard({
             onSubmit={async () => {
               if (!mergeTarget) return;
               const destName = vaults.find((s) => encode(s.id) === mergeTarget)?.name || mergeTarget;
-              if (!confirm(`Merge "${vault.name || vault.id}" into "${destName}"? This will immediately disable "${vault.name || vault.id}" and delete it after all records are moved.`)) return;
+              if (!confirm(`Merge "${vault.name || encode(vault.id)}" into "${destName}"? This will immediately disable "${vault.name || encode(vault.id)}" and delete it after all records are moved.`)) return;
               try {
                 const result = await merge.mutateAsync({
                   source: encode(vault.id),

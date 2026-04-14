@@ -32,7 +32,7 @@ export function ExportToVaultDialog({
       { expression, target: selectedVaultId },
       {
         onSuccess: (jobId) => {
-          addToast(`Export started (job ${jobId})`, "info");
+          addToast(`Export started (job ${encode(jobId)})`, "info");
           onClose();
         },
         onError: (err) => {

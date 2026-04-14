@@ -66,7 +66,7 @@ export function FileDropZone({
     e.target.value = "";
   };
 
-  const filteredPickable = pickableFiles?.filter((f) => f.id !== currentFile?.id) ?? [];
+  const filteredPickable = pickableFiles?.filter((f) => encode(f.id) !== (currentFile ? encode(currentFile.id) : "")) ?? [];
 
   return (
     <div className="flex flex-col gap-2">

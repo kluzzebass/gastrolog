@@ -18,6 +18,7 @@ import { Record as ProtoRecord } from "../api/client";
 import { TableResult, TableRow } from "../api/gen/gastrolog/v1/query_pb";
 
 import { timeRangeMs, sameRecord } from "../utils";
+import { encode } from "../api/glid";
 import { protoToInstant, instantToISO } from "../utils/temporal";
 import {
   stripTimeRange,
@@ -415,7 +416,7 @@ export function useSearchView() {
         { expression: normalized, target: "" },
         {
           onSuccess: (jobId) => {
-            addToast(`Export started (job ${jobId})`, "info");
+            addToast(`Export started (job ${encode(jobId)})`, "info");
           },
           onError: (err) => {
             addToast(`Export failed: ${err instanceof Error ? err.message : String(err)}`, "error");
