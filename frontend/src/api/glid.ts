@@ -15,7 +15,15 @@ const ZERO = new Uint8Array(SIZE);
 
 /** Encode 16 raw bytes to a 26-char base32hex string (lowercase, no padding). */
 export function encode(bytes: Uint8Array): string {
-  if (bytes.length < SIZE) return "";
+  if (bytes.length === 0) return "";
+
+  // Handle string-form IDs stored as proto bytes (e.g. StorageID, NodeID).
+  // These are base32hex strings (26 ASCII bytes) or synthetic IDs that went
+  // through []byte(string) encoding. Decode as UTF-8 and return as-is.
+  if (bytes.length !== SIZE) {
+    return new TextDecoder().decode(bytes);
+  }
+
   let allZero = true;
   for (let i = 0; i < SIZE; i++) {
     if (bytes[i] !== 0) { allZero = false; break; }

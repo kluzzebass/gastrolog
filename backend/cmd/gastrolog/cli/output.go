@@ -105,7 +105,12 @@ func isIDField(name string) bool {
 		lower == "node_id" || lower == "nodeid"
 }
 
-// tryConvertGLID attempts to decode a base64 string as a 16-byte GLID.
+// tryConvertGLID attempts to decode a base64 string as a GLID.
+// Handles two cases:
+//   - 16-byte raw GLID (standard proto bytes encoding)
+//   - 26-byte ASCII base32hex string stored as proto bytes (legacy string-form IDs
+//     like StorageID and NodeID that went through []byte(string) encoding)
+//
 // Returns the base32hex representation if successful.
 func tryConvertGLID(s string) (string, bool) {
 	if s == "" {
@@ -113,20 +118,27 @@ func tryConvertGLID(s string) (string, bool) {
 	}
 	decoded, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		// Try base64 URL-safe and raw variants.
 		decoded, err = base64.RawStdEncoding.DecodeString(s)
 		if err != nil {
 			return "", false
 		}
 	}
-	if len(decoded) != glid.Size {
+	switch len(decoded) {
+	case glid.Size: // 16-byte raw GLID
+		g := glid.FromBytes(decoded)
+		if g.IsZero() {
+			return "", false
+		}
+		return g.String(), true
+	case 26: // base32hex string stored as []byte(string)
+		str := string(decoded)
+		if g, err := glid.Parse(str); err == nil && !g.IsZero() {
+			return g.String(), true
+		}
+		return "", false
+	default:
 		return "", false
 	}
-	g := glid.FromBytes(decoded)
-	if g.IsZero() {
-		return "", false
-	}
-	return g.String(), true
 }
 
 // table writes rows using tabwriter. header is the first row.
