@@ -3,6 +3,7 @@
 package memory
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"cmp"
 	"context"
@@ -14,12 +15,11 @@ import (
 
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // cmpUUID compares two UUIDs lexicographically. Since gastrolog uses UUIDv7,
 // byte order equals creation order.
-func cmpUUID(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) }
+func cmpUUID(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) }
 
 // collectAndSort copies values from a map, applies a per-element transform,
 // and sorts the result. Used by Load to deep-copy + sort each config entity type.
@@ -44,21 +44,21 @@ type serverSettings struct {
 // Store is an in-memory ConfigStore implementation.
 type Store struct {
 	mu                sync.RWMutex
-	filters           map[uuid.UUID]system.FilterConfig
-	rotationPolicies  map[uuid.UUID]system.RotationPolicyConfig
-	retentionPolicies map[uuid.UUID]system.RetentionPolicyConfig
-	vaults            map[uuid.UUID]system.VaultConfig
-	ingesters         map[uuid.UUID]system.IngesterConfig
-	routes            map[uuid.UUID]system.RouteConfig
+	filters           map[glid.GLID]system.FilterConfig
+	rotationPolicies  map[glid.GLID]system.RotationPolicyConfig
+	retentionPolicies map[glid.GLID]system.RetentionPolicyConfig
+	vaults            map[glid.GLID]system.VaultConfig
+	ingesters         map[glid.GLID]system.IngesterConfig
+	routes            map[glid.GLID]system.RouteConfig
 	ss                serverSettings
-	certs             map[uuid.UUID]system.CertPEM
-	users         map[uuid.UUID]system.User         // keyed by ID (UUID)
-	refreshTokens map[uuid.UUID]system.RefreshToken // keyed by token ID
-	nodes         map[uuid.UUID]system.NodeConfig    // keyed by node ID
-	managedFiles       map[uuid.UUID]system.ManagedFileConfig
-	cloudServices      map[uuid.UUID]system.CloudService
-	tiers              map[uuid.UUID]system.TierConfig
-	tierPlacements     map[uuid.UUID][]system.TierPlacement // runtime: system-managed
+	certs             map[glid.GLID]system.CertPEM
+	users         map[glid.GLID]system.User         // keyed by ID (UUID)
+	refreshTokens map[glid.GLID]system.RefreshToken // keyed by token ID
+	nodes         map[glid.GLID]system.NodeConfig    // keyed by node ID
+	managedFiles       map[glid.GLID]system.ManagedFileConfig
+	cloudServices      map[glid.GLID]system.CloudService
+	tiers              map[glid.GLID]system.TierConfig
+	tierPlacements     map[glid.GLID][]system.TierPlacement // runtime: system-managed
 	nodeStorageConfigs map[string]system.NodeStorageConfig   // runtime: keyed by nodeID
 	clusterTLS         *system.ClusterTLS                   // runtime: cluster identity
 	setupWizardDismissed bool                               // runtime: UI state
@@ -69,20 +69,20 @@ var _ system.Store = (*Store)(nil)
 // NewStore creates a new in-memory ConfigStore.
 func NewStore() *Store {
 	return &Store{
-		filters:           make(map[uuid.UUID]system.FilterConfig),
-		rotationPolicies:  make(map[uuid.UUID]system.RotationPolicyConfig),
-		retentionPolicies: make(map[uuid.UUID]system.RetentionPolicyConfig),
-		vaults:            make(map[uuid.UUID]system.VaultConfig),
-		ingesters:         make(map[uuid.UUID]system.IngesterConfig),
-		routes:            make(map[uuid.UUID]system.RouteConfig),
-		certs:             make(map[uuid.UUID]system.CertPEM),
-		users:         make(map[uuid.UUID]system.User),
-		refreshTokens: make(map[uuid.UUID]system.RefreshToken),
-		nodes:         make(map[uuid.UUID]system.NodeConfig),
-		managedFiles:       make(map[uuid.UUID]system.ManagedFileConfig),
-		cloudServices:      make(map[uuid.UUID]system.CloudService),
-		tiers:              make(map[uuid.UUID]system.TierConfig),
-		tierPlacements:     make(map[uuid.UUID][]system.TierPlacement),
+		filters:           make(map[glid.GLID]system.FilterConfig),
+		rotationPolicies:  make(map[glid.GLID]system.RotationPolicyConfig),
+		retentionPolicies: make(map[glid.GLID]system.RetentionPolicyConfig),
+		vaults:            make(map[glid.GLID]system.VaultConfig),
+		ingesters:         make(map[glid.GLID]system.IngesterConfig),
+		routes:            make(map[glid.GLID]system.RouteConfig),
+		certs:             make(map[glid.GLID]system.CertPEM),
+		users:         make(map[glid.GLID]system.User),
+		refreshTokens: make(map[glid.GLID]system.RefreshToken),
+		nodes:         make(map[glid.GLID]system.NodeConfig),
+		managedFiles:       make(map[glid.GLID]system.ManagedFileConfig),
+		cloudServices:      make(map[glid.GLID]system.CloudService),
+		tiers:              make(map[glid.GLID]system.TierConfig),
+		tierPlacements:     make(map[glid.GLID][]system.TierPlacement),
 		nodeStorageConfigs: make(map[string]system.NodeStorageConfig),
 	}
 }
@@ -144,7 +144,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 
 	// Runtime: tier placements (stored separately from TierConfig).
 	if len(s.tierPlacements) > 0 {
-		rt.TierPlacements = make(map[uuid.UUID][]system.TierPlacement, len(s.tierPlacements))
+		rt.TierPlacements = make(map[glid.GLID][]system.TierPlacement, len(s.tierPlacements))
 		for id, p := range s.tierPlacements {
 			cp := make([]system.TierPlacement, len(p))
 			copy(cp, p)
@@ -157,7 +157,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 
 // Filters
 
-func (s *Store) GetFilter(ctx context.Context, id uuid.UUID) (*system.FilterConfig, error) {
+func (s *Store) GetFilter(ctx context.Context, id glid.GLID) (*system.FilterConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -189,7 +189,7 @@ func (s *Store) PutFilter(ctx context.Context, cfg system.FilterConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteFilter(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteFilter(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -199,7 +199,7 @@ func (s *Store) DeleteFilter(ctx context.Context, id uuid.UUID) error {
 
 // Rotation policies
 
-func (s *Store) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*system.RotationPolicyConfig, error) {
+func (s *Store) GetRotationPolicy(ctx context.Context, id glid.GLID) (*system.RotationPolicyConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -231,7 +231,7 @@ func (s *Store) PutRotationPolicy(ctx context.Context, cfg system.RotationPolicy
 	return nil
 }
 
-func (s *Store) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRotationPolicy(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -241,7 +241,7 @@ func (s *Store) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
 
 // Retention policies
 
-func (s *Store) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*system.RetentionPolicyConfig, error) {
+func (s *Store) GetRetentionPolicy(ctx context.Context, id glid.GLID) (*system.RetentionPolicyConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -273,7 +273,7 @@ func (s *Store) PutRetentionPolicy(ctx context.Context, cfg system.RetentionPoli
 	return nil
 }
 
-func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -283,7 +283,7 @@ func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
 
 // Vaults
 
-func (s *Store) GetVault(ctx context.Context, id uuid.UUID) (*system.VaultConfig, error) {
+func (s *Store) GetVault(ctx context.Context, id glid.GLID) (*system.VaultConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -315,7 +315,7 @@ func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID, _ bool) error {
+func (s *Store) DeleteVault(ctx context.Context, id glid.GLID, _ bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -325,7 +325,7 @@ func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID, _ bool) error {
 
 // Ingesters
 
-func (s *Store) GetIngester(ctx context.Context, id uuid.UUID) (*system.IngesterConfig, error) {
+func (s *Store) GetIngester(ctx context.Context, id glid.GLID) (*system.IngesterConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -357,7 +357,7 @@ func (s *Store) PutIngester(ctx context.Context, cfg system.IngesterConfig) erro
 	return nil
 }
 
-func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteIngester(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -367,7 +367,7 @@ func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 
 // Routes
 
-func (s *Store) GetRoute(ctx context.Context, id uuid.UUID) (*system.RouteConfig, error) {
+func (s *Store) GetRoute(ctx context.Context, id glid.GLID) (*system.RouteConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -399,7 +399,7 @@ func (s *Store) PutRoute(ctx context.Context, cfg system.RouteConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRoute(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -409,7 +409,7 @@ func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
 
 // Managed files
 
-func (s *Store) GetManagedFile(ctx context.Context, id uuid.UUID) (*system.ManagedFileConfig, error) {
+func (s *Store) GetManagedFile(ctx context.Context, id glid.GLID) (*system.ManagedFileConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -440,7 +440,7 @@ func (s *Store) PutManagedFile(ctx context.Context, cfg system.ManagedFileConfig
 	return nil
 }
 
-func (s *Store) DeleteManagedFile(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteManagedFile(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -470,7 +470,7 @@ func (s *Store) SaveServerSettings(ctx context.Context, ss system.ServerSettings
 
 // Nodes
 
-func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*system.NodeConfig, error) {
+func (s *Store) GetNode(ctx context.Context, id glid.GLID) (*system.NodeConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -501,7 +501,7 @@ func (s *Store) PutNode(ctx context.Context, node system.NodeConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteNode(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteNode(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -521,7 +521,7 @@ func (s *Store) PutClusterTLS(ctx context.Context, tls system.ClusterTLS) error 
 
 // Cloud services
 
-func (s *Store) GetCloudService(ctx context.Context, id uuid.UUID) (*system.CloudService, error) {
+func (s *Store) GetCloudService(ctx context.Context, id glid.GLID) (*system.CloudService, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -552,7 +552,7 @@ func (s *Store) PutCloudService(ctx context.Context, svc system.CloudService) er
 	return nil
 }
 
-func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteCloudService(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -562,7 +562,7 @@ func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
 
 // Tiers
 
-func (s *Store) GetTier(ctx context.Context, id uuid.UUID) (*system.TierConfig, error) {
+func (s *Store) GetTier(ctx context.Context, id glid.GLID) (*system.TierConfig, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -593,7 +593,7 @@ func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
 	return nil
 }
 
-func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID, _ bool) error {
+func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, _ bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -651,7 +651,7 @@ func (s *Store) ListCertificates(ctx context.Context) ([]system.CertPEM, error) 
 	return result, nil
 }
 
-func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (*system.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id glid.GLID) (*system.CertPEM, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -671,7 +671,7 @@ func (s *Store) PutCertificate(ctx context.Context, cert system.CertPEM) error {
 	return nil
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -698,7 +698,7 @@ func (s *Store) CreateUser(ctx context.Context, user system.User) error {
 	return nil
 }
 
-func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*system.User, error) {
+func (s *Store) GetUser(ctx context.Context, id glid.GLID) (*system.User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -733,7 +733,7 @@ func (s *Store) ListUsers(ctx context.Context) ([]system.User, error) {
 	return users, nil
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id glid.GLID, passwordHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -747,7 +747,7 @@ func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash s
 	return nil
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id glid.GLID, role string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -761,7 +761,7 @@ func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) e
 	return nil
 }
 
-func (s *Store) UpdateUsername(ctx context.Context, id uuid.UUID, username string) error {
+func (s *Store) UpdateUsername(ctx context.Context, id glid.GLID, username string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -781,7 +781,7 @@ func (s *Store) UpdateUsername(ctx context.Context, id uuid.UUID, username strin
 	return nil
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteUser(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -792,7 +792,7 @@ func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *Store) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
+func (s *Store) InvalidateTokens(ctx context.Context, id glid.GLID, at time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -813,7 +813,7 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return len(s.users), nil
 }
 
-func (s *Store) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error) {
+func (s *Store) GetUserPreferences(ctx context.Context, id glid.GLID) (*string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -827,7 +827,7 @@ func (s *Store) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, 
 	return &u.Preferences, nil
 }
 
-func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error {
+func (s *Store) PutUserPreferences(ctx context.Context, id glid.GLID, prefs string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -875,7 +875,7 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]system.RefreshToken, e
 	return tokens, nil
 }
 
-func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRefreshToken(ctx context.Context, id glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -883,7 +883,7 @@ func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -973,7 +973,7 @@ func copyRouteConfig(rt system.RouteConfig) system.RouteConfig {
 		c.FilterID = new(*rt.FilterID)
 	}
 	if len(rt.Destinations) > 0 {
-		c.Destinations = make([]uuid.UUID, len(rt.Destinations))
+		c.Destinations = make([]glid.GLID, len(rt.Destinations))
 		copy(c.Destinations, rt.Destinations)
 	}
 	return c
@@ -1038,7 +1038,7 @@ func copyParams(params map[string]string) map[string]string {
 
 // --- Tier Placements (runtime) ---
 
-func (s *Store) GetTierPlacements(_ context.Context, tierID uuid.UUID) ([]system.TierPlacement, error) {
+func (s *Store) GetTierPlacements(_ context.Context, tierID glid.GLID) ([]system.TierPlacement, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	p := s.tierPlacements[tierID]
@@ -1047,7 +1047,7 @@ func (s *Store) GetTierPlacements(_ context.Context, tierID uuid.UUID) ([]system
 	return cp, nil
 }
 
-func (s *Store) SetTierPlacements(_ context.Context, tierID uuid.UUID, placements []system.TierPlacement) error {
+func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	cp := make([]system.TierPlacement, len(placements))

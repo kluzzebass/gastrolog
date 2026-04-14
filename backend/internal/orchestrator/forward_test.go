@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"sync"
@@ -11,7 +12,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // mockForwarder records Forward() and ForwardSync() calls for testing,
@@ -26,12 +26,12 @@ type mockForwarder struct {
 
 type forwardCall struct {
 	NodeID  string
-	VaultID uuid.UUID
+	VaultID glid.GLID
 	Records []chunk.Record
 	Sync    bool
 }
 
-func (m *mockForwarder) Forward(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (m *mockForwarder) Forward(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.calls = append(m.calls, forwardCall{
@@ -42,7 +42,7 @@ func (m *mockForwarder) Forward(_ context.Context, nodeID string, vaultID uuid.U
 	return nil
 }
 
-func (m *mockForwarder) ForwardSync(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (m *mockForwarder) ForwardSync(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	m.mu.Lock()
 	m.calls = append(m.calls, forwardCall{
 		NodeID:  nodeID,
@@ -86,8 +86,8 @@ func (m *mockSystemLoader) Load(_ context.Context) (*system.System, error) {
 }
 
 func TestIngestForwardsToRemoteVault(t *testing.T) {
-	localVaultID := uuid.Must(uuid.NewV7())
-	remoteVaultID := uuid.Must(uuid.NewV7())
+	localVaultID := glid.New()
+	remoteVaultID := glid.New()
 	remoteNodeID := "node-B"
 
 	fwd := &mockForwarder{}
@@ -133,8 +133,8 @@ func TestIngestForwardsToRemoteVault(t *testing.T) {
 }
 
 func TestIngestNoForwarderSkipsRemote(t *testing.T) {
-	localVaultID := uuid.Must(uuid.NewV7())
-	remoteVaultID := uuid.Must(uuid.NewV7())
+	localVaultID := glid.New()
+	remoteVaultID := glid.New()
 
 	o, err := New(Config{LocalNodeID: "node-A"})
 	if err != nil {
@@ -159,9 +159,9 @@ func TestIngestNoForwarderSkipsRemote(t *testing.T) {
 	o.sysLoader = &mockSystemLoader{cfg: &system.Config{
 		Routes: []system.RouteConfig{
 			{
-				ID:           uuid.Must(uuid.NewV7()),
+				ID:           glid.New(),
 				Enabled:      true,
-				Destinations: []uuid.UUID{localVaultID, remoteVaultID},
+				Destinations: []glid.GLID{localVaultID, remoteVaultID},
 			},
 		},
 		Vaults: []system.VaultConfig{
@@ -237,7 +237,7 @@ func (n *noopChunkManager) Close() error                   { return nil }
 func TestAckGatedRemoteRecordUsesForwardSync(t *testing.T) {
 	t.Parallel()
 
-	remoteVaultID := uuid.Must(uuid.NewV7())
+	remoteVaultID := glid.New()
 	remoteNodeID := "node-B"
 
 	fwd := &mockForwarder{}
@@ -315,7 +315,7 @@ func TestAckGatedRemoteRecordUsesForwardSync(t *testing.T) {
 func TestFireAndForgetRemoteKeepsOldBehavior(t *testing.T) {
 	t.Parallel()
 
-	remoteVaultID := uuid.Must(uuid.NewV7())
+	remoteVaultID := glid.New()
 	remoteNodeID := "node-B"
 
 	fwd := &mockForwarder{}
@@ -360,7 +360,7 @@ func TestFireAndForgetRemoteKeepsOldBehavior(t *testing.T) {
 func TestAckGatedForwardPropagatesError(t *testing.T) {
 	t.Parallel()
 
-	remoteVaultID := uuid.Must(uuid.NewV7())
+	remoteVaultID := glid.New()
 	remoteNodeID := "node-B"
 
 	injected := errors.New("simulated forward failure")

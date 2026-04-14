@@ -1,11 +1,11 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"testing"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 func TestParseBytesValid(t *testing.T) {
@@ -239,7 +239,7 @@ func TestStringPtr(t *testing.T) {
 
 func TestUUIDPtr(t *testing.T) {
 	t.Parallel()
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	p := UUIDPtr(id)
 	if p == nil {
 		t.Fatal("expected non-nil pointer")
@@ -249,11 +249,11 @@ func TestUUIDPtr(t *testing.T) {
 	}
 
 	// Zero UUID.
-	p = UUIDPtr(uuid.Nil)
+	p = UUIDPtr(glid.Nil)
 	if p == nil {
 		t.Fatal("expected non-nil pointer for zero UUID")
 	}
-	if *p != uuid.Nil {
+	if *p != glid.Nil {
 		t.Errorf("got %v, want zero UUID", *p)
 	}
 }

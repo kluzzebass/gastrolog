@@ -1,6 +1,7 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"cmp"
 	"context"
@@ -25,7 +26,6 @@ import (
 	"gastrolog/internal/format"
 	"gastrolog/internal/logging"
 
-	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -97,7 +97,7 @@ type Config struct {
 	CloudStore blobstore.Store
 
 	// VaultID is required when CloudStore is set (used for blob key prefix).
-	VaultID uuid.UUID
+	VaultID glid.GLID
 
 	// CacheDir, when non-empty, enables local caching of cloud GLCB blobs.
 	// Cloud chunks are cached after upload and on first read, avoiding

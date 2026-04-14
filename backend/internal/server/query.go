@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -169,7 +169,7 @@ func (s *QueryServer) searchDirect(
 		}
 		if getRemoteTokens != nil {
 			if token.VaultTokens == nil {
-				token.VaultTokens = make(map[uuid.UUID][]byte)
+				token.VaultTokens = make(map[glid.GLID][]byte)
 			}
 			maps.Copy(token.VaultTokens, getRemoteTokens())
 		}
@@ -188,7 +188,7 @@ func (s *QueryServer) searchDirect(
 
 // splitResumeToken separates a unified resume token into local positions
 // (for eng.Search) and remote opaque blobs (for collectRemote).
-func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[uuid.UUID][]byte) {
+func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.ResumeToken, map[glid.GLID][]byte) {
 	if resume == nil || len(resume.VaultTokens) == 0 {
 		return nil, nil
 	}
@@ -197,7 +197,7 @@ func (s *QueryServer) splitResumeToken(resume *query.ResumeToken) (*query.Resume
 	// remote. Both need to be searched. The ForwardSearch handler on the
 	// remote node only searches its LOCAL tiers, so no double-counting.
 
-	remoteTokens := make(map[uuid.UUID][]byte)
+	remoteTokens := make(map[glid.GLID][]byte)
 	var localPositions []query.MultiVaultPosition
 	for vid, tokenData := range resume.VaultTokens {
 		if s.orch.HasLocalQueryEngine(vid) {

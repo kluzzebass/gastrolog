@@ -1,11 +1,11 @@
 package otlp
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"fmt"
 	"log/slog"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -20,7 +20,7 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for OTLP ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		httpAddr := cmp.Or(params["http_addr"], ":4318")
 		grpcAddr := cmp.Or(params["grpc_addr"], ":4317")
 

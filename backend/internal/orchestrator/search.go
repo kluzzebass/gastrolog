@@ -1,18 +1,18 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"iter"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // Search delegates to the query engine registered under the given key.
 // If key is empty, uses "default".
-func (o *Orchestrator) Search(ctx context.Context, key uuid.UUID, q query.Query, resume *query.ResumeToken) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
+func (o *Orchestrator) Search(ctx context.Context, key glid.GLID, q query.Query, resume *query.ResumeToken) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -33,7 +33,7 @@ func (o *Orchestrator) Search(ctx context.Context, key uuid.UUID, q query.Query,
 }
 
 // SearchThenFollow delegates to the query engine's SearchThenFollow method.
-func (o *Orchestrator) SearchThenFollow(ctx context.Context, key uuid.UUID, q query.Query, resume *query.ResumeToken) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
+func (o *Orchestrator) SearchThenFollow(ctx context.Context, key glid.GLID, q query.Query, resume *query.ResumeToken) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -54,7 +54,7 @@ func (o *Orchestrator) SearchThenFollow(ctx context.Context, key uuid.UUID, q qu
 }
 
 // SearchWithContext delegates to the query engine's SearchWithContext method.
-func (o *Orchestrator) SearchWithContext(ctx context.Context, key uuid.UUID, q query.Query) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
+func (o *Orchestrator) SearchWithContext(ctx context.Context, key glid.GLID, q query.Query) (iter.Seq2[chunk.Record, error], func() *query.ResumeToken, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -75,7 +75,7 @@ func (o *Orchestrator) SearchWithContext(ctx context.Context, key uuid.UUID, q q
 }
 
 // Explain returns the query execution plan without executing the query.
-func (o *Orchestrator) Explain(ctx context.Context, key uuid.UUID, q query.Query) (*query.QueryPlan, error) {
+func (o *Orchestrator) Explain(ctx context.Context, key glid.GLID, q query.Query) (*query.QueryPlan, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 

@@ -8,6 +8,7 @@
 package raftstore
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -18,7 +19,6 @@ import (
 	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/raftfsm"
 
-	"github.com/google/uuid"
 	"github.com/hashicorp/raft"
 )
 
@@ -100,7 +100,7 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 	return s.fsm.Store().Load(ctx)
 }
 
-func (s *Store) GetFilter(ctx context.Context, id uuid.UUID) (*system.FilterConfig, error) {
+func (s *Store) GetFilter(ctx context.Context, id glid.GLID) (*system.FilterConfig, error) {
 	return s.fsm.Store().GetFilter(ctx, id)
 }
 
@@ -108,7 +108,7 @@ func (s *Store) ListFilters(ctx context.Context) ([]system.FilterConfig, error) 
 	return s.fsm.Store().ListFilters(ctx)
 }
 
-func (s *Store) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*system.RotationPolicyConfig, error) {
+func (s *Store) GetRotationPolicy(ctx context.Context, id glid.GLID) (*system.RotationPolicyConfig, error) {
 	return s.fsm.Store().GetRotationPolicy(ctx, id)
 }
 
@@ -116,7 +116,7 @@ func (s *Store) ListRotationPolicies(ctx context.Context) ([]system.RotationPoli
 	return s.fsm.Store().ListRotationPolicies(ctx)
 }
 
-func (s *Store) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*system.RetentionPolicyConfig, error) {
+func (s *Store) GetRetentionPolicy(ctx context.Context, id glid.GLID) (*system.RetentionPolicyConfig, error) {
 	return s.fsm.Store().GetRetentionPolicy(ctx, id)
 }
 
@@ -124,7 +124,7 @@ func (s *Store) ListRetentionPolicies(ctx context.Context) ([]system.RetentionPo
 	return s.fsm.Store().ListRetentionPolicies(ctx)
 }
 
-func (s *Store) GetVault(ctx context.Context, id uuid.UUID) (*system.VaultConfig, error) {
+func (s *Store) GetVault(ctx context.Context, id glid.GLID) (*system.VaultConfig, error) {
 	return s.fsm.Store().GetVault(ctx, id)
 }
 
@@ -132,7 +132,7 @@ func (s *Store) ListVaults(ctx context.Context) ([]system.VaultConfig, error) {
 	return s.fsm.Store().ListVaults(ctx)
 }
 
-func (s *Store) GetIngester(ctx context.Context, id uuid.UUID) (*system.IngesterConfig, error) {
+func (s *Store) GetIngester(ctx context.Context, id glid.GLID) (*system.IngesterConfig, error) {
 	return s.fsm.Store().GetIngester(ctx, id)
 }
 
@@ -140,7 +140,7 @@ func (s *Store) ListIngesters(ctx context.Context) ([]system.IngesterConfig, err
 	return s.fsm.Store().ListIngesters(ctx)
 }
 
-func (s *Store) GetRoute(ctx context.Context, id uuid.UUID) (*system.RouteConfig, error) {
+func (s *Store) GetRoute(ctx context.Context, id glid.GLID) (*system.RouteConfig, error) {
 	return s.fsm.Store().GetRoute(ctx, id)
 }
 
@@ -148,7 +148,7 @@ func (s *Store) ListRoutes(ctx context.Context) ([]system.RouteConfig, error) {
 	return s.fsm.Store().ListRoutes(ctx)
 }
 
-func (s *Store) GetManagedFile(ctx context.Context, id uuid.UUID) (*system.ManagedFileConfig, error) {
+func (s *Store) GetManagedFile(ctx context.Context, id glid.GLID) (*system.ManagedFileConfig, error) {
 	return s.fsm.Store().GetManagedFile(ctx, id)
 }
 
@@ -160,7 +160,7 @@ func (s *Store) LoadServerSettings(ctx context.Context) (system.ServerSettings, 
 	return s.fsm.Store().LoadServerSettings(ctx)
 }
 
-func (s *Store) GetNode(ctx context.Context, id uuid.UUID) (*system.NodeConfig, error) {
+func (s *Store) GetNode(ctx context.Context, id glid.GLID) (*system.NodeConfig, error) {
 	return s.fsm.Store().GetNode(ctx, id)
 }
 
@@ -172,11 +172,11 @@ func (s *Store) ListCertificates(ctx context.Context) ([]system.CertPEM, error) 
 	return s.fsm.Store().ListCertificates(ctx)
 }
 
-func (s *Store) GetCertificate(ctx context.Context, id uuid.UUID) (*system.CertPEM, error) {
+func (s *Store) GetCertificate(ctx context.Context, id glid.GLID) (*system.CertPEM, error) {
 	return s.fsm.Store().GetCertificate(ctx, id)
 }
 
-func (s *Store) GetUser(ctx context.Context, id uuid.UUID) (*system.User, error) {
+func (s *Store) GetUser(ctx context.Context, id glid.GLID) (*system.User, error) {
 	return s.fsm.Store().GetUser(ctx, id)
 }
 
@@ -192,7 +192,7 @@ func (s *Store) CountUsers(ctx context.Context) (int, error) {
 	return s.fsm.Store().CountUsers(ctx)
 }
 
-func (s *Store) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error) {
+func (s *Store) GetUserPreferences(ctx context.Context, id glid.GLID) (*string, error) {
 	return s.fsm.Store().GetUserPreferences(ctx, id)
 }
 
@@ -204,7 +204,7 @@ func (s *Store) ListRefreshTokens(ctx context.Context) ([]system.RefreshToken, e
 	return s.fsm.Store().ListRefreshTokens(ctx)
 }
 
-func (s *Store) GetCloudService(ctx context.Context, id uuid.UUID) (*system.CloudService, error) {
+func (s *Store) GetCloudService(ctx context.Context, id glid.GLID) (*system.CloudService, error) {
 	return s.fsm.Store().GetCloudService(ctx, id)
 }
 
@@ -212,7 +212,7 @@ func (s *Store) ListCloudServices(ctx context.Context) ([]system.CloudService, e
 	return s.fsm.Store().ListCloudServices(ctx)
 }
 
-func (s *Store) GetTier(ctx context.Context, id uuid.UUID) (*system.TierConfig, error) {
+func (s *Store) GetTier(ctx context.Context, id glid.GLID) (*system.TierConfig, error) {
 	return s.fsm.Store().GetTier(ctx, id)
 }
 
@@ -236,7 +236,7 @@ func (s *Store) PutFilter(ctx context.Context, cfg system.FilterConfig) error {
 	return s.apply(command.NewPutFilter(cfg))
 }
 
-func (s *Store) DeleteFilter(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteFilter(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteFilter(id))
 }
 
@@ -244,7 +244,7 @@ func (s *Store) PutRotationPolicy(ctx context.Context, cfg system.RotationPolicy
 	return s.apply(command.NewPutRotationPolicy(cfg))
 }
 
-func (s *Store) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRotationPolicy(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteRotationPolicy(id))
 }
 
@@ -252,7 +252,7 @@ func (s *Store) PutRetentionPolicy(ctx context.Context, cfg system.RetentionPoli
 	return s.apply(command.NewPutRetentionPolicy(cfg))
 }
 
-func (s *Store) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRetentionPolicy(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteRetentionPolicy(id))
 }
 
@@ -260,7 +260,7 @@ func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
 	return s.apply(command.NewPutVault(cfg))
 }
 
-func (s *Store) DeleteVault(ctx context.Context, id uuid.UUID, deleteData bool) error {
+func (s *Store) DeleteVault(ctx context.Context, id glid.GLID, deleteData bool) error {
 	return s.apply(command.NewDeleteVault(id, deleteData))
 }
 
@@ -268,7 +268,7 @@ func (s *Store) PutIngester(ctx context.Context, cfg system.IngesterConfig) erro
 	return s.apply(command.NewPutIngester(cfg))
 }
 
-func (s *Store) DeleteIngester(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteIngester(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteIngester(id))
 }
 
@@ -276,7 +276,7 @@ func (s *Store) PutRoute(ctx context.Context, cfg system.RouteConfig) error {
 	return s.apply(command.NewPutRoute(cfg))
 }
 
-func (s *Store) DeleteRoute(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRoute(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteRoute(id))
 }
 
@@ -284,7 +284,7 @@ func (s *Store) PutManagedFile(ctx context.Context, cfg system.ManagedFileConfig
 	return s.apply(command.NewPutManagedFile(cfg))
 }
 
-func (s *Store) DeleteManagedFile(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteManagedFile(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteManagedFile(id))
 }
 
@@ -304,7 +304,7 @@ func (s *Store) PutNode(ctx context.Context, node system.NodeConfig) error {
 	return s.apply(command.NewPutNodeConfig(node))
 }
 
-func (s *Store) DeleteNode(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteNode(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteNodeConfig(id))
 }
 
@@ -312,7 +312,7 @@ func (s *Store) PutCertificate(ctx context.Context, cert system.CertPEM) error {
 	return s.apply(command.NewPutCertificate(cert))
 }
 
-func (s *Store) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteCertificate(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteCertificate(id))
 }
 
@@ -320,27 +320,27 @@ func (s *Store) CreateUser(ctx context.Context, user system.User) error {
 	return s.apply(command.NewCreateUser(user))
 }
 
-func (s *Store) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+func (s *Store) UpdatePassword(ctx context.Context, id glid.GLID, passwordHash string) error {
 	return s.apply(command.NewUpdatePassword(id, passwordHash))
 }
 
-func (s *Store) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error {
+func (s *Store) UpdateUserRole(ctx context.Context, id glid.GLID, role string) error {
 	return s.apply(command.NewUpdateUserRole(id, role))
 }
 
-func (s *Store) UpdateUsername(ctx context.Context, id uuid.UUID, username string) error {
+func (s *Store) UpdateUsername(ctx context.Context, id glid.GLID, username string) error {
 	return s.apply(command.NewUpdateUsername(id, username))
 }
 
-func (s *Store) DeleteUser(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteUser(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteUser(id))
 }
 
-func (s *Store) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
+func (s *Store) InvalidateTokens(ctx context.Context, id glid.GLID, at time.Time) error {
 	return s.apply(command.NewInvalidateTokens(id, at))
 }
 
-func (s *Store) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error {
+func (s *Store) PutUserPreferences(ctx context.Context, id glid.GLID, prefs string) error {
 	return s.apply(command.NewPutUserPreferences(id, prefs))
 }
 
@@ -348,11 +348,11 @@ func (s *Store) CreateRefreshToken(ctx context.Context, token system.RefreshToke
 	return s.apply(command.NewCreateRefreshToken(token))
 }
 
-func (s *Store) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteRefreshToken(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteRefreshToken(id))
 }
 
-func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error {
 	return s.apply(command.NewDeleteUserRefreshTokens(userID))
 }
 
@@ -360,7 +360,7 @@ func (s *Store) PutCloudService(ctx context.Context, svc system.CloudService) er
 	return s.apply(command.NewPutCloudService(svc))
 }
 
-func (s *Store) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
+func (s *Store) DeleteCloudService(ctx context.Context, id glid.GLID) error {
 	return s.apply(command.NewDeleteCloudService(id))
 }
 
@@ -368,7 +368,7 @@ func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
 	return s.apply(command.NewPutTier(tier))
 }
 
-func (s *Store) DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error {
+func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, drain bool) error {
 	return s.apply(command.NewDeleteTier(id, drain))
 }
 
@@ -378,11 +378,11 @@ func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg system.NodeStorage
 
 // --- Runtime methods (delegate to inner store for reads, apply for writes) ---
 
-func (s *Store) GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([]system.TierPlacement, error) {
+func (s *Store) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]system.TierPlacement, error) {
 	return s.fsm.Store().GetTierPlacements(ctx, tierID)
 }
 
-func (s *Store) SetTierPlacements(ctx context.Context, tierID uuid.UUID, placements []system.TierPlacement) error {
+func (s *Store) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
 	return s.apply(command.NewSetTierPlacements(tierID, placements))
 }
 

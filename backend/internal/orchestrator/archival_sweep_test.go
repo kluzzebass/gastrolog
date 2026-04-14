@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -17,7 +18,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // --- helpers ---
@@ -26,12 +26,12 @@ import (
 // by the in-memory blobstore. Returns the orchestrator, cloud store, chunk manager,
 // vault/tier IDs, and config store.
 func archivalTestSetup(t *testing.T, transitions []system.CloudStorageTransition) (
-	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, uuid.UUID, uuid.UUID, *sysmem.Store,
+	*Orchestrator, *blobstore.Memory, *chunkfile.Manager, glid.GLID, glid.GLID, *sysmem.Store,
 ) {
 	t.Helper()
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	csID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	csID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -450,7 +450,7 @@ func TestCloudServiceArchivalConfigRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	cs := system.CloudService{
-		ID:                uuid.Must(uuid.NewV7()),
+		ID:                glid.New(),
 		Name:              "roundtrip-test",
 		Provider:          "memory",
 		ArchivalMode:      "active",
@@ -541,7 +541,7 @@ func (r *byteReaderImpl) Read(p []byte) (int, error) {
 type cloudClusterHarness struct {
 	*clusterHarness
 	cloudStore *blobstore.Memory
-	csID       uuid.UUID
+	csID       glid.GLID
 }
 
 // setupCloudCluster creates a 4-node cluster where the single tier is cloud-backed
@@ -552,9 +552,9 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 	t.Helper()
 	nodeIDs := []string{"leader", "f1", "f2", "f3"}
 	leaderID := nodeIDs[0]
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	csID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	csID := glid.New()
 
 	cloudStore := blobstore.NewMemory()
 
@@ -664,7 +664,7 @@ func setupCloudCluster(t *testing.T, transitions []system.CloudStorageTransition
 			nodes:    nodes,
 			cfgStore: store,
 			vaultID:  vaultID,
-			tierIDs:  []uuid.UUID{tierID},
+			tierIDs:  []glid.GLID{tierID},
 		},
 		cloudStore: cloudStore,
 		csID:       csID,
@@ -1124,9 +1124,9 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 	t.Parallel()
 
 	// Create a cloud cluster where the leader has a cache dir.
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	csID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	csID := glid.New()
 	nodeID := "leader"
 
 	cloudStore := blobstore.NewMemory()
@@ -1251,9 +1251,9 @@ func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
 func TestCacheEvictionViaRetentionSweep(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	csID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	csID := glid.New()
 	nodeID := "leader"
 
 	cloudStore := blobstore.NewMemory()

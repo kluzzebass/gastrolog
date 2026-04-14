@@ -1,6 +1,7 @@
 package raftfsm
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"io"
@@ -11,7 +12,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/command"
 
-	"github.com/google/uuid"
 	"github.com/hashicorp/raft"
 )
 
@@ -29,7 +29,7 @@ func applyCmd(t *testing.T, fsm *FSM, cmd *gastrologv1.SystemCommand) {
 	}
 }
 
-func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
+func newID() glid.GLID { return glid.New() }
 
 func TestApplyPutFilter(t *testing.T) {
 	t.Parallel()
@@ -602,7 +602,7 @@ func TestCompoundDeleteRotationPolicy(t *testing.T) {
 	ctx := context.Background()
 
 	// tier1 and tier2 should have nil RotationPolicyID.
-	for _, id := range []uuid.UUID{tier1, tier2} {
+	for _, id := range []glid.GLID{tier1, tier2} {
 		tr, err := fsm.Store().GetTier(ctx, id)
 		if err != nil {
 			t.Fatal(err)

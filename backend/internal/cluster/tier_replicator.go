@@ -1,12 +1,12 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"log/slog"
 	"sync"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -17,7 +17,7 @@ import (
 // streamKey identifies a replication stream to a specific follower for a
 // specific tier. One stream per key.
 type streamKey struct {
-	tierID uuid.UUID
+	tierID glid.GLID
 	nodeID string
 }
 
@@ -59,7 +59,7 @@ func NewTierReplicator(peers *PeerConns, logger *slog.Logger) *TierReplicator {
 
 // getOrOpen returns the stream for the given tier+node, opening a new one
 // if needed. The caller must NOT hold tr.mu.
-func (tr *TierReplicator) getOrOpen(tierID uuid.UUID, nodeID string) (*tierStream, error) {
+func (tr *TierReplicator) getOrOpen(tierID glid.GLID, nodeID string) (*tierStream, error) {
 	key := streamKey{tierID: tierID, nodeID: nodeID}
 
 	tr.mu.Lock()
@@ -101,7 +101,7 @@ func (tr *TierReplicator) getOrOpen(tierID uuid.UUID, nodeID string) (*tierStrea
 
 // send sends a command on the stream and waits for the ack. On stream
 // failure, marks the stream as closed so the next call reopens it.
-func (tr *TierReplicator) send(_, tierID uuid.UUID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
+func (tr *TierReplicator) send(_, tierID glid.GLID, nodeID string, cmd *gastrologv1.TierReplicationCommand) error {
 	ts, err := tr.getOrOpen(tierID, nodeID)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func (tr *TierReplicator) send(_, tierID uuid.UUID, nodeID string, cmd *gastrolo
 }
 
 // closeStream marks a stream as closed and cancels its context.
-func (tr *TierReplicator) closeStream(tierID uuid.UUID, nodeID string) {
+func (tr *TierReplicator) closeStream(tierID glid.GLID, nodeID string) {
 	key := streamKey{tierID: tierID, nodeID: nodeID}
 	tr.mu.Lock()
 	ts := tr.streams[key]
@@ -145,7 +145,7 @@ func (tr *TierReplicator) closeStream(tierID uuid.UUID, nodeID string) {
 }
 
 // AppendRecords forwards records to a follower's active chunk.
-func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
@@ -163,7 +163,7 @@ func (tr *TierReplicator) AppendRecords(ctx context.Context, nodeID string, vaul
 }
 
 // SealTier tells a follower to seal its active chunk.
-func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.String(),
 		TierId:  tierID.String(),
@@ -176,7 +176,7 @@ func (tr *TierReplicator) SealTier(ctx context.Context, nodeID string, vaultID, 
 }
 
 // ImportSealedChunk sends a canonical sealed chunk to a follower.
-func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	exports := make([]*gastrologv1.ExportRecord, len(records))
 	for i, rec := range records {
 		exports[i] = convert.RecordToExport(rec)
@@ -194,7 +194,7 @@ func (tr *TierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, 
 }
 
 // DeleteChunk tells a follower to delete a sealed chunk.
-func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	return tr.send(vaultID, tierID, nodeID, &gastrologv1.TierReplicationCommand{
 		VaultId: vaultID.String(),
 		TierId:  tierID.String(),
@@ -207,7 +207,7 @@ func (tr *TierReplicator) DeleteChunk(ctx context.Context, nodeID string, vaultI
 }
 
 // CloseStream closes the stream for a specific tier+follower.
-func (tr *TierReplicator) CloseStream(tierID uuid.UUID, nodeID string) {
+func (tr *TierReplicator) CloseStream(tierID glid.GLID, nodeID string) {
 	tr.closeStream(tierID, nodeID)
 }
 

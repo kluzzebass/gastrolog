@@ -1,6 +1,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"iter"
@@ -14,7 +15,6 @@ import (
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 // runTimechart executes a timechart pipeline operator. It counts records by
@@ -100,7 +100,7 @@ type histogramAccum struct {
 }
 
 func (e *Engine) runTimechartStrategy(
-	ctx context.Context, q Query, preOps []querylang.PipeOp, selectedVaults []uuid.UUID,
+	ctx context.Context, q Query, preOps []querylang.PipeOp, selectedVaults []glid.GLID,
 	start, end time.Time, bucketWidth time.Duration, numBuckets int,
 	hasFilter, hasPreOps, hasGroupBy bool, groupField string,
 	acc *histogramAccum,
@@ -149,7 +149,7 @@ func (e *Engine) runTimechartStrategy(
 
 // applyCloudSelectivity estimates filtered cloud counts using local data selectivity.
 // Computes filteredLocal/localTotal ratio and scales cloud counts by that factor.
-func (e *Engine) applyCloudSelectivity(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts, cloudCounts []int64) {
+func (e *Engine) applyCloudSelectivity(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts, cloudCounts []int64) {
 	localTotals := make([]int64, numBuckets)
 	e.timechartLocalCounts(selectedVaults, start, end, bucketWidth, numBuckets, localTotals)
 
@@ -186,7 +186,7 @@ func clampBuckets(n int) int {
 }
 
 // timechartVaults returns the vaults to query for a timechart, applying any vault filter.
-func (e *Engine) timechartVaults(q Query) []uuid.UUID {
+func (e *Engine) timechartVaults(q Query) []glid.GLID {
 	allVaults := e.listVaults()
 	if q.BoolExpr != nil {
 		if vaults, _ := ExtractVaultFilter(q.BoolExpr, allVaults); vaults != nil {
@@ -197,7 +197,7 @@ func (e *Engine) timechartVaults(q Query) []uuid.UUID {
 }
 
 // deriveTimeRange fills in missing Start/End from chunk metadata across the selected vaults.
-func (e *Engine) deriveTimeRange(q *Query, selectedVaults []uuid.UUID) {
+func (e *Engine) deriveTimeRange(q *Query, selectedVaults []glid.GLID) {
 	for _, vaultID := range selectedVaults {
 		cm, _ := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -224,7 +224,7 @@ func (e *Engine) deriveTimeRange(q *Query, selectedVaults []uuid.UUID) {
 // timechartFastPath counts records per bucket using IngestTS binary search (no record scanning).
 // For the active chunk, uses the in-memory B-tree (FindIngestStartPosition).
 // For sealed chunks, uses the persisted IngestTS index (LoadIngestEntries).
-func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, cloudFlags []bool) {
+func (e *Engine) timechartFastPath(selectedVaults []glid.GLID, start time.Time, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64, cloudFlags []bool) {
 	for _, vaultID := range selectedVaults {
 		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -252,7 +252,7 @@ func (e *Engine) timechartFastPath(selectedVaults []uuid.UUID, start time.Time, 
 // timechartCloudCounts fills cloudCounts with unfiltered record counts from
 // cloud-backed chunks only (via TS index binary search). Sets cloudFlags for
 // buckets with cloud data. Returns true if any cloud chunks were found.
-func (e *Engine) timechartCloudCounts(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, cloudCounts []int64, cloudFlags []bool) bool {
+func (e *Engine) timechartCloudCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, cloudCounts []int64, cloudFlags []bool) bool {
 	found := false
 	for _, vaultID := range selectedVaults {
 		cm, im := e.getVaultManagers(vaultID)
@@ -282,7 +282,7 @@ func (e *Engine) timechartCloudCounts(selectedVaults []uuid.UUID, start, end tim
 
 // timechartLocalCounts fills counts with unfiltered record counts from
 // local (non-cloud) chunks only.
-func (e *Engine) timechartLocalCounts(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
+func (e *Engine) timechartLocalCounts(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, counts []int64) {
 	for _, vaultID := range selectedVaults {
 		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -313,7 +313,7 @@ func (e *Engine) timechartLocalCounts(selectedVaults []uuid.UUID, start, end tim
 // to the exact count. Total cost: O(buckets × samplePerBucket) regardless of
 // dataset size (~50K records for default 50 buckets).
 // Does NOT update total counts — those come from timechartFastPath.
-func (e *Engine) timechartAttrScanGroups(selectedVaults []uuid.UUID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) {
+func (e *Engine) timechartAttrScanGroups(selectedVaults []glid.GLID, start, end time.Time, bucketWidth time.Duration, numBuckets int, groupField string, groupCounts []map[string]int64) {
 	const samplePerBucket = 1000
 
 	for _, vaultID := range selectedVaults {

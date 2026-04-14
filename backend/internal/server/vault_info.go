@@ -1,13 +1,13 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"slices"
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -19,7 +19,7 @@ import (
 )
 
 // vaultName returns the human-readable name for a vault, falling back to the ID.
-func (s *VaultServer) vaultName(ctx context.Context, id uuid.UUID) string {
+func (s *VaultServer) vaultName(ctx context.Context, id glid.GLID) string {
 	cfg, err := s.getFullVaultConfig(ctx, id)
 	if err == nil && cfg.Name != "" {
 		return cfg.Name
@@ -67,7 +67,7 @@ func (s *VaultServer) GetStats(
 
 	// Separate local from remote so each gets the right stats source.
 	localIDs := s.orch.ListVaults()
-	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	localSet := make(map[glid.GLID]struct{}, len(localIDs))
 	for _, id := range localIDs {
 		localSet[id] = struct{}{}
 	}
@@ -94,7 +94,7 @@ func (s *VaultServer) GetStats(
 
 	// Include remote vaults from peer broadcasts.
 	// When no vault filter was provided, pass nil so all remote vaults are included.
-	var remoteFilter []uuid.UUID
+	var remoteFilter []glid.GLID
 	if req.Msg.Vault != "" {
 		remoteFilter = vaults
 	}
@@ -105,7 +105,7 @@ func (s *VaultServer) GetStats(
 	return connect.NewResponse(resp), nil
 }
 
-func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]uuid.UUID, error) {
+func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]glid.GLID, error) {
 	localVaults := s.orch.ListVaults()
 	if vaultFilter == "" {
 		return localVaults, nil
@@ -116,18 +116,18 @@ func (s *VaultServer) resolveVaultIDs(vaultFilter string) ([]uuid.UUID, error) {
 	}
 	// Local vault — fast path.
 	if slices.Contains(localVaults, vaultID) {
-		return []uuid.UUID{vaultID}, nil
+		return []glid.GLID{vaultID}, nil
 	}
 	// Check config store for remote vaults.
 	if s.cfgStore != nil {
 		if cfg, err := s.cfgStore.GetVault(context.Background(), vaultID); err == nil && cfg != nil {
-			return []uuid.UUID{vaultID}, nil
+			return []glid.GLID{vaultID}, nil
 		}
 	}
 	return nil, connect.NewError(connect.CodeNotFound, errors.New("vault not found"))
 }
 
-func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.VaultStats {
+func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID glid.GLID, metas []chunk.ChunkMeta) *apiv1.VaultStats {
 	stat := &apiv1.VaultStats{
 		Id:         vaultID.String(),
 		ChunkCount: int64(len(metas)),
@@ -151,7 +151,7 @@ func (s *VaultServer) buildVaultStats(ctx context.Context, vaultID uuid.UUID, me
 	return stat
 }
 
-func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID uuid.UUID, meta chunk.ChunkMeta) {
+func (s *VaultServer) accumulateChunkBytes(stat *apiv1.VaultStats, vaultID glid.GLID, meta chunk.ChunkMeta) {
 	if meta.DiskBytes > 0 {
 		stat.DataBytes += meta.DiskBytes
 		return
@@ -205,7 +205,7 @@ func (s *VaultServer) fillProcessMetrics(resp *apiv1.GetStatsResponse) {
 // accumulateRemoteVaultStats adds stats from remote vaults (via peer broadcasts)
 // to the GetStats response. localVaults are skipped (already counted).
 // If filter is non-empty, only the specified vaults are included.
-func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVaults []uuid.UUID, resp *apiv1.GetStatsResponse, filter []uuid.UUID) {
+func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVaults []glid.GLID, resp *apiv1.GetStatsResponse, filter []glid.GLID) {
 	if s.cfgStore == nil || s.peerStats == nil {
 		return
 	}
@@ -214,15 +214,15 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 		return
 	}
 
-	localSet := make(map[uuid.UUID]struct{}, len(localVaults))
+	localSet := make(map[glid.GLID]struct{}, len(localVaults))
 	for _, id := range localVaults {
 		localSet[id] = struct{}{}
 	}
 
 	// If a filter was provided, only include those specific remote vaults.
-	var filterSet map[uuid.UUID]struct{}
+	var filterSet map[glid.GLID]struct{}
 	if len(filter) > 0 {
-		filterSet = make(map[uuid.UUID]struct{}, len(filter))
+		filterSet = make(map[glid.GLID]struct{}, len(filter))
 		for _, id := range filter {
 			filterSet[id] = struct{}{}
 		}
@@ -262,7 +262,7 @@ func (s *VaultServer) accumulateRemoteVaultStats(ctx context.Context, localVault
 // mode with no config store) are included as a fallback.
 func (s *VaultServer) allVaultInfos(ctx context.Context) []*apiv1.VaultInfo {
 	localIDs := s.orch.ListVaults()
-	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	localSet := make(map[glid.GLID]struct{}, len(localIDs))
 	for _, id := range localIDs {
 		localSet[id] = struct{}{}
 	}
@@ -272,7 +272,7 @@ func (s *VaultServer) allVaultInfos(ctx context.Context) []*apiv1.VaultInfo {
 		allCfg, err := s.cfgStore.ListVaults(ctx)
 		if err == nil {
 			infos := make([]*apiv1.VaultInfo, 0, len(allCfg))
-			seen := make(map[uuid.UUID]struct{}, len(allCfg))
+			seen := make(map[glid.GLID]struct{}, len(allCfg))
 			for _, vc := range allCfg {
 				seen[vc.ID] = struct{}{}
 				infos = append(infos, s.vaultInfoFromConfig(vc, localSet))
@@ -296,9 +296,9 @@ func (s *VaultServer) allVaultInfos(ctx context.Context) []*apiv1.VaultInfo {
 }
 
 // buildVaultInfo returns VaultInfo for a single vault, or nil if not found.
-func (s *VaultServer) buildVaultInfo(ctx context.Context, id uuid.UUID) *apiv1.VaultInfo {
+func (s *VaultServer) buildVaultInfo(ctx context.Context, id glid.GLID) *apiv1.VaultInfo {
 	localIDs := s.orch.ListVaults()
-	localSet := make(map[uuid.UUID]struct{}, len(localIDs))
+	localSet := make(map[glid.GLID]struct{}, len(localIDs))
 	for _, lid := range localIDs {
 		localSet[lid] = struct{}{}
 	}
@@ -322,7 +322,7 @@ func (s *VaultServer) buildVaultInfo(ctx context.Context, id uuid.UUID) *apiv1.V
 // vaultInfoFromConfig builds a VaultInfo from a config store entry, enriching
 // with runtime stats from the local orchestrator (if local) or peer broadcasts
 // (if remote).
-func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[uuid.UUID]struct{}) *apiv1.VaultInfo {
+func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[glid.GLID]struct{}) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
 		Id:      cfg.ID.String(),
 		Name:    cfg.Name,
@@ -344,7 +344,7 @@ func (s *VaultServer) vaultInfoFromConfig(cfg system.VaultConfig, localSet map[u
 	return info
 }
 
-func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id uuid.UUID) {
+func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id glid.GLID) {
 	metas, err := s.orch.ListAllChunkMetas(id)
 	if err != nil {
 		return
@@ -355,7 +355,7 @@ func (s *VaultServer) enrichLocalVaultInfo(info *apiv1.VaultInfo, id uuid.UUID) 
 	}
 }
 
-func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id uuid.UUID) {
+func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id glid.GLID) {
 	if s.peerStats == nil {
 		return
 	}
@@ -369,7 +369,7 @@ func (s *VaultServer) enrichRemoteVaultInfo(info *apiv1.VaultInfo, id uuid.UUID)
 
 // vaultInfoFromLocal builds a VaultInfo purely from the local orchestrator.
 // Used as fallback when the config store is unavailable or missing the entry.
-func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id uuid.UUID) *apiv1.VaultInfo {
+func (s *VaultServer) vaultInfoFromLocal(ctx context.Context, id glid.GLID) *apiv1.VaultInfo {
 	info := &apiv1.VaultInfo{
 		Id:      id.String(),
 		Enabled: s.orch.IsVaultEnabled(id),

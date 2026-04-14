@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"strconv"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -153,7 +153,7 @@ func newNodeAddStorageCmd() *cobra.Command {
 			}
 
 			// Append new storage.
-			fsID := uuid.Must(uuid.NewV7()).String()
+			fsID := glid.New().String()
 			existing = append(existing, &v1.FileStorage{
 				Id:           fsID,
 				Name:         name,

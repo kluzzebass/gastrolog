@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"net/http"
@@ -17,7 +18,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 )
 
 // embeddedTransport routes requests directly to an http.Handler using pipes
@@ -102,7 +102,7 @@ func TestEmbeddedTransportSearch(t *testing.T) {
 		})
 	}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server

@@ -1,13 +1,13 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"sync"
 	"time"
 
 	"gastrolog/internal/alert"
 
-	"github.com/google/uuid"
 )
 
 // RateAlerter tracks per-tier event rates over a sliding window and raises
@@ -29,10 +29,10 @@ import (
 // flapping at the threshold.
 type RateAlerter struct {
 	mu      sync.Mutex
-	windows map[uuid.UUID]*RateWindow
+	windows map[glid.GLID]*RateWindow
 	// active tracks the last severity we raised for each tier so Evaluate
 	// can decide whether the alert state changed.
-	active map[uuid.UUID]alert.Severity
+	active map[glid.GLID]alert.Severity
 
 	window     time.Duration
 	kind       string  // e.g. "rotation" or "retention"
@@ -40,7 +40,7 @@ type RateAlerter struct {
 	warningAt  float64 // events/sec to raise Warning
 	errorAt    float64 // events/sec to raise Error (0 disables Error escalation)
 	alerts     AlertCollector
-	tierName   func(uuid.UUID) string // best-effort human label, "" if unknown
+	tierName   func(glid.GLID) string // best-effort human label, "" if unknown
 }
 
 // rateAlerterConfig bundles the constructor parameters so RateAlerter
@@ -53,7 +53,7 @@ type rateAlerterConfig struct {
 	WarningAt float64
 	ErrorAt   float64 // 0 = no error escalation
 	Alerts    AlertCollector
-	TierName  func(uuid.UUID) string
+	TierName  func(glid.GLID) string
 }
 
 // newRateAlerter constructs a RateAlerter. tierName may be nil; if provided,
@@ -62,8 +62,8 @@ type rateAlerterConfig struct {
 // concurrently.
 func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 	return &RateAlerter{
-		windows:   make(map[uuid.UUID]*RateWindow),
-		active:    make(map[uuid.UUID]alert.Severity),
+		windows:   make(map[glid.GLID]*RateWindow),
+		active:    make(map[glid.GLID]alert.Severity),
 		window:    cfg.Window,
 		kind:      cfg.Kind,
 		source:    cfg.Source,
@@ -76,7 +76,7 @@ func newRateAlerter(cfg rateAlerterConfig) *RateAlerter {
 
 // Record marks one event for the given tier at the given time. Lazily
 // creates a per-tier RateWindow on first call. Safe for concurrent use.
-func (r *RateAlerter) Record(tierID uuid.UUID, now time.Time) {
+func (r *RateAlerter) Record(tierID glid.GLID, now time.Time) {
 	r.mu.Lock()
 	w, ok := r.windows[tierID]
 	if !ok {
@@ -89,7 +89,7 @@ func (r *RateAlerter) Record(tierID uuid.UUID, now time.Time) {
 
 // Forget removes a tier's tracking and clears any active alert for it.
 // Call this when a tier is removed from the orchestrator.
-func (r *RateAlerter) Forget(tierID uuid.UUID) {
+func (r *RateAlerter) Forget(tierID glid.GLID) {
 	r.mu.Lock()
 	delete(r.windows, tierID)
 	prev, hadActive := r.active[tierID]
@@ -105,7 +105,7 @@ func (r *RateAlerter) Forget(tierID uuid.UUID) {
 // a fixed cadence (e.g., every 5 seconds) by a background goroutine.
 func (r *RateAlerter) Evaluate(now time.Time) {
 	type pending struct {
-		tierID   uuid.UUID
+		tierID   glid.GLID
 		severity alert.Severity // 0 = clear
 		rate     float64
 		count    int64
@@ -155,11 +155,11 @@ func (r *RateAlerter) classify(rate float64) alert.Severity {
 	return 0
 }
 
-func (r *RateAlerter) alertID(tierID uuid.UUID) string {
+func (r *RateAlerter) alertID(tierID glid.GLID) string {
 	return fmt.Sprintf("%s-rate:%s", r.kind, tierID)
 }
 
-func (r *RateAlerter) message(tierID uuid.UUID, rate float64, count int64) string {
+func (r *RateAlerter) message(tierID glid.GLID, rate float64, count int64) string {
 	label := tierID.String()
 	if r.tierName != nil {
 		if name := r.tierName(tierID); name != "" {

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"log/slog"
@@ -13,7 +14,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/raftgroup"
 
-	"github.com/google/uuid"
 )
 
 // Factories holds factory functions for creating components from configuration.
@@ -133,7 +133,7 @@ func (o *Orchestrator) ApplyConfig(sys *system.System, factories Factories) erro
 // compiles filters, and registers vaults.
 func (o *Orchestrator) applyVaults(sys *system.System, factories Factories) error {
 	cfg := &sys.Config
-	vaultIDs := make(map[uuid.UUID]bool)
+	vaultIDs := make(map[glid.GLID]bool)
 
 	for _, vaultCfg := range cfg.Vaults {
 		if vaultIDs[vaultCfg.ID] {
@@ -203,7 +203,7 @@ func (o *Orchestrator) startRetentionSweep() error {
 // applyIngesters creates and registers ingesters from the system.
 func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) error {
 	cfg := &sys.Config
-	ingesterIDs := make(map[uuid.UUID]bool)
+	ingesterIDs := make(map[glid.GLID]bool)
 
 	for _, recvCfg := range cfg.Ingesters {
 		if ingesterIDs[recvCfg.ID] {

@@ -1,13 +1,13 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 	"iter"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -53,7 +53,7 @@ func (a *orchStatsAdapter) IngesterIDs() []string {
 }
 
 func (a *orchStatsAdapter) IngesterStats(id string) (name string, messages, bytes, errors int64, running bool) {
-	uid, err := uuid.Parse(id)
+	uid, err := glid.ParseUUID(id)
 	if err != nil {
 		return "", 0, 0, 0, false
 	}
@@ -127,7 +127,7 @@ func (a *jobBroadcastAdapter) ListJobsProto() []*gastrologv1.Job {
 // TableResult instead of individual records. For regular searches, returns
 // the iterator directly — the streaming handler sends records as it iterates.
 func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
+	return func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeTokenData []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error) {
 		// Don't add vault_id= scope — the engine is already scoped to this
 		// vault's primary tiers. Adding vault_id= would fail because the
 		// engine uses tier IDs, not vault IDs.
@@ -190,7 +190,7 @@ func newSearchExecutor(o *orchestrator.Orchestrator) cluster.SearchExecutor {
 // local vaults for ForwardExplain RPCs received from peer nodes. Scopes the
 // query to the requested vault IDs and sets the node_id on each ChunkPlan.
 func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluster.ExplainExecutor {
-	return func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error) {
+	return func(ctx context.Context, vaultIDs []glid.GLID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error) {
 		var allChunks []*gastrologv1.ChunkPlan
 		var totalChunks int32
 
@@ -250,7 +250,7 @@ func newExplainExecutor(o *orchestrator.Orchestrator, localNodeID string) cluste
 // newFollowExecutor creates a cluster.FollowExecutor that runs a follow on
 // local vaults for ForwardFollow RPCs received from peer nodes.
 func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
-	return func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], error) {
+	return func(ctx context.Context, vaultIDs []glid.GLID, queryExpr string) (iter.Seq2[chunk.Record, error], error) {
 		// Scope the query to the requested vaults by prepending vault_id= predicates.
 		var scopedExpr string
 		for _, vid := range vaultIDs {
@@ -278,7 +278,7 @@ func newFollowExecutor(o *orchestrator.Orchestrator) cluster.FollowExecutor {
 }
 
 func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
+	return func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error) {
 		eng := o.PrimaryTierQueryEngineForVault(vaultID)
 		if eng == nil {
 			return nil, chunk.Record{}, nil, fmt.Errorf("no primary tiers for vault %s", vaultID)
@@ -296,7 +296,7 @@ func newContextExecutor(o *orchestrator.Orchestrator) cluster.ContextExecutor {
 }
 
 func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID) ([]*gastrologv1.ChunkMeta, error) {
+	return func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error) {
 		metas, err := o.ListAllChunkMetas(vaultID)
 		if err != nil {
 			return nil, err
@@ -310,7 +310,7 @@ func newListChunksExecutor(o *orchestrator.Orchestrator) cluster.ListChunksExecu
 }
 
 func newGetIndexesExecutor(o *orchestrator.Orchestrator) cluster.GetIndexesExecutor {
-	return func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error) {
+	return func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error) {
 		report, err := o.ChunkIndexInfos(vaultID, chunkID)
 		if err != nil {
 			return nil, err
@@ -332,7 +332,7 @@ func newGetIndexesExecutor(o *orchestrator.Orchestrator) cluster.GetIndexesExecu
 }
 
 func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaultExecutor {
-	return func(_ context.Context, vaultID uuid.UUID) (*gastrologv1.ValidateVaultResponse, error) {
+	return func(_ context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error) {
 		metas, err := o.ListChunkMetas(vaultID)
 		if err != nil {
 			return nil, err
@@ -342,7 +342,7 @@ func newValidateVaultExecutor(o *orchestrator.Orchestrator) cluster.ValidateVaul
 }
 
 func newGetChunkExecutor(o *orchestrator.Orchestrator) cluster.GetChunkExecutor {
-	return func(_ context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error) {
+	return func(_ context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error) {
 		meta, err := o.GetChunkMeta(vaultID, chunkID)
 		if err != nil {
 			return nil, err
@@ -352,7 +352,7 @@ func newGetChunkExecutor(o *orchestrator.Orchestrator) cluster.GetChunkExecutor 
 }
 
 func newAnalyzeChunkExecutor(o *orchestrator.Orchestrator) cluster.AnalyzeChunkExecutor {
-	return func(_ context.Context, vaultID uuid.UUID, chunkIDStr string) ([]*gastrologv1.ChunkAnalysis, error) {
+	return func(_ context.Context, vaultID glid.GLID, chunkIDStr string) ([]*gastrologv1.ChunkAnalysis, error) {
 		a, err := o.NewAnalyzer(vaultID)
 		if err != nil {
 			return nil, err
@@ -384,14 +384,14 @@ func newAnalyzeChunkExecutor(o *orchestrator.Orchestrator) cluster.AnalyzeChunkE
 }
 
 func newSealVaultExecutor(o *orchestrator.Orchestrator) cluster.SealVaultExecutor {
-	return func(_ context.Context, vaultID uuid.UUID) error {
-		_, err := o.SealActive(vaultID, uuid.Nil)
+	return func(_ context.Context, vaultID glid.GLID) error {
+		_, err := o.SealActive(vaultID, glid.Nil)
 		return err
 	}
 }
 
 func newReindexVaultExecutor(o *orchestrator.Orchestrator) cluster.ReindexVaultExecutor {
-	return func(_ context.Context, vaultID uuid.UUID) (string, error) {
+	return func(_ context.Context, vaultID glid.GLID) (string, error) {
 		if !o.VaultExists(vaultID) {
 			return "", errors.New("vault not found")
 		}

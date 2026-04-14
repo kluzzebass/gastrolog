@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -101,7 +101,7 @@ func (s *QueryServer) ExportToVault(
 
 // RunExportJob is the public entry point for export jobs forwarded from remote
 // nodes. It resolves the vault, parses the expression, and submits the job.
-func (s *QueryServer) RunExportJob(ctx context.Context, expression string, targetVaultID uuid.UUID) (string, error) {
+func (s *QueryServer) RunExportJob(ctx context.Context, expression string, targetVaultID glid.GLID) (string, error) {
 	q, pipeline, err := parseExpression(expression)
 	if err != nil {
 		return "", err
@@ -130,7 +130,7 @@ func (s *QueryServer) runExportJob(
 	job *orchestrator.JobProgress,
 	q query.Query,
 	pipeline *querylang.Pipeline,
-	targetVaultID uuid.UUID,
+	targetVaultID glid.GLID,
 ) {
 	eng := s.orch.PrimaryTierQueryEngine()
 	if s.lookupResolver != nil {
@@ -208,19 +208,19 @@ func (s *QueryServer) runExportJob(
 
 // resolveTargetVault resolves a target string to a vault UUID.
 // Tries UUID parse first, then name lookup in system.
-func (s *QueryServer) resolveTargetVault(ctx context.Context, target string) (uuid.UUID, string, *connect.Error) {
+func (s *QueryServer) resolveTargetVault(ctx context.Context, target string) (glid.GLID, string, *connect.Error) {
 	// Try UUID first.
-	if id, err := uuid.Parse(target); err == nil {
+	if id, err := glid.ParseUUID(target); err == nil {
 		return s.resolveVaultByID(ctx, id, target)
 	}
 
 	// Name lookup.
 	if s.cfgStore == nil {
-		return uuid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %q not found (no config store)", target))
+		return glid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %q not found (no config store)", target))
 	}
 	allVaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
-		return uuid.Nil, "", connect.NewError(connect.CodeInternal, fmt.Errorf("list vaults: %w", err))
+		return glid.Nil, "", connect.NewError(connect.CodeInternal, fmt.Errorf("list vaults: %w", err))
 	}
 
 	var matches []system.VaultConfig
@@ -232,15 +232,15 @@ func (s *QueryServer) resolveTargetVault(ctx context.Context, target string) (uu
 
 	switch len(matches) {
 	case 0:
-		return uuid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %q not found", target))
+		return glid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %q not found", target))
 	case 1:
 		return matches[0].ID, matches[0].Name, nil
 	default:
-		return uuid.Nil, "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("vault name %q is ambiguous (%d matches), use vault UUID instead", target, len(matches)))
+		return glid.Nil, "", connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("vault name %q is ambiguous (%d matches), use vault UUID instead", target, len(matches)))
 	}
 }
 
-func (s *QueryServer) resolveVaultByID(ctx context.Context, id uuid.UUID, target string) (uuid.UUID, string, *connect.Error) {
+func (s *QueryServer) resolveVaultByID(ctx context.Context, id glid.GLID, target string) (glid.GLID, string, *connect.Error) {
 	if s.cfgStore != nil {
 		allVaults, err := s.cfgStore.ListVaults(ctx)
 		if err == nil {
@@ -254,7 +254,7 @@ func (s *QueryServer) resolveVaultByID(ctx context.Context, id uuid.UUID, target
 	if slices.Contains(s.orch.ListVaults(), id) {
 		return id, id.String(), nil
 	}
-	return uuid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %s not found", target))
+	return glid.Nil, "", connect.NewError(connect.CodeNotFound, fmt.Errorf("vault %s not found", target))
 }
 
 // drainRemoteRecords collects all remote records into a slice by draining
@@ -277,7 +277,7 @@ func (s *QueryServer) drainRemoteRecords(ctx context.Context, q query.Query) []c
 // excludeTargetVault ensures the target vault is not searched as a source.
 // If the query has no vault filter, it injects NOT vault_id=<target>.
 // If the query explicitly includes the target, it rejects with an error.
-func (s *QueryServer) excludeTargetVault(q query.Query, targetVaultID uuid.UUID) (query.Query, *connect.Error) {
+func (s *QueryServer) excludeTargetVault(q query.Query, targetVaultID glid.GLID) (query.Query, *connect.Error) {
 	nq := q.Normalize()
 	sourceVaults, _ := query.ExtractVaultFilter(nq.BoolExpr, nil)
 
@@ -307,7 +307,7 @@ func (s *QueryServer) excludeTargetVault(q query.Query, targetVaultID uuid.UUID)
 
 // remoteNodeForTargetVault returns the owning node ID if the vault is remote.
 // Returns "" if the vault is local or not found.
-func (s *QueryServer) remoteNodeForTargetVault(ctx context.Context, vaultID uuid.UUID) string {
+func (s *QueryServer) remoteNodeForTargetVault(ctx context.Context, vaultID glid.GLID) string {
 	// Check if the vault is local.
 	if slices.Contains(s.orch.ListVaults(), vaultID) {
 		return ""
@@ -346,8 +346,8 @@ func (s *QueryServer) now() time.Time { return time.Now() }
 // ExportToVaultExecutor, delegating to this QueryServer's export logic.
 // The closure captures s (not s.queryServer) so it works even when wired
 // before buildMux initializes queryServer.
-func (s *Server) ExportToVaultFunc() func(ctx context.Context, expression string, targetVaultID uuid.UUID) (string, error) {
-	return func(ctx context.Context, expression string, targetVaultID uuid.UUID) (string, error) {
+func (s *Server) ExportToVaultFunc() func(ctx context.Context, expression string, targetVaultID glid.GLID) (string, error) {
+	return func(ctx context.Context, expression string, targetVaultID glid.GLID) (string, error) {
 		return s.queryServer.RunExportJob(ctx, expression, targetVaultID)
 	}
 }

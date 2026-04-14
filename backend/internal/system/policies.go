@@ -1,6 +1,7 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"errors"
 	"fmt"
 	"time"
@@ -8,7 +9,6 @@ import (
 	"gastrolog/internal/chunk"
 
 	"github.com/go-co-op/gocron/v2"
-	"github.com/google/uuid"
 )
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ import (
 // Vaults reference filters by UUID to determine which messages they receive.
 type FilterConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
+	ID glid.GLID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -37,7 +37,7 @@ type FilterConfig struct {
 // All fields are optional (nil = not set).
 type RotationPolicyConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
+	ID glid.GLID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -119,7 +119,7 @@ func (c RotationPolicyConfig) ToRotationPolicy() (chunk.RotationPolicy, error) {
 // All fields are optional (nil = not set).
 type RetentionPolicyConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
+	ID glid.GLID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -192,8 +192,8 @@ const (
 
 // RetentionRule pairs a retention policy with an action.
 type RetentionRule struct {
-	RetentionPolicyID uuid.UUID       `json:"retentionPolicyId"`
+	RetentionPolicyID glid.GLID       `json:"retentionPolicyId"`
 	Action            RetentionAction `json:"action"`
-	EjectRouteIDs     []uuid.UUID     `json:"ejectRouteIds,omitempty"` // target routes, only for eject
+	EjectRouteIDs     []glid.GLID     `json:"ejectRouteIds,omitempty"` // target routes, only for eject
 }
 

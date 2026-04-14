@@ -1,17 +1,17 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"slices"
 	"testing"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 func TestCompileFilter(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 
 	tests := []struct {
 		name      string
@@ -110,11 +110,11 @@ func TestFilterSetMatch(t *testing.T) {
 	// - unfiltered: + (catch-the-rest)
 	// - disabled: (empty, receives nothing)
 
-	prodErrorsID := uuid.Must(uuid.NewV7())
-	stagingID := uuid.Must(uuid.NewV7())
-	archiveID := uuid.Must(uuid.NewV7())
-	unfilteredID := uuid.Must(uuid.NewV7())
-	disabledID := uuid.Must(uuid.NewV7())
+	prodErrorsID := glid.New()
+	stagingID := glid.New()
+	archiveID := glid.New()
+	unfilteredID := glid.New()
+	disabledID := glid.New()
 
 	prodErrors, _ := CompileFilter(prodErrorsID, "env=prod AND level=error")
 	staging, _ := CompileFilter(stagingID, "env=staging")
@@ -127,32 +127,32 @@ func TestFilterSetMatch(t *testing.T) {
 	tests := []struct {
 		name       string
 		attrs      chunk.Attributes
-		wantVaults []uuid.UUID
+		wantVaults []glid.GLID
 	}{
 		{
 			name:       "prod error goes to prod-errors and archive",
 			attrs:      chunk.Attributes{"env": "prod", "level": "error"},
-			wantVaults: []uuid.UUID{prodErrorsID, archiveID},
+			wantVaults: []glid.GLID{prodErrorsID, archiveID},
 		},
 		{
 			name:       "prod info goes to archive and unfiltered (no expr match)",
 			attrs:      chunk.Attributes{"env": "prod", "level": "info"},
-			wantVaults: []uuid.UUID{archiveID, unfilteredID},
+			wantVaults: []glid.GLID{archiveID, unfilteredID},
 		},
 		{
 			name:       "staging goes to staging and archive",
 			attrs:      chunk.Attributes{"env": "staging", "level": "debug"},
-			wantVaults: []uuid.UUID{stagingID, archiveID},
+			wantVaults: []glid.GLID{stagingID, archiveID},
 		},
 		{
 			name:       "unknown env goes to archive and unfiltered",
 			attrs:      chunk.Attributes{"env": "unknown"},
-			wantVaults: []uuid.UUID{archiveID, unfilteredID},
+			wantVaults: []glid.GLID{archiveID, unfilteredID},
 		},
 		{
 			name:       "no attrs goes to archive and unfiltered",
 			attrs:      chunk.Attributes{},
-			wantVaults: []uuid.UUID{archiveID, unfilteredID},
+			wantVaults: []glid.GLID{archiveID, unfilteredID},
 		},
 	}
 
@@ -170,8 +170,8 @@ func TestFilterSetMatch(t *testing.T) {
 func TestFilterSetCatchRestOnlyWhenNoExprMatch(t *testing.T) {
 	t.Parallel()
 	// catch-the-rest should NOT receive messages when an expression filter matches
-	prodID := uuid.Must(uuid.NewV7())
-	unfilteredID := uuid.Must(uuid.NewV7())
+	prodID := glid.New()
+	unfilteredID := glid.New()
 
 	prodOnly, _ := CompileFilter(prodID, "env=prod")
 	catchRest, _ := CompileFilter(unfilteredID, "+")
@@ -201,8 +201,8 @@ func TestFilterSetCatchAllDoesNotPreventCatchRest(t *testing.T) {
 	t.Parallel()
 	// catch-all should NOT prevent catch-the-rest from receiving unmatched messages
 	// (catch-all is not an "expression match")
-	archiveID := uuid.Must(uuid.NewV7())
-	unfilteredID := uuid.Must(uuid.NewV7())
+	archiveID := glid.New()
+	unfilteredID := glid.New()
 
 	catchAll, _ := CompileFilter(archiveID, "*")
 	catchRest, _ := CompileFilter(unfilteredID, "+")
@@ -221,8 +221,8 @@ func TestFilterSetCatchAllDoesNotPreventCatchRest(t *testing.T) {
 
 func TestFilterSetEmptyFilterReceivesNothing(t *testing.T) {
 	t.Parallel()
-	disabledID := uuid.Must(uuid.NewV7())
-	archiveID := uuid.Must(uuid.NewV7())
+	disabledID := glid.New()
+	archiveID := glid.New()
 
 	disabled, _ := CompileFilter(disabledID, "")
 	catchAll, _ := CompileFilter(archiveID, "*")
@@ -240,7 +240,7 @@ func TestFilterSetEmptyFilterReceivesNothing(t *testing.T) {
 
 func TestFilterSetCaseInsensitiveMatching(t *testing.T) {
 	t.Parallel()
-	prodID := uuid.Must(uuid.NewV7())
+	prodID := glid.New()
 
 	filter, _ := CompileFilter(prodID, "env=PROD")
 	filterSet := NewFilterSet([]*CompiledFilter{filter})
@@ -259,7 +259,7 @@ func TestFilterSetCaseInsensitiveMatching(t *testing.T) {
 
 func TestFilterSetNotExpression(t *testing.T) {
 	t.Parallel()
-	notProdID := uuid.Must(uuid.NewV7())
+	notProdID := glid.New()
 
 	// Filter that excludes prod
 	notProd, _ := CompileFilter(notProdID, "NOT env=prod")
@@ -280,7 +280,7 @@ func TestFilterSetNotExpression(t *testing.T) {
 
 func TestFilterSetKeyExists(t *testing.T) {
 	t.Parallel()
-	hasEnvID := uuid.Must(uuid.NewV7())
+	hasEnvID := glid.New()
 
 	// Filter that matches any message with an "env" key
 	hasEnv, _ := CompileFilter(hasEnvID, "env=*")
@@ -307,7 +307,7 @@ func TestFilterSetKeyExists(t *testing.T) {
 
 func TestFilterSetValueExists(t *testing.T) {
 	t.Parallel()
-	hasErrorID := uuid.Must(uuid.NewV7())
+	hasErrorID := glid.New()
 
 	// Filter that matches any message with value "error"
 	hasError, _ := CompileFilter(hasErrorID, "*=error")
@@ -340,8 +340,8 @@ func TestFilterSetValueExists(t *testing.T) {
 
 func TestFilterSetAddOrUpdate(t *testing.T) {
 	t.Parallel()
-	vaultA := uuid.Must(uuid.NewV7())
-	vaultB := uuid.Must(uuid.NewV7())
+	vaultA := glid.New()
+	vaultB := glid.New()
 
 	// AddOrUpdate on nil receiver creates a fresh set.
 	fs, err := (*FilterSet)(nil).AddOrUpdate(vaultA, "env=prod")
@@ -386,9 +386,9 @@ func TestFilterSetAddOrUpdate(t *testing.T) {
 
 func TestFilterSetWithout(t *testing.T) {
 	t.Parallel()
-	vaultA := uuid.Must(uuid.NewV7())
-	vaultB := uuid.Must(uuid.NewV7())
-	vaultC := uuid.Must(uuid.NewV7())
+	vaultA := glid.New()
+	vaultB := glid.New()
+	vaultC := glid.New()
 
 	filterA, _ := CompileFilter(vaultA, "env=prod")
 	filterB, _ := CompileFilter(vaultB, "env=staging")
@@ -431,8 +431,8 @@ func TestFilterSetWithout(t *testing.T) {
 
 func TestAddOrUpdateWithNodePreservesNodeID(t *testing.T) {
 	t.Parallel()
-	vaultA := uuid.Must(uuid.NewV7())
-	vaultB := uuid.Must(uuid.NewV7())
+	vaultA := glid.New()
+	vaultB := glid.New()
 
 	fs, err := (*FilterSet)(nil).AddOrUpdateWithNode(vaultA, "env=prod", "node-A")
 	if err != nil {
@@ -469,8 +469,8 @@ func TestAddOrUpdateWithNodePreservesNodeID(t *testing.T) {
 
 func TestMatchWithNodeReturnsNodeIDs(t *testing.T) {
 	t.Parallel()
-	localID := uuid.Must(uuid.NewV7())
-	remoteID := uuid.Must(uuid.NewV7())
+	localID := glid.New()
+	remoteID := glid.New()
 
 	local, _ := CompileFilter(localID, "*")
 	remote, _ := CompileFilter(remoteID, "env=prod")
@@ -503,8 +503,8 @@ func TestMatchWithNodeReturnsNodeIDs(t *testing.T) {
 
 func TestMatchWithNodeCatchRest(t *testing.T) {
 	t.Parallel()
-	exprID := uuid.Must(uuid.NewV7())
-	catchRestID := uuid.Must(uuid.NewV7())
+	exprID := glid.New()
+	catchRestID := glid.New()
 
 	expr, _ := CompileFilter(exprID, "env=prod")
 	expr.NodeID = "node-A"
@@ -537,11 +537,11 @@ func TestMatchWithNodeCatchRest(t *testing.T) {
 
 // Helper functions
 
-func sameElements(a, b []uuid.UUID) bool {
+func sameElements(a, b []glid.GLID) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	m := make(map[uuid.UUID]int)
+	m := make(map[glid.GLID]int)
 	for _, s := range a {
 		m[s]++
 	}
@@ -554,6 +554,6 @@ func sameElements(a, b []uuid.UUID) bool {
 	return true
 }
 
-func containsUUID(slice []uuid.UUID, id uuid.UUID) bool {
+func containsUUID(slice []glid.GLID, id glid.GLID) bool {
 	return slices.Contains(slice, id)
 }

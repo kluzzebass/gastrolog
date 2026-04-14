@@ -1,6 +1,7 @@
 package mqtt
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -23,7 +23,7 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for MQTT ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		broker := params["broker"]
 		if broker == "" {
 			return nil, errors.New("mqtt ingester: broker param is required")

@@ -1,13 +1,13 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"strings"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 
@@ -27,24 +27,24 @@ const (
 
 // CompiledFilter is a pre-compiled vault filter for fast evaluation.
 type CompiledFilter struct {
-	VaultID uuid.UUID
+	VaultID glid.GLID
 	Kind    FilterKind
 	Expr    string         // original filter expression (for config reconstruction)
 	DNF     *querylang.DNF // only set for FilterExpr
 	NodeID  string         // owning node (empty = local vault)
-	RouteID uuid.UUID      // which route produced this filter (zero = legacy/direct)
+	RouteID glid.GLID      // which route produced this filter (zero = legacy/direct)
 }
 
 // MatchResult pairs a vault ID with the node that owns it.
 type MatchResult struct {
-	VaultID uuid.UUID
+	VaultID glid.GLID
 	NodeID  string    // empty = local vault
-	RouteID uuid.UUID // which route caused this match (zero = legacy/direct)
+	RouteID glid.GLID // which route caused this match (zero = legacy/direct)
 }
 
 // CompileFilter parses a filter string and returns a compiled filter.
 // Returns an error if the filter expression is invalid or uses unsupported predicates.
-func CompileFilter(vaultID uuid.UUID, filter string) (*CompiledFilter, error) {
+func CompileFilter(vaultID glid.GLID, filter string) (*CompiledFilter, error) {
 	filter = strings.TrimSpace(filter)
 
 	// Empty filter = receives nothing
@@ -97,7 +97,7 @@ func NewFilterSet(filters []*CompiledFilter) *FilterSet {
 // AddOrUpdate returns a new FilterSet with the given vault's filter compiled and
 // added or updated. Returns error if the filter expression is invalid.
 // Safe to call on a nil receiver (creates a fresh set).
-func (fs *FilterSet) AddOrUpdate(vaultID uuid.UUID, filterExpr string) (*FilterSet, error) {
+func (fs *FilterSet) AddOrUpdate(vaultID glid.GLID, filterExpr string) (*FilterSet, error) {
 	f, err := CompileFilter(vaultID, filterExpr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter for vault %s: %w", vaultID, err)
@@ -119,7 +119,7 @@ func (fs *FilterSet) AddOrUpdate(vaultID uuid.UUID, filterExpr string) (*FilterS
 // AddOrUpdateWithNode is like AddOrUpdate but also sets the NodeID on the
 // compiled filter. Use this for remote vault destinations so MatchWithNode
 // can distinguish local from remote targets.
-func (fs *FilterSet) AddOrUpdateWithNode(vaultID uuid.UUID, filterExpr, nodeID string) (*FilterSet, error) {
+func (fs *FilterSet) AddOrUpdateWithNode(vaultID glid.GLID, filterExpr, nodeID string) (*FilterSet, error) {
 	f, err := CompileFilter(vaultID, filterExpr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter for vault %s: %w", vaultID, err)
@@ -142,7 +142,7 @@ func (fs *FilterSet) AddOrUpdateWithNode(vaultID uuid.UUID, filterExpr, nodeID s
 // AddOrUpdateWithNodeAndRoute is like AddOrUpdateWithNode but also sets the
 // RouteID on the compiled filter. Use this when building filters from route
 // configuration so per-route stats can be tracked.
-func (fs *FilterSet) AddOrUpdateWithNodeAndRoute(vaultID uuid.UUID, filterExpr, nodeID string, routeID uuid.UUID) (*FilterSet, error) {
+func (fs *FilterSet) AddOrUpdateWithNodeAndRoute(vaultID glid.GLID, filterExpr, nodeID string, routeID glid.GLID) (*FilterSet, error) {
 	f, err := CompileFilter(vaultID, filterExpr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid filter for vault %s: %w", vaultID, err)
@@ -165,12 +165,12 @@ func (fs *FilterSet) AddOrUpdateWithNodeAndRoute(vaultID uuid.UUID, filterExpr, 
 
 // Without returns a new FilterSet excluding filters for the given vault IDs.
 // Returns nil if the resulting set is empty. Safe to call on a nil receiver.
-func (fs *FilterSet) Without(vaultIDs ...uuid.UUID) *FilterSet {
+func (fs *FilterSet) Without(vaultIDs ...glid.GLID) *FilterSet {
 	if fs == nil {
 		return nil
 	}
 
-	exclude := make(map[uuid.UUID]struct{}, len(vaultIDs))
+	exclude := make(map[glid.GLID]struct{}, len(vaultIDs))
 	for _, id := range vaultIDs {
 		exclude[id] = struct{}{}
 	}
@@ -196,8 +196,8 @@ func (fs *FilterSet) Without(vaultIDs ...uuid.UUID) *FilterSet {
 //   - messages_ingested_total (total messages received)
 //
 // This enables alerting on drop rate and visibility into filter distribution.
-func (fs *FilterSet) Match(attrs chunk.Attributes) []uuid.UUID {
-	var result []uuid.UUID
+func (fs *FilterSet) Match(attrs chunk.Attributes) []glid.GLID {
+	var result []glid.GLID
 	matchedExpr := false
 
 	// First pass: evaluate expression filters and catch-all

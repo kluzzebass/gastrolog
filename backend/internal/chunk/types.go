@@ -1,6 +1,7 @@
 package chunk
 
 import (
+	"gastrolog/internal/glid"
 	"encoding/base32"
 	"encoding/binary"
 	"errors"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 )
 
 var (
@@ -89,12 +89,12 @@ var chunkIDEncoding = base32.HexEncoding.WithPadding(base32.NoPadding)
 // ChunkID uniquely identifies a chunk.
 // It is a UUIDv7 (16 bytes) whose string representation is 26-char lowercase
 // base32hex, lexicographically sortable by creation time.
-type ChunkID uuid.UUID
+type ChunkID glid.GLID
 
 // NewChunkID creates a ChunkID from a new UUIDv7.
 // UUIDv7 embeds a millisecond timestamp and guarantees monotonically increasing IDs.
 func NewChunkID() ChunkID {
-	return ChunkID(uuid.Must(uuid.NewV7()))
+	return ChunkID(glid.New())
 }
 
 // ParseChunkID parses a 26-character base32hex string into a ChunkID.
@@ -161,7 +161,7 @@ type ChunkMeta struct {
 // All fields are fixed-size value types, so EventID is comparable and usable
 // as a map key.
 type EventID struct {
-	IngesterID uuid.UUID
+	IngesterID glid.GLID
 	IngestTS   time.Time
 	IngestSeq  uint32
 }
@@ -187,7 +187,7 @@ type Record struct {
 	Attrs    Attributes
 	Raw      []byte
 	Ref      RecordRef
-	VaultID  uuid.UUID
+	VaultID  glid.GLID
 
 	// WaitForReplica signals that the caller wants confirmation that
 	// secondaries received this record before acking. Set by ack-gated

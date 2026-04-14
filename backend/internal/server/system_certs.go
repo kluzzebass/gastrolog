@@ -1,13 +1,13 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/cert"
@@ -133,7 +133,7 @@ func (s *SystemServer) PutCertificate(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("certificate", certID, req.Msg.Name, certs, func(c system.CertPEM) (uuid.UUID, string) { return c.ID, c.Name }); connErr != nil {
+	if connErr := checkNameConflict("certificate", certID, req.Msg.Name, certs, func(c system.CertPEM) (glid.GLID, string) { return c.ID, c.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -222,18 +222,18 @@ func validateCertMaterial(msg *apiv1.PutCertificateRequest, keyPEM string, exist
 	return nil
 }
 
-func resolveCertID(existingID uuid.UUID, reqID string) (uuid.UUID, error) {
-	if existingID != uuid.Nil {
+func resolveCertID(existingID glid.GLID, reqID string) (glid.GLID, error) {
+	if existingID != glid.Nil {
 		return existingID, nil
 	}
 	if reqID != "" {
-		id, err := uuid.Parse(reqID)
+		id, err := glid.ParseUUID(reqID)
 		if err != nil {
-			return uuid.Nil, fmt.Errorf("invalid certificate id %q: %w", reqID, err)
+			return glid.Nil, fmt.Errorf("invalid certificate id %q: %w", reqID, err)
 		}
 		return id, nil
 	}
-	return uuid.Must(uuid.NewV7()), nil
+	return glid.New(), nil
 }
 
 func (s *SystemServer) setDefaultCert(ctx context.Context, name string) error {

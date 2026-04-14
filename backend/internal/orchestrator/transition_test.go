@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"log/slog"
 	"testing"
@@ -23,7 +24,6 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // syntheticPlacements creates a Placements slice with a primary using a synthetic storage ID.
@@ -49,7 +49,7 @@ func (l *transitionSystemLoader) Load(ctx context.Context) (*system.System, erro
 		nodeID = "test-node"
 	}
 	if sys.Runtime.TierPlacements == nil {
-		sys.Runtime.TierPlacements = make(map[uuid.UUID][]system.TierPlacement)
+		sys.Runtime.TierPlacements = make(map[glid.GLID][]system.TierPlacement)
 	}
 	for _, tier := range sys.Config.Tiers {
 		if _, ok := sys.Runtime.TierPlacements[tier.ID]; !ok {
@@ -106,7 +106,7 @@ func newTestOrch(t *testing.T, cfg Config) *Orchestrator {
 	return orch
 }
 
-func newMemoryTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
+func newMemoryTierInstance(t *testing.T, tierID glid.GLID) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -128,7 +128,7 @@ func newMemoryTierInstance(t *testing.T, tierID uuid.UUID) *TierInstance {
 // setupTestStoreRuntime populates the test store with runtime state that tests
 // need — tier placements and node storage config. Most tests use memory tiers
 // with a single test-node, so placements use synthetic storage IDs.
-func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...uuid.UUID) {
+func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...glid.GLID) {
 	ctx := context.Background()
 	for _, tid := range tierIDs {
 		_ = store.SetTierPlacements(ctx, tid, []system.TierPlacement{
@@ -137,11 +137,11 @@ func setupTestStoreRuntime(store *sysmem.Store, nodeID string, tierIDs ...uuid.U
 	}
 }
 
-func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.UUID, *system.Config) {
+func setupTwoTierVault(t *testing.T) (*Orchestrator, glid.GLID, glid.GLID, glid.GLID, *system.Config) {
 	t.Helper()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	nodeID := "test-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
@@ -166,7 +166,7 @@ func setupTwoTierVault(t *testing.T) (*Orchestrator, uuid.UUID, uuid.UUID, uuid.
 	return orch, vaultID, tier0ID, tier1ID, cfg
 }
 
-func newTestRetentionRunner(orch *Orchestrator, vaultID, tierID uuid.UUID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
+func newTestRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
 		vaultID: vaultID,
@@ -298,8 +298,8 @@ func TestTransitionRecordIntegrity(t *testing.T) {
 
 func TestTransitionTerminalTier(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	nodeID := "test-node"
 
 	tier := newMemoryTierInstance(t, tierID)
@@ -470,33 +470,33 @@ type transitionFakeTransferrer struct {
 
 type transitionTransferCall struct {
 	nodeID  string
-	vaultID uuid.UUID
-	tierID  uuid.UUID
+	vaultID glid.GLID
+	tierID  glid.GLID
 	records []chunk.Record
 }
 
 type transitionStreamCall struct {
 	nodeID  string
-	vaultID uuid.UUID
-	tierID  uuid.UUID
+	vaultID glid.GLID
+	tierID  glid.GLID
 	count   int
 }
 
-func (m *transitionFakeTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *transitionFakeTransferrer) TransferRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.RecordIterator) error {
 	return nil
 }
-func (m *transitionFakeTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+func (m *transitionFakeTransferrer) ForwardAppend(_ context.Context, _ string, _ glid.GLID, _ []chunk.Record) error {
 	return nil
 }
-func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *transitionFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil
 }
 
 func TestTransitionCrossNode(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	localNode := "local-node"
 	remoteNode := "remote-node"
 
@@ -570,10 +570,10 @@ func TestTransitionCrossNode(t *testing.T) {
 
 func TestTransitionCrossNodeFailure(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
-	_ = uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
+	_ = glid.New()
 	localNode := "local-node"
 	_ = "remote-node"
 
@@ -625,10 +625,10 @@ func TestTransitionCrossNodeFailure(t *testing.T) {
 
 func TestTransitionNoTransferrer(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
-	_ = uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
+	_ = glid.New()
 	localNode := "local-node"
 	_ = "remote-node"
 
@@ -725,9 +725,9 @@ func TestTransitionSweepDispatch(t *testing.T) {
 // Reproduces gastrolog-9umo2: 3m TTL on cloud tier, chunks sit for 10+ minutes.
 func TestTransitionCloudTierTTLSweep(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	nextTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	nextTierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -842,10 +842,10 @@ func TestTransitionCloudTierTTLSweep(t *testing.T) {
 func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 	t.Parallel()
 	nodeID := "test-node"
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	_ = uuid.Must(uuid.NewV7())
-	csID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	_ = glid.New()
+	csID := glid.New()
 
 	storageDir := t.TempDir()
 
@@ -974,9 +974,9 @@ func TestCloudTierLeaderPreservesCloudBacking(t *testing.T) {
 // future cloud cursor reads (S3 416 Range Not Satisfiable).
 func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	nextTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	nextTierID := glid.New()
 	leaderNode := "leader-node"
 	_ = "follower-node"
 
@@ -1134,7 +1134,7 @@ func (p *keepNPolicy) Apply(state chunk.VaultState) []chunk.ChunkID {
 	return ids
 }
 
-func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 	if m.failErr != nil {
 		return m.failErr
 	}
@@ -1155,7 +1155,7 @@ func (m *transitionFakeTransferrer) StreamToTier(_ context.Context, nodeID strin
 // newCloudFileTier creates a file-backed TierInstance with cloud storage.
 // Sealed chunks are uploaded to the in-memory blobstore and local files deleted,
 // matching production cloud tier behavior.
-func newCloudFileTier(t *testing.T, tierID uuid.UUID, vaultID uuid.UUID, store blobstore.Store) (*TierInstance, string) {
+func newCloudFileTier(t *testing.T, tierID glid.GLID, vaultID glid.GLID, store blobstore.Store) (*TierInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1184,9 +1184,9 @@ func newCloudFileTier(t *testing.T, tierID uuid.UUID, vaultID uuid.UUID, store b
 // where the cloud tier's sealed chunks never transition to tier 4.
 func TestTransitionCloudTierToNextTier(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	nextTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	nextTierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -1294,9 +1294,9 @@ func TestTransitionCloudTierToNextTier(t *testing.T) {
 // This tests the full sweep() path rather than calling transitionChunk directly.
 func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	nextTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	nextTierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -1409,7 +1409,7 @@ func TestTransitionCloudTierSweepDispatch(t *testing.T) {
 
 // newFileTierInstance creates a file-backed TierInstance without cloud storage.
 // Returns the tier instance and its filesystem directory for post-test verification.
-func newFileTierInstance(t *testing.T, tierID uuid.UUID) (*TierInstance, string) {
+func newFileTierInstance(t *testing.T, tierID glid.GLID) (*TierInstance, string) {
 	t.Helper()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -1517,7 +1517,7 @@ func readAllRecords(t *testing.T, cm chunk.ChunkManager) []chunk.Record {
 }
 
 // makeRecordWithEventID creates a record with an explicit EventID for testing preservation.
-func makeRecordWithEventID(raw string, ingesterID uuid.UUID, seq uint32) chunk.Record {
+func makeRecordWithEventID(raw string, ingesterID glid.GLID, seq uint32) chunk.Record {
 	now := time.Now()
 	return chunk.Record{
 		SourceTS: now,
@@ -1538,10 +1538,10 @@ func makeRecordWithEventID(raw string, ingesterID uuid.UUID, seq uint32) chunk.R
 // (memory→memory→memory) preserves exact record count with no duplication.
 func TestTransitionThreeTierChainMemory(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
-	tier2ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
+	tier2ID := glid.New()
 	nodeID := "test-node"
 
 	tier0 := newMemoryTierInstance(t, tier0ID)
@@ -1623,10 +1623,10 @@ func TestTransitionThreeTierChainMemory(t *testing.T) {
 // This is the exact scenario from the gastrolog-1rv42 session bugs.
 func TestTransitionThreeTierChainFileFileCloud(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
-	tier2ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
+	tier2ID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -1760,11 +1760,11 @@ func TestTransitionEventIDPreserved(t *testing.T) {
 	tier0CM := vault.Tiers[0].Chunks
 
 	// Ingest records with distinct EventIDs.
-	ingesterID := uuid.Must(uuid.NewV7())
+	ingesterID := glid.New()
 	const recordCount = 10
 	type eventSnapshot struct {
 		raw       string
-		ingesterID uuid.UUID
+		ingesterID glid.GLID
 		ingestSeq  uint32
 	}
 	originals := make([]eventSnapshot, recordCount)
@@ -1812,9 +1812,9 @@ func TestTransitionEventIDPreserved(t *testing.T) {
 // → cloud upload → cloud cursor read → transition to next tier).
 func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	nextTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	nextTierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -1840,7 +1840,7 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
 	// Ingest records with distinct EventIDs.
-	ingesterID := uuid.Must(uuid.NewV7())
+	ingesterID := glid.New()
 	const recordCount = 15
 	type snapshot struct {
 		raw       string
@@ -1896,9 +1896,9 @@ func TestTransitionEventIDPreservedThroughCloudTier(t *testing.T) {
 // matches the actual number of records readable via cursor at each tier stage.
 func TestTransitionRecordCountAccuracy(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	nodeID := "test-node"
 
 	tier0, tier0Dir := newFileTierInstance(t, tier0ID)
@@ -1983,9 +1983,9 @@ func TestTransitionRecordCountAccuracy(t *testing.T) {
 // tier are searchable via the query engine after transition and upload.
 func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	cloudTierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -2065,8 +2065,8 @@ func TestTransitionCloudSearchAfterTransition(t *testing.T) {
 // contains all records. This guards against duplicate uploads from racing nodes.
 func TestTransitionCloudUploadOnlyOneBlob(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -2150,7 +2150,7 @@ type directTransferrer struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+func (d *directTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
@@ -2158,7 +2158,7 @@ func (d *directTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 	return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
 }
 
-func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
@@ -2171,7 +2171,7 @@ func (d *directTransferrer) ForwardAppend(_ context.Context, nodeID string, vaul
 	return nil
 }
 
-func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTransferrer: unknown node %q", nodeID)
@@ -2190,7 +2190,7 @@ func (d *directTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 	}
 }
 
-func (d *directTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (d *directTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil
 }
 
@@ -2200,7 +2200,7 @@ type directTierReplicator struct {
 	nodes map[string]*Orchestrator
 }
 
-func (d *directTierReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directTierReplicator) AppendRecords(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
@@ -2213,7 +2213,7 @@ func (d *directTierReplicator) AppendRecords(_ context.Context, nodeID string, v
 	return nil
 }
 
-func (d *directTierReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+func (d *directTierReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
@@ -2221,7 +2221,7 @@ func (d *directTierReplicator) SealTier(_ context.Context, nodeID string, vaultI
 	return orch.SealActiveTier(vaultID, tierID, chunkID)
 }
 
-func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error {
+func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
@@ -2238,7 +2238,7 @@ func (d *directTierReplicator) ImportSealedChunk(ctx context.Context, nodeID str
 	return orch.ImportToTier(ctx, vaultID, tierID, chunkID, iter)
 }
 
-func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("directTierReplicator: unknown node %q", nodeID)
@@ -2248,7 +2248,7 @@ func (d *directTierReplicator) DeleteChunk(_ context.Context, nodeID string, vau
 
 // newClusterRetentionRunner creates a retention runner with follower targets
 // for proper cross-node delete forwarding.
-func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID uuid.UUID, tier *TierInstance) *retentionRunner {
+func newClusterRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader:        true,
 		vaultID:         vaultID,
@@ -2274,8 +2274,8 @@ type clusterTestNode struct {
 type clusterHarness struct {
 	nodes    map[string]*clusterTestNode
 	cfgStore *sysmem.Store
-	vaultID  uuid.UUID
-	tierIDs  []uuid.UUID
+	vaultID  glid.GLID
+	tierIDs  []glid.GLID
 }
 
 // allNodeIDs returns sorted node IDs.
@@ -2346,10 +2346,10 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 		t.Fatal("setupCluster needs at least 2 nodes")
 	}
 	leaderID := nodeIDs[0]
-	vaultID := uuid.Must(uuid.NewV7())
-	tierIDs := make([]uuid.UUID, tierCount)
+	vaultID := glid.New()
+	tierIDs := make([]glid.GLID, tierCount)
 	for i := range tierCount {
-		tierIDs[i] = uuid.Must(uuid.NewV7())
+		tierIDs[i] = glid.New()
 	}
 
 	// Create config store.
@@ -2714,7 +2714,7 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 	tier0 := leaderNode.tiers[0]
 
 	// Ingest records with distinct EventIDs.
-	ingesterID := uuid.Must(uuid.NewV7())
+	ingesterID := glid.New()
 	const totalRecords = 5_000
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 	for i := range totalRecords {
@@ -2916,7 +2916,7 @@ func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
 
 // waitForDrainJob polls the scheduler until the drain job completes or times out.
 // Uses ListJobs which returns snapshots — no race with the scheduler goroutine.
-func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID uuid.UUID, timeout time.Duration) {
+func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID glid.GLID, timeout time.Duration) {
 	t.Helper()
 	jobName := "drain:" + vaultID.String()
 	deadline := time.Now().Add(timeout)
@@ -2947,8 +2947,8 @@ func waitForDrainJob(t *testing.T, orch *Orchestrator, vaultID uuid.UUID, timeou
 func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 
 	// Config store — both nodes share the same vault/tier system.
 	store := sysmem.NewStore()
@@ -2960,7 +2960,7 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 		ID: vaultID, Name: "drain-test",
 	})
 	_ = store.PutFilter(context.Background(), system.FilterConfig{
-		ID: uuid.Must(uuid.NewV7()), Name: "catch-all", Expression: "*",
+		ID: glid.New(), Name: "catch-all", Expression: "*",
 	})
 
 	// Create node-A (source) with file-backed tier.
@@ -3075,9 +3075,9 @@ func TestClusterDrainVaultRecordsArriveOnDestination(t *testing.T) {
 
 func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	nodeID := "test-node"
 
 	// Memory tier with 500-byte budget. Each record is ~100 bytes.
@@ -3165,8 +3165,8 @@ func TestMemoryBudgetEnforcementTransitionsChunks(t *testing.T) {
 
 func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	nodeID := "test-node"
 
 	// Memory tier with tiny budget, NO next tier. Budget enforcement
@@ -3221,9 +3221,9 @@ func TestMemoryBudgetEnforcementTerminalTierNoTransition(t *testing.T) {
 
 func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	leaderNode := "leader"
 	followerNode := "follower"
 
@@ -3326,10 +3326,10 @@ func TestMemoryBudgetEnforcementOnlyRunsOnLeader(t *testing.T) {
 func TestExplicitStorageLeaderGetsRotationPolicy(t *testing.T) {
 	t.Parallel()
 	nodeID := "test-node"
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	_ = uuid.Must(uuid.NewV7())
-	policyID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	_ = glid.New()
+	policyID := glid.New()
 
 	storageDir := t.TempDir()
 	tierDir := filepath.Join(storageDir, "vaults", vaultID.String(), tierID.String())

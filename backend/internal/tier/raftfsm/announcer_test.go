@@ -11,6 +11,8 @@ import (
 	"gastrolog/internal/lifecycle"
 	"gastrolog/internal/multiraft"
 	"gastrolog/internal/raftgroup"
+	"gastrolog/internal/raftwal"
+	"path/filepath"
 
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
@@ -77,15 +79,22 @@ func TestAnnouncerReplicatesMetadata(t *testing.T) {
 	}
 
 	for i := range nodeCount {
+		baseDir := t.TempDir()
+		wal, err := raftwal.Open(filepath.Join(baseDir, "wal"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = wal.Close() })
 		nodes[i].manager = raftgroup.NewGroupManager(raftgroup.GroupManagerConfig{
 			Transport: nodes[i].transport,
 			NodeID:    nodeIDs[i],
-			BaseDir:   t.TempDir(),
+			BaseDir:   baseDir,
+			WAL:       wal,
 		})
 		nodes[i].fsm = New()
 		// Symmetric seeding: every node passes the same member list. Raft
 		// elects a leader through normal election. No node has a special role.
-		_, err := nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
+		_, err = nodes[i].manager.CreateGroup(raftgroup.GroupConfig{
 			GroupID:     "tier-test",
 			FSM:         nodes[i].fsm,
 			SeedMembers: members,

@@ -1,6 +1,7 @@
 package scatterbox
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"encoding/json"
 	"testing"
@@ -8,11 +9,10 @@ import (
 
 	"gastrolog/internal/orchestrator"
 
-	"github.com/google/uuid"
 )
 
 func TestEmitsSequentialRecords(t *testing.T) {
-	ing, err := NewIngester(uuid.Must(uuid.NewV7()), map[string]string{
+	ing, err := NewIngester(glid.New(), map[string]string{
 		"interval": "1ms",
 		"burst":    "1",
 	}, nil)
@@ -64,7 +64,7 @@ func TestEmitsSequentialRecords(t *testing.T) {
 }
 
 func TestBurstMode(t *testing.T) {
-	ing, err := NewIngester(uuid.Must(uuid.NewV7()), map[string]string{
+	ing, err := NewIngester(glid.New(), map[string]string{
 		"interval": "10ms",
 		"burst":    "5",
 	}, nil)

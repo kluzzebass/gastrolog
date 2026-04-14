@@ -1,12 +1,12 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"os"
 	"testing"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // TestRemoveTierFromVaultCleansTierDirectory verifies that RemoveTierFromVault
@@ -17,8 +17,8 @@ func TestRemoveTierFromVaultCleansTierDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 
 	tier, dir := newFileTierInstance(t, tierID)
 	// Append and seal a chunk so the tier has data on disk.
@@ -55,8 +55,8 @@ func TestRemoveTierFromVaultCleansEmptyTierDirectory(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 
 	tier, dir := newFileTierInstance(t, tierID)
 

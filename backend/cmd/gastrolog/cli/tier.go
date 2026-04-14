@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 	"strconv"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -65,7 +65,7 @@ func newTierCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.TierConfig{
-				Id:                uuid.Must(uuid.NewV7()).String(),
+				Id:                glid.New().String(),
 				Name:              name,
 				Type:              v1.TierType_TIER_TYPE_FILE,
 				ReplicationFactor: 1,

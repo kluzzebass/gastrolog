@@ -1,10 +1,10 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"time"
 
-	"github.com/google/uuid"
 )
 
 // HistogramBucket holds the count for a single time bucket in the volume histogram.
@@ -67,7 +67,7 @@ func (e *Engine) ComputeHistogram(ctx context.Context, q Query, numBuckets int) 
 
 // ComputeHistogramForVaults computes a histogram for specific vaults only.
 // Used by the forward search handler to compute a per-node histogram.
-func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuckets int, vaultIDs []uuid.UUID) []HistogramBucket {
+func (e *Engine) ComputeHistogramForVaults(ctx context.Context, q Query, numBuckets int, vaultIDs []glid.GLID) []HistogramBucket {
 	numBuckets = clampBuckets(numBuckets)
 
 	if q.Start.IsZero() || q.End.IsZero() {

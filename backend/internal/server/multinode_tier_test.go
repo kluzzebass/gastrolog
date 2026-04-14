@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -21,7 +22,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"net/http"
 )
 
@@ -40,7 +40,7 @@ type mnTransferrer struct {
 	nodes map[string]*orchestrator.Orchestrator
 }
 
-func (d *mnTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+func (d *mnTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("unknown node %q", nodeID)
@@ -48,7 +48,7 @@ func (d *mnTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID
 	return orch.StreamAppendToTier(ctx, vaultID, tierID, next)
 }
 
-func (d *mnTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (d *mnTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("unknown node %q", nodeID)
@@ -61,7 +61,7 @@ func (d *mnTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID 
 	return nil
 }
 
-func (d *mnTransferrer) TransferRecords(_ context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+func (d *mnTransferrer) TransferRecords(_ context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
 	orch, ok := d.nodes[nodeID]
 	if !ok {
 		return fmt.Errorf("unknown node %q", nodeID)
@@ -80,7 +80,7 @@ func (d *mnTransferrer) TransferRecords(_ context.Context, nodeID string, vaultI
 	}
 }
 
-func (d *mnTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (d *mnTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil
 }
 
@@ -111,9 +111,9 @@ type mnTierNode struct {
 func TestMultiNode_TierTransitionSearchFanOut(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 
 	cfgStore := sysmem.NewStore()
 	ctx := context.Background()

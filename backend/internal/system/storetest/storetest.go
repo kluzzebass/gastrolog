@@ -4,16 +4,16 @@
 package storetest
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"testing"
 	"time"
 
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
-func newID() uuid.UUID { return uuid.Must(uuid.NewV7()) }
+func newID() glid.GLID { return glid.New() }
 
 // TestStore runs the full conformance suite against a Store implementation.
 // newStore must return a fresh, empty store for each sub-test.
@@ -166,7 +166,7 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		if len(all) != 2 {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
-		ids := map[uuid.UUID]bool{}
+		ids := map[glid.GLID]bool{}
 		for _, rp := range all {
 			ids[rp.ID] = true
 		}
@@ -197,7 +197,7 @@ func testRotationPolicies(t *testing.T, newStore func(t *testing.T) system.Store
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteRotationPolicy(ctx, uuid.Must(uuid.NewV7())); err != nil {
+		if err := s.DeleteRotationPolicy(ctx, glid.New()); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -320,7 +320,7 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 		if len(all) != 2 {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
-		ids := map[uuid.UUID]bool{}
+		ids := map[glid.GLID]bool{}
 		for _, rp := range all {
 			ids[rp.ID] = true
 		}
@@ -350,7 +350,7 @@ func testRetentionPolicies(t *testing.T, newStore func(t *testing.T) system.Stor
 			t.Fatalf("expected nil after delete, got %+v", got)
 		}
 
-		if err := s.DeleteRetentionPolicy(ctx, uuid.Must(uuid.NewV7())); err != nil {
+		if err := s.DeleteRetentionPolicy(ctx, glid.New()); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -527,7 +527,7 @@ func testVaults(t *testing.T, newStore func(t *testing.T) system.Store) {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
 
-		ids := map[uuid.UUID]bool{}
+		ids := map[glid.GLID]bool{}
 		for _, v := range all {
 			ids[v.ID] = true
 		}
@@ -558,7 +558,7 @@ func testVaults(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteVault(ctx, uuid.Must(uuid.NewV7()), false); err != nil {
+		if err := s.DeleteVault(ctx, glid.New(), false); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -686,7 +686,7 @@ func testIngesters(t *testing.T, newStore func(t *testing.T) system.Store) {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
 
-		ids := map[uuid.UUID]bool{}
+		ids := map[glid.GLID]bool{}
 		for _, ing := range all {
 			ids[ing.ID] = true
 		}
@@ -717,7 +717,7 @@ func testIngesters(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteIngester(ctx, uuid.Must(uuid.NewV7())); err != nil {
+		if err := s.DeleteIngester(ctx, glid.New()); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -800,7 +800,7 @@ func testIntegration(t *testing.T, newStore func(t *testing.T) system.Store) {
 	t.Run("GetNonExistent", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
-		nope := uuid.Must(uuid.NewV7())
+		nope := glid.New()
 
 		rp, err := s.GetRotationPolicy(ctx, nope)
 		if err != nil {
@@ -960,7 +960,7 @@ func testUsers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		got, err := s.GetUser(ctx, uuid.Must(uuid.NewV7()))
+		got, err := s.GetUser(ctx, glid.New())
 		if err != nil {
 			t.Fatalf("GetUser: %v", err)
 		}
@@ -1022,7 +1022,7 @@ func testUsers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		err := s.UpdatePassword(ctx, uuid.Must(uuid.NewV7()), "hash")
+		err := s.UpdatePassword(ctx, glid.New(), "hash")
 		if err == nil {
 			t.Fatal("expected error updating non-existent user, got nil")
 		}
@@ -1138,7 +1138,7 @@ func testUsers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		err := s.UpdateUserRole(ctx, uuid.Must(uuid.NewV7()), "admin")
+		err := s.UpdateUserRole(ctx, glid.New(), "admin")
 		if err == nil {
 			t.Fatal("expected error updating non-existent user, got nil")
 		}
@@ -1182,7 +1182,7 @@ func testUsers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		s := newStore(t)
 		ctx := context.Background()
 
-		err := s.DeleteUser(ctx, uuid.Must(uuid.NewV7()))
+		err := s.DeleteUser(ctx, glid.New())
 		if err == nil {
 			t.Fatal("expected error deleting non-existent user, got nil")
 		}
@@ -1228,7 +1228,7 @@ func testUsers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Non-existent user returns nil.
-		got, err = s.GetUserPreferences(ctx, uuid.Must(uuid.NewV7()))
+		got, err = s.GetUserPreferences(ctx, glid.New())
 		if err != nil {
 			t.Fatalf("GetUserPreferences non-existent: %v", err)
 		}
@@ -1237,7 +1237,7 @@ func testUsers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Put for non-existent user errors.
-		err = s.PutUserPreferences(ctx, uuid.Must(uuid.NewV7()), `{}`)
+		err = s.PutUserPreferences(ctx, glid.New(), `{}`)
 		if err == nil {
 			t.Fatal("expected error putting preferences for non-existent user")
 		}
@@ -1295,7 +1295,7 @@ func testAuth(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Non-existent user returns error.
-		if err := s.InvalidateTokens(ctx, uuid.Must(uuid.NewV7()), invalidAt); err == nil {
+		if err := s.InvalidateTokens(ctx, glid.New(), invalidAt); err == nil {
 			t.Fatal("expected error invalidating non-existent user")
 		}
 	})
@@ -1585,7 +1585,7 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) system.Store) {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
 
-		ids := map[uuid.UUID]bool{}
+		ids := map[glid.GLID]bool{}
 		for _, cs := range all {
 			ids[cs.ID] = true
 		}
@@ -1646,7 +1646,7 @@ func testCloudServices(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteCloudService(ctx, uuid.Must(uuid.NewV7())); err != nil {
+		if err := s.DeleteCloudService(ctx, glid.New()); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -1740,7 +1740,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 			t.Fatalf("expected 2, got %d", len(all))
 		}
 
-		ids := map[uuid.UUID]bool{}
+		ids := map[glid.GLID]bool{}
 		for _, tier := range all {
 			ids[tier.ID] = true
 		}
@@ -1801,7 +1801,7 @@ func testTiers(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 
 		// Delete non-existent is a no-op.
-		if err := s.DeleteTier(ctx, uuid.Must(uuid.NewV7()), false); err != nil {
+		if err := s.DeleteTier(ctx, glid.New(), false); err != nil {
 			t.Fatalf("Delete non-existent: %v", err)
 		}
 	})
@@ -1946,7 +1946,7 @@ func assertStringPtr(t *testing.T, name string, got *string, want string) {
 	}
 }
 
-func assertUUIDPtr(t *testing.T, name string, got *uuid.UUID, want uuid.UUID) {
+func assertUUIDPtr(t *testing.T, name string, got *glid.GLID, want glid.GLID) {
 	t.Helper()
 	if got == nil {
 		t.Errorf("%s: expected %s, got nil", name, want)

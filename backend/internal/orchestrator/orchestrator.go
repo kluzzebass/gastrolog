@@ -4,6 +4,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -20,7 +21,6 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/notify"
 
-	"github.com/google/uuid"
 )
 
 // IngesterStats tracks per-ingester metrics using atomic counters.
@@ -95,8 +95,8 @@ type drainState struct {
 // the orchestrator's shared pressure gate so ingesters throttle upstream
 // when cross-node forwarding is backed up (gastrolog-27zvt).
 type RecordForwarder interface {
-	Forward(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
-	ForwardSync(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
+	Forward(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
+	ForwardSync(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
 	RegisterPressureGate(gate *chanwatch.PressureGate)
 	RedirectNode(fromNodeID, toNodeID string)
 }
@@ -104,10 +104,10 @@ type RecordForwarder interface {
 // TierReplicator sequences all replication commands for a tier on a single
 // ordered stream per follower. Nil in single-node mode.
 type TierReplicator interface {
-	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
-	SealTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
-	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, records []chunk.Record) error
-	DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+	AppendRecords(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+	SealTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
+	ImportSealedChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, records []chunk.Record) error
+	DeleteChunk(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 }
 
 // RemoteTransferrer sends records to a remote node for cross-node chunk
@@ -118,25 +118,25 @@ type RemoteTransferrer interface {
 	// TransferRecords streams records to a remote node, which imports them
 	// as a new sealed chunk. Used by MoveChunk and DrainVault where
 	// preserving chunk boundaries is desired.
-	TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error
+	TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error
 
 	// ForwardAppend sends records to a remote node, which appends them to
 	// the destination vault's active chunk (same as live ingestion).
 	// Synchronous — blocks until the remote node confirms the append.
 	// Used by retention eject where records should flow through the
 	// destination's normal rotation lifecycle.
-	ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error
+	ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error
 
 	// StreamToTier opens a single streaming connection and pipes all records
 	// to a remote tier's active chunk. Used for tier transitions — one stream,
 	// no per-batch round trips.
-	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error
+	StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
 
 	// WaitVaultReady blocks until the vault is registered and accepting
 	// records on the given node, or ctx expires. Used by DrainVault to
 	// synchronize with the target node's AddVault before unregistering
 	// the vault locally.
-	WaitVaultReady(ctx context.Context, nodeID string, vaultID uuid.UUID) error
+	WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error
 }
 
 // Orchestrator coordinates ingestion, indexing, and querying.
@@ -174,13 +174,13 @@ type Orchestrator struct {
 	mu sync.RWMutex
 
 	// Vault registry. Each vault bundles Chunks, Indexes, and Query.
-	vaults map[uuid.UUID]*Vault
+	vaults map[glid.GLID]*Vault
 
 	// Ingester management.
-	ingesters       map[uuid.UUID]Ingester
-	ingesterCancels map[uuid.UUID]context.CancelFunc // per-ingester cancel functions
-	ingesterStats   map[uuid.UUID]*IngesterStats     // per-ingester metrics
-	ingesterMeta    map[uuid.UUID]ingesterInfo        // per-ingester name/type for logging
+	ingesters       map[glid.GLID]Ingester
+	ingesterCancels map[glid.GLID]context.CancelFunc // per-ingester cancel functions
+	ingesterStats   map[glid.GLID]*IngesterStats     // per-ingester metrics
+	ingesterMeta    map[glid.GLID]ingesterInfo        // per-ingester name/type for logging
 
 	// Digesters (message enrichment pipeline).
 	digesters []Digester
@@ -190,8 +190,8 @@ type Orchestrator struct {
 
 	// Route stats (atomic, no lock needed for reads/writes).
 	routeStats      RouteStats
-	vaultRouteStats sync.Map // uuid.UUID → *VaultRouteStats
-	perRouteStats   sync.Map // uuid.UUID → *PerRouteStats
+	vaultRouteStats sync.Map // glid.GLID → *VaultRouteStats
+	perRouteStats   sync.Map // glid.GLID → *PerRouteStats
 
 	// Record forwarder for cross-node delivery (nil in single-node mode).
 	forwarder RecordForwarder
@@ -230,7 +230,7 @@ type Orchestrator struct {
 	importMu sync.Map // tierID → *sync.Mutex
 
 	// Draining vaults (keyed by vault ID, tracks in-progress migrations).
-	draining map[uuid.UUID]*drainState
+	draining map[glid.GLID]*drainState
 
 	// Draining tiers (keyed by "vaultID:tierID", tracks in-progress tier drains).
 	tierDraining map[string]*tierDrainState
@@ -238,7 +238,7 @@ type Orchestrator struct {
 	// OnTierDrainComplete is called after a tier drain finishes. The dispatch
 	// layer uses this to remove the tier from vault tier lists in the config
 	// store (which fires a subsequent vault-put notification to rebuild).
-	OnTierDrainComplete func(ctx context.Context, vaultID, tierID uuid.UUID)
+	OnTierDrainComplete func(ctx context.Context, vaultID, tierID glid.GLID)
 
 	// Retention runners (keyed by tierID:storageID, invoked by the shared scheduler).
 	retention map[string]*retentionRunner
@@ -326,7 +326,7 @@ func (o *Orchestrator) NotifyChunkChange() {
 // or "" if the tier or config is unknown. Used by RateAlerter to build
 // alert messages that say "tier ssd-hot" instead of just a UUID. Safe to
 // call from any goroutine — it acquires the orchestrator read lock.
-func (o *Orchestrator) tierLabel(tierID uuid.UUID) string {
+func (o *Orchestrator) tierLabel(tierID glid.GLID) string {
 	if o.sysLoader == nil {
 		return ""
 	}
@@ -415,12 +415,12 @@ func New(cfg Config) (*Orchestrator, error) {
 	}
 
 	o := &Orchestrator{
-		vaults:          make(map[uuid.UUID]*Vault),
-		ingesters:       make(map[uuid.UUID]Ingester),
-		ingesterCancels: make(map[uuid.UUID]context.CancelFunc),
-		ingesterStats:   make(map[uuid.UUID]*IngesterStats),
-		ingesterMeta:    make(map[uuid.UUID]ingesterInfo),
-		draining:     make(map[uuid.UUID]*drainState),
+		vaults:          make(map[glid.GLID]*Vault),
+		ingesters:       make(map[glid.GLID]Ingester),
+		ingesterCancels: make(map[glid.GLID]context.CancelFunc),
+		ingesterStats:   make(map[glid.GLID]*IngesterStats),
+		ingesterMeta:    make(map[glid.GLID]ingesterInfo),
+		draining:     make(map[glid.GLID]*drainState),
 		tierDraining: make(map[string]*tierDrainState),
 		retention:    make(map[string]*retentionRunner),
 		scheduler:       sched,
@@ -470,7 +470,7 @@ func New(cfg Config) (*Orchestrator, error) {
 	// so the rotation rate counter must be hooked from the cron manager
 	// directly. The age-based rotationsweep path increments the counter
 	// inline at its seal-trigger site.
-	o.cronRotation.onRotation = func(_, tierID uuid.UUID) {
+	o.cronRotation.onRotation = func(_, tierID glid.GLID) {
 		o.rotationRates.Record(tierID, o.now())
 	}
 
@@ -521,14 +521,14 @@ func (o *Orchestrator) Scheduler() *Scheduler {
 
 // GetIngesterStats returns the stats for a specific ingester.
 // Returns nil if the ingester is not found.
-func (o *Orchestrator) GetIngesterStats(id uuid.UUID) *IngesterStats {
+func (o *Orchestrator) GetIngesterStats(id glid.GLID) *IngesterStats {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.ingesterStats[id]
 }
 
 // IngesterName returns the registered display name for the given ingester.
-func (o *Orchestrator) IngesterName(id uuid.UUID) string {
+func (o *Orchestrator) IngesterName(id glid.GLID) string {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	return o.ingesterMeta[id].Name
@@ -536,7 +536,7 @@ func (o *Orchestrator) IngesterName(id uuid.UUID) string {
 
 // IsIngesterRunning reports whether the given ingester has an active cancel function,
 // meaning its goroutine was launched and hasn't been stopped.
-func (o *Orchestrator) IsIngesterRunning(id uuid.UUID) bool {
+func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	_, ok := o.ingesterCancels[id]
@@ -558,10 +558,10 @@ func (o *Orchestrator) IsFilterSetActive() bool {
 
 // VaultRouteStatsList returns per-vault routing stats for all vaults
 // that have received at least one record.
-func (o *Orchestrator) VaultRouteStatsList() map[uuid.UUID]*VaultRouteStats {
-	result := make(map[uuid.UUID]*VaultRouteStats)
+func (o *Orchestrator) VaultRouteStatsList() map[glid.GLID]*VaultRouteStats {
+	result := make(map[glid.GLID]*VaultRouteStats)
 	o.vaultRouteStats.Range(func(key, value any) bool {
-		result[key.(uuid.UUID)] = value.(*VaultRouteStats)
+		result[key.(glid.GLID)] = value.(*VaultRouteStats)
 		return true
 	})
 	return result
@@ -569,10 +569,10 @@ func (o *Orchestrator) VaultRouteStatsList() map[uuid.UUID]*VaultRouteStats {
 
 // PerRouteStatsList returns per-route routing stats for all routes
 // that have matched at least one record.
-func (o *Orchestrator) PerRouteStatsList() map[uuid.UUID]*PerRouteStats {
-	result := make(map[uuid.UUID]*PerRouteStats)
+func (o *Orchestrator) PerRouteStatsList() map[glid.GLID]*PerRouteStats {
+	result := make(map[glid.GLID]*PerRouteStats)
 	o.perRouteStats.Range(func(key, value any) bool {
-		result[key.(uuid.UUID)] = value.(*PerRouteStats)
+		result[key.(glid.GLID)] = value.(*PerRouteStats)
 		return true
 	})
 	return result
@@ -608,7 +608,7 @@ func (o *Orchestrator) PressureGate() *chanwatch.PressureGate {
 
 // VaultSnapshot is a point-in-time summary of a vault's state.
 type VaultSnapshot struct {
-	ID           uuid.UUID
+	ID           glid.GLID
 	RecordCount  int64
 	ChunkCount   int
 	SealedChunks int

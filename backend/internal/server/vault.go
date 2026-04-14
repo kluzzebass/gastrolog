@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -65,11 +65,11 @@ func mapVaultError(err error) *connect.Error {
 	return errInternal(err)
 }
 
-// parseUUID parses a string into a uuid.UUID, returning a connect error on failure.
-func parseUUID(s string) (uuid.UUID, *connect.Error) {
-	id, err := uuid.Parse(s)
+// parseUUID parses a string into a glid.GLID, returning a connect error on failure.
+func parseUUID(s string) (glid.GLID, *connect.Error) {
+	id, err := glid.ParseUUID(s)
 	if err != nil {
-		return uuid.Nil, connect.NewError(connect.CodeInvalidArgument,
+		return glid.Nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("invalid ID %q: %w", s, err))
 	}
 	return id, nil

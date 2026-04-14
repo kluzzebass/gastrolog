@@ -1,12 +1,12 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"errors"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 )
 
 
@@ -203,7 +203,7 @@ type ClusterTLS struct {
 
 // User represents a user account.
 type User struct {
-	ID                 uuid.UUID `json:"id"`
+	ID                 glid.GLID `json:"id"`
 	Username           string    `json:"username"`
 	PasswordHash       string    `json:"password_hash"`
 	Role               string    `json:"role"` // "admin" or "user"
@@ -215,8 +215,8 @@ type User struct {
 
 // RefreshToken represents a stored refresh token (hash only, not the opaque token itself).
 type RefreshToken struct {
-	ID        uuid.UUID `json:"id"`
-	UserID    uuid.UUID `json:"user_id"`
+	ID        glid.GLID `json:"id"`
+	UserID    glid.GLID `json:"user_id"`
 	TokenHash string    `json:"token_hash"` // SHA-256 of the opaque token
 	ExpiresAt time.Time `json:"expires_at"`
 	CreatedAt time.Time `json:"created_at"`
@@ -271,13 +271,13 @@ func StringPtr(s string) *string { return new(s) }
 // UUIDPtr returns a pointer to id.
 //
 //go:fix inline
-func UUIDPtr(id uuid.UUID) *uuid.UUID { return new(id) }
+func UUIDPtr(id glid.GLID) *glid.GLID { return new(id) }
 
 // ManagedFileConfig describes an uploaded managed file managed by the system.
 // Only metadata is stored in the config; the file itself lives on disk at
 // <home>/lookups/<ID>/<Name>.
 type ManagedFileConfig struct {
-	ID         uuid.UUID `json:"id"`
+	ID         glid.GLID `json:"id"`
 	Name       string    `json:"name"`       // original filename
 	SHA256     string    `json:"sha256"`     // hex-encoded content hash
 	Size       int64     `json:"size"`       // file size in bytes

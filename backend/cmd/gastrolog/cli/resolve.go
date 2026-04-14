@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/server"
@@ -99,7 +99,7 @@ func newResolver(ctx context.Context, client *server.Client) (*resolver, error) 
 // resolve tries uuid.Parse first; if that fails, looks up nameOrID in the
 // given map (case-insensitive). Returns the UUID string or an error.
 func resolve(nameOrID string, m map[string]string, entityType string) (string, error) {
-	if _, err := uuid.Parse(nameOrID); err == nil {
+	if _, err := glid.ParseUUID(nameOrID); err == nil {
 		return nameOrID, nil
 	}
 	id, ok := m[strings.ToLower(nameOrID)]

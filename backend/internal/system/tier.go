@@ -1,21 +1,21 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"slices"
 	"strings"
 
-	"github.com/google/uuid"
 )
 
 // NodeConfig represents a cluster node configuration with its human-readable name.
 type NodeConfig struct {
-	ID   uuid.UUID `json:"id"`
+	ID   glid.GLID `json:"id"`
 	Name string    `json:"name"`
 }
 
 // FileStorage defines a local file storage on a node.
 type FileStorage struct {
-	ID                uuid.UUID `json:"id"`
+	ID                glid.GLID `json:"id"`
 	StorageClass      uint32    `json:"storageClass"`
 	Name              string    `json:"name"`
 	Path              string    `json:"path,omitempty"`
@@ -36,7 +36,7 @@ type CloudStorageTransition struct {
 }
 
 type CloudService struct {
-	ID               uuid.UUID `json:"id"`
+	ID               glid.GLID `json:"id"`
 	Name             string    `json:"name"`
 	Provider         string    `json:"provider"`
 	Bucket           string    `json:"bucket"`
@@ -71,16 +71,16 @@ const (
 // TierConfig defines a storage tier owned by exactly one vault. Tiers are
 // ordered within a vault by their Position field (0 = hottest / first).
 type TierConfig struct {
-	ID                uuid.UUID       `json:"id"`
+	ID                glid.GLID       `json:"id"`
 	Name              string          `json:"name"`
 	Type              TierType        `json:"type"`
-	VaultID           uuid.UUID       `json:"vaultId"`             // owning vault
+	VaultID           glid.GLID       `json:"vaultId"`             // owning vault
 	Position          uint32          `json:"position"`            // 0-based order in vault's tier chain
-	RotationPolicyID  *uuid.UUID      `json:"rotationPolicyId,omitempty"`
+	RotationPolicyID  *glid.GLID      `json:"rotationPolicyId,omitempty"`
 	RetentionRules    []RetentionRule `json:"retentionRules,omitempty"`
 	MemoryBudgetBytes uint64          `json:"memoryBudgetBytes,omitempty"`
 	StorageClass      uint32          `json:"storageClass,omitempty"`
-	CloudServiceID    *uuid.UUID      `json:"cloudServiceId,omitempty"`
+	CloudServiceID    *glid.GLID      `json:"cloudServiceId,omitempty"`
 	ActiveChunkClass  uint32          `json:"activeChunkClass,omitempty"`
 	CacheClass        uint32          `json:"cacheClass,omitempty"`
 	Path              string          `json:"path,omitempty"`              // direct path for JSONL sinks

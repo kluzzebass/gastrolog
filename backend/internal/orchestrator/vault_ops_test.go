@@ -1,12 +1,12 @@
 package orchestrator_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/chunk"
 	chunkmem "gastrolog/internal/chunk/memory"
@@ -14,12 +14,12 @@ import (
 	"gastrolog/internal/orchestrator"
 )
 
-func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, uuid.UUID) {
+func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, glid.GLID) {
 	t.Helper()
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5),
 	})
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -28,7 +28,7 @@ func newFacadeSetup(t *testing.T) (*orchestrator.Orchestrator, uuid.UUID) {
 	return orch, id
 }
 
-func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUID, n int) {
+func appendRecords(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLID, n int) {
 	t.Helper()
 	for i := range n {
 		ts := time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC)
@@ -48,7 +48,7 @@ func TestVaultExists(t *testing.T) {
 	if !orch.VaultExists(id) {
 		t.Fatal("VaultExists returned false for registered vault")
 	}
-	if orch.VaultExists(uuid.Must(uuid.NewV7())) {
+	if orch.VaultExists(glid.New()) {
 		t.Fatal("VaultExists returned true for unknown vault")
 	}
 }
@@ -73,7 +73,7 @@ func TestListChunkMetas_UnknownVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = orch.ListChunkMetas(uuid.Must(uuid.NewV7()))
+	_, err = orch.ListChunkMetas(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSealActive(t *testing.T) {
 	orch, id := newFacadeSetup(t)
 	appendRecords(t, orch, id, 3)
 
-	if _, err := orch.SealActive(id, uuid.Nil); err != nil {
+	if _, err := orch.SealActive(id, glid.Nil); err != nil {
 		t.Fatalf("SealActive: %v", err)
 	}
 
@@ -127,7 +127,7 @@ func TestSealActive_Empty(t *testing.T) {
 	t.Parallel()
 	orch, id := newFacadeSetup(t)
 	// No records appended — seal should be a no-op.
-	if _, err := orch.SealActive(id, uuid.Nil); err != nil {
+	if _, err := orch.SealActive(id, glid.Nil); err != nil {
 		t.Fatalf("SealActive on empty vault: %v", err)
 	}
 }
@@ -138,7 +138,7 @@ func TestSealActive_UnknownVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = orch.SealActive(uuid.Must(uuid.NewV7()), uuid.Nil)
+	_, err = orch.SealActive(glid.New(), glid.Nil)
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -185,7 +185,7 @@ func TestAppend_UnknownVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = orch.Append(uuid.Must(uuid.NewV7()), chunk.Record{Raw: []byte("x")})
+	_, _, err = orch.Append(glid.New(), chunk.Record{Raw: []byte("x")})
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -295,7 +295,7 @@ func TestNewAnalyzer_UnknownVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = orch.NewAnalyzer(uuid.Must(uuid.NewV7()))
+	_, err = orch.NewAnalyzer(glid.New())
 	if !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		t.Fatalf("expected ErrVaultNotFound, got %v", err)
 	}
@@ -310,8 +310,8 @@ func TestSupportsChunkMove_MemoryVaults(t *testing.T) {
 
 	s1 := memtest.MustNewVault(t, chunkmem.Config{})
 	s2 := memtest.MustNewVault(t, chunkmem.Config{})
-	id1 := uuid.Must(uuid.NewV7())
-	id2 := uuid.Must(uuid.NewV7())
+	id1 := glid.New()
+	id2 := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(id1, s1.CM, s1.IM, s1.QE))
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(id2, s2.CM, s2.IM, s2.QE))
 
@@ -333,8 +333,8 @@ func TestCopyRecords(t *testing.T) {
 	})
 	dstVault := memtest.MustNewVault(t, chunkmem.Config{})
 
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
+	srcID := glid.New()
+	dstID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(srcID, srcVault.CM, srcVault.IM, srcVault.QE))
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(dstID, dstVault.CM, dstVault.IM, dstVault.QE))
 

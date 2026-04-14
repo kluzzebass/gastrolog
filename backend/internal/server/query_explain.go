@@ -1,10 +1,10 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
@@ -48,8 +48,8 @@ func (s *QueryServer) Explain(
 	}
 
 	// Cache vault→nodeID lookups to avoid repeated config reads.
-	vaultNodeCache := make(map[uuid.UUID]string)
-	vaultNodeID := func(vaultID uuid.UUID) string {
+	vaultNodeCache := make(map[glid.GLID]string)
+	vaultNodeID := func(vaultID glid.GLID) string {
 		if nid, ok := vaultNodeCache[vaultID]; ok {
 			return nid
 		}

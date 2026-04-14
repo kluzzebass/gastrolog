@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // Ingest filters a record to matching chunk managers.
@@ -78,7 +78,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 			vs := o.getOrCreateVaultRouteStats(t.VaultID)
 			vs.Matched.Add(1)
 			vs.Forwarded.Add(1)
-			if t.RouteID != uuid.Nil {
+			if t.RouteID != glid.Nil {
 				rs := o.getOrCreatePerRouteStats(t.RouteID)
 				rs.Matched.Add(1)
 				rs.Forwarded.Add(1)
@@ -98,7 +98,7 @@ func (o *Orchestrator) ingest(rec chunk.Record) (*pendingAcks, error) {
 		}
 		vs := o.getOrCreateVaultRouteStats(t.VaultID)
 		vs.Matched.Add(1)
-		if t.RouteID != uuid.Nil {
+		if t.RouteID != glid.Nil {
 			rs := o.getOrCreatePerRouteStats(t.RouteID)
 			rs.Matched.Add(1)
 		}
@@ -149,11 +149,11 @@ func (p *pendingAcks) isEmpty() bool {
 // so the ack-gated durability guarantee extends to cross-node routes.
 type forwardTask struct {
 	nodeID  string
-	vaultID uuid.UUID
+	vaultID glid.GLID
 }
 
 // getOrCreateVaultRouteStats returns the per-vault route stats, creating if needed.
-func (o *Orchestrator) getOrCreateVaultRouteStats(vaultID uuid.UUID) *VaultRouteStats {
+func (o *Orchestrator) getOrCreateVaultRouteStats(vaultID glid.GLID) *VaultRouteStats {
 	if v, ok := o.vaultRouteStats.Load(vaultID); ok {
 		return v.(*VaultRouteStats)
 	}
@@ -162,7 +162,7 @@ func (o *Orchestrator) getOrCreateVaultRouteStats(vaultID uuid.UUID) *VaultRoute
 }
 
 // getOrCreatePerRouteStats returns the per-route stats, creating if needed.
-func (o *Orchestrator) getOrCreatePerRouteStats(routeID uuid.UUID) *PerRouteStats {
+func (o *Orchestrator) getOrCreatePerRouteStats(routeID glid.GLID) *PerRouteStats {
 	if v, ok := o.perRouteStats.Load(routeID); ok {
 		return v.(*PerRouteStats)
 	}
@@ -173,7 +173,7 @@ func (o *Orchestrator) getOrCreatePerRouteStats(routeID uuid.UUID) *PerRouteStat
 // appendLocal appends a record to a local vault.
 // Returns a replicationTask when the record needs sync forwarding (ack-gated).
 // Remote fire-and-forget forwards are dispatched after the lock is released.
-func (o *Orchestrator) appendLocal(vaultID uuid.UUID, rec chunk.Record) (*replicationTask, error) {
+func (o *Orchestrator) appendLocal(vaultID glid.GLID, rec chunk.Record) (*replicationTask, error) {
 	_, _, task, remotes, err := o.appendRecord(vaultID, rec)
 	if err != nil {
 		o.logger.Error("append to vault failed", "vault", vaultID, "error", err)
@@ -197,7 +197,7 @@ func (o *Orchestrator) forwardRemote(t MatchResult, rec chunk.Record) {
 // postSealWork schedules the post-seal pipeline for a newly sealed chunk.
 // Safe to call from any context (cron rotation, background sweep, etc.) —
 // acquires the orchestrator lock internally.
-func (o *Orchestrator) postSealWork(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
+func (o *Orchestrator) postSealWork(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	o.schedulePostSeal(vaultID, cm, chunkID)
@@ -209,7 +209,7 @@ func (o *Orchestrator) postSealWork(vaultID uuid.UUID, cm chunk.ChunkManager, ch
 // If the chunk manager implements ChunkPostSealProcessor, the entire pipeline runs
 // as one sequential job. Otherwise falls back to compress-only for non-file managers.
 // After the pipeline completes, sealed-chunk replication is triggered for leader tiers.
-func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
+func (o *Orchestrator) schedulePostSeal(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID) {
 	// Resolve tier info for post-pipeline replication.
 	tierID, followerTargets := o.tierReplicationInfo(vaultID, cm)
 
@@ -259,15 +259,15 @@ func (o *Orchestrator) schedulePostSeal(vaultID uuid.UUID, cm chunk.ChunkManager
 // tierReplicationInfo returns the tier ID and follower targets for the tier
 // that owns the given ChunkManager. Returns zero values if not found or if the
 // tier is a follower (followers don't replicate further).
-func (o *Orchestrator) tierReplicationInfo(vaultID uuid.UUID, cm chunk.ChunkManager) (uuid.UUID, []system.ReplicationTarget) {
+func (o *Orchestrator) tierReplicationInfo(vaultID glid.GLID, cm chunk.ChunkManager) (glid.GLID, []system.ReplicationTarget) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
-		return uuid.UUID{}, nil
+		return glid.GLID{}, nil
 	}
 	for _, tier := range vault.Tiers {
 		if tier.Chunks == cm && tier.ShouldForwardToFollowers() {
 			return tier.TierID, tier.FollowerTargets
 		}
 	}
-	return uuid.UUID{}, nil
+	return glid.GLID{}, nil
 }

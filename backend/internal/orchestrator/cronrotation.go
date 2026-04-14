@@ -1,16 +1,16 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"log/slog"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // cronJobName returns the scheduler job name for a tier's cron rotation.
-func cronJobName(vaultID, tierID uuid.UUID) string {
+func cronJobName(vaultID, tierID glid.GLID) string {
 	return fmt.Sprintf("cron-rotate:%s:%s", vaultID, tierID)
 }
 
@@ -18,8 +18,8 @@ func cronJobName(vaultID, tierID uuid.UUID) string {
 type cronRotationManager struct {
 	scheduler  *Scheduler
 	schedules  map[string]string // jobName → cronExpr (tracks current schedule to avoid unnecessary updates)
-	onSeal     func(vaultID uuid.UUID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
-	onRotation func(vaultID, tierID uuid.UUID) // optional: called once per successful rotation
+	onSeal     func(vaultID glid.GLID, cm chunk.ChunkManager, chunkID chunk.ChunkID)
+	onRotation func(vaultID, tierID glid.GLID) // optional: called once per successful rotation
 	logger     *slog.Logger
 }
 
@@ -32,7 +32,7 @@ func newCronRotationManager(scheduler *Scheduler, logger *slog.Logger) *cronRota
 }
 
 // ensure creates or updates a cron rotation job only if the schedule changed.
-func (m *cronRotationManager) ensure(vaultID, tierID uuid.UUID, vaultName, cronExpr string, cm chunk.ChunkManager) {
+func (m *cronRotationManager) ensure(vaultID, tierID glid.GLID, vaultName, cronExpr string, cm chunk.ChunkManager) {
 	name := cronJobName(vaultID, tierID)
 	if existing, ok := m.schedules[name]; ok && existing == cronExpr {
 		return // schedule unchanged
@@ -61,7 +61,7 @@ func (m *cronRotationManager) pruneExcept(active map[string]bool) {
 }
 
 // removeAllForVault eagerly removes all cron jobs for a vault being unregistered.
-func (m *cronRotationManager) removeAllForVault(vaultID uuid.UUID) {
+func (m *cronRotationManager) removeAllForVault(vaultID glid.GLID) {
 	prefix := fmt.Sprintf("cron-rotate:%s:", vaultID)
 	m.scheduler.RemoveJobsByPrefix(prefix)
 	for name := range m.schedules {
@@ -72,7 +72,7 @@ func (m *cronRotationManager) removeAllForVault(vaultID uuid.UUID) {
 }
 
 // rotateVault seals the active chunk for a vault tier if it has records.
-func (m *cronRotationManager) rotateVault(vaultID, tierID uuid.UUID, vaultName string, cm chunk.ChunkManager) {
+func (m *cronRotationManager) rotateVault(vaultID, tierID glid.GLID, vaultName string, cm chunk.ChunkManager) {
 	active := cm.Active()
 	if active == nil || active.RecordCount == 0 {
 		m.logger.Debug("cron rotation: skipping empty chunk",

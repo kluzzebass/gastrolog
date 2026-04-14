@@ -1,11 +1,11 @@
 package fluentfwd
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"fmt"
 	"log/slog"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -19,7 +19,7 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for Fluent Forward ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		addr := cmp.Or(params["addr"], ":24224")
 
 		// Validate addr format.

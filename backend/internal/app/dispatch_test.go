@@ -1,6 +1,7 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"log/slog"
@@ -8,7 +9,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
@@ -64,9 +64,9 @@ func (h *captureHandler) reset() {
 
 // mockOrch implements orchActions with configurable error returns.
 type mockOrch struct {
-	vaults     []uuid.UUID
-	vaultTypes map[uuid.UUID]string
-	ingesters  []uuid.UUID
+	vaults     []glid.GLID
+	vaultTypes map[glid.GLID]string
+	ingesters  []glid.GLID
 
 	addVaultErr        error
 	forceRemoveErr     error
@@ -82,23 +82,23 @@ type mockOrch struct {
 	removeIngesterErr  error
 	updateMaxJobsErr   error
 
-	drainCalls          []uuid.UUID // IDs passed to DrainVault
-	cancelDrainIDs      []uuid.UUID // IDs passed to CancelDrain
-	forceRemoveIDs      []uuid.UUID // IDs passed to ForceRemoveVault
-	unregisterIDs       []uuid.UUID // IDs passed to UnregisterVault
+	drainCalls          []glid.GLID // IDs passed to DrainVault
+	cancelDrainIDs      []glid.GLID // IDs passed to CancelDrain
+	forceRemoveIDs      []glid.GLID // IDs passed to ForceRemoveVault
+	unregisterIDs       []glid.GLID // IDs passed to UnregisterVault
 	unregisterErr       error
-	removeIngesterIDs   []uuid.UUID // IDs passed to RemoveIngester
+	removeIngesterIDs   []glid.GLID // IDs passed to RemoveIngester
 	reloadFiltersCalls  int         // number of ReloadFilters calls
 
 	// Tier drain tracking.
-	tierDrainCalls      []uuid.UUID                                                  // tier IDs passed to DrainTier
-	removeTierCalls     [][2]uuid.UUID                                               // [vaultID, tierID] pairs passed to RemoveTierFromVault
-	localTierExported   func(vaultID, tierID uuid.UUID) *orchestrator.TierInstance   // configurable return
+	tierDrainCalls      []glid.GLID                                                  // tier IDs passed to DrainTier
+	removeTierCalls     [][2]glid.GLID                                               // [vaultID, tierID] pairs passed to RemoveTierFromVault
+	localTierExported   func(vaultID, tierID glid.GLID) *orchestrator.TierInstance   // configurable return
 }
 
-func (m *mockOrch) ListVaults() []uuid.UUID    { return m.vaults }
-func (m *mockOrch) ListIngesters() []uuid.UUID { return m.ingesters }
-func (m *mockOrch) VaultType(id uuid.UUID) string {
+func (m *mockOrch) ListVaults() []glid.GLID    { return m.vaults }
+func (m *mockOrch) ListIngesters() []glid.GLID { return m.ingesters }
+func (m *mockOrch) VaultType(id glid.GLID) string {
 	if m.vaultTypes != nil {
 		return m.vaultTypes[id]
 	}
@@ -114,45 +114,45 @@ func (m *mockOrch) ReloadFilters(context.Context) error {
 }
 func (m *mockOrch) ReloadRotationPolicies(context.Context) error { return m.reloadRotationErr }
 func (m *mockOrch) ReloadRetentionPolicies(context.Context) error { return m.reloadRetentionErr }
-func (m *mockOrch) DisableVault(uuid.UUID) error                 { return m.disableVaultErr }
-func (m *mockOrch) EnableVault(uuid.UUID) error                  { return m.enableVaultErr }
-func (m *mockOrch) ForceRemoveVault(id uuid.UUID) error {
+func (m *mockOrch) DisableVault(glid.GLID) error                 { return m.disableVaultErr }
+func (m *mockOrch) EnableVault(glid.GLID) error                  { return m.enableVaultErr }
+func (m *mockOrch) ForceRemoveVault(id glid.GLID) error {
 	m.forceRemoveIDs = append(m.forceRemoveIDs, id)
 	return m.forceRemoveErr
 }
-func (m *mockOrch) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
-	m.removeTierCalls = append(m.removeTierCalls, [2]uuid.UUID{vaultID, tierID})
+func (m *mockOrch) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
+	m.removeTierCalls = append(m.removeTierCalls, [2]glid.GLID{vaultID, tierID})
 	return true
 }
-func (m *mockOrch) DrainTier(_ context.Context, _, tierID uuid.UUID, _ orchestrator.TierDrainMode, _ string) error {
+func (m *mockOrch) DrainTier(_ context.Context, _, tierID glid.GLID, _ orchestrator.TierDrainMode, _ string) error {
 	m.tierDrainCalls = append(m.tierDrainCalls, tierID)
 	return nil
 }
-func (m *mockOrch) UnregisterVault(id uuid.UUID) error {
+func (m *mockOrch) UnregisterVault(id glid.GLID) error {
 	m.unregisterIDs = append(m.unregisterIDs, id)
 	return m.unregisterErr
 }
-func (m *mockOrch) HasMissingTiers(_ uuid.UUID, _ []uuid.UUID) bool { return false }
-func (m *mockOrch) LocalTierIDs(_ uuid.UUID) []uuid.UUID             { return nil }
-func (m *mockOrch) AddTierToVault(_ context.Context, _, _ uuid.UUID, _ orchestrator.Factories) error {
+func (m *mockOrch) HasMissingTiers(_ glid.GLID, _ []glid.GLID) bool { return false }
+func (m *mockOrch) LocalTierIDs(_ glid.GLID) []glid.GLID             { return nil }
+func (m *mockOrch) AddTierToVault(_ context.Context, _, _ glid.GLID, _ orchestrator.Factories) error {
 	return nil
 }
-func (m *mockOrch) DrainVault(_ context.Context, id uuid.UUID, _ string) error {
+func (m *mockOrch) DrainVault(_ context.Context, id glid.GLID, _ string) error {
 	m.drainCalls = append(m.drainCalls, id)
 	return m.drainVaultErr
 }
-func (m *mockOrch) IsDraining(uuid.UUID) bool                    { return m.isDraining }
-func (m *mockOrch) CancelDrain(_ context.Context, id uuid.UUID) error {
+func (m *mockOrch) IsDraining(glid.GLID) bool                    { return m.isDraining }
+func (m *mockOrch) CancelDrain(_ context.Context, id glid.GLID) error {
 	m.cancelDrainIDs = append(m.cancelDrainIDs, id)
 	return m.cancelDrainErr
 }
-func (m *mockOrch) RemoveIngester(id uuid.UUID) error {
+func (m *mockOrch) RemoveIngester(id glid.GLID) error {
 	m.removeIngesterIDs = append(m.removeIngesterIDs, id)
 	return m.removeIngesterErr
 }
 func (m *mockOrch) UpdateMaxConcurrentJobs(int) error            { return m.updateMaxJobsErr }
 
-func (m *mockOrch) AddIngester(uuid.UUID, string, string, orchestrator.Ingester) error {
+func (m *mockOrch) AddIngester(glid.GLID, string, string, orchestrator.Ingester) error {
 	return m.addIngesterErr
 }
 
@@ -175,13 +175,13 @@ type stubCfgStore struct {
 	loadErr     error
 }
 
-func (s *stubCfgStore) GetVault(context.Context, uuid.UUID) (*system.VaultConfig, error) {
+func (s *stubCfgStore) GetVault(context.Context, glid.GLID) (*system.VaultConfig, error) {
 	return s.vault, s.vaultErr
 }
 func (s *stubCfgStore) ListVaults(context.Context) ([]system.VaultConfig, error) {
 	return s.vaultList, s.vaultListErr
 }
-func (s *stubCfgStore) GetIngester(context.Context, uuid.UUID) (*system.IngesterConfig, error) {
+func (s *stubCfgStore) GetIngester(context.Context, glid.GLID) (*system.IngesterConfig, error) {
 	return s.ingester, s.ingesterErr
 }
 func (s *stubCfgStore) LoadServerSettings(context.Context) (system.ServerSettings, error) {
@@ -225,7 +225,7 @@ func TestHandle_NilOrch(t *testing.T) {
 	d := newTestDispatcher(nil, &stubCfgStore{}, h)
 
 	// Should not panic; bootstrap phase silently returns.
-	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: uuid.New()})
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: glid.New()})
 
 	if h.count() != 0 {
 		t.Fatal("expected no log output when orch is nil")
@@ -233,7 +233,7 @@ func TestHandle_NilOrch(t *testing.T) {
 }
 
 func TestHandle_VaultPut(t *testing.T) {
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 
 	t.Run("store_error", func(t *testing.T) {
 		h := &captureHandler{}
@@ -269,7 +269,7 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("unscoped_node_not_skipped", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{} // no error → AddVault succeeds
-		tierID := uuid.Must(uuid.NewV7())
+		tierID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
 			tiers: []system.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
@@ -285,7 +285,7 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("add_vault_error", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{addVaultErr: errors.New("factory boom")}
-		tierID := uuid.Must(uuid.NewV7())
+		tierID := glid.New()
 		d := newTestDispatcher(mo, &stubCfgStore{
 			vault: &system.VaultConfig{ID: id, Enabled: true},
 			tiers: []system.TierConfig{{ID: tierID, VaultID: id, Position: 0}},
@@ -301,7 +301,7 @@ func TestHandle_VaultPut(t *testing.T) {
 	t.Run("existing_vault_reload_errors", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults:             []uuid.UUID{id}, // vault already registered
+			vaults:             []glid.GLID{id}, // vault already registered
 			reloadFiltersErr:   errors.New("f"),
 			reloadRotationErr:  errors.New("r"),
 			reloadRetentionErr: errors.New("ret"),
@@ -325,7 +325,7 @@ func TestHandle_VaultPut(t *testing.T) {
 }
 
 func TestHandle_VaultDeleted(t *testing.T) {
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 
 	t.Run("force_remove_error", func(t *testing.T) {
 		h := &captureHandler{}
@@ -370,7 +370,7 @@ func TestHandle_VaultDeleted(t *testing.T) {
 }
 
 func TestHandle_IngesterPut(t *testing.T) {
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 
 	t.Run("store_error", func(t *testing.T) {
 		h := &captureHandler{}
@@ -402,7 +402,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 	t.Run("reassignment_stops_local_ingester", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			ingesters: []uuid.UUID{id}, // locally registered
+			ingesters: []glid.GLID{id}, // locally registered
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
 			ingester: &system.IngesterConfig{ID: id, Name: "chatterbox", Enabled: true},
@@ -436,7 +436,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
 			ingester: &system.IngesterConfig{ID: id, Type: "test", Enabled: true},
 		}, h)
-		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return nil, errors.New("bad params")
 		}}
 
@@ -453,7 +453,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 		d := newTestDispatcher(mo, &stubCfgStore{
 			ingester: &system.IngesterConfig{ID: id, Type: "test", Enabled: true},
 		}, h)
-		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
 		}}
 
@@ -467,13 +467,13 @@ func TestHandle_IngesterPut(t *testing.T) {
 	t.Run("existing_ingester_remove_error", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			ingesters:         []uuid.UUID{id},
+			ingesters:         []glid.GLID{id},
 			removeIngesterErr: errors.New("stuck"),
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
 			ingester: &system.IngesterConfig{ID: id, Enabled: true},
 		}, h)
-		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(uuid.UUID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
 			return noopIngester{}, nil
 		}}
 
@@ -500,7 +500,7 @@ func TestHandle_IngesterPut(t *testing.T) {
 }
 
 func TestHandle_IngesterDeleted(t *testing.T) {
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 
 	t.Run("remove_error", func(t *testing.T) {
 		h := &captureHandler{}
@@ -691,7 +691,7 @@ func TestHandle_ConfigSignal(t *testing.T) {
 		d.configSignal = sig
 
 		ch := sig.C()
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: uuid.Must(uuid.NewV7())})
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyVaultPut, ID: glid.New()})
 
 		select {
 		case <-ch:
@@ -708,7 +708,7 @@ func TestHandle_ConfigSignal(t *testing.T) {
 		d.configSignal = sig
 
 		ch := sig.C()
-		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: uuid.Must(uuid.NewV7())})
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterPut, ID: glid.New()})
 
 		select {
 		case <-ch:
@@ -769,7 +769,7 @@ func TestHandle_ConfigSignal(t *testing.T) {
 }
 
 func TestHandle_VaultDrain(t *testing.T) {
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 
 	// reassign_triggers_drain and drain_error_logged were removed:
 	// they tested NodeID-based vault reassignment which no longer exists.
@@ -778,7 +778,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 	t.Run("already_draining_cancels", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults:     []uuid.UUID{id},
+			vaults:     []glid.GLID{id},
 			isDraining: true,
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
@@ -796,7 +796,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 	t.Run("reassign_back_cancels_drain", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults:     []uuid.UUID{id},
+			vaults:     []glid.GLID{id},
 			isDraining: true,
 		}
 		d := newTestDispatcher(mo, &stubCfgStore{
@@ -813,7 +813,7 @@ func TestHandle_VaultDrain(t *testing.T) {
 	t.Run("cancel_drain_error_logged", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults:         []uuid.UUID{id},
+			vaults:         []glid.GLID{id},
 			isDraining:     true,
 			cancelDrainErr: errors.New("boom"),
 		}
@@ -829,28 +829,28 @@ func TestHandle_VaultDrain(t *testing.T) {
 	})
 }
 
-func (m *mockOrch) FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrator.TierInstance {
+func (m *mockOrch) FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance {
 	if m.localTierExported != nil {
 		return m.localTierExported(vaultID, tierID)
 	}
 	return nil
 }
 
-func (m *mockOrch) StopTierLeaderLoop(uuid.UUID)            {}
-func (m *mockOrch) SetDesiredTierLeader(uuid.UUID, string) {}
+func (m *mockOrch) StopTierLeaderLoop(glid.GLID)            {}
+func (m *mockOrch) SetDesiredTierLeader(glid.GLID, string) {}
 
 // TestHandleTierDeleted_DrainOnlyOnLeader verifies that when a tier is deleted
 // with drain=true, only the config leader for that tier initiates a drain.
 // Follower nodes should immediately remove their local tier instance.
 func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 
 	t.Run("leader_drains", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults: []uuid.UUID{vaultID},
-			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+			vaults: []glid.GLID{vaultID},
+			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
 				return &orchestrator.TierInstance{
 					TierID:     tierID,
 					IsFollower: false, // this node is the leader
@@ -877,8 +877,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 	t.Run("follower_removes_immediately", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults: []uuid.UUID{vaultID},
-			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+			vaults: []glid.GLID{vaultID},
+			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
 				return &orchestrator.TierInstance{
 					TierID:       tierID,
 					IsFollower:   true,
@@ -903,8 +903,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 	t.Run("no_local_tier_removes_nothing", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults: []uuid.UUID{vaultID},
-			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+			vaults: []glid.GLID{vaultID},
+			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
 				return nil // this node doesn't host the tier
 			},
 		}
@@ -925,8 +925,8 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 	t.Run("non_drain_always_removes", func(t *testing.T) {
 		h := &captureHandler{}
 		mo := &mockOrch{
-			vaults: []uuid.UUID{vaultID},
-			localTierExported: func(_, _ uuid.UUID) *orchestrator.TierInstance {
+			vaults: []glid.GLID{vaultID},
+			localTierExported: func(_, _ glid.GLID) *orchestrator.TierInstance {
 				return &orchestrator.TierInstance{
 					TierID:     tierID,
 					IsFollower: false,

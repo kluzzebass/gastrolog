@@ -1,6 +1,7 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -8,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/memory"
@@ -42,7 +42,7 @@ func (s *startupStub) Load(context.Context) (*system.System, error) {
 func (s *startupStub) LoadServerSettings(context.Context) (system.ServerSettings, error) {
 	return s.settings, s.settingsErr
 }
-func (s *startupStub) GetNode(_ context.Context, _ uuid.UUID) (*system.NodeConfig, error) {
+func (s *startupStub) GetNode(_ context.Context, _ glid.GLID) (*system.NodeConfig, error) {
 	return s.node, s.nodeErr
 }
 func (s *startupStub) PutNode(_ context.Context, n system.NodeConfig) error {
@@ -58,8 +58,8 @@ func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func TestEnsureNodeConfig_ExistingNode(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
-	store := &startupStub{node: &system.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
+	nodeID := glid.New().String()
+	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "old-panda"}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
 	if err != nil {
@@ -75,7 +75,7 @@ func TestEnsureNodeConfig_ExistingNode(t *testing.T) {
 
 func TestEnsureNodeConfig_NewNode(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
+	nodeID := glid.New().String()
 	store := &startupStub{node: nil}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "")
@@ -103,7 +103,7 @@ func TestEnsureNodeConfig_InvalidID(t *testing.T) {
 
 func TestEnsureNodeConfig_GetNodeError(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
+	nodeID := glid.New().String()
 	store := &startupStub{nodeErr: errors.New("db down")}
 
 	_, err := ensureNodeConfig(context.Background(), store, nodeID, "")
@@ -114,7 +114,7 @@ func TestEnsureNodeConfig_GetNodeError(t *testing.T) {
 
 func TestEnsureNodeConfig_PutNodeError(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
+	nodeID := glid.New().String()
 	store := &startupStub{node: nil, putNodeErr: errors.New("write failed")}
 
 	_, err := ensureNodeConfig(context.Background(), store, nodeID, "")
@@ -125,7 +125,7 @@ func TestEnsureNodeConfig_PutNodeError(t *testing.T) {
 
 func TestEnsureNodeConfig_PreferredName(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
+	nodeID := glid.New().String()
 	store := &startupStub{node: nil}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "coord")
@@ -142,8 +142,8 @@ func TestEnsureNodeConfig_PreferredName(t *testing.T) {
 
 func TestEnsureNodeConfig_PreferredNameOverridesExisting(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
-	store := &startupStub{node: &system.NodeConfig{ID: uuid.MustParse(nodeID), Name: "old-panda"}}
+	nodeID := glid.New().String()
+	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "old-panda"}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "data-1")
 	if err != nil {
@@ -159,8 +159,8 @@ func TestEnsureNodeConfig_PreferredNameOverridesExisting(t *testing.T) {
 
 func TestEnsureNodeConfig_PreferredNameMatchesExisting(t *testing.T) {
 	t.Parallel()
-	nodeID := uuid.Must(uuid.NewV7()).String()
-	store := &startupStub{node: &system.NodeConfig{ID: uuid.MustParse(nodeID), Name: "coord"}}
+	nodeID := glid.New().String()
+	store := &startupStub{node: &system.NodeConfig{ID: glid.MustParse(nodeID), Name: "coord"}}
 
 	name, err := ensureNodeConfig(context.Background(), store, nodeID, "coord")
 	if err != nil {
@@ -202,7 +202,7 @@ func TestEnsureConfig_ConfigWithoutSecret(t *testing.T) {
 	ctx := context.Background()
 	// Add a dummy filter so Load() returns non-nil, but leave server settings empty.
 	if err := store.PutFilter(ctx, system.FilterConfig{
-		ID: uuid.Must(uuid.NewV7()), Name: "dummy", Expression: "*",
+		ID: glid.New(), Name: "dummy", Expression: "*",
 	}); err != nil {
 		t.Fatal(err)
 	}

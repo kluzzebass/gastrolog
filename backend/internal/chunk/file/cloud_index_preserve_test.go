@@ -1,6 +1,7 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"os"
 	"path/filepath"
@@ -13,7 +14,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	filetoken "gastrolog/internal/index/file/token"
 
-	"github.com/google/uuid"
 )
 
 // newCloudManagerWithIndexes creates a file-based chunk manager with a cloud
@@ -24,7 +24,7 @@ func newCloudManagerWithIndexes(t *testing.T) (*Manager, string, *blobstore.Memo
 	t.Helper()
 	dir := t.TempDir()
 	cacheDir := t.TempDir()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
 	cm, err := NewManager(Config{
@@ -272,7 +272,7 @@ func TestRestartPreservesCloudIndexes(t *testing.T) {
 
 	dir := t.TempDir()
 	cacheDir := t.TempDir()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
 	// Phase 1: create, ingest, seal, upload.
@@ -411,7 +411,7 @@ func TestCloudReadOnlySkipsUpload(t *testing.T) {
 
 	dir := t.TempDir()
 	cacheDir := t.TempDir()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
 	cm, err := NewManager(Config{

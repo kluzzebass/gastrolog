@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"bufio"
 	"context"
 	"encoding/json"
@@ -9,7 +10,6 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -200,7 +200,7 @@ func ensureID(name string, existing map[string]string, id *string) {
 	if existingID, ok := existing[strings.ToLower(name)]; ok {
 		*id = existingID
 	} else if *id == "" {
-		*id = uuid.Must(uuid.NewV7()).String()
+		*id = glid.New().String()
 	}
 }
 

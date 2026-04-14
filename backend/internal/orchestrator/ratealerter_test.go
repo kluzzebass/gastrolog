@@ -1,13 +1,13 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"sync"
 	"testing"
 	"time"
 
 	"gastrolog/internal/alert"
 
-	"github.com/google/uuid"
 )
 
 // fakeAlerts captures Set/Clear calls for assertion. Implements
@@ -59,7 +59,7 @@ func newTestRateAlerter(alerts AlertCollector) *RateAlerter {
 		WarningAt: 1.0, // >= 10 events in 10s
 		ErrorAt:   5.0, // >= 50 events in 10s
 		Alerts:    alerts,
-		TierName:  func(id uuid.UUID) string { return "test-tier-" + id.String()[:4] },
+		TierName:  func(id glid.GLID) string { return "test-tier-" + id.String()[:4] },
 	})
 }
 
@@ -67,7 +67,7 @@ func TestRateAlerterStaysSilentBelowThreshold(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	// 5 events in 10s = 0.5/s, below the 1.0 warning threshold.
 	for i := range 5 {
@@ -84,7 +84,7 @@ func TestRateAlerterRaisesWarningAtThreshold(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	// 10 events in 10s = exactly 1.0/s (the warning threshold).
 	for i := range 10 {
@@ -108,7 +108,7 @@ func TestRateAlerterEscalatesToError(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	// 50 events in 10s = 5.0/s (exactly the error threshold).
 	for i := range 50 {
@@ -126,7 +126,7 @@ func TestRateAlerterClearsWhenRateDrops(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	// Cross threshold.
 	for i := range 10 {
@@ -153,7 +153,7 @@ func TestRateAlerterIdempotentRepeatedEvaluations(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	for i := range 10 {
 		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
@@ -172,7 +172,7 @@ func TestRateAlerterTransitionsWarningToErrorEmitsResetSet(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	// First, push into warning territory.
 	for i := range 10 {
@@ -199,8 +199,8 @@ func TestRateAlerterPerTierIndependence(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tier1 := uuid.New()
-	tier2 := uuid.New()
+	tier1 := glid.New()
+	tier2 := glid.New()
 
 	// Tier 1 crosses threshold; tier 2 stays below.
 	for i := range 10 {
@@ -224,7 +224,7 @@ func TestRateAlerterForgetClearsActiveAlert(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	for i := range 10 {
 		ra.Record(tierID, baseTime.Add(time.Duration(i)*time.Second))
@@ -244,7 +244,7 @@ func TestRateAlerterForgetWithoutActiveDoesNotClear(t *testing.T) {
 	t.Parallel()
 	alerts := &fakeAlerts{}
 	ra := newTestRateAlerter(alerts)
-	tierID := uuid.New()
+	tierID := glid.New()
 
 	// Record a small number that doesn't trip the threshold.
 	for range 3 {

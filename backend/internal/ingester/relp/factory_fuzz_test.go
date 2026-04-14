@@ -1,11 +1,11 @@
 package relp
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"log/slog"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 func FuzzNewFactory(f *testing.F) {
@@ -14,7 +14,7 @@ func FuzzNewFactory(f *testing.F) {
 	// tls_cert is set, so we seed without those to test the rest of parsing.
 	// The fuzzer may also hit the nil certMgr path, which returns a clear error.
 	factory := NewFactory(nil)
-	id := uuid.New()
+	id := glid.New()
 
 	// Seed: valid params.
 	f.Add([]byte("addr\x00:2514"))

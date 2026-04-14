@@ -1,12 +1,12 @@
 package metrics
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -30,7 +30,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("default intervals", func(t *testing.T) {
 		t.Parallel()
-		ing, err := factory(uuid.New(), nil, nil)
+		ing, err := factory(glid.New(), nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,7 +45,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("custom interval", func(t *testing.T) {
 		t.Parallel()
-		ing, err := factory(uuid.New(), map[string]string{"interval": "10s"}, nil)
+		ing, err := factory(glid.New(), map[string]string{"interval": "10s"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("custom vault_interval", func(t *testing.T) {
 		t.Parallel()
-		ing, err := factory(uuid.New(), map[string]string{"vault_interval": "5s"}, nil)
+		ing, err := factory(glid.New(), map[string]string{"vault_interval": "5s"}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("invalid interval", func(t *testing.T) {
 		t.Parallel()
-		_, err := factory(uuid.New(), map[string]string{"interval": "bad"}, nil)
+		_, err := factory(glid.New(), map[string]string{"interval": "bad"}, nil)
 		if err == nil {
 			t.Fatal("expected error for invalid interval")
 		}
@@ -77,7 +77,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("non-positive interval", func(t *testing.T) {
 		t.Parallel()
-		_, err := factory(uuid.New(), map[string]string{"interval": "0s"}, nil)
+		_, err := factory(glid.New(), map[string]string{"interval": "0s"}, nil)
 		if err == nil {
 			t.Fatal("expected error for zero interval")
 		}
@@ -85,7 +85,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("invalid vault_interval", func(t *testing.T) {
 		t.Parallel()
-		_, err := factory(uuid.New(), map[string]string{"vault_interval": "bad"}, nil)
+		_, err := factory(glid.New(), map[string]string{"vault_interval": "bad"}, nil)
 		if err == nil {
 			t.Fatal("expected error for invalid vault_interval")
 		}
@@ -93,7 +93,7 @@ func TestNewFactory(t *testing.T) {
 
 	t.Run("non-positive vault_interval", func(t *testing.T) {
 		t.Parallel()
-		_, err := factory(uuid.New(), map[string]string{"vault_interval": "-1s"}, nil)
+		_, err := factory(glid.New(), map[string]string{"vault_interval": "-1s"}, nil)
 		if err == nil {
 			t.Fatal("expected error for negative vault_interval")
 		}
@@ -106,7 +106,7 @@ func TestSystemMetrics(t *testing.T) {
 	factory := NewFactory(src)
 
 	// Use a long vault_interval so only system fires in time.
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"interval":       "10ms",
 		"vault_interval": "1h",
 	}, nil)
@@ -157,7 +157,7 @@ func TestSystemMetrics(t *testing.T) {
 
 func TestVaultMetrics(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.New()
+	vaultID := glid.New()
 	src := &fakeStats{
 		depth:    0,
 		capacity: 100,
@@ -175,7 +175,7 @@ func TestVaultMetrics(t *testing.T) {
 	factory := NewFactory(src)
 
 	// Use a long system interval so only vault fires in time.
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"interval":       "1h",
 		"vault_interval": "10ms",
 	}, nil)
@@ -229,13 +229,13 @@ func TestDualTickerIndependence(t *testing.T) {
 		depth:    1,
 		capacity: 100,
 		snapshots: []orchestrator.VaultSnapshot{
-			{ID: uuid.New(), RecordCount: 10, ChunkCount: 1, Enabled: true},
+			{ID: glid.New(), RecordCount: 10, ChunkCount: 1, Enabled: true},
 		},
 	}
 	factory := NewFactory(src)
 
 	// Vault interval is shorter, so vault metrics should arrive first.
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"interval":       "200ms",
 		"vault_interval": "10ms",
 	}, nil)

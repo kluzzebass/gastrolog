@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -15,7 +16,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // TestArchiveChunkViaRetentionSweep runs the full archival lifecycle:
@@ -24,8 +24,8 @@ import (
 func TestArchiveChunkViaRetentionSweep(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	nodeID := "test-node"
 
 	cloudStore := blobstore.NewMemory()
@@ -176,7 +176,7 @@ func TestArchiveNonCloudChunkFails(t *testing.T) {
 func TestArchiveAlreadyArchivedIsNoop(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	cloudStore := blobstore.NewMemory()
 	dir := t.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{

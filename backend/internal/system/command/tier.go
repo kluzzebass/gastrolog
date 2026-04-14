@@ -1,11 +1,11 @@
 package command
 
 import (
+	"gastrolog/internal/glid"
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 func putTierCmd(tier system.TierConfig) *gastrologv1.PutTierCommand {
@@ -24,7 +24,7 @@ func NewPutTier(tier system.TierConfig) *gastrologv1.SystemCommand {
 }
 
 // NewDeleteTier creates a SystemCommand for DeleteTier.
-func NewDeleteTier(id uuid.UUID, drain bool) *gastrologv1.SystemCommand {
+func NewDeleteTier(id glid.GLID, drain bool) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_DeleteTier{
 			DeleteTier: &gastrologv1.DeleteTierCommand{Id: id.String(), Drain: drain},
@@ -43,12 +43,12 @@ func ExtractPutTierPlacements(cmd *gastrologv1.PutTierCommand) []system.TierPlac
 }
 
 // ExtractDeleteTier extracts the UUID from a DeleteTierCommand.
-func ExtractDeleteTier(cmd *gastrologv1.DeleteTierCommand) (uuid.UUID, error) {
-	return uuid.Parse(cmd.GetId())
+func ExtractDeleteTier(cmd *gastrologv1.DeleteTierCommand) (glid.GLID, error) {
+	return glid.ParseUUID(cmd.GetId())
 }
 
 // NewSetTierPlacements creates a SystemCommand for SetTierPlacements.
-func NewSetTierPlacements(tierID uuid.UUID, placements []system.TierPlacement) *gastrologv1.SystemCommand {
+func NewSetTierPlacements(tierID glid.GLID, placements []system.TierPlacement) *gastrologv1.SystemCommand {
 	pbPlacements := make([]*gastrologv1.TierPlacement, len(placements))
 	for i, p := range placements {
 		pbPlacements[i] = &gastrologv1.TierPlacement{
@@ -76,10 +76,10 @@ func NewSetSetupWizardDismissed(dismissed bool) *gastrologv1.SystemCommand {
 }
 
 // ExtractSetTierPlacements converts a SetTierPlacementsCommand back.
-func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (uuid.UUID, []system.TierPlacement, error) {
-	tierID, err := uuid.Parse(cmd.GetTierId())
+func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (glid.GLID, []system.TierPlacement, error) {
+	tierID, err := glid.ParseUUID(cmd.GetTierId())
 	if err != nil {
-		return uuid.UUID{}, nil, err
+		return glid.GLID{}, nil, err
 	}
 	placements := make([]system.TierPlacement, len(cmd.GetPlacements()))
 	for i, p := range cmd.GetPlacements() {

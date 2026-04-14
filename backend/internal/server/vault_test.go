@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"net/http"
@@ -23,7 +24,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 )
 
 // waitForJob polls the JobService until the job completes or fails, returning the final job state.
@@ -51,7 +51,7 @@ func waitForJob(t *testing.T, jobClient gastrologv1connect.JobServiceClient, job
 type vaultTestClients struct {
 	vault     gastrologv1connect.VaultServiceClient
 	job       gastrologv1connect.JobServiceClient
-	defaultID uuid.UUID
+	defaultID glid.GLID
 }
 
 func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
@@ -61,7 +61,7 @@ func newVaultTestSetup(t *testing.T, recordCount int) vaultTestClients {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(5), // Seal every 5 records.
@@ -131,7 +131,7 @@ func TestReindexVaultNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.vault.ReindexVault(ctx, connect.NewRequest(&gastrologv1.ReindexVaultRequest{
-		Vault: uuid.Must(uuid.NewV7()).String(),
+		Vault: glid.New().String(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -191,7 +191,7 @@ func TestValidateVaultNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.vault.ValidateVault(ctx, connect.NewRequest(&gastrologv1.ValidateVaultRequest{
-		Vault: uuid.Must(uuid.NewV7()).String(),
+		Vault: glid.New().String(),
 	}))
 	if err == nil {
 		t.Fatal("expected error for nonexistent vault")
@@ -283,7 +283,7 @@ type fullVaultTestClients struct {
 	vault     gastrologv1connect.VaultServiceClient
 	job       gastrologv1connect.JobServiceClient
 	cfgStore  system.Store
-	defaultID uuid.UUID
+	defaultID glid.GLID
 }
 
 func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
@@ -294,7 +294,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -306,7 +306,7 @@ func newFullVaultTestSetup(t *testing.T, recordCount int) fullVaultTestClients {
 	}
 
 	// Create default vault via config + orchestrator.
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	cfgStore.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "default-tier", Type: system.TierTypeMemory,
 		VaultID: defaultID, Position: 0,
@@ -429,7 +429,7 @@ func TestMigrateVaultNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := tc.vault.MigrateVault(ctx, connect.NewRequest(&gastrologv1.MigrateVaultRequest{
-		Source:      uuid.Must(uuid.NewV7()).String(),
+		Source:      glid.New().String(),
 		Destination: "dest",
 	}))
 	if err == nil {
@@ -487,7 +487,7 @@ func TestExportVaultNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	stream, err := tc.vault.ExportVault(ctx, connect.NewRequest(&gastrologv1.ExportVaultRequest{
-		Vault: uuid.Must(uuid.NewV7()).String(),
+		Vault: glid.New().String(),
 	}))
 	if err != nil {
 		t.Fatalf("ExportVault call: %v", err)
@@ -549,7 +549,7 @@ func TestImportRecordsVaultNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := tc.vault.ImportRecords(ctx, connect.NewRequest(&gastrologv1.ImportRecordsRequest{
-		Vault:   uuid.Must(uuid.NewV7()).String(),
+		Vault:   glid.New().String(),
 		Records: []*gastrologv1.ExportRecord{{Raw: []byte("test")}},
 	}))
 	if err == nil {
@@ -619,8 +619,8 @@ type twoVaultTestClients struct {
 	vault gastrologv1connect.VaultServiceClient
 	job   gastrologv1connect.JobServiceClient
 	orch  *orchestrator.Orchestrator
-	srcID uuid.UUID
-	dstID uuid.UUID
+	srcID glid.GLID
+	dstID glid.GLID
 }
 
 // newTwoVaultTestSetup creates an orchestrator with two memory vaults for merge testing.
@@ -632,9 +632,9 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filterID := uuid.Must(uuid.NewV7())
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	srcID := glid.New()
+	dstID := glid.New()
 
 	factories := orchestrator.Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -659,8 +659,8 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	ctx := context.Background()
 
 	// Create a memory tier for each vault.
-	for _, vid := range []uuid.UUID{srcID, dstID} {
-		tierID := uuid.Must(uuid.NewV7())
+	for _, vid := range []glid.GLID{srcID, dstID} {
+		tierID := glid.New()
 		if err := cfgStore.PutTier(ctx, system.TierConfig{
 			ID: tierID, Name: "tier-" + vid.String()[:8], Type: system.TierTypeMemory,
 			VaultID: vid, Position: 0,
@@ -677,7 +677,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	}
 
 	for _, v := range []struct {
-		id   uuid.UUID
+		id   glid.GLID
 		name string
 	}{{srcID, "merge-src"}, {dstID, "merge-dst"}} {
 		_, err := cfgClient.PutVault(ctx, connect.NewRequest(&gastrologv1.PutVaultRequest{
@@ -695,7 +695,7 @@ func newTwoVaultTestSetup(t *testing.T) twoVaultTestClients {
 	// Route the catch-all filter to both vaults so Ingest delivers records.
 	_, err = cfgClient.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Id:       uuid.Must(uuid.NewV7()).String(),
+			Id:       glid.New().String(),
 			Name:     "merge-route",
 			FilterId: filterID.String(),
 			Destinations: []*gastrologv1.RouteDestination{
@@ -796,9 +796,9 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 	jobClient := gastrologv1connect.NewJobServiceClient(httpClient, "http://embedded")
 	ctx := context.Background()
 
-	filterID := uuid.Must(uuid.NewV7())
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	srcID := glid.New()
+	dstID := glid.New()
 
 	_, err = cfgClient.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 		Config: &gastrologv1.FilterConfig{Id: filterID.String(), Name: "file-merge-filter", Expression: "*"},
@@ -808,19 +808,19 @@ func TestMergeVaultsFileBacked(t *testing.T) {
 	}
 
 	for _, v := range []struct {
-		id   uuid.UUID
+		id   glid.GLID
 		name string
 	}{{srcID, "file-merge-src"}, {dstID, "file-merge-dst"}} {
 		vaultDir := filepath.Join(homeDir, "vaults", v.id.String())
 		// Create a local tier + node storage config for the vault directory.
-		fileTierID := uuid.Must(uuid.NewV7())
+		fileTierID := glid.New()
 		if err := cfgStore.PutTier(ctx, system.TierConfig{
 			ID: fileTierID, Name: v.name + "-tier", Type: system.TierTypeFile, StorageClass: 1,
 			VaultID: v.id, Position: 0,
 		}); err != nil {
 			t.Fatal(err)
 		}
-		storageID := uuid.Must(uuid.NewV7())
+		storageID := glid.New()
 		if err := cfgStore.SetNodeStorageConfig(ctx, system.NodeStorageConfig{
 			NodeID: "", FileStorages: []system.FileStorage{{ID: storageID, StorageClass: 1, Path: vaultDir}},
 		}); err != nil {
@@ -945,7 +945,7 @@ func TestMergeVaultsNotFound(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := clients.vault.MergeVaults(ctx, connect.NewRequest(&gastrologv1.MergeVaultsRequest{
-		Source:      uuid.Must(uuid.NewV7()).String(),
+		Source:      glid.New().String(),
 		Destination: clients.defaultID.String(),
 	}))
 	if err == nil {

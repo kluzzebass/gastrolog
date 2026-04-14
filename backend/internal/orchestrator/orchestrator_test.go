@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"slices"
@@ -16,7 +17,6 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // recordCountPolicy creates a rotation policy for testing that rotates at maxRecords.
@@ -46,7 +46,7 @@ func (t *trackingIndexManager) BuildIndexes(ctx context.Context, chunkID chunk.C
 	return t.IndexManager.BuildIndexes(ctx, chunkID)
 }
 
-func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, uuid.UUID) {
+func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, chunk.ChunkManager, *trackingIndexManager, glid.GLID) {
 	t.Helper()
 	s, _ := memtest.NewVault(chunkmem.Config{
 		RotationPolicy: recordCountPolicy(maxRecords),
@@ -54,7 +54,7 @@ func newTestSetup(t *testing.T, maxRecords int64) (*orchestrator.Orchestrator, c
 
 	tracker := &trackingIndexManager{IndexManager: s.IM}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -293,7 +293,7 @@ func TestSearchByUUID(t *testing.T) {
 	}
 
 	// Zero UUID should return ErrUnknownRegistry.
-	_, _, err = orch.Search(context.Background(), uuid.Nil, query.Query{}, nil)
+	_, _, err = orch.Search(context.Background(), glid.Nil, query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry for zero UUID, got %v", err)
 	}
@@ -302,7 +302,7 @@ func TestSearchByUUID(t *testing.T) {
 func TestSearchUnknownRegistry(t *testing.T) {
 	orch, _, _, _ := newTestSetup(t, 1 << 20)
 
-	_, _, err := orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
+	_, _, err := orch.Search(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
@@ -327,7 +327,7 @@ func TestSearchNoQueryEngines(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, err = orch.Search(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
+	_, _, err = orch.Search(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrNoQueryEngines {
 		t.Errorf("expected ErrNoQueryEngines, got %v", err)
 	}
@@ -476,7 +476,7 @@ func newIngesterTestSetup(t *testing.T) (*orchestrator.Orchestrator, chunk.Chunk
 		RotationPolicy: recordCountPolicy(10000),
 	})
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +497,7 @@ func TestIngesterMessageReachesChunkManager(t *testing.T) {
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("test message")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -542,7 +542,7 @@ func TestRouteStatsThroughLifecycle(t *testing.T) {
 	}
 
 	recv := newMockIngester(msgs)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -584,7 +584,7 @@ func TestIngesterContextCancellation(t *testing.T) {
 	orch, _ := newIngesterTestSetup(t)
 
 	recv := newBlockingIngester()
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -617,8 +617,8 @@ func TestMultipleIngesters(t *testing.T) {
 		{Attrs: map[string]string{"source": "recv2"}, Raw: []byte("from recv2")},
 	})
 
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test-1", "mock", recv1)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test-2", "mock", recv2)
+	orch.RegisterIngester(glid.New(), "test-1", "mock", recv1)
+	orch.RegisterIngester(glid.New(), "test-2", "mock", recv2)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -682,7 +682,7 @@ func TestIngesterSealOnChunkFull(t *testing.T) {
 		RotationPolicy: recordCountPolicy(2), // 2 records per chunk
 	})
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -698,7 +698,7 @@ func TestIngesterSealOnChunkFull(t *testing.T) {
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("two")},
 		{Attrs: map[string]string{"host": "s1"}, Raw: []byte("three")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -731,7 +731,7 @@ func TestUnregisterIngester(t *testing.T) {
 	orch, _ := newIngesterTestSetup(t)
 
 	recv := newBlockingIngester()
-	ingesterID := uuid.Must(uuid.NewV7())
+	ingesterID := glid.New()
 	orch.RegisterIngester(ingesterID, "test", "mock", recv)
 	orch.UnregisterIngester(ingesterID)
 
@@ -792,7 +792,7 @@ func TestHighVolumeIngestion(t *testing.T) {
 	orch, cm := newIngesterTestSetup(t)
 
 	recv := newCountingIngester(100)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -838,7 +838,7 @@ func TestChunkManagerAccessor(t *testing.T) {
 	}
 
 	// Unknown key returns nil.
-	got = orch.ChunkManager(uuid.Must(uuid.NewV7()))
+	got = orch.ChunkManager(glid.New())
 	if got != nil {
 		t.Error("expected nil for unknown key")
 	}
@@ -866,7 +866,7 @@ func TestIndexManagerAccessor(t *testing.T) {
 	}
 
 	// Unknown key returns nil.
-	got = orch.IndexManager(uuid.Must(uuid.NewV7()))
+	got = orch.IndexManager(glid.New())
 	if got != nil {
 		t.Error("expected nil for unknown key")
 	}
@@ -889,8 +889,8 @@ func TestListIngestersAccessor(t *testing.T) {
 
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
-	id1 := uuid.Must(uuid.NewV7())
-	id2 := uuid.Must(uuid.NewV7())
+	id1 := glid.New()
+	id2 := glid.New()
 	orch.RegisterIngester(id1, "test-1", "mock", recv1)
 	orch.RegisterIngester(id2, "test-2", "mock", recv2)
 
@@ -900,7 +900,7 @@ func TestListIngestersAccessor(t *testing.T) {
 	}
 
 	// Keys may be in any order.
-	found := make(map[uuid.UUID]bool)
+	found := make(map[glid.GLID]bool)
 	for _, k := range keys {
 		found[k] = true
 	}
@@ -954,7 +954,7 @@ func TestRebuildMissingIndexes(t *testing.T) {
 	// RebuildMissingIndexes skips vaults without builders.
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -1020,7 +1020,7 @@ func TestRebuildMissingIndexesCloudBackedWithCompleteIndexes(t *testing.T) {
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
 	overlay := &cloudOverlayCM{ChunkManager: s.CM}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -1063,7 +1063,7 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 	s.CM.(chunk.ChunkPostSealProcessor).SetIndexBuilders([]chunk.ChunkIndexBuilder{tracker.BuildAdapter()})
 	overlay := &cloudOverlayCM{ChunkManager: s.CM}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch, err := orchestrator.New(orchestrator.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -1084,7 +1084,7 @@ func TestRebuildMissingIndexesCloudBackedWithMissingIndexes(t *testing.T) {
 func TestSearchThenFollowUnknownRegistry(t *testing.T) {
 	orch, _, _, _ := newTestSetup(t, 1 << 20)
 
-	_, _, err := orch.SearchThenFollow(context.Background(), uuid.Must(uuid.NewV7()), query.Query{}, nil)
+	_, _, err := orch.SearchThenFollow(context.Background(), glid.New(), query.Query{}, nil)
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
@@ -1093,7 +1093,7 @@ func TestSearchThenFollowUnknownRegistry(t *testing.T) {
 func TestSearchWithContextUnknownRegistry(t *testing.T) {
 	orch, _, _, _ := newTestSetup(t, 1 << 20)
 
-	_, _, err := orch.SearchWithContext(context.Background(), uuid.Must(uuid.NewV7()), query.Query{})
+	_, _, err := orch.SearchWithContext(context.Background(), glid.New(), query.Query{})
 	if err != orchestrator.ErrUnknownRegistry {
 		t.Errorf("expected ErrUnknownRegistry, got %v", err)
 	}
@@ -1101,11 +1101,11 @@ func TestSearchWithContextUnknownRegistry(t *testing.T) {
 
 // filteredTestVaults holds the vault IDs and chunk managers for the filtered test setup.
 type filteredTestVaults struct {
-	prod     uuid.UUID
-	staging  uuid.UUID
-	archive  uuid.UUID
-	catchRest uuid.UUID
-	cms      map[uuid.UUID]chunk.ChunkManager
+	prod     glid.GLID
+	staging  glid.GLID
+	archive  glid.GLID
+	catchRest glid.GLID
+	cms      map[glid.GLID]chunk.ChunkManager
 }
 
 // newFilteredTestSetup creates an orchestrator with multiple vaults and a filter set.
@@ -1113,11 +1113,11 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 	t.Helper()
 
 	vaults := filteredTestVaults{
-		prod:     uuid.Must(uuid.NewV7()),
-		staging:  uuid.Must(uuid.NewV7()),
-		archive:  uuid.Must(uuid.NewV7()),
-		catchRest: uuid.Must(uuid.NewV7()),
-		cms:      make(map[uuid.UUID]chunk.ChunkManager),
+		prod:     glid.New(),
+		staging:  glid.New(),
+		archive:  glid.New(),
+		catchRest: glid.New(),
+		cms:      make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch, err := orchestrator.New(orchestrator.Config{})
@@ -1125,7 +1125,7 @@ func newFilteredTestSetup(t *testing.T) (*orchestrator.Orchestrator, filteredTes
 		t.Fatal(err)
 	}
 
-	for _, id := range []uuid.UUID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -1143,11 +1143,11 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*or
 	t.Helper()
 
 	vaults := filteredTestVaults{
-		prod:     uuid.Must(uuid.NewV7()),
-		staging:  uuid.Must(uuid.NewV7()),
-		archive:  uuid.Must(uuid.NewV7()),
-		catchRest: uuid.Must(uuid.NewV7()),
-		cms:      make(map[uuid.UUID]chunk.ChunkManager),
+		prod:     glid.New(),
+		staging:  glid.New(),
+		archive:  glid.New(),
+		catchRest: glid.New(),
+		cms:      make(map[glid.GLID]chunk.ChunkManager),
 	}
 
 	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: loader})
@@ -1155,7 +1155,7 @@ func newFilteredTestSetupWithLoader(t *testing.T, loader *fakeSystemLoader) (*or
 		t.Fatal(err)
 	}
 
-	for _, id := range []uuid.UUID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
+	for _, id := range []glid.GLID{vaults.prod, vaults.staging, vaults.archive, vaults.catchRest} {
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: recordCountPolicy(10000),
 		})
@@ -1259,31 +1259,31 @@ func TestFilteringIntegration(t *testing.T) {
 		name     string
 		attrs    chunk.Attributes
 		raw      string
-		expected []uuid.UUID // vaults that should receive the message
+		expected []glid.GLID // vaults that should receive the message
 	}{
 		{
 			name:     "prod message goes to prod and archive",
 			attrs:    chunk.Attributes{"env": "prod", "level": "error"},
 			raw:      "production error",
-			expected: []uuid.UUID{vaults.prod, vaults.archive},
+			expected: []glid.GLID{vaults.prod, vaults.archive},
 		},
 		{
 			name:     "staging message goes to staging and archive",
 			attrs:    chunk.Attributes{"env": "staging", "level": "info"},
 			raw:      "staging info",
-			expected: []uuid.UUID{vaults.staging, vaults.archive},
+			expected: []glid.GLID{vaults.staging, vaults.archive},
 		},
 		{
 			name:     "dev message goes to archive and catchRest",
 			attrs:    chunk.Attributes{"env": "dev", "level": "debug"},
 			raw:      "dev debug",
-			expected: []uuid.UUID{vaults.archive, vaults.catchRest},
+			expected: []glid.GLID{vaults.archive, vaults.catchRest},
 		},
 		{
 			name:     "no env goes to archive and catchRest",
 			attrs:    chunk.Attributes{"level": "warn"},
 			raw:      "no env warn",
-			expected: []uuid.UUID{vaults.archive, vaults.catchRest},
+			expected: []glid.GLID{vaults.archive, vaults.catchRest},
 		},
 	}
 
@@ -1300,7 +1300,7 @@ func TestFilteringIntegration(t *testing.T) {
 	}
 
 	// Verify each vault received the expected messages.
-	vaultMessages := make(map[uuid.UUID][]string)
+	vaultMessages := make(map[glid.GLID][]string)
 	for id, cm := range vaults.cms {
 		vaultMessages[id] = getRecordMessages(t, cm)
 	}
@@ -1345,7 +1345,7 @@ func TestFilteringWithIngesters(t *testing.T) {
 		{Attrs: map[string]string{"env": "prod"}, Raw: []byte("prod msg 2")},
 		{Attrs: map[string]string{"env": "staging"}, Raw: []byte("staging msg")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1491,7 +1491,7 @@ func TestIngestAckSuccess(t *testing.T) {
 		msg:     msg,
 		started: make(chan struct{}),
 	}
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1520,7 +1520,7 @@ func TestIngestAckNotSentWhenNil(t *testing.T) {
 	recv := newMockIngester([]orchestrator.IngestMessage{
 		{Attrs: map[string]string{"host": "server1"}, Raw: []byte("no ack message")},
 	})
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start failed: %v", err)
@@ -1585,7 +1585,7 @@ func TestPipelineOverlap(t *testing.T) {
 	})
 
 	slowCM := &slowChunkManager{ChunkManager: s.CM, delay: writeDelay}
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 
 	orch, err := orchestrator.New(orchestrator.Config{IngestChannelSize: n})
 	if err != nil {
@@ -1612,7 +1612,7 @@ func TestPipelineOverlap(t *testing.T) {
 	msgs[n-1].Ack = ackCh
 
 	recv := newMockIngester(msgs)
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "test", "mock", recv)
+	orch.RegisterIngester(glid.New(), "test", "mock", recv)
 
 	start := time.Now()
 
@@ -1695,8 +1695,8 @@ func TestIngesterPanicRecovery(t *testing.T) {
 	}
 	normal := newMockIngester([]orchestrator.IngestMessage{normalMsg})
 
-	panickerID := uuid.Must(uuid.NewV7())
-	normalID := uuid.Must(uuid.NewV7())
+	panickerID := glid.New()
+	normalID := glid.New()
 
 	if err := orch.AddIngester(panickerID, "panicker", "test", panicker); err != nil {
 		t.Fatal(err)

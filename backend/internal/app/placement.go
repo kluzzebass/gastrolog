@@ -1,6 +1,7 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"strings"
 	"context"
 	"fmt"
@@ -14,7 +15,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/orchestrator"
 
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -114,7 +114,7 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 	// Build set of tier IDs actually referenced by vaults (tiers with a VaultID).
 	referencedTiers := make(map[string]bool)
 	for _, t := range tiers {
-		if t.VaultID != (uuid.UUID{}) {
+		if t.VaultID != (glid.GLID{}) {
 			referencedTiers[t.ID.String()] = true
 		}
 	}

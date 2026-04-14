@@ -1,6 +1,7 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -14,7 +15,6 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // countingStore wraps a blobstore.Store and counts Download/DownloadRange calls.
@@ -36,7 +36,7 @@ func (s *countingStore) DownloadRange(ctx context.Context, key string, offset, l
 
 func newCacheTestManager(t *testing.T) (*Manager, *countingStore, string) {
 	t.Helper()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	inner := blobstore.NewMemory()
 	store := &countingStore{Store: inner}
 
@@ -315,7 +315,7 @@ func TestCacheConcurrentDownloadSafe(t *testing.T) {
 
 func TestCacheReadOnlyDirFallsBackToRangeRequests(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	inner := blobstore.NewMemory()
 	store := &countingStore{Store: inner}
 
@@ -379,7 +379,7 @@ func TestCacheReadOnlyDirFallsBackToRangeRequests(t *testing.T) {
 func TestNoCacheDirSkipsCaching(t *testing.T) {
 	t.Parallel()
 	// Manager without CacheDir — original behavior.
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	store := blobstore.NewMemory()
 	dir := t.TempDir()
 

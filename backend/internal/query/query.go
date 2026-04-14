@@ -4,6 +4,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -21,7 +22,6 @@ import (
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 // OrderBy specifies which timestamp field to use for ordering search results.
@@ -239,7 +239,7 @@ func (q Query) WithVaultPredicate(vaultID string) Query {
 
 // MultiVaultPosition represents a position within a specific vault's chunk.
 type MultiVaultPosition struct {
-	VaultID  uuid.UUID
+	VaultID  glid.GLID
 	ChunkID  chunk.ChunkID
 	Position uint64
 	ResumeTS time.Time // non-zero for reordered chunks (no TS index)
@@ -253,7 +253,7 @@ type ResumeToken struct {
 	// VaultTokens maps vault IDs to their opaque resume tokens.
 	// For local vaults, these are deserialized into Positions by the search engine.
 	// For remote vaults, they are forwarded as-is to the owning node.
-	VaultTokens map[uuid.UUID][]byte
+	VaultTokens map[glid.GLID][]byte
 
 	// FrozenStart and FrozenEnd preserve the original query time bounds from
 	// the first page. On subsequent pages, these override the re-parsed time
@@ -275,7 +275,7 @@ type ResumeToken struct {
 // Normalize converts a legacy resume token (using Next) to the new format (using Positions).
 // If Positions is already populated, returns the token unchanged.
 // The vaultID parameter is used for legacy tokens that don't include vault information.
-func (t *ResumeToken) Normalize(defaultVaultID uuid.UUID) *ResumeToken {
+func (t *ResumeToken) Normalize(defaultVaultID glid.GLID) *ResumeToken {
 	if t == nil {
 		return nil
 	}
@@ -306,7 +306,7 @@ var ErrMultiVaultNotSupported = errors.New("operation not supported in multi-vau
 // recordWithRef combines a record with its reference for internal iteration.
 // VaultID is included for multi-vault queries.
 type recordWithRef struct {
-	VaultID   uuid.UUID
+	VaultID   glid.GLID
 	Record    chunk.Record
 	Ref       chunk.RecordRef
 	Reordered bool // true when yielded from reorder fallback (resume by IngestTS, not position)
@@ -380,7 +380,7 @@ func (e *Engine) isMultiVault() bool {
 
 // getVaultManagers returns the chunk and index managers for a vault.
 // For single-vault mode, vaultID is ignored.
-func (e *Engine) getVaultManagers(vaultID uuid.UUID) (chunk.ChunkManager, index.IndexManager) {
+func (e *Engine) getVaultManagers(vaultID glid.GLID) (chunk.ChunkManager, index.IndexManager) {
 	if e.registry != nil {
 		return e.registry.ChunkManager(vaultID), e.registry.IndexManager(vaultID)
 	}
@@ -388,11 +388,11 @@ func (e *Engine) getVaultManagers(vaultID uuid.UUID) (chunk.ChunkManager, index.
 }
 
 // listVaults returns all vault IDs this engine can query.
-func (e *Engine) listVaults() []uuid.UUID {
+func (e *Engine) listVaults() []glid.GLID {
 	if e.registry != nil {
 		return e.registry.ListVaults()
 	}
-	return []uuid.UUID{uuid.Nil}
+	return []glid.GLID{glid.Nil}
 }
 
 // selectChunks filters to chunks that overlap the query time range,
@@ -487,7 +487,7 @@ func sortChunks(out []chunk.ChunkMeta, orderBy OrderBy, reverse bool) {
 // vaultID identifies which vault the chunk belongs to (for multi-vault queries).
 // startPos allows resuming from a specific position within the chunk.
 // Unsealed chunks are scanned sequentially without indexes.
-func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
+func (e *Engine) searchChunkWithRef(ctx context.Context, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64) iter.Seq2[recordWithRef, error] {
 	return func(yield func(recordWithRef, error) bool) {
 		cm, im := e.getVaultManagers(vaultID)
 		if cm == nil {
@@ -562,7 +562,7 @@ func positionCursor(cursor chunk.RecordCursor, q Query, meta chunk.ChunkMeta, st
 // When OrderBy != OrderByWriteTS, sealed chunks use TS-index-ordered scanning:
 // the TS index is walked in timestamp order, producing positions in TS order
 // rather than physical order. For active chunks, results are buffered and sorted.
-func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID uuid.UUID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
+func (e *Engine) buildScannerWithManagers(ctx context.Context, cursor chunk.RecordCursor, q Query, vaultID glid.GLID, meta chunk.ChunkMeta, startPos *uint64, cm chunk.ChunkManager, im index.IndexManager) (iter.Seq2[recordWithRef, error], error) {
 	b := newScannerBuilder(meta.ID)
 	b.vaultID = vaultID
 

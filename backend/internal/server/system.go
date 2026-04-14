@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
@@ -13,7 +14,6 @@ import (
 
 	"connectrpc.com/connect"
 	petname "github.com/dustinkirkland/golang-petname"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -485,7 +485,7 @@ func (s *SystemServer) GetSettings(
 		NodeId:               s.localNodeID,
 	}
 
-	if nodeUUID, err := uuid.Parse(s.localNodeID); err == nil {
+	if nodeUUID, err := glid.ParseUUID(s.localNodeID); err == nil {
 		if node, err := s.sysStore.GetNode(ctx, nodeUUID); err == nil && node != nil {
 			resp.NodeName = node.Name
 		}
@@ -597,7 +597,7 @@ func (s *SystemServer) PutNodeConfig(
 	if idStr == "" {
 		idStr = s.localNodeID
 	}
-	nodeUUID, err := uuid.Parse(idStr)
+	nodeUUID, err := glid.ParseUUID(idStr)
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("parse node ID: %w", err))
 	}
@@ -607,7 +607,7 @@ func (s *SystemServer) PutNodeConfig(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("node", nodeUUID, name, nodes, func(n system.NodeConfig) (uuid.UUID, string) { return n.ID, n.Name }); connErr != nil {
+	if connErr := checkNameConflict("node", nodeUUID, name, nodes, func(n system.NodeConfig) (glid.GLID, string) { return n.ID, n.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -1157,7 +1157,7 @@ func (s *SystemServer) PreviewCSVLookup(
 
 // checkNameConflict returns an AlreadyExists error if another entity of the
 // same type already has the given name. Empty names are allowed to coexist.
-func checkNameConflict[S ~[]E, E any](entityType string, id uuid.UUID, name string, existing S, identify func(E) (uuid.UUID, string)) *connect.Error {
+func checkNameConflict[S ~[]E, E any](entityType string, id glid.GLID, name string, existing S, identify func(E) (glid.GLID, string)) *connect.Error {
 	for _, e := range existing {
 		eid, ename := identify(e)
 		if eid != id && ename == name {

@@ -1,15 +1,15 @@
 package mqtt
 
 import (
+	"gastrolog/internal/glid"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 func TestFactory_RequiredParams(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	_, err := factory(id, map[string]string{}, nil)
 	if err == nil || err.Error() != "mqtt ingester: broker param is required" {
@@ -25,7 +25,7 @@ func TestFactory_RequiredParams(t *testing.T) {
 func TestFactory_DefaultsV3(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"broker": "mqtt://localhost:1883",
@@ -52,7 +52,7 @@ func TestFactory_DefaultsV3(t *testing.T) {
 func TestFactory_V5(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"broker":  "mqtt://localhost:1883",
@@ -71,7 +71,7 @@ func TestFactory_V5(t *testing.T) {
 func TestFactory_VersionValidation(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	base := map[string]string{
 		"broker": "mqtt://localhost:1883",
@@ -101,7 +101,7 @@ func TestFactory_VersionValidation(t *testing.T) {
 func TestFactory_TopicSplitting(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"broker": "mqtt://localhost:1883",
@@ -126,7 +126,7 @@ func TestFactory_TopicSplitting(t *testing.T) {
 func TestFactory_ClientID(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"broker":    "mqtt://localhost:1883",
@@ -146,7 +146,7 @@ func TestFactory_ClientID(t *testing.T) {
 func TestFactory_TLSAndAuth(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"broker":   "ssl://broker:8883",
@@ -174,7 +174,7 @@ func TestFactory_TLSAndAuth(t *testing.T) {
 func TestFactory_CleanSessionFalse(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"broker":        "mqtt://localhost:1883",

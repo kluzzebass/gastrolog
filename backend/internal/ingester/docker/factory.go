@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"log/slog"
@@ -9,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/system"
 	"gastrolog/internal/logging"
@@ -44,7 +44,7 @@ func DockerSocketExamples() []string {
 // NewFactory returns an IngesterFactory for Docker container log ingesters.
 // The config store is used to resolve certificate names for TLS.
 func NewFactory(cfgStore system.Store) orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		cfg, err := parseConfig(id.String(), params, cfgStore, logger)
 		if err != nil {
 			return nil, err

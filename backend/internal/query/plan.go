@@ -1,6 +1,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
 
-	"github.com/google/uuid"
 )
 
 // QueryPlan describes how a query will be executed across chunks.
@@ -25,7 +25,7 @@ type QueryPlan struct {
 
 // ChunkPlan describes the execution plan for a single chunk.
 type ChunkPlan struct {
-	VaultID       uuid.UUID // vault this chunk belongs to
+	VaultID       glid.GLID // vault this chunk belongs to
 	ChunkID       chunk.ChunkID
 	Sealed        bool
 	RecordCount   int
@@ -117,7 +117,7 @@ func (e *Engine) Explain(ctx context.Context, q Query) (*QueryPlan, error) {
 }
 
 // buildChunkPlan builds the execution plan for a single chunk.
-func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMeta, vaultID uuid.UUID, cm chunk.ChunkManager, im index.IndexManager) ChunkPlan {
+func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMeta, vaultID glid.GLID, cm chunk.ChunkManager, im index.IndexManager) ChunkPlan {
 	cp := ChunkPlan{
 		VaultID:       vaultID,
 		ChunkID:       meta.ID,

@@ -1,13 +1,13 @@
 package cloud
 
 import (
+	"gastrolog/internal/glid"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"slices"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 
 	seekable "github.com/SaveTheRbtz/zstd-seekable-format-go/pkg"
@@ -29,7 +29,7 @@ type tsEntry struct {
 // and finally the embedded TS indexes + TOC footer (v2).
 type Writer struct {
 	chunkID chunk.ChunkID
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	dict    *chunk.StringDict
 	enc     *zstd.Encoder // caller-provided, reused across uploads
 
@@ -52,7 +52,7 @@ type Writer struct {
 }
 
 // NewWriter creates a writer for the given chunk and vault.
-func NewWriter(chunkID chunk.ChunkID, vaultID uuid.UUID, enc *zstd.Encoder) *Writer {
+func NewWriter(chunkID chunk.ChunkID, vaultID glid.GLID, enc *zstd.Encoder) *Writer {
 	return &Writer{
 		chunkID: chunkID,
 		vaultID: vaultID,

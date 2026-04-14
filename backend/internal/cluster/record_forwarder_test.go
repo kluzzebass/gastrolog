@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"log/slog"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 func TestBufferOverflow(t *testing.T) {
@@ -19,7 +19,7 @@ func TestBufferOverflow(t *testing.T) {
 		ch: make(chan forwardEntry, forwardChanCap),
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 
 	// Fill to capacity.
 	for i := 0; i < forwardChanCap; i++ {
@@ -44,7 +44,7 @@ func TestChannelDrain(t *testing.T) {
 		ch: make(chan forwardEntry, forwardChanCap),
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	nf.ch <- forwardEntry{vaultID: vaultID, record: chunk.Record{Raw: []byte("single")}}
 
 	// Entry should be retrievable from the channel.
@@ -61,8 +61,8 @@ func TestChannelDrain(t *testing.T) {
 
 func TestForwardEntryToProto(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	ingesterID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	ingesterID := glid.New()
 	now := time.Now()
 
 	entry := forwardEntry{
@@ -142,7 +142,7 @@ func TestForwardEnqueuesAndCloses(t *testing.T) {
 		}
 	}()
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	rec := chunk.Record{Raw: []byte("test")}
 
 	err := rf.Forward(context.Background(), nodeID, vaultID, []chunk.Record{rec})
@@ -163,7 +163,7 @@ func TestForwardClosedReturnsError(t *testing.T) {
 		closed: true,
 	}
 
-	err := rf.Forward(context.Background(), "node-X", uuid.Must(uuid.NewV7()), []chunk.Record{{Raw: []byte("x")}})
+	err := rf.Forward(context.Background(), "node-X", glid.New(), []chunk.Record{{Raw: []byte("x")}})
 	if err == nil {
 		t.Error("expected error from closed forwarder")
 	}
@@ -259,7 +259,7 @@ func TestCloseDoesNotRaceWithDrain(t *testing.T) {
 	}()
 
 	// Enqueue records concurrently with close.
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	go func() {
 		for range 500 {
 			_ = rf.Forward(context.Background(), nodeID, vaultID, []chunk.Record{{Raw: []byte("x")}})

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -18,7 +19,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // TestConcurrentAppendToTierAttrIntegrity reproduces gastrolog-4dd48:
@@ -26,8 +26,8 @@ import (
 func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	nodeID := "test-node"
 
 	dir := t.TempDir()
@@ -155,9 +155,9 @@ func TestConcurrentAppendToTierAttrIntegrity(t *testing.T) {
 func TestTransitionConcurrentWithAppends(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	nodeID := "test-node"
 
 	dir0 := t.TempDir()
@@ -360,8 +360,8 @@ func TestCursorOpenDuringSeal(t *testing.T) {
 func TestImportToTierCursorVerified(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	nodeID := "test-node"
 
 	dir := t.TempDir()
@@ -393,7 +393,7 @@ func TestImportToTierCursorVerified(t *testing.T) {
 			Raw:      fmt.Appendf(nil, "import-verify-%d", i),
 			Attrs:    chunk.Attributes{"idx": fmt.Sprintf("%d", i)},
 			EventID: chunk.EventID{
-				IngesterID: uuid.Must(uuid.NewV7()),
+				IngesterID: glid.New(),
 				IngestSeq:  uint32(i),
 			},
 		}
@@ -468,9 +468,9 @@ func testIterFromSlice(records []chunk.Record) chunk.RecordIterator {
 func TestTransitionSourceDeleteFailsAfterImport(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	nodeID := "test-node"
 
 	tier0, _ := newFileTierInstance(t, tier0ID)
@@ -588,7 +588,7 @@ func (f *faultyBlobstore) Head(ctx context.Context, key string) (blobstore.BlobI
 func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 
 	faulty := &faultyBlobstore{inner: blobstore.NewMemory(), failUpload: true}
 
@@ -640,9 +640,9 @@ func TestCloudUploadFailureRetainsChunk(t *testing.T) {
 func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	cloudTierID := uuid.Must(uuid.NewV7())
-	nextTierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	cloudTierID := glid.New()
+	nextTierID := glid.New()
 	nodeID := "test-node"
 
 	faulty := &faultyBlobstore{inner: blobstore.NewMemory()}
@@ -717,9 +717,9 @@ func TestCloudDownloadFailureDuringTransition(t *testing.T) {
 func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	nodeID := "test-node"
 
 	tier0, _ := newFileTierInstance(t, tier0ID)
@@ -800,10 +800,10 @@ func TestReconfigDuringTransitionDoesNotPanic(t *testing.T) {
 func TestDrainConcurrentWithIngestion(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -817,7 +817,7 @@ func TestDrainConcurrentWithIngestion(t *testing.T) {
 	})
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "default", FilterID: &filterID,
-		Destinations: []uuid.UUID{vaultID}, Enabled: true,
+		Destinations: []glid.GLID{vaultID}, Enabled: true,
 	})
 
 	// Source node.

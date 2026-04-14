@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"time"
@@ -9,7 +10,6 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // digestedRecord is the intermediate type passed from digestLoop to writeLoop.
@@ -229,7 +229,7 @@ func (o *Orchestrator) Stop() error {
 	o.ingestCh = nil
 	o.digestedCh = nil
 	// Clear per-ingester cancel functions.
-	o.ingesterCancels = make(map[uuid.UUID]context.CancelFunc)
+	o.ingesterCancels = make(map[glid.GLID]context.CancelFunc)
 	o.mu.Unlock()
 
 	return nil
@@ -244,7 +244,7 @@ func (o *Orchestrator) Close() {
 
 // runIngester executes a single ingester with panic recovery so that a
 // misbehaving ingester cannot crash the entire process.
-func (o *Orchestrator) runIngester(id uuid.UUID, r Ingester, ctx context.Context, out chan<- IngestMessage) {
+func (o *Orchestrator) runIngester(id glid.GLID, r Ingester, ctx context.Context, out chan<- IngestMessage) {
 	defer func() {
 		if v := recover(); v != nil {
 			o.logger.Error("ingester panicked", "id", id, "panic", v)
@@ -310,7 +310,7 @@ func (o *Orchestrator) digestAndForward(msg IngestMessage) {
 	if msg.IngesterID != "" {
 		seq := o.ingestSeqs[msg.IngesterID]
 		o.ingestSeqs[msg.IngesterID] = seq + 1
-		ingesterUUID, err := uuid.Parse(msg.IngesterID)
+		ingesterUUID, err := glid.ParseUUID(msg.IngesterID)
 		if err == nil {
 			rec.EventID = chunk.EventID{
 				IngesterID: ingesterUUID,
@@ -365,7 +365,7 @@ func (o *Orchestrator) trackWriteStats(dr digestedRecord, ingestErr error) {
 	if dr.ingesterID == "" {
 		return
 	}
-	id, parseErr := uuid.Parse(dr.ingesterID)
+	id, parseErr := glid.ParseUUID(dr.ingesterID)
 	if parseErr != nil {
 		return
 	}
@@ -406,7 +406,7 @@ func (o *Orchestrator) RebuildMissingIndexes(ctx context.Context) error {
 }
 
 // rebuildTierIndexes checks a single tier for sealed chunks with incomplete indexes.
-func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID uuid.UUID, tier *TierInstance) error {
+func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID glid.GLID, tier *TierInstance) error {
 	// Skip tiers where the post-seal pipeline handles indexes.
 	if proc, ok := tier.Chunks.(chunk.ChunkPostSealProcessor); ok {
 		if !proc.HasIndexBuilders() {
@@ -431,7 +431,7 @@ func (o *Orchestrator) rebuildTierIndexes(ctx context.Context, vaultID uuid.UUID
 	return nil
 }
 
-func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID uuid.UUID, tier *TierInstance, meta chunk.ChunkMeta) {
+func (o *Orchestrator) scheduleIndexRebuildIfNeeded(ctx context.Context, vaultID glid.GLID, tier *TierInstance, meta chunk.ChunkMeta) {
 	complete, err := tier.Indexes.IndexesComplete(meta.ID)
 	if err != nil || complete {
 		return

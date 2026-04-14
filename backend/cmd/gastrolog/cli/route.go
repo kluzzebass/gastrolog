@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"strconv"
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -118,7 +118,7 @@ func newRouteCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.RouteConfig{
-				Id:           uuid.Must(uuid.NewV7()).String(),
+				Id:           glid.New().String(),
 				Name:         name,
 				Distribution: "fanout",
 				Enabled:      true,

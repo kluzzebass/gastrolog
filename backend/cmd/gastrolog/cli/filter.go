@@ -1,11 +1,11 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -98,7 +98,7 @@ func newFilterCreateCmd() *cobra.Command {
 			ctx := context.Background()
 
 			cfg := &v1.FilterConfig{
-				Id:         uuid.Must(uuid.NewV7()).String(),
+				Id:         glid.New().String(),
 				Name:       name,
 				Expression: "*",
 			}

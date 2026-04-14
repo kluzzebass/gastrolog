@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
@@ -34,7 +34,7 @@ func (s *SystemServer) ListIngesters(
 	}
 
 	// Local orchestrator knows which ingesters are running on this node.
-	localIDs := make(map[uuid.UUID]struct{})
+	localIDs := make(map[glid.GLID]struct{})
 	for _, id := range s.orch.ListIngesters() {
 		localIDs[id] = struct{}{}
 	}
@@ -125,7 +125,7 @@ func (s *SystemServer) PutIngester(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -144,7 +144,7 @@ func (s *SystemServer) PutIngester(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("ingester", id, req.Msg.Config.Name, ingesters, func(i system.IngesterConfig) (uuid.UUID, string) { return i.ID, i.Name }); connErr != nil {
+	if connErr := checkNameConflict("ingester", id, req.Msg.Config.Name, ingesters, func(i system.IngesterConfig) (glid.GLID, string) { return i.ID, i.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -390,7 +390,7 @@ func (s *SystemServer) TestIngester(
 		addrs := reg.ListenAddrs(req.Msg.Params)
 		// Skip trial bind if this ingester is already running (it holds its ports).
 		if req.Msg.Id != "" {
-			if id, err := uuid.Parse(req.Msg.Id); err == nil && s.orch.GetIngesterStats(id) != nil {
+			if id, err := glid.ParseUUID(req.Msg.Id); err == nil && s.orch.GetIngesterStats(id) != nil {
 				return connect.NewResponse(&apiv1.TestIngesterResponse{
 					Success: true,
 					Message: "ports held by running ingester",
@@ -431,7 +431,7 @@ func (s *SystemServer) TriggerIngester(
 }
 
 // findPeerIngesterStats returns broadcast stats for a remote ingester, or nil.
-func (s *SystemServer) findPeerIngesterStats(id uuid.UUID) *apiv1.IngesterNodeStats {
+func (s *SystemServer) findPeerIngesterStats(id glid.GLID) *apiv1.IngesterNodeStats {
 	if s.peerStats == nil {
 		return nil
 	}

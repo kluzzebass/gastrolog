@@ -1,6 +1,7 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"io"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // blockingStore is a blobstore.Store whose Upload method blocks until the
@@ -54,7 +54,7 @@ func TestCloudUploadTimeout(t *testing.T) {
 	cloudUploadTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { cloudUploadTimeout = prevTimeout })
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	blocking := &blockingStore{
 		Store:        blobstore.NewMemory(),
 		uploadCalled: make(chan struct{}),

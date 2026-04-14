@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"net/http"
@@ -14,7 +15,6 @@ import (
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
 
-	"github.com/google/uuid"
 )
 
 func TestMetricsEndpoint(t *testing.T) {
@@ -37,7 +37,7 @@ func TestMetricsEndpoint(t *testing.T) {
 		})
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})

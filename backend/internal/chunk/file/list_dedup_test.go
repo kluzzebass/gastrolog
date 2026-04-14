@@ -1,6 +1,7 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"testing"
 	"time"
@@ -8,7 +9,6 @@ import (
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // TestListDeduplicatesCloudAndLocal verifies that List() returns each chunk
@@ -22,7 +22,7 @@ func TestListDeduplicatesCloudAndLocal(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	store := blobstore.NewMemory()
 
 	cm, err := NewManager(Config{

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"io"
 	"log/slog"
 	"testing"
@@ -9,7 +10,6 @@ import (
 	"gastrolog/internal/raftgroup"
 	tierfsm "gastrolog/internal/tier/raftfsm"
 
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -80,7 +80,7 @@ func TestTierLeaderManager_StartStopIdempotent(t *testing.T) {
 	mgr := newTierLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 
 	// Start twice — second is a no-op.
 	mgr.Start(tierID, g)
@@ -112,7 +112,7 @@ func TestTierLeaderManager_ReconcileAddsMissingMember(t *testing.T) {
 	mgr := newTierLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 
 	// Desired set = current (just the leader) + a synthetic second member.
 	mgr.SetDesiredMembers(tierID, []hraft.Server{
@@ -162,7 +162,7 @@ func TestTierLeaderManager_ReconcileRemovesExtras(t *testing.T) {
 	mgr := newTierLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 
 	// Desired set = just the two alive nodes. doomed should be removed.
 	mgr.SetDesiredMembers(tierID, []hraft.Server{
@@ -284,7 +284,7 @@ func TestTierLeaderManager_ReconcileNoOpWhenStable(t *testing.T) {
 	mgr := newTierLeaderManager(discardLogger())
 	defer mgr.StopAll()
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 
 	// Desired = current = just the leader.
 	mgr.SetDesiredMembers(tierID, []hraft.Server{
@@ -313,7 +313,7 @@ func TestTierMembershipMap_RoundTrip(t *testing.T) {
 	t.Parallel()
 
 	m := newTierMembershipMap()
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 
 	// Initial Get returns nil.
 	if got := m.Get(tierID); got != nil {

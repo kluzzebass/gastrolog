@@ -1,16 +1,16 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"slices"
 
-	"github.com/google/uuid"
 )
 
 // VaultConfig describes a storage backend to instantiate.
 type VaultConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
+	ID glid.GLID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -23,9 +23,9 @@ type VaultConfig struct {
 // VaultTierIDs returns the ordered tier IDs for a vault by filtering tiers
 // with matching VaultID and sorting by Position. This replaces the old
 // VaultConfig.TierIDs field — tier ownership now lives on TierConfig.
-func VaultTierIDs(tiers []TierConfig, vaultID uuid.UUID) []uuid.UUID {
+func VaultTierIDs(tiers []TierConfig, vaultID glid.GLID) []glid.GLID {
 	type entry struct {
-		id  uuid.UUID
+		id  glid.GLID
 		pos uint32
 	}
 	var matched []entry
@@ -37,7 +37,7 @@ func VaultTierIDs(tiers []TierConfig, vaultID uuid.UUID) []uuid.UUID {
 	slices.SortFunc(matched, func(a, b entry) int {
 		return cmp.Compare(a.pos, b.pos)
 	})
-	ids := make([]uuid.UUID, len(matched))
+	ids := make([]glid.GLID, len(matched))
 	for i, e := range matched {
 		ids[i] = e.id
 	}
@@ -45,7 +45,7 @@ func VaultTierIDs(tiers []TierConfig, vaultID uuid.UUID) []uuid.UUID {
 }
 
 // VaultTiers returns the ordered tier configs for a vault.
-func VaultTiers(tiers []TierConfig, vaultID uuid.UUID) []TierConfig {
+func VaultTiers(tiers []TierConfig, vaultID glid.GLID) []TierConfig {
 	var matched []TierConfig
 	for _, t := range tiers {
 		if t.VaultID == vaultID {
@@ -75,17 +75,17 @@ const (
 // multi-destination routing with distribution modes.
 type RouteConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
+	ID glid.GLID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
 
 	// FilterID references a FilterConfig by UUID.
 	// Nil means no filter (route receives nothing).
-	FilterID *uuid.UUID `json:"filterId,omitempty"`
+	FilterID *glid.GLID `json:"filterId,omitempty"`
 
 	// Destinations lists the vault IDs that this route sends messages to.
-	Destinations []uuid.UUID `json:"destinations"`
+	Destinations []glid.GLID `json:"destinations"`
 
 	// Distribution controls how messages are distributed to destinations.
 	// "fanout" (default): send to all destinations.
@@ -105,7 +105,7 @@ type RouteConfig struct {
 // IngesterConfig describes a ingester to instantiate.
 type IngesterConfig struct {
 	// ID is the unique identifier (UUIDv7).
-	ID uuid.UUID `json:"id"`
+	ID glid.GLID `json:"id"`
 
 	// Name is the human-readable display name (unique).
 	Name string `json:"name"`
@@ -130,7 +130,7 @@ type IngesterConfig struct {
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).
 // When both are set, file paths take precedence and are watched for changes.
 type CertPEM struct {
-	ID       uuid.UUID `json:"id"`
+	ID       glid.GLID `json:"id"`
 	Name     string    `json:"name"`
 	CertPEM  string    `json:"cert_pem,omitempty"`
 	KeyPEM   string    `json:"key_pem,omitempty"`

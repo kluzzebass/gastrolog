@@ -1,13 +1,13 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"encoding/binary"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // FuzzCloudMetaRoundTrip verifies that encodeCloudMeta/decodeCloudMeta
@@ -41,7 +41,7 @@ func FuzzCloudMetaRoundTrip(f *testing.F) {
 		flags := data[104]
 
 		m := &chunkMeta{
-			id:              chunk.ChunkID(uuid.UUID{}), // zero ID for round-trip
+			id:              chunk.ChunkID(glid.GLID{}), // zero ID for round-trip
 			writeStart:      time.Unix(0, readI64(0)),
 			writeEnd:        time.Unix(0, readI64(8)),
 			recordCount:     readI64(16),

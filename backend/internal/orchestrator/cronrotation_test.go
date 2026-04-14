@@ -1,13 +1,13 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"log/slog"
 	"testing"
 	"time"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // ---------- fake chunk manager for cron rotation ----------
@@ -77,8 +77,8 @@ func TestRotateVaultSealsNonEmptyChunk(t *testing.T) {
 		},
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	m := newTestCronManager(t)
 	m.rotateVault(vaultID, tierID, "test-vault", cm)
 
@@ -95,8 +95,8 @@ func TestRotateVaultSkipsEmptyChunk(t *testing.T) {
 		},
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	m := newTestCronManager(t)
 	m.rotateVault(vaultID, tierID, "test-vault", cm)
 
@@ -110,8 +110,8 @@ func TestRotateVaultSkipsNilActive(t *testing.T) {
 		active: nil,
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	m := newTestCronManager(t)
 	m.rotateVault(vaultID, tierID, "test-vault", cm)
 
@@ -124,8 +124,8 @@ func TestEnsureCreatesAndUpdatesJob(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	vaultA := uuid.Must(uuid.NewV7())
-	tierA := uuid.Must(uuid.NewV7())
+	vaultA := glid.New()
+	tierA := glid.New()
 
 	// First ensure creates the job.
 	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
@@ -158,10 +158,10 @@ func TestPruneExceptRemovesStaleJobs(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	vaultA := uuid.Must(uuid.NewV7())
-	vaultB := uuid.Must(uuid.NewV7())
-	tierA := uuid.Must(uuid.NewV7())
-	tierB := uuid.Must(uuid.NewV7())
+	vaultA := glid.New()
+	vaultB := glid.New()
+	tierA := glid.New()
+	tierB := glid.New()
 
 	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
 	m.ensure(vaultB, tierB, "vault-b", "0 * * * *", cm)
@@ -187,9 +187,9 @@ func TestRemoveAllForVault(t *testing.T) {
 	cm := &cronFakeChunkManager{}
 	m := newTestCronManager(t)
 
-	vaultA := uuid.Must(uuid.NewV7())
-	tierA := uuid.Must(uuid.NewV7())
-	tierB := uuid.Must(uuid.NewV7())
+	vaultA := glid.New()
+	tierA := glid.New()
+	tierB := glid.New()
 
 	m.ensure(vaultA, tierA, "vault-a", "* * * * *", cm)
 	m.ensure(vaultA, tierB, "vault-a", "0 * * * *", cm)

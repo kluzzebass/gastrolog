@@ -1,13 +1,13 @@
 package kafka
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -21,7 +21,7 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for Kafka ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		brokers := params["brokers"]
 		if brokers == "" {
 			return nil, errors.New("kafka ingester: brokers param is required")

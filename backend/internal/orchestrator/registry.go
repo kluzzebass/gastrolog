@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"fmt"
 	"slices"
@@ -9,7 +10,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // RegisterVault adds a vault to the registry.
@@ -30,7 +30,7 @@ func (o *Orchestrator) RegisterDigester(d Digester) {
 
 // RegisterIngester adds a ingester to the registry.
 // Must be called before Start().
-func (o *Orchestrator) RegisterIngester(id uuid.UUID, name, ingType string, r Ingester) {
+func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ingesters[id] = r
@@ -51,7 +51,7 @@ func (o *Orchestrator) SetFilterSet(fs *FilterSet) {
 
 // UnregisterIngester removes a ingester from the registry.
 // Must be called before Start() or after Stop().
-func (o *Orchestrator) UnregisterIngester(id uuid.UUID) {
+func (o *Orchestrator) UnregisterIngester(id glid.GLID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	delete(o.ingesters, id)
@@ -60,7 +60,7 @@ func (o *Orchestrator) UnregisterIngester(id uuid.UUID) {
 
 // ChunkManager returns the chunk manager registered under the given key.
 // Returns nil if not found.
-func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
+func (o *Orchestrator) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
@@ -71,7 +71,7 @@ func (o *Orchestrator) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 
 // IndexManager returns the index manager registered under the given key.
 // Returns nil if not found.
-func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
+func (o *Orchestrator) IndexManager(key glid.GLID) index.IndexManager {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
@@ -82,7 +82,7 @@ func (o *Orchestrator) IndexManager(key uuid.UUID) index.IndexManager {
 
 // TriggerIngester triggers a one-shot emission on a Triggerable ingester.
 // Returns an error if the ingester is not found or doesn't support triggering.
-func (o *Orchestrator) TriggerIngester(id uuid.UUID) error {
+func (o *Orchestrator) TriggerIngester(id glid.GLID) error {
 	o.mu.RLock()
 	ing, ok := o.ingesters[id]
 	o.mu.RUnlock()
@@ -105,14 +105,14 @@ func (o *Orchestrator) IsRunning() bool {
 }
 
 // ListVaults returns all registered vault IDs in deterministic order.
-func (o *Orchestrator) ListVaults() []uuid.UUID {
+func (o *Orchestrator) ListVaults() []glid.GLID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]uuid.UUID, 0, len(o.vaults))
+	keys := make([]glid.GLID, 0, len(o.vaults))
 	for k := range o.vaults {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
 	return keys
 }
 
@@ -120,10 +120,10 @@ func (o *Orchestrator) ListVaults() []uuid.UUID {
 // leader. Used by search fan-out: follower tiers are NOT included because
 // they may be incomplete (missing active chunk, replication lag). The search
 // always fans out to the leader for authoritative results.
-func (o *Orchestrator) LocalPrimaryTierIDs() map[uuid.UUID]bool {
+func (o *Orchestrator) LocalPrimaryTierIDs() map[glid.GLID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	ids := make(map[uuid.UUID]bool)
+	ids := make(map[glid.GLID]bool)
 	for _, v := range o.vaults {
 		for _, t := range v.Tiers {
 			if !t.IsFollower {
@@ -137,7 +137,7 @@ func (o *Orchestrator) LocalPrimaryTierIDs() map[uuid.UUID]bool {
 // HasLocalQueryEngine returns true if the vault has at least one tier with
 // a query engine on this node (i.e., actual searchable data, not just a
 // routing entry). Used by search fan-out to decide local vs. remote.
-func (o *Orchestrator) HasLocalQueryEngine(vaultID uuid.UUID) bool {
+func (o *Orchestrator) HasLocalQueryEngine(vaultID glid.GLID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	v := o.vaults[vaultID]
@@ -153,20 +153,20 @@ func (o *Orchestrator) HasLocalQueryEngine(vaultID uuid.UUID) bool {
 }
 
 // ListIngesters returns all registered ingester IDs in deterministic order.
-func (o *Orchestrator) ListIngesters() []uuid.UUID {
+func (o *Orchestrator) ListIngesters() []glid.GLID {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
-	keys := make([]uuid.UUID, 0, len(o.ingesters))
+	keys := make([]glid.GLID, 0, len(o.ingesters))
 	for k := range o.ingesters {
 		keys = append(keys, k)
 	}
-	slices.SortFunc(keys, func(a, b uuid.UUID) int { return bytes.Compare(a[:], b[:]) })
+	slices.SortFunc(keys, func(a, b glid.GLID) int { return bytes.Compare(a[:], b[:]) })
 	return keys
 }
 
 // QueryEngine returns the query engine registered under the given key.
 // Returns nil if not found.
-func (o *Orchestrator) QueryEngine(key uuid.UUID) *query.Engine {
+func (o *Orchestrator) QueryEngine(key glid.GLID) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if s := o.vaults[key]; s != nil {
@@ -194,10 +194,10 @@ type primaryTierRegistry struct {
 	o *Orchestrator
 }
 
-func (r *primaryTierRegistry) ListVaults() []uuid.UUID {
+func (r *primaryTierRegistry) ListVaults() []glid.GLID {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
-	var ids []uuid.UUID
+	var ids []glid.GLID
 	for _, v := range r.o.vaults {
 		for _, t := range v.Tiers {
 			if !t.IsFollower && t.Query != nil {
@@ -208,7 +208,7 @@ func (r *primaryTierRegistry) ListVaults() []uuid.UUID {
 	return ids
 }
 
-func (r *primaryTierRegistry) ChunkManager(key uuid.UUID) chunk.ChunkManager {
+func (r *primaryTierRegistry) ChunkManager(key glid.GLID) chunk.ChunkManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -221,7 +221,7 @@ func (r *primaryTierRegistry) ChunkManager(key uuid.UUID) chunk.ChunkManager {
 	return nil
 }
 
-func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
+func (r *primaryTierRegistry) IndexManager(key glid.GLID) index.IndexManager {
 	r.o.mu.RLock()
 	defer r.o.mu.RUnlock()
 	for _, v := range r.o.vaults {
@@ -234,12 +234,12 @@ func (r *primaryTierRegistry) IndexManager(key uuid.UUID) index.IndexManager {
 	return nil
 }
 
-func (r *primaryTierRegistry) QueryEngine(_ uuid.UUID) *query.Engine { return nil }
+func (r *primaryTierRegistry) QueryEngine(_ glid.GLID) *query.Engine { return nil }
 
 // PrimaryTierQueryEngineForVault returns a query engine scoped to leader
 // tiers of a single vault. Used by ForwardSearch — the vault is already
 // selected, no vault_id= filtering needed.
-func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID uuid.UUID) *query.Engine {
+func (o *Orchestrator) PrimaryTierQueryEngineForVault(vaultID glid.GLID) *query.Engine {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	v := o.vaults[vaultID]

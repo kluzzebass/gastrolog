@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 const (
@@ -72,7 +72,7 @@ func (o *Orchestrator) archivalSweepAll() {
 	}
 
 	// Build map of active cloud services (archivalMode == "active").
-	activeCS := make(map[uuid.UUID]*system.CloudService)
+	activeCS := make(map[glid.GLID]*system.CloudService)
 	for i := range sys.Config.CloudServices {
 		cs := &sys.Config.CloudServices[i]
 		if cs.ArchivalMode == "active" && len(cs.Transitions) > 0 {

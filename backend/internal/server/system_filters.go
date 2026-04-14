@@ -1,11 +1,11 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
@@ -22,14 +22,14 @@ func (s *SystemServer) PutFilter(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
 	}
 
 	// Validate expression by trying to compile it.
-	if _, err := orchestrator.CompileFilter(uuid.Nil, req.Msg.Config.Expression); err != nil {
+	if _, err := orchestrator.CompileFilter(glid.Nil, req.Msg.Config.Expression); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("invalid filter expression: %w", err))
 	}
 
@@ -43,7 +43,7 @@ func (s *SystemServer) PutFilter(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("filter", id, req.Msg.Config.Name, filters, func(f system.FilterConfig) (uuid.UUID, string) { return f.ID, f.Name }); connErr != nil {
+	if connErr := checkNameConflict("filter", id, req.Msg.Config.Name, filters, func(f system.FilterConfig) (glid.GLID, string) { return f.ID, f.Name }); connErr != nil {
 		return nil, connErr
 	}
 

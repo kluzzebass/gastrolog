@@ -5,6 +5,7 @@
 package raftfsm
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"io"
@@ -14,7 +15,6 @@ import (
 	"gastrolog/internal/system/command"
 	"gastrolog/internal/system/memory"
 
-	"github.com/google/uuid"
 	"github.com/hashicorp/raft"
 )
 
@@ -52,7 +52,7 @@ const (
 // Notification describes a config mutation that the FSM just applied.
 type Notification struct {
 	Kind       NotifyKind
-	ID         uuid.UUID // entity ID (zero for settings)
+	ID         glid.GLID // entity ID (zero for settings)
 	Name       string    // entity name (populated on deletes where config is read pre-delete)
 	Key        string    // settings key (empty for entity mutations)
 	NodeID     string    // owning node (populated on vault/ingester deletes)
@@ -611,7 +611,7 @@ func (f *FSM) applyRefreshToken(ctx context.Context, cmd *gastrologv1.SystemComm
 }
 
 // cascadeDeleteRotationPolicy clears rotation policy references from tiers.
-func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID uuid.UUID) error {
+func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID glid.GLID) error {
 	tiers, err := f.store.ListTiers(ctx)
 	if err != nil {
 		return fmt.Errorf("list tiers for cascade: %w", err)
@@ -628,7 +628,7 @@ func (f *FSM) cascadeDeleteRotationPolicy(ctx context.Context, policyID uuid.UUI
 }
 
 // cascadeDeleteRetentionPolicy removes retention rules referencing the policy from tiers.
-func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID uuid.UUID) error {
+func (f *FSM) cascadeDeleteRetentionPolicy(ctx context.Context, policyID glid.GLID) error {
 	tiers, err := f.store.ListTiers(ctx)
 	if err != nil {
 		return fmt.Errorf("list tiers for cascade: %w", err)

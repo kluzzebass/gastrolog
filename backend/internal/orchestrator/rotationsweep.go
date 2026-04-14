@@ -1,12 +1,12 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 const (
@@ -34,7 +34,7 @@ func (o *Orchestrator) rotationSweep() {
 	}
 
 	type sealEvent struct {
-		vaultID uuid.UUID
+		vaultID glid.GLID
 		cm      chunk.ChunkManager
 		chunkID chunk.ChunkID
 	}

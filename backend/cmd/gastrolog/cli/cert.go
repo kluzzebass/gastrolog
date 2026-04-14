@@ -1,12 +1,12 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"os"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -118,7 +118,7 @@ func newCertCreateCmd() *cobra.Command {
 			}
 
 			client := clientFromCmd(cmd)
-			id := uuid.Must(uuid.NewV7()).String()
+			id := glid.New().String()
 			_, err := client.System.PutCertificate(context.Background(), connect.NewRequest(&v1.PutCertificateRequest{
 				Id:           id,
 				Name:         name,

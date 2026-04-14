@@ -1,6 +1,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"container/heap"
 	"context"
 	"errors"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
@@ -20,19 +20,19 @@ const positionExhausted = math.MaxUint64
 
 // vaultChunk pairs a vault ID with its chunk metadata.
 type vaultChunk struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	meta    chunk.ChunkMeta
 }
 
 // mergeKey uniquely identifies a chunk within a vault.
 type mergeKey struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	chunkID chunk.ChunkID
 }
 
 // activeScanner tracks an open iterator for a chunk during merge operations.
 type activeScanner struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	chunkID chunk.ChunkID
 	iter    func() (recordWithRef, error, bool)
 	stop    func()
@@ -40,7 +40,7 @@ type activeScanner struct {
 
 // pendingRecord holds a record collected during Follow polling.
 type pendingRecord struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	rec     chunk.Record
 	ref     chunk.RecordRef
 }
@@ -82,7 +82,7 @@ func (ms *mergeState) buildLastRefs() {
 }
 
 // findScanner looks up a scanner by vault and chunk ID.
-func (ms *mergeState) findScanner(vaultID uuid.UUID, chunkID chunk.ChunkID) *activeScanner {
+func (ms *mergeState) findScanner(vaultID glid.GLID, chunkID chunk.ChunkID) *activeScanner {
 	for i := range ms.scanners {
 		if ms.scanners[i].vaultID == vaultID && ms.scanners[i].chunkID == chunkID {
 			return &ms.scanners[i]
@@ -123,7 +123,7 @@ func (ms *mergeState) advanceScanner(entry *cursorEntry) (error, bool) {
 // collectVaultChunks gathers chunks from selected vaults that overlap the query.
 // Returns the matching chunks and the count of archived chunks that were skipped.
 func (e *Engine) collectVaultChunks(
-	selectedVaults []uuid.UUID,
+	selectedVaults []glid.GLID,
 	q Query,
 	chunkIDs []chunk.ChunkID,
 ) ([]vaultChunk, int32, error) {
@@ -184,8 +184,8 @@ type resumeInfo struct {
 	ResumeTS time.Time // non-zero for reordered chunks
 }
 
-func buildResumeMap(resume *ResumeToken) map[uuid.UUID]map[chunk.ChunkID]resumeInfo {
-	m := make(map[uuid.UUID]map[chunk.ChunkID]resumeInfo)
+func buildResumeMap(resume *ResumeToken) map[glid.GLID]map[chunk.ChunkID]resumeInfo {
+	m := make(map[glid.GLID]map[chunk.ChunkID]resumeInfo)
 	if resume == nil {
 		return m
 	}
@@ -210,7 +210,7 @@ func newMergeHeap(q Query, capacity int) heap.Interface {
 // Returns nil if no resume info exists. Sets the chunk as exhausted in
 // chunkPositions and returns (nil, true) if the chunk was already exhausted.
 func lookupResumeInfo(
-	resumeMap map[uuid.UUID]map[chunk.ChunkID]resumeInfo,
+	resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo,
 	sc vaultChunk,
 	chunkPositions map[mergeKey]uint64,
 ) (info *resumeInfo, exhausted bool) {
@@ -231,7 +231,7 @@ func lookupResumeInfo(
 
 // resolveStartPosition finds the resume start position for a single chunk
 // from a resume token. Returns nil if no position is found.
-func resolveStartPosition(resume *ResumeToken, vaultID uuid.UUID, chunkID chunk.ChunkID) *uint64 {
+func resolveStartPosition(resume *ResumeToken, vaultID glid.GLID, chunkID chunk.ChunkID) *uint64 {
 	if resume == nil {
 		return nil
 	}
@@ -285,7 +285,7 @@ func (e *Engine) primeHeapWithResume(
 	ctx context.Context,
 	q Query,
 	allChunks []vaultChunk,
-	resumeMap map[uuid.UUID]map[chunk.ChunkID]resumeInfo,
+	resumeMap map[glid.GLID]map[chunk.ChunkID]resumeInfo,
 	ms *mergeState,
 ) error {
 	for _, sc := range allChunks {
@@ -380,7 +380,7 @@ func (e *Engine) handleCloudPrimeError(ctx context.Context, err error, sc vaultC
 // chunkReadError wraps a data access error for a specific chunk, allowing
 // callers to skip individual unreadable chunks without aborting the search.
 type chunkReadError struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	chunkID chunk.ChunkID
 	err     error
 }
@@ -523,7 +523,7 @@ func (e *Engine) Search(ctx context.Context, q Query, resume *ResumeToken) (iter
 
 	// Normalize resume token to new format.
 	// For single-vault mode, use the first selected vault as default.
-	var defaultVaultID uuid.UUID
+	var defaultVaultID glid.GLID
 	if len(selectedVaults) > 0 {
 		defaultVaultID = selectedVaults[0]
 	} else if len(allVaults) > 0 {
@@ -834,7 +834,7 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 			q:             q,
 			vaultFilter:   vaultFilter,
 			lastPositions: make(map[mergeKey]uint64),
-			knownVaults:   make(map[uuid.UUID]bool),
+			knownVaults:   make(map[glid.GLID]bool),
 		}
 
 		// Initialize positions for vaults that exist right now.
@@ -848,14 +848,14 @@ func (e *Engine) Follow(ctx context.Context, q Query) iter.Seq2[chunk.Record, er
 type followState struct {
 	engine        *Engine
 	q             Query
-	vaultFilter   []uuid.UUID
+	vaultFilter   []glid.GLID
 	lastPositions map[mergeKey]uint64
-	knownVaults   map[uuid.UUID]bool
+	knownVaults   map[glid.GLID]bool
 }
 
 // initVaultPositions marks all existing chunks in a vault as seen,
 // so Follow only yields records that arrive after this point.
-func (fs *followState) initVaultPositions(vaultID uuid.UUID) {
+func (fs *followState) initVaultPositions(vaultID glid.GLID) {
 	cm, _ := fs.engine.getVaultManagers(vaultID)
 	if cm == nil {
 		return
@@ -877,7 +877,7 @@ func (fs *followState) initVaultPositions(vaultID uuid.UUID) {
 
 // initActiveChunkPosition scans an active (unsealed) chunk to find the last
 // record position, so Follow starts from after existing records.
-func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, vaultID uuid.UUID, meta chunk.ChunkMeta) {
+func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, vaultID glid.GLID, meta chunk.ChunkMeta) {
 	cursor, err := cm.OpenCursor(meta.ID)
 	if err != nil {
 		return
@@ -902,7 +902,7 @@ func (fs *followState) initActiveChunkPosition(cm chunk.ChunkManager, vaultID uu
 // resolveVaults returns the vaults to poll this iteration.
 // When no vault_id= predicate exists, it re-evaluates the live vault
 // list each call, initializing positions for any newly discovered vault.
-func (fs *followState) resolveVaults() []uuid.UUID {
+func (fs *followState) resolveVaults() []glid.GLID {
 	vaults := fs.vaultFilter
 	if vaults == nil {
 		vaults = fs.engine.listVaults()
@@ -954,7 +954,7 @@ func (fs *followState) pollLoop(ctx context.Context, yield func(chunk.Record, er
 // collectNewRecords scans all selected vaults for records newer than
 // the last seen positions. Returns nil if yield returned false (caller stop).
 func (fs *followState) collectNewRecords(
-	selectedVaults []uuid.UUID,
+	selectedVaults []glid.GLID,
 	yield func(chunk.Record, error) bool,
 ) []pendingRecord {
 	pending := []pendingRecord{} // non-nil empty; nil is reserved for yield-returned-false
@@ -984,7 +984,7 @@ func (fs *followState) collectNewRecords(
 // them to pending. Records already seen (based on lastPositions) are skipped.
 func (fs *followState) collectChunkRecords(
 	cm chunk.ChunkManager,
-	vaultID uuid.UUID,
+	vaultID glid.GLID,
 	meta chunk.ChunkMeta,
 	pending *[]pendingRecord,
 ) {
@@ -1158,7 +1158,7 @@ type contextSearchState struct {
 // processChunk iterates over matches in a single chunk, yielding each match
 // with its surrounding context records. Returns false if iteration should stop.
 func (cs *contextSearchState) processChunk(meta chunk.ChunkMeta, yield func(chunk.Record, error) bool) bool {
-	for rr, err := range cs.engine.searchChunkWithRef(cs.ctx, cs.q, uuid.UUID{}, meta, nil) {
+	for rr, err := range cs.engine.searchChunkWithRef(cs.ctx, cs.q, glid.GLID{}, meta, nil) {
 		if err != nil {
 			*cs.nextRef = &rr.Ref
 			yield(chunk.Record{}, err)

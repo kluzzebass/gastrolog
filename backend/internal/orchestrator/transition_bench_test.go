@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"log/slog"
@@ -15,7 +16,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // ---------- tier transition benchmarks ----------
@@ -25,7 +25,7 @@ import (
 // accuracy under burst load.
 
 // benchFileTier creates a file-backed TierInstance for benchmarks.
-func benchFileTier(b *testing.B, tierID uuid.UUID) *TierInstance {
+func benchFileTier(b *testing.B, tierID glid.GLID) *TierInstance {
 	b.Helper()
 	dir := b.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -48,7 +48,7 @@ func benchFileTier(b *testing.B, tierID uuid.UUID) *TierInstance {
 
 // benchCloudFileTier creates a file-backed TierInstance with cloud storage.
 // Uses a 200K rotation policy to avoid auto-rotation within benchmark bursts.
-func benchCloudFileTier(b *testing.B, tierID, vaultID uuid.UUID, store blobstore.Store) *TierInstance {
+func benchCloudFileTier(b *testing.B, tierID, vaultID glid.GLID, store blobstore.Store) *TierInstance {
 	b.Helper()
 	dir := b.TempDir()
 	cm, err := chunkfile.NewManager(chunkfile.Config{
@@ -69,7 +69,7 @@ func benchCloudFileTier(b *testing.B, tierID, vaultID uuid.UUID, store blobstore
 }
 
 // benchRetentionRunner creates a retention runner for benchmarks.
-func benchRetentionRunner(orch *Orchestrator, vaultID, tierID uuid.UUID, tier *TierInstance) *retentionRunner {
+func benchRetentionRunner(orch *Orchestrator, vaultID, tierID glid.GLID, tier *TierInstance) *retentionRunner {
 	return &retentionRunner{
 		isLeader: true,
 		vaultID:  vaultID,
@@ -84,17 +84,17 @@ func benchRetentionRunner(orch *Orchestrator, vaultID, tierID uuid.UUID, tier *T
 
 // benchTransitionSetup creates an N-tier chain and returns the orchestrator,
 // IDs (vaultID + tierIDs), and tier instances.
-func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchestrator, []uuid.UUID, []*TierInstance) {
+func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchestrator, []glid.GLID, []*TierInstance) {
 	b.Helper()
 	nodeID := "bench-node"
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 
-	tierIDs := make([]uuid.UUID, tierCount)
+	tierIDs := make([]glid.GLID, tierCount)
 	tiers := make([]*TierInstance, tierCount)
 	tierCfgs := make([]system.TierConfig, tierCount)
 
 	for i := range tierCount {
-		tierIDs[i] = uuid.Must(uuid.NewV7())
+		tierIDs[i] = glid.New()
 		if withCloud && i == tierCount-1 {
 			cloudStore := blobstore.NewMemory()
 			tiers[i] = benchCloudFileTier(b, tierIDs[i], vaultID, cloudStore)
@@ -129,7 +129,7 @@ func benchTransitionSetup(b *testing.B, tierCount int, withCloud bool) (*Orchest
 	}
 	orch.sysLoader = &transitionSystemLoader{store: store}
 
-	return orch, append([]uuid.UUID{vaultID}, tierIDs...), tiers
+	return orch, append([]glid.GLID{vaultID}, tierIDs...), tiers
 }
 
 // countAllTierRecords is defined in transition_test.go with testing.TB.

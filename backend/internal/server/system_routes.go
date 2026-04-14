@@ -1,12 +1,12 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"slices"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
@@ -22,7 +22,7 @@ func (s *SystemServer) PutRoute(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 
 	if req.Msg.Config.Name == "" {
@@ -39,12 +39,12 @@ func (s *SystemServer) PutRoute(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("route", id, req.Msg.Config.Name, routes, func(r system.RouteConfig) (uuid.UUID, string) { return r.ID, r.Name }); connErr != nil {
+	if connErr := checkNameConflict("route", id, req.Msg.Config.Name, routes, func(r system.RouteConfig) (glid.GLID, string) { return r.ID, r.Name }); connErr != nil {
 		return nil, connErr
 	}
 
 	// Validate filter_id references an existing filter (if non-empty).
-	var filterID *uuid.UUID
+	var filterID *glid.GLID
 	if req.Msg.Config.FilterId != "" {
 		fid, connErr := parseUUID(req.Msg.Config.FilterId)
 		if connErr != nil {
@@ -62,7 +62,7 @@ func (s *SystemServer) PutRoute(
 	}
 
 	// Validate all destination vault IDs reference existing vaults.
-	var destinations []uuid.UUID
+	var destinations []glid.GLID
 	for _, dest := range req.Msg.Config.Destinations {
 		vid, connErr := parseUUID(dest.VaultId)
 		if connErr != nil {
@@ -153,15 +153,15 @@ func (s *SystemServer) DeleteRoute(
 }
 
 // vaultReferencedByRoute checks if a vault ID is used as a destination in any route.
-func (s *SystemServer) vaultReferencedByRoute(ctx context.Context, vaultID uuid.UUID) (uuid.UUID, bool, error) {
+func (s *SystemServer) vaultReferencedByRoute(ctx context.Context, vaultID glid.GLID) (glid.GLID, bool, error) {
 	routes, err := s.sysStore.ListRoutes(ctx)
 	if err != nil {
-		return uuid.Nil, false, err
+		return glid.Nil, false, err
 	}
 	for _, rt := range routes {
 		if slices.Contains(rt.Destinations, vaultID) {
 			return rt.ID, true, nil
 		}
 	}
-	return uuid.Nil, false, nil
+	return glid.Nil, false, nil
 }

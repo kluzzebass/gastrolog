@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 
@@ -8,12 +9,11 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 // ejectTarget represents a resolved destination for an ejected record.
 type ejectTarget struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	nodeID  string // empty = local
 }
 
@@ -26,7 +26,7 @@ type resolvedRoute struct {
 // remoteKey identifies a unique (node, vault) destination for remote delivery.
 type remoteKey struct {
 	nodeID  string
-	vaultID uuid.UUID
+	vaultID glid.GLID
 }
 
 // ejectChunk streams a sealed chunk's records through named routes, delivering
@@ -36,7 +36,7 @@ type remoteKey struct {
 // This is the core retention-eject operation: records are decomposed from the
 // sealed chunk, evaluated against each route's filter, and delivered to matching
 // destinations (local via Append, remote via TransferRecords).
-func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
+func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []glid.GLID) {
 	ctx := context.Background()
 
 	sys, err := r.orch.loadSystem(ctx)
@@ -83,7 +83,7 @@ func (r *retentionRunner) ejectChunk(id chunk.ChunkID, routeIDs []uuid.UUID) {
 
 // resolveEjectRoutes compiles each route's filter and resolves destinations.
 // Returns nil if resolution fails (errors are logged).
-func (r *retentionRunner) resolveEjectRoutes(sys *system.System, id chunk.ChunkID, routeIDs []uuid.UUID) []resolvedRoute {
+func (r *retentionRunner) resolveEjectRoutes(sys *system.System, id chunk.ChunkID, routeIDs []glid.GLID) []resolvedRoute {
 	var routes []resolvedRoute
 	for _, routeID := range routeIDs {
 		route := findRoute(sys.Config.Routes, routeID)
@@ -120,7 +120,7 @@ func (r *retentionRunner) resolveEjectRoutes(sys *system.System, id chunk.ChunkI
 
 // resolveOneRoute compiles a single route's filter and resolves its destinations.
 // Returns nil on compile error (logged).
-func (r *retentionRunner) resolveOneRoute(sys *system.System, routeID uuid.UUID, route *system.RouteConfig) *resolvedRoute {
+func (r *retentionRunner) resolveOneRoute(sys *system.System, routeID glid.GLID, route *system.RouteConfig) *resolvedRoute {
 	cfg := &sys.Config
 	var cf *CompiledFilter
 	if route.FilterID != nil {
@@ -241,7 +241,7 @@ func matchesEjectFilter(cf *CompiledFilter, attrs chunk.Attributes) bool {
 }
 
 // findRoute finds a RouteConfig by ID in a slice.
-func findRoute(routes []system.RouteConfig, id uuid.UUID) *system.RouteConfig {
+func findRoute(routes []system.RouteConfig, id glid.GLID) *system.RouteConfig {
 	for i := range routes {
 		if routes[i].ID == id {
 			return &routes[i]

@@ -59,9 +59,9 @@
 package cloud
 
 import (
+	"gastrolog/internal/glid"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/chunk"
 )
@@ -112,7 +112,7 @@ func tsFromNanos(n uint64) time.Time {
 // BlobMeta holds the metadata decoded from a cloud blob header.
 type BlobMeta struct {
 	ChunkID     chunk.ChunkID
-	VaultID     uuid.UUID
+	VaultID     glid.GLID
 	RecordCount uint32
 	RawBytes    int64     // uncompressed record data size (0 if unknown)
 	WriteStart  time.Time

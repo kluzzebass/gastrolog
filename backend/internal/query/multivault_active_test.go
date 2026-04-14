@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"testing"
@@ -12,13 +13,12 @@ import (
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 func TestMultiVaultSearchActiveChunks(t *testing.T) {
 	t.Parallel()
 	reg := &testRegistry{
-		vaults: make(map[uuid.UUID]struct {
+		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
@@ -26,7 +26,7 @@ func TestMultiVaultSearchActiveChunks(t *testing.T) {
 
 	// Create two vaults with ACTIVE (unsealed) chunks
 	for range 2 {
-		vaultID := uuid.Must(uuid.NewV7())
+		vaultID := glid.New()
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		})

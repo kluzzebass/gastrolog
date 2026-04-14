@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -16,7 +17,6 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 )
 
@@ -41,7 +41,7 @@ const (
 // vault. Used exclusively for cross-node vault routing — tier-targeted
 // follower replication now goes through TierReplicator (see gastrolog-5c6fp).
 type forwardEntry struct {
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	record  chunk.Record
 }
 
@@ -130,7 +130,7 @@ func NewRecordForwarder(peers *PeerConns, logger *slog.Logger, alerts *alert.Col
 // if the per-node buffer is full, records are dropped with a warning.
 // This is the fire-and-forget path — callers that require durable
 // delivery must use ForwardSync.
-func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	nf, err := rf.nodeFor(nodeID)
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func (rf *RecordForwarder) Forward(_ context.Context, nodeID string, vaultID uui
 // method guarantees; end-to-end remote ack (that the record actually
 // landed in the remote node's chunk store) is out of scope and would
 // require a bidirectional stream protocol.
-func (rf *RecordForwarder) ForwardSync(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (rf *RecordForwarder) ForwardSync(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	nf, err := rf.nodeFor(nodeID)
 	if err != nil {
 		return err
@@ -352,11 +352,11 @@ func (rf *RecordForwarder) flushRemaining(nodeID string, nf *nodeForwarder, stre
 func (rf *RecordForwarder) sendBurst(nodeID string, nf *nodeForwarder, stream grpc.ClientStream, entries []forwardEntry) error {
 	// Group by vault, preserving FIFO order within each group.
 	type groupData struct {
-		vaultID uuid.UUID
+		vaultID glid.GLID
 		records []*gastrologv1.ExportRecord
 	}
 	var groups []groupData
-	groupIdx := make(map[uuid.UUID]int, 2)
+	groupIdx := make(map[glid.GLID]int, 2)
 	for _, e := range entries {
 		idx, ok := groupIdx[e.vaultID]
 		if !ok {

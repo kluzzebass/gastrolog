@@ -1,13 +1,13 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"context"
 	"iter"
 	"slices"
 	"sync"
 
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -21,7 +21,7 @@ import (
 // returns a merged sorted iterator over their records plus the combined
 // histogram. The iterator performs a k-way merge — at most one record per
 // remote vault is held in memory at any time.
-func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[uuid.UUID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, func() map[uuid.UUID][]byte) {
+func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTokens map[glid.GLID][]byte) (iter.Seq2[chunk.Record, error], []*apiv1.HistogramBucket, func() map[glid.GLID][]byte) {
 	if s.remoteSearcher == nil || s.cfgStore == nil {
 		return nil, nil, nil
 	}
@@ -33,7 +33,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 
 	queryExpr := q.String()
 	if remoteTokens == nil {
-		remoteTokens = make(map[uuid.UUID][]byte)
+		remoteTokens = make(map[glid.GLID][]byte)
 	}
 
 	// Fan out streaming RPCs concurrently — one per remote vault.
@@ -41,7 +41,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 		records        <-chan []*apiv1.ExportRecord
 		errCh          <-chan error
 		getResumeToken func() []byte
-		vaultID        uuid.UUID
+		vaultID        glid.GLID
 	}
 	var streams []vaultStream
 	var allHist []*apiv1.HistogramBucket
@@ -65,8 +65,8 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 	}
 	wg.Wait()
 
-	getRemoteTokens := func() map[uuid.UUID][]byte {
-		tokens := make(map[uuid.UUID][]byte)
+	getRemoteTokens := func() map[glid.GLID][]byte {
+		tokens := make(map[glid.GLID][]byte)
 		for _, vs := range streams {
 			if vs.getResumeToken != nil {
 				if t := vs.getResumeToken(); len(t) > 0 {
@@ -102,7 +102,7 @@ func (s *QueryServer) collectRemote(ctx context.Context, q query.Query, remoteTo
 // (used when the query contains a vault_id=X filter).
 //
 // Uses tier-level NodeID (set by the placement manager) for node assignment.
-func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []uuid.UUID) map[string][]uuid.UUID {
+func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []glid.GLID) map[string][]glid.GLID {
 	vaults, err := s.cfgStore.ListVaults(ctx)
 	if err != nil {
 		return nil
@@ -116,7 +116,7 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 		return nil
 	}
 
-	selected := make(map[uuid.UUID]bool, len(selectedVaults))
+	selected := make(map[glid.GLID]bool, len(selectedVaults))
 	for _, id := range selectedVaults {
 		selected[id] = true
 	}
@@ -127,12 +127,12 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []u
 	// double-query their primary remotely.
 	localTierIDs := s.orch.LocalPrimaryTierIDs()
 
-	tierMap := make(map[uuid.UUID]*system.TierConfig, len(tiers))
+	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}
 
-	byNode := make(map[string][]uuid.UUID)
+	byNode := make(map[string][]glid.GLID)
 	for _, v := range vaults {
 		if len(selected) > 0 && !selected[v.ID] {
 			continue
@@ -367,7 +367,7 @@ func (s *QueryServer) collectRemotePipeline(ctx context.Context, q query.Query, 
 	// Fan out RPCs concurrently — one goroutine per remote vault.
 	type pipelineFetch struct {
 		nodeID string
-		vid    uuid.UUID
+		vid    glid.GLID
 	}
 	var fetches []pipelineFetch
 	for nodeID, vaultIDs := range byNode {

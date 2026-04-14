@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"log/slog"
@@ -17,7 +18,6 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // ejectSystemLoader implements SystemLoader for eject tests.
@@ -72,15 +72,15 @@ type ejectFakeTransferrer struct {
 
 type ejectTransferCall struct {
 	nodeID  string
-	vaultID uuid.UUID
+	vaultID glid.GLID
 	records []chunk.Record
 }
 
-func (m *ejectFakeTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *ejectFakeTransferrer) TransferRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.RecordIterator) error {
 	return nil // not used by eject
 }
 
-func (m *ejectFakeTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (m *ejectFakeTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	if m.failErr != nil {
 		return m.failErr
 	}
@@ -88,7 +88,7 @@ func (m *ejectFakeTransferrer) ForwardAppend(_ context.Context, nodeID string, v
 	return nil
 }
 
-func (m *ejectFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *ejectFakeTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil
 }
 
@@ -139,7 +139,7 @@ func TestMatchesEjectFilter(t *testing.T) {
 	})
 
 	t.Run("catch_all", func(t *testing.T) {
-		cf, err := CompileFilter(uuid.New(), "*")
+		cf, err := CompileFilter(glid.New(), "*")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +149,7 @@ func TestMatchesEjectFilter(t *testing.T) {
 	})
 
 	t.Run("catch_rest", func(t *testing.T) {
-		cf, err := CompileFilter(uuid.New(), "+")
+		cf, err := CompileFilter(glid.New(), "+")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -159,7 +159,7 @@ func TestMatchesEjectFilter(t *testing.T) {
 	})
 
 	t.Run("matching_expression", func(t *testing.T) {
-		cf, err := CompileFilter(uuid.New(), "level=error")
+		cf, err := CompileFilter(glid.New(), "level=error")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -169,7 +169,7 @@ func TestMatchesEjectFilter(t *testing.T) {
 	})
 
 	t.Run("non_matching_expression", func(t *testing.T) {
-		cf, err := CompileFilter(uuid.New(), "level=info")
+		cf, err := CompileFilter(glid.New(), "level=info")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,10 +189,10 @@ func TestMatchesEjectFilter(t *testing.T) {
 func TestEjectChunkLocalDelivery(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	records := makeTestRecords(5, chunk.Attributes{"level": "error"})
@@ -216,7 +216,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, Name: "eject-route", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "eject-route", FilterID: &filterID, Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -242,7 +242,7 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeID})
+	r.ejectChunk(chunkID, []glid.GLID{routeID})
 
 	// Source chunk should be expired (deleted).
 	if len(cm.deleted) != 1 || cm.deleted[0] != chunkID {
@@ -253,10 +253,10 @@ func TestEjectChunkLocalDelivery(t *testing.T) {
 func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	records := makeTestRecords(3, chunk.Attributes{"level": "info"})
@@ -279,7 +279,7 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, Name: "eject-separate", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "eject-separate", FilterID: &filterID, Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -302,7 +302,7 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeID})
+	r.ejectChunk(chunkID, []glid.GLID{routeID})
 
 	// Verify records were appended to destination vault.
 	if len(dstCM.appended) != 3 {
@@ -318,10 +318,10 @@ func TestEjectChunkDeliveryToSeparateVault(t *testing.T) {
 func TestEjectChunkFilterMatching(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	// Mix of matching and non-matching records.
@@ -350,7 +350,7 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 			{ID: filterID, Expression: "level=error"}, // only matches error records
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, Name: "eject-filtered", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "eject-filtered", FilterID: &filterID, Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -373,7 +373,7 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeID})
+	r.ejectChunk(chunkID, []glid.GLID{routeID})
 
 	// Only 2 records should be appended (level=error).
 	if len(dstCM.appended) != 2 {
@@ -389,13 +389,13 @@ func TestEjectChunkFilterMatching(t *testing.T) {
 func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstA := uuid.Must(uuid.NewV7())
-	dstB := uuid.Must(uuid.NewV7())
-	filterAll := uuid.Must(uuid.NewV7())
-	filterErrors := uuid.Must(uuid.NewV7())
-	routeA := uuid.Must(uuid.NewV7())
-	routeB := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstA := glid.New()
+	dstB := glid.New()
+	filterAll := glid.New()
+	filterErrors := glid.New()
+	routeA := glid.New()
+	routeB := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	records := []chunk.Record{
@@ -423,8 +423,8 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 			{ID: filterErrors, Expression: "level=error"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeA, Name: "route-all", FilterID: &filterAll, Destinations: []uuid.UUID{dstA}, Enabled: true, EjectOnly: true},
-			{ID: routeB, Name: "route-errors", FilterID: &filterErrors, Destinations: []uuid.UUID{dstB}, Enabled: true, EjectOnly: true},
+			{ID: routeA, Name: "route-all", FilterID: &filterAll, Destinations: []glid.GLID{dstA}, Enabled: true, EjectOnly: true},
+			{ID: routeB, Name: "route-errors", FilterID: &filterErrors, Destinations: []glid.GLID{dstB}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -449,7 +449,7 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeA, routeB})
+	r.ejectChunk(chunkID, []glid.GLID{routeA, routeB})
 
 	// Route A (catch-all → dstA): 2 records
 	// Route B (level=error → dstB): 1 record
@@ -464,10 +464,10 @@ func TestEjectChunkMultiRoutesFanOut(t *testing.T) {
 func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	records := makeTestRecords(2, chunk.Attributes{"level": "info"})
@@ -490,7 +490,7 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, Name: "eject-fail", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "eject-fail", FilterID: &filterID, Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -512,7 +512,7 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeID})
+	r.ejectChunk(chunkID, []glid.GLID{routeID})
 
 	// Source chunk must NOT be deleted on failure.
 	if len(cm.deleted) != 0 {
@@ -523,10 +523,10 @@ func TestEjectChunkAbortOnRemoteFailure(t *testing.T) {
 func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	records := makeTestRecords(2, chunk.Attributes{"level": "info"})
@@ -549,7 +549,7 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, Name: "disabled-route", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: false, EjectOnly: true},
+			{ID: routeID, Name: "disabled-route", FilterID: &filterID, Destinations: []glid.GLID{dstVaultID}, Enabled: false, EjectOnly: true},
 		},
 	}}
 
@@ -568,7 +568,7 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeID})
+	r.ejectChunk(chunkID, []glid.GLID{routeID})
 
 	// All routes disabled → no valid routes → chunk not deleted.
 	if len(cm.deleted) != 0 {
@@ -579,9 +579,9 @@ func TestEjectChunkDisabledRouteSkipped(t *testing.T) {
 func TestEjectChunkNoFilter(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 
 	records := makeTestRecords(3, chunk.Attributes{"level": "info"})
@@ -602,7 +602,7 @@ func TestEjectChunkNoFilter(t *testing.T) {
 		},
 		Routes: []system.RouteConfig{
 			// Route with no filter ID — matchesEjectFilter returns false for nil.
-			{ID: routeID, Name: "no-filter-route", Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "no-filter-route", Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -624,7 +624,7 @@ func TestEjectChunkNoFilter(t *testing.T) {
 		logger:  slog.Default(),
 	}
 
-	r.ejectChunk(chunkID, []uuid.UUID{routeID})
+	r.ejectChunk(chunkID, []glid.GLID{routeID})
 
 	// Route with no filter → nil CompiledFilter → no records match.
 	// But the chunk is still deleted (all records processed, zero delivered).
@@ -640,10 +640,10 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 	t.Parallel()
 
 	// Verify the full retention sweep dispatches to ejectChunk correctly.
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	chunkID := chunk.NewChunkID()
 	base := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 
@@ -669,7 +669,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, Name: "eject-sweep", FilterID: &filterID, Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true},
+			{ID: routeID, Name: "eject-sweep", FilterID: &filterID, Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true},
 		},
 	}}
 
@@ -687,7 +687,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 		{
 			policy:        chunk.NewCountRetentionPolicy(1),
 			action:        system.RetentionActionEject,
-			ejectRouteIDs: []uuid.UUID{routeID},
+			ejectRouteIDs: []glid.GLID{routeID},
 		},
 	}
 	r := &retentionRunner{
@@ -714,7 +714,7 @@ func TestEjectChunkSweepIntegration(t *testing.T) {
 // errTest is a sentinel error for tests.
 var errTest = errors.New("test error")
 
-func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.RecordIterator) error {
 	return nil
 }
 
@@ -732,12 +732,12 @@ func (m *ejectFakeTransferrer) StreamToTier(_ context.Context, _ string, _, _ uu
 func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	srcTierID := uuid.Must(uuid.NewV7())
-	dstTierID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	srcTierID := glid.New()
+	dstTierID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 	nodeID := "node-A"
 
 	// Config store with source vault, destination vault, filter, and eject route.
@@ -763,7 +763,7 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 	})
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "eject-route", FilterID: &filterID,
-		Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true,
+		Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true,
 	})
 
 	// File-backed source vault.
@@ -858,7 +858,7 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 		logger:          slog.Default(),
 	}
 	for _, m := range metas {
-		runner.ejectChunk(m.ID, []uuid.UUID{routeID})
+		runner.ejectChunk(m.ID, []glid.GLID{routeID})
 	}
 
 	// ---- Verify: destination has all records (cursor-verified) ----
@@ -892,12 +892,12 @@ func TestEjectChunkFileBackedLocalDelivery(t *testing.T) {
 func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	t.Parallel()
 
-	srcVaultID := uuid.Must(uuid.NewV7())
-	dstVaultID := uuid.Must(uuid.NewV7())
-	srcTierID := uuid.Must(uuid.NewV7())
-	dstTierID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	srcVaultID := glid.New()
+	dstVaultID := glid.New()
+	srcTierID := glid.New()
+	dstTierID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 
 	store := sysmem.NewStore()
 	_ = store.PutVault(context.Background(), system.VaultConfig{
@@ -921,7 +921,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 	})
 	_ = store.PutRoute(context.Background(), system.RouteConfig{
 		ID: routeID, Name: "eject-route", FilterID: &filterID,
-		Destinations: []uuid.UUID{dstVaultID}, Enabled: true, EjectOnly: true,
+		Destinations: []glid.GLID{dstVaultID}, Enabled: true, EjectOnly: true,
 	})
 
 	// Node-A (source).
@@ -1009,7 +1009,7 @@ func TestEjectChunkFileBackedRemoteDelivery(t *testing.T) {
 		logger:   slog.Default(),
 	}
 	for _, m := range metas {
-		runner.ejectChunk(m.ID, []uuid.UUID{routeID})
+		runner.ejectChunk(m.ID, []glid.GLID{routeID})
 	}
 
 	// ---- Verify: node-B has all records (cursor-verified) ----

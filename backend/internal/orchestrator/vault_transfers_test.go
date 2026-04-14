@@ -1,12 +1,12 @@
 package orchestrator_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
@@ -37,17 +37,17 @@ type mockTransferrer struct {
 	gate    chan struct{} // if non-nil, TransferRecords blocks until closed
 }
 
-func (m *mockTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *mockTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil // always ready in tests
 }
 
 type transferCall struct {
 	NodeID  string
-	VaultID uuid.UUID
+	VaultID glid.GLID
 	Records []chunk.Record
 }
 
-func (m *mockTransferrer) TransferRecords(_ context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+func (m *mockTransferrer) TransferRecords(_ context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
 	if m.gate != nil {
 		<-m.gate
 	}
@@ -74,7 +74,7 @@ func (m *mockTransferrer) TransferRecords(_ context.Context, nodeID string, vaul
 	return nil
 }
 
-func (m *mockTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (m *mockTransferrer) ForwardAppend(_ context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	if m.failErr != nil {
 		return m.failErr
 	}
@@ -126,7 +126,7 @@ func newMemVault(t *testing.T) chunk.ChunkManager {
 	return cm
 }
 
-func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUID, count int) chunk.ChunkID {
+func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID glid.GLID, count int) chunk.ChunkID {
 	t.Helper()
 	for i := range count {
 		ts := time.Date(2025, 1, 1, 0, 0, i, 0, time.UTC)
@@ -138,7 +138,7 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUI
 			t.Fatalf("append: %v", err)
 		}
 	}
-	if _, err := orch.SealActive(vaultID, uuid.Nil); err != nil {
+	if _, err := orch.SealActive(vaultID, glid.Nil); err != nil {
 		t.Fatalf("seal: %v", err)
 	}
 	metas, err := orch.ListChunkMetas(vaultID)
@@ -158,8 +158,8 @@ func seedAndSeal(t *testing.T, orch *orchestrator.Orchestrator, vaultID uuid.UUI
 
 func TestMoveChunkRemoteNoTransferrer(t *testing.T) {
 	t.Parallel()
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
+	srcID := glid.New()
+	dstID := glid.New()
 
 	srcCM, srcIM := newFileVault(t)
 
@@ -191,8 +191,8 @@ func TestMoveChunkLocalImportFallback(t *testing.T) {
 	t.Parallel()
 	// When both source and dest are memory vaults (no ChunkMover),
 	// MoveChunk should use ImportRecords.
-	srcID := uuid.Must(uuid.NewV7())
-	dstID := uuid.Must(uuid.NewV7())
+	srcID := glid.New()
+	dstID := glid.New()
 
 	srcCM := newMemVault(t)
 	dstCM := newMemVault(t)
@@ -357,9 +357,9 @@ func TestImportRecordsEmpty(t *testing.T) {
 // but don't actually forward anything.
 type noopForwarder struct{}
 
-func (noopForwarder) Forward(context.Context, string, uuid.UUID, []chunk.Record) error { return nil }
+func (noopForwarder) Forward(context.Context, string, glid.GLID, []chunk.Record) error { return nil }
 
-func (noopForwarder) ForwardSync(context.Context, string, uuid.UUID, []chunk.Record) error {
+func (noopForwarder) ForwardSync(context.Context, string, glid.GLID, []chunk.Record) error {
 	return nil
 }
 
@@ -390,12 +390,12 @@ func waitForJob(t *testing.T, sched *orchestrator.Scheduler, jobID string, timeo
 // drainSetup creates an orchestrator with a single vault, routes, and a mock
 // transferrer suitable for drain tests. Returns the orchestrator, vault ID,
 // mock transferrer, and config loader (for route-based filter reload).
-func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid.UUID, *mockTransferrer) {
+func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, glid.GLID, *mockTransferrer) {
 	t.Helper()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 
 	cm := newMemVault(t)
 
@@ -407,7 +407,7 @@ func drainSetup(t *testing.T, recordCount int) (*orchestrator.Orchestrator, uuid
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+			{ID: routeID, FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 
@@ -499,9 +499,9 @@ func TestDrainVault_Basic(t *testing.T) {
 
 func TestDrainVault_CancelDrain(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 
 	cm := newMemVault(t)
 
@@ -513,7 +513,7 @@ func TestDrainVault_CancelDrain(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+			{ID: routeID, FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 
@@ -629,9 +629,9 @@ func TestDrainVault_EmptyVault(t *testing.T) {
 
 func TestDrainVault_NoTransferrer(t *testing.T) {
 	t.Parallel()
-	vaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 
 	cm := newMemVault(t)
 
@@ -643,7 +643,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 			{ID: filterID, Expression: "*"},
 		},
 		Routes: []system.RouteConfig{
-			{ID: routeID, FilterID: &filterID, Destinations: []uuid.UUID{vaultID}, Enabled: true},
+			{ID: routeID, FilterID: &filterID, Destinations: []glid.GLID{vaultID}, Enabled: true},
 		},
 	}}
 
@@ -694,7 +694,7 @@ func TestDrainVault_NoTransferrer(t *testing.T) {
 	}
 }
 
-func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (m *mockTransferrer) StreamToTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.RecordIterator) error {
 	return nil
 }
 

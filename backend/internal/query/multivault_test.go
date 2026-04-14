@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"strconv"
@@ -14,32 +15,31 @@ import (
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 type testRegistry struct {
-	vaults map[uuid.UUID]struct {
+	vaults map[glid.GLID]struct {
 		cm chunk.ChunkManager
 		im index.IndexManager
 	}
 }
 
-func (r *testRegistry) ListVaults() []uuid.UUID {
-	var keys []uuid.UUID
+func (r *testRegistry) ListVaults() []glid.GLID {
+	var keys []glid.GLID
 	for k := range r.vaults {
 		keys = append(keys, k)
 	}
 	return keys
 }
 
-func (r *testRegistry) ChunkManager(vaultID uuid.UUID) chunk.ChunkManager {
+func (r *testRegistry) ChunkManager(vaultID glid.GLID) chunk.ChunkManager {
 	if s, ok := r.vaults[vaultID]; ok {
 		return s.cm
 	}
 	return nil
 }
 
-func (r *testRegistry) IndexManager(vaultID uuid.UUID) index.IndexManager {
+func (r *testRegistry) IndexManager(vaultID glid.GLID) index.IndexManager {
 	if s, ok := r.vaults[vaultID]; ok {
 		return s.im
 	}
@@ -48,7 +48,7 @@ func (r *testRegistry) IndexManager(vaultID uuid.UUID) index.IndexManager {
 
 func TestMultiVaultSearch(t *testing.T) {
 	reg := &testRegistry{
-		vaults: make(map[uuid.UUID]struct {
+		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
@@ -56,7 +56,7 @@ func TestMultiVaultSearch(t *testing.T) {
 
 	// Create two vaults
 	for range 2 {
-		vaultID := uuid.Must(uuid.NewV7())
+		vaultID := glid.New()
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		})
@@ -104,7 +104,7 @@ func TestMultiVaultSearch(t *testing.T) {
 // copies (dedup is now opt-in, not automatic).
 func TestMultiVaultDedup(t *testing.T) {
 	reg := &testRegistry{
-		vaults: make(map[uuid.UUID]struct {
+		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
@@ -114,7 +114,7 @@ func TestMultiVaultDedup(t *testing.T) {
 	// Each record has a distinct EventID so dedup can identify duplicates
 	// across vaults while keeping unique records.
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
-	ingesterID := uuid.Must(uuid.NewV7())
+	ingesterID := glid.New()
 	records := []chunk.Record{
 		{IngestTS: t0, EventID: chunk.EventID{IngesterID: ingesterID, IngestTS: t0, IngestSeq: 0}, Raw: []byte("line A")},
 		{IngestTS: t0.Add(1 * time.Second), EventID: chunk.EventID{IngesterID: ingesterID, IngestTS: t0.Add(1 * time.Second), IngestSeq: 1}, Raw: []byte("line B")},
@@ -122,7 +122,7 @@ func TestMultiVaultDedup(t *testing.T) {
 	}
 
 	for range 3 {
-		vaultID := uuid.Must(uuid.NewV7())
+		vaultID := glid.New()
 		s := memtest.MustNewVault(t, chunkmem.Config{
 			RotationPolicy: chunk.NewRecordCountPolicy(1000),
 		})
@@ -169,7 +169,7 @@ func TestMultiVaultDedup(t *testing.T) {
 // incoming query limit (e.g. from proto-level pagination) so stats pipelines
 // process all matching records, not just the first page.
 func TestRunPipelineIgnoresIncomingLimit(t *testing.T) {
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
@@ -188,7 +188,7 @@ func TestRunPipelineIgnoresIncomingLimit(t *testing.T) {
 	s.CM.Seal()
 
 	reg := &testRegistry{
-		vaults: map[uuid.UUID]struct {
+		vaults: map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}{
@@ -358,7 +358,7 @@ func TestPipelineNeedsGlobalRecords(t *testing.T) {
 
 func TestRunPipelineOnRecords(t *testing.T) {
 	// Set up a single-vault engine with 20 local records.
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	s := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
@@ -375,7 +375,7 @@ func TestRunPipelineOnRecords(t *testing.T) {
 	s.CM.Seal()
 
 	reg := &testRegistry{
-		vaults: map[uuid.UUID]struct {
+		vaults: map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}{

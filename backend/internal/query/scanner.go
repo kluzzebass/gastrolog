@@ -1,6 +1,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"errors"
@@ -17,7 +18,6 @@ import (
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
 
-	"github.com/google/uuid"
 )
 
 // kvExtractors is the default set of KV extractors used by runtime filters.
@@ -90,7 +90,7 @@ type recordFilter func(chunk.Record) bool
 //   - empty (len==0): index says no matches, skip chunk entirely
 //   - non-empty: seek to these positions only
 type scannerBuilder struct {
-	vaultID        uuid.UUID // vault ID for multi-vault queries
+	vaultID        glid.GLID // vault ID for multi-vault queries
 	chunkID        chunk.ChunkID
 	positions      []uint64       // nil = sequential, empty = no matches, non-empty = seek positions
 	filters        []recordFilter // applied in order; cheap filters should be added first
@@ -637,7 +637,7 @@ func timestampPrecision(s string) time.Duration {
 func firstClassFieldValue(key string, rec chunk.Record) (string, bool) {
 	switch strings.ToLower(key) {
 	case "ingester_id":
-		if rec.EventID.IngesterID != (uuid.UUID{}) {
+		if rec.EventID.IngesterID != (glid.GLID{}) {
 			return rec.EventID.IngesterID.String(), true
 		}
 		return "", false

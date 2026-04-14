@@ -1,6 +1,7 @@
 package otlp
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -12,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -630,7 +630,7 @@ func TestOTLPFactory(t *testing.T) {
 	factory := NewFactory()
 
 	// Default addrs.
-	ing, err := factory(uuid.New(), nil, nil)
+	ing, err := factory(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("factory with nil params: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestOTLPFactory(t *testing.T) {
 	}
 
 	// Custom addrs.
-	ing, err = factory(uuid.New(), map[string]string{
+	ing, err = factory(glid.New(), map[string]string{
 		"http_addr": ":9318",
 		"grpc_addr": ":9317",
 	}, nil)
@@ -651,7 +651,7 @@ func TestOTLPFactory(t *testing.T) {
 	}
 
 	// Invalid addr.
-	_, err = factory(uuid.New(), map[string]string{"http_addr": "noport"}, nil)
+	_, err = factory(glid.New(), map[string]string{"http_addr": "noport"}, nil)
 	if err == nil {
 		t.Error("expected error for invalid addr")
 	}

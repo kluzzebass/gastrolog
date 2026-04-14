@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"maps"
@@ -25,7 +26,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 )
 
 // testAfterConfigApply creates a dispatch callback for non-raft test stores.
@@ -95,9 +95,9 @@ func testAfterConfigApply(orch *orchestrator.Orchestrator, cfgStore system.Store
 
 // ensureMemoryTier creates a memory tier in the config store linked to the
 // given vault, and returns the tier ID as a string.
-func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID uuid.UUID) string {
+func ensureMemoryTier(t *testing.T, cfgStore system.Store, vaultID glid.GLID) string {
 	t.Helper()
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	if err := cfgStore.PutTier(context.Background(), system.TierConfig{
 		ID: tierID, Name: "test-tier-" + tierID.String()[:8], Type: system.TierTypeMemory,
 		VaultID: vaultID, Position: 0,
@@ -146,8 +146,8 @@ func TestDeleteVaultForce(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	filterID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	vaultID := glid.New()
 	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// Create a filter first, then a vault that uses it.
@@ -219,7 +219,7 @@ func TestDeleteVaultNotFound(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	nonexistentID := uuid.Must(uuid.NewV7())
+	nonexistentID := glid.New()
 	_, err := client.DeleteVault(ctx, connect.NewRequest(&gastrologv1.DeleteVaultRequest{
 		Id: nonexistentID.String(),
 	}))
@@ -238,8 +238,8 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	client, cfgStore, orch := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	filterID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	vaultID := glid.New()
 	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// Create a filter and a vault.
@@ -264,7 +264,7 @@ func TestPauseResumeVaultRPC(t *testing.T) {
 	// Route the catch-all filter to the vault so Ingest delivers records.
 	_, err = client.PutRoute(ctx, connect.NewRequest(&gastrologv1.PutRouteRequest{
 		Config: &gastrologv1.RouteConfig{
-			Id:       uuid.Must(uuid.NewV7()).String(),
+			Id:       glid.New().String(),
 			Name:     "test-route",
 			FilterId: filterID.String(),
 			Destinations: []*gastrologv1.RouteDestination{
@@ -326,7 +326,7 @@ func TestPauseVaultNotFoundRPC(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	nonexistentID := uuid.Must(uuid.NewV7())
+	nonexistentID := glid.New()
 	_, err := client.PauseVault(ctx, connect.NewRequest(&gastrologv1.PauseVaultRequest{
 		Id: nonexistentID.String(),
 	}))
@@ -342,7 +342,7 @@ func TestResumeVaultNotFoundRPC(t *testing.T) {
 	client, _, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	nonexistentID := uuid.Must(uuid.NewV7())
+	nonexistentID := glid.New()
 	_, err := client.ResumeVault(ctx, connect.NewRequest(&gastrologv1.ResumeVaultRequest{
 		Id: nonexistentID.String(),
 	}))
@@ -358,8 +358,8 @@ func TestPauseVaultPersistsToConfig(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	filterID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	vaultID := glid.New()
 	ensureMemoryTier(t, cfgStore, vaultID)
 
 	// Create a filter and vault.
@@ -566,8 +566,8 @@ func TestDuplicateEntityNames(t *testing.T) {
 	})
 
 	t.Run("node", func(t *testing.T) {
-		nodeA := uuid.Must(uuid.NewV7())
-		nodeB := uuid.Must(uuid.NewV7())
+		nodeA := glid.New()
+		nodeB := glid.New()
 		_, err := client.PutNodeConfig(ctx, connect.NewRequest(&gastrologv1.PutNodeConfigRequest{
 			Config: &gastrologv1.NodeConfig{Id: nodeA.String(), Name: "alpha"},
 		}))
@@ -587,7 +587,7 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("update_self_allowed", func(t *testing.T) {
 		// Creating with an explicit ID, then updating with the same ID and name should work.
-		id := uuid.Must(uuid.NewV7())
+		id := glid.New()
 		_, err := client.PutFilter(ctx, connect.NewRequest(&gastrologv1.PutFilterRequest{
 			Config: &gastrologv1.FilterConfig{Id: id.String(), Name: "self-update", Expression: "*"},
 		}))
@@ -610,7 +610,7 @@ func TestDuplicateEntityNames(t *testing.T) {
 					{Name: "duped", UrlTemplate: "http://example.com/{ip}"},
 				},
 				CsvLookups: []*gastrologv1.CSVLookupEntry{
-					{Name: "duped", FileId: uuid.Must(uuid.NewV7()).String()},
+					{Name: "duped", FileId: glid.New().String()},
 				},
 			},
 		}))
@@ -676,7 +676,7 @@ func TestDeleteIngesterNotFound(t *testing.T) {
 	client, _, _ := newConfigTestSetupWithIngesters(t)
 	ctx := context.Background()
 
-	nonexistentID := uuid.Must(uuid.NewV7())
+	nonexistentID := glid.New()
 	_, err := client.DeleteIngester(ctx, connect.NewRequest(&gastrologv1.DeleteIngesterRequest{
 		Id: nonexistentID.String(),
 	}))
@@ -715,7 +715,7 @@ func TestListIngestersRemoteRunning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remoteIngID := uuid.Must(uuid.NewV7())
+	remoteIngID := glid.New()
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
@@ -763,7 +763,7 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remoteIngID := uuid.Must(uuid.NewV7())
+	remoteIngID := glid.New()
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
@@ -812,7 +812,7 @@ func TestGetIngesterStatusLocal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ingID := uuid.Must(uuid.NewV7())
+	ingID := glid.New()
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID: ingID, Name: "local-syslog", Enabled: true,
 	})
@@ -859,7 +859,7 @@ func TestListIngestersNoPeerStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	remoteIngID := uuid.Must(uuid.NewV7())
+	remoteIngID := glid.New()
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
@@ -1054,9 +1054,9 @@ func TestGetRouteStats(t *testing.T) {
 	}
 
 	// Configure a vault, filter, and route.
-	vaultID := uuid.Must(uuid.NewV7())
-	filterID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	filterID := glid.New()
+	routeID := glid.New()
 
 	cm, err := chunkmem.NewManager(chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(100000),
@@ -1070,7 +1070,7 @@ func TestGetRouteStats(t *testing.T) {
 	_ = cfgStore.PutFilter(ctx, system.FilterConfig{ID: filterID, Expression: "*"})
 	_ = cfgStore.PutRoute(ctx, system.RouteConfig{
 		ID: routeID, FilterID: &filterID,
-		Destinations: []uuid.UUID{vaultID}, Enabled: true,
+		Destinations: []glid.GLID{vaultID}, Enabled: true,
 	})
 
 	if err := orch.ReloadFilters(ctx); err != nil {

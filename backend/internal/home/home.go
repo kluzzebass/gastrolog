@@ -19,12 +19,12 @@
 package home
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/google/uuid"
 )
 
 // Dir represents a gastrolog home directory.
@@ -99,7 +99,7 @@ func (d Dir) EnsureExists() error {
 // If the file doesn't exist, a new UUIDv7 is generated and written.
 func (d Dir) NodeID() (string, error) {
 	return d.readOrCreate("node_id", func() string {
-		return uuid.Must(uuid.NewV7()).String()
+		return glid.New().String()
 	})
 }
 

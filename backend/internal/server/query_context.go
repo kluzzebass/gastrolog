@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -98,7 +98,7 @@ func (s *QueryServer) GetContext(
 
 // readAnchor reads a single record by its ref. If the vault is local, reads
 // via cursor. If remote, forwards to the owning node.
-func (s *QueryServer) readAnchor(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64) (*apiv1.Record, error) {
+func (s *QueryServer) readAnchor(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64) (*apiv1.Record, error) {
 	if nodeID := s.remoteNodeForVault(ctx, vaultID); nodeID != "" {
 		resp, err := s.remoteSearcher.GetContext(ctx, nodeID, &apiv1.ForwardGetContextRequest{
 			VaultId: vaultID.String(),
@@ -210,7 +210,7 @@ func drainIterToProto(it iter.Seq2[chunk.Record, error]) []*apiv1.Record {
 // or "" if the vault is local or lookup fails.
 //
 // Uses tier-level NodeID (set by the placement manager) for node assignment.
-func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID) string {
+func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID glid.GLID) string {
 	// If the vault is registered locally, it's not remote.
 	if slices.Contains(s.orch.ListVaults(), vaultID) {
 		return ""
@@ -234,7 +234,7 @@ func (s *QueryServer) remoteNodeForVault(ctx context.Context, vaultID uuid.UUID)
 		return ""
 	}
 
-	tierMap := make(map[uuid.UUID]*system.TierConfig, len(tiers))
+	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}

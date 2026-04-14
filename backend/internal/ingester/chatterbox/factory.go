@@ -1,6 +1,7 @@
 package chatterbox
 
 import (
+	"gastrolog/internal/glid"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -65,7 +65,7 @@ func ParamDefaults() map[string]string {
 //
 // Returns an error if parameters are invalid (e.g., unparseable duration,
 // min > max, negative values, unknown format names).
-func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 	minInterval := defaultMinInterval
 	maxInterval := defaultMaxInterval
 	hostCount := defaultHostCount

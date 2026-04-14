@@ -1,12 +1,12 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
@@ -23,7 +23,7 @@ func (s *SystemServer) PutRotationPolicy(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -39,7 +39,7 @@ func (s *SystemServer) PutRotationPolicy(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("rotation policy", id, req.Msg.Config.Name, rotPolicies, func(p system.RotationPolicyConfig) (uuid.UUID, string) { return p.ID, p.Name }); connErr != nil {
+	if connErr := checkNameConflict("rotation policy", id, req.Msg.Config.Name, rotPolicies, func(p system.RotationPolicyConfig) (glid.GLID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -115,7 +115,7 @@ func (s *SystemServer) PutRetentionPolicy(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -131,7 +131,7 @@ func (s *SystemServer) PutRetentionPolicy(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("retention policy", id, req.Msg.Config.Name, retPolicies, func(p system.RetentionPolicyConfig) (uuid.UUID, string) { return p.ID, p.Name }); connErr != nil {
+	if connErr := checkNameConflict("retention policy", id, req.Msg.Config.Name, retPolicies, func(p system.RetentionPolicyConfig) (glid.GLID, string) { return p.ID, p.Name }); connErr != nil {
 		return nil, connErr
 	}
 

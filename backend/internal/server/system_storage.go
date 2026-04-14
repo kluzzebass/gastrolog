@@ -1,12 +1,12 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
@@ -25,7 +25,7 @@ func (s *SystemServer) PutCloudService(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -41,7 +41,7 @@ func (s *SystemServer) PutCloudService(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("cloud service", id, req.Msg.Config.Name, services, func(cs system.CloudService) (uuid.UUID, string) { return cs.ID, cs.Name }); connErr != nil {
+	if connErr := checkNameConflict("cloud service", id, req.Msg.Config.Name, services, func(cs system.CloudService) (glid.GLID, string) { return cs.ID, cs.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -124,8 +124,8 @@ func (s *SystemServer) SetNodeStorageConfig(
 
 	// Assign UUIDs to file storages that don't have one.
 	for i := range cfg.FileStorages {
-		if cfg.FileStorages[i].ID == uuid.Nil {
-			cfg.FileStorages[i].ID = uuid.Must(uuid.NewV7())
+		if cfg.FileStorages[i].ID == glid.Nil {
+			cfg.FileStorages[i].ID = glid.New()
 		}
 	}
 
@@ -152,7 +152,7 @@ func (s *SystemServer) PutTier(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	id, connErr := parseUUID(req.Msg.Config.Id)
 	if connErr != nil {

@@ -1,14 +1,14 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // cursorEntry represents a cursor with its current record in the merge heap.
 type cursorEntry struct {
-	vaultID   uuid.UUID
+	vaultID   glid.GLID
 	chunkID   chunk.ChunkID
 	rec       chunk.Record
 	ref       chunk.RecordRef

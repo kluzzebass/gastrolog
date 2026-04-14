@@ -1,6 +1,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"testing"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 func TestApplyRecordEval(t *testing.T) {
@@ -505,8 +505,8 @@ func TestApplyTableLookupMissingColumn(t *testing.T) {
 }
 
 func TestApplyRecordDedup(t *testing.T) {
-	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
-	idB := uuid.MustParse("00000000-0000-0000-0000-00000000000b")
+	idA := glid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idB := glid.MustParse("00000000-0000-0000-0000-00000000000b")
 	t0 := baseTime
 	t1 := baseTime.Add(time.Second)
 	t2 := baseTime.Add(2 * time.Second)
@@ -535,8 +535,8 @@ func TestApplyRecordDedup(t *testing.T) {
 }
 
 func TestApplyRecordDedupNoDups(t *testing.T) {
-	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
-	idB := uuid.MustParse("00000000-0000-0000-0000-00000000000b")
+	idA := glid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idB := glid.MustParse("00000000-0000-0000-0000-00000000000b")
 	records := []chunk.Record{
 		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idA, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("one")},
 		{IngestTS: baseTime.Add(time.Second), WriteTS: baseTime.Add(time.Second), EventID: chunk.EventID{IngesterID: idB, IngestTS: baseTime.Add(time.Second), IngestSeq: 0}, Raw: []byte("two")},
@@ -556,8 +556,8 @@ func TestApplyRecordDedupEmpty(t *testing.T) {
 }
 
 func TestApplyRecordDedupSameTimeDiffIngester(t *testing.T) {
-	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
-	idB := uuid.MustParse("00000000-0000-0000-0000-00000000000b")
+	idA := glid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idB := glid.MustParse("00000000-0000-0000-0000-00000000000b")
 	records := []chunk.Record{
 		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idA, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("one")},
 		{IngestTS: baseTime, WriteTS: baseTime, EventID: chunk.EventID{IngesterID: idB, IngestTS: baseTime, IngestSeq: 0}, Raw: []byte("two")},
@@ -570,7 +570,7 @@ func TestApplyRecordDedupSameTimeDiffIngester(t *testing.T) {
 }
 
 func TestApplyRecordDedupWindowExpiry(t *testing.T) {
-	idA := uuid.MustParse("00000000-0000-0000-0000-00000000000a")
+	idA := glid.MustParse("00000000-0000-0000-0000-00000000000a")
 	t0 := baseTime
 	// Same EventID, but WriteTS is more than 1s apart — should NOT be deduped.
 	records := []chunk.Record{

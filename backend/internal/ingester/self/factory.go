@@ -4,10 +4,10 @@
 package self
 
 import (
+	"gastrolog/internal/glid"
 	"log/slog"
 	"strings"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -31,7 +31,7 @@ func NewFactory(
 	capture *logging.CaptureHandler,
 	alerts orchestrator.AlertCollector,
 ) orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		scopedLogger := logging.Default(logger).With(
 			"component", "ingester",
 			"type", "self",

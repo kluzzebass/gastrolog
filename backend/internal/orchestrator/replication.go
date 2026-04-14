@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -9,12 +10,11 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // SealActiveTier seals the active chunk for a specific tier.
 // Used by the TierReplication seal command on follower nodes.
-func (o *Orchestrator) SealActiveTier(vaultID, tierID uuid.UUID, expectedChunkID chunk.ChunkID) error {
+func (o *Orchestrator) SealActiveTier(vaultID, tierID glid.GLID, expectedChunkID chunk.ChunkID) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
 		return ErrVaultNotFound
@@ -86,7 +86,7 @@ func (o *Orchestrator) ackAfterReplication(ack chan<- error, pa *pendingAcks, re
 
 // scheduleReplication schedules a separate job to replicate a sealed chunk.
 // Decoupled from the post-seal pipeline — never blocks compression or indexing.
-func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
+func (o *Orchestrator) scheduleReplication(vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if len(targets) == 0 {
 		return
 	}
@@ -110,7 +110,7 @@ func (o *Orchestrator) scheduleReplication(vaultID, tierID uuid.UUID, chunkID ch
 // Cloud-backed chunks are skipped: the data is in shared S3, so followers don't
 // need record streaming. The tier Raft FSM's OnUpload callback registers the
 // chunk in each follower's cloud index (see wireTierFSMOnUpload).
-func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
+func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, targets []system.ReplicationTarget) {
 	if o.transferrer == nil || len(targets) == 0 {
 		return
 	}
@@ -139,7 +139,7 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 
 // replicateToTarget sends a sealed chunk to one target. Same-node targets
 // use local ImportToTierStorage; cross-node targets use gRPC.
-func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) {
+func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager, tgt system.ReplicationTarget) {
 	if tgt.NodeID == o.localNodeID {
 		if err := o.replicateLocally(ctx, vaultID, tierID, tgt.StorageID, chunkID, sourceCM); err != nil {
 			o.logger.Warn("replication: local copy failed",
@@ -166,7 +166,7 @@ func (o *Orchestrator) replicateToTarget(ctx context.Context, vaultID, tierID uu
 // replicateLocally copies a sealed chunk to a different storage-specific
 // tier instance on the same node. Opens a cursor on the source, then
 // imports into the target via ImportToTierStorage.
-func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID uuid.UUID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
+func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID glid.GLID, storageID string, chunkID chunk.ChunkID, sourceCM chunk.ChunkManager) error {
 	cursor, err := sourceCM.OpenCursor(chunkID)
 	if err != nil {
 		return fmt.Errorf("open cursor: %w", err)
@@ -180,7 +180,7 @@ func (o *Orchestrator) replicateLocally(ctx context.Context, vaultID, tierID uui
 // replicateToFollower streams a single sealed chunk to one follower node.
 // Validates that the chunk is readable before opening the network stream —
 // corrupted chunks fail fast without touching the wire.
-func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
+func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, cm chunk.ChunkManager, nodeID string) error {
 	if o.tierReplicator == nil {
 		return errors.New("replicateToFollower: tier replicator not configured")
 	}

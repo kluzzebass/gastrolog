@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,7 +18,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/home"
 
-	"github.com/google/uuid"
 )
 
 const maxUploadSize = 256 << 20 // 256 MB
@@ -147,7 +147,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 		}
 	}
 
-	fileID := uuid.Must(uuid.NewV7())
+	fileID := glid.New()
 	hd := home.New(s.homeDir)
 	fileDir := hd.ManagedFileDir(fileID.String())
 	if err := os.MkdirAll(fileDir, 0o750); err != nil { //nolint:gosec // G703: fileDir from trusted home + UUID

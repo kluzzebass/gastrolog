@@ -1,12 +1,12 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
@@ -23,7 +23,7 @@ func (s *SystemServer) PutVault(
 		return nil, errRequired("config")
 	}
 	if req.Msg.Config.Id == "" {
-		req.Msg.Config.Id = uuid.Must(uuid.NewV7()).String()
+		req.Msg.Config.Id = glid.New().String()
 	}
 	if req.Msg.Config.Name == "" {
 		return nil, errRequired("name")
@@ -39,7 +39,7 @@ func (s *SystemServer) PutVault(
 	if err != nil {
 		return nil, errInternal(err)
 	}
-	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v system.VaultConfig) (uuid.UUID, string) { return v.ID, v.Name }); connErr != nil {
+	if connErr := checkNameConflict("vault", vaultCfg.ID, vaultCfg.Name, vaults, func(v system.VaultConfig) (glid.GLID, string) { return v.ID, v.Name }); connErr != nil {
 		return nil, connErr
 	}
 
@@ -126,14 +126,14 @@ func (s *SystemServer) DeleteVault(
 	return connect.NewResponse(&apiv1.DeleteVaultResponse{System: cfg}), nil
 }
 
-func (s *SystemServer) forceDeleteVault(id uuid.UUID) error {
+func (s *SystemServer) forceDeleteVault(id glid.GLID) error {
 	if err := s.orch.ForceRemoveVault(id); err != nil && !errors.Is(err, orchestrator.ErrVaultNotFound) {
 		return errInternal(err)
 	}
 	return nil
 }
 
-func (s *SystemServer) removeVault(id uuid.UUID) error {
+func (s *SystemServer) removeVault(id glid.GLID) error {
 	err := s.orch.RemoveVault(id)
 	if err == nil {
 		return nil
@@ -226,7 +226,7 @@ func (s *SystemServer) ResumeVault(
 
 // protoToVaultConfig converts a proto VaultConfig to a system.VaultConfig.
 func protoToVaultConfig(p *apiv1.VaultConfig) (system.VaultConfig, error) {
-	id, err := uuid.Parse(p.Id)
+	id, err := glid.ParseUUID(p.Id)
 	if err != nil {
 		return system.VaultConfig{}, fmt.Errorf("invalid vault ID: %w", err)
 	}

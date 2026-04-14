@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -22,7 +23,6 @@ import (
 	"gastrolog/internal/raftgroup"
 	tierfsm "gastrolog/internal/tier/raftfsm"
 
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -91,7 +91,7 @@ func (o *Orchestrator) AddVault(ctx context.Context, vaultCfg system.VaultConfig
 // (rotationSweep and retentionSweepAll). No per-tier setup needed during AddVault.
 
 // findTierConfig finds a TierConfig by ID in a slice.
-func findTierConfig(tiers []system.TierConfig, id uuid.UUID) *system.TierConfig {
+func findTierConfig(tiers []system.TierConfig, id glid.GLID) *system.TierConfig {
 	for i := range tiers {
 		if tiers[i].ID == id {
 			return &tiers[i]
@@ -100,7 +100,7 @@ func findTierConfig(tiers []system.TierConfig, id uuid.UUID) *system.TierConfig 
 	return nil
 }
 
-func findVaultConfig(vaults []system.VaultConfig, id uuid.UUID) *system.VaultConfig {
+func findVaultConfig(vaults []system.VaultConfig, id glid.GLID) *system.VaultConfig {
 	for i := range vaults {
 		if vaults[i].ID == id {
 			return &vaults[i]
@@ -155,7 +155,7 @@ func resolveRetentionRulesFromTier(cfg *system.Config, vaultCfg system.VaultConf
 // RemoveVault removes a vault if it's empty (no chunks with data).
 // Returns ErrVaultNotFound if the vault doesn't exist.
 // Returns ErrVaultNotEmpty if the vault has any chunks.
-func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
+func (o *Orchestrator) RemoveVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -186,7 +186,7 @@ func (o *Orchestrator) RemoveVault(id uuid.UUID) error {
 
 // removeVaultJobs removes retention runners and cron rotation jobs for a vault
 // without closing managers or unregistering. Used by UnregisterVault and drain.
-func (o *Orchestrator) removeVaultJobs(id uuid.UUID, vault *Vault) {
+func (o *Orchestrator) removeVaultJobs(id glid.GLID, vault *Vault) {
 	for _, tier := range vault.Tiers {
 		delete(o.retention, retentionKey(tier.TierID, tier.StorageID))
 	}
@@ -195,7 +195,7 @@ func (o *Orchestrator) removeVaultJobs(id uuid.UUID, vault *Vault) {
 
 // teardownVault performs the common cleanup for all vault removal paths:
 // cancels pending jobs, closes managers, removes from registry, rebuilds filters.
-func (o *Orchestrator) teardownVault(id uuid.UUID, vault *Vault) {
+func (o *Orchestrator) teardownVault(id glid.GLID, vault *Vault) {
 	// Cancel pending post-seal/compress/index jobs to prevent use-after-close.
 	vaultPrefix := id.String()
 	o.scheduler.RemoveJobsByPrefix("post-seal:" + vaultPrefix)
@@ -220,7 +220,7 @@ func (o *Orchestrator) teardownVault(id uuid.UUID, vault *Vault) {
 // DisableVault disables ingestion for a vault.
 // Disabled vaults will not receive new records from the ingest pipeline.
 // Returns ErrVaultNotFound if the vault doesn't exist.
-func (o *Orchestrator) DisableVault(id uuid.UUID) error {
+func (o *Orchestrator) DisableVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -236,7 +236,7 @@ func (o *Orchestrator) DisableVault(id uuid.UUID) error {
 
 // EnableVault enables ingestion for a vault.
 // Returns ErrVaultNotFound if the vault doesn't exist.
-func (o *Orchestrator) EnableVault(id uuid.UUID) error {
+func (o *Orchestrator) EnableVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -251,7 +251,7 @@ func (o *Orchestrator) EnableVault(id uuid.UUID) error {
 }
 
 // IsVaultEnabled returns whether ingestion is enabled for the given vault.
-func (o *Orchestrator) IsVaultEnabled(id uuid.UUID) bool {
+func (o *Orchestrator) IsVaultEnabled(id glid.GLID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	if vault := o.vaults[id]; vault != nil {
@@ -264,7 +264,7 @@ func (o *Orchestrator) IsVaultEnabled(id uuid.UUID) bool {
 // It seals the active chunk if present, deletes all indexes and chunks,
 // closes the chunk manager, and cleans up all associated resources.
 // Returns ErrVaultNotFound if the vault doesn't exist.
-func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
+func (o *Orchestrator) ForceRemoveVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -310,7 +310,7 @@ func (o *Orchestrator) ForceRemoveVault(id uuid.UUID) error {
 
 // DeleteTierData deletes all chunks and indexes for a tier, then removes the
 // data directory. Called when a tier is deleted with delete_data=true.
-func (o *Orchestrator) DeleteTierData(tierID uuid.UUID) {
+func (o *Orchestrator) DeleteTierData(tierID glid.GLID) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -329,7 +329,7 @@ func (o *Orchestrator) DeleteTierData(tierID uuid.UUID) {
 // sealAndDeleteAllChunks seals the active chunk (if any), then deletes all
 // chunks and their indexes. Returns the number of chunks found. Errors are
 // logged with the given prefix but do not abort the cleanup.
-func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tierID uuid.UUID) int {
+func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tierID glid.GLID) int {
 	if active := tier.Chunks.Active(); active != nil {
 		if err := tier.Chunks.Seal(); err != nil {
 			o.logger.Warn(op+": seal failed", "tier", tierID, "error", err)
@@ -357,7 +357,7 @@ func (o *Orchestrator) sealAndDeleteAllChunks(tier *TierInstance, op string, tie
 // data (chunks + indexes), closes its managers, and cleans up retention/rotation
 // jobs. Used when this node loses ownership of a tier (rebalancing, RF reduction).
 // Returns true if a tier was removed.
-func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
+func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID glid.GLID) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -428,14 +428,14 @@ func (o *Orchestrator) RemoveTierFromVault(vaultID, tierID uuid.UUID) bool {
 // Called by the dispatch handler during tier deletion cleanup so that non-storage
 // nodes (which have no TierInstance but do participate in the tier Raft group)
 // can cleanly stop the leader loop before the group is destroyed.
-func (o *Orchestrator) StopTierLeaderLoop(tierID uuid.UUID) {
+func (o *Orchestrator) StopTierLeaderLoop(tierID glid.GLID) {
 	o.tierLeaders.Stop(tierID)
 }
 
 // AddTierToVault builds a single tier instance and adds it to an existing vault
 // without tearing down any other tiers. This is the incremental counterpart to
 // RemoveTierFromVault.
-func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.UUID, factories Factories) error {
+func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID glid.GLID, factories Factories) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
@@ -529,7 +529,7 @@ func (o *Orchestrator) AddTierToVault(ctx context.Context, vaultID, tierID uuid.
 // and indexes are left intact in storage. This is the correct operation for
 // cloud vault reassignment — the data lives in shared object storage and the
 // new node will open a fresh Manager pointing to the same bucket.
-func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
+func (o *Orchestrator) UnregisterVault(id glid.GLID) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -562,7 +562,7 @@ func (o *Orchestrator) UnregisterVault(id uuid.UUID) error {
 
 // VaultConfig returns the effective configuration for a vault.
 // This is useful for API responses and debugging.
-func (o *Orchestrator) VaultConfig(id uuid.UUID) (system.VaultConfig, error) {
+func (o *Orchestrator) VaultConfig(id glid.GLID) (system.VaultConfig, error) {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 
@@ -582,7 +582,7 @@ func (o *Orchestrator) VaultConfig(id uuid.UUID) (system.VaultConfig, error) {
 //
 // For rotation policy changes, use ChunkManager(id).SetRotationPolicy(policy)
 // directly with a composed policy object.
-func (o *Orchestrator) UpdateVaultFilter(id uuid.UUID, filter string) error {
+func (o *Orchestrator) UpdateVaultFilter(id glid.GLID, filter string) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -682,7 +682,7 @@ func (o *Orchestrator) buildTierInstances(sys *system.System, vaultCfg system.Va
 // failed to initialize during vault build. The tier is skipped but the
 // vault continues with its remaining tiers. The failed tier will be
 // retried on the next reconfig cycle. See gastrolog-68fqk.
-func (o *Orchestrator) alertTierInitFailed(tierID uuid.UUID, tierName string, err error) {
+func (o *Orchestrator) alertTierInitFailed(tierID glid.GLID, tierName string, err error) {
 	o.logger.Warn("buildTierInstances: tier init failed, skipping",
 		"tier", tierID, "name", tierName, "error", err)
 	if o.alerts != nil {
@@ -932,7 +932,7 @@ func findFileStorageByID(rt *system.Runtime, storageID string) *system.FileStora
 }
 
 // applyRotationPolicy resolves and applies a rotation policy to a chunk manager.
-func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicyConfig, policyID *uuid.UUID) error {
+func applyRotationPolicy(cm chunk.ChunkManager, policies []system.RotationPolicyConfig, policyID *glid.GLID) error {
 	if policyID == nil {
 		return nil
 	}
@@ -1277,7 +1277,7 @@ func (o *Orchestrator) buildTierRaftMembers(clusterNodes []system.NodeConfig, fa
 
 // setDesiredTierLeader tells the tier leader manager which node the placement
 // manager assigned as the leader. Uses the factories' resolver.
-func (o *Orchestrator) setDesiredTierLeader(tierID uuid.UUID, leaderNodeID string, factories Factories) {
+func (o *Orchestrator) setDesiredTierLeader(tierID glid.GLID, leaderNodeID string, factories Factories) {
 	if leaderNodeID == "" || factories.NodeAddressResolver == nil {
 		return
 	}
@@ -1293,7 +1293,7 @@ func (o *Orchestrator) setDesiredTierLeader(tierID uuid.UUID, leaderNodeID strin
 
 // SetDesiredTierLeader is the exported version for use by the dispatch handler.
 // Uses the stored node address resolver from ApplyConfig.
-func (o *Orchestrator) SetDesiredTierLeader(tierID uuid.UUID, leaderNodeID string) {
+func (o *Orchestrator) SetDesiredTierLeader(tierID glid.GLID, leaderNodeID string) {
 	if leaderNodeID == "" || o.nodeAddrResolver == nil {
 		return
 	}
@@ -1408,7 +1408,7 @@ func findLocalFileStorage(rt *system.Runtime, nodeID string, storageClass uint32
 }
 
 // findCloudService finds a CloudService by ID in the system.
-func findCloudService(cfg *system.Config, id uuid.UUID) *system.CloudService {
+func findCloudService(cfg *system.Config, id glid.GLID) *system.CloudService {
 	for i := range cfg.CloudServices {
 		if cfg.CloudServices[i].ID == id {
 			return &cfg.CloudServices[i]

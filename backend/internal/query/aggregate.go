@@ -1,6 +1,7 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"errors"
 	"fmt"
 	"maps"
@@ -13,7 +14,6 @@ import (
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
 
-	"github.com/google/uuid"
 )
 
 // MaxGroupCardinality limits the number of distinct groups to prevent memory exhaustion.
@@ -51,7 +51,7 @@ func RecordToRow(rec chunk.Record) querylang.Row {
 	maps.Copy(row, rec.Attrs) // attrs take precedence over extracted fields
 	row["raw"] = string(rec.Raw)
 	// Expose EventID fields for expressions and stats grouping.
-	if rec.EventID.IngesterID != (uuid.UUID{}) {
+	if rec.EventID.IngesterID != (glid.GLID{}) {
 		row["ingester_id"] = rec.EventID.IngesterID.String()
 	}
 	row["ingest_seq"] = strconv.FormatUint(uint64(rec.EventID.IngestSeq), 10)

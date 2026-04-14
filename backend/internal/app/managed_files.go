@@ -1,6 +1,7 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"log/slog"
 	"os"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/home"
 
-	"github.com/google/uuid"
 )
 
 const (
@@ -37,7 +37,7 @@ type managedFileManager struct {
 var _ ManagedFileHandler = (*managedFileManager)(nil)
 
 // OnPut checks if the file exists locally; if not, starts an async pull from a peer.
-func (m *managedFileManager) OnPut(_ context.Context, fileID uuid.UUID) {
+func (m *managedFileManager) OnPut(_ context.Context, fileID glid.GLID) {
 	fid := fileID.String()
 	if m.fileExists(fid) {
 		return // already have it (we're the uploader)
@@ -48,7 +48,7 @@ func (m *managedFileManager) OnPut(_ context.Context, fileID uuid.UUID) {
 }
 
 // OnDelete removes the managed file from local disk.
-func (m *managedFileManager) OnDelete(fileID uuid.UUID) {
+func (m *managedFileManager) OnDelete(fileID glid.GLID) {
 	if m.homeDir == "" {
 		return
 	}

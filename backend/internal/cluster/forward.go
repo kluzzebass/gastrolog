@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"io"
@@ -11,7 +12,6 @@ import (
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -19,11 +19,11 @@ import (
 
 // RecordAppender appends a single record to a local vault.
 // Used by the ForwardRecords handler to write received records.
-type RecordAppender func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error
+type RecordAppender func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error
 
 // RecordTierAppender appends a single record to a specific tier in a local vault.
 // Used by the ForwardRecords handler when tier_id is set (inter-tier transition).
-type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
+type RecordTierAppender func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error
 
 
 // SearchExecutor runs a search on a local vault and returns results.
@@ -34,58 +34,58 @@ type RecordTierAppender func(ctx context.Context, vaultID, tierID uuid.UUID, pri
 // Used by the ForwardSearch handler to serve remote search requests.
 // The resumeToken parameter allows resuming a paginated search. The returned
 // getToken function returns a resume token for the next page (nil if exhausted).
-type SearchExecutor func(ctx context.Context, vaultID uuid.UUID, queryExpr string, resumeToken []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
+type SearchExecutor func(ctx context.Context, vaultID glid.GLID, queryExpr string, resumeToken []byte) (iter.Seq2[chunk.Record, error], func() []byte, *gastrologv1.TableResult, []*gastrologv1.HistogramBucket, error)
 
 // ContextExecutor fetches records surrounding a specific position in a local vault.
 // Used by the ForwardGetContext handler to serve remote context requests.
-type ContextExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error)
+type ContextExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64, before, after int) ([]chunk.Record, chunk.Record, []chunk.Record, error)
 
 // ListChunksExecutor lists chunks in a local vault for remote requests.
-type ListChunksExecutor func(ctx context.Context, vaultID uuid.UUID) ([]*gastrologv1.ChunkMeta, error)
+type ListChunksExecutor func(ctx context.Context, vaultID glid.GLID) ([]*gastrologv1.ChunkMeta, error)
 
 // GetIndexesExecutor returns index status for a chunk in a local vault.
-type GetIndexesExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error)
+type GetIndexesExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.GetIndexesResponse, error)
 
 // ValidateVaultExecutor validates a local vault and returns the result.
-type ValidateVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (*gastrologv1.ValidateVaultResponse, error)
+type ValidateVaultExecutor func(ctx context.Context, vaultID glid.GLID) (*gastrologv1.ValidateVaultResponse, error)
 
 // ExplainExecutor returns the explain plan for local vaults matching the query.
 // Used by the ForwardExplain handler to serve remote explain requests.
-type ExplainExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error)
+type ExplainExecutor func(ctx context.Context, vaultIDs []glid.GLID, queryExpr string) ([]*gastrologv1.ChunkPlan, int32, error)
 
 // FollowExecutor runs a follow (tail -f) on local vaults for a remote request.
 // Returns an iterator that yields new records as they arrive. The caller is
 // responsible for cancelling the context to stop the follow.
-type FollowExecutor func(ctx context.Context, vaultIDs []uuid.UUID, queryExpr string) (iter.Seq2[chunk.Record, error], error)
+type FollowExecutor func(ctx context.Context, vaultIDs []glid.GLID, queryExpr string) (iter.Seq2[chunk.Record, error], error)
 
 // GetChunkExecutor returns details for a specific chunk in a local vault.
-type GetChunkExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error)
+type GetChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID chunk.ChunkID) (*gastrologv1.ChunkMeta, error)
 
 // AnalyzeChunkExecutor runs index analysis on a local vault (or specific chunk).
-type AnalyzeChunkExecutor func(ctx context.Context, vaultID uuid.UUID, chunkID string) ([]*gastrologv1.ChunkAnalysis, error)
+type AnalyzeChunkExecutor func(ctx context.Context, vaultID glid.GLID, chunkID string) ([]*gastrologv1.ChunkAnalysis, error)
 
 // SealVaultExecutor seals the active chunk of a local vault.
-type SealVaultExecutor func(ctx context.Context, vaultID uuid.UUID) error
+type SealVaultExecutor func(ctx context.Context, vaultID glid.GLID) error
 
 // ReindexVaultExecutor rebuilds all indexes for a local vault.
-type ReindexVaultExecutor func(ctx context.Context, vaultID uuid.UUID) (string, error)
+type ReindexVaultExecutor func(ctx context.Context, vaultID glid.GLID) (string, error)
 
 // ExportToVaultExecutor runs an export-to-vault job on a local vault.
 // Returns the job ID.
-type ExportToVaultExecutor func(ctx context.Context, expression string, targetVaultID uuid.UUID) (string, error)
+type ExportToVaultExecutor func(ctx context.Context, expression string, targetVaultID glid.GLID) (string, error)
 
 // RecordImporter imports records as a new sealed chunk in a vault.
 // Used by the ForwardImportRecords handler for cross-node chunk migration.
-type RecordImporter func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error
+type RecordImporter func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error
 
 // TierRecordImporter imports records as a sealed chunk in a specific tier,
 // preserving the original chunk ID. Used for sealed-chunk replication.
-type TierRecordImporter func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
+type TierRecordImporter func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error
 
 // TierStreamAppender appends streamed records to a tier's active chunk.
 // Used for tier transitions — records flow into the destination tier like
 // normal ingestion. The tier's rotation policy handles sealing.
-type TierStreamAppender func(ctx context.Context, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error
+type TierStreamAppender func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error
 
 // ManagedFileReader opens a managed file for streaming to a peer.
 // Returns the original filename, a ReadCloser for the content, and the SHA256 hex hash.
@@ -96,18 +96,18 @@ type ManagedFileIDsLister func() []string
 
 // ── ID parse helpers ────────────────────────────────────────────────
 
-func parseVaultID(raw string) (uuid.UUID, error) {
-	id, err := uuid.Parse(raw)
+func parseVaultID(raw string) (glid.GLID, error) {
+	id, err := glid.ParseUUID(raw)
 	if err != nil {
-		return uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
+		return glid.Nil, status.Errorf(codes.InvalidArgument, "invalid vault_id: %v", err)
 	}
 	return id, nil
 }
 
-func parseTierID(raw string) (uuid.UUID, error) {
-	id, err := uuid.Parse(raw)
+func parseTierID(raw string) (glid.GLID, error) {
+	id, err := glid.ParseUUID(raw)
 	if err != nil {
-		return uuid.Nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
+		return glid.Nil, status.Errorf(codes.InvalidArgument, "invalid tier_id: %v", err)
 	}
 	return id, nil
 }
@@ -273,7 +273,7 @@ func streamForwardRecordsHandler(srv any, stream grpc.ServerStream) error {
 			return err
 		}
 
-		vaultID, err := uuid.Parse(msg.GetVaultId())
+		vaultID, err := glid.ParseUUID(msg.GetVaultId())
 		if err != nil {
 			continue
 		}
@@ -329,7 +329,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 	// StreamToTier for tier transitions). Empty tier_id means the import
 	// creates a new sealed chunk in the vault (used by TransferRecords for
 	// cross-node chunk migration).
-	var tierID uuid.UUID
+	var tierID glid.GLID
 	if first.GetTierId() != "" {
 		tierID, err = parseTierID(first.GetTierId())
 		if err != nil {
@@ -365,7 +365,7 @@ func forwardImportRecordsStreamHandler(srv any, stream grpc.ServerStream) error 
 		return convert.ExportToRecord(msg.GetRecord()), nil
 	})
 
-	if tierID != uuid.Nil && s.tierStreamAppender != nil {
+	if tierID != glid.Nil && s.tierStreamAppender != nil {
 		if err := s.tierStreamAppender(stream.Context(), vaultID, tierID, next); err != nil {
 			return status.Errorf(codes.Internal, "tier stream append: %v", err)
 		}
@@ -392,9 +392,9 @@ func forwardFollowStreamHandler(srv any, stream grpc.ServerStream) error {
 		return status.Errorf(codes.InvalidArgument, "receive request: %v", err)
 	}
 
-	vaultIDs := make([]uuid.UUID, 0, len(req.GetVaultIds()))
+	vaultIDs := make([]glid.GLID, 0, len(req.GetVaultIds()))
 	for _, raw := range req.GetVaultIds() {
-		id, err := uuid.Parse(raw)
+		id, err := glid.ParseUUID(raw)
 		if err != nil {
 			return status.Errorf(codes.InvalidArgument, "invalid vault_id %q: %v", raw, err)
 		}
@@ -649,7 +649,7 @@ func (s *Server) forwardSealVault(ctx context.Context, req *gastrologv1.ForwardS
 
 // SealTierExecutor seals a specific tier's active chunk on this node.
 // Invoked by the TierReplication stream handler.
-type SealTierExecutor func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+type SealTierExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
 // SetSealTierExecutor injects the callback for handling TierReplicationSeal commands.
 func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
@@ -658,7 +658,7 @@ func (s *Server) SetSealTierExecutor(fn SealTierExecutor) {
 
 // DeleteChunkExecutor deletes a specific sealed chunk from a tier on this node.
 // Invoked by the TierReplication stream handler.
-type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error
+type DeleteChunkExecutor func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error
 
 // SetDeleteChunkExecutor injects the callback for handling TierReplicationDelete commands.
 func (s *Server) SetDeleteChunkExecutor(fn DeleteChunkExecutor) {
@@ -688,7 +688,7 @@ func (s *Server) forwardExportToVault(ctx context.Context, req *gastrologv1.Forw
 	if s.exportToVaultExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "export to vault executor not configured")
 	}
-	vaultID, err := uuid.Parse(req.GetTargetVaultId())
+	vaultID, err := glid.ParseUUID(req.GetTargetVaultId())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid target_vault_id: %v", err)
 	}
@@ -705,9 +705,9 @@ func (s *Server) forwardExplain(ctx context.Context, req *gastrologv1.ForwardExp
 	if s.explainExecutor == nil {
 		return nil, status.Error(codes.Unavailable, "explain executor not configured")
 	}
-	vaultIDs := make([]uuid.UUID, 0, len(req.GetVaultIds()))
+	vaultIDs := make([]glid.GLID, 0, len(req.GetVaultIds()))
 	for _, vs := range req.GetVaultIds() {
-		vid, err := uuid.Parse(vs)
+		vid, err := glid.ParseUUID(vs)
 		if err != nil {
 			return nil, status.Errorf(codes.InvalidArgument, "invalid vault_id %q: %v", vs, err)
 		}

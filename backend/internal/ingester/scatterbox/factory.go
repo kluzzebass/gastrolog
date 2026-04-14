@@ -1,12 +1,12 @@
 package scatterbox
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"log/slog"
 	"strconv"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -33,7 +33,7 @@ func ParamDefaults() map[string]string {
 //
 // At the default settings, scatterbox emits 10 records/sec.
 // Set interval=1ms burst=1 for 1000 records/sec.
-func NewIngester(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+func NewIngester(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 	interval := defaultInterval
 	burst := defaultBurst
 

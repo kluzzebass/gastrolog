@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"io"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // newMinimalForwarder constructs a RecordForwarder without calling
@@ -65,7 +65,7 @@ func manualStartNode(rf *RecordForwarder, nodeID string) *nodeForwarder {
 	return nf
 }
 
-func fillChannel(t *testing.T, nf *nodeForwarder, vaultID uuid.UUID) {
+func fillChannel(t *testing.T, nf *nodeForwarder, vaultID glid.GLID) {
 	t.Helper()
 	for len(nf.ch) < cap(nf.ch) {
 		nf.ch <- forwardEntry{vaultID: vaultID, record: chunk.Record{Raw: []byte("fill")}}
@@ -79,7 +79,7 @@ func TestForwardSyncBlocksUntilSpace(t *testing.T) {
 	rf := newMinimalForwarder(t)
 
 	nodeID := "test-node-block"
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	nf := manualStartNode(rf, nodeID)
 	fillChannel(t, nf, vaultID)
 
@@ -121,7 +121,7 @@ func TestForwardSyncRespectsContextCancel(t *testing.T) {
 	rf := newMinimalForwarder(t)
 
 	nodeID := "test-node-ctx"
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	nf := manualStartNode(rf, nodeID)
 	fillChannel(t, nf, vaultID)
 
@@ -146,7 +146,7 @@ func TestForwardSyncAcceptsWhenSpaceAvailable(t *testing.T) {
 	rf := newMinimalForwarder(t)
 
 	nodeID := "test-node-ok"
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	nf := manualStartNode(rf, nodeID)
 
 	err := rf.ForwardSync(context.Background(), nodeID, vaultID, []chunk.Record{
@@ -171,7 +171,7 @@ func TestForwardSyncErrorsWhenClosed(t *testing.T) {
 	close(rf.stop)
 	rf.mu.Unlock()
 
-	err := rf.ForwardSync(context.Background(), "node", uuid.New(), []chunk.Record{
+	err := rf.ForwardSync(context.Background(), "node", glid.New(), []chunk.Record{
 		{Raw: []byte("post-close")},
 	})
 	if err == nil {
@@ -195,8 +195,8 @@ func TestRegisterPressureGateAddsExistingNodes(t *testing.T) {
 	rf.RegisterPressureGate(gate)
 
 	// Fill both channels to capacity.
-	fillChannel(t, nfA, uuid.New())
-	fillChannel(t, nfB, uuid.New())
+	fillChannel(t, nfA, glid.New())
+	fillChannel(t, nfB, glid.New())
 
 	// One tick at 200ms interval — wait ~350ms for it to run once.
 	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
@@ -220,7 +220,7 @@ func TestRegisterPressureGateAddsFutureNodes(t *testing.T) {
 
 	// Create the node AFTER the gate is registered.
 	nf := manualStartNode(rf, "late-peer")
-	fillChannel(t, nf, uuid.New())
+	fillChannel(t, nf, glid.New())
 
 	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
 	defer cancel()

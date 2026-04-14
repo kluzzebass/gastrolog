@@ -1,13 +1,13 @@
 package convert
 
 import (
+	"gastrolog/internal/glid"
 	"testing"
 	"time"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -21,7 +21,7 @@ func fullyPopulatedRecord() chunk.Record {
 		IngestTS: time.Date(2025, 6, 15, 10, 30, 1, 0, time.UTC),
 		WriteTS:  time.Date(2025, 6, 15, 10, 30, 2, 0, time.UTC),
 		EventID: chunk.EventID{
-			IngesterID: uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			IngesterID: glid.MustParse("11111111-1111-1111-1111-111111111111"),
 			IngestSeq:  42,
 			IngestTS:   time.Date(2025, 6, 15, 10, 30, 1, 0, time.UTC),
 		},
@@ -30,10 +30,10 @@ func fullyPopulatedRecord() chunk.Record {
 			"level": "error",
 		},
 		Ref: chunk.RecordRef{
-			ChunkID: chunk.ChunkID(uuid.MustParse("22222222-2222-2222-2222-222222222222")),
+			ChunkID: chunk.ChunkID(glid.MustParse("22222222-2222-2222-2222-222222222222")),
 			Pos:     99,
 		},
-		VaultID: uuid.MustParse("33333333-3333-3333-3333-333333333333"),
+		VaultID: glid.MustParse("33333333-3333-3333-3333-333333333333"),
 	}
 }
 
@@ -85,7 +85,7 @@ func TestRecordToExport_AllFields(t *testing.T) {
 	if er.IngestSeq != rec.EventID.IngestSeq {
 		t.Errorf("IngestSeq: got %d, want %d", er.IngestSeq, rec.EventID.IngestSeq)
 	}
-	var gotIngesterID uuid.UUID
+	var gotIngesterID glid.GLID
 	copy(gotIngesterID[:], er.IngesterId)
 	if gotIngesterID != rec.EventID.IngesterID {
 		t.Errorf("IngesterId: got %x, want %x", er.IngesterId, rec.EventID.IngesterID[:])
@@ -123,7 +123,7 @@ func TestExportToRecord_AllFields(t *testing.T) {
 	if rec.EventID.IngestSeq != er.IngestSeq {
 		t.Errorf("IngestSeq: got %d, want %d", rec.EventID.IngestSeq, er.IngestSeq)
 	}
-	if rec.EventID.IngesterID != uuid.MustParse("11111111-1111-1111-1111-111111111111") {
+	if rec.EventID.IngesterID != glid.MustParse("11111111-1111-1111-1111-111111111111") {
 		t.Errorf("IngesterID: got %v, want 11111111-...", rec.EventID.IngesterID)
 	}
 	if rec.EventID.IngestTS != rec.IngestTS {
@@ -244,8 +244,8 @@ func TestExportToRecord_ZeroExportRecord(t *testing.T) {
 	if !rec.WriteTS.IsZero() {
 		t.Error("nil WriteTs should produce zero WriteTS")
 	}
-	if rec.VaultID != uuid.Nil {
-		t.Errorf("empty VaultId should produce uuid.Nil, got %v", rec.VaultID)
+	if rec.VaultID != glid.Nil {
+		t.Errorf("empty VaultId should produce glid.Nil, got %v", rec.VaultID)
 	}
 	if rec.EventID.IngestSeq != 0 {
 		t.Errorf("IngestSeq: got %d, want 0", rec.EventID.IngestSeq)
@@ -288,7 +288,7 @@ func TestExportToRecord_ShortIngesterID(t *testing.T) {
 	}
 	rec := ExportToRecord(er)
 
-	if rec.EventID.IngesterID != (uuid.UUID{}) {
+	if rec.EventID.IngesterID != (glid.GLID{}) {
 		t.Errorf("short IngesterId should produce zero UUID, got %v", rec.EventID.IngesterID)
 	}
 	if rec.EventID.IngestSeq != 5 {

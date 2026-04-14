@@ -1,19 +1,19 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 	"slices"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/chunk"
 )
 
 // ContextRef identifies the anchor record.
 type ContextRef struct {
-	VaultID uuid.UUID
+	VaultID glid.GLID
 	ChunkID chunk.ChunkID
 	Pos     uint64
 }
@@ -26,7 +26,7 @@ type ContextResult struct {
 }
 
 // ReadRecord reads a single record by vault, chunk, and position.
-func (e *Engine) ReadRecord(_ context.Context, vaultID uuid.UUID, chunkID chunk.ChunkID, pos uint64) (chunk.Record, error) {
+func (e *Engine) ReadRecord(_ context.Context, vaultID glid.GLID, chunkID chunk.ChunkID, pos uint64) (chunk.Record, error) {
 	cm, _ := e.getVaultManagers(vaultID)
 	if cm == nil {
 		return chunk.Record{}, fmt.Errorf("vault %q: %w", vaultID, chunk.ErrVaultNotFound)

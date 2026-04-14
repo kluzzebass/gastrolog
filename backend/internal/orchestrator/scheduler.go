@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"github.com/google/uuid"
+	"gastrolog/internal/glid"
 	"cmp"
 	"context"
 	"fmt"
@@ -11,7 +13,6 @@ import (
 	"time"
 
 	"github.com/go-co-op/gocron/v2"
-	"github.com/google/uuid"
 )
 
 // JobStatus represents the lifecycle state of a job.
@@ -547,7 +548,7 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		s.logger.Error("failed to schedule job", "name", name, "error", err)
 		prog.Fail(s.now(), "failed to schedule: "+err.Error())
 		// Generate an ID for the failed job so the caller can still look it up.
-		failedID := uuid.Must(uuid.NewV7()).String()
+		failedID := glid.New().String()
 		s.completed[failedID] = JobInfo{
 			ID:          failedID,
 			Name:        name,

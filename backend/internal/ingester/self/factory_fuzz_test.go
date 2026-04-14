@@ -1,11 +1,11 @@
 package self
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"log/slog"
 	"testing"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/logging"
 )
@@ -16,7 +16,7 @@ func FuzzNewFactory(f *testing.F) {
 	// nil CaptureHandler and nil AlertCollector — the factory and
 	// drop monitor are guarded by nil checks.
 	factory := NewFactory(ch, nil, nil)
-	id := uuid.New()
+	id := glid.New()
 
 	// Seed: valid params.
 	f.Add([]byte("min_level\x00warn"))

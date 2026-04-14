@@ -1,23 +1,23 @@
 package cloud_test
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"io"
 	"os"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/chunk/cloud"
 )
 
-func testRecords() (chunk.ChunkID, uuid.UUID, []chunk.Record) {
+func testRecords() (chunk.ChunkID, glid.GLID, []chunk.Record) {
 	chunkID := chunk.NewChunkID()
-	vaultID := uuid.New()
-	ingesterID := uuid.New()
+	vaultID := glid.New()
+	ingesterID := glid.New()
 	now := time.Now().Truncate(time.Nanosecond)
 
 	records := []chunk.Record{
@@ -80,7 +80,7 @@ func assertRecord(t *testing.T, i int, got, want chunk.Record) {
 }
 
 // writeBlobToTempFile writes a blob to a temp file and returns it seeked to start.
-func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID uuid.UUID, records []chunk.Record) *os.File {
+func writeBlobToTempFile(t *testing.T, chunkID chunk.ChunkID, vaultID glid.GLID, records []chunk.Record) *os.File {
 	t.Helper()
 
 	enc, _ := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedDefault))
@@ -274,7 +274,7 @@ func TestSeekableCursor(t *testing.T) {
 
 func TestEmptyBlob(t *testing.T) {
 	chunkID := chunk.NewChunkID()
-	vaultID := uuid.New()
+	vaultID := glid.New()
 
 	tmp := writeBlobToTempFile(t, chunkID, vaultID, nil)
 
@@ -298,8 +298,8 @@ func TestEmptyBlob(t *testing.T) {
 // Mimics scatterbox: 17K records with sequential IngestTS.
 func TestLargeRoundTrip(t *testing.T) {
 	chunkID := chunk.NewChunkID()
-	vaultID := uuid.New()
-	ingesterID := uuid.New()
+	vaultID := glid.New()
+	ingesterID := glid.New()
 	base := time.Now().Truncate(time.Nanosecond)
 
 	const n = 17_000

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"log/slog"
@@ -11,7 +12,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 
-	"github.com/google/uuid"
 )
 
 // ---------- fake chunk manager ----------
@@ -135,7 +135,7 @@ func newRetentionRunner(cm chunk.ChunkManager, im index.IndexManager, policy chu
 	}
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: uuid.Must(uuid.NewV7()),
+		vaultID: glid.New(),
 		cm:      cm,
 		im:      im,
 		now:     time.Now,
@@ -310,8 +310,8 @@ func TestExpireChunkAppliesRaftDeleteBeforeLocal(t *testing.T) {
 	var raftApplied bool
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: uuid.Must(uuid.NewV7()),
-		tierID:  uuid.Must(uuid.NewV7()),
+		vaultID: glid.New(),
+		tierID:  glid.New(),
 		cm:      cm,
 		im:      im,
 		now:     time.Now,
@@ -344,8 +344,8 @@ func TestExpireChunkSkipsLocalOnRaftFailure(t *testing.T) {
 
 	r := &retentionRunner{
 		isLeader: true,
-		vaultID: uuid.Must(uuid.NewV7()),
-		tierID:  uuid.Must(uuid.NewV7()),
+		vaultID: glid.New(),
+		tierID:  glid.New(),
 		cm:      cm,
 		im:      im,
 		now:     time.Now,
@@ -541,9 +541,9 @@ func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
 func TestRetentionTargetRefreshesCmOnExistingRunner(t *testing.T) {
 	t.Parallel()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	policyID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	policyID := glid.New()
 
 	cm1 := &retentionFakeChunkManager{}
 	im1 := &retentionFakeIndexManager{}
@@ -632,7 +632,7 @@ func TestReconcileFollowerSkipsWhenFSMNotReady(t *testing.T) {
 	}
 
 	tier := &TierInstance{
-		TierID:     uuid.Must(uuid.NewV7()),
+		TierID:     glid.New(),
 		Chunks:     cm,
 		Indexes:    &retentionFakeIndexManager{},
 		// FSM not ready — manifest incomplete, unsafe to reconcile.
@@ -670,7 +670,7 @@ func TestReconcileFollowerDeletesOrphansWhenLeaderPresent(t *testing.T) {
 	im := &retentionFakeIndexManager{}
 
 	tier := &TierInstance{
-		TierID:       uuid.Must(uuid.NewV7()),
+		TierID:       glid.New(),
 		Chunks:       cm,
 		Indexes:      im,
 		IsFSMReady:   func() bool { return true },
@@ -706,7 +706,7 @@ func TestReconcileFollowerDeletesAllWhenManifestEmpty(t *testing.T) {
 
 	// FSM is ready but manifest is empty — all sealed chunks are orphans.
 	tier := &TierInstance{
-		TierID:       uuid.Must(uuid.NewV7()),
+		TierID:       glid.New(),
 		Chunks:       cm,
 		Indexes:      im,
 		IsFSMReady:   func() bool { return true },
@@ -738,7 +738,7 @@ func TestReconcileFollowerSkipsWhenNilCallbacks(t *testing.T) {
 	// IsFSMReady is nil — single-node/memory mode, no Raft group.
 	// Reconciliation should proceed (manifest is always authoritative locally).
 	tier := &TierInstance{
-		TierID:       uuid.Must(uuid.NewV7()),
+		TierID:       glid.New(),
 		Chunks:       cm,
 		ListManifest: func() []chunk.ChunkID { return []chunk.ChunkID{chunk.NewChunkID()} },
 	}

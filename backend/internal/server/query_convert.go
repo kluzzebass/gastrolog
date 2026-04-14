@@ -1,13 +1,13 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"maps"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -298,9 +298,9 @@ func ProtoToResumeToken(data []byte) (*query.ResumeToken, error) {
 
 	token := &query.ResumeToken{}
 	if len(protoToken.VaultTokens) > 0 {
-		token.VaultTokens = make(map[uuid.UUID][]byte, len(protoToken.VaultTokens))
+		token.VaultTokens = make(map[glid.GLID][]byte, len(protoToken.VaultTokens))
 		for vidStr, tokenData := range protoToken.VaultTokens {
-			vid, err := uuid.Parse(vidStr)
+			vid, err := glid.ParseUUID(vidStr)
 			if err != nil {
 				continue
 			}
@@ -332,7 +332,7 @@ func VaultTokenToPositions(data []byte) ([]query.MultiVaultPosition, error) {
 		if err != nil {
 			return nil, err
 		}
-		vaultID, err := uuid.Parse(pos.VaultId)
+		vaultID, err := glid.ParseUUID(pos.VaultId)
 		if err != nil {
 			return nil, err
 		}
@@ -386,12 +386,12 @@ func ResumeTokenToProto(token *query.ResumeToken) []byte {
 	// If there are raw Positions (from eng.Search local), serialize them
 	// as per-vault tokens grouped by vault ID.
 	if len(token.Positions) > 0 {
-		byVault := make(map[uuid.UUID][]query.MultiVaultPosition)
+		byVault := make(map[glid.GLID][]query.MultiVaultPosition)
 		for _, pos := range token.Positions {
 			byVault[pos.VaultID] = append(byVault[pos.VaultID], pos)
 		}
 		if token.VaultTokens == nil {
-			token.VaultTokens = make(map[uuid.UUID][]byte)
+			token.VaultTokens = make(map[glid.GLID][]byte)
 		}
 		for vid, positions := range byVault {
 			token.VaultTokens[vid] = PositionsToVaultToken(positions)

@@ -1,17 +1,17 @@
 package syslog
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"log/slog"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 func FuzzNewFactory(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	// Seed: valid params.
 	f.Add([]byte("udp_addr\x00:514\x00tcp_addr\x00:601"))

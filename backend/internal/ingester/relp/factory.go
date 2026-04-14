@@ -1,9 +1,9 @@
 package relp
 
 import (
+	"gastrolog/internal/glid"
 	"log/slog"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/cert"
 	"gastrolog/internal/orchestrator"
@@ -19,7 +19,7 @@ func ParamDefaults() map[string]string {
 // NewFactory returns an IngesterFactory for RELP ingesters.
 // The cert manager is used to resolve TLS certificate names.
 func NewFactory(certMgr *cert.Manager) orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		addr := params["addr"]
 		if addr == "" {
 			addr = ":2514" // RELP convention port

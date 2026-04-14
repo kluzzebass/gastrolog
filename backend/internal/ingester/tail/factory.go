@@ -1,13 +1,13 @@
 package tail
 
 import (
+	"gastrolog/internal/glid"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"path/filepath"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
@@ -22,7 +22,7 @@ func ParamDefaults() map[string]string {
 
 // NewFactory returns an IngesterFactory for file tail ingesters.
 func NewFactory() orchestrator.IngesterFactory {
-	return func(id uuid.UUID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
+	return func(id glid.GLID, params map[string]string, logger *slog.Logger) (orchestrator.Ingester, error) {
 		cfg, err := parseConfig(id.String(), params, logger)
 		if err != nil {
 			return nil, err

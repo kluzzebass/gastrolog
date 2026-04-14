@@ -1,6 +1,7 @@
 package self
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"log/slog"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/orchestrator"
 
-	"github.com/google/uuid"
 )
 
 // fakeAlerts is a local mock implementing orchestrator.AlertCollector.
@@ -63,7 +63,7 @@ func newTestIngester(t *testing.T) (*ingester, *logging.CaptureHandler, *fakeAle
 
 	alerts := &fakeAlerts{}
 	return &ingester{
-		id:        uuid.New().String(),
+		id:        glid.New().String(),
 		ch:        ch,
 		logger:    slog.New(inner),
 		capture:   capture,
@@ -214,7 +214,7 @@ func TestDropMonitorNilGuardedByRun(t *testing.T) {
 	inner := slog.NewTextHandler(io.Discard, nil)
 	capture := logging.NewCaptureHandler(inner, ch, nil)
 	ing := &ingester{
-		id:        uuid.New().String(),
+		id:        glid.New().String(),
 		ch:        ch,
 		logger:    slog.New(inner),
 		capture:   capture,

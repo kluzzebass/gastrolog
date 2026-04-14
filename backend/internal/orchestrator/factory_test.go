@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"log/slog"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -107,8 +107,8 @@ func (f *fakeIndexManager) BuildAdapter() chunk.ChunkIndexBuilder { return nil }
 
 // testVaultCfg creates a VaultConfig + TierConfig pair for tests.
 // tierType is the tier type (e.g., system.TierTypeMemory or "test").
-func testVaultCfg(vaultID uuid.UUID, tierType system.TierType) (system.VaultConfig, system.TierConfig) {
-	tierID := uuid.Must(uuid.NewV7())
+func testVaultCfg(vaultID glid.GLID, tierType system.TierType) (system.VaultConfig, system.TierConfig) {
+	tierID := glid.New()
 	return system.VaultConfig{
 			ID:      vaultID,
 			Enabled: true,
@@ -170,8 +170,8 @@ func TestApplyConfigVaultWithNoLocalTiers(t *testing.T) {
 		},
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{{ID: vaultID, Enabled: true}},
 		Tiers: []system.TierConfig{{
@@ -209,8 +209,8 @@ func TestApplyConfigVaults(t *testing.T) {
 		},
 	}
 
-	vault1ID := uuid.Must(uuid.NewV7())
-	vault2ID := uuid.Must(uuid.NewV7())
+	vault1ID := glid.New()
+	vault2ID := glid.New()
 	vc1, tc1 := testVaultCfg(vault1ID, system.TierTypeMemory)
 	vc2, tc2 := testVaultCfg(vault2ID, system.TierTypeMemory)
 
@@ -245,14 +245,14 @@ func TestApplyConfigIngesters(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
 			}},
 		},
 	}
 
-	recv1ID := uuid.Must(uuid.NewV7())
-	recv2ID := uuid.Must(uuid.NewV7())
+	recv1ID := glid.New()
+	recv2ID := glid.New()
 	cfg := &system.Config{
 		Ingesters: []system.IngesterConfig{
 			{ID: recv1ID, Type: "test", Enabled: true},
@@ -273,7 +273,7 @@ func TestApplyConfigIngesters(t *testing.T) {
 func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
@@ -296,7 +296,7 @@ func TestApplyConfigUnknownChunkManagerType(t *testing.T) {
 func TestApplyConfigUnknownIndexManagerType(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -327,7 +327,7 @@ func TestApplyConfigUnknownIngesterType(t *testing.T) {
 
 	cfg := &system.Config{
 		Ingesters: []system.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Enabled: true},
+			{ID: glid.New(), Enabled: true},
 		},
 	}
 
@@ -355,7 +355,7 @@ func TestApplyConfigDuplicateVaultID(t *testing.T) {
 		},
 	}
 
-	dupID := uuid.Must(uuid.NewV7())
+	dupID := glid.New()
 	vc1, tc1 := testVaultCfg(dupID, system.TierTypeMemory)
 	vc2 := vc1 // duplicate ID, same tier
 	cfg := &system.Config{
@@ -374,13 +374,13 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return &fakeIngester{}, nil
 			}},
 		},
 	}
 
-	dupIngID := uuid.Must(uuid.NewV7())
+	dupIngID := glid.New()
 	cfg := &system.Config{
 		Ingesters: []system.IngesterConfig{
 			{ID: dupIngID, Enabled: true},
@@ -397,7 +397,7 @@ func TestApplyConfigDuplicateIngesterID(t *testing.T) {
 func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -430,7 +430,7 @@ func TestApplyConfigChunkManagerFactoryError(t *testing.T) {
 func TestApplyConfigIndexManagerFactoryError(t *testing.T) {
 	orch := newTestOrch(t, Config{})
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	factories := Factories{
 		ChunkManagers: map[string]chunk.ManagerFactory{
@@ -465,7 +465,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				return nil, errors.New("factory error")
 			}},
 		},
@@ -473,7 +473,7 @@ func TestApplyConfigIngesterFactoryError(t *testing.T) {
 
 	cfg := &system.Config{
 		Ingesters: []system.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Enabled: true},
+			{ID: glid.New(), Enabled: true},
 		},
 	}
 
@@ -489,7 +489,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 	var receivedParams map[string]string
 	factories := Factories{
 		IngesterTypes: map[string]IngesterRegistration{
-			"test": {Factory: func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error) {
+			"test": {Factory: func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error) {
 				receivedParams = params
 				return &fakeIngester{}, nil
 			}},
@@ -498,7 +498,7 @@ func TestApplyConfigParamsPassedToIngesterFactory(t *testing.T) {
 
 	cfg := &system.Config{
 		Ingesters: []system.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Type: "test", Enabled: true, Params: map[string]string{
+			{ID: glid.New(), Type: "test", Enabled: true, Params: map[string]string{
 				"host": "localhost",
 				"port": "514",
 			}},
@@ -539,9 +539,9 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 		},
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	storageID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tierID := glid.New()
+	storageID := glid.New()
 
 	sys := &system.System{
 		Config: system.Config{
@@ -559,7 +559,7 @@ func TestApplyConfigParamsPassedToVaultFactories(t *testing.T) {
 					ID: storageID, StorageClass: 1, Name: "fast", Path: "/data/chunks",
 				}},
 			}},
-			TierPlacements: map[uuid.UUID][]system.TierPlacement{
+			TierPlacements: map[glid.GLID][]system.TierPlacement{
 				tierID: {{StorageID: storageID.String(), Leader: true}},
 			},
 		},
@@ -600,7 +600,7 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 		},
 	}
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	vc, tc := testVaultCfg(vaultID, system.TierTypeMemory)
 	cfg := &system.Config{
 		Vaults: []system.VaultConfig{vc},
@@ -624,9 +624,9 @@ func TestApplyConfigIndexManagerReceivesChunkManager(t *testing.T) {
 func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 	t.Parallel()
 
-	node1 := uuid.Must(uuid.NewV7())
-	node2 := uuid.Must(uuid.NewV7())
-	node3 := uuid.Must(uuid.NewV7())
+	node1 := glid.New()
+	node2 := glid.New()
+	node3 := glid.New()
 
 	clusterNodes := []system.NodeConfig{
 		{ID: node1, Name: "node-1"},
@@ -665,8 +665,8 @@ func TestBuildTierRaftMembers_AllClusterNodes(t *testing.T) {
 func TestBuildTierRaftMembers_UnresolvableNodeSkipped(t *testing.T) {
 	t.Parallel()
 
-	node1 := uuid.Must(uuid.NewV7())
-	node2 := uuid.Must(uuid.NewV7())
+	node1 := glid.New()
+	node2 := glid.New()
 
 	clusterNodes := []system.NodeConfig{
 		{ID: node1, Name: "node-1"},
@@ -701,7 +701,7 @@ func TestBuildTierRaftMembers_NilResolver(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{})
 	members := orch.buildTierRaftMembers(
-		[]system.NodeConfig{{ID: uuid.Must(uuid.NewV7())}},
+		[]system.NodeConfig{{ID: glid.New()}},
 		Factories{},
 	)
 	if len(members) != 0 {

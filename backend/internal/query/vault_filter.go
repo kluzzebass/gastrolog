@@ -1,11 +1,11 @@
 package query
 
 import (
+	"gastrolog/internal/glid"
 	"strings"
 
 	"gastrolog/internal/querylang"
 
-	"github.com/google/uuid"
 )
 
 // vaultKey is the reserved key for vault filtering.
@@ -23,7 +23,7 @@ const vaultKey = "vault_id"
 // Vault predicates at the top level (ANDed with other terms) are extracted.
 // Vault predicates inside OR branches or negated are left in place and
 // handled at runtime (though this is an unusual use case).
-func ExtractVaultFilter(expr querylang.Expr, allVaults []uuid.UUID) (vaults []uuid.UUID, remainingExpr querylang.Expr) {
+func ExtractVaultFilter(expr querylang.Expr, allVaults []glid.GLID) (vaults []glid.GLID, remainingExpr querylang.Expr) {
 	if expr == nil {
 		return nil, nil // nil means all vaults
 	}
@@ -36,9 +36,9 @@ func ExtractVaultFilter(expr querylang.Expr, allVaults []uuid.UUID) (vaults []uu
 	}
 
 	// Convert extracted string values to UUIDs.
-	vaults = make([]uuid.UUID, 0, len(extracted))
+	vaults = make([]glid.GLID, 0, len(extracted))
 	for s := range extracted {
-		id, err := uuid.Parse(s)
+		id, err := glid.ParseUUID(s)
 		if err != nil {
 			continue // skip unparseable values
 		}

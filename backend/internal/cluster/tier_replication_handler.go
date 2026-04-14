@@ -1,11 +1,11 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"io"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
@@ -43,11 +43,11 @@ func tierReplicationStreamHandler(srv any, stream grpc.ServerStream) error {
 }
 
 func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.TierReplicationCommand) *gastrologv1.TierReplicationAck {
-	vaultID, err := uuid.Parse(msg.GetVaultId())
+	vaultID, err := glid.ParseUUID(msg.GetVaultId())
 	if err != nil {
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "invalid vault_id: " + err.Error()}
 	}
-	tierID, err := uuid.Parse(msg.GetTierId())
+	tierID, err := glid.ParseUUID(msg.GetTierId())
 	if err != nil {
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "invalid tier_id: " + err.Error()}
 	}
@@ -66,7 +66,7 @@ func (s *Server) handleReplicationCommand(ctx context.Context, msg *gastrologv1.
 	}
 }
 
-func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID uuid.UUID, cmd *gastrologv1.TierReplicationAppend) *gastrologv1.TierReplicationAck {
+func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationAppend) *gastrologv1.TierReplicationAck {
 	if s.recordTierAppender == nil {
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "tier appender not configured"}
 	}
@@ -92,7 +92,7 @@ func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID uu
 	return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
-func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID uuid.UUID, cmd *gastrologv1.TierReplicationSeal) *gastrologv1.TierReplicationAck {
+func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationSeal) *gastrologv1.TierReplicationAck {
 	if s.sealTierExecutor == nil {
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "seal executor not configured"}
 	}
@@ -115,7 +115,7 @@ func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID uuid
 	return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
-func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID uuid.UUID, cmd *gastrologv1.TierReplicationImport) *gastrologv1.TierReplicationAck {
+func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationImport) *gastrologv1.TierReplicationAck {
 	if s.tierRecordImporter == nil {
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "tier importer not configured"}
 	}
@@ -151,7 +151,7 @@ func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID uu
 	return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
 }
 
-func (s *Server) handleReplicationDelete(ctx context.Context, vaultID, tierID uuid.UUID, cmd *gastrologv1.TierReplicationDelete) *gastrologv1.TierReplicationAck {
+func (s *Server) handleReplicationDelete(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationDelete) *gastrologv1.TierReplicationAck {
 	if s.deleteChunkExecutor == nil {
 		return &gastrologv1.TierReplicationAck{Ok: false, Error: "delete executor not configured"}
 	}

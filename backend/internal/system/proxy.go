@@ -1,12 +1,12 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 )
 
 // ErrJoining is returned by the proxy when a cluster join is in progress.
@@ -89,7 +89,7 @@ func (p *StoreProxy) Load(ctx context.Context) (*System, error) {
 	return p.inner.Load(ctx)
 }
 
-func (p *StoreProxy) GetFilter(ctx context.Context, id uuid.UUID) (*FilterConfig, error) {
+func (p *StoreProxy) GetFilter(ctx context.Context, id glid.GLID) (*FilterConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -116,7 +116,7 @@ func (p *StoreProxy) PutFilter(ctx context.Context, cfg FilterConfig) error {
 	return p.inner.PutFilter(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteFilter(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteFilter(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -125,7 +125,7 @@ func (p *StoreProxy) DeleteFilter(ctx context.Context, id uuid.UUID) error {
 	return p.inner.DeleteFilter(ctx, id)
 }
 
-func (p *StoreProxy) GetRotationPolicy(ctx context.Context, id uuid.UUID) (*RotationPolicyConfig, error) {
+func (p *StoreProxy) GetRotationPolicy(ctx context.Context, id glid.GLID) (*RotationPolicyConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -152,7 +152,7 @@ func (p *StoreProxy) PutRotationPolicy(ctx context.Context, cfg RotationPolicyCo
 	return p.inner.PutRotationPolicy(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteRotationPolicy(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -161,7 +161,7 @@ func (p *StoreProxy) DeleteRotationPolicy(ctx context.Context, id uuid.UUID) err
 	return p.inner.DeleteRotationPolicy(ctx, id)
 }
 
-func (p *StoreProxy) GetRetentionPolicy(ctx context.Context, id uuid.UUID) (*RetentionPolicyConfig, error) {
+func (p *StoreProxy) GetRetentionPolicy(ctx context.Context, id glid.GLID) (*RetentionPolicyConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -188,7 +188,7 @@ func (p *StoreProxy) PutRetentionPolicy(ctx context.Context, cfg RetentionPolicy
 	return p.inner.PutRetentionPolicy(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteRetentionPolicy(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -197,7 +197,7 @@ func (p *StoreProxy) DeleteRetentionPolicy(ctx context.Context, id uuid.UUID) er
 	return p.inner.DeleteRetentionPolicy(ctx, id)
 }
 
-func (p *StoreProxy) GetVault(ctx context.Context, id uuid.UUID) (*VaultConfig, error) {
+func (p *StoreProxy) GetVault(ctx context.Context, id glid.GLID) (*VaultConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -224,7 +224,7 @@ func (p *StoreProxy) PutVault(ctx context.Context, cfg VaultConfig) error {
 	return p.inner.PutVault(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteVault(ctx context.Context, id uuid.UUID, deleteData bool) error {
+func (p *StoreProxy) DeleteVault(ctx context.Context, id glid.GLID, deleteData bool) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -233,7 +233,7 @@ func (p *StoreProxy) DeleteVault(ctx context.Context, id uuid.UUID, deleteData b
 	return p.inner.DeleteVault(ctx, id, deleteData)
 }
 
-func (p *StoreProxy) GetIngester(ctx context.Context, id uuid.UUID) (*IngesterConfig, error) {
+func (p *StoreProxy) GetIngester(ctx context.Context, id glid.GLID) (*IngesterConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -260,7 +260,7 @@ func (p *StoreProxy) PutIngester(ctx context.Context, cfg IngesterConfig) error 
 	return p.inner.PutIngester(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteIngester(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteIngester(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -269,7 +269,7 @@ func (p *StoreProxy) DeleteIngester(ctx context.Context, id uuid.UUID) error {
 	return p.inner.DeleteIngester(ctx, id)
 }
 
-func (p *StoreProxy) GetRoute(ctx context.Context, id uuid.UUID) (*RouteConfig, error) {
+func (p *StoreProxy) GetRoute(ctx context.Context, id glid.GLID) (*RouteConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -296,7 +296,7 @@ func (p *StoreProxy) PutRoute(ctx context.Context, cfg RouteConfig) error {
 	return p.inner.PutRoute(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteRoute(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteRoute(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -305,7 +305,7 @@ func (p *StoreProxy) DeleteRoute(ctx context.Context, id uuid.UUID) error {
 	return p.inner.DeleteRoute(ctx, id)
 }
 
-func (p *StoreProxy) GetManagedFile(ctx context.Context, id uuid.UUID) (*ManagedFileConfig, error) {
+func (p *StoreProxy) GetManagedFile(ctx context.Context, id glid.GLID) (*ManagedFileConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -332,7 +332,7 @@ func (p *StoreProxy) PutManagedFile(ctx context.Context, cfg ManagedFileConfig) 
 	return p.inner.PutManagedFile(ctx, cfg)
 }
 
-func (p *StoreProxy) DeleteManagedFile(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteManagedFile(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -359,7 +359,7 @@ func (p *StoreProxy) SaveServerSettings(ctx context.Context, ss ServerSettings) 
 	return p.inner.SaveServerSettings(ctx, ss)
 }
 
-func (p *StoreProxy) GetNode(ctx context.Context, id uuid.UUID) (*NodeConfig, error) {
+func (p *StoreProxy) GetNode(ctx context.Context, id glid.GLID) (*NodeConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -386,7 +386,7 @@ func (p *StoreProxy) PutNode(ctx context.Context, node NodeConfig) error {
 	return p.inner.PutNode(ctx, node)
 }
 
-func (p *StoreProxy) DeleteNode(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteNode(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -413,7 +413,7 @@ func (p *StoreProxy) ListCertificates(ctx context.Context) ([]CertPEM, error) {
 	return p.inner.ListCertificates(ctx)
 }
 
-func (p *StoreProxy) GetCertificate(ctx context.Context, id uuid.UUID) (*CertPEM, error) {
+func (p *StoreProxy) GetCertificate(ctx context.Context, id glid.GLID) (*CertPEM, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -431,7 +431,7 @@ func (p *StoreProxy) PutCertificate(ctx context.Context, cert CertPEM) error {
 	return p.inner.PutCertificate(ctx, cert)
 }
 
-func (p *StoreProxy) DeleteCertificate(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteCertificate(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -449,7 +449,7 @@ func (p *StoreProxy) CreateUser(ctx context.Context, user User) error {
 	return p.inner.CreateUser(ctx, user)
 }
 
-func (p *StoreProxy) GetUser(ctx context.Context, id uuid.UUID) (*User, error) {
+func (p *StoreProxy) GetUser(ctx context.Context, id glid.GLID) (*User, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -476,7 +476,7 @@ func (p *StoreProxy) ListUsers(ctx context.Context) ([]User, error) {
 	return p.inner.ListUsers(ctx)
 }
 
-func (p *StoreProxy) UpdatePassword(ctx context.Context, id uuid.UUID, passwordHash string) error {
+func (p *StoreProxy) UpdatePassword(ctx context.Context, id glid.GLID, passwordHash string) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -485,7 +485,7 @@ func (p *StoreProxy) UpdatePassword(ctx context.Context, id uuid.UUID, passwordH
 	return p.inner.UpdatePassword(ctx, id, passwordHash)
 }
 
-func (p *StoreProxy) UpdateUserRole(ctx context.Context, id uuid.UUID, role string) error {
+func (p *StoreProxy) UpdateUserRole(ctx context.Context, id glid.GLID, role string) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -494,7 +494,7 @@ func (p *StoreProxy) UpdateUserRole(ctx context.Context, id uuid.UUID, role stri
 	return p.inner.UpdateUserRole(ctx, id, role)
 }
 
-func (p *StoreProxy) UpdateUsername(ctx context.Context, id uuid.UUID, username string) error {
+func (p *StoreProxy) UpdateUsername(ctx context.Context, id glid.GLID, username string) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -503,7 +503,7 @@ func (p *StoreProxy) UpdateUsername(ctx context.Context, id uuid.UUID, username 
 	return p.inner.UpdateUsername(ctx, id, username)
 }
 
-func (p *StoreProxy) DeleteUser(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteUser(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -512,7 +512,7 @@ func (p *StoreProxy) DeleteUser(ctx context.Context, id uuid.UUID) error {
 	return p.inner.DeleteUser(ctx, id)
 }
 
-func (p *StoreProxy) InvalidateTokens(ctx context.Context, id uuid.UUID, at time.Time) error {
+func (p *StoreProxy) InvalidateTokens(ctx context.Context, id glid.GLID, at time.Time) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -530,7 +530,7 @@ func (p *StoreProxy) CountUsers(ctx context.Context) (int, error) {
 	return p.inner.CountUsers(ctx)
 }
 
-func (p *StoreProxy) GetUserPreferences(ctx context.Context, id uuid.UUID) (*string, error) {
+func (p *StoreProxy) GetUserPreferences(ctx context.Context, id glid.GLID) (*string, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -539,7 +539,7 @@ func (p *StoreProxy) GetUserPreferences(ctx context.Context, id uuid.UUID) (*str
 	return p.inner.GetUserPreferences(ctx, id)
 }
 
-func (p *StoreProxy) PutUserPreferences(ctx context.Context, id uuid.UUID, prefs string) error {
+func (p *StoreProxy) PutUserPreferences(ctx context.Context, id glid.GLID, prefs string) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -575,7 +575,7 @@ func (p *StoreProxy) ListRefreshTokens(ctx context.Context) ([]RefreshToken, err
 	return p.inner.ListRefreshTokens(ctx)
 }
 
-func (p *StoreProxy) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteRefreshToken(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -584,7 +584,7 @@ func (p *StoreProxy) DeleteRefreshToken(ctx context.Context, id uuid.UUID) error
 	return p.inner.DeleteRefreshToken(ctx, id)
 }
 
-func (p *StoreProxy) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UUID) error {
+func (p *StoreProxy) DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -593,7 +593,7 @@ func (p *StoreProxy) DeleteUserRefreshTokens(ctx context.Context, userID uuid.UU
 	return p.inner.DeleteUserRefreshTokens(ctx, userID)
 }
 
-func (p *StoreProxy) GetCloudService(ctx context.Context, id uuid.UUID) (*CloudService, error) {
+func (p *StoreProxy) GetCloudService(ctx context.Context, id glid.GLID) (*CloudService, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -620,7 +620,7 @@ func (p *StoreProxy) PutCloudService(ctx context.Context, svc CloudService) erro
 	return p.inner.PutCloudService(ctx, svc)
 }
 
-func (p *StoreProxy) DeleteCloudService(ctx context.Context, id uuid.UUID) error {
+func (p *StoreProxy) DeleteCloudService(ctx context.Context, id glid.GLID) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -629,7 +629,7 @@ func (p *StoreProxy) DeleteCloudService(ctx context.Context, id uuid.UUID) error
 	return p.inner.DeleteCloudService(ctx, id)
 }
 
-func (p *StoreProxy) GetTier(ctx context.Context, id uuid.UUID) (*TierConfig, error) {
+func (p *StoreProxy) GetTier(ctx context.Context, id glid.GLID) (*TierConfig, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -656,7 +656,7 @@ func (p *StoreProxy) PutTier(ctx context.Context, tier TierConfig) error {
 	return p.inner.PutTier(ctx, tier)
 }
 
-func (p *StoreProxy) DeleteTier(ctx context.Context, id uuid.UUID, drain bool) error {
+func (p *StoreProxy) DeleteTier(ctx context.Context, id glid.GLID, drain bool) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -692,7 +692,7 @@ func (p *StoreProxy) SetNodeStorageConfig(ctx context.Context, cfg NodeStorageCo
 	return p.inner.SetNodeStorageConfig(ctx, cfg)
 }
 
-func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([]TierPlacement, error) {
+func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]TierPlacement, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {
@@ -701,7 +701,7 @@ func (p *StoreProxy) GetTierPlacements(ctx context.Context, tierID uuid.UUID) ([
 	return p.inner.GetTierPlacements(ctx, tierID)
 }
 
-func (p *StoreProxy) SetTierPlacements(ctx context.Context, tierID uuid.UUID, placements []TierPlacement) error {
+func (p *StoreProxy) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []TierPlacement) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	if err := p.check(); err != nil {

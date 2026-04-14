@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"encoding/binary"
@@ -14,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	sysmem "gastrolog/internal/system/memory"
 	"gastrolog/internal/logging"
@@ -225,7 +225,7 @@ func TestFactoryValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := factory(uuid.New(), tt.params, logging.Discard())
+			_, err := factory(glid.New(), tt.params, logging.Discard())
 			if tt.wantErr == "" {
 				// For valid params, we may still get a connection error.
 				// That's fine - we're testing param validation, not connection.

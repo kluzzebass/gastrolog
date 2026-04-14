@@ -1,18 +1,18 @@
 package metrics
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"log/slog"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 func FuzzNewFactory(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	// nil StatsSource is fine — it's stored but not called during construction.
 	factory := NewFactory(nil)
-	id := uuid.New()
+	id := glid.New()
 
 	// Seed: valid with defaults.
 	f.Add([]byte(""))

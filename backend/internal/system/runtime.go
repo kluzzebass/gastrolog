@@ -1,6 +1,6 @@
 package system
 
-import "github.com/google/uuid"
+import "gastrolog/internal/glid"
 
 // Runtime holds cluster-managed state — things the system controls
 // autonomously, not the operator. Replicated via the system Raft group
@@ -14,7 +14,7 @@ type Runtime struct {
 	// Tier placements: which storages hold replicas, and who leads.
 	// Keyed by tier ID. The operator sets replication factor and storage
 	// class on TierConfig; the system decides placements.
-	TierPlacements map[uuid.UUID][]TierPlacement `json:"tierPlacements,omitempty"`
+	TierPlacements map[glid.GLID][]TierPlacement `json:"tierPlacements,omitempty"`
 
 	// Cluster identity material (generated at cluster-init).
 	ClusterTLS *ClusterTLS `json:"cluster_tls,omitempty"`

@@ -1,6 +1,7 @@
 package cluster_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"runtime"
 	"testing"
@@ -8,7 +9,6 @@ import (
 
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -32,7 +32,7 @@ func waitStableLeader(t *testing.T, nodes []*testNode, timeout time.Duration) *t
 }
 
 // waitReplication waits for a filter to appear on a node's FSM.
-func waitReplication(t *testing.T, node *testNode, filterID uuid.UUID, timeout time.Duration) *system.FilterConfig {
+func waitReplication(t *testing.T, node *testNode, filterID glid.GLID, timeout time.Duration) *system.FilterConfig {
 	t.Helper()
 	ctx := context.Background()
 	deadline := time.Now().Add(timeout)
@@ -95,7 +95,7 @@ func TestLeadershipTransfer(t *testing.T) {
 
 	// Write a filter while node1 is leader.
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "before-transfer", Expression: "*",
 	}); err != nil {
@@ -116,7 +116,7 @@ func TestLeadershipTransfer(t *testing.T) {
 	}
 
 	// Write on the new leader.
-	filter2ID := uuid.Must(uuid.NewV7())
+	filter2ID := glid.New()
 	if err := newLeader.store.PutFilter(ctx, system.FilterConfig{
 		ID: filter2ID, Name: "after-transfer", Expression: "*",
 	}); err != nil {
@@ -165,7 +165,7 @@ func TestNodeRemoval(t *testing.T) {
 
 	// Write on the leader after removal — cluster should still work with 2 nodes.
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "post-removal", Expression: "*",
 	}); err != nil {
@@ -198,7 +198,7 @@ func TestFollowerShutdownClusterSurvives(t *testing.T) {
 
 	// Leader should still accept writes (quorum of 2 out of 3).
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "after-follower-down", Expression: "*",
 	}); err != nil {
@@ -258,7 +258,7 @@ found:
 
 	// Write on leader and verify replication to nonvoter.
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "nonvoter-test", Expression: "*",
 	}); err != nil {
@@ -309,7 +309,7 @@ demoted:
 
 	// Leader should still accept writes (2 voters: node-1 + node-2).
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "after-demote", Expression: "*",
 	}); err != nil {
@@ -335,7 +335,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 
 	// Write something before the leader goes down.
 	ctx := context.Background()
-	preFilterID := uuid.Must(uuid.NewV7())
+	preFilterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: preFilterID, Name: "pre-election", Expression: "*",
 	}); err != nil {
@@ -352,7 +352,7 @@ func TestLeaderStepDownNewElection(t *testing.T) {
 	newLeader := waitStableLeader(t, survivors, 10*time.Second)
 
 	// Write on the new leader.
-	postFilterID := uuid.Must(uuid.NewV7())
+	postFilterID := glid.New()
 	if err := newLeader.store.PutFilter(ctx, system.FilterConfig{
 		ID: postFilterID, Name: "post-election", Expression: "*",
 	}); err != nil {
@@ -390,7 +390,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 
 	// Write via follower (node2) — should forward to node1 (current leader).
 	ctx := context.Background()
-	filter1ID := uuid.Must(uuid.NewV7())
+	filter1ID := glid.New()
 	if err := node2.store.PutFilter(ctx, system.FilterConfig{
 		ID: filter1ID, Name: "fwd-to-node1", Expression: "*",
 	}); err != nil {
@@ -417,7 +417,7 @@ func TestFollowerForwardingAfterLeaderChange(t *testing.T) {
 
 	// Write via the follower — should forward to the new leader.
 	// Retry briefly: the follower may not know the new leader yet.
-	filter2ID := uuid.Must(uuid.NewV7())
+	filter2ID := glid.New()
 	fwdDeadline := time.Now().Add(5 * time.Second)
 	for {
 		err := follower.store.PutFilter(ctx, system.FilterConfig{
@@ -460,7 +460,7 @@ func TestQuorumLossBlocksWrites(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID: filterID, Name: "should-fail", Expression: "*",
 	})

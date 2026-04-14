@@ -1,16 +1,16 @@
 package chatterbox
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"log/slog"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 func FuzzNewIngester(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
-	id := uuid.New()
+	id := glid.New()
 
 	// Seed: valid with defaults.
 	f.Add([]byte(""))

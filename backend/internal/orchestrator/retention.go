@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -15,7 +16,6 @@ import (
 	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 
-	"github.com/google/uuid"
 )
 
 const (
@@ -24,7 +24,7 @@ const (
 )
 
 // retentionKey returns a unique map key for a tier instance's retention state.
-func retentionKey(tierID uuid.UUID, storageID string) string {
+func retentionKey(tierID glid.GLID, storageID string) string {
 	if storageID == "" {
 		return tierID.String()
 	}
@@ -35,7 +35,7 @@ func retentionKey(tierID uuid.UUID, storageID string) string {
 type retentionRule struct {
 	policy        chunk.RetentionPolicy
 	action        system.RetentionAction
-	ejectRouteIDs []uuid.UUID // target route IDs, only for eject
+	ejectRouteIDs []glid.GLID // target route IDs, only for eject
 }
 
 // retentionRunner holds per-tier-instance state that persists across sweeps.
@@ -43,8 +43,8 @@ type retentionRule struct {
 // via the ChunkFSM.OnDelete callback.
 type retentionRunner struct {
 	mu         sync.Mutex
-	vaultID    uuid.UUID
-	tierID     uuid.UUID
+	vaultID    glid.GLID
+	tierID     glid.GLID
 	cm         chunk.ChunkManager
 	im         index.IndexManager
 	inflight   map[chunk.ChunkID]bool // chunks currently being processed
@@ -167,8 +167,8 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 		return
 	}
 	type budgetTarget struct {
-		vaultID uuid.UUID
-		tierID  uuid.UUID
+		vaultID glid.GLID
+		tierID  glid.GLID
 		cm      chunk.ChunkManager
 		excess  int64
 	}
@@ -207,7 +207,7 @@ func (o *Orchestrator) enforceMemoryBudgets(cfg *system.Config) {
 
 // drainExcessChunks transitions the oldest sealed chunks from a memory tier
 // until the excess bytes are reclaimed (or no more sealed chunks remain).
-func (o *Orchestrator) drainExcessChunks(vaultID, tierID uuid.UUID, cm chunk.ChunkManager, excess int64) {
+func (o *Orchestrator) drainExcessChunks(vaultID, tierID glid.GLID, cm chunk.ChunkManager, excess int64) {
 	metas, err := cm.List()
 	if err != nil {
 		return
@@ -263,7 +263,7 @@ func (o *Orchestrator) drainExcessChunks(vaultID, tierID uuid.UUID, cm chunk.Chu
 
 // RetentionPendingChunks returns chunk IDs marked as retention-pending in the
 // tier Raft FSM for a vault. Visible to all nodes via Raft replication.
-func (o *Orchestrator) RetentionPendingChunks(vaultID uuid.UUID) map[chunk.ChunkID]bool {
+func (o *Orchestrator) RetentionPendingChunks(vaultID glid.GLID) map[chunk.ChunkID]bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	vault := o.vaults[vaultID]

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -9,7 +10,6 @@ import (
 	chunkfile "gastrolog/internal/chunk/file"
 	"gastrolog/internal/index"
 
-	"github.com/google/uuid"
 )
 
 // --- Single-chunk move ---
@@ -18,7 +18,7 @@ import (
 // Used by retention-triggered migration to move individual chunks.
 // Supports filesystem-level moves (local), record-level import (local), and
 // cross-node transfer (remote destination via RemoteTransferrer).
-func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, srcID, dstID uuid.UUID) error {
+func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, srcID, dstID glid.GLID) error {
 	srcCM, err := o.chunkManager(srcID)
 	if err != nil {
 		return err
@@ -73,7 +73,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 // moveChunkRemote transfers a sealed chunk to a vault on another node.
 // Reads records from the source chunk and sends them via the RemoteTransferrer.
 // The destination imports them as a new sealed chunk (no mixing with active chunk).
-func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkID, srcID uuid.UUID, srcCM chunk.ChunkManager, dstID uuid.UUID, dstNodeID string) error {
+func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkID, srcID glid.GLID, srcCM chunk.ChunkManager, dstID glid.GLID, dstNodeID string) error {
 	if o.transferrer == nil {
 		return fmt.Errorf("remote vault %s on node %s: no remote transferrer configured (single-node mode)", dstID, dstNodeID)
 	}
@@ -99,7 +99,7 @@ func (o *Orchestrator) moveChunkRemote(ctx context.Context, chunkID chunk.ChunkI
 // resolveVaultNode loads config and returns the NodeID for the given vault.
 // With tiered storage, vaults no longer have a NodeID. All nodes can serve
 // all vaults. This always returns empty string (local).
-func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) (string, error) {
+func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID glid.GLID) (string, error) {
 	if o.sysLoader == nil {
 		return "", errors.New("config loader not configured")
 	}
@@ -117,7 +117,7 @@ func (o *Orchestrator) resolveVaultNode(ctx context.Context, vaultID uuid.UUID) 
 
 // isRemoteVault reports whether a vault lives on another node.
 // Returns the destination node ID and whether it's remote.
-func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID uuid.UUID) (string, bool, error) {
+func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID glid.GLID) (string, bool, error) {
 	// If the vault is registered locally, it's not remote.
 	if o.VaultExists(vaultID) {
 		return "", false, nil
@@ -135,7 +135,7 @@ func (o *Orchestrator) isRemoteVault(ctx context.Context, vaultID uuid.UUID) (st
 }
 
 // deleteSourceChunk removes indexes and the chunk from the source vault.
-func (o *Orchestrator) deleteSourceChunk(srcID uuid.UUID, srcCM chunk.ChunkManager, chunkID chunk.ChunkID) error {
+func (o *Orchestrator) deleteSourceChunk(srcID glid.GLID, srcCM chunk.ChunkManager, chunkID chunk.ChunkID) error {
 	o.mu.RLock()
 	srcVault := o.vaults[srcID]
 	o.mu.RUnlock()
@@ -187,7 +187,7 @@ func (o *Orchestrator) moveChunkFS(ctx context.Context, chunkID chunk.ChunkID, s
 // node. The vault remains registered locally (for search) but the filter set
 // routes new records to the target node via RecordForwarder. Once all sealed
 // chunks are transferred, the vault is unregistered locally.
-func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error {
+func (o *Orchestrator) DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for drain: %w", err)
@@ -225,7 +225,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, target
 	o.mu.Unlock()
 
 	// Seal active chunk outside the lock — flush any locally-buffered records.
-	if _, err := o.SealActive(vaultID, uuid.Nil); err != nil {
+	if _, err := o.SealActive(vaultID, glid.Nil); err != nil {
 		o.logger.Warn("drain: failed to seal active chunk", "vault", vaultID, "error", err)
 	}
 
@@ -247,7 +247,7 @@ func (o *Orchestrator) DrainVault(ctx context.Context, vaultID uuid.UUID, target
 }
 
 // drainWorker runs in the scheduler, transferring sealed chunks one by one.
-func (o *Orchestrator) drainWorker(ctx context.Context, vaultID uuid.UUID, targetNodeID string, job *JobProgress) {
+func (o *Orchestrator) drainWorker(ctx context.Context, vaultID glid.GLID, targetNodeID string, job *JobProgress) {
 	cm, err := o.chunkManager(vaultID)
 	if err != nil {
 		job.Fail(o.now(), fmt.Sprintf("get chunk manager: %v", err))
@@ -272,7 +272,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID uuid.UUID, targe
 	// Final seal: catch any records that were appended between
 	// DrainVault's SealActive and the worker starting (e.g. from
 	// ForwardRecords RPCs from nodes with stale filter sets).
-	if _, err := o.SealActive(vaultID, uuid.Nil); err != nil {
+	if _, err := o.SealActive(vaultID, glid.Nil); err != nil {
 		o.logger.Warn("drain: final seal", "vault", vaultID, "error", err)
 	}
 	if !o.drainSealed(ctx, vaultID, cm, targetNodeID, job) {
@@ -284,7 +284,7 @@ func (o *Orchestrator) drainWorker(ctx context.Context, vaultID uuid.UUID, targe
 
 // drainSealed lists sealed chunks and transfers each to the target node.
 // Returns false if the transfer failed (job.Fail was called).
-func (o *Orchestrator) drainSealed(ctx context.Context, vaultID uuid.UUID, cm chunk.ChunkManager, targetNodeID string, job *JobProgress) bool {
+func (o *Orchestrator) drainSealed(ctx context.Context, vaultID glid.GLID, cm chunk.ChunkManager, targetNodeID string, job *JobProgress) bool {
 	metas, err := cm.List()
 	if err != nil {
 		job.Fail(o.now(), fmt.Sprintf("list chunks: %v", err))
@@ -310,7 +310,7 @@ func (o *Orchestrator) drainSealed(ctx context.Context, vaultID uuid.UUID, cm ch
 }
 
 // finishDrain cleans up after all chunks have been transferred.
-func (o *Orchestrator) finishDrain(vaultID uuid.UUID) {
+func (o *Orchestrator) finishDrain(vaultID glid.GLID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -339,7 +339,7 @@ func (o *Orchestrator) finishDrain(vaultID uuid.UUID) {
 }
 
 // CancelDrain cancels an in-progress drain and restores local routing.
-func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID uuid.UUID) error {
+func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID glid.GLID) error {
 	sys, err := o.loadSystem(ctx)
 	if err != nil {
 		return fmt.Errorf("load config for cancel drain: %w", err)
@@ -365,7 +365,7 @@ func (o *Orchestrator) CancelDrain(ctx context.Context, vaultID uuid.UUID) error
 }
 
 // IsDraining reports whether a vault is currently being drained.
-func (o *Orchestrator) IsDraining(vaultID uuid.UUID) bool {
+func (o *Orchestrator) IsDraining(vaultID glid.GLID) bool {
 	o.mu.RLock()
 	defer o.mu.RUnlock()
 	_, ok := o.draining[vaultID]
@@ -376,7 +376,7 @@ func (o *Orchestrator) IsDraining(vaultID uuid.UUID) bool {
 
 // CopyRecords copies all records from source to destination, reporting progress via job.
 // After copying, it seals the destination's active chunk and builds indexes.
-func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID uuid.UUID, job *JobProgress) error {
+func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID glid.GLID, job *JobProgress) error {
 	srcCM, err := o.chunkManager(srcID)
 	if err != nil {
 		return err
@@ -445,7 +445,7 @@ func (o *Orchestrator) CopyRecords(ctx context.Context, srcID, dstID uuid.UUID, 
 
 // MoveChunks moves sealed chunks from source to destination using filesystem-level moves.
 // Both vaults must implement chunk.ChunkMover (caller should verify with SupportsChunkMove).
-func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID uuid.UUID, job *JobProgress) error {
+func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID glid.GLID, job *JobProgress) error {
 	srcCM, err := o.chunkManager(srcID)
 	if err != nil {
 		return err
@@ -508,8 +508,8 @@ func (o *Orchestrator) MoveChunks(ctx context.Context, srcID, dstID uuid.UUID, j
 
 // TransferParams describes a vault-to-vault data movement operation.
 type TransferParams struct {
-	SrcID uuid.UUID
-	DstID uuid.UUID
+	SrcID glid.GLID
+	DstID glid.GLID
 
 	// Description is a human-readable label for the job (shown in the UI).
 	Description string
@@ -565,7 +565,7 @@ func (o *Orchestrator) MergeVaults(ctx context.Context, p TransferParams) string
 
 	jobName := "merge:" + p.SrcID.String() + "->" + p.DstID.String()
 	jobID := o.scheduler.Submit(jobName, func(ctx context.Context, job *JobProgress) {
-		if _, err := o.SealActive(p.SrcID, uuid.Nil); err != nil {
+		if _, err := o.SealActive(p.SrcID, glid.Nil); err != nil {
 			job.Fail(o.now(), fmt.Sprintf("seal source: %v", err))
 			return
 		}

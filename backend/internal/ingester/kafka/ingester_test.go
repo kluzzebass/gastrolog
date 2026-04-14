@@ -1,9 +1,9 @@
 package kafka
 
 import (
+	"gastrolog/internal/glid"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 // --- Factory Tests ---
@@ -12,7 +12,7 @@ func TestFactoryRequiresBrokers(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"topic": "logs",
 	}, nil)
 	if err == nil {
@@ -24,7 +24,7 @@ func TestFactoryRequiresTopic(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
 	}, nil)
 	if err == nil {
@@ -36,7 +36,7 @@ func TestFactoryMinimalParams(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
 		"topic":   "logs",
 	}, nil)
@@ -63,7 +63,7 @@ func TestFactoryMultipleBrokers(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "broker1:9092, broker2:9092 , broker3:9092",
 		"topic":   "logs",
 	}, nil)
@@ -87,7 +87,7 @@ func TestFactoryCustomGroup(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
 		"topic":   "logs",
 		"group":   "my-consumers",
@@ -106,7 +106,7 @@ func TestFactoryTLSEnabled(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9093",
 		"topic":   "logs",
 		"tls":     "true",
@@ -126,7 +126,7 @@ func TestFactoryTLSNotEnabled(t *testing.T) {
 	factory := NewFactory()
 
 	// "tls" set to something other than "true" should be false.
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
 		"topic":   "logs",
 		"tls":     "false",
@@ -147,7 +147,7 @@ func TestFactorySASLPlain(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
 		"topic":          "logs",
 		"sasl_mechanism": "plain",
@@ -177,7 +177,7 @@ func TestFactorySASLScramSHA256(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
 		"topic":          "logs",
 		"sasl_mechanism": "scram-sha-256",
@@ -198,7 +198,7 @@ func TestFactorySASLScramSHA512(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
 		"topic":          "logs",
 		"sasl_mechanism": "scram-sha-512",
@@ -219,7 +219,7 @@ func TestFactorySASLMechanismCaseInsensitive(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
 		"topic":          "logs",
 		"sasl_mechanism": "PLAIN",
@@ -240,7 +240,7 @@ func TestFactorySASLUnsupportedMechanism(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
 		"topic":          "logs",
 		"sasl_mechanism": "kerberos",
@@ -254,7 +254,7 @@ func TestFactoryNoSASLWhenMechanismEmpty(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "localhost:9092",
 		"topic":          "logs",
 		"sasl_mechanism": "",
@@ -274,7 +274,7 @@ func TestFactoryEmptyBrokersString(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"brokers": "",
 		"topic":   "logs",
 	}, nil)
@@ -287,7 +287,7 @@ func TestFactoryEmptyTopicString(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"brokers": "localhost:9092",
 		"topic":   "",
 	}, nil)
@@ -300,7 +300,7 @@ func TestFactoryNilParams(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	_, err := factory(uuid.New(), nil, nil)
+	_, err := factory(glid.New(), nil, nil)
 	if err == nil {
 		t.Fatal("expected error for nil params (missing brokers and topic)")
 	}
@@ -367,7 +367,7 @@ func TestBuildSASLMechanismUnsupported(t *testing.T) {
 
 func TestNewIngester(t *testing.T) {
 	t.Parallel()
-	id := uuid.New().String()
+	id := glid.New().String()
 	ing := New(Config{
 		ID:      id,
 		Brokers: []string{"b1:9092", "b2:9092"},
@@ -410,7 +410,7 @@ func TestFactoryAllParams(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers":        "broker1:9092,broker2:9092",
 		"topic":          "application-logs",
 		"group":          "log-consumers",
@@ -460,7 +460,7 @@ func TestFactorySingleBroker(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "kafka.example.com:9092",
 		"topic":   "events",
 	}, nil)
@@ -481,7 +481,7 @@ func TestFactoryBrokerWhitespaceTrimming(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
 
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"brokers": "  b1:9092 ,  b2:9093  ,b3:9094  ",
 		"topic":   "logs",
 	}, nil)
@@ -504,7 +504,7 @@ func TestFactoryBrokerWhitespaceTrimming(t *testing.T) {
 func TestFactoryIDPropagated(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	ing, err := factory(id, map[string]string{
 		"brokers": "localhost:9092",

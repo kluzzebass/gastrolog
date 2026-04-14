@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +11,11 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 
-	"github.com/google/uuid"
 )
 
 // ScheduleCatchupForTier finds the vault containing the given tier and
 // schedules catchup for the specified followers.
-func (o *Orchestrator) ScheduleCatchupForTier(tierID uuid.UUID, followerNodeIDs []string) {
+func (o *Orchestrator) ScheduleCatchupForTier(tierID glid.GLID, followerNodeIDs []string) {
 	o.mu.RLock()
 	for vaultID, vault := range o.vaults {
 		for _, t := range vault.Tiers {
@@ -31,7 +31,7 @@ func (o *Orchestrator) ScheduleCatchupForTier(tierID uuid.UUID, followerNodeIDs 
 
 // scheduleCatchup schedules background jobs to replicate existing sealed chunks
 // from the leader to newly added follower nodes.
-func (o *Orchestrator) scheduleCatchup(vaultID, tierID uuid.UUID, newFollowers []string) {
+func (o *Orchestrator) scheduleCatchup(vaultID, tierID glid.GLID, newFollowers []string) {
 	for _, nodeID := range newFollowers {
 		o.scheduleCatchupForNode(vaultID, tierID, nodeID, 0)
 	}
@@ -39,7 +39,7 @@ func (o *Orchestrator) scheduleCatchup(vaultID, tierID uuid.UUID, newFollowers [
 
 const maxCatchupRetries = 3
 
-func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID uuid.UUID, nodeID string, attempt int) {
+func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID glid.GLID, nodeID string, attempt int) {
 	name := "replication-catchup:" + vaultID.String() + ":" + tierID.String() + ":" + nodeID
 	if attempt > 0 {
 		name += fmt.Sprintf(":retry-%d", attempt)
@@ -72,7 +72,7 @@ func (o *Orchestrator) scheduleCatchupForNode(vaultID, tierID uuid.UUID, nodeID 
 // catchupFollower copies all sealed chunks from the leader's tier to a
 // follower node. Each chunk's records are streamed via TransferRecords,
 // producing an identical sealed chunk on the follower.
-func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID uuid.UUID, nodeID string) error {
+func (o *Orchestrator) catchupFollower(ctx context.Context, vaultID, tierID glid.GLID, nodeID string) error {
 	tier := o.findLocalTier(vaultID, tierID)
 	if tier == nil {
 		return fmt.Errorf("tier %s not found in vault %s", tierID, vaultID)

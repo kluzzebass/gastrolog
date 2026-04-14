@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"net/http"
 	"runtime"
@@ -21,7 +22,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 )
 
 // mockCluster implements ClusterStatusProvider for testing.
@@ -55,7 +55,7 @@ func TestDrainWaitsForInFlightRequests(t *testing.T) {
 		})
 	}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
@@ -141,7 +141,7 @@ func TestDrainRejectsNewRequests(t *testing.T) {
 		})
 	}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server
@@ -216,7 +216,7 @@ func TestShutdownWithoutDrain(t *testing.T) {
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	// Create server

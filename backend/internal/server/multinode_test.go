@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"context"
 	"fmt"
@@ -25,7 +26,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -44,7 +44,7 @@ import (
 type multinodeTestNode struct {
 	nodeID  string
 	orch    *orchestrator.Orchestrator
-	vaultID uuid.UUID    // zero if no vault
+	vaultID glid.GLID    // zero if no vault
 	vault   memtest.Vault // zero value if no vault
 }
 
@@ -127,7 +127,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 		} else {
 			node := setupMNNode(t, id)
 			// Create a tier assigned to this node (test-only manual assignment; production uses placement manager).
-			tierID := uuid.Must(uuid.NewV7())
+			tierID := glid.New()
 			_ = cfgStore.PutTier(ctx, system.TierConfig{
 				ID:   tierID,
 				Name: "tier-" + id,
@@ -223,7 +223,7 @@ func setupMNNode(t *testing.T, nodeID string) multinodeTestNode {
 		RotationPolicy: chunk.NewRecordCountPolicy(10000),
 	})
 
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(vaultID, v.CM, v.IM, v.QE))
 
 	return multinodeTestNode{nodeID: nodeID, orch: orch, vaultID: vaultID, vault: v}
@@ -311,7 +311,7 @@ type mnPeerIngesterStats struct {
 }
 
 func (p *mnPeerIngesterStats) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNodeStats {
-	id, err := uuid.Parse(ingesterID)
+	id, err := glid.ParseUUID(ingesterID)
 	if err != nil {
 		return nil
 	}
@@ -339,7 +339,7 @@ type mnPeerVaultStats struct {
 }
 
 func (p *mnPeerVaultStats) FindVaultStats(vaultID string) *gastrologv1.VaultStats {
-	id, err := uuid.Parse(vaultID)
+	id, err := glid.ParseUUID(vaultID)
 	if err != nil {
 		return nil
 	}
@@ -384,7 +384,7 @@ func (d *directRemoteSearcher) Search(ctx context.Context, nodeID string, req *g
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
 
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := glid.ParseUUID(req.GetVaultId())
 	if err != nil {
 		return nil, fmt.Errorf("invalid vault_id: %w", err)
 	}
@@ -459,7 +459,7 @@ func (d *directRemoteSearcher) SearchStream(ctx context.Context, nodeID string, 
 		return recCh, nil, nil, errCh, func() []byte { return nil }
 	}
 
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := glid.ParseUUID(req.GetVaultId())
 	if err != nil {
 		errCh <- fmt.Errorf("invalid vault_id: %w", err)
 		close(recCh)
@@ -550,7 +550,7 @@ func (d *directRemoteSearcher) GetContext(ctx context.Context, nodeID string, re
 		return nil, fmt.Errorf("unknown node: %s", nodeID)
 	}
 
-	vaultID, err := uuid.Parse(req.GetVaultId())
+	vaultID, err := glid.ParseUUID(req.GetVaultId())
 	if err != nil {
 		return nil, fmt.Errorf("invalid vault_id: %w", err)
 	}
@@ -1353,8 +1353,8 @@ func TestMultiNode_PerRouteStatsAggregated(t *testing.T) {
 	d2 := h.Node(t, "data-2")
 
 	// Create two distinct route IDs.
-	routeA := uuid.New()
-	routeB := uuid.New()
+	routeA := glid.New()
+	routeB := glid.New()
 
 	// data-1: route A catches everything.
 	d1.orch.SetFilterSet(orchestrator.NewFilterSet([]*orchestrator.CompiledFilter{
@@ -1693,7 +1693,7 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 	ctx := context.Background()
 
 	// Register an ingester on data-1's orchestrator.
-	ingID := uuid.Must(uuid.NewV7())
+	ingID := glid.New()
 	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
 
 	// Also register it in the config store so ListIngesters can find it.
@@ -1730,7 +1730,7 @@ func TestMultiNode_GetIngesterStatusCrossNode(t *testing.T) {
 	ctx := context.Background()
 
 	// Register an ingester on data-1.
-	ingID := uuid.Must(uuid.NewV7())
+	ingID := glid.New()
 	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
 
 	_ = h.cfgStore.PutIngester(ctx, system.IngesterConfig{

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"log/slog"
 	"sync"
@@ -8,7 +9,6 @@ import (
 
 	"gastrolog/internal/raftgroup"
 
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 )
 
@@ -36,7 +36,7 @@ const (
 // leadership to the desired node.
 type tierLeaderManager struct {
 	mu            sync.Mutex
-	epochs        map[uuid.UUID]context.CancelFunc
+	epochs        map[glid.GLID]context.CancelFunc
 	desired       *tierMembershipMap
 	desiredLeader *tierDesiredLeaderMap
 	rootCtx       context.Context
@@ -47,7 +47,7 @@ type tierLeaderManager struct {
 func newTierLeaderManager(logger *slog.Logger) *tierLeaderManager {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &tierLeaderManager{
-		epochs:        make(map[uuid.UUID]context.CancelFunc),
+		epochs:        make(map[glid.GLID]context.CancelFunc),
 		desired:       newTierMembershipMap(),
 		desiredLeader: newTierDesiredLeaderMap(),
 		rootCtx:       ctx,
@@ -58,7 +58,7 @@ func newTierLeaderManager(logger *slog.Logger) *tierLeaderManager {
 
 // Start spawns a leader loop for the given tier's Raft group if one is not
 // already running. Idempotent: re-calling for the same tier ID is a no-op.
-func (m *tierLeaderManager) Start(tierID uuid.UUID, group *raftgroup.Group) {
+func (m *tierLeaderManager) Start(tierID glid.GLID, group *raftgroup.Group) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.epochs[tierID]; ok {
@@ -81,7 +81,7 @@ func (m *tierLeaderManager) Start(tierID uuid.UUID, group *raftgroup.Group) {
 
 // Stop cancels the leader loop for a tier and clears its desired-member
 // state. Safe to call even if no loop was started.
-func (m *tierLeaderManager) Stop(tierID uuid.UUID) {
+func (m *tierLeaderManager) Stop(tierID glid.GLID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if cancel, ok := m.epochs[tierID]; ok {
@@ -105,20 +105,20 @@ func (m *tierLeaderManager) StopAll() {
 // SetDesiredMembers updates the desired member list for a tier. The next
 // reconcile pass on the tier Raft leader will apply the diff against the
 // current Raft configuration.
-func (m *tierLeaderManager) SetDesiredMembers(tierID uuid.UUID, members []hraft.Server) {
+func (m *tierLeaderManager) SetDesiredMembers(tierID glid.GLID, members []hraft.Server) {
 	m.desired.Set(tierID, members)
 }
 
 // SetDesiredLeader sets the node that should be the tier Raft leader.
 // If the current Raft leader differs, the leader epoch will call
 // LeadershipTransferToServer to align them. Pass nil to clear.
-func (m *tierLeaderManager) SetDesiredLeader(tierID uuid.UUID, server *hraft.Server) {
+func (m *tierLeaderManager) SetDesiredLeader(tierID glid.GLID, server *hraft.Server) {
 	m.desiredLeader.Set(tierID, server)
 }
 
 // runLeaderEpoch runs the per-epoch reconcile loop. Called after Barrier()
 // returns successfully on the leader. Exits when ctx is cancelled.
-func (m *tierLeaderManager) runLeaderEpoch(ctx context.Context, tierID uuid.UUID, group *raftgroup.Group) {
+func (m *tierLeaderManager) runLeaderEpoch(ctx context.Context, tierID glid.GLID, group *raftgroup.Group) {
 	// Initial reconcile immediately after barrier.
 	m.reconcile(tierID, group)
 
@@ -138,7 +138,7 @@ func (m *tierLeaderManager) runLeaderEpoch(ctx context.Context, tierID uuid.UUID
 // Raft configuration and applies the diff via AddVoter / RemoveServer.
 // Bails on the first error (lost leadership, timeout, etc.) — the next pass
 // (or the next epoch on the new leader) will pick up where we left off.
-func (m *tierLeaderManager) reconcile(tierID uuid.UUID, group *raftgroup.Group) {
+func (m *tierLeaderManager) reconcile(tierID glid.GLID, group *raftgroup.Group) {
 	desired := m.desired.Get(tierID)
 	if len(desired) == 0 {
 		// No desired-members info yet. The orchestrator should have
@@ -204,7 +204,7 @@ func (m *tierLeaderManager) reconcile(tierID uuid.UUID, group *raftgroup.Group) 
 // placement leader. If not, initiates LeadershipTransferToServer so the Raft
 // leader aligns with the node that owns the data. This reduces FSM apply
 // latency (no forwarding hop) and simplifies the operational model.
-func (m *tierLeaderManager) transferIfNeeded(tierID uuid.UUID, group *raftgroup.Group) {
+func (m *tierLeaderManager) transferIfNeeded(tierID glid.GLID, group *raftgroup.Group) {
 	want := m.desiredLeader.Get(tierID)
 	if want == nil {
 		return // no desired leader set (single-node or not yet configured)
@@ -234,16 +234,16 @@ func (m *tierLeaderManager) transferIfNeeded(tierID uuid.UUID, group *raftgroup.
 // happen from inside leader epoch reconcile callbacks.
 type tierMembershipMap struct {
 	mu      sync.RWMutex
-	desired map[uuid.UUID][]hraft.Server
+	desired map[glid.GLID][]hraft.Server
 }
 
 func newTierMembershipMap() *tierMembershipMap {
 	return &tierMembershipMap{
-		desired: make(map[uuid.UUID][]hraft.Server),
+		desired: make(map[glid.GLID][]hraft.Server),
 	}
 }
 
-func (t *tierMembershipMap) Set(tierID uuid.UUID, members []hraft.Server) {
+func (t *tierMembershipMap) Set(tierID glid.GLID, members []hraft.Server) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	cp := make([]hraft.Server, len(members))
@@ -251,7 +251,7 @@ func (t *tierMembershipMap) Set(tierID uuid.UUID, members []hraft.Server) {
 	t.desired[tierID] = cp
 }
 
-func (t *tierMembershipMap) Get(tierID uuid.UUID) []hraft.Server {
+func (t *tierMembershipMap) Get(tierID glid.GLID) []hraft.Server {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	src := t.desired[tierID]
@@ -263,7 +263,7 @@ func (t *tierMembershipMap) Get(tierID uuid.UUID) []hraft.Server {
 	return cp
 }
 
-func (t *tierMembershipMap) Delete(tierID uuid.UUID) {
+func (t *tierMembershipMap) Delete(tierID glid.GLID) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.desired, tierID)
@@ -272,16 +272,16 @@ func (t *tierMembershipMap) Delete(tierID uuid.UUID) {
 // tierDesiredLeaderMap tracks which node should be the Raft leader for each tier.
 type tierDesiredLeaderMap struct {
 	mu      sync.RWMutex
-	leaders map[uuid.UUID]*hraft.Server
+	leaders map[glid.GLID]*hraft.Server
 }
 
 func newTierDesiredLeaderMap() *tierDesiredLeaderMap {
 	return &tierDesiredLeaderMap{
-		leaders: make(map[uuid.UUID]*hraft.Server),
+		leaders: make(map[glid.GLID]*hraft.Server),
 	}
 }
 
-func (t *tierDesiredLeaderMap) Set(tierID uuid.UUID, srv *hraft.Server) {
+func (t *tierDesiredLeaderMap) Set(tierID glid.GLID, srv *hraft.Server) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if srv == nil {
@@ -292,7 +292,7 @@ func (t *tierDesiredLeaderMap) Set(tierID uuid.UUID, srv *hraft.Server) {
 	}
 }
 
-func (t *tierDesiredLeaderMap) Get(tierID uuid.UUID) *hraft.Server {
+func (t *tierDesiredLeaderMap) Get(tierID glid.GLID) *hraft.Server {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 	srv := t.leaders[tierID]

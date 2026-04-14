@@ -1,15 +1,15 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 
-	"github.com/google/uuid"
 )
 
 // AddIngester adds and starts a new ingester. If an ingester with the same ID
 // already exists, it is stopped and replaced — making the operation idempotent.
-func (o *Orchestrator) AddIngester(id uuid.UUID, name, ingType string, r Ingester) error {
+func (o *Orchestrator) AddIngester(id glid.GLID, name, ingType string, r Ingester) error {
 	o.mu.Lock()
 
 	// Stop existing ingester if present (idempotent replace).
@@ -43,7 +43,7 @@ func (o *Orchestrator) AddIngester(id uuid.UUID, name, ingType string, r Ingeste
 // RemoveIngester stops and removes a ingester.
 // If the orchestrator is running, the ingester is stopped gracefully before removal.
 // The method waits for the ingester to finish processing before returning.
-func (o *Orchestrator) RemoveIngester(id uuid.UUID) error {
+func (o *Orchestrator) RemoveIngester(id glid.GLID) error {
 	o.mu.Lock()
 
 	if _, exists := o.ingesters[id]; !exists {

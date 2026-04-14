@@ -5,12 +5,12 @@
 package convert
 
 import (
+	"gastrolog/internal/glid"
 	"maps"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -21,7 +21,7 @@ import (
 // cross-node search) MUST use this function.
 //
 // Zero-valued fields serialize naturally: a zero UUID becomes
-// "00000000-0000-0000-0000-000000000000" (parsed back as uuid.Nil by
+// "00000000-0000-0000-0000-000000000000" (parsed back as glid.Nil by
 // ExportToRecord), and zero timestamps become nil proto fields.
 func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 	er := &gastrologv1.ExportRecord{
@@ -69,7 +69,7 @@ func ExportToRecord(er *gastrologv1.ExportRecord) chunk.Record {
 		maps.Copy(rec.Attrs, er.GetAttrs())
 	}
 	if er.GetVaultId() != "" {
-		rec.VaultID, _ = uuid.Parse(er.GetVaultId())
+		rec.VaultID, _ = glid.ParseUUID(er.GetVaultId())
 	}
 	if er.GetChunkId() != "" {
 		rec.Ref.ChunkID, _ = chunk.ParseChunkID(er.GetChunkId())

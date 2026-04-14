@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -9,7 +10,6 @@ import (
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // mockCloudChunkManager is a minimal ChunkManager that also implements
@@ -44,7 +44,7 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	mock := &mockCloudChunkManager{}
 	mock.degraded.Store(true)
 	mock.degradedErr.Store("connection refused")
@@ -52,7 +52,7 @@ func TestEvaluateCloudHealth_SetsAlertWhenDegraded(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 	tier := &TierInstance{TierID: tierID, Type: "cloud", Chunks: mock}
-	orch.RegisterVault(NewVault(uuid.Must(uuid.NewV7()), tier))
+	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	orch.evaluateCloudHealth()
 
@@ -73,13 +73,13 @@ func TestEvaluateCloudHealth_ClearsAlertWhenHealthy(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	mock := &mockCloudChunkManager{}
 
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 	tier := &TierInstance{TierID: tierID, Type: "cloud", Chunks: mock}
-	orch.RegisterVault(NewVault(uuid.Must(uuid.NewV7()), tier))
+	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	// Simulate prior degraded alert.
 	alertID := fmt.Sprintf("cloud-store:%s", tierID)
@@ -105,8 +105,8 @@ func TestEvaluateCloudHealth_SkipsNonCloudTiers(t *testing.T) {
 	orch.alerts = ac
 
 	// Type is "file", not "cloud" — should be skipped.
-	tier := &TierInstance{TierID: uuid.Must(uuid.NewV7()), Type: "file", Chunks: mock}
-	orch.RegisterVault(NewVault(uuid.Must(uuid.NewV7()), tier))
+	tier := &TierInstance{TierID: glid.New(), Type: "file", Chunks: mock}
+	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	orch.evaluateCloudHealth()
 
@@ -138,7 +138,7 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 		},
 	}
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &TierInstance{
@@ -176,7 +176,7 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &TierInstance{
-		TierID:       uuid.Must(uuid.NewV7()),
+		TierID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -206,7 +206,7 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &TierInstance{
-		TierID:       uuid.Must(uuid.NewV7()),
+		TierID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -237,7 +237,7 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &TierInstance{
-		TierID:       uuid.Must(uuid.NewV7()),
+		TierID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return true },
@@ -271,7 +271,7 @@ func TestBackfillCloudUploads_RunsOnAnyNode(t *testing.T) {
 		},
 	}
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
@@ -283,7 +283,7 @@ func TestBackfillCloudUploads_RunsOnAnyNode(t *testing.T) {
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return false },
 	}
-	orch.RegisterVault(NewVault(uuid.Must(uuid.NewV7()), tier))
+	orch.RegisterVault(NewVault(glid.New(), tier))
 
 	orch.evaluateCloudHealth()
 
@@ -307,7 +307,7 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 		},
 	}
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = alert.New()
 	tier := &TierInstance{

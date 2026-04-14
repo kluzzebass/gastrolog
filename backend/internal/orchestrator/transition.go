@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // transitionChunk streams all records from a sealed chunk to the next tier
@@ -119,7 +119,7 @@ func (r *retentionRunner) transitionChunk(id chunk.ChunkID) {
 }
 
 // findDestTierInstance looks up the destination tier in the orchestrator's vault registry.
-func (r *retentionRunner) findDestTierInstance(destTierID uuid.UUID) *TierInstance {
+func (r *retentionRunner) findDestTierInstance(destTierID glid.GLID) *TierInstance {
 	if r.orch == nil {
 		return nil
 	}
@@ -136,7 +136,7 @@ func (r *retentionRunner) findDestTierInstance(destTierID uuid.UUID) *TierInstan
 }
 
 // resolveNextTier delegates to resolveNextTierInChain.
-func (r *retentionRunner) resolveNextTier(cfg *system.Config) (uuid.UUID, *system.TierConfig) {
+func (r *retentionRunner) resolveNextTier(cfg *system.Config) (glid.GLID, *system.TierConfig) {
 	nextID, nextCfg, err := resolveNextTierInChain(cfg, r.vaultID, r.tierID)
 	if err != nil {
 		r.logger.Warn("transition: "+err.Error(), "vault", r.vaultID, "tier", r.tierID)
@@ -146,7 +146,7 @@ func (r *retentionRunner) resolveNextTier(cfg *system.Config) (uuid.UUID, *syste
 
 // resolveNextTierInChain finds the next tier in a vault's chain after the given tier.
 // Returns an error string if the tier is terminal or not found.
-func resolveNextTierInChain(cfg *system.Config, vaultID, tierID uuid.UUID) (uuid.UUID, *system.TierConfig, error) {
+func resolveNextTierInChain(cfg *system.Config, vaultID, tierID glid.GLID) (glid.GLID, *system.TierConfig, error) {
 	var vaultCfg *system.VaultConfig
 	for i := range cfg.Vaults {
 		if cfg.Vaults[i].ID == vaultID {
@@ -155,22 +155,22 @@ func resolveNextTierInChain(cfg *system.Config, vaultID, tierID uuid.UUID) (uuid
 		}
 	}
 	if vaultCfg == nil {
-		return uuid.UUID{}, nil, fmt.Errorf("vault %s not found in config", vaultID)
+		return glid.GLID{}, nil, fmt.Errorf("vault %s not found in config", vaultID)
 	}
 
 	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultID)
 	idx := slices.Index(tierIDs, tierID)
 	if idx < 0 {
-		return uuid.UUID{}, nil, fmt.Errorf("tier %s not found in vault's tier chain", tierID)
+		return glid.GLID{}, nil, fmt.Errorf("tier %s not found in vault's tier chain", tierID)
 	}
 	if idx == len(tierIDs)-1 {
-		return uuid.UUID{}, nil, errors.New("terminal tier has no next tier")
+		return glid.GLID{}, nil, errors.New("terminal tier has no next tier")
 	}
 
 	nextTierID := tierIDs[idx+1]
 	nextTierCfg := findTierConfig(cfg.Tiers, nextTierID)
 	if nextTierCfg == nil {
-		return uuid.UUID{}, nil, fmt.Errorf("next tier %s config not found", nextTierID)
+		return glid.GLID{}, nil, fmt.Errorf("next tier %s config not found", nextTierID)
 	}
 	return nextTierID, nextTierCfg, nil
 }
@@ -204,7 +204,7 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	// Resolve the destination tier (for logging only — see comment below
 	// about why we can't check the destination's manifest).
 	nextTierID, _ := r.resolveNextTier(cfg)
-	if nextTierID == uuid.Nil {
+	if nextTierID == glid.Nil {
 		return
 	}
 
@@ -253,7 +253,7 @@ func (r *retentionRunner) findTierInstance() *TierInstance {
 // TransitionChunk transitions a single sealed chunk from the given tier to the
 // next tier in the vault's chain. Exported for integration tests that need to
 // trigger transitions from outside the package.
-func (o *Orchestrator) TransitionChunk(vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) {
+func (o *Orchestrator) TransitionChunk(vaultID, tierID glid.GLID, chunkID chunk.ChunkID) {
 	vault := o.vaults[vaultID]
 	if vault == nil {
 		return
@@ -283,7 +283,7 @@ func (o *Orchestrator) TransitionChunk(vaultID, tierID uuid.UUID, chunkID chunk.
 }
 
 // streamLocal appends records from a cursor to a local tier via AppendToTier.
-func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID uuid.UUID) error {
+func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID glid.GLID) error {
 	for {
 		rec, _, err := cursor.Next()
 		if errors.Is(err, chunk.ErrNoMoreRecords) {

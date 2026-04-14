@@ -1,6 +1,7 @@
 package cluster_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"runtime"
@@ -13,7 +14,6 @@ import (
 	"gastrolog/internal/system/raftstore"
 
 	"github.com/Jille/raftadmin/proto"
-	"github.com/google/uuid"
 	hraft "github.com/hashicorp/raft"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -151,7 +151,7 @@ func TestSingleNodeForwardApply(t *testing.T) {
 
 	// Write a filter config via the store (goes through raft.Apply on leader).
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	err := node.store.PutFilter(ctx, system.FilterConfig{
 		ID:         filterID,
 		Name:       "test-filter",
@@ -213,7 +213,7 @@ func TestThreeNodeCluster(t *testing.T) {
 
 	// Write a filter on the leader.
 	ctx := context.Background()
-	filterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
 	if err := node1.store.PutFilter(ctx, system.FilterConfig{
 		ID:         filterID,
 		Name:       "leader-filter",
@@ -241,7 +241,7 @@ func TestThreeNodeCluster(t *testing.T) {
 	}
 
 	// Write on a follower — should be forwarded to the leader.
-	followerFilterID := uuid.Must(uuid.NewV7())
+	followerFilterID := glid.New()
 	if err := node2.store.PutFilter(ctx, system.FilterConfig{
 		ID:         followerFilterID,
 		Name:       "follower-filter",

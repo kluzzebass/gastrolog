@@ -1,6 +1,7 @@
 package query_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"testing"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/memtest"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // cloudBackedCM wraps a ChunkManager so that List() returns all chunks
@@ -47,7 +47,7 @@ func (c *cloudBackedCM) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 // priming was never implemented — deferredChunks was written but never read.
 func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 	reg := &testRegistry{
-		vaults: make(map[uuid.UUID]struct {
+		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
@@ -56,7 +56,7 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 
 	// Tier 1 (local): 5 records at t0+0s through t0+4s
-	localVaultID := uuid.Must(uuid.NewV7())
+	localVaultID := glid.New()
 	local := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
@@ -73,7 +73,7 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 	}{local.CM, local.IM}
 
 	// Tier 2 (cloud): 5 records at t0+5s through t0+9s
-	cloudVaultID := uuid.Must(uuid.NewV7())
+	cloudVaultID := glid.New()
 	cloud := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
@@ -124,7 +124,7 @@ func TestCloudTierChunksIncludedInSearch(t *testing.T) {
 // chronologically earlier than local records must appear first.
 func TestCloudTierTimestampOrdering(t *testing.T) {
 	reg := &testRegistry{
-		vaults: make(map[uuid.UUID]struct {
+		vaults: make(map[glid.GLID]struct {
 			cm chunk.ChunkManager
 			im index.IndexManager
 		}),
@@ -133,7 +133,7 @@ func TestCloudTierTimestampOrdering(t *testing.T) {
 	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
 
 	// Cloud tier has EARLIER records (t0+0s through t0+2s).
-	cloudVaultID := uuid.Must(uuid.NewV7())
+	cloudVaultID := glid.New()
 	cloud := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})
@@ -150,7 +150,7 @@ func TestCloudTierTimestampOrdering(t *testing.T) {
 	}{&cloudBackedCM{cloud.CM}, cloud.IM}
 
 	// Local tier has LATER records (t0+3s through t0+5s).
-	localVaultID := uuid.Must(uuid.NewV7())
+	localVaultID := glid.New()
 	local := memtest.MustNewVault(t, chunkmem.Config{
 		RotationPolicy: chunk.NewRecordCountPolicy(1000),
 	})

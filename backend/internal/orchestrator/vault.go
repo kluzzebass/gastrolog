@@ -1,18 +1,18 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // Vault bundles tier instances for a single vault.
 // The active tier (Tiers[0]) provides the chunk manager, index manager, and
 // query engine used by the orchestrator for ingest and search.
 type Vault struct {
-	ID             uuid.UUID
+	ID             glid.GLID
 	Name           string
 	Enabled        bool
 	Tiers          []*TierInstance
@@ -20,7 +20,7 @@ type Vault struct {
 }
 
 // NewVault creates a Vault with the given tier instances.
-func NewVault(id uuid.UUID, tiers ...*TierInstance) *Vault {
+func NewVault(id glid.GLID, tiers ...*TierInstance) *Vault {
 	return &Vault{
 		ID:      id,
 		Enabled: true,
@@ -80,7 +80,7 @@ func (v *Vault) Type() string {
 // NewVaultFromComponents creates a Vault from raw components (chunk manager,
 // index manager, query engine). This wraps the components in a single
 // TierInstance with type "memory". Intended for test code.
-func NewVaultFromComponents(id uuid.UUID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Vault {
+func NewVaultFromComponents(id glid.GLID, cm chunk.ChunkManager, im index.IndexManager, qe *query.Engine) *Vault {
 	return NewVault(id, &TierInstance{
 		TierID:  id, // reuse vault ID as tier ID for simplicity
 		Type:    "memory",
@@ -96,15 +96,15 @@ type tierRegistry struct {
 	tiers []*TierInstance
 }
 
-func (r *tierRegistry) ListVaults() []uuid.UUID {
-	ids := make([]uuid.UUID, len(r.tiers))
+func (r *tierRegistry) ListVaults() []glid.GLID {
+	ids := make([]glid.GLID, len(r.tiers))
 	for i, t := range r.tiers {
 		ids[i] = t.TierID
 	}
 	return ids
 }
 
-func (r *tierRegistry) ChunkManager(id uuid.UUID) chunk.ChunkManager {
+func (r *tierRegistry) ChunkManager(id glid.GLID) chunk.ChunkManager {
 	for _, t := range r.tiers {
 		if t.TierID == id {
 			return t.Chunks
@@ -113,7 +113,7 @@ func (r *tierRegistry) ChunkManager(id uuid.UUID) chunk.ChunkManager {
 	return nil
 }
 
-func (r *tierRegistry) IndexManager(id uuid.UUID) index.IndexManager {
+func (r *tierRegistry) IndexManager(id glid.GLID) index.IndexManager {
 	for _, t := range r.tiers {
 		if t.TierID == id {
 			return t.Indexes

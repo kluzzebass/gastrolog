@@ -1,6 +1,7 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -12,7 +13,6 @@ import (
 	"gastrolog/internal/chunk"
 	chunkcloud "gastrolog/internal/chunk/cloud"
 
-	"github.com/google/uuid"
 )
 
 // Factory parameter keys.
@@ -109,7 +109,7 @@ func configureSealedBacking(cfg *Config, params map[string]string) error {
 	if err := store.EnsureBucket(context.Background()); err != nil {
 		return fmt.Errorf("ensure %s bucket for sealed backing: %w", backing, err)
 	}
-	vaultID, err := uuid.Parse(params[chunkcloud.ParamVaultID])
+	vaultID, err := glid.ParseUUID(params[chunkcloud.ParamVaultID])
 	if err != nil {
 		return fmt.Errorf("invalid vault ID for sealed backing: %w", err)
 	}

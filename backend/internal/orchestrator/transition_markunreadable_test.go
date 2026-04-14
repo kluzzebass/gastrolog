@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -13,7 +14,6 @@ import (
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 
-	"github.com/google/uuid"
 )
 
 // streamErrTransferrer is a minimal RemoteTransferrer that returns a
@@ -23,19 +23,19 @@ type streamErrTransferrer struct {
 	err error
 }
 
-func (t *streamErrTransferrer) StreamToTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (t *streamErrTransferrer) StreamToTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.RecordIterator) error {
 	return t.err
 }
 
 // The other interface methods aren't called by transitionChunk but must
 // exist to satisfy RemoteTransferrer.
-func (t *streamErrTransferrer) TransferRecords(_ context.Context, _ string, _ uuid.UUID, _ chunk.RecordIterator) error {
+func (t *streamErrTransferrer) TransferRecords(_ context.Context, _ string, _ glid.GLID, _ chunk.RecordIterator) error {
 	return nil
 }
-func (t *streamErrTransferrer) ForwardAppend(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+func (t *streamErrTransferrer) ForwardAppend(_ context.Context, _ string, _ glid.GLID, _ []chunk.Record) error {
 	return nil
 }
-func (t *streamErrTransferrer) WaitVaultReady(_ context.Context, _ string, _ uuid.UUID) error {
+func (t *streamErrTransferrer) WaitVaultReady(_ context.Context, _ string, _ glid.GLID) error {
 	return nil
 }
 
@@ -48,9 +48,9 @@ func (t *streamErrTransferrer) WaitVaultReady(_ context.Context, _ string, _ uui
 func setupRemoteTransitionRunner(t *testing.T, transferrer RemoteTransferrer) (*retentionRunner, chunk.ChunkID, chunk.ChunkManager) {
 	t.Helper()
 
-	vaultID := uuid.Must(uuid.NewV7())
-	tier0ID := uuid.Must(uuid.NewV7())
-	tier1ID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
+	tier0ID := glid.New()
+	tier1ID := glid.New()
 	localNodeID := "local-node"
 	_ = "remote-node"
 

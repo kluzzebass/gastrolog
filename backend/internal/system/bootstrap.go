@@ -1,25 +1,25 @@
 package system
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
 
-	"github.com/google/uuid"
 )
 
 // DefaultConfig returns the bootstrap configuration for first-run.
 // The default vault is always in-memory; file-backed vaults are only created
 // when the user explicitly configures one.
 func DefaultConfig() *Config {
-	filterID := uuid.Must(uuid.NewV7())
-	rotationID := uuid.Must(uuid.NewV7())
-	retentionID := uuid.Must(uuid.NewV7())
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
-	routeID := uuid.Must(uuid.NewV7())
-	ingesterID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	rotationID := glid.New()
+	retentionID := glid.New()
+	tierID := glid.New()
+	vaultID := glid.New()
+	routeID := glid.New()
+	ingesterID := glid.New()
 
 	return &Config{
 		Filters: []FilterConfig{
@@ -56,7 +56,7 @@ func DefaultConfig() *Config {
 				ID:           routeID,
 				Name:         "default",
 				FilterID:     new(filterID),
-				Destinations: []uuid.UUID{vaultID},
+				Destinations: []glid.GLID{vaultID},
 				Distribution: DistributionFanout,
 				Enabled:      true,
 			},

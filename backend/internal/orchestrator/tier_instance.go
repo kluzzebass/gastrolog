@@ -1,12 +1,12 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/system"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // TierInstance is the node-local materialization of a TierConfig.
@@ -18,7 +18,7 @@ import (
 // has a unique StorageID and its own chunk manager pointing to a different
 // directory.
 type TierInstance struct {
-	TierID           uuid.UUID
+	TierID           glid.GLID
 	StorageID        string // the file storage ID this instance uses (empty for memory/JSONL tiers)
 	Type             string
 	Chunks           chunk.ChunkManager

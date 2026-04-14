@@ -1,13 +1,13 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"log/slog"
 	"time"
 
 	"gastrolog/internal/chanwatch"
 
-	"github.com/google/uuid"
 )
 
 // IngestMessage is the data emitted by ingesters for ingestion.
@@ -62,4 +62,4 @@ type PressureAware interface {
 // defined here. Concrete factory implementations live in their respective
 // ingester packages (e.g., syslog.NewFactory()). The orchestrator never
 // contains ingester construction logic - it only calls factories.
-type IngesterFactory func(id uuid.UUID, params map[string]string, logger *slog.Logger) (Ingester, error)
+type IngesterFactory func(id glid.GLID, params map[string]string, logger *slog.Logger) (Ingester, error)

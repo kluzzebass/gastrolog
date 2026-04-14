@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"testing"
@@ -11,7 +12,6 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/memtest"
 
-	"github.com/google/uuid"
 )
 
 // TestRotationHookFiresRateAlerter verifies that the cron rotation
@@ -39,11 +39,11 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 		TierName:  orch.tierLabel,
 	})
 	// Re-wire the cron callback against the new alerter.
-	orch.cronRotation.onRotation = func(_, tierID uuid.UUID) {
+	orch.cronRotation.onRotation = func(_, tierID glid.GLID) {
 		orch.rotationRates.Record(tierID, orch.now())
 	}
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	cm := &cronFakeChunkManager{
 		active: &chunk.ChunkMeta{
 			ID:          chunkIDAt(time.Now()),
@@ -60,7 +60,7 @@ func TestRotationHookFiresRateAlerter(t *testing.T) {
 			ID:          chunkIDAt(time.Now()),
 			RecordCount: 1,
 		}
-		orch.cronRotation.rotateVault(uuid.Must(uuid.NewV7()), tierID, "test-vault", cm)
+		orch.cronRotation.rotateVault(glid.New(), tierID, "test-vault", cm)
 	}
 
 	// Trigger evaluation; alerter should raise the per-tier warning.
@@ -100,7 +100,7 @@ func TestRetentionHookFiresRateAlerter(t *testing.T) {
 		TierName:  orch.tierLabel,
 	})
 
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 
 	// Record retention events directly via the same code path the
 	// expireChunk hook uses. We don't drive a real expireChunk here
@@ -150,7 +150,7 @@ func TestInternalRotationFiresRateAlerter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("memtest.NewVault: %v", err)
 	}
-	vaultID := uuid.Must(uuid.NewV7())
+	vaultID := glid.New()
 	orch.RegisterVault(NewVaultFromComponents(vaultID, s.CM, s.IM, s.QE))
 
 	// Catch-all filter so every record routes into the vault.
@@ -224,7 +224,7 @@ func TestRateAlertEvaluatorRunsPeriodically(t *testing.T) {
 	// Record several rotation events immediately so the rate is
 	// comfortably above the warning threshold. The background
 	// evaluator runs every 5s; we wait up to 7s for it to fire.
-	tierID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
 	for range 5 {
 		orch.rotationRates.Record(tierID, orch.now())
 	}

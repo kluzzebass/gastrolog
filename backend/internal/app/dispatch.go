@@ -1,6 +1,7 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"log/slog"
@@ -8,7 +9,6 @@ import (
 	"os"
 	"slices"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
@@ -20,41 +20,41 @@ import (
 // orchActions is the subset of orchestrator.Orchestrator methods used by the
 // dispatcher. Defined at the consumer site so tests can supply a mock.
 type orchActions interface {
-	ListVaults() []uuid.UUID
-	VaultType(id uuid.UUID) string
+	ListVaults() []glid.GLID
+	VaultType(id glid.GLID) string
 	AddVault(ctx context.Context, cfg system.VaultConfig, f orchestrator.Factories) error
 	ReloadFilters(ctx context.Context) error
 	ReloadRotationPolicies(ctx context.Context) error
 	ReloadRetentionPolicies(ctx context.Context) error
-	DisableVault(id uuid.UUID) error
-	EnableVault(id uuid.UUID) error
-	ForceRemoveVault(id uuid.UUID) error
-	RemoveTierFromVault(vaultID, tierID uuid.UUID) bool
-	AddTierToVault(ctx context.Context, vaultID, tierID uuid.UUID, f orchestrator.Factories) error
-	DrainTier(ctx context.Context, vaultID, tierID uuid.UUID, mode orchestrator.TierDrainMode, targetNodeID string) error
-	UnregisterVault(id uuid.UUID) error
-	HasMissingTiers(vaultID uuid.UUID, tierIDs []uuid.UUID) bool
-	LocalTierIDs(vaultID uuid.UUID) []uuid.UUID
-	DrainVault(ctx context.Context, vaultID uuid.UUID, targetNodeID string) error
-	IsDraining(vaultID uuid.UUID) bool
-	CancelDrain(ctx context.Context, vaultID uuid.UUID) error
-	ListIngesters() []uuid.UUID
-	AddIngester(id uuid.UUID, name, ingType string, r orchestrator.Ingester) error
-	RemoveIngester(id uuid.UUID) error
+	DisableVault(id glid.GLID) error
+	EnableVault(id glid.GLID) error
+	ForceRemoveVault(id glid.GLID) error
+	RemoveTierFromVault(vaultID, tierID glid.GLID) bool
+	AddTierToVault(ctx context.Context, vaultID, tierID glid.GLID, f orchestrator.Factories) error
+	DrainTier(ctx context.Context, vaultID, tierID glid.GLID, mode orchestrator.TierDrainMode, targetNodeID string) error
+	UnregisterVault(id glid.GLID) error
+	HasMissingTiers(vaultID glid.GLID, tierIDs []glid.GLID) bool
+	LocalTierIDs(vaultID glid.GLID) []glid.GLID
+	DrainVault(ctx context.Context, vaultID glid.GLID, targetNodeID string) error
+	IsDraining(vaultID glid.GLID) bool
+	CancelDrain(ctx context.Context, vaultID glid.GLID) error
+	ListIngesters() []glid.GLID
+	AddIngester(id glid.GLID, name, ingType string, r orchestrator.Ingester) error
+	RemoveIngester(id glid.GLID) error
 	UpdateMaxConcurrentJobs(n int) error
-	FindLocalTierExported(vaultID, tierID uuid.UUID) *orchestrator.TierInstance
-	StopTierLeaderLoop(tierID uuid.UUID)
-	SetDesiredTierLeader(tierID uuid.UUID, leaderNodeID string)
+	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance
+	StopTierLeaderLoop(tierID glid.GLID)
+	SetDesiredTierLeader(tierID glid.GLID, leaderNodeID string)
 }
 
 // ManagedFileHandler handles managed file lifecycle events from the FSM.
 type ManagedFileHandler interface {
 	// OnPut is called when a managed file's metadata is committed to Raft.
 	// If the file isn't already on disk, it should be pulled from a peer.
-	OnPut(ctx context.Context, fileID uuid.UUID)
+	OnPut(ctx context.Context, fileID glid.GLID)
 	// OnDelete is called when a managed file is removed from Raft.
 	// The handler should clean up the file from disk.
-	OnDelete(fileID uuid.UUID)
+	OnDelete(fileID glid.GLID)
 }
 
 // configDispatcher translates FSM notifications into orchestrator side effects.
@@ -70,7 +70,7 @@ type configDispatcher struct {
 	tlsFilePath       string              // path to persist cluster TLS on rotation
 	configSignal      *notify.Signal      // broadcasts config changes to WatchConfig streams
 	managedFileHandler ManagedFileHandler   // nil for single-node or before wiring
-	catchupScheduler   func(tierID uuid.UUID, followerNodeIDs []string) // nil until orch is wired
+	catchupScheduler   func(tierID glid.GLID, followerNodeIDs []string) // nil until orch is wired
 	placementTrigger   func() // triggers immediate placement reconcile; nil for single-node
 }
 
@@ -132,7 +132,7 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	}
 }
 
-func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
+func (d *configDispatcher) handleVaultPut(ctx context.Context, id glid.GLID) {
 	vaultCfg, err := d.cfgStore.GetVault(ctx, id)
 	if err != nil || vaultCfg == nil {
 		d.logger.Error("dispatch: read vault config", "id", id, "error", err)
@@ -185,7 +185,7 @@ func (d *configDispatcher) handleVaultPut(ctx context.Context, id uuid.UUID) {
 // download each chunk, send it over the internal network, and re-upload it.
 // Instead, the vault is simply unregistered locally; the new node's
 // AddVault creates a Manager pointing to the same bucket.
-func (d *configDispatcher) maybeStartDrain(ctx context.Context, id uuid.UUID, targetNodeID string) {
+func (d *configDispatcher) maybeStartDrain(ctx context.Context, id glid.GLID, targetNodeID string) {
 	if !slices.Contains(d.orch.ListVaults(), id) {
 		return
 	}
@@ -215,8 +215,8 @@ func (d *configDispatcher) maybeStartDrain(ctx context.Context, id uuid.UUID, ta
 
 // reconcileVaultTiers incrementally adds missing tiers and removes stale tiers
 // from an existing vault, without tearing down any tiers that are unchanged.
-func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID uuid.UUID, tierIDs []uuid.UUID) {
-	expected := make(map[uuid.UUID]bool, len(tierIDs))
+func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID glid.GLID, tierIDs []glid.GLID) {
+	expected := make(map[glid.GLID]bool, len(tierIDs))
 	for _, id := range tierIDs {
 		expected[id] = true
 	}
@@ -244,7 +244,7 @@ func (d *configDispatcher) reconcileVaultTiers(ctx context.Context, vaultID uuid
 	}
 }
 
-func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id uuid.UUID, cfg *system.VaultConfig) {
+func (d *configDispatcher) applyExistingVaultChanges(ctx context.Context, id glid.GLID, cfg *system.VaultConfig) {
 	if err := d.orch.ReloadFilters(ctx); err != nil {
 		d.logger.Error("dispatch: reload filters", "error", err)
 	}
@@ -294,7 +294,7 @@ func (d *configDispatcher) reloadRetentionPolicies(ctx context.Context) {
 	}
 }
 
-func (d *configDispatcher) handleIngesterPut(ctx context.Context, id uuid.UUID) {
+func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) {
 	ingCfg, err := d.cfgStore.GetIngester(ctx, id)
 	if err != nil || ingCfg == nil {
 		d.logger.Error("dispatch: read ingester config", "id", id, "error", err)
@@ -374,7 +374,7 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 // Runs on ALL nodes — each node independently decides whether it gained or lost
 // ownership based on the tier's resolved node IDs vs localNodeID.
 // Also reloads rotation/retention policies when tier config changes.
-func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) {
+func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) {
 	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
 	if err != nil || tierCfg == nil {
 		d.logger.Error("dispatch: read tier config", "tier", tierID, "error", err)
@@ -388,7 +388,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 	}
 
 	// Each tier owns its vault reference directly.
-	if tierCfg.VaultID == (uuid.UUID{}) {
+	if tierCfg.VaultID == (glid.GLID{}) {
 		return // tier not assigned to a vault
 	}
 	v, err := d.cfgStore.GetVault(ctx, tierCfg.VaultID)
@@ -456,7 +456,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID uuid.UUID) 
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutTier from the placement manager will retry.
-func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *system.TierConfig, v system.VaultConfig, tierID uuid.UUID, leaderNodeID string, followerNodeIDs []string) {
+func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *system.TierConfig, v system.VaultConfig, tierID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
 	// Placements are "complete" when they include a leader. We can't gate on
 	// len(placements) >= RF because RF may be unsatisfiable when a node is
 	// down — the placement manager writes the best it can with surviving
@@ -488,14 +488,14 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCf
 	}
 }
 
-func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, tierID uuid.UUID) {
+func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, tierID glid.GLID) {
 	if err := d.orch.AddVault(ctx, v, d.factories); err != nil {
 		d.logger.Error("dispatch: add vault for gained tier",
 			"vault", v.ID, "tier", tierID, "error", err)
 	}
 }
 
-func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v system.VaultConfig, tierID uuid.UUID) {
+func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v system.VaultConfig, tierID glid.GLID) {
 	existing := d.orch.FindLocalTierExported(v.ID, tierID)
 	if existing != nil {
 		d.updateTierRoleIfNeeded(ctx, v.ID, tierID, existing)
@@ -510,7 +510,7 @@ func (d *configDispatcher) rebuildVaultIfTierMissing(ctx context.Context, v syst
 
 // updateTierRoleIfNeeded checks whether a tier's role (leader ↔ follower) has changed
 // and updates it in place — avoiding a full vault rebuild and file lock churn.
-func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, tierID uuid.UUID, existing *orchestrator.TierInstance) {
+func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, tierID glid.GLID, existing *orchestrator.TierInstance) {
 	tierCfg, err := d.cfgStore.GetTier(ctx, tierID)
 	if err != nil || tierCfg == nil {
 		return
@@ -542,7 +542,7 @@ func (d *configDispatcher) updateTierRoleIfNeeded(ctx context.Context, vaultID, 
 // have all chunks from normal replication — only genuinely new followers need
 // catchup. This prevents redundant chunk transfers on leader reassignment
 // (e.g. when a node dies and the leader moves but followers stay the same).
-func (d *configDispatcher) newFollowersForTier(vaultID, tierID uuid.UUID, followerNodeIDs []string) []string {
+func (d *configDispatcher) newFollowersForTier(vaultID, tierID glid.GLID, followerNodeIDs []string) []string {
 	existing := d.orch.FindLocalTierExported(vaultID, tierID)
 	if existing == nil {
 		// Tier was just added to this node — all followers are new.
@@ -563,7 +563,7 @@ func (d *configDispatcher) newFollowersForTier(vaultID, tierID uuid.UUID, follow
 }
 
 // handleTierDeleted removes vaults that no longer have any local tiers.
-func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID uuid.UUID, drain bool) {
+func (d *configDispatcher) handleTierDeleted(ctx context.Context, tierID glid.GLID, drain bool) {
 	d.logger.Info("dispatch: handleTierDeleted", "tier", tierID, "drain", drain)
 
 	// The tier config is already deleted from the store, so we can't look up

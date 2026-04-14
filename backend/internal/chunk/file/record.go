@@ -1,13 +1,13 @@
 package file
 
 import (
+	"gastrolog/internal/glid"
 	"encoding/binary"
 	"errors"
 	"time"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 // idx.log entry layout (58 bytes):
@@ -70,7 +70,7 @@ type IdxEntry struct {
 	AttrOffset uint32    // Byte offset into attr.log (after header)
 	AttrSize   uint16    // Length of encoded attributes
 	IngestSeq  uint32    // Per-ingester rolling sequence counter
-	IngesterID uuid.UUID // Ingester identity (16-byte UUID)
+	IngesterID glid.GLID // Ingester identity (16-byte UUID)
 }
 
 // EncodeIdxEntry encodes an idx.log entry into a 58-byte buffer.
@@ -94,7 +94,7 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 	if ns := int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:])); ns > 0 { //nolint:gosec // G115: nanosecond timestamps fit in int64
 		sourceTS = time.Unix(0, ns)
 	}
-	var ingesterID uuid.UUID
+	var ingesterID glid.GLID
 	copy(ingesterID[:], buf[idxIngesterIDOffset:idxIngesterIDOffset+16])
 	return IdxEntry{
 		SourceTS:   sourceTS,

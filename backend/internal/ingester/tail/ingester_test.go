@@ -1,13 +1,13 @@
 package tail
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -30,7 +30,7 @@ func collectMessages(t *testing.T, out chan orchestrator.IngestMessage, timeout 
 func TestFactoryMissingPaths(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	_, err := factory(uuid.New(), map[string]string{}, nil)
+	_, err := factory(glid.New(), map[string]string{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing paths")
 	}
@@ -39,7 +39,7 @@ func TestFactoryMissingPaths(t *testing.T) {
 func TestFactoryInvalidPathsJSON(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	_, err := factory(uuid.New(), map[string]string{"paths": "not-json"}, nil)
+	_, err := factory(glid.New(), map[string]string{"paths": "not-json"}, nil)
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -48,7 +48,7 @@ func TestFactoryInvalidPathsJSON(t *testing.T) {
 func TestFactoryEmptyPaths(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	_, err := factory(uuid.New(), map[string]string{"paths": "[]"}, nil)
+	_, err := factory(glid.New(), map[string]string{"paths": "[]"}, nil)
 	if err == nil {
 		t.Fatal("expected error for empty paths array")
 	}
@@ -57,7 +57,7 @@ func TestFactoryEmptyPaths(t *testing.T) {
 func TestFactoryInvalidPollInterval(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"paths":         `["/tmp/*.log"]`,
 		"poll_interval": "not-a-duration",
 	}, nil)
@@ -69,7 +69,7 @@ func TestFactoryInvalidPollInterval(t *testing.T) {
 func TestFactoryNegativePollInterval(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	_, err := factory(uuid.New(), map[string]string{
+	_, err := factory(glid.New(), map[string]string{
 		"paths":         `["/tmp/*.log"]`,
 		"poll_interval": "-1s",
 	}, nil)
@@ -81,7 +81,7 @@ func TestFactoryNegativePollInterval(t *testing.T) {
 func TestFactoryStateDir(t *testing.T) {
 	t.Parallel()
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 	ing, err := factory(id, map[string]string{
 		"paths":      `["/tmp/*.log"]`,
 		"_state_dir": "/data",
@@ -105,7 +105,7 @@ func TestSingleFileTailing(t *testing.T) {
 	}
 
 	factory := NewFactory()
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s", // disable polling
 	}, nil)
@@ -172,7 +172,7 @@ func TestCRLFLineEndings(t *testing.T) {
 	logFile := filepath.Join(dir, "app.log")
 
 	factory := NewFactory()
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s",
 	}, nil)
@@ -227,7 +227,7 @@ func TestMultipleFiles(t *testing.T) {
 	os.WriteFile(log2, nil, 0o644)
 
 	factory := NewFactory()
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s",
 	}, nil)
@@ -278,7 +278,7 @@ func TestTruncationDetection(t *testing.T) {
 	os.WriteFile(logFile, nil, 0o644)
 
 	factory := NewFactory()
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "100ms",
 	}, nil)
@@ -391,7 +391,7 @@ func TestBookmarkResumeFromOffset(t *testing.T) {
 	}
 
 	factory := NewFactory()
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "0s",
 		"_state_dir":    dir,
@@ -493,7 +493,7 @@ func TestPollDetectsNewFile(t *testing.T) {
 	dir := t.TempDir()
 
 	factory := NewFactory()
-	ing, err := factory(uuid.New(), map[string]string{
+	ing, err := factory(glid.New(), map[string]string{
 		"paths":         `["` + filepath.Join(dir, "*.log") + `"]`,
 		"poll_interval": "200ms",
 	}, nil)

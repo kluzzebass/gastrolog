@@ -1,18 +1,18 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // resolveFilterExpr looks up a filter ID in the config and returns its expression.
 // Returns empty string if the filter ID is nil or not found (vault receives nothing).
-func resolveFilterExpr(cfg *system.Config, filterID uuid.UUID) string {
-	if filterID == uuid.Nil || cfg == nil {
+func resolveFilterExpr(cfg *system.Config, filterID glid.GLID) string {
+	if filterID == glid.Nil || cfg == nil {
 		return ""
 	}
 	fc := findFilter(cfg.Filters, filterID)
@@ -23,7 +23,7 @@ func resolveFilterExpr(cfg *system.Config, filterID uuid.UUID) string {
 }
 
 // findFilter finds a FilterConfig by ID in a slice.
-func findFilter(filters []system.FilterConfig, id uuid.UUID) *system.FilterConfig {
+func findFilter(filters []system.FilterConfig, id glid.GLID) *system.FilterConfig {
 	for i := range filters {
 		if filters[i].ID == id {
 			return &filters[i]
@@ -34,7 +34,7 @@ func findFilter(filters []system.FilterConfig, id uuid.UUID) *system.FilterConfi
 
 // resolveVaultNodeID finds the node that owns the vault's first (active) tier.
 // Returns empty string if the vault has no tiers or the active tier is unassigned.
-func resolveVaultNodeID(sys *system.System, vaultID uuid.UUID) string {
+func resolveVaultNodeID(sys *system.System, vaultID glid.GLID) string {
 	cfg := &sys.Config
 	rt := &sys.Runtime
 	for _, v := range cfg.Vaults {
@@ -152,7 +152,7 @@ func (o *Orchestrator) reloadFiltersFromRoutes(sys *system.System) error {
 // redirectStaleForwards compares old and new filter sets and redirects
 // queued records when a vault's target node changed (e.g. leader failover).
 func (o *Orchestrator) redirectStaleForwards(prev, next *FilterSet) {
-	oldNodes := make(map[uuid.UUID]string)
+	oldNodes := make(map[glid.GLID]string)
 	for _, f := range prev.filters {
 		if f.NodeID != "" {
 			oldNodes[f.VaultID] = f.NodeID
@@ -169,7 +169,7 @@ func (o *Orchestrator) redirectStaleForwards(prev, next *FilterSet) {
 
 // updateFilterLocked adds or updates a single vault's filter in the filter set.
 // Must be called with o.mu held.
-func (o *Orchestrator) updateFilterLocked(vaultID uuid.UUID, filterExpr string) error {
+func (o *Orchestrator) updateFilterLocked(vaultID glid.GLID, filterExpr string) error {
 	fs, err := o.filterSet.AddOrUpdate(vaultID, filterExpr)
 	if err != nil {
 		return err
@@ -186,7 +186,7 @@ func (o *Orchestrator) rebuildFilterSetLocked() {
 		return
 	}
 
-	var removed []uuid.UUID
+	var removed []glid.GLID
 	for _, f := range o.filterSet.filters {
 		if f.NodeID != "" {
 			continue // remote vault — not expected in o.vaults

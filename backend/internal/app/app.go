@@ -4,6 +4,7 @@
 package app
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	petname "github.com/dustinkirkland/golang-petname"
-	"github.com/google/uuid"
 
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/alert"
@@ -204,7 +204,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	disp.orch = orch
 	disp.cfgStore = cfgStore
 	disp.factories = factories
-	disp.catchupScheduler = func(tierID uuid.UUID, followerNodeIDs []string) {
+	disp.catchupScheduler = func(tierID glid.GLID, followerNodeIDs []string) {
 		orch.ScheduleCatchupForTier(tierID, followerNodeIDs)
 	}
 
@@ -330,8 +330,8 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 // makeTierDrainCompleteHandler returns a callback that deletes the drained tier
 // config (removing its vault association) and destroys the tier's Raft group.
-func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, uuid.UUID, uuid.UUID) {
-	return func(ctx context.Context, _, tierID uuid.UUID) {
+func makeTierDrainCompleteHandler(cfgStore system.Store, logger *slog.Logger, factories orchestrator.Factories) func(context.Context, glid.GLID, glid.GLID) {
+	return func(ctx context.Context, _, tierID glid.GLID) {
 		// Tier ownership lives on TierConfig.VaultID — deleting the tier
 		// config removes the association. The drain=false flag avoids
 		// re-triggering a drain notification.
@@ -386,14 +386,14 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 		}
 	}
 
-	clusterSrv.SetRecordAppender(func(ctx context.Context, vaultID uuid.UUID, rec chunk.Record) error {
+	clusterSrv.SetRecordAppender(func(ctx context.Context, vaultID glid.GLID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
 		_, _, err := orch.Append(vaultID, rec)
 		return err
 	})
-	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID uuid.UUID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
+	clusterSrv.SetRecordTierAppender(func(ctx context.Context, vaultID, tierID glid.GLID, primaryChunkID chunk.ChunkID, rec chunk.Record) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
@@ -409,19 +409,19 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	orch.SetTierReplicator(tierReplicator)
 
 	// Same readiness gate for bulk chunk imports.
-	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID uuid.UUID, next chunk.RecordIterator) error {
+	clusterSrv.SetRecordImporter(func(ctx context.Context, vaultID glid.GLID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
 		return orch.ImportChunkRecords(ctx, vaultID, next)
 	})
-	clusterSrv.SetTierRecordImporter(func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
+	clusterSrv.SetTierRecordImporter(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
 		return orch.ImportToTier(ctx, vaultID, tierID, chunkID, next)
 	})
-	clusterSrv.SetTierStreamAppender(func(ctx context.Context, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+	clusterSrv.SetTierStreamAppender(func(ctx context.Context, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 		if err := waitForOrch(ctx); err != nil {
 			return err
 		}
@@ -437,10 +437,10 @@ func wireClusterForwarding(clusterSrv *cluster.Server, orch *orchestrator.Orches
 	clusterSrv.SetGetChunkExecutor(newGetChunkExecutor(orch))
 	clusterSrv.SetAnalyzeChunkExecutor(newAnalyzeChunkExecutor(orch))
 	clusterSrv.SetSealVaultExecutor(newSealVaultExecutor(orch))
-	clusterSrv.SetSealTierExecutor(func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	clusterSrv.SetSealTierExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.SealActiveTier(vaultID, tierID, chunkID)
 	})
-	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+	clusterSrv.SetDeleteChunkExecutor(func(ctx context.Context, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 		return orch.DeleteChunkFromTier(vaultID, tierID, chunkID)
 	})
 	clusterSrv.SetReindexVaultExecutor(newReindexVaultExecutor(orch))
@@ -530,7 +530,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:      nodeID,
 		NodeNameFn: func() string {
-			nid, err := uuid.Parse(nodeID)
+			nid, err := glid.ParseAny(nodeID)
 			if err != nil {
 				return ""
 			}
@@ -568,7 +568,7 @@ func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, e
 	}
 
 	if cfg.ConfigType == "memory" {
-		return uuid.Must(uuid.NewV7()).String(), nil
+		return glid.New().String(), nil
 	}
 	nodeID, err := hd.NodeID()
 	if err != nil {
@@ -706,7 +706,7 @@ func waitForServerSettings(ctx context.Context, cfgStore system.Store, timeout t
 }
 
 func ensureNodeConfig(ctx context.Context, cfgStore system.Store, nodeID, preferredName string) (string, error) {
-	nodeUUID, err := uuid.Parse(nodeID)
+	nodeUUID, err := glid.ParseAny(nodeID)
 	if err != nil {
 		return "", fmt.Errorf("parse node ID %q: %w", nodeID, err)
 	}

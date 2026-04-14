@@ -1,12 +1,12 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
@@ -116,7 +116,7 @@ func moreAuthoritative(a, b *apiv1.ChunkMeta) bool {
 // remoteTierNodes returns node IDs of ALL remote nodes that host tiers for a
 // vault — both leaders and followers. Leaders provide authoritative chunk
 // metadata; followers are queried to verify replica presence for the UI.
-func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []string {
+func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID glid.GLID) []string {
 	vaultCfg, err := s.cfgStore.GetVault(ctx, vaultID)
 	if err != nil || vaultCfg == nil {
 		return nil
@@ -130,7 +130,7 @@ func (s *VaultServer) remoteTierNodes(ctx context.Context, vaultID uuid.UUID) []
 		return nil
 	}
 	vaultTierIDs := system.VaultTierIDs(tiers, vaultID)
-	tierIDs := make(map[uuid.UUID]bool, len(vaultTierIDs))
+	tierIDs := make(map[glid.GLID]bool, len(vaultTierIDs))
 	for _, tid := range vaultTierIDs {
 		tierIDs[tid] = true
 	}
@@ -302,7 +302,7 @@ func (s *VaultServer) ValidateVault(
 // ValidateVaultLocal runs chunk and index integrity checks on a local vault.
 // Exported so both the VaultServer RPC handler and the cluster executor can
 // share the same validation logic.
-func ValidateVaultLocal(orch *orchestrator.Orchestrator, vaultID uuid.UUID, metas []chunk.ChunkMeta) *apiv1.ValidateVaultResponse {
+func ValidateVaultLocal(orch *orchestrator.Orchestrator, vaultID glid.GLID, metas []chunk.ChunkMeta) *apiv1.ValidateVaultResponse {
 	resp := &apiv1.ValidateVaultResponse{Valid: true}
 	for _, meta := range metas {
 		cv := validateChunk(orch, vaultID, meta)
@@ -315,7 +315,7 @@ func ValidateVaultLocal(orch *orchestrator.Orchestrator, vaultID uuid.UUID, meta
 }
 
 // validateChunk checks a single chunk's cursor readability and index completeness.
-func validateChunk(orch *orchestrator.Orchestrator, vaultID uuid.UUID, meta chunk.ChunkMeta) *apiv1.ChunkValidation {
+func validateChunk(orch *orchestrator.Orchestrator, vaultID glid.GLID, meta chunk.ChunkMeta) *apiv1.ChunkValidation {
 	cv := &apiv1.ChunkValidation{
 		ChunkId: meta.ID.String(),
 		Valid:   true,

@@ -1,17 +1,17 @@
 package kafka
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"log/slog"
 	"testing"
 
-	"github.com/google/uuid"
 )
 
 func FuzzNewFactory(f *testing.F) {
 	logger := slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil))
 	factory := NewFactory()
-	id := uuid.New()
+	id := glid.New()
 
 	// Seed: valid params.
 	f.Add([]byte("brokers\x00localhost:9092\x00topic\x00logs\x00group\x00gastrolog"))

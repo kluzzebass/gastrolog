@@ -1,13 +1,13 @@
 package memory
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"testing"
 
 	"gastrolog/internal/system"
 	"gastrolog/internal/system/storetest"
 
-	"github.com/google/uuid"
 )
 
 func TestConformance(t *testing.T) {
@@ -22,7 +22,7 @@ func TestStoreIsolation(t *testing.T) {
 	s := NewStore()
 	ctx := context.Background()
 
-	ingesterID := uuid.Must(uuid.NewV7())
+	ingesterID := glid.New()
 	if err := s.PutIngester(ctx, system.IngesterConfig{
 		ID: ingesterID, Type: "test", Params: map[string]string{"key": "value"},
 	}); err != nil {
@@ -34,7 +34,7 @@ func TestStoreIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetIngester: %v", err)
 	}
-	modifiedID := uuid.Must(uuid.NewV7())
+	modifiedID := glid.New()
 	got.ID = modifiedID
 	got.Params["key"] = "modified"
 

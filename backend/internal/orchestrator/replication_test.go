@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"log/slog"
@@ -16,14 +17,13 @@ import (
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
 
-	"github.com/google/uuid"
 )
 
 // ---------- fake forwarder ----------
 
 type replicationFakeForwarder struct{}
 
-func (f *replicationFakeForwarder) Forward(_ context.Context, _ string, _ uuid.UUID, _ []chunk.Record) error {
+func (f *replicationFakeForwarder) Forward(_ context.Context, _ string, _ glid.GLID, _ []chunk.Record) error {
 	return nil
 }
 
@@ -37,31 +37,31 @@ type replicationFakeReplicator struct {
 
 type sealCall struct {
 	nodeID  string
-	vaultID uuid.UUID
-	tierID  uuid.UUID
+	vaultID glid.GLID
+	tierID  glid.GLID
 	chunkID chunk.ChunkID
 }
 
-func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (m *replicationFakeReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
-func (m *replicationFakeReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID uuid.UUID, chunkID chunk.ChunkID) error {
+func (m *replicationFakeReplicator) SealTier(_ context.Context, nodeID string, vaultID, tierID glid.GLID, chunkID chunk.ChunkID) error {
 	if m.sealErr != nil {
 		return m.sealErr
 	}
 	m.sealCalls = append(m.sealCalls, sealCall{nodeID: nodeID, vaultID: vaultID, tierID: tierID, chunkID: chunkID})
 	return nil
 }
-func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, chunkID chunk.ChunkID, _ []chunk.Record) error {
+func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, chunkID chunk.ChunkID, _ []chunk.Record) error {
 	m.replicatedChunks = append(m.replicatedChunks, chunkID)
 	return nil
 }
-func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 // ---------- helpers ----------
 
-func newReplicationTier(t *testing.T, tierID uuid.UUID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
+func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
 	t.Helper()
 	cm, err := chunkmem.NewFactory()(nil, nil)
 	if err != nil {
@@ -100,8 +100,8 @@ func TestSealActiveTier(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	vault.Name = "seal-test"
 	orch.RegisterVault(vault)
@@ -131,8 +131,8 @@ func TestSealActiveTierMismatchSkipsSeal(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	vault.Name = "mismatch"
 	orch.RegisterVault(vault)
@@ -164,12 +164,12 @@ func TestSealActiveTierTierNotFound(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	orch.RegisterVault(vault)
 
-	wrongTierID := uuid.Must(uuid.NewV7())
+	wrongTierID := glid.New()
 	err := orch.SealActiveTier(vaultID, wrongTierID, chunk.ChunkID{})
 	if !errors.Is(err, ErrVaultNotFound) {
 		t.Errorf("expected ErrVaultNotFound, got %v", err)
@@ -180,8 +180,8 @@ func TestSealActiveTierNoActiveChunk(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	orch.RegisterVault(vault)
 
@@ -201,8 +201,8 @@ func TestCatchupSecondaryNoSealedChunks(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	orch.RegisterVault(vault)
 
@@ -220,8 +220,8 @@ func TestCatchupSecondaryOnlyPrimary(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	// This is a follower — should not initiate catchup.
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, true, "node-2"))
 	orch.RegisterVault(vault)
@@ -236,8 +236,8 @@ func TestCatchupSecondaryNoTransferrer(t *testing.T) {
 	t.Parallel()
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	vault := NewVault(vaultID, newReplicationTier(t, tierID, nil, false, ""))
 	orch.RegisterVault(vault)
 	// No transferrer set.
@@ -266,8 +266,8 @@ func TestCatchupSkipsFSMRetiredChunks(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	tier := newReplicationTier(t, tierID, nil, false, "")
 	vault := NewVault(vaultID, tier)
 	orch.RegisterVault(vault)
@@ -352,8 +352,8 @@ func TestCatchupNilManifestUsesAllChunks(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node-1"})
 	orch.logger = slog.Default()
 
-	tierID := uuid.Must(uuid.NewV7())
-	vaultID := uuid.Must(uuid.NewV7())
+	tierID := glid.New()
+	vaultID := glid.New()
 	tier := newReplicationTier(t, tierID, nil, false, "")
 	vault := NewVault(vaultID, tier)
 	orch.RegisterVault(vault)

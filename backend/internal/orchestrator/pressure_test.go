@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/chanwatch"
 	"gastrolog/internal/orchestrator"
 
-	"github.com/google/uuid"
 )
 
 // pressureAwareIngester is a test ingester that implements
@@ -68,7 +68,7 @@ func TestPressureGateInjectedIntoPressureAwareIngester(t *testing.T) {
 	orch, _ := newIngesterTestSetup(t)
 
 	ing := newPressureAwareIngester()
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "pressure-aware", "test", ing)
+	orch.RegisterIngester(glid.New(), "pressure-aware", "test", ing)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -103,7 +103,7 @@ func TestPressureGateStartsInNormalState(t *testing.T) {
 	orch, _ := newIngesterTestSetup(t)
 
 	ing := newPressureAwareIngester()
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "pressure-aware", "test", ing)
+	orch.RegisterIngester(glid.New(), "pressure-aware", "test", ing)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -132,7 +132,7 @@ func TestPressureGateFiresTransitionCallbacks(t *testing.T) {
 
 	// Need a PressureAware ingester so the gate is created at Start time.
 	ing := newPressureAwareIngester()
-	orch.RegisterIngester(uuid.Must(uuid.NewV7()), "pressure-aware", "test", ing)
+	orch.RegisterIngester(glid.New(), "pressure-aware", "test", ing)
 
 	if err := orch.Start(context.Background()); err != nil {
 		t.Fatalf("Start: %v", err)

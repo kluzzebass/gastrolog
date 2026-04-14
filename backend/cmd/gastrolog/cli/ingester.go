@@ -1,13 +1,13 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
 	"strconv"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 
 	v1 "gastrolog/api/gen/gastrolog/v1"
@@ -114,7 +114,7 @@ func newIngesterCreateCmd() *cobra.Command {
 
 			// Upsert: if an ingester with this name exists, start from its config.
 			cfg := &v1.IngesterConfig{
-				Id:      uuid.Must(uuid.NewV7()).String(),
+				Id:      glid.New().String(),
 				Name:    name,
 				Enabled: true, // default for new ingesters
 			}

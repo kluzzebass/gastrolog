@@ -1,20 +1,20 @@
 package chatterbox
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
 
 func TestNewIngester_Defaults(t *testing.T) {
 	t.Parallel()
-	r, err := NewIngester(uuid.New(), nil, nil)
+	r, err := NewIngester(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(nil) failed: %v", err)
 	}
@@ -33,7 +33,7 @@ func TestNewIngester_CustomParams(t *testing.T) {
 		"minInterval": "50ms",
 		"maxInterval": "200ms",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(params) failed: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestNewIngester_SubMillisecond(t *testing.T) {
 		"minInterval": "100us",
 		"maxInterval": "500us",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(params) failed: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestNewIngester_MixedUnits(t *testing.T) {
 		"minInterval": "1.5ms",
 		"maxInterval": "2s",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(params) failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestNewIngester_MixedUnits(t *testing.T) {
 func TestNewIngester_InvalidMinInterval(t *testing.T) {
 	t.Parallel()
 	params := map[string]string{"minInterval": "not-a-duration"}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid min_interval")
 	}
@@ -96,7 +96,7 @@ func TestNewIngester_InvalidMinInterval(t *testing.T) {
 func TestNewIngester_InvalidMaxInterval(t *testing.T) {
 	t.Parallel()
 	params := map[string]string{"maxInterval": "not-a-duration"}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid max_interval")
 	}
@@ -105,7 +105,7 @@ func TestNewIngester_InvalidMaxInterval(t *testing.T) {
 func TestNewIngester_NegativeMinInterval(t *testing.T) {
 	t.Parallel()
 	params := map[string]string{"minInterval": "-10ms"}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative min_interval")
 	}
@@ -114,7 +114,7 @@ func TestNewIngester_NegativeMinInterval(t *testing.T) {
 func TestNewIngester_NegativeMaxInterval(t *testing.T) {
 	t.Parallel()
 	params := map[string]string{"maxInterval": "-10ms"}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative max_interval")
 	}
@@ -126,7 +126,7 @@ func TestNewIngester_MinExceedsMax(t *testing.T) {
 		"minInterval": "500ms",
 		"maxInterval": "100ms",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error when min > max")
 	}
@@ -138,7 +138,7 @@ func TestNewIngester_EqualMinMax(t *testing.T) {
 		"minInterval": "100ms",
 		"maxInterval": "100ms",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester with min=max should succeed: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestRun_EmitsMessages(t *testing.T) {
 		"minInterval": "1ms",
 		"maxInterval": "5ms",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestRun_StopsOnContextCancel(t *testing.T) {
 		"minInterval": "1s",
 		"maxInterval": "2s",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -235,11 +235,11 @@ func TestRun_ConcurrentIngesters(t *testing.T) {
 		"maxInterval": "5ms",
 	}
 
-	r1, err := NewIngester(uuid.New(), params, nil)
+	r1, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(r1) failed: %v", err)
 	}
-	r2, err := NewIngester(uuid.New(), params, nil)
+	r2, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester(r2) failed: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestRun_ConcurrentIngesters(t *testing.T) {
 
 func TestRun_ReturnsNilOnCancel(t *testing.T) {
 	t.Parallel()
-	r, err := NewIngester(uuid.New(), nil, nil)
+	r, err := NewIngester(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -292,7 +292,7 @@ func TestRun_ReturnsNilOnCancel(t *testing.T) {
 
 func TestGenerateMessage_Format(t *testing.T) {
 	t.Parallel()
-	r, err := NewIngester(uuid.New(), nil, nil)
+	r, err := NewIngester(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -318,7 +318,7 @@ func TestGenerateMessage_Format(t *testing.T) {
 
 func TestRandomInterval_Bounds(t *testing.T) {
 	t.Parallel()
-	r, err := NewIngester(uuid.New(), map[string]string{
+	r, err := NewIngester(glid.New(), map[string]string{
 		"minInterval": "10ms",
 		"maxInterval": "20ms",
 	}, nil)
@@ -337,7 +337,7 @@ func TestRandomInterval_Bounds(t *testing.T) {
 
 func TestRandomInterval_EqualBounds(t *testing.T) {
 	t.Parallel()
-	r, err := NewIngester(uuid.New(), map[string]string{
+	r, err := NewIngester(glid.New(), map[string]string{
 		"minInterval": "50ms",
 		"maxInterval": "50ms",
 	}, nil)
@@ -359,7 +359,7 @@ func TestNewIngester_Formats(t *testing.T) {
 	params := map[string]string{
 		"formats": "json,kv",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -371,7 +371,7 @@ func TestNewIngester_Formats(t *testing.T) {
 
 func TestNewIngester_AllFormats(t *testing.T) {
 	t.Parallel()
-	r, err := NewIngester(uuid.New(), nil, nil)
+	r, err := NewIngester(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestGenerateMessages_MultirecordProducesMultiple(t *testing.T) {
 	params := map[string]string{
 		"formats": "multirecord",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -416,7 +416,7 @@ func TestNewIngester_UnknownFormat(t *testing.T) {
 	params := map[string]string{
 		"formats": "json,invalid",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for unknown format")
 	}
@@ -428,7 +428,7 @@ func TestNewIngester_FormatWeights(t *testing.T) {
 		"formats":       "json,kv",
 		"formatWeights": "json=10,kv=5",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -448,7 +448,7 @@ func TestNewIngester_InvalidWeight(t *testing.T) {
 		"formats":       "json",
 		"formatWeights": "json=notanumber",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid weight")
 	}
@@ -460,7 +460,7 @@ func TestNewIngester_ZeroWeight(t *testing.T) {
 		"formats":       "json",
 		"formatWeights": "json=0",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for zero weight")
 	}
@@ -472,7 +472,7 @@ func TestNewIngester_NegativeWeight(t *testing.T) {
 		"formats":       "json",
 		"formatWeights": "json=-5",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for negative weight")
 	}
@@ -483,7 +483,7 @@ func TestNewIngester_HostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "20",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestNewIngester_InvalidHostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "invalid",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid host_count")
 	}
@@ -521,7 +521,7 @@ func TestNewIngester_ZeroHostCount(t *testing.T) {
 	params := map[string]string{
 		"hostCount": "0",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for zero host_count")
 	}
@@ -533,7 +533,7 @@ func TestNewIngester_ServiceCount(t *testing.T) {
 		"serviceCount": "3",
 		"formats":      "plain", // plain format uses service attr
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -560,7 +560,7 @@ func TestNewIngester_InvalidServiceCount(t *testing.T) {
 	params := map[string]string{
 		"serviceCount": "invalid",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for invalid service_count")
 	}
@@ -571,7 +571,7 @@ func TestNewIngester_ZeroServiceCount(t *testing.T) {
 	params := map[string]string{
 		"serviceCount": "0",
 	}
-	_, err := NewIngester(uuid.New(), params, nil)
+	_, err := NewIngester(glid.New(), params, nil)
 	if err == nil {
 		t.Error("expected error for zero service_count")
 	}
@@ -584,7 +584,7 @@ func TestGenerateMessage_MultipleFormats(t *testing.T) {
 		"maxInterval": "5ms",
 		"formats":     "plain,json,kv,access,syslog",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -629,7 +629,7 @@ func TestGenerateMessage_WeightedSelection(t *testing.T) {
 		"formats":       "json,plain",
 		"formatWeights": "json=90,plain=10",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}
@@ -657,7 +657,7 @@ func TestGenerateMessage_AttrsIncludeIngesterType(t *testing.T) {
 	params := map[string]string{
 		"formats": "json",
 	}
-	r, err := NewIngester(uuid.New(), params, nil)
+	r, err := NewIngester(glid.New(), params, nil)
 	if err != nil {
 		t.Fatalf("NewIngester failed: %v", err)
 	}

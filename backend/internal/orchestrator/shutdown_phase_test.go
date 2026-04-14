@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"sync/atomic"
 	"testing"
@@ -8,7 +9,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/lifecycle"
 
-	"github.com/google/uuid"
 )
 
 // recordingTierReplicator is a TierReplicator that counts every call. Used
@@ -19,21 +19,21 @@ type recordingTierReplicator struct {
 	sealCalls   atomic.Int32
 }
 
-func (r *recordingTierReplicator) AppendRecords(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingTierReplicator) AppendRecords(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	r.appendCalls.Add(1)
 	return nil
 }
 
-func (r *recordingTierReplicator) SealTier(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+func (r *recordingTierReplicator) SealTier(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	r.sealCalls.Add(1)
 	return nil
 }
 
-func (r *recordingTierReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID, _ []chunk.Record) error {
+func (r *recordingTierReplicator) ImportSealedChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID, _ []chunk.Record) error {
 	return nil
 }
 
-func (r *recordingTierReplicator) DeleteChunk(_ context.Context, _ string, _, _ uuid.UUID, _ chunk.ChunkID) error {
+func (r *recordingTierReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
 
@@ -65,8 +65,8 @@ func TestFireAndForgetRemoteSkipsDuringShutdown(t *testing.T) {
 	orch.SetTierReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: uuid.Must(uuid.NewV7()), tierID: uuid.Must(uuid.NewV7())},
-		{nodeID: "remote-b", vaultID: uuid.Must(uuid.NewV7()), tierID: uuid.Must(uuid.NewV7())},
+		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
+		{nodeID: "remote-b", vaultID: glid.New(), tierID: glid.New()},
 	}
 	rec := chunk.Record{Raw: []byte("payload")}
 
@@ -103,7 +103,7 @@ func TestSealRemoteFollowersSkipsDuringShutdown(t *testing.T) {
 	orch.SetTierReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: uuid.Must(uuid.NewV7()), tierID: uuid.Must(uuid.NewV7())},
+		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
 	}
 	chunkID := chunk.ChunkID{}
 
@@ -134,7 +134,7 @@ func TestFireAndForgetRemoteNilPhaseDoesNotPanic(t *testing.T) {
 	orch.SetTierReplicator(replicator)
 
 	targets := []remoteForwardTarget{
-		{nodeID: "remote-a", vaultID: uuid.Must(uuid.NewV7()), tierID: uuid.Must(uuid.NewV7())},
+		{nodeID: "remote-a", vaultID: glid.New(), tierID: glid.New()},
 	}
 	orch.fireAndForgetRemote(targets, chunk.Record{Raw: []byte("payload")})
 

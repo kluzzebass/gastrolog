@@ -1,6 +1,7 @@
 package fluentfwd
 
 import (
+	"gastrolog/internal/glid"
 	"bytes"
 	"compress/gzip"
 	"encoding/binary"
@@ -9,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 
 	"gastrolog/internal/orchestrator"
@@ -520,7 +520,7 @@ func TestFluentFwdFactory(t *testing.T) {
 	factory := NewFactory()
 
 	// Default addr.
-	ing, err := factory(uuid.New(), nil, nil)
+	ing, err := factory(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("factory with nil params: %v", err)
 	}
@@ -529,7 +529,7 @@ func TestFluentFwdFactory(t *testing.T) {
 	}
 
 	// Custom addr.
-	ing, err = factory(uuid.New(), map[string]string{"addr": ":9224"}, nil)
+	ing, err = factory(glid.New(), map[string]string{"addr": ":9224"}, nil)
 	if err != nil {
 		t.Fatalf("factory with custom addr: %v", err)
 	}
@@ -538,7 +538,7 @@ func TestFluentFwdFactory(t *testing.T) {
 	}
 
 	// Invalid addr.
-	_, err = factory(uuid.New(), map[string]string{"addr": "noport"}, nil)
+	_, err = factory(glid.New(), map[string]string{"addr": "noport"}, nil)
 	if err == nil {
 		t.Error("expected error for invalid addr")
 	}

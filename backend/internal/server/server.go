@@ -2,6 +2,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"cmp"
 	"context"
 	"crypto/tls"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
 
@@ -285,7 +285,7 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 	if c.cfgStore == nil {
 		return ""
 	}
-	id, err := uuid.Parse(vaultID)
+	id, err := glid.ParseUUID(vaultID)
 	if err != nil {
 		return ""
 	}
@@ -303,7 +303,7 @@ func (c *configVaultOwner) ResolveVaultOwner(ctx context.Context, vaultID string
 		return ""
 	}
 
-	tierMap := make(map[uuid.UUID]*system.TierConfig, len(tiers))
+	tierMap := make(map[glid.GLID]*system.TierConfig, len(tiers))
 	for i := range tiers {
 		tierMap[tiers[i].ID] = &tiers[i]
 	}

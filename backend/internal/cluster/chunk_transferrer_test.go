@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"net"
@@ -9,7 +10,6 @@ import (
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -95,7 +95,7 @@ func TestStreamToTierTimeoutOnHangingPeer(t *testing.T) {
 	}
 
 	start := time.Now()
-	err := ct.StreamToTier(context.Background(), "hung", uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), emptyIterator())
+	err := ct.StreamToTier(context.Background(), "hung", glid.New(), glid.New(), emptyIterator())
 	elapsed := time.Since(start)
 
 	if err == nil {

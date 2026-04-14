@@ -1,6 +1,7 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -67,7 +67,7 @@ func (s *AuthServer) loadRefreshDuration(ctx context.Context) time.Duration {
 }
 
 // issueRefreshToken generates a refresh token, stores its hash, and returns the opaque token.
-func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (string, error) {
+func (s *AuthServer) issueRefreshToken(ctx context.Context, userID glid.GLID) (string, error) {
 	token, hash, err := auth.GenerateRefreshToken()
 	if err != nil {
 		return "", err
@@ -75,7 +75,7 @@ func (s *AuthServer) issueRefreshToken(ctx context.Context, userID uuid.UUID) (s
 	refreshDuration := s.loadRefreshDuration(ctx)
 	now := time.Now().UTC()
 	rt := system.RefreshToken{
-		ID:        uuid.Must(uuid.NewV7()),
+		ID:        glid.New(),
 		UserID:    userID,
 		TokenHash: hash,
 		ExpiresAt: now.Add(refreshDuration),
@@ -185,7 +185,7 @@ func (s *AuthServer) Register(
 	}
 
 	// Create first user as admin.
-	userID := uuid.Must(uuid.NewV7())
+	userID := glid.New()
 	now := time.Now().UTC()
 	user := system.User{
 		ID:           userID,
@@ -457,7 +457,7 @@ func (s *AuthServer) CreateUser(
 
 	now := time.Now().UTC()
 	user := system.User{
-		ID:           uuid.Must(uuid.NewV7()),
+		ID:           glid.New(),
 		Username:     username,
 		PasswordHash: hash,
 		Role:         role,

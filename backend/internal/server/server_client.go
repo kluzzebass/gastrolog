@@ -1,13 +1,13 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 	"gastrolog/internal/system"
@@ -19,7 +19,7 @@ type tokenValidator struct {
 }
 
 func (tv *tokenValidator) IsTokenValid(ctx context.Context, userID string, issuedAt time.Time) (bool, error) {
-	uid, err := uuid.Parse(userID)
+	uid, err := glid.ParseUUID(userID)
 	if err != nil {
 		return false, fmt.Errorf("parse user ID %q: %w", userID, err)
 	}

@@ -1,6 +1,7 @@
 package command
 
 import (
+	"gastrolog/internal/glid"
 	"reflect"
 	"testing"
 	"time"
@@ -8,7 +9,6 @@ import (
 	gastrologv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/system"
 
-	"github.com/google/uuid"
 )
 
 // ptr returns a pointer to v.
@@ -21,7 +21,7 @@ func ptr[T any](v T) *T { return &v }
 func TestPutFilter(t *testing.T) {
 	t.Parallel()
 	want := system.FilterConfig{
-		ID:         uuid.Must(uuid.NewV7()),
+		ID:         glid.New(),
 		Name:       "prod-errors",
 		Expression: "env=prod AND level=error",
 	}
@@ -49,7 +49,7 @@ func TestPutFilter(t *testing.T) {
 
 func TestDeleteFilter(t *testing.T) {
 	t.Parallel()
-	want := uuid.Must(uuid.NewV7())
+	want := glid.New()
 	cmd := NewDeleteFilter(want)
 	b, err := Marshal(cmd)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestDeleteFilter(t *testing.T) {
 func TestPutRotationPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RotationPolicyConfig{
-		ID:         uuid.Must(uuid.NewV7()),
+		ID:         glid.New(),
 		Name:       "default-rotation",
 		MaxBytes:   ptr("64MB"),
 		MaxAge:     ptr("1h"),
@@ -89,7 +89,7 @@ func TestPutRotationPolicy(t *testing.T) {
 func TestPutRotationPolicyNilOptionals(t *testing.T) {
 	t.Parallel()
 	want := system.RotationPolicyConfig{
-		ID:   uuid.Must(uuid.NewV7()),
+		ID:   glid.New(),
 		Name: "minimal",
 	}
 	got := roundTripCommand(t, NewPutRotationPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RotationPolicyConfig, error) {
@@ -103,7 +103,7 @@ func TestPutRotationPolicyNilOptionals(t *testing.T) {
 func TestPutRetentionPolicy(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{
-		ID:        uuid.Must(uuid.NewV7()),
+		ID:        glid.New(),
 		Name:      "long-term",
 		MaxAge:    ptr("720h"),
 		MaxBytes:  ptr("10GB"),
@@ -120,7 +120,7 @@ func TestPutRetentionPolicy(t *testing.T) {
 func TestPutRetentionPolicyNilOptionals(t *testing.T) {
 	t.Parallel()
 	want := system.RetentionPolicyConfig{
-		ID:   uuid.Must(uuid.NewV7()),
+		ID:   glid.New(),
 		Name: "empty",
 	}
 	got := roundTripCommand(t, NewPutRetentionPolicy(want), func(cmd *gastrologv1.SystemCommand) (system.RetentionPolicyConfig, error) {
@@ -135,7 +135,7 @@ func TestPutVault(t *testing.T) {
 	t.Parallel()
 
 	want := system.VaultConfig{
-		ID:      uuid.Must(uuid.NewV7()),
+		ID:      glid.New(),
 		Name:    "production",
 		Enabled: true,
 	}
@@ -150,7 +150,7 @@ func TestPutVault(t *testing.T) {
 func TestPutVaultNilOptionals(t *testing.T) {
 	t.Parallel()
 	want := system.VaultConfig{
-		ID:   uuid.Must(uuid.NewV7()),
+		ID:   glid.New(),
 		Name: "bare",
 	}
 	got := roundTripCommand(t, NewPutVault(want), func(cmd *gastrologv1.SystemCommand) (system.VaultConfig, error) {
@@ -164,7 +164,7 @@ func TestPutVaultNilOptionals(t *testing.T) {
 func TestPutIngester(t *testing.T) {
 	t.Parallel()
 	want := system.IngesterConfig{
-		ID:      uuid.Must(uuid.NewV7()),
+		ID:      glid.New(),
 		Name:    "syslog-prod",
 		Type:    "syslog-udp",
 		Enabled: true,
@@ -213,7 +213,7 @@ func TestPutServerSettings(t *testing.T) {
 func TestPutCertificate(t *testing.T) {
 	t.Parallel()
 	want := system.CertPEM{
-		ID:       uuid.Must(uuid.NewV7()),
+		ID:       glid.New(),
 		Name:     "main-cert",
 		CertPEM:  "-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----",
 		KeyPEM:   "-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
@@ -232,7 +232,7 @@ func TestCreateUser(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	want := system.User{
-		ID:                 uuid.Must(uuid.NewV7()),
+		ID:                 glid.New(),
 		Username:           "admin",
 		PasswordHash:       "$2a$10$fakehash",
 		Role:               "admin",
@@ -260,7 +260,7 @@ func TestCreateUser(t *testing.T) {
 func TestCreateUserZeroTime(t *testing.T) {
 	t.Parallel()
 	want := system.User{
-		ID:           uuid.Must(uuid.NewV7()),
+		ID:           glid.New(),
 		Username:     "nobody",
 		PasswordHash: "$2a$10$hash",
 		Role:         "user",
@@ -275,7 +275,7 @@ func TestCreateUserZeroTime(t *testing.T) {
 
 func TestUpdatePassword(t *testing.T) {
 	t.Parallel()
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	hash := "$2a$10$newhash"
 	cmd := NewUpdatePassword(id, hash)
 	b, err := Marshal(cmd)
@@ -297,7 +297,7 @@ func TestUpdatePassword(t *testing.T) {
 
 func TestUpdateUserRole(t *testing.T) {
 	t.Parallel()
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	cmd := NewUpdateUserRole(id, "admin")
 	b, err := Marshal(cmd)
 	if err != nil {
@@ -318,7 +318,7 @@ func TestUpdateUserRole(t *testing.T) {
 
 func TestUpdateUsername(t *testing.T) {
 	t.Parallel()
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	cmd := NewUpdateUsername(id, "newname")
 	b, err := Marshal(cmd)
 	if err != nil {
@@ -339,7 +339,7 @@ func TestUpdateUsername(t *testing.T) {
 
 func TestInvalidateTokens(t *testing.T) {
 	t.Parallel()
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	cmd := NewInvalidateTokens(id, at)
 	b, err := Marshal(cmd)
@@ -362,7 +362,7 @@ func TestInvalidateTokens(t *testing.T) {
 
 func TestPutUserPreferences(t *testing.T) {
 	t.Parallel()
-	id := uuid.Must(uuid.NewV7())
+	id := glid.New()
 	prefs := `{"theme":"light","syntax":"monokai"}`
 	cmd := NewPutUserPreferences(id, prefs)
 	b, err := Marshal(cmd)
@@ -386,8 +386,8 @@ func TestCreateRefreshToken(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	want := system.RefreshToken{
-		ID:        uuid.Must(uuid.NewV7()),
-		UserID:    uuid.Must(uuid.NewV7()),
+		ID:        glid.New(),
+		UserID:    glid.New(),
 		TokenHash: "sha256:abc123",
 		ExpiresAt: now.Add(7 * 24 * time.Hour),
 		CreatedAt: now,
@@ -406,7 +406,7 @@ func TestCreateRefreshToken(t *testing.T) {
 
 func TestDeleteRefreshToken(t *testing.T) {
 	t.Parallel()
-	want := uuid.Must(uuid.NewV7())
+	want := glid.New()
 	cmd := NewDeleteRefreshToken(want)
 	b, err := Marshal(cmd)
 	if err != nil {
@@ -427,7 +427,7 @@ func TestDeleteRefreshToken(t *testing.T) {
 
 func TestDeleteUserRefreshTokens(t *testing.T) {
 	t.Parallel()
-	want := uuid.Must(uuid.NewV7())
+	want := glid.New()
 	cmd := NewDeleteUserRefreshTokens(want)
 	b, err := Marshal(cmd)
 	if err != nil {
@@ -454,9 +454,9 @@ func TestSnapshotRoundTrip(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
-	filterID := uuid.Must(uuid.NewV7())
-	policyID := uuid.Must(uuid.NewV7())
-	retPolicyID := uuid.Must(uuid.NewV7())
+	filterID := glid.New()
+	policyID := glid.New()
+	retPolicyID := glid.New()
 	cfg := &system.Config{
 		Filters: []system.FilterConfig{
 			{ID: filterID, Name: "all", Expression: "*"},
@@ -469,23 +469,23 @@ func TestSnapshotRoundTrip(t *testing.T) {
 		},
 		Vaults: []system.VaultConfig{
 			{
-				ID:      uuid.Must(uuid.NewV7()),
+				ID:      glid.New(),
 				Name:    "main",
 				Enabled: true,
 			},
 		},
 		Ingesters: []system.IngesterConfig{
-			{ID: uuid.Must(uuid.NewV7()), Name: "syslog", Enabled: true},
+			{ID: glid.New(), Name: "syslog", Enabled: true},
 		},
 		Auth: system.AuthConfig{JWTSecret: "test"},
 		Certs: []system.CertPEM{
-			{ID: uuid.Must(uuid.NewV7()), Name: "default", CertPEM: "cert", KeyPEM: "key"},
+			{ID: glid.New(), Name: "default", CertPEM: "cert", KeyPEM: "key"},
 		},
 	}
 
 	users := []system.User{
 		{
-			ID:                 uuid.Must(uuid.NewV7()),
+			ID:                 glid.New(),
 			Username:           "admin",
 			PasswordHash:       "$2a$10$hash",
 			Role:               "admin",
@@ -498,7 +498,7 @@ func TestSnapshotRoundTrip(t *testing.T) {
 
 	tokens := []system.RefreshToken{
 		{
-			ID:        uuid.Must(uuid.NewV7()),
+			ID:        glid.New(),
 			UserID:    users[0].ID,
 			TokenHash: "sha256:tok",
 			ExpiresAt: now.Add(7 * 24 * time.Hour),

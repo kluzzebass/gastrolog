@@ -1,11 +1,11 @@
 package orchestrator
 
 import (
+	"gastrolog/internal/glid"
 	"testing"
 
 	"gastrolog/internal/chunk"
 
-	"github.com/google/uuid"
 )
 
 func FuzzCompileFilter(f *testing.F) {
@@ -29,7 +29,7 @@ func FuzzCompileFilter(f *testing.F) {
 	f.Add(`env="prod" AND /pattern/`)
 
 	f.Fuzz(func(t *testing.T, filter string) {
-		vid := uuid.Must(uuid.NewV7())
+		vid := glid.New()
 		// Must not panic on any input.
 		_, _ = CompileFilter(vid, filter)
 	})
@@ -50,7 +50,7 @@ func FuzzFilterSetMatch(f *testing.F) {
 	f.Add(`key_exists("host")`, "env", "prod")
 
 	f.Fuzz(func(t *testing.T, filter, key, value string) {
-		vid := uuid.Must(uuid.NewV7())
+		vid := glid.New()
 		cf, err := CompileFilter(vid, filter)
 		if err != nil {
 			return // invalid filter expressions are expected

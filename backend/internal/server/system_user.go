@@ -1,13 +1,13 @@
 package server
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/auth"
@@ -28,10 +28,10 @@ type savedQuery struct {
 }
 
 // loadPrefs reads and parses the preferences JSON for the authenticated user.
-func (s *SystemServer) loadPrefs(ctx context.Context, claims *auth.Claims) (uuid.UUID, userPreferences, error) {
-	uid, err := uuid.Parse(claims.UserID)
+func (s *SystemServer) loadPrefs(ctx context.Context, claims *auth.Claims) (glid.GLID, userPreferences, error) {
+	uid, err := glid.ParseUUID(claims.UserID)
 	if err != nil {
-		return uuid.Nil, userPreferences{}, fmt.Errorf("parse user id: %w", err)
+		return glid.Nil, userPreferences{}, fmt.Errorf("parse user id: %w", err)
 	}
 	raw, err := s.sysStore.GetUserPreferences(ctx, uid)
 	if err != nil {
@@ -47,7 +47,7 @@ func (s *SystemServer) loadPrefs(ctx context.Context, claims *auth.Claims) (uuid
 }
 
 // savePrefs marshals and writes the preferences JSON for a user.
-func (s *SystemServer) savePrefs(ctx context.Context, uid uuid.UUID, prefs userPreferences) error {
+func (s *SystemServer) savePrefs(ctx context.Context, uid glid.GLID, prefs userPreferences) error {
 	data, err := json.Marshal(prefs)
 	if err != nil {
 		return err

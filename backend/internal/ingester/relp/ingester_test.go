@@ -1,6 +1,7 @@
 package relp
 
 import (
+	"gastrolog/internal/glid"
 	"bufio"
 	"context"
 	"crypto/ecdsa"
@@ -19,7 +20,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 
 	"gastrolog/internal/orchestrator"
 )
@@ -106,7 +106,7 @@ func TestRELPFactory(t *testing.T) {
 	factory := NewFactory(nil)
 
 	// Default addr.
-	ing, err := factory(uuid.New(), nil, nil)
+	ing, err := factory(glid.New(), nil, nil)
 	if err != nil {
 		t.Fatalf("factory with nil params: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestRELPFactory(t *testing.T) {
 	}
 
 	// Custom addr.
-	ing, err = factory(uuid.New(), map[string]string{"addr": ":9514"}, nil)
+	ing, err = factory(glid.New(), map[string]string{"addr": ":9514"}, nil)
 	if err != nil {
 		t.Fatalf("factory with custom addr: %v", err)
 	}

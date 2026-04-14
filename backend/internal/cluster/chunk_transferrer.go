@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/convert"
 
-	"github.com/google/uuid"
 	"google.golang.org/grpc"
 )
 
@@ -61,7 +61,7 @@ func NewChunkTransferrer(peers *PeerConns) *ChunkTransferrer {
 // TransferRecords sends records to the given node's vault via a client-streaming
 // ForwardImportRecords RPC. Each record is sent as a separate message so the
 // entire chunk never materializes in memory.
-func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID uuid.UUID, next chunk.RecordIterator) error {
+func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, vaultID glid.GLID, next chunk.RecordIterator) error {
 	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
 	defer cancel()
 
@@ -116,7 +116,7 @@ func (ct *ChunkTransferrer) TransferRecords(ctx context.Context, nodeID string, 
 // RPC, which appends them to the destination vault's active chunk (same path
 // as live ingestion forwarding). Synchronous — blocks until the remote node
 // confirms the append. Used by retention eject for remote delivery.
-func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, vaultID uuid.UUID, records []chunk.Record) error {
+func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, vaultID glid.GLID, records []chunk.Record) error {
 	ctx, cancel := context.WithTimeout(ctx, unaryCallTimeout)
 	defer cancel()
 
@@ -145,7 +145,7 @@ func (ct *ChunkTransferrer) ForwardAppend(ctx context.Context, nodeID string, va
 // StreamToTier opens a single gRPC stream and pipes all records from the
 // iterator to a remote tier's active chunk. The stream close is the ack.
 // Used for remote tier transitions — destination handles its own chunking.
-func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID uuid.UUID, next chunk.RecordIterator) error {
+func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vaultID, tierID glid.GLID, next chunk.RecordIterator) error {
 	ctx, cancel := context.WithTimeout(ctx, streamCallTimeout)
 	defer cancel()
 
@@ -209,7 +209,7 @@ func (ct *ChunkTransferrer) StreamToTier(ctx context.Context, nodeID string, vau
 // WaitVaultReady polls the target node until the vault is registered and
 // accepting records, or ctx expires. Uses ForwardListChunks as a lightweight
 // existence probe — it returns an error if the vault doesn't exist.
-func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID uuid.UUID) error {
+func (ct *ChunkTransferrer) WaitVaultReady(ctx context.Context, nodeID string, vaultID glid.GLID) error {
 	const pollInterval = 100 * time.Millisecond
 
 	vid := vaultID.String()

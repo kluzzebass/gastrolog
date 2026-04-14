@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"io"
 	"net/http"
@@ -16,7 +17,6 @@ import (
 	"gastrolog/internal/server"
 
 	"connectrpc.com/connect"
-	"github.com/google/uuid"
 )
 
 // newQueryTestSetup creates an orchestrator with a memory vault containing
@@ -42,7 +42,7 @@ func newQueryTestSetup(t *testing.T, numRecords int) gastrologv1connect.QuerySer
 		})
 	}
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
@@ -346,7 +346,7 @@ func TestGetFields(t *testing.T) {
 		Raw:      []byte(`level=debug msg="cache hit" host=cache-01 port=6379`),
 	})
 
-	defaultID := uuid.Must(uuid.NewV7())
+	defaultID := glid.New()
 	orch.RegisterVault(orchestrator.NewVaultFromComponents(defaultID, s.CM, s.IM, s.QE))
 
 	srv := server.New(orch, nil, orchestrator.Factories{}, nil, server.Config{})
