@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"fmt"
 	"strconv"
@@ -42,7 +43,7 @@ func newJobListCmd() *cobra.Command {
 			var rows [][]string
 			for _, j := range resp.Msg.Jobs {
 				rows = append(rows, []string{
-					string(j.Id), j.Name, jobStatusStr(j.Status), j.Kind.String(), j.Description,
+					glid.FromBytes(j.Id).String(), j.Name, jobStatusStr(j.Status), j.Kind.String(), j.Description,
 				})
 			}
 			p.table([]string{"ID", "NAME", "STATUS", "KIND", "DESCRIPTION"}, rows)
@@ -71,7 +72,7 @@ func newJobGetCmd() *cobra.Command {
 				return p.json(j)
 			}
 			pairs := [][2]string{
-				{"ID", string(j.Id)},
+				{"ID", glid.FromBytes(j.Id).String()},
 				{"Name", j.Name},
 				{"Status", jobStatusStr(j.Status)},
 				{"Kind", j.Kind.String()},

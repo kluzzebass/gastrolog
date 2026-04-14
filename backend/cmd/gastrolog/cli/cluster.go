@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
@@ -70,7 +71,7 @@ func newClusterStatusCmd() *cobra.Command {
 						role += " *"
 					}
 					rows = append(rows, []string{
-						string(n.Id), n.Name, n.Address, role,
+						glid.FromBytes(n.Id).String(), n.Name, n.Address, role,
 						clusterSuffrageStr(n.Suffrage),
 					})
 				}

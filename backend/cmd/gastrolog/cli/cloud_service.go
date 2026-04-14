@@ -119,7 +119,7 @@ func newCloudServiceCreateCmd() *cobra.Command {
 			if outputFormat(cmd) == "json" {
 				return newPrinter("json").json(cfg)
 			}
-			fmt.Printf("%s cloud service %q (%s)\n", verb, name, cfg.Id)
+			fmt.Printf("%s cloud service %q (%s)\n", verb, name, glid.FromBytes(cfg.Id))
 			return nil
 		},
 	}
