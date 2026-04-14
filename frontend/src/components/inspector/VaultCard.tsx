@@ -1,4 +1,4 @@
-import { encode } from "../../api/glid";
+import { encode, truncGlid } from "../../api/glid";
 import { useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { clickableProps } from "../../utils";
@@ -392,10 +392,10 @@ function ChunkRow({
               {"\u25B6"}
             </span>
             <span
-              className={`font-mono truncate block max-w-36 ${c("text-text-muted", "text-light-text-muted")}`}
+              className={`font-mono block ${c("text-text-muted", "text-light-text-muted")}`}
               title={encode(chunk.id)}
             >
-              {encode(chunk.id)}
+              {truncGlid(encode(chunk.id))}
             </span>
           </span>
         </td>

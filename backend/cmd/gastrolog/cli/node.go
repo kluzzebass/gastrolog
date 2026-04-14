@@ -229,8 +229,10 @@ func newNodeListStorageCmd() *cobra.Command {
 				}
 				nscNodeStr := string(nsc.NodeId)
 				nodeName := nodeNames[nscNodeStr]
-				if nodeName == "" && len(nscNodeStr) > 8 {
-					nodeName = nscNodeStr[:8]
+				if nodeName == "" && len(nscNodeStr) > 16 {
+					nodeName = nscNodeStr[:7] + "…" + nscNodeStr[len(nscNodeStr)-7:]
+				} else if nodeName == "" {
+					nodeName = nscNodeStr
 				}
 				for _, fs := range nsc.FileStorages {
 					rows = append(rows, []string{
