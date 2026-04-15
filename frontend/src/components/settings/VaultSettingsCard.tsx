@@ -369,15 +369,15 @@ export function VaultSettingsCard({
   const handleSaveAll = async () => {
     const tierIds = await createStagedTier([...edit.tierIds]);
     if (!tierIds) return;
-    // Sync local state after successful tier creation.
-    setEdit({ tierIds });
-    setNewTier(null);
-    const tiersOk = await updateExistingTiers(tierIds);
+    await updateExistingTiers(tierIds);
     await executeRemovals();
     if (edit.name !== vault.name || edit.enabled !== vault.enabled) {
       await saveVault(encode(vault.id), { name: edit.name, enabled: edit.enabled });
     }
-    if (tiersOk) setPendingReset(true);
+    // Clear the new-tier form and let the pending reset sync with server
+    // state once the config cache refreshes (includes the newly created tier).
+    setNewTier(null);
+    setPendingReset(true);
   };
 
   const warnings: string[] = [];
