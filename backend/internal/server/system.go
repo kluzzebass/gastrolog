@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/theory/jsonpath"
 	"errors"
 	"fmt"
 	"io"
@@ -1303,22 +1302,33 @@ func (s *SystemServer) PreviewJSONLookup(
 
 	// Evaluate JSONPath query if provided.
 	if query := req.Msg.GetQuery(); query != "" && parsed != nil {
-		resp.QueryResult, resp.QueryError = evalJSONPath(query, req.Msg.GetParameters(), parsed)
+		resp.QueryResult, resp.QueryError = evalJQ(query, req.Msg.GetParameters(), parsed)
 	}
 
 	return connect.NewResponse(resp), nil
 }
 
-// evalJSONPath evaluates a JSONPath query with parameter substitution.
-func evalJSONPath(query string, params map[string]string, data any) (result, errMsg string) {
+// evalJQ evaluates a jq query with parameter substitution.
+func evalJQ(query string, params map[string]string, data any) (result, errMsg string) {
 	for k, v := range params {
 		query = strings.ReplaceAll(query, "{"+k+"}", v)
 	}
-	jp, err := jsonpath.Parse(query)
+	code, err := lookup.CompileJQ(query)
 	if err != nil {
-		return "", fmt.Sprintf("parse error: %v", err)
+		return "", fmt.Sprintf("compile error: %v", err)
 	}
-	results := jp.Select(data)
+	var results []any
+	iter := code.Run(data)
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if e, isErr := v.(error); isErr {
+			return "", fmt.Sprintf("eval error: %v", e)
+		}
+		results = append(results, v)
+	}
 	pretty, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		return "", fmt.Sprintf("marshal result: %v", err)

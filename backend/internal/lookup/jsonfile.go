@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/theory/jsonpath"
 )
 
 // JSONFileConfig configures a JSON file-backed lookup table.
@@ -78,9 +77,11 @@ const (
 func NewJSONFile(cfg JSONFileConfig) *JSONFile {
 	var paths []httpPath
 	for _, p := range cfg.ResponsePaths {
-		if parsed, err := jsonpath.Parse(p); err == nil {
-			paths = append(paths, httpPath{raw: p, parsed: parsed})
+		code, err := CompileJQ(p)
+		if err != nil {
+			continue
 		}
+		paths = append(paths, httpPath{raw: p, parsed: code})
 	}
 
 	params := cfg.Parameters
@@ -184,12 +185,12 @@ func (j *JSONFile) cachedExecute(d *jsonData, cacheKey string, buildQuery func()
 // execute runs the JSONPath query against the root data.
 func (j *JSONFile) execute(root any, query string) map[string]string {
 
-	p, err := jsonpath.Parse(query)
+	code, err := CompileJQ(query)
 	if err != nil {
 		return nil
 	}
 
-	nodes := p.Select(root)
+	nodes := jqSelect(code, root)
 	if len(nodes) == 0 {
 		return nil
 	}
@@ -210,7 +211,7 @@ func (j *JSONFile) execute(root any, query string) map[string]string {
 	merged := make(map[string]string)
 	for _, node := range nodes {
 		for _, hp := range j.responsePaths {
-			subNodes := hp.parsed.Select(node)
+			subNodes := jqSelect(hp.parsed, node)
 			for _, sub := range subNodes {
 				mergeNode(merged, hp.raw, sub)
 			}

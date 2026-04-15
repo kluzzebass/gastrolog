@@ -8,11 +8,12 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/theory/jsonpath"
+	"github.com/itchyny/gojq"
 )
 
 const (
@@ -38,10 +39,95 @@ type httpEntry struct {
 	expires time.Time
 }
 
-// httpPath pairs a parsed JSONPath with its raw expression string.
+// httpPath pairs a pre-compiled jq program with its raw expression string.
 type httpPath struct {
 	raw    string
-	parsed *jsonpath.Path
+	parsed *gojq.Code
+}
+
+// jsonPathFilter matches JSONPath filter expressions like [?(@.field == 'value')] or [?(@.field == true)].
+// Captures the full content between [?( and )].
+var jsonPathFilter = regexp.MustCompile(`\[\?\(([^)]+)\)\]`)
+
+// jsonPathToJQ converts a JSONPath expression to an equivalent jq expression.
+// Supports: $ root, dot-notation, bracket notation, array indices, and filter expressions.
+func jsonPathToJQ(jp string) string {
+	if jp == "" {
+		return "."
+	}
+
+	// Strip leading $.
+	s := strings.TrimPrefix(jp, "$")
+	if s == "" {
+		return "."
+	}
+
+	// Convert bracket key access $['key'] or $["key"] to .["key"].
+	s = strings.ReplaceAll(s, "['", `["`)
+	s = strings.ReplaceAll(s, "']", `"]`)
+
+	// Convert filter expressions [?(expr)] to [] | select(expr).
+	s = jsonPathFilter.ReplaceAllStringFunc(s, func(match string) string {
+		inner := jsonPathFilter.FindStringSubmatch(match)
+		if len(inner) < 2 {
+			return match
+		}
+		expr := inner[1]
+
+		// Convert @.field references to .field.
+		expr = strings.ReplaceAll(expr, "@.", ".")
+
+		// Convert single-quoted strings to double-quoted.
+		expr = strings.ReplaceAll(expr, "'", `"`)
+
+		// Convert && to "and", || to "or".
+		expr = strings.ReplaceAll(expr, "&&", "and")
+		expr = strings.ReplaceAll(expr, "||", "or")
+
+		return "[] | select(" + expr + ")"
+	})
+
+	// Ensure it starts with a dot.
+	if !strings.HasPrefix(s, ".") && !strings.HasPrefix(s, "[") {
+		s = "." + s
+	}
+	// Bracket notation at start needs a dot prefix: ["key"] -> .["key"]
+	if strings.HasPrefix(s, "[") {
+		s = "." + s
+	}
+
+	return s
+}
+
+// CompileJQ parses a JSONPath expression by converting it to jq syntax, then compiles it.
+func CompileJQ(expr string) (*gojq.Code, error) {
+	jqExpr := jsonPathToJQ(expr)
+	parsed, err := gojq.Parse(jqExpr)
+	if err != nil {
+		return nil, fmt.Errorf("parse %q (from %q): %w", jqExpr, expr, err)
+	}
+	code, err := gojq.Compile(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("compile %q (from %q): %w", jqExpr, expr, err)
+	}
+	return code, nil
+}
+
+// jqSelect runs a compiled jq program against input and collects all non-error results.
+func jqSelect(code *gojq.Code, input any) []any {
+	var results []any
+	iter := code.Run(input)
+	for {
+		v, ok := iter.Next()
+		if !ok {
+			break
+		}
+		if _, isErr := v.(error); isErr {
+			break
+		}
+		results = append(results, v)
+	}
+	return results
 }
 
 // HTTP is a lookup table that enriches records by calling an external HTTP endpoint.
@@ -79,9 +165,11 @@ func NewHTTP(cfg HTTPConfig) *HTTP {
 
 	var paths []httpPath
 	for _, p := range cfg.ResponsePaths {
-		if parsed, err := jsonpath.Parse(p); err == nil {
-			paths = append(paths, httpPath{raw: p, parsed: parsed})
+		code, err := CompileJQ(p)
+		if err != nil {
+			continue
 		}
+		paths = append(paths, httpPath{raw: p, parsed: code})
 	}
 
 	params := cfg.Parameters
@@ -221,10 +309,10 @@ func (h *HTTP) doFetch(ctx context.Context, reqURL string) map[string]string {
 		return flattenScalars(obj)
 	}
 
-	// Evaluate each JSONPath and merge results.
+	// Evaluate each jq expression and merge results.
 	merged := make(map[string]string)
 	for _, hp := range h.responsePaths {
-		nodes := hp.parsed.Select(raw)
+		nodes := jqSelect(hp.parsed, raw)
 		for _, node := range nodes {
 			mergeNode(merged, hp.raw, node)
 		}
