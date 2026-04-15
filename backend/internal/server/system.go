@@ -1328,6 +1328,9 @@ func evalJQ(query string, params map[string]string, data any) (result, errMsg st
 			break
 		}
 		results = append(results, v)
+		if len(results) >= 10 {
+			break
+		}
 	}
 	if len(results) == 0 {
 		return "", lastErr
