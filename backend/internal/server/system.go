@@ -892,7 +892,7 @@ func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []system.JSO
 		}
 		out = append(out, system.JSONFileLookupConfig{
 			Name:          e.Name,
-			FileID:        glid.FromBytes(e.FileId).String(),
+			FileID:        parseLookupFileID(e.FileId),
 			Query:         e.Query,
 			ResponsePaths: e.ResponsePaths,
 			Parameters:    params,
@@ -925,7 +925,7 @@ func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []system.MMDBLookupC
 		out = append(out, system.MMDBLookupConfig{
 			Name:   e.Name,
 			DBType: e.DbType,
-			FileID: glid.FromBytes(e.FileId).String(),
+			FileID: parseLookupFileID(e.FileId),
 		})
 	}
 	return out
@@ -955,12 +955,28 @@ func csvLookupsFromProto(entries []*apiv1.CSVLookupEntry) []system.CSVLookupConf
 		}
 		out = append(out, system.CSVLookupConfig{
 			Name:         e.Name,
-			FileID:       glid.FromBytes(e.FileId).String(),
+			FileID:       parseLookupFileID(e.FileId),
 			KeyColumn:    e.KeyColumn,
 			ValueColumns: e.ValueColumns,
 		})
 	}
 	return out
+}
+
+// parseLookupFileID converts proto bytes to a GLID string, handling both
+// new format (16 raw bytes) and legacy format (26 UTF-8 bytes of base32hex).
+func parseLookupFileID(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	if len(b) == glid.Size {
+		return glid.FromBytes(b).String()
+	}
+	// Legacy: stored as []byte(base32hexString) — try parsing the UTF-8 as a GLID.
+	if g, err := glid.Parse(string(b)); err == nil {
+		return g.String()
+	}
+	return string(b)
 }
 
 func mergeCluster(c *apiv1.PutClusterSettings, cluster *system.ClusterConfig) *connect.Error {
