@@ -155,11 +155,12 @@ export function JsonAddForm({
         />
       </FormField>
       <JsonPreviewPanel dark={dark} fileId={draft.fileId} />
-      <FormField label="Query" description="JSONPath query with {value} or {name} placeholders. Example: $.hosts[?(@.ip == '{value}')]" dark={dark}>
-        <TextInput value={draft.query} onChange={(v) => setDraft((d) => ({ ...d, query: v }))} placeholder="" dark={dark} mono />
+      <FormField label="Query" description="JSONPath query with {value} or {name} placeholders." dark={dark}>
+        <TextInput value={draft.query} onChange={(v) => setDraft((d) => ({ ...d, query: v }))} placeholder="" dark={dark} mono
+          examples={["$.hosts[?(@.ip == '{value}')]", "$['{value}']", "$.data[*]"]} />
       </FormField>
       <ParameterListEditor values={draft.parameters} onChange={(params) => setDraft((d) => ({ ...d, parameters: params }))} dark={dark} />
-      <FormField label="Response Paths" description="JSONPath expressions to extract from results. Example: $.country, $.city. Leave empty to flatten all." dark={dark}>
+      <FormField label="Response Paths" description="JSONPath expressions to extract from results. Leave empty to flatten all." dark={dark}>
         <StringListEditor values={draft.responsePaths} onChange={(v) => setDraft((d) => ({ ...d, responsePaths: v }))} placeholder="" dark={dark} />
       </FormField>
     </AddFormCard>
@@ -233,11 +234,12 @@ export function JsonCards({
                 />
               </FormField>
               <JsonPreviewPanel dark={dark} fileId={j.fileId} />
-              <FormField label="Query" description="JSONPath query with {value} or {name} placeholders. Example: $.hosts[?(@.ip == '{value}')]" dark={dark}>
-                <TextInput value={j.query} onChange={(v) => onUpdate(i, { query: v })} placeholder="" dark={dark} mono />
+              <FormField label="Query" description="JSONPath query with {value} or {name} placeholders." dark={dark}>
+                <TextInput value={j.query} onChange={(v) => onUpdate(i, { query: v })} placeholder="" dark={dark} mono
+                  examples={["$.hosts[?(@.ip == '{value}')]", "$['{value}']", "$.data[*]"]} />
               </FormField>
               <ParameterListEditor values={j.parameters} onChange={(params) => onUpdate(i, { parameters: params })} dark={dark} />
-              <FormField label="Response Paths" description="JSONPath expressions to extract from results. Example: $.country, $.city. Leave empty to flatten all." dark={dark}>
+              <FormField label="Response Paths" description="JSONPath expressions to extract from results. Leave empty to flatten all." dark={dark}>
                 <StringListEditor values={j.responsePaths} onChange={(v) => onUpdate(i, { responsePaths: v })} placeholder="" dark={dark} />
               </FormField>
             </div>
