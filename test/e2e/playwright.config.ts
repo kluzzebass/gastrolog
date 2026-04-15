@@ -40,11 +40,23 @@ export default defineConfig({
       testMatch: "auth.spec.ts",
       use: { ...devices["Desktop Chrome"], storageState: undefined },
     },
-    // All other tests depend on auth and reuse the saved auth state.
+    // Seed project: creates a chatterbox ingester and waits for searchable
+    // data. Runs after auth (setup wizard creates the vault/route), before
+    // app tests that need records.
+    {
+      name: "seed",
+      testMatch: "seed.spec.ts",
+      dependencies: ["auth"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "./auth-state.json",
+      },
+    },
+    // All other tests depend on seed (which depends on auth).
     {
       name: "app",
-      testIgnore: "auth.spec.ts",
-      dependencies: ["auth"],
+      testIgnore: ["auth.spec.ts", "seed.spec.ts"],
+      dependencies: ["seed"],
       use: {
         ...devices["Desktop Chrome"],
         storageState: "./auth-state.json",

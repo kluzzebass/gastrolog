@@ -34,8 +34,8 @@ test.describe.serial("Inspector", () => {
     const vaultsBtn = dialog.getByRole("button", { name: /Vaults/i });
     await vaultsBtn.click();
 
-    // The right panel should show vault details (heading + at least one vault card).
-    await expect(dialog.getByText(/memory|file/i).first()).toBeVisible({
+    // The right panel should show at least one vault card with stats.
+    await expect(dialog.getByText(/chunks|records/i).first()).toBeVisible({
       timeout: 10_000,
     });
   });
