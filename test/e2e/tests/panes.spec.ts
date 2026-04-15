@@ -22,7 +22,7 @@ test.describe.serial("Collapsible panes", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -37,7 +37,7 @@ test.describe.serial("Collapsible panes", () => {
   test("right detail panel closes when pressing Escape", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -56,7 +56,7 @@ test.describe.serial("Collapsible panes", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -77,7 +77,7 @@ test.describe.serial("Collapsible panes", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,

@@ -13,7 +13,8 @@ test.describe.serial("Search", () => {
   test("executes a wildcard query and shows results", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    // Search recent records across all vaults.
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
@@ -31,7 +32,7 @@ test.describe.serial("Search", () => {
   test("shows histogram chart", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
@@ -48,7 +49,7 @@ test.describe.serial("Search", () => {
   test("opens detail sidebar when clicking a log entry", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
@@ -74,7 +75,7 @@ test.describe.serial("Search", () => {
   test("detail sidebar shows copyable field values", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -93,7 +94,7 @@ test.describe.serial("Search", () => {
     await gotoAuthenticated(page, "/search");
 
     // Execute a wildcard search first to get results.
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -131,7 +132,7 @@ test.describe.serial("Search", () => {
 
     // The preset should now be active (has copper background).
     // Run a search with the new time range.
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -198,7 +199,7 @@ test.describe.serial("Search", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -249,7 +250,7 @@ test.describe.serial("Search", () => {
   test("switching time range preset re-searches", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
 
     // Use a narrow range then widen it.
     await page.getByRole("button", { name: "5m", exact: true }).click();
@@ -286,7 +287,7 @@ test.describe.serial("Search", () => {
     // The sidebar "Vaults" section should list vaults as buttons.
     await expect(page.getByText("Vaults")).toBeVisible();
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -312,7 +313,7 @@ test.describe.serial("Search", () => {
   test("detail sidebar shows field key-value pairs", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -333,7 +334,7 @@ test.describe.serial("Search", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -360,7 +361,7 @@ test.describe.serial("Search", () => {
   test("detail sidebar has copy buttons", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -380,7 +381,7 @@ test.describe.serial("Search", () => {
   test("detail sidebar shows event identity section", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -406,7 +407,7 @@ test.describe.serial("Search", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -428,7 +429,7 @@ test.describe.serial("Search", () => {
   test("explain plan shows execution plan", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
 
     // Click the explain plan button.
     await page.getByRole("button", { name: "Explain query plan" }).click();
@@ -447,7 +448,7 @@ test.describe.serial("Search", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Explain query plan" }).click();
 
     // The explain RPC can be slow on a fresh cluster with few sealed chunks.
@@ -476,7 +477,7 @@ test.describe.serial("Search", () => {
   test("histogram renders with bar elements", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -497,7 +498,7 @@ test.describe.serial("Search", () => {
   test("histogram brush selection narrows time range", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,

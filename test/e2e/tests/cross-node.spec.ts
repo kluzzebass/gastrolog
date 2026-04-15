@@ -225,7 +225,7 @@ test.describe.serial("Cross-node config propagation", () => {
     await page.waitForTimeout(3_000);
 
     await gotoNode(page, NODE_URLS.node3, "/search");
-    await typeQuery(page, "ingester_type=scatterbox");
+    await typeQuery(page, "ingester_type=scatterbox last=5m");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({

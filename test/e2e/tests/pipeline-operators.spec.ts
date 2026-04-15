@@ -15,7 +15,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("count operator returns a single value", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "* | count");
+    await typeQuery(page, "last=5m reverse=true | count");
     await page.getByRole("button", { name: "Search" }).click();
 
     // Pipeline results should render — count produces a single numeric value.
@@ -27,7 +27,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("top operator shows a table", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "* | top level");
+    await typeQuery(page, "last=5m reverse=true | top level");
     await page.getByRole("button", { name: "Search" }).click();
 
     // Should show results with a table or chart view.
@@ -49,7 +49,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("stats operator shows aggregation results", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "* | stats count by level");
+    await typeQuery(page, "last=5m reverse=true | stats count by level");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
@@ -60,7 +60,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("stats pipeline renders chart or table view", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "* | stats count by level");
+    await typeQuery(page, "last=5m reverse=true | stats count by level");
     await page.getByRole("button", { name: "Search" }).click();
 
     // Pipeline results replace the regular result-count toolbar.
@@ -93,7 +93,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "* | top level");
+    await typeQuery(page, "last=5m reverse=true | top level");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -124,7 +124,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("export button is visible after search", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -138,7 +138,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("export button opens format dropdown", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -168,7 +168,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("export triggers a download", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -205,7 +205,7 @@ test.describe.serial("Pipeline operators and visualizations", () => {
   test("chained pipeline operators work", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "* | top level | sort count desc | limit 3");
+    await typeQuery(page, "last=5m reverse=true | top level | sort count desc | limit 3");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({

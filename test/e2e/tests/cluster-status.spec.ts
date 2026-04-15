@@ -96,7 +96,7 @@ test.describe.serial("Cluster Status", () => {
     await gotoAuthenticated(page, "/search");
 
     // Execute a wildcard search — data should come from all nodes.
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
 
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({

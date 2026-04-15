@@ -211,7 +211,7 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
 
     // Search for scatterbox records — this attribute is unique to scatterbox,
     // so any results prove the full pipeline (ingester → route → vault → search).
-    await typeQuery(page, "ingester_type=scatterbox");
+    await typeQuery(page, "ingester_type=scatterbox last=5m");
     await page.getByRole("button", { name: "Search" }).click();
 
     // Verify records appeared.

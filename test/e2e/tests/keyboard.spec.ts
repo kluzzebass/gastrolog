@@ -56,7 +56,7 @@ test.describe.serial("Keyboard shortcuts", () => {
   test("Escape deselects a selected log entry", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -75,7 +75,7 @@ test.describe.serial("Keyboard shortcuts", () => {
   test("Arrow keys navigate between log entries", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -107,7 +107,7 @@ test.describe.serial("Keyboard shortcuts", () => {
   test("Enter in query bar triggers search", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
 
     // Press Enter in the query textarea.
     await page.locator("textarea").press("Enter");

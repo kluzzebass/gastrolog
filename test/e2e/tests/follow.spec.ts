@@ -49,7 +49,7 @@ test.describe("Follow mode", () => {
   // ── Basic lifecycle ──────────────────────────────────────────────────
 
   test("starts follow and shows Following status", async ({ page }) => {
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
 
     // The stop button should be visible (replaces the follow button).
     await expect(
@@ -60,7 +60,7 @@ test.describe("Follow mode", () => {
   });
 
   test("stops follow and returns to search", async ({ page }) => {
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
     await stopFollow(page);
 
     // Should be back on /search.
@@ -70,7 +70,7 @@ test.describe("Follow mode", () => {
   // ── Live data: skip if no records arrive ─────────────────────────────
 
   test("receives live records and displays log entries", async ({ page }) => {
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
 
     const hasRecords = await waitForRecords(page);
     if (!hasRecords) {
@@ -85,7 +85,7 @@ test.describe("Follow mode", () => {
   });
 
   test("follow count increments over time", async ({ page }) => {
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
 
     const hasRecords = await waitForRecords(page);
     if (!hasRecords) {
@@ -133,7 +133,7 @@ test.describe("Follow mode", () => {
   // ── Sidebar ──────────────────────────────────────────────────────────
 
   test("follow mode shows volume label in sidebar", async ({ page }) => {
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
 
     await expect(page.getByText("Volume")).toBeVisible({ timeout: 10_000 });
 
@@ -143,11 +143,11 @@ test.describe("Follow mode", () => {
   // ── Re-follow after stop ─────────────────────────────────────────────
 
   test("can re-enter follow mode after stopping", async ({ page }) => {
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
     await stopFollow(page);
 
     // Second follow session — should work identically.
-    await startFollow(page, "*");
+    await startFollow(page, "last=5m reverse=true");
 
     await expect(
       page.getByRole("button", { name: "Stop following" }),

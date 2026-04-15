@@ -58,7 +58,7 @@ test.describe.serial("URL state and deep linking", () => {
     await gotoAuthenticated(page, "/search");
 
     // First search.
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.locator("[data-testid='result-count']")).toBeVisible({
       timeout: 30_000,
@@ -83,7 +83,7 @@ test.describe.serial("URL state and deep linking", () => {
   test("follow mode URL contains /follow path", async ({ page }) => {
     await gotoAuthenticated(page, "/search");
 
-    await typeQuery(page, "*");
+    await typeQuery(page, "last=5m reverse=true");
     await page.getByRole("button", { name: "Follow" }).click();
     await expect(page).toHaveURL(/\/follow/, { timeout: 10_000 });
 
