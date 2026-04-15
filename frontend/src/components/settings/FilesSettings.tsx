@@ -235,7 +235,7 @@ function VersionRow({
       <div className="flex-1 min-w-0 flex flex-col gap-0.5">
         <div className="flex items-center gap-2">
           <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`}>
-            {file.sha256.slice(0, 12)}
+            sha256:{file.sha256.slice(0, 12)}
           </span>
           <span className={c("text-text-ghost", "text-light-text-ghost")}>
             {formatBytes(Number(file.size))}
