@@ -107,7 +107,29 @@ export function usePutSettings() {
     if (args.query) req.query = args.query;
     if (args.scheduler) req.scheduler = args.scheduler;
     if (args.tls) req.tls = args.tls;
-    if (args.lookup) req.lookup = args.lookup;
+    if (args.lookup) {
+      // Encode fileId strings to proto bytes for lookup entries.
+      const lookup: Record<string, unknown> = { ...args.lookup };
+      if (args.lookup.csvLookups) {
+        lookup.csvLookups = args.lookup.csvLookups.map((l) => ({
+          ...l,
+          fileId: l.fileId ? decode(l.fileId) : undefined,
+        }));
+      }
+      if (args.lookup.jsonFileLookups) {
+        lookup.jsonFileLookups = args.lookup.jsonFileLookups.map((l) => ({
+          ...l,
+          fileId: l.fileId ? decode(l.fileId) : undefined,
+        }));
+      }
+      if (args.lookup.mmdbLookups) {
+        lookup.mmdbLookups = args.lookup.mmdbLookups.map((l) => ({
+          ...l,
+          fileId: l.fileId ? decode(l.fileId) : undefined,
+        }));
+      }
+      req.lookup = lookup;
+    }
     if (args.maxmind) req.maxmind = buildMaxMindReq(args.maxmind);
     if (args.cluster) req.cluster = args.cluster;
     if (args.setupWizardDismissed !== undefined)

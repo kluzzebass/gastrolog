@@ -871,7 +871,7 @@ func jsonFileLookupsToProto(lookups []system.JSONFileLookupConfig) []*apiv1.JSON
 		}
 		out[i] = &apiv1.JSONFileLookupEntry{
 			Name:          l.Name,
-			FileId:        []byte(l.FileID),
+			FileId:        glid.MustParse(l.FileID).ToProto(),
 			Query:         l.Query,
 			ResponsePaths: l.ResponsePaths,
 			Parameters:    params,
@@ -892,7 +892,7 @@ func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []system.JSO
 		}
 		out = append(out, system.JSONFileLookupConfig{
 			Name:          e.Name,
-			FileID:        string(e.FileId),
+			FileID:        glid.FromBytes(e.FileId).String(),
 			Query:         e.Query,
 			ResponsePaths: e.ResponsePaths,
 			Parameters:    params,
@@ -910,7 +910,7 @@ func mmdbLookupsToProto(lookups []system.MMDBLookupConfig) []*apiv1.MMDBLookupEn
 		out[i] = &apiv1.MMDBLookupEntry{
 			Name:   l.Name,
 			DbType: l.DBType,
-			FileId: []byte(l.FileID),
+			FileId: glid.MustParse(l.FileID).ToProto(),
 		}
 	}
 	return out
@@ -925,7 +925,7 @@ func mmdbLookupsFromProto(entries []*apiv1.MMDBLookupEntry) []system.MMDBLookupC
 		out = append(out, system.MMDBLookupConfig{
 			Name:   e.Name,
 			DBType: e.DbType,
-			FileID: string(e.FileId),
+			FileID: glid.FromBytes(e.FileId).String(),
 		})
 	}
 	return out
@@ -939,7 +939,7 @@ func csvLookupsToProto(lookups []system.CSVLookupConfig) []*apiv1.CSVLookupEntry
 	for i, l := range lookups {
 		out[i] = &apiv1.CSVLookupEntry{
 			Name:         l.Name,
-			FileId:       []byte(l.FileID),
+			FileId:       glid.MustParse(l.FileID).ToProto(),
 			KeyColumn:    l.KeyColumn,
 			ValueColumns: l.ValueColumns,
 		}
@@ -955,7 +955,7 @@ func csvLookupsFromProto(entries []*apiv1.CSVLookupEntry) []system.CSVLookupConf
 		}
 		out = append(out, system.CSVLookupConfig{
 			Name:         e.Name,
-			FileID:       string(e.FileId),
+			FileID:       glid.FromBytes(e.FileId).String(),
 			KeyColumn:    e.KeyColumn,
 			ValueColumns: e.ValueColumns,
 		})
