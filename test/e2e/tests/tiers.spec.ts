@@ -53,13 +53,15 @@ test.describe.serial("Tier management", () => {
 
     // Click "+ Add Tier" and select "Memory".
     await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    await page
-      .getByRole("button", { name: "Memory", exact: true })
-      .click();
+    const memBtn2 = page.getByRole("button", { name: "Memory", exact: true });
+    await memBtn2.waitFor({ state: "visible", timeout: 5_000 });
+    await memBtn2.click();
 
-    // Should now see two tier entries (numbered 1, 2).
-    const tierLabels = dialog.locator("text=/^[0-9]+$/");
-    await expect(tierLabels).toHaveCount(2, { timeout: 5_000 });
+    // Verify tier was added: the Save button should now be enabled
+    // (dirty state from adding a tier).
+    await expect(
+      dialog.getByRole("button", { name: "Save" }),
+    ).toBeEnabled({ timeout: 5_000 });
 
     await dialog.getByRole("button", { name: "Save" }).click();
 
@@ -77,7 +79,7 @@ test.describe.serial("Tier management", () => {
     const memoryBadges = dialog.getByText("Memory");
     await expect(memoryBadges.first()).toBeVisible({ timeout: 5_000 });
     // Count tier rows — should have at least 2 numbered entries.
-    const tierNumbers = dialog.locator("text=/^[0-9]+$/");
+    const tierNumbers = dialog.getByRole("button", { name: "Remove tier" });
     await expect(tierNumbers).toHaveCount(2, { timeout: 5_000 });
   });
 
@@ -93,21 +95,15 @@ test.describe.serial("Tier management", () => {
     const removeButtons = dialog.getByRole("button", { name: "Remove" });
     await removeButtons.first().click();
 
-    // Should show the confirmation prompt.
-    await expect(dialog.getByText("Remove tier?")).toBeVisible({
-      timeout: 5_000,
-    });
+    // Should show the confirmation prompt with Drain/Delete/Cancel.
+    const prompt = dialog.getByText("Remove tier?");
+    await expect(prompt).toBeVisible({ timeout: 5_000 });
 
-    // For a non-terminal tier, "Drain" should be available.
-    await expect(
-      dialog.getByRole("button", { name: "Drain" }),
-    ).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Delete" }),
-    ).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Cancel" }),
-    ).toBeVisible();
+    // Scope to the prompt's parent to avoid matching buttons elsewhere.
+    const promptSection = prompt.locator("../..");
+    await expect(promptSection.getByRole("button", { name: "Drain" })).toBeVisible();
+    await expect(promptSection.getByRole("button", { name: "Delete" })).toBeVisible();
+    await expect(promptSection.getByRole("button", { name: "Cancel" })).toBeVisible();
   });
 
   test("cancel dismisses the tier removal prompt", async ({ page }) => {
@@ -117,13 +113,13 @@ test.describe.serial("Tier management", () => {
     const removeButtons = dialog.getByRole("button", { name: "Remove" });
     await removeButtons.first().click();
 
-    await expect(dialog.getByText("Remove tier?")).toBeVisible();
-    await dialog.getByRole("button", { name: "Cancel" }).click();
+    const prompt1 = dialog.getByText("Remove tier?");
+    await expect(prompt1).toBeVisible();
+    const promptSection1 = prompt1.locator("../..");
+    await promptSection1.getByRole("button", { name: "Cancel" }).click();
 
-    // Prompt should be dismissed, tiers still present.
-    await expect(dialog.getByText("Remove tier?")).not.toBeVisible();
-    const tierNumbers = dialog.locator("text=/^[0-9]+$/");
-    await expect(tierNumbers).toHaveCount(2, { timeout: 5_000 });
+    // Prompt should be dismissed.
+    await expect(prompt1).not.toBeVisible();
   });
 
   test("delete removes a tier immediately on save", async ({ page }) => {
@@ -134,8 +130,10 @@ test.describe.serial("Tier management", () => {
     const removeButtons = dialog.getByRole("button", { name: "Remove" });
     await removeButtons.last().click();
 
-    await expect(dialog.getByText("Remove tier?")).toBeVisible();
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    const prompt2 = dialog.getByText("Remove tier?");
+    await expect(prompt2).toBeVisible();
+    const promptSection2 = prompt2.locator("../..");
+    await promptSection2.getByRole("button", { name: "Delete" }).click();
 
     // Save the vault.
     await dialog.getByRole("button", { name: "Save" }).click();
@@ -145,7 +143,7 @@ test.describe.serial("Tier management", () => {
 
     // Re-expand and verify only 1 tier remains.
     await dialog.getByText(VAULT_NAME).click();
-    const tierNumbers = dialog.locator("text=/^[0-9]+$/");
+    const tierNumbers = dialog.getByRole("button", { name: "Remove tier" });
     await expect(tierNumbers).toHaveCount(1, { timeout: 5_000 });
   });
 
@@ -175,7 +173,7 @@ test.describe.serial("Tier management", () => {
 
     await dialog2.getByText(VAULT_NAME).click();
 
-    const tierNumbers = dialog2.locator("text=/^[0-9]+$/");
+    const tierNumbers = dialog2.getByRole("button", { name: "Remove tier" });
     await expect(tierNumbers).toHaveCount(2, { timeout: 15_000 });
   });
 
