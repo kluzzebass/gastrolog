@@ -1084,7 +1084,7 @@ func (s *SystemServer) PreviewCSVLookup(
 	ctx context.Context,
 	req *connect.Request[apiv1.PreviewCSVLookupRequest],
 ) (*connect.Response[apiv1.PreviewCSVLookupResponse], error) {
-	fileID := string(req.Msg.GetFileId())
+	fileID := glid.FromBytes(req.Msg.GetFileId()).String()
 	if fileID == "" {
 		return connect.NewResponse(&apiv1.PreviewCSVLookupResponse{
 			Error: "file_id is required",
