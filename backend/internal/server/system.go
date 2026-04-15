@@ -1106,6 +1106,14 @@ func (s *SystemServer) PreviewCSVLookup(
 	}
 	defer func() { _ = f.Close() }()
 
+	// Strip UTF-8 BOM if present — Excel and many tools emit it.
+	var bom [3]byte
+	if n, _ := f.Read(bom[:]); n == 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF {
+		// BOM consumed, reader starts after it.
+	} else {
+		_, _ = f.Seek(0, 0) // not a BOM, rewind
+	}
+
 	reader := csv.NewReader(f)
 	reader.FieldsPerRecord = -1
 	reader.ReuseRecord = false

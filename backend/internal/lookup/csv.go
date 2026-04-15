@@ -210,12 +210,16 @@ func (c *CSV) Load(path string) error {
 		return fmt.Errorf("csv file %q: no rows found", path)
 	}
 
-	// Parse header from the first row.
+	// Parse header from the first row, skipping UTF-8 BOM if present.
+	headerStart := 0
+	if len(mmapData) >= 3 && mmapData[0] == 0xEF && mmapData[1] == 0xBB && mmapData[2] == 0xBF {
+		headerStart = 3
+	}
 	headerEnd := len(mmapData)
 	if len(rowOffsets) > 1 {
 		headerEnd = rowOffsets[1]
 	}
-	headerReader := csv.NewReader(bytes.NewReader(mmapData[:headerEnd]))
+	headerReader := csv.NewReader(bytes.NewReader(mmapData[headerStart:headerEnd]))
 	headerReader.Comma = c.delimiter
 	headerReader.FieldsPerRecord = -1
 	header, err := headerReader.Read()
