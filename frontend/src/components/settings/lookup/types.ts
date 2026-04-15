@@ -26,8 +26,8 @@ export interface JSONFileLookupDraft {
   name: string;
   fileId: string;
   query: string;
-  responsePaths: string[];
-  parameters: LookupParamDraft[];
+  keyColumn: string;
+  valueColumns: string[];
 }
 
 export interface MMDBLookupDraft {
@@ -78,7 +78,7 @@ export function emptyHttpDraft(): HTTPLookupDraft {
 }
 
 export function emptyJsonDraft(): JSONFileLookupDraft {
-  return { name: "", fileId: "", query: "", responsePaths: [], parameters: [] };
+  return { name: "", fileId: "", query: "", keyColumn: "", valueColumns: [] };
 }
 
 export function emptyMmdbDraft(): MMDBLookupDraft {
@@ -157,13 +157,13 @@ export function csvLookupEqual(draft: CSVLookupDraft, saved: CSVLookupEntry): bo
 }
 
 export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileLookupEntry): boolean {
-  if (
-    draft.name !== saved.name ||
-    draft.fileId !== encode(saved.fileId) ||
-    draft.query !== saved.query ||
-    !arraysEqual(draft.responsePaths, saved.responsePaths)
-  ) return false;
-  return paramsEqual(draft.parameters, saved.parameters);
+  return (
+    draft.name === saved.name &&
+    draft.fileId === encode(saved.fileId) &&
+    draft.query === saved.query &&
+    draft.keyColumn === saved.keyColumn &&
+    arraysEqual(draft.valueColumns, saved.valueColumns)
+  );
 }
 
 export function staticLookupEqual(draft: StaticLookupDraft, saved: StaticLookupEntry): boolean {

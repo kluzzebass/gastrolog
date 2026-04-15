@@ -4,29 +4,32 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
-	"strings"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/itchyny/gojq"
 )
 
 // JSONFileConfig configures a JSON file-backed lookup table.
 type JSONFileConfig struct {
-	Query         string   // JSONPath query template with {value} placeholder
-	ResponsePaths []string // optional: JSONPath expressions to extract from query results
-	Parameters    []string // ordered parameter names for {name} placeholders; empty = legacy {value} mode
+	Name         string
+	Query        string   // jq expression that produces an array of objects
+	KeyColumn    string   // field used as the lookup key; empty = first column
+	ValueColumns []string // columns to include in output; empty = all non-key
 }
 
-// jsonData holds a memory-mapped JSON file and its parsed representation.
+// jsonData holds the indexed table produced by running the jq expression
+// against a memory-mapped JSON file.
 type jsonData struct {
-	root     any      // parsed JSON tree (backed by mmapped bytes)
-	suffixes []string // discovered output keys
+	index    map[string]map[string]string // key value -> row values
+	suffixes []string                     // output column names (sorted)
 
-	// mmap backing — kept alive so the parsed strings can reference it.
+	// mmap backing — kept alive so garbage collection doesn't reclaim it prematurely.
 	mmapData []byte
 	file     *os.File
 }
@@ -41,66 +44,58 @@ func (d *jsonData) close() {
 }
 
 // JSONFile is a lookup table backed by a memory-mapped JSON file.
-// At lookup time, the query template is instantiated with the lookup value
-// and executed as a JSONPath expression against the parsed JSON tree.
-// Optional response paths further extract fields from query results.
+// The jq expression is compiled once at construction time. On each Load,
+// it runs against the parsed JSON to produce an array of objects, which are
+// indexed by key_column for O(1) lookups.
 //
 // Safe for concurrent use; the data is swapped atomically on reload.
 type JSONFile struct {
-	queryTemplate string     // JSONPath with {value}/{name} placeholders
-	responsePaths []httpPath // parsed JSONPath for post-extraction; nil = flatten results directly
-	parameters    []string   // ordered parameter names; empty = legacy {value} mode
+	query        *gojq.Code
+	keyColumn    string
+	valueColumns map[string]struct{} // nil = all non-key columns
 
 	data atomic.Pointer[jsonData]
 
 	mu        sync.Mutex
-	cache     map[string]cacheEntry
-	cacheTTL  time.Duration
-	cacheSize int
-
 	watcher   *fsnotify.Watcher
 	watchPath string
 	watchDone chan struct{}
 }
 
-type cacheEntry struct {
-	result  map[string]string
-	expires time.Time
-}
-
-const (
-	defaultJSONFileCacheTTL = 1 * time.Minute
-	defaultJSONFileCacheMax = 10_000
-)
+var _ LookupTable = (*JSONFile)(nil)
 
 // NewJSONFile creates a JSON file lookup table.
-func NewJSONFile(cfg JSONFileConfig) *JSONFile {
-	var paths []httpPath
-	for _, p := range cfg.ResponsePaths {
-		code, err := CompileJQ(p)
-		if err != nil {
-			continue
-		}
-		paths = append(paths, httpPath{raw: p, parsed: code})
+// The jq expression is compiled once here and reused on every Load.
+func NewJSONFile(cfg JSONFileConfig) (*JSONFile, error) {
+	parsed, err := gojq.Parse(cfg.Query)
+	if err != nil {
+		return nil, fmt.Errorf("parse jq expression %q: %w", cfg.Query, err)
+	}
+	code, err := gojq.Compile(parsed)
+	if err != nil {
+		return nil, fmt.Errorf("compile jq expression %q: %w", cfg.Query, err)
 	}
 
-	params := cfg.Parameters
-	if len(params) == 0 {
-		params = []string{"value"}
+	var valCols map[string]struct{}
+	if len(cfg.ValueColumns) > 0 {
+		valCols = make(map[string]struct{}, len(cfg.ValueColumns))
+		for _, c := range cfg.ValueColumns {
+			valCols[c] = struct{}{}
+		}
 	}
 
 	return &JSONFile{
-		queryTemplate: cfg.Query,
-		responsePaths: paths,
-		parameters:    params,
-		cache:         make(map[string]cacheEntry),
-		cacheTTL:      defaultJSONFileCacheTTL,
-		cacheSize:     defaultJSONFileCacheMax,
-	}
+		query:        code,
+		keyColumn:    cfg.KeyColumn,
+		valueColumns: valCols,
+	}, nil
 }
 
-// Suffixes returns the output keys discovered from the loaded data.
-// Returns nil before any successful load or if no suffixes were discovered.
+// Parameters returns the single input parameter name.
+func (j *JSONFile) Parameters() []string { return []string{"value"} }
+
+// Suffixes returns the output column names discovered from the loaded data.
+// Returns nil before any successful load.
 func (j *JSONFile) Suffixes() []string {
 	d := j.data.Load()
 	if d == nil {
@@ -109,121 +104,28 @@ func (j *JSONFile) Suffixes() []string {
 	return d.suffixes
 }
 
-// Parameters returns the ordered parameter names (at least ["value"]).
-func (j *JSONFile) Parameters() []string {
-	return j.parameters
-}
-
-// LookupValues performs a single lookup with multiple named input values.
-// Values are substituted as {key} placeholders in the query template.
+// LookupValues performs an O(1) key lookup in the indexed table.
 func (j *JSONFile) LookupValues(_ context.Context, values map[string]string) map[string]string {
-	if len(values) == 0 {
+	key := values["value"]
+	if key == "" {
 		return nil
 	}
-
 	d := j.data.Load()
 	if d == nil {
 		return nil
 	}
-
-	// Build cache key from parameter values in order.
-	var b strings.Builder
-	for _, p := range j.parameters {
-		if b.Len() > 0 {
-			b.WriteByte(0)
-		}
-		b.WriteString(values[p])
-	}
-	cacheKey := b.String()
-
-	return j.cachedExecute(d, cacheKey, func() string {
-		query := j.queryTemplate
-		for k, v := range values {
-			query = strings.ReplaceAll(query, "{"+k+"}", v)
-		}
-		return query
-	})
-}
-
-// cachedExecute checks the cache, executes the query if needed, and caches the result.
-func (j *JSONFile) cachedExecute(d *jsonData, cacheKey string, buildQuery func() string) map[string]string {
-	// Check cache.
-	j.mu.Lock()
-	if entry, ok := j.cache[cacheKey]; ok {
-		if time.Now().Before(entry.expires) {
-			j.mu.Unlock()
-			return entry.result
-		}
-	}
-	j.mu.Unlock()
-
-	result := j.execute(d.root, buildQuery())
-
-	// Cache the result (including nil for negative caching).
-	j.mu.Lock()
-	if len(j.cache) >= j.cacheSize {
-		clear(j.cache)
-	}
-	j.cache[cacheKey] = cacheEntry{result: result, expires: time.Now().Add(j.cacheTTL)}
-
-	// Discover suffixes from first successful result.
-	if result != nil {
-		dd := j.data.Load()
-		if dd != nil && dd.suffixes == nil {
-			keys := make([]string, 0, len(result))
-			for k := range result {
-				keys = append(keys, k)
-			}
-			dd.suffixes = keys
-		}
-	}
-	j.mu.Unlock()
-
-	return result
-}
-
-// execute runs the JSONPath query against the root data.
-func (j *JSONFile) execute(root any, query string) map[string]string {
-
-	code, err := CompileJQ(query)
-	if err != nil {
+	row, ok := d.index[key]
+	if !ok {
 		return nil
 	}
-
-	nodes := jqSelect(code, root)
-	if len(nodes) == 0 {
-		return nil
-	}
-
-	// If no response paths, flatten query results directly.
-	if len(j.responsePaths) == 0 {
-		merged := make(map[string]string)
-		for _, node := range nodes {
-			mergeNode(merged, query, node)
-		}
-		if len(merged) == 0 {
-			return nil
-		}
-		return merged
-	}
-
-	// Apply response paths to each query result and merge.
-	merged := make(map[string]string)
-	for _, node := range nodes {
-		for _, hp := range j.responsePaths {
-			subNodes := jqSelect(hp.parsed, node)
-			for _, sub := range subNodes {
-				mergeNode(merged, hp.raw, sub)
-			}
-		}
-	}
-	if len(merged) == 0 {
-		return nil
-	}
-	return merged
+	// Return a copy to prevent caller mutation.
+	out := make(map[string]string, len(row))
+	maps.Copy(out, row)
+	return out
 }
 
-// Load memory-maps a JSON file and parses it into the lookup tree.
+// Load memory-maps a JSON file, parses it, runs the compiled jq expression
+// to produce an array of objects, and indexes them by key_column.
 // The previous data is released after the atomic swap.
 func (j *JSONFile) Load(path string) error {
 	f, err := os.Open(path) //nolint:gosec // path comes from validated config, not user input
@@ -243,7 +145,7 @@ func (j *JSONFile) Load(path string) error {
 		return fmt.Errorf("json file %q is empty", path)
 	}
 
-	mmapData, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
+	mmapData, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64->int safe on 64-bit
 	if err != nil {
 		_ = f.Close()
 		return fmt.Errorf("mmap json file %q: %w", path, err)
@@ -256,24 +158,146 @@ func (j *JSONFile) Load(path string) error {
 		return fmt.Errorf("parse json file %q: %w", path, err)
 	}
 
+	// Run the jq expression and build the indexed table.
+	index, suffixes, err := j.buildIndex(root, path)
+	if err != nil {
+		_ = syscall.Munmap(mmapData)
+		_ = f.Close()
+		return err
+	}
+
 	newData := &jsonData{
-		root:     root,
+		index:    index,
+		suffixes: suffixes,
 		mmapData: mmapData,
 		file:     f,
 	}
 
 	old := j.data.Swap(newData)
-
-	// Flush cache on reload.
-	j.mu.Lock()
-	clear(j.cache)
-	j.mu.Unlock()
-
 	if old != nil {
 		old.close()
 	}
 
 	return nil
+}
+
+// buildIndex runs the compiled jq expression against the parsed JSON,
+// collects object results into rows, and indexes them by key column.
+func (j *JSONFile) buildIndex(root any, path string) (map[string]map[string]string, []string, error) {
+	results := jqSelect(j.query, root)
+	if len(results) == 0 {
+		return nil, nil, fmt.Errorf("jq expression produced no results for %q", path)
+	}
+
+	// Collect results into rows. Each jq result may be a single object or
+	// an array of objects (e.g. `.hosts` yields the whole array as one result).
+	// Unwrap arrays so individual objects become rows.
+	var objects []map[string]any
+	for _, r := range results {
+		switch v := r.(type) {
+		case map[string]any:
+			objects = append(objects, v)
+		case []any:
+			for _, elem := range v {
+				if obj, ok := elem.(map[string]any); ok {
+					objects = append(objects, obj)
+				}
+			}
+		}
+	}
+
+	var rows []map[string]string
+	for _, obj := range objects {
+		row := flattenScalars(obj)
+		if row != nil {
+			rows = append(rows, row)
+		}
+	}
+	if len(rows) == 0 {
+		return nil, nil, fmt.Errorf("jq expression produced no object results for %q", path)
+	}
+
+	keyCol := j.resolveKeyColumn(rows)
+	suffixes := j.resolveSuffixes(rows, keyCol)
+
+	index := indexRows(rows, keyCol, suffixes)
+	return index, suffixes, nil
+}
+
+// indexRows builds a key -> value-columns map from flattened rows.
+// First occurrence wins for duplicate keys; empty keys are skipped.
+func indexRows(rows []map[string]string, keyCol string, suffixes []string) map[string]map[string]string {
+	valSet := make(map[string]struct{}, len(suffixes))
+	for _, c := range suffixes {
+		valSet[c] = struct{}{}
+	}
+
+	index := make(map[string]map[string]string, len(rows))
+	for _, row := range rows {
+		key := row[keyCol]
+		if key == "" {
+			continue
+		}
+		if _, exists := index[key]; exists {
+			continue // first occurrence wins
+		}
+		vals := make(map[string]string, len(suffixes))
+		for k, v := range row {
+			if k == keyCol {
+				continue
+			}
+			if _, ok := valSet[k]; ok {
+				vals[k] = v
+			}
+		}
+		index[key] = vals
+	}
+	return index
+}
+
+// resolveKeyColumn returns the key column name: the configured one, or the
+// lexicographically first column from the first row.
+func (j *JSONFile) resolveKeyColumn(rows []map[string]string) string {
+	if j.keyColumn != "" {
+		return j.keyColumn
+	}
+	keys := make([]string, 0, len(rows[0]))
+	for k := range rows[0] {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		return keys[0]
+	}
+	return ""
+}
+
+// resolveSuffixes returns the output column names: the configured value columns,
+// or all non-key columns discovered from the rows (sorted for determinism).
+func (j *JSONFile) resolveSuffixes(rows []map[string]string, keyCol string) []string {
+	if j.valueColumns != nil {
+		out := make([]string, 0, len(j.valueColumns))
+		for c := range j.valueColumns {
+			out = append(out, c)
+		}
+		sort.Strings(out)
+		return out
+	}
+
+	seen := make(map[string]struct{})
+	for _, row := range rows {
+		for k := range row {
+			if k != keyCol {
+				seen[k] = struct{}{}
+			}
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for k := range seen {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // WatchFile watches a JSON file for changes using fsnotify.

@@ -4,12 +4,11 @@ import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, usePreviewJSONLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
-import { FormField, TextInput } from "../FormField";
+import { FormField, TextInput, SelectInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
 import { FileDropZone } from "../FileDropZone";
-import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, jsonFileLookupEqual } from "./types";
 import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import { PreviewTable, parseTabularResult } from "./PreviewTable";
@@ -18,21 +17,16 @@ import { PreviewTable, parseTabularResult } from "./PreviewTable";
 // JSON File Preview
 // ---------------------------------------------------------------------------
 
-function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
+function JsonPreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable }: Readonly<{
   dark: boolean;
   fileId: string;
   query?: string;
-  parameters?: { name: string }[];
+  keyColumn?: string;
+  onColumnsAvailable?: (columns: string[]) => void;
 }>) {
   const c = useThemeClass(dark);
   const preview = usePreviewJSONLookup();
   const [data, setData] = useState(preview.data);
-
-  // Build parameter map with placeholder values for preview.
-  const paramMap: Record<string, string> = {};
-  for (const p of parameters ?? []) {
-    if (p.name) paramMap[p.name] = `<${p.name}>`;
-  }
 
   // Auto-fetch preview when fileId or query changes (debounced for query).
   const [debouncedQuery, setDebouncedQuery] = useState(query ?? "");
@@ -43,11 +37,23 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
 
   useEffect(() => {
     if (fileId) {
-      preview.mutateAsync({ fileId, query: debouncedQuery, parameters: paramMap }).then(setData).catch(() => {});
+      preview.mutateAsync({ fileId, query: debouncedQuery }).then((d) => {
+        setData(d);
+        if (d.queryResult) {
+          const table = parseTabularResult(d.queryResult);
+          onColumnsAvailable?.(table ? table.columns : []);
+        } else {
+          onColumnsAvailable?.([]);
+        }
+      }).catch(() => {});
     }
   }, [fileId, debouncedQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!fileId) return null;
+
+  // Parse table for rendering (keyColumn highlight).
+  const table = data?.queryResult ? parseTabularResult(data.queryResult) : null;
+  const resolvedKey = keyColumn || (table && table.columns.length > 0 ? table.columns[0]! : "");
 
   return (
     <div className={`rounded-lg border overflow-hidden ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
@@ -61,7 +67,15 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
           )}
         </span>
         <button
-          onClick={() => preview.mutateAsync({ fileId, query: debouncedQuery, parameters: paramMap }).then(setData).catch(() => {})}
+          onClick={() => preview.mutateAsync({ fileId, query: debouncedQuery }).then((d) => {
+            setData(d);
+            if (d.queryResult) {
+              const t = parseTabularResult(d.queryResult);
+              onColumnsAvailable?.(t ? t.columns : []);
+            } else {
+              onColumnsAvailable?.([]);
+            }
+          }).catch(() => {})}
           disabled={preview.isPending}
           className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
             "text-text-ghost hover:text-copper hover:bg-ink-hover",
@@ -95,13 +109,12 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
       )}
 
       {data?.queryResult && (() => {
-        const table = parseTabularResult(data.queryResult);
         return table ? (
           <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
             <div className={`px-3 py-1.5 text-[0.75em] font-medium ${c("text-text-muted bg-ink-surface", "text-light-text-muted bg-light-surface")}`}>
               Query Result &middot; {table.rows.length} rows
             </div>
-            <PreviewTable dark={dark} columns={table.columns} rows={table.rows} />
+            <PreviewTable dark={dark} columns={table.columns} rows={table.rows} keyColumn={resolvedKey} />
           </div>
         ) : (
           <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
@@ -139,8 +152,8 @@ function serializeJsonLookups(lookups: JSONFileLookupDraft[]) {
       name: j.name,
       fileId: j.fileId,
       query: j.query || undefined,
-      responsePaths: j.responsePaths.filter(Boolean),
-      parameters: j.parameters.filter((p) => p.name),
+      keyColumn: j.keyColumn || undefined,
+      valueColumns: j.valueColumns.filter(Boolean),
     }));
 }
 
@@ -159,8 +172,29 @@ export function JsonAddForm({
   existingLookups: JSONFileLookupDraft[];
   namePlaceholder: string;
 }) {
+  const c = useThemeClass(dark);
   const putConfig = usePutSettings();
   const [draft, setDraft] = useState<JSONFileLookupDraft>(() => emptyJsonDraft());
+  const [tableColumns, setTableColumns] = useState<string[]>([]);
+
+  const resolvedKey = draft.keyColumn || (tableColumns.length > 0 ? tableColumns[0]! : "");
+  const nonKeyColumns = tableColumns.filter((col) => col !== resolvedKey);
+  const effectiveValues = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
+
+  const toggleValueColumn = (col: string) => {
+    const isChecked = effectiveValues.includes(col);
+    if (isChecked) {
+      const base = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
+      setDraft((d) => ({ ...d, valueColumns: base.filter((v) => v !== col) }));
+    } else {
+      const next = [...draft.valueColumns, col];
+      if (nonKeyColumns.every((c) => next.includes(c))) {
+        setDraft((d) => ({ ...d, valueColumns: [] }));
+      } else {
+        setDraft((d) => ({ ...d, valueColumns: next }));
+      }
+    }
+  };
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || namePlaceholder };
@@ -200,16 +234,157 @@ export function JsonAddForm({
           onFileSelected={(fileId) => setDraft((d) => ({ ...d, fileId }))}
         />
       </FormField>
-      <JsonPreviewPanel dark={dark} fileId={draft.fileId} query={draft.query} parameters={draft.parameters} />
-      <FormField label="Query" description="jq expression with {value} or {name} placeholders. Test with: cat file.json | jq 'expr'" dark={dark}>
+      <FormField label="Query" description="jq expression that transforms the JSON file into a lookup table." dark={dark}>
         <TextInput value={draft.query} onChange={(v) => setDraft((d) => ({ ...d, query: v }))} placeholder="" dark={dark} mono
-          examples={[".hosts[] | select(.ip == \"{value}\")", ".[\"{ value}\"]", ".data[]"]} />
+          examples={["[.hosts[] | {ip, hostname, env}]", ".data", "[.[] | {key: .id, value: .name}]"]} />
       </FormField>
-      <ParameterListEditor values={draft.parameters} onChange={(params) => setDraft((d) => ({ ...d, parameters: params }))} dark={dark} />
-      <FormField label="Response Paths" description="jq expressions to extract from results. Leave empty to flatten all." dark={dark}>
-        <StringListEditor values={draft.responsePaths} onChange={(v) => setDraft((d) => ({ ...d, responsePaths: v }))} placeholder="" dark={dark} />
-      </FormField>
+      <JsonPreviewPanel dark={dark} fileId={draft.fileId} query={draft.query} keyColumn={resolvedKey} onColumnsAvailable={setTableColumns} />
+
+      {/* Column pickers — only shown when the jq expression produces a valid table */}
+      {tableColumns.length > 0 && (
+        <>
+          <FormField label="Key Column" description="Column used as the lookup key." dark={dark}>
+            <SelectInput
+              value={draft.keyColumn}
+              onChange={(v) => setDraft((d) => ({ ...d, keyColumn: v }))}
+              options={[
+                { value: "", label: `${tableColumns[0]} (first column)` },
+                ...tableColumns.slice(1).map((col) => ({ value: col, label: col })),
+              ]}
+              dark={dark}
+            />
+          </FormField>
+
+          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." dark={dark}>
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+              {nonKeyColumns.map((col) => {
+                const checked = effectiveValues.includes(col);
+                return (
+                  <label
+                    key={col}
+                    className={`flex items-center gap-1.5 text-[0.85em] font-mono cursor-pointer select-none ${c("text-text-bright", "text-light-text-bright")}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleValueColumn(col)}
+                      className="accent-copper"
+                    />
+                    {col}
+                  </label>
+                );
+              })}
+            </div>
+          </FormField>
+        </>
+      )}
     </AddFormCard>
+  );
+}
+
+function JsonCardBody({
+  dark,
+  draft,
+  index,
+  managedFiles,
+  uploadFile,
+  addToast,
+  onUpdate,
+}: Readonly<{
+  dark: boolean;
+  draft: JSONFileLookupDraft;
+  index: number;
+  managedFiles: LookupSectionProps["managedFiles"];
+  uploadFile: LookupSectionProps["uploadFile"];
+  addToast: LookupSectionProps["addToast"];
+  onUpdate: (i: number, patch: Partial<JSONFileLookupDraft>) => void;
+}>) {
+  const c = useThemeClass(dark);
+  const [tableColumns, setTableColumns] = useState<string[]>([]);
+
+  const resolvedFile = managedFiles.find((f) => encode(f.id) === draft.fileId);
+  const resolvedKey = draft.keyColumn || (tableColumns.length > 0 ? tableColumns[0]! : "");
+  const nonKeyColumns = tableColumns.filter((col) => col !== resolvedKey);
+  const effectiveValues = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
+
+  const toggleValueColumn = (col: string) => {
+    const isChecked = effectiveValues.includes(col);
+    if (isChecked) {
+      const base = draft.valueColumns.length > 0 ? draft.valueColumns : nonKeyColumns;
+      onUpdate(index, { valueColumns: base.filter((v) => v !== col) });
+    } else {
+      const next = [...draft.valueColumns, col];
+      if (nonKeyColumns.every((c) => next.includes(c))) {
+        onUpdate(index, { valueColumns: [] });
+      } else {
+        onUpdate(index, { valueColumns: next });
+      }
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <FormField label="Name" description="Registry name used in queries, e.g. | lookup hosts" dark={dark}>
+        <TextInput value={draft.name} onChange={(v) => onUpdate(index, { name: v })} placeholder="" dark={dark} mono />
+      </FormField>
+      <FormField label="File" dark={dark}>
+        <FileDropZone
+          dark={dark}
+          inputId={`json-upload-${index}`}
+          accept=".json"
+          label=".json file"
+          currentFile={resolvedFile}
+          pickableFiles={managedFiles.filter((f) => f.name.endsWith(".json"))}
+          uploadFile={uploadFile}
+          addToast={addToast}
+          onFileSelected={(fileId) => onUpdate(index, { fileId })}
+        />
+      </FormField>
+      <FormField label="Query" description="jq expression that transforms the JSON file into a lookup table." dark={dark}>
+        <TextInput value={draft.query} onChange={(v) => onUpdate(index, { query: v })} placeholder="" dark={dark} mono
+          examples={["[.hosts[] | {ip, hostname, env}]", ".data", "[.[] | {key: .id, value: .name}]"]} />
+      </FormField>
+      <JsonPreviewPanel dark={dark} fileId={draft.fileId} query={draft.query} keyColumn={resolvedKey} onColumnsAvailable={setTableColumns} />
+
+      {/* Column pickers — only shown when the jq expression produces a valid table */}
+      {tableColumns.length > 0 && (
+        <>
+          <FormField label="Key Column" description="Column used as the lookup key." dark={dark}>
+            <SelectInput
+              value={draft.keyColumn}
+              onChange={(v) => onUpdate(index, { keyColumn: v })}
+              options={[
+                { value: "", label: `${tableColumns[0]} (first column)` },
+                ...tableColumns.slice(1).map((col) => ({ value: col, label: col })),
+              ]}
+              dark={dark}
+            />
+          </FormField>
+
+          <FormField label="Value Columns" description="Columns included in lookup results. Uncheck columns you don't need." dark={dark}>
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+              {nonKeyColumns.map((col) => {
+                const checked = effectiveValues.includes(col);
+                return (
+                  <label
+                    key={col}
+                    className={`flex items-center gap-1.5 text-[0.85em] font-mono cursor-pointer select-none ${c("text-text-bright", "text-light-text-bright")}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleValueColumn(col)}
+                      className="accent-copper"
+                    />
+                    {col}
+                  </label>
+                );
+              })}
+            </div>
+          </FormField>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -262,33 +437,15 @@ export function JsonCards({
               </Button>
             }
           >
-            <div className="flex flex-col gap-3">
-              <FormField label="Name" description="Registry name used in queries, e.g. | lookup hosts" dark={dark}>
-                <TextInput value={j.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
-              </FormField>
-              <FormField label="File" dark={dark}>
-                <FileDropZone
-                  dark={dark}
-                  inputId={`json-upload-${i}`}
-                  accept=".json"
-                  label=".json file"
-                  currentFile={resolvedFile}
-                  pickableFiles={managedFiles.filter((f) => f.name.endsWith(".json"))}
-                  uploadFile={uploadFile}
-                  addToast={addToast}
-                  onFileSelected={(fileId) => onUpdate(i, { fileId })}
-                />
-              </FormField>
-              <JsonPreviewPanel dark={dark} fileId={j.fileId} query={j.query} parameters={j.parameters} />
-              <FormField label="Query" description="jq expression with {value} or {name} placeholders. Test with: cat file.json | jq 'expr'" dark={dark}>
-                <TextInput value={j.query} onChange={(v) => onUpdate(i, { query: v })} placeholder="" dark={dark} mono
-                  examples={[".hosts[] | select(.ip == \"{value}\")", ".[\"{ value}\"]", ".data[]"]} />
-              </FormField>
-              <ParameterListEditor values={j.parameters} onChange={(params) => onUpdate(i, { parameters: params })} dark={dark} />
-              <FormField label="Response Paths" description="jq expressions to extract from results. Leave empty to flatten all." dark={dark}>
-                <StringListEditor values={j.responsePaths} onChange={(v) => onUpdate(i, { responsePaths: v })} placeholder="" dark={dark} />
-              </FormField>
-            </div>
+            <JsonCardBody
+              dark={dark}
+              draft={j}
+              index={i}
+              managedFiles={managedFiles}
+              uploadFile={uploadFile}
+              addToast={addToast}
+              onUpdate={onUpdate}
+            />
           </SettingsCard>
         );
       })}

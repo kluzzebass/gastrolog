@@ -56,8 +56,8 @@ type PutSettingsArgs = {
       name: string;
       fileId: string;
       query?: string;
-      responsePaths?: string[];
-      parameters?: { name: string; description: string }[];
+      keyColumn?: string;
+      valueColumns?: string[];
     }[];
     mmdbLookups?: {
       name: string;

@@ -57,8 +57,8 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         name: j.name,
         fileId: encode(j.fileId),
         query: j.query,
-        responsePaths: [...j.responsePaths],
-        parameters: j.parameters.map((p) => ({ name: p.name, description: p.description })),
+        keyColumn: j.keyColumn,
+        valueColumns: [...j.valueColumns],
       })),
     );
     setCsvLookups(

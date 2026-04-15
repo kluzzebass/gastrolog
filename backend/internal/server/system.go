@@ -874,16 +874,12 @@ func jsonFileLookupsToProto(lookups []system.JSONFileLookupConfig) []*apiv1.JSON
 	}
 	out := make([]*apiv1.JSONFileLookupEntry, len(lookups))
 	for i, l := range lookups {
-		params := make([]*apiv1.HTTPLookupParam, len(l.Parameters))
-		for j, p := range l.Parameters {
-			params[j] = &apiv1.HTTPLookupParam{Name: p.Name, Description: p.Description}
-		}
 		out[i] = &apiv1.JSONFileLookupEntry{
-			Name:          l.Name,
-			FileId:        glid.MustParse(l.FileID).ToProto(),
-			Query:         l.Query,
-			ResponsePaths: l.ResponsePaths,
-			Parameters:    params,
+			Name:         l.Name,
+			FileId:       glid.MustParse(l.FileID).ToProto(),
+			Query:        l.Query,
+			KeyColumn:    l.KeyColumn,
+			ValueColumns: l.ValueColumns,
 		}
 	}
 	return out
@@ -895,16 +891,12 @@ func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []system.JSO
 		if e.Name == "" || len(e.FileId) == 0 {
 			continue
 		}
-		params := make([]system.HTTPLookupParam, len(e.Parameters))
-		for j, p := range e.Parameters {
-			params[j] = system.HTTPLookupParam{Name: p.Name, Description: p.Description}
-		}
 		out = append(out, system.JSONFileLookupConfig{
-			Name:          e.Name,
-			FileID:        parseLookupFileID(e.FileId),
-			Query:         e.Query,
-			ResponsePaths: e.ResponsePaths,
-			Parameters:    params,
+			Name:         e.Name,
+			FileID:       parseLookupFileID(e.FileId),
+			Query:        e.Query,
+			KeyColumn:    e.KeyColumn,
+			ValueColumns: e.ValueColumns,
 		})
 	}
 	return out

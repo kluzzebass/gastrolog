@@ -202,15 +202,16 @@ func (s *Server) registerJSONFileLookups(cfg system.LookupConfig, registry looku
 			continue
 		}
 
-		paramNames := make([]string, len(jcfg.Parameters))
-		for k, p := range jcfg.Parameters {
-			paramNames[k] = p.Name
-		}
-		jf := lookup.NewJSONFile(lookup.JSONFileConfig{
-			Query:         jcfg.Query,
-			ResponsePaths: jcfg.ResponsePaths,
-			Parameters:    paramNames,
+		jf, err := lookup.NewJSONFile(lookup.JSONFileConfig{
+			Name:         jcfg.Name,
+			Query:        jcfg.Query,
+			KeyColumn:    jcfg.KeyColumn,
+			ValueColumns: jcfg.ValueColumns,
 		})
+		if err != nil {
+			s.logger.Warn("failed to compile JSON lookup jq expression", "name", jcfg.Name, "error", err)
+			continue
+		}
 
 		if err := jf.Load(filePath); err != nil {
 			s.logger.Warn("failed to load JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)

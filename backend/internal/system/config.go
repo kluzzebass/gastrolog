@@ -162,11 +162,11 @@ type HTTPLookupConfig struct {
 
 // JSONFileLookupConfig defines a JSON file-backed lookup table.
 type JSONFileLookupConfig struct {
-	Name          string            `json:"name"`                      // registry name (e.g. "hosts")
-	FileID        string            `json:"file_id"`                   // managed file ID (UUID)
-	Query         string            `json:"query"`                     // JSONPath query template with {name} placeholders
-	ResponsePaths []string          `json:"response_paths,omitempty"`  // JSONPath expressions to extract from results
-	Parameters    []HTTPLookupParam `json:"parameters,omitempty"`      // ordered params for query template placeholders
+	Name         string   `json:"name"`                    // registry name (e.g. "hosts")
+	FileID       string   `json:"file_id"`                 // managed file ID (UUID)
+	Query        string   `json:"query"`                   // jq expression that produces an array of objects
+	KeyColumn    string   `json:"key_column,omitempty"`    // field used as the lookup key; empty = first column
+	ValueColumns []string `json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
 }
 
 // CSVLookupConfig defines a CSV file-backed lookup table.

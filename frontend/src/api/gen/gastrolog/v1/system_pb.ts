@@ -2438,7 +2438,8 @@ export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
 
 /**
  * JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
- * The JSON file is memory-mapped and queried via jq expressions at lookup time.
+ * The jq expression transforms the JSON file into an array of objects at load time.
+ * The key_column identifies which field is used for lookups at query time.
  *
  * @generated from message gastrolog.v1.JSONFileLookupEntry
  */
@@ -2451,32 +2452,32 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
   name = "";
 
   /**
-   * managed file ID (UUID)
+   * managed file ID
    *
    * @generated from field: bytes file_id = 2;
    */
   fileId = new Uint8Array(0);
 
   /**
-   * jq query template with {name} placeholders, e.g. ".hosts[] | select(.ip == \"{ip}\")"
+   * jq expression that produces an array of objects (the lookup table)
    *
    * @generated from field: string query = 3;
    */
   query = "";
 
   /**
-   * optional: jq expressions to extract from results; empty = flatten
+   * column used as the lookup key; empty = first column
    *
-   * @generated from field: repeated string response_paths = 4;
+   * @generated from field: string key_column = 6;
    */
-  responsePaths: string[] = [];
+  keyColumn = "";
 
   /**
-   * ordered param definitions for query template placeholders
+   * columns to include in output; empty = all non-key
    *
-   * @generated from field: repeated gastrolog.v1.HTTPLookupParam parameters = 5;
+   * @generated from field: repeated string value_columns = 7;
    */
-  parameters: HTTPLookupParam[] = [];
+  valueColumns: string[] = [];
 
   constructor(data?: PartialMessage<JSONFileLookupEntry>) {
     super();
@@ -2489,8 +2490,8 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 4, name: "response_paths", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
-    { no: 5, name: "parameters", kind: "message", T: HTTPLookupParam, repeated: true },
+    { no: 6, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JSONFileLookupEntry {

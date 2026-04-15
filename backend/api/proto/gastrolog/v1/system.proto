@@ -438,13 +438,15 @@ message HTTPLookupEntry {
 }
 
 // JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
-// The JSON file is memory-mapped and queried via jq expressions at lookup time.
+// The jq expression transforms the JSON file into an array of objects at load time.
+// The key_column identifies which field is used for lookups at query time.
 message JSONFileLookupEntry {
   string name = 1;                            // registry name (e.g. "hosts")
-  bytes file_id = 2;                        // managed file ID (UUID)
-  string query = 3;                          // jq query template with {name} placeholders, e.g. ".hosts[] | select(.ip == \"{ip}\")"
-  repeated string response_paths = 4;        // optional: jq expressions to extract from results; empty = flatten
-  repeated HTTPLookupParam parameters = 5;   // ordered param definitions for query template placeholders
+  bytes file_id = 2;                          // managed file ID
+  string query = 3;                           // jq expression that produces an array of objects (the lookup table)
+  reserved 4, 5;                              // was: response_paths, parameters (replaced by key_column/value_columns)
+  string key_column = 6;                      // column used as the lookup key; empty = first column
+  repeated string value_columns = 7;          // columns to include in output; empty = all non-key
 }
 
 // CSVLookupEntry defines a CSV file-backed lookup table for key→row enrichment.
