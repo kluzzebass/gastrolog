@@ -74,7 +74,9 @@ test.describe.serial("Cross-node config propagation", () => {
 
     await dialog1.getByRole("button", { name: /Add Vault/i }).click();
     await dialog1.getByRole("button", { name: /Add Tier/i }).click();
-    await page.getByRole("button", { name: "Memory", exact: true }).click();
+    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
+    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
+    await memBtn.click();
     await dialog1.getByLabel("Name").fill(VAULT_NAME);
     await dialog1.getByRole("button", { name: "Create" }).click();
     await expect(dialog1.getByText(VAULT_NAME)).toBeVisible({

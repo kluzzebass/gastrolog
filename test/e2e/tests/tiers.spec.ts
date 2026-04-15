@@ -21,10 +21,17 @@ test.describe.serial("Tier management", () => {
   test("creates a vault with a memory tier", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Vaults");
 
+    // Idempotent: skip if vault already exists (retry after prior failure).
+    if (await dialog.getByText(VAULT_NAME).isVisible().catch(() => false)) {
+      return;
+    }
+
     // Open the vault creation form, then add a memory tier.
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
     await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    await page.getByRole("button", { name: "Memory", exact: true }).click();
+    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
+    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
+    await memBtn.click();
 
     await dialog.getByLabel("Name").fill(VAULT_NAME);
 

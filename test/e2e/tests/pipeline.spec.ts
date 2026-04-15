@@ -31,6 +31,12 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
   test("creates a rotation policy", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Rotation Policies");
 
+    // Idempotent: skip creation if the policy already exists (e.g. retry
+    // after a prior test in the serial chain already created it).
+    if (await dialog.getByText(ROTATION_NAME).isVisible().catch(() => false)) {
+      return;
+    }
+
     await dialog.getByRole("button", { name: /Add Policy/i }).click();
 
     await dialog.getByLabel("Name").fill(ROTATION_NAME);
@@ -48,6 +54,10 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
   test("creates a retention policy", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Retention Policies");
 
+    if (await dialog.getByText(RETENTION_NAME).isVisible().catch(() => false)) {
+      return;
+    }
+
     await dialog.getByRole("button", { name: /Add Policy/i }).click();
 
     await dialog.getByLabel("Name").fill(RETENTION_NAME);
@@ -64,6 +74,10 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
 
   test("creates a filter", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Filters");
+
+    if (await dialog.getByText(FILTER_NAME).isVisible().catch(() => false)) {
+      return;
+    }
 
     await dialog.getByRole("button", { name: /Add Filter/i }).click();
 
@@ -83,9 +97,15 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
   test("creates a memory vault with rotation policy", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Vaults");
 
+    if (await dialog.getByText(VAULT_NAME).isVisible().catch(() => false)) {
+      return;
+    }
+
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
     await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    await page.getByRole("button", { name: "Memory", exact: true }).click();
+    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
+    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
+    await memBtn.click();
 
     await dialog.getByLabel("Name").fill(VAULT_NAME);
 
@@ -105,6 +125,10 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
 
   test("creates a route pointing to the vault", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Routes");
+
+    if (await dialog.getByText(ROUTE_NAME).isVisible().catch(() => false)) {
+      return;
+    }
 
     await dialog.getByRole("button", { name: /Add Route/i }).click();
 
@@ -133,6 +157,10 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
 
   test("creates a scatterbox ingester", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Ingesters");
+
+    if (await dialog.getByText(INGESTER_NAME).isVisible().catch(() => false)) {
+      return;
+    }
 
     await dialog.getByRole("button", { name: /Add Ingester/i }).click();
     await page

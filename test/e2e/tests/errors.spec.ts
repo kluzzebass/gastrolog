@@ -74,7 +74,9 @@ test.describe("Error states and validation", () => {
 
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
     await dialog.getByRole("button", { name: /Add Tier/i }).click();
-    await page.getByRole("button", { name: "Memory", exact: true }).click();
+    const memBtn = page.getByRole("button", { name: "Memory", exact: true });
+    await memBtn.waitFor({ state: "visible", timeout: 5_000 });
+    await memBtn.click();
 
     // Create button should be enabled (generated placeholder name is used).
     const createBtn = dialog.getByRole("button", { name: "Create" });
