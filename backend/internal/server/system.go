@@ -1265,21 +1265,38 @@ func (s *SystemServer) PreviewJSONLookup(
 	}
 	defer func() { _ = f.Close() }()
 
-	buf := make([]byte, maxBytes)
-	n, _ := f.Read(buf)
-	raw := buf[:n]
+	// Read full file for JSON parsing (needed for query evaluation).
+	// Cap at 10MB to prevent abuse.
+	readLimit := min(totalSize, 10<<20)
+	fullBuf := make([]byte, readLimit)
+	n, _ := f.Read(fullBuf)
+	fullData := fullBuf[:n]
 
-	// Try to pretty-print if it's valid JSON.
+	// Parse the full JSON for query evaluation.
 	var parsed any
-	if json.Unmarshal(raw, &parsed) == nil {
+	_ = json.Unmarshal(fullData, &parsed)
+
+	// Truncated preview for display.
+	displayData := fullData
+	truncated := false
+	if len(displayData) > maxBytes {
+		displayData = displayData[:maxBytes]
+		truncated = true
+	}
+	if parsed != nil {
 		if pretty, err := json.MarshalIndent(parsed, "", "  "); err == nil {
-			raw = pretty
+			if len(pretty) > maxBytes {
+				displayData = pretty[:maxBytes]
+				truncated = true
+			} else {
+				displayData = pretty
+				truncated = int64(len(pretty)) < totalSize
+			}
 		}
 	}
 
-	truncated := int64(n) < totalSize
 	resp := &apiv1.PreviewJSONLookupResponse{
-		Content:   string(raw),
+		Content:   string(displayData),
 		TotalSize: totalSize,
 		Truncated: truncated,
 	}
