@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"strings"
 
+	"github.com/itchyny/gojq"
+
 	"errors"
 	"fmt"
 	"io"
@@ -1313,7 +1315,11 @@ func evalJQ(query string, params map[string]string, data any) (result, errMsg st
 	for k, v := range params {
 		query = strings.ReplaceAll(query, "{"+k+"}", v)
 	}
-	code, err := lookup.CompileJQ(query)
+	parsed, err := gojq.Parse(query)
+	if err != nil {
+		return "", fmt.Sprintf("parse error: %v", err)
+	}
+	code, err := gojq.Compile(parsed)
 	if err != nil {
 		return "", fmt.Sprintf("compile error: %v", err)
 	}
