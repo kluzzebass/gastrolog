@@ -210,7 +210,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     const name = storageName.trim() || storageNamePlaceholder || "file-storage";
 
     const newStorage = {
-      id: crypto.randomUUID(),
+      id: encode(crypto.getRandomValues(new Uint8Array(16))),
       storageClass: cls,
       name,
       path,

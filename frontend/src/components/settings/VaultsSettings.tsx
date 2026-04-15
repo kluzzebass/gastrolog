@@ -588,7 +588,8 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
 
   const handleCreate = () => {
     const name = addForm.name.trim() || addForm.namePlaceholder || "vault";
-    const vaultId = crypto.randomUUID();
+    const vaultIdBytes = crypto.getRandomValues(new Uint8Array(16));
+    const vaultId = encode(vaultIdBytes);
 
     // Build tier configs outside try/catch (React Compiler can't optimize
     // conditional expressions inside try/catch).
