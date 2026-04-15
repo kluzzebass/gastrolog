@@ -1,5 +1,5 @@
 import { encode } from "../../../api/glid";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { usePutSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
@@ -54,12 +54,10 @@ function CsvFileFields({
 }>) {
   const c = useThemeClass(dark);
   const preview = usePreviewCSVLookup();
-  const lastFileIdRef = useRef("");
 
   // Auto-fetch preview when fileId changes.
   useEffect(() => {
-    if (fileId && fileId !== lastFileIdRef.current) {
-      lastFileIdRef.current = fileId;
+    if (fileId) {
       preview.mutate({ fileId });
     }
   }, [fileId]); // eslint-disable-line react-hooks/exhaustive-deps
