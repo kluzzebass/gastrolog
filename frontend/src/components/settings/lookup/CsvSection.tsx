@@ -8,6 +8,7 @@ import { FormField, TextInput, SelectInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
+import { PreviewTable } from "./PreviewTable";
 import { FileDropZone } from "../FileDropZone";
 import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
@@ -134,47 +135,12 @@ function CsvFileFields({
           )}
 
           {data && !data.error && columns.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[0.75em]">
-                <thead>
-                  <tr className={c("bg-ink-surface/80", "bg-light-surface/80")}>
-                    {columns.map((col) => (
-                      <th
-                        key={col}
-                        className={`px-2.5 py-1.5 text-left font-mono font-medium whitespace-nowrap ${
-                          col === resolvedKey
-                            ? "text-copper"
-                            : c("text-text-muted", "text-light-text-muted")
-                        }`}
-                      >
-                        {col}
-                        {col === resolvedKey && (
-                          <span className="ml-1 text-[0.85em] opacity-60">key</span>
-                        )}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.rows.map((row, ri) => (
-                    <tr
-                      key={ri}
-                      className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
-                    >
-                      {row.values.map((val, ci) => (
-                        <td
-                          key={ci}
-                          className={`px-2.5 py-1 font-mono whitespace-nowrap max-w-xs truncate ${c("text-text-bright", "text-light-text-bright")}`}
-                          title={val}
-                        >
-                          {val}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <PreviewTable
+              dark={dark}
+              columns={columns}
+              rows={data.rows.map((r) => r.values)}
+              keyColumn={resolvedKey}
+            />
           )}
 
           {preview.isPending && !data && (

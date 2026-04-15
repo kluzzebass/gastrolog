@@ -12,6 +12,7 @@ import { FileDropZone } from "../FileDropZone";
 import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, jsonFileLookupEqual } from "./types";
 import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import { PreviewTable, parseTabularResult } from "./PreviewTable";
 
 // ---------------------------------------------------------------------------
 // JSON File Preview
@@ -93,18 +94,28 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
         </div>
       )}
 
-      {data?.queryResult && (
-        <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
-          <div className={`px-3 py-1.5 text-[0.75em] font-medium ${c("text-text-muted bg-ink-surface", "text-light-text-muted bg-light-surface")}`}>
-            Query Result
+      {data?.queryResult && (() => {
+        const table = parseTabularResult(data.queryResult);
+        return table ? (
+          <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+            <div className={`px-3 py-1.5 text-[0.75em] font-medium ${c("text-text-muted bg-ink-surface", "text-light-text-muted bg-light-surface")}`}>
+              Query Result &middot; {table.rows.length} rows
+            </div>
+            <PreviewTable dark={dark} columns={table.columns} rows={table.rows} />
           </div>
-          <div className="overflow-x-auto max-h-32">
-            <pre className={`px-3 py-2 font-mono text-[0.75em] whitespace-pre text-copper`}>
-              {data.queryResult}
-            </pre>
+        ) : (
+          <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+            <div className={`px-3 py-2 text-[0.75em] ${c("text-severity-warn bg-severity-warn/5", "text-severity-warn bg-severity-warn/5")}`}>
+              Expression must produce an array of objects to use as a lookup table
+            </div>
+            <div className="overflow-x-auto max-h-32">
+              <pre className={`px-3 py-2 font-mono text-[0.75em] whitespace-pre text-copper`}>
+                {data.queryResult}
+              </pre>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {data?.queryError && (
         <div className={`border-t px-3 py-2 text-[0.75em] text-severity-error bg-severity-error/5 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
