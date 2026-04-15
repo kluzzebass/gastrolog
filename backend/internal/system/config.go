@@ -131,6 +131,7 @@ type LookupConfig struct {
 	JSONFileLookups []JSONFileLookupConfig `json:"json_file_lookups,omitempty"`
 	MMDBLookups     []MMDBLookupConfig     `json:"mmdb_lookups,omitempty"`
 	CSVLookups      []CSVLookupConfig      `json:"csv_lookups,omitempty"`
+	StaticLookups   []StaticLookupConfig   `json:"staticLookups,omitempty"`
 }
 
 // MMDBLookupConfig defines a named MMDB-backed lookup table (GeoIP City or ASN).
@@ -174,6 +175,19 @@ type CSVLookupConfig struct {
 	FileID       string   `json:"file_id"`                 // managed file ID (UUID)
 	KeyColumn    string   `json:"key_column,omitempty"`    // column header for lookup key; empty = first column
 	ValueColumns []string `json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
+}
+
+// StaticLookupRow holds the column values for a single static lookup row.
+type StaticLookupRow struct {
+	Values map[string]string `json:"values"`
+}
+
+// StaticLookupConfig defines a manually-entered lookup table with inline key-value rows.
+type StaticLookupConfig struct {
+	Name         string            `json:"name"`
+	KeyColumn    string            `json:"keyColumn"`
+	ValueColumns []string          `json:"valueColumns,omitempty"`
+	Rows         []StaticLookupRow `json:"rows,omitempty"`
 }
 
 // MaxMindConfig holds credentials and state for automatic MaxMind database downloading.

@@ -47,6 +47,9 @@ func (s *Server) applyLookupConfig(cfg system.LookupConfig, mm system.MaxMindCon
 	// Register CSV lookup tables from system.
 	s.registerCSVLookups(cfg, registry)
 
+	// Register static (inline) lookup tables from system.
+	s.registerStaticLookups(cfg, registry)
+
 	// Manage the maxmind-update cron job.
 	s.manageMaxMindJob(mm, registry)
 }
@@ -277,6 +280,40 @@ func (s *Server) registerCSVLookups(cfg system.LookupConfig, registry lookup.Reg
 
 		registry[ccfg.Name] = ct
 		s.logger.Info("registered CSV lookup table", "name", ccfg.Name, "path", filePath)
+	}
+}
+
+// registerStaticLookups registers inline static lookup tables from config into the registry.
+func (s *Server) registerStaticLookups(cfg system.LookupConfig, registry lookup.Registry) {
+	keep := make(map[string]struct{}, len(cfg.StaticLookups))
+	for _, scfg := range cfg.StaticLookups {
+		if scfg.Name != "" {
+			keep[scfg.Name] = struct{}{}
+		}
+	}
+
+	// Remove stale static lookups no longer in config.
+	for name, table := range registry {
+		if _, ok := table.(*lookup.Static); ok {
+			if _, exists := keep[name]; !exists {
+				delete(registry, name)
+				s.logger.Info("removed static lookup table", "name", name)
+			}
+		}
+	}
+
+	for _, scfg := range cfg.StaticLookups {
+		if scfg.Name == "" {
+			continue
+		}
+
+		rows := make([]lookup.StaticRow, len(scfg.Rows))
+		for i, r := range scfg.Rows {
+			rows[i] = lookup.StaticRow{Values: r.Values}
+		}
+
+		registry[scfg.Name] = lookup.NewStatic(scfg.Name, scfg.KeyColumn, scfg.ValueColumns, rows)
+		s.logger.Info("registered static lookup table", "name", scfg.Name, "rows", len(scfg.Rows))
 	}
 }
 

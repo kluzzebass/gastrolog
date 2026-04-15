@@ -1,7 +1,7 @@
 import { encode } from "../../../api/glid";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { usePutSettings } from "../../../api/hooks/useSettings";
+import { usePutSettings, usePreviewJSONLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput } from "../FormField";
@@ -12,6 +12,79 @@ import { FileDropZone } from "../FileDropZone";
 import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type JSONFileLookupDraft, type LookupSectionProps, emptyJsonDraft, jsonFileLookupEqual } from "./types";
 import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+
+// ---------------------------------------------------------------------------
+// JSON File Preview
+// ---------------------------------------------------------------------------
+
+function JsonPreviewPanel({ dark, fileId }: Readonly<{ dark: boolean; fileId: string }>) {
+  const c = useThemeClass(dark);
+  const preview = usePreviewJSONLookup();
+
+  // Auto-fetch preview when fileId changes.
+  useEffect(() => {
+    if (fileId) {
+      preview.mutate({ fileId });
+    }
+  }, [fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const data = preview.data;
+
+  if (!fileId) return null;
+
+  return (
+    <div className={`rounded-lg border overflow-hidden ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+      <div className={`flex items-center justify-between px-3 py-1.5 ${c("bg-ink-surface", "bg-light-surface")}`}>
+        <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
+          Preview
+          {data && !data.error && (
+            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+              {" "}&middot; {Number(data.totalSize).toLocaleString()} bytes
+            </span>
+          )}
+        </span>
+        <button
+          onClick={() => preview.mutate({ fileId })}
+          disabled={preview.isPending}
+          className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
+            "text-text-ghost hover:text-copper hover:bg-ink-hover",
+            "text-light-text-ghost hover:text-copper hover:bg-light-hover",
+          )}`}
+        >
+          {preview.isPending ? "Loading..." : "Refresh"}
+        </button>
+      </div>
+
+      {data?.error && (
+        <div className="px-3 py-2 text-[0.8em] text-severity-error bg-severity-error/5">
+          {data.error}
+        </div>
+      )}
+
+      {data && !data.error && (
+        <div className="overflow-x-auto">
+          <pre className={`px-3 py-2 font-mono text-[0.75em] whitespace-pre ${c("text-text-bright", "text-light-text-bright")}`}>
+            {data.content}
+          </pre>
+          {data.truncated && (
+            <div className={`px-3 py-1.5 text-[0.7em] border-t ${c(
+              "border-ink-border-subtle text-text-ghost",
+              "border-light-border-subtle text-light-text-ghost",
+            )}`}>
+              Truncated
+            </div>
+          )}
+        </div>
+      )}
+
+      {preview.isPending && !data && (
+        <div className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          Loading preview...
+        </div>
+      )}
+    </div>
+  );
+}
 
 function serializeJsonLookups(lookups: JSONFileLookupDraft[]) {
   return lookups
@@ -81,6 +154,7 @@ export function JsonAddForm({
           onFileSelected={(fileId) => setDraft((d) => ({ ...d, fileId }))}
         />
       </FormField>
+      <JsonPreviewPanel dark={dark} fileId={draft.fileId} />
       <FormField label="Query" description="JSONPath query with {value} or {name} placeholders. Supports filter expressions." dark={dark}>
         <TextInput value={draft.query} onChange={(v) => setDraft((d) => ({ ...d, query: v }))} placeholder="$.hosts[?(@.ip == '{value}')]" dark={dark} mono />
       </FormField>
@@ -158,6 +232,7 @@ export function JsonCards({
                   onFileSelected={(fileId) => onUpdate(i, { fileId })}
                 />
               </FormField>
+              <JsonPreviewPanel dark={dark} fileId={j.fileId} />
               <FormField label="Query" description="JSONPath query with {value} or {name} placeholders. Supports filter expressions." dark={dark}>
                 <TextInput value={j.query} onChange={(v) => onUpdate(i, { query: v })} placeholder="$.hosts[?(@.ip == '{value}')]" dark={dark} mono />
               </FormField>

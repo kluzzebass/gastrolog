@@ -477,6 +477,7 @@ func (s *SystemServer) GetSettings(
 			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
 			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
 			CsvLookups:      csvLookupsToProto(ss.Lookup.CSVLookups),
+			StaticLookups:   staticLookupsToProto(ss.Lookup.StaticLookups),
 		},
 		Maxmind: mm,
 		Cluster: &apiv1.ClusterSettings{
@@ -798,6 +799,9 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *system.LookupConfig) {
 	if l.CsvLookups != nil {
 		lookup.CSVLookups = csvLookupsFromProto(l.CsvLookups)
 	}
+	if l.StaticLookups != nil {
+		lookup.StaticLookups = staticLookupsFromProto(l.StaticLookups)
+	}
 }
 
 func mergeMaxMind(mm *apiv1.PutMaxMindSettings, cfg *system.MaxMindConfig) {
@@ -959,6 +963,46 @@ func csvLookupsFromProto(entries []*apiv1.CSVLookupEntry) []system.CSVLookupConf
 			FileID:       parseLookupFileID(e.FileId),
 			KeyColumn:    e.KeyColumn,
 			ValueColumns: e.ValueColumns,
+		})
+	}
+	return out
+}
+
+func staticLookupsToProto(lookups []system.StaticLookupConfig) []*apiv1.StaticLookupEntry {
+	if len(lookups) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.StaticLookupEntry, len(lookups))
+	for i, l := range lookups {
+		rows := make([]*apiv1.StaticLookupRow, len(l.Rows))
+		for j, r := range l.Rows {
+			rows[j] = &apiv1.StaticLookupRow{Values: r.Values}
+		}
+		out[i] = &apiv1.StaticLookupEntry{
+			Name:         l.Name,
+			KeyColumn:    l.KeyColumn,
+			ValueColumns: l.ValueColumns,
+			Rows:         rows,
+		}
+	}
+	return out
+}
+
+func staticLookupsFromProto(entries []*apiv1.StaticLookupEntry) []system.StaticLookupConfig {
+	out := make([]system.StaticLookupConfig, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" {
+			continue
+		}
+		rows := make([]system.StaticLookupRow, len(e.Rows))
+		for j, r := range e.Rows {
+			rows[j] = system.StaticLookupRow{Values: r.Values}
+		}
+		out = append(out, system.StaticLookupConfig{
+			Name:         e.Name,
+			KeyColumn:    e.KeyColumn,
+			ValueColumns: e.ValueColumns,
+			Rows:         rows,
 		})
 	}
 	return out

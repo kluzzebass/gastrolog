@@ -9,7 +9,8 @@ import { MmdbAddForm, MmdbCards } from "./lookup/MmdbSection";
 import { HttpAddForm, HttpCards } from "./lookup/HttpSection";
 import { JsonAddForm, JsonCards } from "./lookup/JsonSection";
 import { CsvAddForm, CsvCards } from "./lookup/CsvSection";
-import { lookupTypes, type MMDBLookupDraft, type HTTPLookupDraft, type JSONFileLookupDraft, type CSVLookupDraft } from "./lookup/types";
+import { StaticAddForm, StaticCards } from "./lookup/StaticSection";
+import { lookupTypes, type MMDBLookupDraft, type HTTPLookupDraft, type JSONFileLookupDraft, type CSVLookupDraft, type StaticLookupDraft } from "./lookup/types";
 
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data, isLoading } = useSettings();
@@ -26,6 +27,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [httpLookups, setHttpLookups] = useState<HTTPLookupDraft[]>([]);
   const [jsonFileLookups, setJsonFileLookups] = useState<JSONFileLookupDraft[]>([]);
   const [csvLookups, setCsvLookups] = useState<CSVLookupDraft[]>([]);
+  const [staticLookups, setStaticLookups] = useState<StaticLookupDraft[]>([]);
   const [addingType, setAddingType] = useState<string | null>(null);
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
@@ -67,6 +69,14 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         valueColumns: [...c.valueColumns],
       })),
     );
+    setStaticLookups(
+      (data.lookup?.staticLookups ?? []).map((s) => ({
+        name: s.name,
+        keyColumn: s.keyColumn,
+        valueColumns: [...s.valueColumns],
+        rows: s.rows.map((r) => ({ ...r.values })),
+      })),
+    );
     setInitialized(true);
   }
 
@@ -79,7 +89,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const closeAdd = () => setAddingType(null);
-  const isEmpty = mmdbLookups.length === 0 && httpLookups.length === 0 && jsonFileLookups.length === 0 && csvLookups.length === 0;
+  const isEmpty = mmdbLookups.length === 0 && httpLookups.length === 0 && jsonFileLookups.length === 0 && csvLookups.length === 0 && staticLookups.length === 0;
   const sectionProps = { dark, managedFiles, uploadFile, addToast };
 
   // -- Render -----------------------------------------------------------------
@@ -132,6 +142,16 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           onCancel={closeAdd}
         />
       )}
+      {addingType === "static" && (
+        <StaticAddForm
+          dark={dark}
+          addToast={addToast}
+          existingLookups={staticLookups}
+          namePlaceholder={namePlaceholder}
+          onCreated={(draft) => { setStaticLookups((prev) => [...prev, draft]); closeAdd(); }}
+          onCancel={closeAdd}
+        />
+      )}
 
       {/* Entity cards */}
       <MmdbCards
@@ -162,6 +182,14 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.csvLookups ?? []}
         onUpdate={(i, patch) => setCsvLookups((prev) => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)))}
         onDelete={(i) => setCsvLookups((prev) => prev.filter((_, j) => j !== i))}
+      />
+      <StaticCards
+        dark={dark}
+        addToast={addToast}
+        lookups={staticLookups}
+        savedLookups={data?.lookup?.staticLookups ?? []}
+        onUpdate={(i, patch) => setStaticLookups((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)))}
+        onDelete={(i) => setStaticLookups((prev) => prev.filter((_, j) => j !== i))}
       />
     </SettingsSection>
   );

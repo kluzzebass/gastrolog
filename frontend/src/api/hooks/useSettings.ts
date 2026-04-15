@@ -70,6 +70,12 @@ type PutSettingsArgs = {
       keyColumn?: string;
       valueColumns?: string[];
     }[];
+    staticLookups?: {
+      name: string;
+      keyColumn: string;
+      valueColumns: string[];
+      rows: { values: Record<string, string> }[];
+    }[];
   };
   maxmind?: {
     autoDownload?: boolean;
@@ -182,6 +188,20 @@ export function usePreviewCSVLookup() {
         keyColumn: args.keyColumn ?? "",
         valueColumns: args.valueColumns ?? [],
         maxRows: args.maxRows ?? 10,
+      });
+      return response;
+    },
+  });
+}
+
+type PreviewJSONLookupArgs = { fileId: string; maxBytes?: number };
+
+export function usePreviewJSONLookup() {
+  return useMutation({
+    mutationFn: async (args: PreviewJSONLookupArgs) => {
+      const response = await systemClient.previewJSONLookup({
+        fileId: decode(args.fileId),
+        maxBytes: args.maxBytes ?? 4096,
       });
       return response;
     },

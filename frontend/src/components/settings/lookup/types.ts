@@ -1,5 +1,5 @@
 import { encode } from "../../../api/glid";
-import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry, StaticLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../../api/hooks/useUploadManagedFile";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +43,13 @@ export interface CSVLookupDraft {
   valueColumns: string[];
 }
 
+export interface StaticLookupDraft {
+  name: string;
+  keyColumn: string;
+  valueColumns: string[];
+  rows: Record<string, string>[];
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -52,6 +59,7 @@ export const lookupTypes = [
   { value: "http", label: "HTTP" },
   { value: "json", label: "JSON File" },
   { value: "csv", label: "CSV File" },
+  { value: "static", label: "Static" },
 ];
 
 export const mmdbDbTypes = [
@@ -79,6 +87,10 @@ export function emptyMmdbDraft(): MMDBLookupDraft {
 
 export function emptyCsvDraft(): CSVLookupDraft {
   return { name: "", fileId: "", keyColumn: "", valueColumns: [] };
+}
+
+export function emptyStaticDraft(): StaticLookupDraft {
+  return { name: "", keyColumn: "", valueColumns: [], rows: [] };
 }
 
 // ---------------------------------------------------------------------------
@@ -152,4 +164,24 @@ export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileL
     !arraysEqual(draft.responsePaths, saved.responsePaths)
   ) return false;
   return paramsEqual(draft.parameters, saved.parameters);
+}
+
+export function staticLookupEqual(draft: StaticLookupDraft, saved: StaticLookupEntry): boolean {
+  if (
+    draft.name !== saved.name ||
+    draft.keyColumn !== saved.keyColumn ||
+    !arraysEqual(draft.valueColumns, saved.valueColumns)
+  ) return false;
+  if (draft.rows.length !== saved.rows.length) return false;
+  for (let i = 0; i < draft.rows.length; i++) {
+    const dRow = draft.rows[i]!;
+    const sRow = saved.rows[i]!.values;
+    const dKeys = Object.keys(dRow);
+    const sKeys = Object.keys(sRow);
+    if (dKeys.length !== sKeys.length) return false;
+    for (const k of dKeys) {
+      if (dRow[k] !== sRow[k]) return false;
+    }
+  }
+  return true;
 }
