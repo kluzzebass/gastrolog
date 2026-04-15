@@ -73,7 +73,8 @@ test.describe("Error states and validation", () => {
     const dialog = await openSettingsTab(page, "Vaults");
 
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
-    await page.getByRole("button", { name: "memory", exact: true }).click();
+    await dialog.getByRole("button", { name: /Add Tier/i }).click();
+    await page.getByRole("button", { name: "Memory", exact: true }).click();
 
     // Create button should be enabled (generated placeholder name is used).
     const createBtn = dialog.getByRole("button", { name: "Create" });

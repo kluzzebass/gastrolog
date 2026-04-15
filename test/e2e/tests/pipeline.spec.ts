@@ -84,7 +84,8 @@ test.describe.serial("Pipeline: full ingestion workflow", () => {
     const dialog = await openSettingsTab(page, "Vaults");
 
     await dialog.getByRole("button", { name: /Add Vault/i }).click();
-    await page.getByRole("button", { name: "memory", exact: true }).click();
+    await dialog.getByRole("button", { name: /Add Tier/i }).click();
+    await page.getByRole("button", { name: "Memory", exact: true }).click();
 
     await dialog.getByLabel("Name").fill(VAULT_NAME);
 
