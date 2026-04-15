@@ -1324,6 +1324,7 @@ func evalJQ(query string, params map[string]string, data any) (result, errMsg st
 		return "", fmt.Sprintf("compile error: %v", err)
 	}
 	var results []any
+	var lastErr string
 	iter := code.Run(data)
 	for {
 		v, ok := iter.Next()
@@ -1331,15 +1332,19 @@ func evalJQ(query string, params map[string]string, data any) (result, errMsg st
 			break
 		}
 		if e, isErr := v.(error); isErr {
-			return "", fmt.Sprintf("eval error: %v", e)
+			lastErr = fmt.Sprintf("eval error: %v", e)
+			break
 		}
 		results = append(results, v)
+	}
+	if len(results) == 0 {
+		return "", lastErr
 	}
 	pretty, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		return "", fmt.Sprintf("marshal result: %v", err)
 	}
-	return string(pretty), ""
+	return string(pretty), lastErr
 }
 
 // checkNameConflict returns an AlreadyExists error if another entity of the
