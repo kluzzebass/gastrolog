@@ -184,7 +184,8 @@ func (j *JSONFile) Load(path string) error {
 // buildIndex runs the compiled jq expression against the parsed JSON,
 // collects object results into rows, and indexes them by key column.
 func (j *JSONFile) buildIndex(root any, path string) (map[string]map[string]string, []string, error) {
-	results := jqSelect(j.query, root)
+	const maxRows = 100_000
+	results := jqSelectN(j.query, root, maxRows)
 	if len(results) == 0 {
 		return nil, nil, fmt.Errorf("jq expression produced no results for %q", path)
 	}

@@ -115,6 +115,12 @@ func CompileJQ(expr string) (*gojq.Code, error) {
 
 // jqSelect runs a compiled jq program against input and collects all non-error results.
 func jqSelect(code *gojq.Code, input any) []any {
+	return jqSelectN(code, input, 0)
+}
+
+// jqSelectN runs a compiled jq program and collects up to maxResults values.
+// maxResults <= 0 means unlimited.
+func jqSelectN(code *gojq.Code, input any, maxResults int) []any {
 	var results []any
 	iter := code.Run(input)
 	for {
@@ -126,6 +132,9 @@ func jqSelect(code *gojq.Code, input any) []any {
 			break
 		}
 		results = append(results, v)
+		if maxResults > 0 && len(results) >= maxResults {
+			break
+		}
 	}
 	return results
 }
