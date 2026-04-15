@@ -114,7 +114,9 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 		return fmt.Errorf("hash mismatch for %s: expected %s, got %s", fileID, expectedHash, actualHash)
 	}
 
-	finalPath := filepath.Join(destDir, filename)
+	// Save as "data" to match the canonical filename used by the upload path.
+	// The original filename is metadata in the FSM, not used for disk storage.
+	finalPath := filepath.Join(destDir, "data")
 	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: paths from trusted peer + filename
 		return fmt.Errorf("rename to final path: %w", err)
 	}
