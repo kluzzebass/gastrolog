@@ -55,13 +55,13 @@ test.describe.serial("Settings", () => {
     await dialog.getByRole("button", { name: /Add Filter/i }).click();
 
     // Fill name and expression.
-    await dialog.getByLabel("Name").fill("e2e-test-filter");
+    await dialog.getByLabel("Name").fill("e2e-settings-filter");
     await dialog.getByLabel("Expression").fill("level=error");
 
     await dialog.getByRole("button", { name: "Create" }).click();
 
     // New filter should appear in the list.
-    await expect(dialog.getByText("e2e-test-filter")).toBeVisible({
+    await expect(dialog.getByText("e2e-settings-filter")).toBeVisible({
       timeout: 10_000,
     });
   });
@@ -69,8 +69,8 @@ test.describe.serial("Settings", () => {
   test("edits the created filter", async ({ page }) => {
     const dialog = await openSettingsTab(page, "Filters");
 
-    // Expand the e2e-test-filter card.
-    await dialog.getByText("e2e-test-filter").click();
+    // Expand the e2e-settings-filter card.
+    await dialog.getByText("e2e-settings-filter").click();
 
     // Change the expression.
     const expressionInput = dialog.getByLabel("Expression");
@@ -89,14 +89,14 @@ test.describe.serial("Settings", () => {
     const dialog = await openSettingsTab(page, "Filters");
 
     // Expand the filter.
-    await dialog.getByText("e2e-test-filter").click();
+    await dialog.getByText("e2e-settings-filter").click();
 
     // Click Delete, then confirm.
     await dialog.getByRole("button", { name: "Delete" }).click();
     await dialog.getByRole("button", { name: "Yes" }).click();
 
     // Filter should be gone.
-    await expect(dialog.getByText("e2e-test-filter")).not.toBeVisible({
+    await expect(dialog.getByText("e2e-settings-filter")).not.toBeVisible({
       timeout: 10_000,
     });
   });
