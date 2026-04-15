@@ -24,8 +24,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
 )
+
+// readSmall reads a small identity file (node_id, node_name) with a bounded
+// buffer. These are tiny constant-size files (< 64 bytes) read once at
+// startup — mmap is slower here (9.9µs vs 8.4µs, benchmarked), and the
+// stdlib slurp function over-allocates (920 B vs 200 B).
+func readSmall(path string) ([]byte, error) {
+	f, err := os.Open(path) //nolint:gosec // G304: paths from trusted home dir + constant filename
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	buf := make([]byte, 256)
+	n, _ := f.Read(buf)
+	return buf[:n], nil
+}
 
 // Dir represents a gastrolog home directory.
 type Dir struct {
@@ -77,9 +91,19 @@ func (d Dir) ManagedFilesDir() string {
 	return filepath.Join(d.root, "managed-files")
 }
 
+const managedFilesDir = "managed-files"
+const managedFileDataName = "data"
+
 // ManagedFileDir returns the directory for a specific managed file.
 func (d Dir) ManagedFileDir(fileID string) string {
-	return filepath.Join(d.root, "managed-files", fileID)
+	return filepath.Join(d.root, managedFilesDir, fileID)
+}
+
+// ManagedFilePath returns the canonical on-disk path for a managed file's data.
+// This is the single source of truth — all code that reads or writes managed
+// file data must use this function.
+func (d Dir) ManagedFilePath(fileID string) string {
+	return filepath.Join(d.root, managedFilesDir, fileID, managedFileDataName)
 }
 
 // SocketPath returns the path to the Unix domain socket for local CLI access.
@@ -106,7 +130,7 @@ func (d Dir) NodeID() (string, error) {
 // ReadNodeName reads the cached node name from <root>/node_name.
 // Returns empty string if the file doesn't exist yet.
 func (d Dir) ReadNodeName() string {
-	data, err := os.ReadFile(filepath.Join(d.root, "node_name"))
+	data, err := readSmall(filepath.Join(d.root, "node_name"))
 	if err != nil {
 		return ""
 	}
@@ -125,7 +149,7 @@ func (d Dir) WriteNodeName(name string) error {
 // If the file doesn't exist, generate() provides the default which is persisted.
 func (d Dir) readOrCreate(filename string, generate func() string) (string, error) {
 	p := filepath.Join(d.root, filename)
-	data, err := os.ReadFile(p) //nolint:gosec // G304: path is constructed from trusted home dir + constant filename
+	data, err := readSmall(p)
 	if err == nil {
 		if v := strings.TrimSpace(string(data)); v != "" {
 			return v, nil

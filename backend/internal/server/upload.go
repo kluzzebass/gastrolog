@@ -22,9 +22,6 @@ import (
 
 const maxUploadSize = 256 << 20 // 256 MB
 
-// managedFileName is the fixed filename used for all managed files on disk.
-// The user-supplied name is stored only in config metadata, never in the filesystem.
-const managedFileName = "data"
 
 // handleManagedFileUpload handles multipart file uploads for managed files.
 // The file is streamed to disk (never buffered in heap), then metadata is
@@ -155,7 +152,7 @@ func (s *Server) RegisterFile(ctx context.Context, srcPath string, name string) 
 	}
 
 	// Store with a fixed filename — user-supplied name stays in metadata only.
-	finalPath := filepath.Join(fileDir, managedFileName)
+	finalPath := hd.ManagedFilePath(fileID.String())
 	if err := os.Rename(srcPath, finalPath); err != nil { //nolint:gosec // G703: finalPath uses constant filename, srcPath from trusted temp
 		_ = os.RemoveAll(fileDir) //nolint:gosec // G703: cleanup our own dir
 		return system.ManagedFileConfig{}, fmt.Errorf("move file: %w", err)
@@ -235,10 +232,9 @@ func (s *Server) ResolveManagedFileByID(ctx context.Context, fileID string) stri
 	return ""
 }
 
-// managedFilePath returns the on-disk path for a managed file by its UUID.
+// managedFilePath returns the on-disk path for a managed file.
 func (s *Server) managedFilePath(fileID string) string {
-	hd := home.New(s.homeDir)
-	return filepath.Join(hd.ManagedFileDir(fileID), managedFileName)
+	return home.New(s.homeDir).ManagedFilePath(fileID)
 }
 
 // registerUploadHandler adds the managed file upload endpoint to the mux.
@@ -288,7 +284,7 @@ func (s *Server) ManagedFileReader(fileID string) (name string, rc io.ReadCloser
 
 	// Look up display name from system.
 	files, listErr := s.cfgStore.ListManagedFiles(context.Background())
-	displayName := managedFileName
+	displayName := "data"
 	if listErr == nil {
 		for _, mf := range files {
 			if mf.ID.String() == fileID {

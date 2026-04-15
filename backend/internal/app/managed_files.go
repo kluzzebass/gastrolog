@@ -65,11 +65,11 @@ func (m *managedFileManager) OnDelete(fileID glid.GLID) {
 // Returns true if the file was pulled successfully.
 func (m *managedFileManager) pullFromPeer(ctx context.Context, fileID string) bool {
 	hd := home.New(m.homeDir)
-	destDir := hd.ManagedFileDir(fileID)
+	destPath := hd.ManagedFilePath(fileID)
 
 	for _, peerID := range m.peerIDs() {
 		pullCtx, cancel := context.WithTimeout(ctx, pullTimeout)
-		err := m.transferrer.PullFile(pullCtx, peerID, fileID, destDir)
+		err := m.transferrer.PullFile(pullCtx, peerID, fileID, destPath)
 		cancel()
 		if err != nil {
 			m.logger.Debug("pull managed file from peer failed", "file_id", fileID, "peer", peerID, "error", err)

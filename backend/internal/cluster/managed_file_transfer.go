@@ -29,11 +29,11 @@ func NewManagedFileTransferrer(peers *PeerConns) *ManagedFileTransferrer {
 	return &ManagedFileTransferrer{peers: peers}
 }
 
-// PullFile downloads a managed file from a peer node and writes it to destDir.
+// PullFile downloads a managed file from a peer node and writes it to destPath.
 // The file is streamed chunk-by-chunk (never fully buffered) and verified
 // against the expected SHA256 hash before the temp file is renamed to its
-// final location.
-func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, destDir string) error {
+// final location. destPath is the full canonical path (from home.Dir.ManagedFilePath).
+func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, destPath string) error {
 	conn, err := lt.peers.Conn(nodeID)
 	if err != nil {
 		return fmt.Errorf("dial node %s: %w", nodeID, err)
@@ -62,6 +62,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 	}
 
 	// Receive chunks, writing to a temp file.
+	destDir := filepath.Dir(destPath)
 	if err := os.MkdirAll(destDir, 0o750); err != nil {
 		return fmt.Errorf("create dest dir: %w", err)
 	}
@@ -114,9 +115,7 @@ func (lt *ManagedFileTransferrer) PullFile(ctx context.Context, nodeID, fileID, 
 		return fmt.Errorf("hash mismatch for %s: expected %s, got %s", fileID, expectedHash, actualHash)
 	}
 
-	// Save as "data" to match the canonical filename used by the upload path.
-	// The original filename is metadata in the FSM, not used for disk storage.
-	finalPath := filepath.Join(destDir, "data")
+	finalPath := destPath
 	if err := os.Rename(tmpPath, finalPath); err != nil { //nolint:gosec // G703: paths from trusted peer + filename
 		return fmt.Errorf("rename to final path: %w", err)
 	}
