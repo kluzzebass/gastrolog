@@ -25,6 +25,7 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
 }>) {
   const c = useThemeClass(dark);
   const preview = usePreviewJSONLookup();
+  const [data, setData] = useState(preview.data);
 
   // Build parameter map with placeholder values for preview.
   const paramMap: Record<string, string> = {};
@@ -41,11 +42,9 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
 
   useEffect(() => {
     if (fileId) {
-      preview.mutate({ fileId, query: debouncedQuery, parameters: paramMap });
+      preview.mutateAsync({ fileId, query: debouncedQuery, parameters: paramMap }).then(setData).catch(() => {});
     }
   }, [fileId, debouncedQuery]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const data = preview.data;
 
   if (!fileId) return null;
 
@@ -61,7 +60,7 @@ function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
           )}
         </span>
         <button
-          onClick={() => preview.mutate({ fileId, query: debouncedQuery, parameters: paramMap })}
+          onClick={() => preview.mutateAsync({ fileId, query: debouncedQuery, parameters: paramMap }).then(setData).catch(() => {})}
           disabled={preview.isPending}
           className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
             "text-text-ghost hover:text-copper hover:bg-ink-hover",
