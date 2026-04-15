@@ -135,17 +135,16 @@ export function FileDropZone({
         )}
       </div>
 
-      {pickableFiles && (
+      {pickableFiles && (filteredPickable.length > 0 || !currentFile) && (
         <div className={`flex flex-col gap-1 rounded-lg border p-2 ${c("border-ink-border-subtle bg-ink-surface/50", "border-light-border-subtle bg-light-surface/50")}`}>
           <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
             Existing files
           </span>
           {filteredPickable.length === 0 ? (
             <span className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
-              No files uploaded yet
+              No {accept} files uploaded yet
             </span>
-          ) : (
-            filteredPickable.map((f) => (
+          ) : (filteredPickable.map((f) => (
               <button
                 key={encode(f.id)}
                 onClick={() => onFileSelected?.(encode(f.id))}
