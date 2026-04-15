@@ -145,7 +145,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
     try {
       await putCert.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name: n,
         certPem: certPem.trim(),
         keyPem: keyPem.trim(),
@@ -173,7 +173,7 @@ export function CertificatesSettings({ dark }: Readonly<{ dark: boolean }>) {
     }
     try {
       await putCert.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name: n,
         certPem: "",
         keyPem: "",

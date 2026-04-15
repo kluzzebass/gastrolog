@@ -107,7 +107,7 @@ export function FiltersSettings({ dark, onNavigateTo }: Readonly<{ dark: boolean
     const name = newName.trim() || namePlaceholder || "catch-all";
     const expression = newExpression.trim() || "*";
     try {
-      await putFilter.mutateAsync({ id: "", name, expression });
+      await putFilter.mutateAsync({ id: encode(crypto.getRandomValues(new Uint8Array(16))), name, expression });
       addToast(`Filter "${name}" created`, "info");
       setAdding(false);
       setNewName("");

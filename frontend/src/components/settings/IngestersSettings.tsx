@@ -145,7 +145,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
     const name = newName.trim() || namePlaceholder || newType;
     try {
       await putIngester.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         type: newType,
         enabled: true,

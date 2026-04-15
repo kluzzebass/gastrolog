@@ -215,7 +215,7 @@ export function PoliciesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly
     const maxRecordsValue = newMaxRecords ? BigInt(newMaxRecords) : BigInt(0);
     try {
       await putPolicy.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         maxBytes: parseBytes(newMaxBytes),
         maxRecords: maxRecordsValue,

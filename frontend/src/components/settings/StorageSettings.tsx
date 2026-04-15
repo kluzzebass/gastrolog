@@ -115,7 +115,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
     const name = addForm.name.trim() || addForm.namePlaceholder || "cloud-service";
     try {
       await putCloudService.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         provider: addForm.provider,
         bucket: addForm.bucket,

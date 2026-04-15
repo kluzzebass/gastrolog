@@ -115,7 +115,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
     const name = newName.trim() || namePlaceholder || "route";
     try {
       await putRoute.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         filterId: newFilterId,
         destinations: newDestinations.map((d) => d.vaultId),

@@ -151,7 +151,7 @@ export function RetentionPoliciesSettings({ dark, onNavigateTo: _onNavigateTo }:
     const maxChunksValue = newMaxChunks ? BigInt(newMaxChunks) : BigInt(0);
     try {
       await putPolicy.mutateAsync({
-        id: "",
+        id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         maxAgeSeconds: parseDuration(newMaxAge),
         maxBytes: parseBytes(newMaxBytes),
