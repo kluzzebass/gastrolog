@@ -433,17 +433,17 @@ message HTTPLookupEntry {
   string timeout = 4;       // Go duration string, optional
   string cache_ttl = 5;     // Go duration string, optional
   int32 cache_size = 6;     // optional, default 10000
-  repeated string response_paths = 7; // JSONPath expressions, e.g. "$.data.user"
+  repeated string response_paths = 7; // jq expressions, e.g. "$.data.user"
   repeated HTTPLookupParam parameters = 8; // ordered param definitions for URL template
 }
 
 // JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
-// The JSON file is memory-mapped and queried via JSONPath expressions at lookup time.
+// The JSON file is memory-mapped and queried via jq expressions at lookup time.
 message JSONFileLookupEntry {
   string name = 1;                            // registry name (e.g. "hosts")
   bytes file_id = 2;                        // managed file ID (UUID)
-  string query = 3;                          // JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
-  repeated string response_paths = 4;        // optional: JSONPath to extract from results; empty = flatten
+  string query = 3;                          // jq query template with {name} placeholders, e.g. ".hosts[] | select(.ip == \"{ip}\")"
+  repeated string response_paths = 4;        // optional: jq expressions to extract from results; empty = flatten
   repeated HTTPLookupParam parameters = 5;   // ordered param definitions for query template placeholders
 }
 
@@ -866,7 +866,7 @@ message CSVPreviewRow {
 message PreviewJSONLookupRequest {
   bytes file_id = 1;                     // managed file ID
   int32 max_bytes = 2;                   // max content bytes to return; 0 = default (4096)
-  string query = 3;                      // optional JSONPath query to evaluate against the file
+  string query = 3;                      // optional jq query to evaluate against the file
   map<string, string> parameters = 4;    // optional parameter values for {name} placeholders in query
 }
 
@@ -875,8 +875,8 @@ message PreviewJSONLookupResponse {
   int64 total_size = 2;                  // file size in bytes
   bool truncated = 3;                    // true if content was cut short
   string error = 4;                      // non-empty on failure
-  string query_result = 5;              // pretty-printed JSONPath query result (when query is provided)
-  string query_error = 6;              // JSONPath evaluation error (when query is provided but fails)
+  string query_result = 5;              // pretty-printed jq query result (when query is provided)
+  string query_error = 6;              // jq evaluation error (when query is provided but fails)
 }
 
 // --- Cloud Services ---

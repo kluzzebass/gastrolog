@@ -2388,7 +2388,7 @@ export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
   cacheSize = 0;
 
   /**
-   * JSONPath expressions, e.g. "$.data.user"
+   * jq expressions, e.g. "$.data.user"
    *
    * @generated from field: repeated string response_paths = 7;
    */
@@ -2438,7 +2438,7 @@ export class HTTPLookupEntry extends Message<HTTPLookupEntry> {
 
 /**
  * JSONFileLookupEntry defines a JSON file-backed lookup table for field enrichment.
- * The JSON file is memory-mapped and queried via JSONPath expressions at lookup time.
+ * The JSON file is memory-mapped and queried via jq expressions at lookup time.
  *
  * @generated from message gastrolog.v1.JSONFileLookupEntry
  */
@@ -2458,14 +2458,14 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
   fileId = new Uint8Array(0);
 
   /**
-   * JSONPath query template with {name} placeholders, e.g. "$.hosts[?(@.ip == '{ip}')]"
+   * jq query template with {name} placeholders, e.g. ".hosts[] | select(.ip == \"{ip}\")"
    *
    * @generated from field: string query = 3;
    */
   query = "";
 
   /**
-   * optional: JSONPath to extract from results; empty = flatten
+   * optional: jq expressions to extract from results; empty = flatten
    *
    * @generated from field: repeated string response_paths = 4;
    */
@@ -6032,7 +6032,7 @@ export class PreviewJSONLookupRequest extends Message<PreviewJSONLookupRequest> 
   maxBytes = 0;
 
   /**
-   * optional JSONPath query to evaluate against the file
+   * optional jq query to evaluate against the file
    *
    * @generated from field: string query = 3;
    */
@@ -6109,14 +6109,14 @@ export class PreviewJSONLookupResponse extends Message<PreviewJSONLookupResponse
   error = "";
 
   /**
-   * pretty-printed JSONPath query result (when query is provided)
+   * pretty-printed jq query result (when query is provided)
    *
    * @generated from field: string query_result = 5;
    */
   queryResult = "";
 
   /**
-   * JSONPath evaluation error (when query is provided but fails)
+   * jq evaluation error (when query is provided but fails)
    *
    * @generated from field: string query_error = 6;
    */

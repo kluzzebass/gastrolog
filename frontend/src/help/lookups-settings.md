@@ -27,7 +27,7 @@ HTTP lookups fetch data from an external HTTP endpoint at query time. Each looku
 - **Name** — registry name used in queries, e.g. `| lookup users`.
 - **URL Template** — the endpoint URL with `{param}` placeholders matching parameter names below. For example: `https://api.example.com/users/{user_id}`.
 - **Parameters** — ordered list of named URL template parameters. Each name becomes a `{name}` placeholder in the URL. In queries, fields map positionally: `| lookup users user_id` passes the `user_id` field as the first parameter.
-- **Response Paths** — JSONPath expressions to extract fields from the JSON response. Each path produces a named suffix. Results from multiple paths are merged. Leave empty to flatten the entire response.
+- **Response Paths** — jq expressions to extract fields from the JSON response. Each path produces a named suffix. Results from multiple paths are merged. Leave empty to flatten the entire response.
 - **Headers** — custom HTTP request headers (e.g. `Authorization: Bearer token123`).
 - **Timeout** — maximum time to wait for a response. Default: `5s`.
 - **Cache TTL** — how long to cache successful responses. Default: `5m`. Set to `0` to disable caching.
@@ -69,6 +69,6 @@ JSON file lookups query a managed JSON file using a jq-style expression. Useful 
 
 - **Name** — registry name used in queries, e.g. `| lookup hosts`.
 - **File** — upload a `.json` file or select an existing managed file.
-- **Query** — a JSONPath expression with `{param}` placeholders. The expression is evaluated against the JSON file with parameter values substituted. For example: `$.hosts[?(@.ip == '{value}')]` finds the host object whose `ip` field matches the lookup value.
+- **Query** — a jq expression with `{param}` placeholders. The expression is evaluated against the JSON file with parameter values substituted. For example: `.hosts[] | select(.ip == "{value}")` finds the host object whose `ip` field matches the lookup value.
 - **Parameters** — named parameters that map to `{name}` placeholders in the query expression. Fields map positionally in queries, just like HTTP lookups.
-- **Response Paths** — JSONPath expressions to extract specific fields from the query result. Leave empty to flatten the entire matched object into key-value pairs.
+- **Response Paths** — jq expressions to extract specific fields from the query result. Leave empty to flatten the entire matched object into key-value pairs.

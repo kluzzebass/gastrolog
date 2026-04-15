@@ -181,7 +181,7 @@ Count events by asset owner:
 
 ### HTTP
 
-HTTP lookups fetch data from an external HTTP endpoint at query time. The URL template uses `{param}` placeholders that are substituted with field values. Response data is extracted using JSONPath expressions.
+HTTP lookups fetch data from an external HTTP endpoint at query time. The URL template uses `{param}` placeholders that are substituted with field values. Response data is extracted using jq expressions.
 
 Output suffixes are derived from the configured response paths.
 
