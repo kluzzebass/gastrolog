@@ -600,14 +600,14 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
         vaultId: decode(vaultId),
         position: i,
         storageClass: tier.type === "file" ? parseInt(tier.storageClass, 10) || 0 : 0,
-        cloudServiceId: tier.type === "cloud" ? decode(tier.cloudServiceId) : new Uint8Array(16),
+        cloudServiceId: tier.type === "cloud" && tier.cloudServiceId ? decode(tier.cloudServiceId) : new Uint8Array(0),
         activeChunkClass: tier.type === "cloud" ? parseInt(tier.activeChunkClass, 10) || 0 : 0,
         cacheClass: tier.type === "cloud" ? parseInt(tier.cacheClass, 10) || 0 : 0,
         cacheEviction: tier.type === "cloud" ? (tier.cacheEviction || "lru") : "",
         cacheBudget: tier.type === "cloud" ? (tier.cacheBudget || "") : "",
         cacheTtl: tier.type === "cloud" ? (tier.cacheTTL || "") : "",
         memoryBudgetBytes: tier.type === "memory" ? parseMemoryBudget(tier.memoryBudget) : protoInt64.zero,
-        rotationPolicyId: decode(tier.rotationPolicyId),
+        rotationPolicyId: tier.rotationPolicyId ? decode(tier.rotationPolicyId) : new Uint8Array(0),
         retentionRules: tier.retentionPolicyId
           ? [new RetentionRule({ retentionPolicyId: decode(tier.retentionPolicyId), action: retentionActionForPosition(i, addForm.tiers.length) })]
           : [],

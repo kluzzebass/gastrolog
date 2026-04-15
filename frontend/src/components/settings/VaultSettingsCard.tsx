@@ -261,14 +261,14 @@ export function VaultSettingsCard({
       vaultId: vault.id,  // already Uint8Array from proto
       position: tierIds.length,
       storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
-      cloudServiceId: newTier.type === "cloud" ? decode(newTier.cloudServiceId) : new Uint8Array(16),
+      cloudServiceId: newTier.type === "cloud" && newTier.cloudServiceId ? decode(newTier.cloudServiceId) : new Uint8Array(0),
       activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
       cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
       cacheEviction: newTier.type === "cloud" ? (newTier.cacheEviction || "lru") : "",
       cacheBudget: newTier.type === "cloud" ? (newTier.cacheBudget || "") : "",
       cacheTtl: newTier.type === "cloud" ? (newTier.cacheTTL || "") : "",
       memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
-      rotationPolicyId: decode(newTier.rotationPolicyId),
+      rotationPolicyId: newTier.rotationPolicyId ? decode(newTier.rotationPolicyId) : new Uint8Array(0),
       retentionRules: newTier.retentionPolicyId
         ? [new RetentionRule({
             retentionPolicyId: decode(newTier.retentionPolicyId),
@@ -330,7 +330,7 @@ export function VaultSettingsCard({
       if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged && !ceChanged && !cbChanged && !ctChanged && !posChanged && !vaultIdChanged) continue;
 
       const updated = tier.clone();
-      if (rotChanged) updated.rotationPolicyId = decode(rpId);
+      if (rotChanged) updated.rotationPolicyId = rpId ? decode(rpId) : new Uint8Array(0);
       if (rfChanged) updated.replicationFactor = rf;
       if (scChanged) updated.storageClass = sc;
       if (accChanged) updated.activeChunkClass = acc;
