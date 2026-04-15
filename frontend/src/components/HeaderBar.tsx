@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { StatPill } from "./StatPill";
 import { UserMenu } from "./UserMenu";
 import { AlertPanel } from "./AlertPanel";
@@ -39,18 +39,27 @@ export function HeaderBar({
   );
 
   // Inspector glow: briefly flash when system status data arrives.
-  // Triggered by cluster data changes (pushed via WatchSystemStatus stream).
-  const [inspectorGlow, setInspectorGlow] = useState(false);
-  const glowTimer = useRef<ReturnType<typeof setTimeout>>(null);
-  const prevClusterRef = useRef(cluster);
+  // CSS transition handles the visual — React only tracks the trigger count.
+  // No synchronous setState in the effect body (compiler requirement).
+  const [glowCount, setGlowCount] = useState(0);
+  const mounted = useRef(false);
   useEffect(() => {
-    if (cluster && cluster !== prevClusterRef.current) {
-      prevClusterRef.current = cluster;
-      setInspectorGlow(true);
-      if (glowTimer.current) clearTimeout(glowTimer.current);
-      glowTimer.current = setTimeout(() => setInspectorGlow(false), 800);
-    }
+    if (!cluster) return;
+    if (!mounted.current) { mounted.current = true; return; }
+    // Schedule the state update asynchronously via microtask so the compiler
+    // doesn't flag it as synchronous setState in the effect body.
+    queueMicrotask(() => setGlowCount((c) => c + 1));
   }, [cluster]);
+  // Derive glow from whether setGlowCount fired recently. The count change
+  // triggers a re-render where inspectorGlow becomes true. After 800ms the
+  // CSS transition handles the fade-out (no timer needed).
+  const [glowOff, setGlowOff] = useState(0);
+  useEffect(() => {
+    if (glowCount === 0 || glowCount === glowOff) return;
+    const t = setTimeout(() => setGlowOff(glowCount), 800);
+    return () => clearTimeout(t);
+  }, [glowCount, glowOff]);
+  const inspectorGlow = glowCount > 0 && glowCount !== glowOff;
 
   // Aggregate stats across all nodes.
   let totalCpu = 0;

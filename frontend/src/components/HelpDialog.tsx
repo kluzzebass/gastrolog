@@ -428,31 +428,12 @@ function MarkdownContent({ dark, content, onNavigate, onOpenSettings }: Readonly
   onNavigate: (topicId: string) => void;
   onOpenSettings?: (tab: string) => void;
 }>) {
-  // Store callbacks in refs so the components object identity only changes
-  // when `dark` changes — not when parent re-renders create new closures.
-  const navigateRef = useRef(onNavigate);
-  navigateRef.current = onNavigate;
-  const settingsRef = useRef(onOpenSettings);
-  settingsRef.current = onOpenSettings;
-
-  const [prevDark, setPrevDark] = useState(dark);
-  const componentsRef = useRef(buildMarkdownComponents(
-    dark,
-    (id: string) => navigateRef.current(id),
-    (tab: string) => settingsRef.current?.(tab),
-  ));
-  if (dark !== prevDark) {
-    setPrevDark(dark);
-    componentsRef.current = buildMarkdownComponents(
-      dark,
-      (id: string) => navigateRef.current(id),
-      (tab: string) => settingsRef.current?.(tab),
-    );
-  }
+  // React Compiler handles memoization — no manual ref caching needed.
+  const components = buildMarkdownComponents(dark, onNavigate, onOpenSettings);
 
   return (
     <Suspense fallback={null}>
-      <Markdown remarkPlugins={remarkGfmPlugin} components={componentsRef.current} urlTransform={identityUrlTransform}>
+      <Markdown remarkPlugins={remarkGfmPlugin} components={components} urlTransform={identityUrlTransform}>
         {content}
       </Markdown>
     </Suspense>
