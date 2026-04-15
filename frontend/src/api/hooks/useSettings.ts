@@ -1,4 +1,4 @@
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { systemClient } from "../client";
 import { useSystemMutation } from "./useSystem";
 import { decode } from "../glid";
@@ -101,7 +101,8 @@ function buildMaxMindReq(mm: NonNullable<PutSettingsArgs["maxmind"]>): Record<st
 }
 
 export function usePutSettings() {
-  return useSystemMutation(async (args: PutSettingsArgs) => {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: async (args: PutSettingsArgs) => {
     const req: Record<string, unknown> = {};
     if (args.auth) req.auth = buildAuthReq(args.auth);
     if (args.query) req.query = args.query;
@@ -135,7 +136,10 @@ export function usePutSettings() {
     if (args.setupWizardDismissed !== undefined)
       req.setupWizardDismissed = args.setupWizardDismissed;
     return systemClient.putSettings(req as Parameters<typeof systemClient.putSettings>[0]);
-  }, [["settings"], ["certificates"]]);
+  }, onSuccess: () => {
+    qc.invalidateQueries({ queryKey: ["settings"] });
+    qc.invalidateQueries({ queryKey: ["system"] });
+  } });
 }
 
 type TestHTTPLookupArgs = {
