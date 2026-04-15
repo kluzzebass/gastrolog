@@ -152,6 +152,9 @@ const (
 	// SystemServicePreviewCSVLookupProcedure is the fully-qualified name of the SystemService's
 	// PreviewCSVLookup RPC.
 	SystemServicePreviewCSVLookupProcedure = "/gastrolog.v1.SystemService/PreviewCSVLookup"
+	// SystemServicePreviewJSONLookupProcedure is the fully-qualified name of the SystemService's
+	// PreviewJSONLookup RPC.
+	SystemServicePreviewJSONLookupProcedure = "/gastrolog.v1.SystemService/PreviewJSONLookup"
 	// SystemServicePutCloudServiceProcedure is the fully-qualified name of the SystemService's
 	// PutCloudService RPC.
 	SystemServicePutCloudServiceProcedure = "/gastrolog.v1.SystemService/PutCloudService"
@@ -254,6 +257,8 @@ type SystemServiceClient interface {
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
 	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
+	// PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
+	PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error)
 	// Cloud services
 	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
@@ -521,6 +526,12 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("PreviewCSVLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		previewJSONLookup: connect.NewClient[v1.PreviewJSONLookupRequest, v1.PreviewJSONLookupResponse](
+			httpClient,
+			baseURL+SystemServicePreviewJSONLookupProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PreviewJSONLookup")),
+			connect.WithClientOptions(opts...),
+		),
 		putCloudService: connect.NewClient[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse](
 			httpClient,
 			baseURL+SystemServicePutCloudServiceProcedure,
@@ -597,6 +608,7 @@ type systemServiceClient struct {
 	testCloudService      *connect.Client[v1.TestCloudServiceRequest, v1.TestCloudServiceResponse]
 	testHTTPLookup        *connect.Client[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse]
 	previewCSVLookup      *connect.Client[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse]
+	previewJSONLookup     *connect.Client[v1.PreviewJSONLookupRequest, v1.PreviewJSONLookupResponse]
 	putCloudService       *connect.Client[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse]
 	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
@@ -809,6 +821,11 @@ func (c *systemServiceClient) PreviewCSVLookup(ctx context.Context, req *connect
 	return c.previewCSVLookup.CallUnary(ctx, req)
 }
 
+// PreviewJSONLookup calls gastrolog.v1.SystemService.PreviewJSONLookup.
+func (c *systemServiceClient) PreviewJSONLookup(ctx context.Context, req *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error) {
+	return c.previewJSONLookup.CallUnary(ctx, req)
+}
+
 // PutCloudService calls gastrolog.v1.SystemService.PutCloudService.
 func (c *systemServiceClient) PutCloudService(ctx context.Context, req *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {
 	return c.putCloudService.CallUnary(ctx, req)
@@ -920,6 +937,8 @@ type SystemServiceHandler interface {
 	TestHTTPLookup(context.Context, *connect.Request[v1.TestHTTPLookupRequest]) (*connect.Response[v1.TestHTTPLookupResponse], error)
 	// PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
 	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
+	// PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
+	PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error)
 	// Cloud services
 	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
@@ -1183,6 +1202,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("PreviewCSVLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServicePreviewJSONLookupHandler := connect.NewUnaryHandler(
+		SystemServicePreviewJSONLookupProcedure,
+		svc.PreviewJSONLookup,
+		connect.WithSchema(systemServiceMethods.ByName("PreviewJSONLookup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	systemServicePutCloudServiceHandler := connect.NewUnaryHandler(
 		SystemServicePutCloudServiceProcedure,
 		svc.PutCloudService,
@@ -1297,6 +1322,8 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceTestHTTPLookupHandler.ServeHTTP(w, r)
 		case SystemServicePreviewCSVLookupProcedure:
 			systemServicePreviewCSVLookupHandler.ServeHTTP(w, r)
+		case SystemServicePreviewJSONLookupProcedure:
+			systemServicePreviewJSONLookupHandler.ServeHTTP(w, r)
 		case SystemServicePutCloudServiceProcedure:
 			systemServicePutCloudServiceHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteCloudServiceProcedure:
@@ -1478,6 +1505,10 @@ func (UnimplementedSystemServiceHandler) TestHTTPLookup(context.Context, *connec
 
 func (UnimplementedSystemServiceHandler) PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PreviewCSVLookup is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PreviewJSONLookup is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {

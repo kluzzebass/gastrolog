@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -1173,6 +1174,67 @@ func (s *SystemServer) PreviewCSVLookup(
 		KeyColumn: keyCol,
 		Rows:      rows,
 		TotalRows: int32(totalRows),
+	}), nil
+}
+
+// PreviewJSONLookup reads a managed JSON file and returns pretty-printed
+// content for structure inspection in the settings UI.
+func (s *SystemServer) PreviewJSONLookup(
+	ctx context.Context,
+	req *connect.Request[apiv1.PreviewJSONLookupRequest],
+) (*connect.Response[apiv1.PreviewJSONLookupResponse], error) {
+	fileID := glid.FromBytes(req.Msg.GetFileId()).String()
+	if fileID == "" {
+		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+			Error: "file_id is required",
+		}), nil
+	}
+
+	filePath := s.resolveManagedFile(ctx, fileID)
+	if filePath == "" {
+		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+			Error: "file not found",
+		}), nil
+	}
+
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+			Error: fmt.Sprintf("stat file: %v", err),
+		}), nil
+	}
+	totalSize := info.Size()
+
+	maxBytes := int(req.Msg.GetMaxBytes())
+	if maxBytes <= 0 {
+		maxBytes = 4096
+	}
+
+	f, err := os.Open(filePath) //nolint:gosec // path from validated managed file
+	if err != nil {
+		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+			Error: fmt.Sprintf("open file: %v", err),
+		}), nil
+	}
+	defer func() { _ = f.Close() }()
+
+	buf := make([]byte, maxBytes)
+	n, _ := f.Read(buf)
+	raw := buf[:n]
+
+	// Try to pretty-print if it's valid JSON.
+	var parsed any
+	if json.Unmarshal(raw, &parsed) == nil {
+		if pretty, err := json.MarshalIndent(parsed, "", "  "); err == nil {
+			raw = pretty
+		}
+	}
+
+	truncated := int64(n) < totalSize
+	return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+		Content:   string(raw),
+		TotalSize: totalSize,
+		Truncated: truncated,
 	}), nil
 }
 

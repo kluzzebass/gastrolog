@@ -2195,6 +2195,11 @@ export class LookupSettings extends Message<LookupSettings> {
    */
   csvLookups: CSVLookupEntry[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.StaticLookupEntry static_lookups = 8;
+   */
+  staticLookups: StaticLookupEntry[] = [];
+
   constructor(data?: PartialMessage<LookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2207,6 +2212,7 @@ export class LookupSettings extends Message<LookupSettings> {
     { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
     { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
+    { no: 8, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
@@ -2567,6 +2573,112 @@ export class CSVLookupEntry extends Message<CSVLookupEntry> {
 
   static equals(a: CSVLookupEntry | PlainMessage<CSVLookupEntry> | undefined, b: CSVLookupEntry | PlainMessage<CSVLookupEntry> | undefined): boolean {
     return proto3.util.equals(CSVLookupEntry, a, b);
+  }
+}
+
+/**
+ * StaticLookupEntry defines a manually-entered lookup table.
+ * Data is stored directly in the Raft-replicated config — no file upload needed.
+ * Useful for small, hand-maintained mappings (host→team, code→label).
+ *
+ * @generated from message gastrolog.v1.StaticLookupEntry
+ */
+export class StaticLookupEntry extends Message<StaticLookupEntry> {
+  /**
+   * registry name (e.g. "teams")
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * name of the key field (e.g. "host")
+   *
+   * @generated from field: string key_column = 2;
+   */
+  keyColumn = "";
+
+  /**
+   * names of value fields (e.g. ["team", "owner"])
+   *
+   * @generated from field: repeated string value_columns = 3;
+   */
+  valueColumns: string[] = [];
+
+  /**
+   * the data rows
+   *
+   * @generated from field: repeated gastrolog.v1.StaticLookupRow rows = 4;
+   */
+  rows: StaticLookupRow[] = [];
+
+  constructor(data?: PartialMessage<StaticLookupEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.StaticLookupEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 4, name: "rows", kind: "message", T: StaticLookupRow, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StaticLookupEntry {
+    return new StaticLookupEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StaticLookupEntry {
+    return new StaticLookupEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StaticLookupEntry {
+    return new StaticLookupEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: StaticLookupEntry | PlainMessage<StaticLookupEntry> | undefined, b: StaticLookupEntry | PlainMessage<StaticLookupEntry> | undefined): boolean {
+    return proto3.util.equals(StaticLookupEntry, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.StaticLookupRow
+ */
+export class StaticLookupRow extends Message<StaticLookupRow> {
+  /**
+   * column_name → cell_value
+   *
+   * @generated from field: map<string, string> values = 1;
+   */
+  values: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<StaticLookupRow>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.StaticLookupRow";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "values", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): StaticLookupRow {
+    return new StaticLookupRow().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): StaticLookupRow {
+    return new StaticLookupRow().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): StaticLookupRow {
+    return new StaticLookupRow().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: StaticLookupRow | PlainMessage<StaticLookupRow> | undefined, b: StaticLookupRow | PlainMessage<StaticLookupRow> | undefined): boolean {
+    return proto3.util.equals(StaticLookupRow, a, b);
   }
 }
 
@@ -3038,6 +3150,13 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
    */
   csvLookups: CSVLookupEntry[] = [];
 
+  /**
+   * replaces the full list when present
+   *
+   * @generated from field: repeated gastrolog.v1.StaticLookupEntry static_lookups = 8;
+   */
+  staticLookups: StaticLookupEntry[] = [];
+
   constructor(data?: PartialMessage<PutLookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3050,6 +3169,7 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
     { no: 5, name: "json_file_lookups", kind: "message", T: JSONFileLookupEntry, repeated: true },
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
     { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
+    { no: 8, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {
@@ -5890,6 +6010,116 @@ export class CSVPreviewRow extends Message<CSVPreviewRow> {
 
   static equals(a: CSVPreviewRow | PlainMessage<CSVPreviewRow> | undefined, b: CSVPreviewRow | PlainMessage<CSVPreviewRow> | undefined): boolean {
     return proto3.util.equals(CSVPreviewRow, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PreviewJSONLookupRequest
+ */
+export class PreviewJSONLookupRequest extends Message<PreviewJSONLookupRequest> {
+  /**
+   * managed file ID
+   *
+   * @generated from field: bytes file_id = 1;
+   */
+  fileId = new Uint8Array(0);
+
+  /**
+   * max content bytes to return; 0 = default (4096)
+   *
+   * @generated from field: int32 max_bytes = 2;
+   */
+  maxBytes = 0;
+
+  constructor(data?: PartialMessage<PreviewJSONLookupRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PreviewJSONLookupRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "max_bytes", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewJSONLookupRequest {
+    return new PreviewJSONLookupRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PreviewJSONLookupRequest {
+    return new PreviewJSONLookupRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PreviewJSONLookupRequest {
+    return new PreviewJSONLookupRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PreviewJSONLookupRequest | PlainMessage<PreviewJSONLookupRequest> | undefined, b: PreviewJSONLookupRequest | PlainMessage<PreviewJSONLookupRequest> | undefined): boolean {
+    return proto3.util.equals(PreviewJSONLookupRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PreviewJSONLookupResponse
+ */
+export class PreviewJSONLookupResponse extends Message<PreviewJSONLookupResponse> {
+  /**
+   * pretty-printed JSON, potentially truncated
+   *
+   * @generated from field: string content = 1;
+   */
+  content = "";
+
+  /**
+   * file size in bytes
+   *
+   * @generated from field: int64 total_size = 2;
+   */
+  totalSize = protoInt64.zero;
+
+  /**
+   * true if content was cut short
+   *
+   * @generated from field: bool truncated = 3;
+   */
+  truncated = false;
+
+  /**
+   * non-empty on failure
+   *
+   * @generated from field: string error = 4;
+   */
+  error = "";
+
+  constructor(data?: PartialMessage<PreviewJSONLookupResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PreviewJSONLookupResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "content", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "total_size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "truncated", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewJSONLookupResponse {
+    return new PreviewJSONLookupResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PreviewJSONLookupResponse {
+    return new PreviewJSONLookupResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PreviewJSONLookupResponse {
+    return new PreviewJSONLookupResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PreviewJSONLookupResponse | PlainMessage<PreviewJSONLookupResponse> | undefined, b: PreviewJSONLookupResponse | PlainMessage<PreviewJSONLookupResponse> | undefined): boolean {
+    return proto3.util.equals(PreviewJSONLookupResponse, a, b);
   }
 }
 

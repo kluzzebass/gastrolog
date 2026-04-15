@@ -133,6 +133,9 @@ service SystemService {
   // PreviewCSVLookup reads a managed CSV file and returns column headers, sample rows, and total row count.
   rpc PreviewCSVLookup(PreviewCSVLookupRequest) returns (PreviewCSVLookupResponse);
 
+  // PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
+  rpc PreviewJSONLookup(PreviewJSONLookupRequest) returns (PreviewJSONLookupResponse);
+
   // Cloud services
   rpc PutCloudService(PutCloudServiceRequest) returns (PutCloudServiceResponse);
   rpc DeleteCloudService(DeleteCloudServiceRequest) returns (DeleteCloudServiceResponse);
@@ -405,6 +408,7 @@ message LookupSettings {
   repeated JSONFileLookupEntry json_file_lookups = 5;
   repeated MMDBLookupEntry mmdb_lookups = 6;
   repeated CSVLookupEntry csv_lookups = 7;
+  repeated StaticLookupEntry static_lookups = 8;
 }
 
 // MMDBLookupEntry defines a named MMDB-backed lookup table (GeoIP City or ASN).
@@ -450,6 +454,20 @@ message CSVLookupEntry {
   bytes file_id = 2;                   // managed file ID (UUID)
   string key_column = 3;                // column header for lookup key; empty = first column
   repeated string value_columns = 4;    // columns to include in output; empty = all non-key
+}
+
+// StaticLookupEntry defines a manually-entered lookup table.
+// Data is stored directly in the Raft-replicated config — no file upload needed.
+// Useful for small, hand-maintained mappings (host→team, code→label).
+message StaticLookupEntry {
+  string name = 1;                       // registry name (e.g. "teams")
+  string key_column = 2;                 // name of the key field (e.g. "host")
+  repeated string value_columns = 3;     // names of value fields (e.g. ["team", "owner"])
+  repeated StaticLookupRow rows = 4;     // the data rows
+}
+
+message StaticLookupRow {
+  map<string, string> values = 1;        // column_name → cell_value
 }
 
 message ClusterSettings {
@@ -516,6 +534,7 @@ message PutLookupSettings {
   repeated JSONFileLookupEntry json_file_lookups = 5; // replaces the full list when present
   repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
   repeated CSVLookupEntry csv_lookups = 7; // replaces the full list when present
+  repeated StaticLookupEntry static_lookups = 8; // replaces the full list when present
 }
 
 message PutClusterSettings {
@@ -842,6 +861,18 @@ message PreviewCSVLookupResponse {
 
 message CSVPreviewRow {
   repeated string values = 1;            // cell values in column order
+}
+
+message PreviewJSONLookupRequest {
+  bytes file_id = 1;                     // managed file ID
+  int32 max_bytes = 2;                   // max content bytes to return; 0 = default (4096)
+}
+
+message PreviewJSONLookupResponse {
+  string content = 1;                    // pretty-printed JSON, potentially truncated
+  int64 total_size = 2;                  // file size in bytes
+  bool truncated = 3;                    // true if content was cut short
+  string error = 4;                      // non-empty on failure
 }
 
 // --- Cloud Services ---
