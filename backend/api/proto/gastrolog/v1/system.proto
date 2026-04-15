@@ -866,6 +866,8 @@ message CSVPreviewRow {
 message PreviewJSONLookupRequest {
   bytes file_id = 1;                     // managed file ID
   int32 max_bytes = 2;                   // max content bytes to return; 0 = default (4096)
+  string query = 3;                      // optional JSONPath query to evaluate against the file
+  map<string, string> parameters = 4;    // optional parameter values for {name} placeholders in query
 }
 
 message PreviewJSONLookupResponse {
@@ -873,6 +875,8 @@ message PreviewJSONLookupResponse {
   int64 total_size = 2;                  // file size in bytes
   bool truncated = 3;                    // true if content was cut short
   string error = 4;                      // non-empty on failure
+  string query_result = 5;              // pretty-printed JSONPath query result (when query is provided)
+  string query_error = 6;              // JSONPath evaluation error (when query is provided but fails)
 }
 
 // --- Cloud Services ---

@@ -7,6 +7,9 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"strings"
+
+	"github.com/theory/jsonpath"
 	"errors"
 	"fmt"
 	"io"
@@ -1275,11 +1278,35 @@ func (s *SystemServer) PreviewJSONLookup(
 	}
 
 	truncated := int64(n) < totalSize
-	return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+	resp := &apiv1.PreviewJSONLookupResponse{
 		Content:   string(raw),
 		TotalSize: totalSize,
 		Truncated: truncated,
-	}), nil
+	}
+
+	// Evaluate JSONPath query if provided.
+	if query := req.Msg.GetQuery(); query != "" && parsed != nil {
+		resp.QueryResult, resp.QueryError = evalJSONPath(query, req.Msg.GetParameters(), parsed)
+	}
+
+	return connect.NewResponse(resp), nil
+}
+
+// evalJSONPath evaluates a JSONPath query with parameter substitution.
+func evalJSONPath(query string, params map[string]string, data any) (result, errMsg string) {
+	for k, v := range params {
+		query = strings.ReplaceAll(query, "{"+k+"}", v)
+	}
+	jp, err := jsonpath.Parse(query)
+	if err != nil {
+		return "", fmt.Sprintf("parse error: %v", err)
+	}
+	results := jp.Select(data)
+	pretty, err := json.MarshalIndent(results, "", "  ")
+	if err != nil {
+		return "", fmt.Sprintf("marshal result: %v", err)
+	}
+	return string(pretty), ""
 }
 
 // checkNameConflict returns an AlreadyExists error if another entity of the

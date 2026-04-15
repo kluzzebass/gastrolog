@@ -194,7 +194,12 @@ export function usePreviewCSVLookup() {
   });
 }
 
-type PreviewJSONLookupArgs = { fileId: string; maxBytes?: number };
+type PreviewJSONLookupArgs = {
+  fileId: string;
+  maxBytes?: number;
+  query?: string;
+  parameters?: Record<string, string>;
+};
 
 export function usePreviewJSONLookup() {
   return useMutation({
@@ -202,6 +207,8 @@ export function usePreviewJSONLookup() {
       const response = await systemClient.previewJSONLookup({
         fileId: decode(args.fileId),
         maxBytes: args.maxBytes ?? 4096,
+        query: args.query ?? "",
+        parameters: args.parameters ?? {},
       });
       return response;
     },

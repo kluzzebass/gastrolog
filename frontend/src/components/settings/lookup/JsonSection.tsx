@@ -17,16 +17,33 @@ import type { JSONFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_p
 // JSON File Preview
 // ---------------------------------------------------------------------------
 
-function JsonPreviewPanel({ dark, fileId }: Readonly<{ dark: boolean; fileId: string }>) {
+function JsonPreviewPanel({ dark, fileId, query, parameters }: Readonly<{
+  dark: boolean;
+  fileId: string;
+  query?: string;
+  parameters?: { name: string }[];
+}>) {
   const c = useThemeClass(dark);
   const preview = usePreviewJSONLookup();
 
-  // Auto-fetch preview when fileId changes.
+  // Build parameter map with placeholder values for preview.
+  const paramMap: Record<string, string> = {};
+  for (const p of parameters ?? []) {
+    if (p.name) paramMap[p.name] = `<${p.name}>`;
+  }
+
+  // Auto-fetch preview when fileId or query changes (debounced for query).
+  const [debouncedQuery, setDebouncedQuery] = useState(query ?? "");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query ?? ""), 300);
+    return () => clearTimeout(t);
+  }, [query]);
+
   useEffect(() => {
     if (fileId) {
-      preview.mutate({ fileId });
+      preview.mutate({ fileId, query: debouncedQuery, parameters: paramMap });
     }
-  }, [fileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fileId, debouncedQuery]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const data = preview.data;
 
@@ -44,7 +61,7 @@ function JsonPreviewPanel({ dark, fileId }: Readonly<{ dark: boolean; fileId: st
           )}
         </span>
         <button
-          onClick={() => preview.mutate({ fileId })}
+          onClick={() => preview.mutate({ fileId, query: debouncedQuery, parameters: paramMap })}
           disabled={preview.isPending}
           className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
             "text-text-ghost hover:text-copper hover:bg-ink-hover",
@@ -62,7 +79,7 @@ function JsonPreviewPanel({ dark, fileId }: Readonly<{ dark: boolean; fileId: st
       )}
 
       {data && !data.error && (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-48">
           <pre className={`px-3 py-2 font-mono text-[0.75em] whitespace-pre ${c("text-text-bright", "text-light-text-bright")}`}>
             {data.content}
           </pre>
@@ -74,6 +91,25 @@ function JsonPreviewPanel({ dark, fileId }: Readonly<{ dark: boolean; fileId: st
               Truncated
             </div>
           )}
+        </div>
+      )}
+
+      {data?.queryResult && (
+        <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+          <div className={`px-3 py-1.5 text-[0.75em] font-medium ${c("text-text-muted bg-ink-surface", "text-light-text-muted bg-light-surface")}`}>
+            Query Result
+          </div>
+          <div className="overflow-x-auto max-h-32">
+            <pre className={`px-3 py-2 font-mono text-[0.75em] whitespace-pre text-copper`}>
+              {data.queryResult}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {data?.queryError && (
+        <div className={`border-t px-3 py-2 text-[0.75em] text-severity-error bg-severity-error/5 ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+          {data.queryError}
         </div>
       )}
 
@@ -154,7 +190,7 @@ export function JsonAddForm({
           onFileSelected={(fileId) => setDraft((d) => ({ ...d, fileId }))}
         />
       </FormField>
-      <JsonPreviewPanel dark={dark} fileId={draft.fileId} />
+      <JsonPreviewPanel dark={dark} fileId={draft.fileId} query={draft.query} parameters={draft.parameters} />
       <FormField label="Query" description="JSONPath query with {value} or {name} placeholders." dark={dark}>
         <TextInput value={draft.query} onChange={(v) => setDraft((d) => ({ ...d, query: v }))} placeholder="" dark={dark} mono
           examples={["$.hosts[?(@.ip == '{value}')]", "$['{value}']", "$.data[*]"]} />
@@ -233,7 +269,7 @@ export function JsonCards({
                   onFileSelected={(fileId) => onUpdate(i, { fileId })}
                 />
               </FormField>
-              <JsonPreviewPanel dark={dark} fileId={j.fileId} />
+              <JsonPreviewPanel dark={dark} fileId={j.fileId} query={j.query} parameters={j.parameters} />
               <FormField label="Query" description="JSONPath query with {value} or {name} placeholders." dark={dark}>
                 <TextInput value={j.query} onChange={(v) => onUpdate(i, { query: v })} placeholder="" dark={dark} mono
                   examples={["$.hosts[?(@.ip == '{value}')]", "$['{value}']", "$.data[*]"]} />

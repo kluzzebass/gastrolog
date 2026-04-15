@@ -6031,6 +6031,20 @@ export class PreviewJSONLookupRequest extends Message<PreviewJSONLookupRequest> 
    */
   maxBytes = 0;
 
+  /**
+   * optional JSONPath query to evaluate against the file
+   *
+   * @generated from field: string query = 3;
+   */
+  query = "";
+
+  /**
+   * optional parameter values for {name} placeholders in query
+   *
+   * @generated from field: map<string, string> parameters = 4;
+   */
+  parameters: { [key: string]: string } = {};
+
   constructor(data?: PartialMessage<PreviewJSONLookupRequest>) {
     super();
     proto3.util.initPartial(data, this);
@@ -6041,6 +6055,8 @@ export class PreviewJSONLookupRequest extends Message<PreviewJSONLookupRequest> 
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 2, name: "max_bytes", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "parameters", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewJSONLookupRequest {
@@ -6092,6 +6108,20 @@ export class PreviewJSONLookupResponse extends Message<PreviewJSONLookupResponse
    */
   error = "";
 
+  /**
+   * pretty-printed JSONPath query result (when query is provided)
+   *
+   * @generated from field: string query_result = 5;
+   */
+  queryResult = "";
+
+  /**
+   * JSONPath evaluation error (when query is provided but fails)
+   *
+   * @generated from field: string query_error = 6;
+   */
+  queryError = "";
+
   constructor(data?: PartialMessage<PreviewJSONLookupResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -6104,6 +6134,8 @@ export class PreviewJSONLookupResponse extends Message<PreviewJSONLookupResponse
     { no: 2, name: "total_size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 3, name: "truncated", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "query_result", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "query_error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewJSONLookupResponse {
