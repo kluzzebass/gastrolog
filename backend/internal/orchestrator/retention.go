@@ -598,23 +598,37 @@ func (r *retentionRunner) expireChunk(id chunk.ChunkID) {
 // (which already deleted the chunk everywhere), so "chunk not found" responses
 // are logged at debug only. In single-node / pre-cascade mode the forward is
 // the primary deletion mechanism for followers and any error is a real failure.
-func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, clusterMode bool) {
+func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, _ bool) {
 	for _, target := range r.followerTargets {
 		if target.NodeID == r.orch.localNodeID {
 			continue // already handled by deleteFromFollowers
 		}
-		err := r.sendDeleteToFollower(target.NodeID, id)
+		r.forwardDeleteWithRetry(target.NodeID, id)
+	}
+}
+
+// forwardDeleteWithRetry sends a chunk-delete RPC to a follower with up to
+// 3 retries on transient failures. "chunk not found" means the chunk is
+// already gone on the follower — goal achieved, no retry needed.
+func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID) {
+	const maxAttempts = 5
+	for attempt := range maxAttempts {
+		err := r.sendDeleteToFollower(nodeID, id)
 		if err == nil {
-			continue
+			return
 		}
-		if clusterMode && strings.Contains(err.Error(), "chunk not found") {
-			r.logger.Debug("retention: follower already removed chunk via OnDelete cascade",
-				"vault", r.vaultID, "chunk", id.String(), "follower", target.NodeID)
+		if strings.Contains(err.Error(), "chunk not found") {
+			r.logger.Debug("retention: chunk already gone on follower",
+				"vault", r.vaultID, "chunk", id.String(), "follower", nodeID)
+			return
+		}
+		if attempt < maxAttempts-1 {
+			time.Sleep(time.Duration(attempt+1) * time.Second) // 1s, 2s, 3s, 4s backoff
 			continue
 		}
 		r.logger.Warn("retention: failed to forward chunk deletion to follower",
 			"vault", r.vaultID, "chunk", id.String(),
-			"follower", target.NodeID, "error", err)
+			"follower", nodeID, "error", err, "attempts", maxAttempts)
 	}
 }
 

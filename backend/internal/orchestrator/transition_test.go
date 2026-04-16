@@ -2476,27 +2476,75 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 // directories, and stale files.
 func (h *clusterHarness) assertTierDirEmpty(t *testing.T, tierIdx int) {
 	t.Helper()
-	for _, nid := range h.allNodeIDs() {
-		node := h.nodes[nid]
-		dir := node.tierDirs[tierIdx]
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			t.Errorf("tier %d on %s: ReadDir(%s): %v", tierIdx, nid, dir, err)
-			continue
-		}
-		// Filter to only chunk directories (chunk IDs are 26-char base32).
-		// Skip .lock, index files, and other manager artifacts.
-		var chunkDirs []string
-		for _, e := range entries {
-			if e.IsDir() && len(e.Name()) == 26 {
-				chunkDirs = append(chunkDirs, e.Name())
+	// Poll briefly — async chunk deletion may lag under CPU contention.
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		allEmpty := true
+		for _, nid := range h.allNodeIDs() {
+			if len(h.chunkDirsOnNode(nid, tierIdx)) > 0 {
+				allEmpty = false
+				break
 			}
 		}
+		if allEmpty {
+			return
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	for _, nid := range h.allNodeIDs() {
+		chunkDirs := h.chunkDirsOnNode(nid, tierIdx)
 		if len(chunkDirs) > 0 {
 			t.Errorf("tier %d on %s: %d chunk directories still on disk: %v",
 				tierIdx, nid, len(chunkDirs), chunkDirs)
 		}
 	}
+}
+
+// assertTierEmptyAllNodes polls until all nodes report zero records on the
+// given tier, or fails after 10s. Follower chunk deletion is async.
+func (h *clusterHarness) assertTierEmptyAllNodes(t *testing.T, tierIdx int) {
+	t.Helper()
+	deadline := time.Now().Add(60 * time.Second)
+	for {
+		allEmpty := true
+		for _, nid := range h.allNodeIDs() {
+			if cursorCountRecords(t, h.nodes[nid].tiers[tierIdx].Chunks) > 0 {
+				allEmpty = false
+				break
+			}
+		}
+		if allEmpty {
+			return
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	for _, nid := range h.allNodeIDs() {
+		count := cursorCountRecords(t, h.nodes[nid].tiers[tierIdx].Chunks)
+		if count != 0 {
+			t.Errorf("tier %d on %s: cursor read %d records after full chain (should be 0)", tierIdx, nid, count)
+		}
+	}
+}
+
+func (h *clusterHarness) chunkDirsOnNode(nid string, tierIdx int) []string {
+	dir := h.nodes[nid].tierDirs[tierIdx]
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() && len(e.Name()) == 26 {
+			dirs = append(dirs, e.Name())
+		}
+	}
+	return dirs
 }
 
 // listChunkDirsOnNode returns the chunk directory names in a tier dir on a node.
@@ -2585,14 +2633,7 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 	}
 
 	// ---- Verify: tier 0 is EMPTY on ALL nodes (cursor-verified) ----
-	for _, nodeID := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nodeID].tiers[0].Chunks)
-		if count != 0 {
-			metas, _ := h.nodes[nodeID].tiers[0].Chunks.List()
-			t.Errorf("tier 0 on %s: cursor read %d records (should be 0, %d sealed chunks remain)",
-				nodeID, count, len(metas))
-		}
-	}
+	h.assertTierEmptyAllNodes(t, 0)
 
 	// ---- Verify: tier 0 chunk directories removed from disk on ALL nodes ----
 	h.assertTierDirEmpty(t, 0)
@@ -2687,12 +2728,8 @@ func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
 	}
 
 	// ---- Verify tier 0 empty on ALL nodes (cursor-verified) ----
-	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
-		if count != 0 {
-			t.Errorf("tier 0 on %s: cursor read %d records after full chain (should be 0)", nid, count)
-		}
-	}
+	// Follower chunk deletion is async — poll briefly under CPU contention.
+	h.assertTierEmptyAllNodes(t, 0)
 
 	// ---- Verify tier 0 AND tier 1 chunk directories gone from disk ----
 	h.assertTierDirEmpty(t, 0)
@@ -2823,13 +2860,8 @@ func TestClusterTransitionLargeBurst(t *testing.T) {
 		runner.transitionChunk(m.ID)
 	}
 
-	// Verify: tier 0 empty on ALL nodes, tier 1 has all records on leader (all cursor-verified).
-	for _, nid := range h.allNodeIDs() {
-		remaining := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
-		if remaining != 0 {
-			t.Errorf("tier 0 on %s: cursor read %d records after transition (should be 0)", nid, remaining)
-		}
-	}
+	// Verify: tier 0 empty on ALL nodes (cursor-verified, polls for async delete).
+	h.assertTierEmptyAllNodes(t, 0)
 
 	// Verify: tier 0 chunk directories gone from disk on ALL nodes.
 	h.assertTierDirEmpty(t, 0)
@@ -2900,12 +2932,7 @@ func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
 	}
 
 	// ---- Verify: tier 0 has 0 cursor-readable records on ALL nodes ----
-	for _, nid := range h.allNodeIDs() {
-		count := cursorCountRecords(t, h.nodes[nid].tiers[0].Chunks)
-		if count != 0 {
-			t.Errorf("tier 0 on %s: cursor read %d records (should be 0)", nid, count)
-		}
-	}
+	h.assertTierEmptyAllNodes(t, 0)
 
 	// ---- Verify: no chunk directories on disk for tier 0 on ANY node ----
 	h.assertTierDirEmpty(t, 0)
