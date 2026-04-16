@@ -27,6 +27,7 @@ type placementManager struct {
 	cfgStore    system.Store
 	clusterSrv  *cluster.Server
 	peerState   *cluster.PeerState
+	factories   *orchestrator.Factories
 	alerts      orchestrator.AlertCollector
 	localNodeID string
 	logger      *slog.Logger
@@ -79,8 +80,8 @@ func (pm *placementManager) Reconcile(ctx context.Context) {
 	}
 }
 
-// reconcile evaluates all tiers and assigns them to eligible, alive nodes.
-// Only writes PutTier when the assignment actually changes.
+// reconcile evaluates all tiers and active ingesters, assigning them to
+// eligible alive nodes. Only writes when the assignment actually changes.
 func (pm *placementManager) reconcile(ctx context.Context) {
 	tiers, err := pm.cfgStore.ListTiers(ctx)
 	if err != nil {
@@ -140,6 +141,84 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		}
 		pm.placeTier(ctx, tier, alive, nscs, tierCount)
 	}
+
+	pm.reconcileActiveIngesters(ctx, alive)
+}
+
+// reconcileActiveIngesters assigns each active (collector) ingester to exactly
+// one alive node from its allowed set, preferring non-leader nodes.
+func (pm *placementManager) reconcileActiveIngesters(ctx context.Context, alive map[string]bool) {
+	ingesters, err := pm.cfgStore.ListIngesters(ctx)
+	if err != nil {
+		pm.logger.Error("placement: list ingesters", "error", err)
+		return
+	}
+
+	leaderID := ""
+	if pm.clusterSrv != nil {
+		_, leaderID = pm.clusterSrv.LeaderInfo()
+	}
+
+	for _, ing := range ingesters {
+		if !ing.Enabled || len(ing.NodeIDs) == 0 {
+			continue
+		}
+		// Skip passive (listener) ingesters — they manage themselves.
+		if pm.isPassiveIngester(ing.Type) {
+			continue
+		}
+		pm.placeActiveIngester(ctx, ing, alive, leaderID)
+	}
+}
+
+// placeActiveIngester assigns a single active ingester to one alive node.
+func (pm *placementManager) placeActiveIngester(ctx context.Context, ing system.IngesterConfig, alive map[string]bool, leaderID string) {
+	current, _ := pm.cfgStore.GetIngesterAssignment(ctx, ing.ID)
+
+	// Current assignment still valid?
+	if current != "" && alive[current] && slices.Contains(ing.NodeIDs, current) {
+		return
+	}
+
+	// Pick an eligible alive node, preferring non-leader.
+	var candidates []string
+	for _, nodeID := range ing.NodeIDs {
+		if alive[nodeID] {
+			candidates = append(candidates, nodeID)
+		}
+	}
+	if len(candidates) == 0 {
+		pm.logger.Warn("placement: no alive node for active ingester", "id", ing.ID, "name", ing.Name)
+		return
+	}
+
+	// Prefer non-leader.
+	nonLeader := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		if c != leaderID {
+			nonLeader = append(nonLeader, c)
+		}
+	}
+	if len(nonLeader) > 0 {
+		candidates = nonLeader
+	}
+
+	best := candidates[rand.Intn(len(candidates))] //nolint:gosec // G404: load balancing, not security
+	if best == current {
+		return
+	}
+
+	_ = pm.cfgStore.SetIngesterAssignment(ctx, ing.ID, best)
+	pm.logger.Info("placement: assigned active ingester", "id", ing.ID, "name", ing.Name, "node", best, "prev", current)
+}
+
+// isPassiveIngester checks if the type has ListenAddrs registered.
+func (pm *placementManager) isPassiveIngester(ingType string) bool {
+	if pm.factories == nil {
+		return false
+	}
+	reg, ok := pm.factories.IngesterTypes[ingType]
+	return ok && reg.ListenAddrs != nil
 }
 
 // placeTier evaluates a single tier and assigns it to an eligible node if needed.

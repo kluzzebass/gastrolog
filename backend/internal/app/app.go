@@ -254,6 +254,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 			cfgStore:    cfgStore,
 			clusterSrv:  clusterSrv,
 			peerState:   peerState,
+			factories:   &factories,
 			alerts:      alertCollector,
 			localNodeID: nodeID,
 			logger:      logger.With("component", "placement"),

@@ -879,6 +879,11 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		}
 	}
 
+	// Runtime: ingester assignment state.
+	for ingesterID, nodeID := range rt.IngesterAssignment {
+		snap.IngesterAssignments = append(snap.IngesterAssignments, NewSetIngesterAssignment(ingesterID, nodeID).GetSetIngesterAssignment())
+	}
+
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
 
 	return snap
@@ -1041,6 +1046,15 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 				rt.IngesterAlive[ingesterID] = make(map[string]bool)
 			}
 			rt.IngesterAlive[ingesterID][ia.GetNodeId()] = ia.GetAlive()
+		}
+	}
+
+	// Restore ingester assignment state.
+	if len(snap.GetIngesterAssignments()) > 0 {
+		rt.IngesterAssignment = make(map[glid.GLID]string, len(snap.GetIngesterAssignments()))
+		for _, ia := range snap.GetIngesterAssignments() {
+			ingesterID := glid.FromBytes(ia.GetIngesterId())
+			rt.IngesterAssignment[ingesterID] = ia.GetNodeId()
 		}
 	}
 

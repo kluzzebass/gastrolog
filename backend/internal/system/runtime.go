@@ -23,6 +23,11 @@ type Runtime struct {
 	// Updated by each node as ingesters start/stop/fail.
 	IngesterAlive map[glid.GLID]map[string]bool `json:"ingesterAlive,omitempty"`
 
+	// Active ingester assignments: ingesterID → assigned nodeID.
+	// Set by the Raft leader's placement manager. Only the assigned node
+	// starts the ingester. Empty means unassigned.
+	IngesterAssignment map[glid.GLID]string `json:"ingesterAssignment,omitempty"`
+
 	// UI state.
 	SetupWizardDismissed bool `json:"setup_wizard_dismissed,omitempty"`
 }

@@ -215,7 +215,7 @@ func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) e
 		if !recvCfg.Enabled {
 			continue
 		}
-		if err := o.applyIngester(recvCfg, factories); err != nil {
+		if err := o.applyIngester(recvCfg, sys.Runtime.IngesterAssignment, factories); err != nil {
 			return err
 		}
 	}
@@ -224,14 +224,28 @@ func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) e
 }
 
 // applyIngester creates and registers a single ingester if it should run on this node.
-func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, factories Factories) error {
-	if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
-		return nil
-	}
-
+func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments map[glid.GLID]string, factories Factories) error {
 	reg, ok := factories.IngesterTypes[recvCfg.Type]
 	if !ok {
 		return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
+	}
+
+	isPassive := reg.ListenAddrs != nil
+	if isPassive {
+		// Passive ingesters run on all selected nodes.
+		if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
+			return nil
+		}
+	} else {
+		// Active ingesters run only on the assigned node.
+		assigned := assignments[recvCfg.ID]
+		if assigned != "" && assigned != o.localNodeID {
+			return nil
+		}
+		if assigned == "" {
+			// Not yet assigned by the placement manager — skip for now.
+			return nil
+		}
 	}
 
 	params := maps.Clone(recvCfg.Params)

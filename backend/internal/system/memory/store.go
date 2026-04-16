@@ -60,6 +60,7 @@ type Store struct {
 	tiers              map[glid.GLID]system.TierConfig
 	tierPlacements     map[glid.GLID][]system.TierPlacement    // runtime: system-managed
 	ingesterAlive      map[glid.GLID]map[string]bool          // runtime: system-managed
+	ingesterAssignment map[glid.GLID]string                   // runtime: system-managed
 	nodeStorageConfigs map[string]system.NodeStorageConfig     // runtime: keyed by nodeID
 	clusterTLS         *system.ClusterTLS                     // runtime: cluster identity
 	setupWizardDismissed bool                                 // runtime: UI state
@@ -85,6 +86,7 @@ func NewStore() *Store {
 		tiers:              make(map[glid.GLID]system.TierConfig),
 		tierPlacements:     make(map[glid.GLID][]system.TierPlacement),
 		ingesterAlive:      make(map[glid.GLID]map[string]bool),
+		ingesterAssignment: make(map[glid.GLID]string),
 		nodeStorageConfigs: make(map[string]system.NodeStorageConfig),
 	}
 }
@@ -162,6 +164,12 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 			maps.Copy(cp, m)
 			rt.IngesterAlive[id] = cp
 		}
+	}
+
+	// Runtime: ingester assignment state.
+	if len(s.ingesterAssignment) > 0 {
+		rt.IngesterAssignment = make(map[glid.GLID]string, len(s.ingesterAssignment))
+		maps.Copy(rt.IngesterAssignment, s.ingesterAssignment)
 	}
 
 	return sys, nil
@@ -1099,6 +1107,28 @@ func (s *Store) SetIngesterAlive(_ context.Context, ingesterID glid.GLID, nodeID
 		s.ingesterAlive[ingesterID] = make(map[string]bool)
 	}
 	s.ingesterAlive[ingesterID][nodeID] = true
+	return nil
+}
+
+// --- Ingester Assignment (runtime) ---
+
+func (s *Store) GetIngesterAssignment(_ context.Context, ingesterID glid.GLID) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.ingesterAssignment[ingesterID], nil
+}
+
+func (s *Store) SetIngesterAssignment(_ context.Context, ingesterID glid.GLID, nodeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ingesterAssignment == nil {
+		s.ingesterAssignment = make(map[glid.GLID]string)
+	}
+	if nodeID == "" {
+		delete(s.ingesterAssignment, ingesterID)
+		return nil
+	}
+	s.ingesterAssignment[ingesterID] = nodeID
 	return nil
 }
 

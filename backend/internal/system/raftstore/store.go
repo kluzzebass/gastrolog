@@ -394,6 +394,14 @@ func (s *Store) SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, node
 	return s.apply(command.NewSetIngesterAlive(ingesterID, nodeID, alive))
 }
 
+func (s *Store) GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID) (string, error) {
+	return s.fsm.Store().GetIngesterAssignment(ctx, ingesterID)
+}
+
+func (s *Store) SetIngesterAssignment(ctx context.Context, ingesterID glid.GLID, nodeID string) error {
+	return s.apply(command.NewSetIngesterAssignment(ingesterID, nodeID))
+}
+
 func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 	return s.fsm.Store().GetSetupWizardDismissed(ctx)
 }

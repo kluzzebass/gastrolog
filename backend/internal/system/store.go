@@ -130,6 +130,10 @@ type Store interface {
 	GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error)
 	SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, nodeID string, alive bool) error
 
+	// Ingester assignment (runtime — system-managed, placement manager)
+	GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID) (string, error)
+	SetIngesterAssignment(ctx context.Context, ingesterID glid.GLID, nodeID string) error
+
 	// Node storage (per-node, runtime — discovered at enrollment)
 	GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error)
 	ListNodeStorageConfigs(ctx context.Context) ([]NodeStorageConfig, error)

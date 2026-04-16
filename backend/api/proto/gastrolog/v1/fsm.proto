@@ -51,6 +51,7 @@ message SystemCommand {
     SetTierPlacementsCommand set_tier_placements = 37;
     SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 38;
     SetIngesterAliveCommand set_ingester_alive = 39;
+    SetIngesterAssignmentCommand set_ingester_assignment = 40;
   }
 }
 
@@ -317,6 +318,11 @@ message SetIngesterAliveCommand {
   bool alive = 3;
 }
 
+message SetIngesterAssignmentCommand {
+  bytes ingester_id = 1;
+  string node_id = 2; // Assigned node. Empty = unassigned.
+}
+
 // --- Snapshot ---
 
 // SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
@@ -342,4 +348,5 @@ message SystemSnapshot {
   repeated SetTierPlacementsCommand tier_placements = 17;
   bool setup_wizard_dismissed = 18;
   repeated SetIngesterAliveCommand ingester_alive = 19;
+  repeated SetIngesterAssignmentCommand ingester_assignments = 20;
 }

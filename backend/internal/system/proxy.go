@@ -728,6 +728,24 @@ func (p *StoreProxy) SetIngesterAlive(ctx context.Context, ingesterID glid.GLID,
 	return p.inner.SetIngesterAlive(ctx, ingesterID, nodeID, alive)
 }
 
+func (p *StoreProxy) GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID) (string, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return "", err
+	}
+	return p.inner.GetIngesterAssignment(ctx, ingesterID)
+}
+
+func (p *StoreProxy) SetIngesterAssignment(ctx context.Context, ingesterID glid.GLID, nodeID string) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetIngesterAssignment(ctx, ingesterID, nodeID)
+}
+
 func (p *StoreProxy) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
