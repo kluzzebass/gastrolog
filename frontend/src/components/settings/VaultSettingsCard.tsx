@@ -485,7 +485,7 @@ export function VaultSettingsCard({
               dark={dark}
               onClick={() => { resetEdit(); setNewTier(null); }}
             >
-              Cancel
+              Discard
             </Button>
           )}
           <Button

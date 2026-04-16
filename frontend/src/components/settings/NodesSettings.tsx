@@ -143,7 +143,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                 dirty ? (
                   <>
                     <Button variant="ghost" onClick={() => clearEdit(node.id)} dark={dark}>
-                      Reset
+                      Discard
                     </Button>
                     <Button
                       onClick={() => handleSave(node.id)}

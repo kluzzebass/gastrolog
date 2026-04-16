@@ -574,7 +574,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
             </Button>
             {dirty && (
               <Button variant="ghost" onClick={handleReset} dark={dark}>
-                Reset
+                Discard
               </Button>
             )}
           </div>

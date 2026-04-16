@@ -185,11 +185,19 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
       />
       <StaticCards
         dark={dark}
-        addToast={addToast}
         lookups={staticLookups}
         savedLookups={data?.lookup?.staticLookups ?? []}
         onUpdate={(i, patch) => setStaticLookups((prev) => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)))}
         onDelete={(i) => setStaticLookups((prev) => prev.filter((_, j) => j !== i))}
+        onRevert={(i) => {
+          const saved = data?.lookup?.staticLookups[i];
+          if (saved) setStaticLookups((prev) => prev.map((s, j) => j === i ? {
+            name: saved.name,
+            keyColumn: saved.keyColumn,
+            valueColumns: [...saved.valueColumns],
+            rows: saved.rows.map((r) => ({ ...r.values })),
+          } : s));
+        }}
       />
     </SettingsSection>
   );

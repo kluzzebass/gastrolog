@@ -7,6 +7,7 @@ import { FormField, TextInput } from "../FormField";
 import { Button } from "../Buttons";
 import { SettingsCard } from "../SettingsCard";
 import { AddFormCard } from "../AddFormCard";
+import { EditableGrid } from "../EditableGrid";
 import { type StaticLookupDraft, emptyStaticDraft, staticLookupEqual } from "./types";
 import type { StaticLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
@@ -21,202 +22,26 @@ export function serializeStaticLookups(lookups: StaticLookupDraft[]) {
     }));
 }
 
-// ---------------------------------------------------------------------------
-// Inline table editor
-// ---------------------------------------------------------------------------
+// Returns true if any row has an empty or duplicate key value.
+function hasKeyErrors(rows: Record<string, string>[], keyColumn: string): boolean {
+  if (!keyColumn) return false;
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const v = (r[keyColumn] ?? "").trim();
+    if (!v || seen.has(v)) return true;
+    seen.add(v);
+  }
+  return false;
+}
 
-function StaticTableEditor({
-  dark,
-  keyColumn,
-  valueColumns,
-  rows,
-  onKeyColumnChange,
-  onValueColumnsChange,
-  onRowsChange,
-}: Readonly<{
-  dark: boolean;
-  keyColumn: string;
-  valueColumns: string[];
-  rows: Record<string, string>[];
-  onKeyColumnChange: (v: string) => void;
-  onValueColumnsChange: (v: string[]) => void;
-  onRowsChange: (v: Record<string, string>[]) => void;
-}>) {
-  const c = useThemeClass(dark);
+// Helper: merge keyColumn + valueColumns into a single array for EditableGrid.
+function mergeColumns(key: string, values: string[]): string[] {
+  return [key, ...values];
+}
 
-  const allColumns = [keyColumn, ...valueColumns];
-
-  const inputClass = `w-full px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
-    "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-    "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
-  )}`;
-
-  const headerClass = `px-2 py-1 text-[0.8em] font-mono font-medium border rounded focus:outline-none ${c(
-    "bg-ink-surface/80 border-ink-border text-copper placeholder:text-text-ghost focus:border-copper-dim",
-    "bg-light-surface/80 border-light-border text-copper placeholder:text-light-text-ghost focus:border-copper",
-  )}`;
-
-  const addColumn = () => {
-    onValueColumnsChange([...valueColumns, ""]);
-  };
-
-  const removeColumn = (ci: number) => {
-    const colName = valueColumns[ci]!;
-    onValueColumnsChange(valueColumns.filter((_, j) => j !== ci));
-    // Remove column data from rows.
-    if (colName) {
-      onRowsChange(rows.map((r) => {
-        const next = { ...r };
-        delete next[colName];
-        return next;
-      }));
-    }
-  };
-
-  const renameColumn = (oldName: string, newName: string, isKey: boolean, colIndex?: number) => {
-    if (isKey) {
-      onKeyColumnChange(newName);
-    } else {
-      const next = [...valueColumns];
-      next[colIndex!] = newName;
-      onValueColumnsChange(next);
-    }
-    // Rename in rows.
-    if (oldName && oldName !== newName) {
-      onRowsChange(rows.map((r) => {
-        const next = { ...r };
-        if (oldName in next) {
-          next[newName] = next[oldName] ?? "";
-          delete next[oldName];
-        }
-        return next;
-      }));
-    }
-  };
-
-  const addRow = () => {
-    const empty: Record<string, string> = {};
-    for (const col of allColumns) {
-      if (col) empty[col] = "";
-    }
-    onRowsChange([...rows, empty]);
-  };
-
-  const deleteRow = (ri: number) => {
-    onRowsChange(rows.filter((_, j) => j !== ri));
-  };
-
-  const updateCell = (ri: number, col: string, value: string) => {
-    const next = [...rows];
-    next[ri] = { ...next[ri]!, [col]: value };
-    onRowsChange(next);
-  };
-
-  return (
-    <div className={`rounded-lg border overflow-hidden ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
-      <div className="overflow-x-auto">
-        <table className="w-full">
-          {/* Column headers (editable) */}
-          <thead>
-            <tr className={c("bg-ink-surface/80", "bg-light-surface/80")}>
-              <th className="px-1.5 py-1.5 w-[1%]">
-                {/* Row actions header */}
-              </th>
-              <th className="px-1 py-1.5">
-                <input
-                  type="text"
-                  value={keyColumn}
-                  onChange={(e) => renameColumn(keyColumn, e.target.value, true)}
-                  placeholder="key"
-                  className={headerClass}
-                />
-              </th>
-              {valueColumns.map((col, ci) => (
-                <th key={ci} className="px-1 py-1.5">
-                  <div className="flex items-center gap-0.5">
-                    <input
-                      type="text"
-                      value={col}
-                      onChange={(e) => renameColumn(col, e.target.value, false, ci)}
-                      placeholder="column"
-                      className={`flex-1 min-w-0 ${headerClass}`}
-                    />
-                    <button
-                      onClick={() => removeColumn(ci)}
-                      className={`shrink-0 px-1 py-0.5 text-[0.75em] rounded transition-colors ${c(
-                        "text-text-ghost hover:text-severity-error",
-                        "text-light-text-ghost hover:text-severity-error",
-                      )}`}
-                      title="Remove column"
-                    >
-                      &times;
-                    </button>
-                  </div>
-                </th>
-              ))}
-              <th className="px-1 py-1.5 w-[1%]">
-                <button
-                  onClick={addColumn}
-                  className={`px-2 py-0.5 text-[0.75em] rounded border transition-colors whitespace-nowrap ${c(
-                    "border-ink-border text-text-ghost hover:text-copper hover:border-copper-dim",
-                    "border-light-border text-light-text-ghost hover:text-copper hover:border-copper",
-                  )}`}
-                  title="Add column"
-                >
-                  + Col
-                </button>
-              </th>
-            </tr>
-          </thead>
-
-          {/* Data rows */}
-          <tbody>
-            {rows.map((row, ri) => (
-              <tr key={ri} className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
-                <td className="px-1.5 py-1 text-center">
-                  <button
-                    onClick={() => deleteRow(ri)}
-                    className={`px-1 py-0.5 text-[0.75em] rounded transition-colors ${c(
-                      "text-text-ghost hover:text-severity-error",
-                      "text-light-text-ghost hover:text-severity-error",
-                    )}`}
-                    title="Delete row"
-                  >
-                    &times;
-                  </button>
-                </td>
-                {allColumns.map((col, ci) => (
-                  <td key={ci} className="px-1 py-1">
-                    <input
-                      type="text"
-                      value={(col && row[col]) ?? ""}
-                      onChange={(e) => col && updateCell(ri, col, e.target.value)}
-                      disabled={!col}
-                      className={inputClass}
-                    />
-                  </td>
-                ))}
-                <td />
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Add row button */}
-      <div className={`px-3 py-1.5 border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
-        <button
-          onClick={addRow}
-          className={`text-[0.8em] px-2 py-0.5 rounded border transition-colors ${c(
-            "border-ink-border text-text-muted hover:text-copper hover:border-copper-dim hover:bg-ink-hover",
-            "border-light-border text-light-text-muted hover:text-copper hover:border-copper hover:bg-light-hover",
-          )}`}
-        >
-          + Row
-        </button>
-      </div>
-    </div>
-  );
+// Helper: split EditableGrid's columns array back into keyColumn + valueColumns.
+function splitColumns(cols: string[]): { keyColumn: string; valueColumns: string[] } {
+  return { keyColumn: cols[0] ?? "", valueColumns: cols.slice(1) };
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +68,7 @@ export function StaticAddForm({
 
   const handleCreate = async () => {
     const final = { ...draft, name: draft.name.trim() || namePlaceholder };
-    if (!final.name || !final.keyColumn) return;
+    if (!final.name) return;
     const updated = [...existingLookups, final];
     try {
       await putConfig.mutateAsync({ lookup: { staticLookups: serializeStaticLookups(updated) } });
@@ -260,23 +85,22 @@ export function StaticAddForm({
       onCancel={onCancel}
       onCreate={handleCreate}
       isPending={putConfig.isPending}
-      createDisabled={(!draft.name.trim() && !namePlaceholder) || !draft.keyColumn.trim()}
+      createDisabled={(!draft.name.trim() && !namePlaceholder) || !draft.keyColumn.trim() || hasKeyErrors(draft.rows, draft.keyColumn)}
       typeBadge="static"
     >
       <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
         <TextInput value={draft.name} onChange={(v) => setDraft((d) => ({ ...d, name: v }))} placeholder={namePlaceholder} dark={dark} mono />
       </FormField>
-      <FormField label="Table" description="Define columns and enter rows. The first column is the lookup key." dark={dark}>
-        <StaticTableEditor
+      <EditableGrid
           dark={dark}
-          keyColumn={draft.keyColumn}
-          valueColumns={draft.valueColumns}
+          columns={mergeColumns(draft.keyColumn, draft.valueColumns)}
           rows={draft.rows}
-          onKeyColumnChange={(v) => setDraft((d) => ({ ...d, keyColumn: v }))}
-          onValueColumnsChange={(v) => setDraft((d) => ({ ...d, valueColumns: v }))}
-          onRowsChange={(v) => setDraft((d) => ({ ...d, rows: v }))}
+          onColumnsChange={(cols) => {
+            const { keyColumn, valueColumns } = splitColumns(cols);
+            setDraft((d) => ({ ...d, keyColumn, valueColumns }));
+          }}
+          onRowsChange={(rows) => setDraft((d) => ({ ...d, rows }))}
         />
-      </FormField>
     </AddFormCard>
   );
 }
@@ -287,18 +111,18 @@ export function StaticAddForm({
 
 export function StaticCards({
   dark,
-  addToast,
   lookups,
   savedLookups,
   onUpdate,
   onDelete,
+  onRevert,
 }: Readonly<{
   dark: boolean;
-  addToast: (msg: string, type: "info" | "error") => void;
   lookups: StaticLookupDraft[];
   savedLookups: StaticLookupEntry[];
   onUpdate: (i: number, patch: Partial<StaticLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
 }>) {
   const c = useThemeClass(dark);
   const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
@@ -309,47 +133,62 @@ export function StaticCards({
 
   return (
     <>
-      {lookups.map((s, i) => (
+      {lookups.map((s, i) => {
+        const cardKey = s.name || `static-${String(i)}`;
+        return (
         <SettingsCard
-          key={`static-${i}`}
-          id={s.name || `Static Lookup ${i + 1}`}
+          key={cardKey}
+          id={s.name || `Static Lookup ${String(i + 1)}`}
           typeBadge="static"
           dark={dark}
-          expanded={isExpanded(`static-${i}`)}
-          onToggle={() => toggle(`static-${i}`)}
+          expanded={isExpanded(cardKey)}
+          onToggle={() => toggle(cardKey)}
           onDelete={() => handleDelete(i)}
           status={
             <span className={`font-mono text-[0.75em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
-              {s.rows.length} row{s.rows.length !== 1 ? "s" : ""}
+              {s.rows.length} row{s.rows.length === 1 ? "" : "s"}
             </span>
           }
           footer={
-            <Button
-              onClick={() => save(i)}
-              disabled={!isDirty(i) || !s.name || !s.keyColumn || putConfig.isPending}
-            >
-              {putConfig.isPending ? "Saving..." : "Save"}
-            </Button>
+            <>
+              {isDirty(i) && (
+                <button
+                  onClick={() => onRevert(i)}
+                  className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
+                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
+                  )}`}
+                >
+                  Discard
+                </button>
+              )}
+              <Button
+                onClick={() => save(i)}
+                disabled={!isDirty(i) || !s.name || !s.keyColumn || putConfig.isPending || hasKeyErrors(s.rows, s.keyColumn)}
+              >
+                {putConfig.isPending ? "Saving..." : "Save"}
+              </Button>
+            </>
           }
         >
           <div className="flex flex-col gap-3">
             <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
               <TextInput value={s.name} onChange={(v) => onUpdate(i, { name: v })} placeholder="" dark={dark} mono />
             </FormField>
-            <FormField label="Table" description="Define columns and enter rows. The first column is the lookup key." dark={dark}>
-              <StaticTableEditor
+              <EditableGrid
                 dark={dark}
-                keyColumn={s.keyColumn}
-                valueColumns={s.valueColumns}
+                columns={mergeColumns(s.keyColumn, s.valueColumns)}
                 rows={s.rows}
-                onKeyColumnChange={(v) => onUpdate(i, { keyColumn: v })}
-                onValueColumnsChange={(v) => onUpdate(i, { valueColumns: v })}
-                onRowsChange={(v) => onUpdate(i, { rows: v })}
+                onColumnsChange={(cols) => {
+                  const { keyColumn, valueColumns } = splitColumns(cols);
+                  onUpdate(i, { keyColumn, valueColumns });
+                }}
+                onRowsChange={(rows) => onUpdate(i, { rows })}
               />
-            </FormField>
           </div>
         </SettingsCard>
-      ))}
+        );
+      })}
     </>
   );
 }
