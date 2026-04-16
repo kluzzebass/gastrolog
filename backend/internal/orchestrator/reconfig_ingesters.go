@@ -9,7 +9,7 @@ import (
 
 // AddIngester adds and starts a new ingester. If an ingester with the same ID
 // already exists, it is stopped and replaced — making the operation idempotent.
-func (o *Orchestrator) AddIngester(id glid.GLID, name, ingType string, r Ingester) error {
+func (o *Orchestrator) AddIngester(id glid.GLID, name, ingType string, passive bool, r Ingester) error {
 	o.mu.Lock()
 
 	// Stop existing ingester if present (idempotent replace).
@@ -20,7 +20,7 @@ func (o *Orchestrator) AddIngester(id glid.GLID, name, ingType string, r Ingeste
 	delete(o.ingesters, id)
 
 	o.ingesters[id] = r
-	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType}
+	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType, Passive: passive}
 	if o.ingesterStats[id] == nil {
 		o.ingesterStats[id] = &IngesterStats{}
 	}

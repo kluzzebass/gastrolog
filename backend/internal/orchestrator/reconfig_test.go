@@ -526,7 +526,7 @@ func TestAddIngesterWhileRunning(t *testing.T) {
 	})
 
 	ingesterID := glid.New()
-	if err := orch.AddIngester(ingesterID, "test", "mock", recv); err != nil {
+	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
@@ -553,12 +553,12 @@ func TestAddIngesterReplacesDuplicate(t *testing.T) {
 	recv1 := newBlockingIngester()
 	recv2 := newBlockingIngester()
 
-	if err := orch.AddIngester(ingesterID, "test-1", "mock", recv1); err != nil {
+	if err := orch.AddIngester(ingesterID, "test-1", "mock", false, recv1); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
 	// Adding with the same ID should replace, not error.
-	if err := orch.AddIngester(ingesterID, "test-2", "mock", recv2); err != nil {
+	if err := orch.AddIngester(ingesterID, "test-2", "mock", false, recv2); err != nil {
 		t.Fatalf("AddIngester (replace): %v", err)
 	}
 
@@ -576,7 +576,7 @@ func TestRemoveIngesterNotRunning(t *testing.T) {
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, "test", "mock", recv); err != nil {
+	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 
@@ -608,7 +608,7 @@ func TestRemoveIngesterWhileRunning(t *testing.T) {
 
 	ingesterID := glid.New()
 	recv := newBlockingIngester()
-	if err := orch.AddIngester(ingesterID, "test", "mock", recv); err != nil {
+	if err := orch.AddIngester(ingesterID, "test", "mock", false, recv); err != nil {
 		t.Fatalf("AddIngester: %v", err)
 	}
 

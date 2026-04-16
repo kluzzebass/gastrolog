@@ -1698,10 +1698,10 @@ func TestIngesterPanicRecovery(t *testing.T) {
 	panickerID := glid.New()
 	normalID := glid.New()
 
-	if err := orch.AddIngester(panickerID, "panicker", "test", panicker); err != nil {
+	if err := orch.AddIngester(panickerID, "panicker", "test", false, panicker); err != nil {
 		t.Fatal(err)
 	}
-	if err := orch.AddIngester(normalID, "normal", "test", normal); err != nil {
+	if err := orch.AddIngester(normalID, "normal", "test", false, normal); err != nil {
 		t.Fatal(err)
 	}
 

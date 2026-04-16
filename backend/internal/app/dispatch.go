@@ -39,7 +39,7 @@ type orchActions interface {
 	IsDraining(vaultID glid.GLID) bool
 	CancelDrain(ctx context.Context, vaultID glid.GLID) error
 	ListIngesters() []glid.GLID
-	AddIngester(id glid.GLID, name, ingType string, r orchestrator.Ingester) error
+	AddIngester(id glid.GLID, name, ingType string, passive bool, r orchestrator.Ingester) error
 	RemoveIngester(id glid.GLID) error
 	UpdateMaxConcurrentJobs(n int) error
 	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance
@@ -305,8 +305,10 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 		return
 	}
 
-	if len(ingCfg.NodeIDs) > 0 && !slices.Contains(ingCfg.NodeIDs, d.localNodeID) {
-		// This node is not in the allowed set — stop it locally if running.
+	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
+	isPassive := ok && reg.ListenAddrs != nil
+
+	if !d.shouldRunIngester(ctx, *ingCfg, isPassive) {
 		if slices.Contains(d.orch.ListIngesters(), id) {
 			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
 				d.logger.Error("dispatch: remove ingester not assigned to this node", "id", id, "name", ingCfg.Name, "error", err)
@@ -327,7 +329,6 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 		return
 	}
 
-	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
 	if !ok {
 		d.logger.Error("dispatch: unknown ingester type", "id", id, "name", ingCfg.Name, "type", ingCfg.Type)
 		return
@@ -340,15 +341,45 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 		params["_state_dir"] = d.factories.HomeDir
 	}
 
-	ingester, err := reg.Factory(ingCfg.ID, params, d.factories.Logger)
+	ing, err := reg.Factory(ingCfg.ID, params, d.factories.Logger)
 	if err != nil {
 		d.logger.Error("dispatch: create ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 		return
 	}
 
-	if err := d.orch.AddIngester(ingCfg.ID, ingCfg.Name, ingCfg.Type, ingester); err != nil {
+	// Restore Raft-replicated checkpoint if the ingester supports it.
+	if cp, ok := ing.(orchestrator.Checkpointable); ok {
+		data, cpErr := d.cfgStore.GetIngesterCheckpoint(ctx, ingCfg.ID)
+		if cpErr == nil && len(data) > 0 {
+			if loadErr := cp.LoadCheckpoint(data); loadErr != nil {
+				d.logger.Warn("dispatch: checkpoint load failed, starting fresh", "id", id, "error", loadErr)
+			}
+		}
+	}
+
+	if err := d.orch.AddIngester(ingCfg.ID, ingCfg.Name, ingCfg.Type, isPassive, ing); err != nil {
 		d.logger.Error("dispatch: add ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 	}
+}
+
+// shouldRunIngester checks whether this node should run the given ingester.
+// Passive: this node must be in NodeIDs (or NodeIDs empty).
+// Active: this node must be the Raft-assigned node.
+func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.IngesterConfig, passive bool) bool {
+	if len(cfg.NodeIDs) > 0 && !slices.Contains(cfg.NodeIDs, d.localNodeID) {
+		return false
+	}
+	if passive {
+		return true
+	}
+	assigned, err := d.cfgStore.GetIngesterAssignment(ctx, cfg.ID)
+	if err != nil {
+		return false
+	}
+	// Empty assignment = not yet placed by the placement manager.
+	// Allow local start (single-node or pre-HA compat). The placement
+	// manager will assign it on the next reconcile cycle.
+	return assigned == "" || assigned == d.localNodeID
 }
 
 // handleIngesterAssignment reacts to a Raft-replicated assignment change.

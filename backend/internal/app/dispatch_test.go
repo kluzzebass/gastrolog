@@ -152,7 +152,7 @@ func (m *mockOrch) RemoveIngester(id glid.GLID) error {
 }
 func (m *mockOrch) UpdateMaxConcurrentJobs(int) error            { return m.updateMaxJobsErr }
 
-func (m *mockOrch) AddIngester(glid.GLID, string, string, orchestrator.Ingester) error {
+func (m *mockOrch) AddIngester(glid.GLID, string, string, bool, orchestrator.Ingester) error {
 	return m.addIngesterErr
 }
 
@@ -197,6 +197,13 @@ func (s *stubCfgStore) ListTiers(context.Context) ([]system.TierConfig, error) {
 	if s.cfg != nil {
 		return s.cfg.Tiers, nil
 	}
+	return nil, nil
+}
+
+func (s *stubCfgStore) GetIngesterAssignment(context.Context, glid.GLID) (string, error) {
+	return "", nil
+}
+func (s *stubCfgStore) GetIngesterCheckpoint(context.Context, glid.GLID) ([]byte, error) {
 	return nil, nil
 }
 

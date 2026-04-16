@@ -238,12 +238,10 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 		}
 	} else {
 		// Active ingesters run only on the assigned node.
+		// Empty assignment = not yet placed — allow local start for
+		// single-node or pre-HA compat.
 		assigned := assignments[recvCfg.ID]
 		if assigned != "" && assigned != o.localNodeID {
-			return nil
-		}
-		if assigned == "" {
-			// Not yet assigned by the placement manager — skip for now.
 			return nil
 		}
 	}
