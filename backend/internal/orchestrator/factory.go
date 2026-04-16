@@ -212,42 +212,45 @@ func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) e
 		}
 		ingesterIDs[recvCfg.ID] = true
 
-		// Skip ingesters not assigned to this node.
-		if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
-			continue
-		}
-
 		if !recvCfg.Enabled {
 			continue
 		}
-
-		// Look up ingester factory.
-		reg, ok := factories.IngesterTypes[recvCfg.Type]
-		if !ok {
-			return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
+		if err := o.applyIngester(recvCfg, factories); err != nil {
+			return err
 		}
-
-		// Inject _state_dir so ingesters can persist state.
-		params := maps.Clone(recvCfg.Params)
-		if params == nil {
-			params = make(map[string]string)
-		}
-		if factories.HomeDir != "" {
-			params["_state_dir"] = factories.HomeDir
-		}
-
-		// Create ingester with scoped logger.
-		var recvLogger *slog.Logger
-		if factories.Logger != nil {
-			recvLogger = factories.Logger.With("ingester_id", recvCfg.ID)
-		}
-		recv, err := reg.Factory(recvCfg.ID, params, recvLogger)
-		if err != nil {
-			return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
-		}
-
-		o.RegisterIngester(recvCfg.ID, recvCfg.Name, recvCfg.Type, recv)
 	}
 
+	return nil
+}
+
+// applyIngester creates and registers a single ingester if it should run on this node.
+func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, factories Factories) error {
+	if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
+		return nil
+	}
+
+	reg, ok := factories.IngesterTypes[recvCfg.Type]
+	if !ok {
+		return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
+	}
+
+	params := maps.Clone(recvCfg.Params)
+	if params == nil {
+		params = make(map[string]string)
+	}
+	if factories.HomeDir != "" {
+		params["_state_dir"] = factories.HomeDir
+	}
+
+	var recvLogger *slog.Logger
+	if factories.Logger != nil {
+		recvLogger = factories.Logger.With("ingester_id", recvCfg.ID)
+	}
+	recv, err := reg.Factory(recvCfg.ID, params, recvLogger)
+	if err != nil {
+		return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
+	}
+
+	o.registerIngester(recvCfg.ID, recvCfg.Name, recvCfg.Type, reg.ListenAddrs != nil, recv)
 	return nil
 }

@@ -96,6 +96,27 @@ func (p *PeerState) FindIngesterStats(ingesterID string) *gastrologv1.IngesterNo
 	return nil
 }
 
+// CollectIngesterAlive returns a map of nodeID → running for the given ingester
+// across all live peers. Only includes peers that report stats for this ingester.
+func (p *PeerState) CollectIngesterAlive(ingesterID string) map[string]bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	result := make(map[string]bool)
+	now := time.Now()
+	for nodeID, e := range p.entries {
+		if now.Sub(e.received) > p.ttl || e.stats == nil {
+			continue
+		}
+		for _, is := range e.stats.Ingesters {
+			if string(is.Id) == ingesterID {
+				result[nodeID] = is.Running
+				break
+			}
+		}
+	}
+	return result
+}
+
 // AggregateRouteStats sums route stats from all live peers.
 // Returns per-peer totals merged into a single snapshot.
 func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filterActive bool, vaultStats []*gastrologv1.VaultRouteStats, routeStats []*gastrologv1.PerRouteStats) {

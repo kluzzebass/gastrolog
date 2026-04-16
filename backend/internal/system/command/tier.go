@@ -87,3 +87,16 @@ func ExtractSetTierPlacements(cmd *gastrologv1.SetTierPlacementsCommand) (glid.G
 	}
 	return tierID, placements, nil
 }
+
+// NewSetIngesterAlive creates a SystemCommand for SetIngesterAlive.
+func NewSetIngesterAlive(ingesterID glid.GLID, nodeID string, alive bool) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetIngesterAlive{
+			SetIngesterAlive: &gastrologv1.SetIngesterAliveCommand{
+				IngesterId: ingesterID.ToProto(),
+				NodeId:     nodeID,
+				Alive:      alive,
+			},
+		},
+	}
+}

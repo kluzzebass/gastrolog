@@ -29,6 +29,7 @@ type IngesterStats struct {
 	MessagesIngested atomic.Int64
 	BytesIngested    atomic.Int64
 	Errors           atomic.Int64
+	Alive            atomic.Bool // true while Run() is executing, false during retry sleep
 }
 
 // RouteStats tracks routing metrics using atomic counters.
@@ -54,8 +55,9 @@ type PerRouteStats struct {
 // ingesterInfo holds metadata about an ingester for logging purposes.
 // The Ingester interface is a bare Run() — metadata lives alongside it.
 type ingesterInfo struct {
-	Name string
-	Type string
+	Name    string
+	Type    string
+	Passive bool // true for listener ingesters that should retry on failure
 }
 
 var (
@@ -297,6 +299,9 @@ type Orchestrator struct {
 	// alongside this node. See gastrolog-1e5ke.
 	phase *lifecycle.Phase
 
+	// onIngesterAlive is called when an ingester's alive state changes.
+	onIngesterAlive func(ingesterID glid.GLID, alive bool)
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -382,6 +387,10 @@ type Config struct {
 	// Components call Set to raise alerts and Clear to resolve them.
 	Alerts AlertCollector
 
+	// OnIngesterAlive is called when an ingester's alive state changes.
+	// The app layer wires this to Raft to replicate the state cluster-wide.
+	OnIngesterAlive func(ingesterID glid.GLID, alive bool)
+
 	// Phase is the shared shutdown signal. When non-nil, the orchestrator
 	// consults phase.ShuttingDown() in hot-path replication helpers so that
 	// during the drain window (after BeginShutdown) remote forwards no-op
@@ -434,6 +443,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		chunkSignal:     notify.NewSignal(),
 		tierLeaders:     newTierLeaderManager(logger),
 		phase:           cfg.Phase,
+		onIngesterAlive: cfg.OnIngesterAlive,
 		now:             cfg.Now,
 		logger:          logger,
 	}
@@ -538,9 +548,9 @@ func (o *Orchestrator) IngesterName(id glid.GLID) string {
 // meaning its goroutine was launched and hasn't been stopped.
 func (o *Orchestrator) IsIngesterRunning(id glid.GLID) bool {
 	o.mu.RLock()
-	defer o.mu.RUnlock()
-	_, ok := o.ingesterCancels[id]
-	return ok
+	stats := o.ingesterStats[id]
+	o.mu.RUnlock()
+	return stats != nil && stats.Alive.Load()
 }
 
 // GetRouteStats returns the global route stats.

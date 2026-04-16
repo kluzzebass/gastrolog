@@ -144,6 +144,8 @@ function VaultsList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boo
 
 function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: boolean; onOpenSettings?: (tab: string, entityName?: string) => void; expandTarget?: string | null }>) {
   const { data: ingesters, isLoading } = useIngesters();
+  const { data: cluster } = useClusterStatus();
+  const liveNodeIds = new Set((cluster?.nodes ?? []).map((n) => encode(n.id)));
   const { expanded, toggle, add } = useToggleSet();
 
   // Auto-expand an ingester when deep-linked from settings.
@@ -166,6 +168,7 @@ function IngestersList({ dark, onOpenSettings, expandTarget }: Readonly<{ dark: 
         <IngesterCard
           key={encode(ing.id)}
           ingester={ing}
+          liveNodeIds={liveNodeIds}
           dark={dark}
           expanded={expanded.has(encode(ing.id))}
           onToggle={() => toggle(encode(ing.id))}

@@ -4,6 +4,7 @@ import (
 	"gastrolog/internal/glid"
 	"context"
 	"fmt"
+	"math/rand/v2"
 	"time"
 
 	"gastrolog/internal/alert"
@@ -244,13 +245,44 @@ func (o *Orchestrator) Close() {
 
 // runIngester executes a single ingester with panic recovery so that a
 // misbehaving ingester cannot crash the entire process.
+//
+// Passive (listener) ingesters retry on failure with 3–5s jitter — port-bind
+// errors are recoverable when another process releases the port or a
+// co-located node dies. Active ingesters exit on first error.
 func (o *Orchestrator) runIngester(id glid.GLID, r Ingester, ctx context.Context, out chan<- IngestMessage) {
 	defer func() {
 		if v := recover(); v != nil {
 			o.logger.Error("ingester panicked", "id", id, "panic", v)
 		}
 	}()
-	_ = r.Run(ctx, out)
+
+	meta := o.ingesterMeta[id]
+	stats := o.ingesterStats[id]
+	for {
+		o.setIngesterAlive(id, stats, true)
+		err := r.Run(ctx, out)
+		o.setIngesterAlive(id, stats, false)
+		if ctx.Err() != nil || !meta.Passive {
+			return
+		}
+		delay := 3*time.Second + time.Duration(rand.Int64N(int64(2*time.Second))) //nolint:gosec // G404: jitter for retry delay, not security-sensitive
+		o.logger.Warn("passive ingester failed, retrying", "id", id, "name", meta.Name, "error", err, "retry_in", delay)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+	}
+}
+
+// setIngesterAlive updates both the local stats and the Raft-replicated state.
+func (o *Orchestrator) setIngesterAlive(id glid.GLID, stats *IngesterStats, alive bool) {
+	if stats != nil {
+		stats.Alive.Store(alive)
+	}
+	if o.onIngesterAlive != nil {
+		o.onIngesterAlive(id, alive)
+	}
 }
 
 // digestLoop reads IngestMessages, stamps identity, runs the digester chain,

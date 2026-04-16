@@ -164,6 +164,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		LocalNodeID:       nodeID,
 		Alerts:            alertCollector,
 		Phase:             shutdownPhase,
+		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
+			_ = cfgStore.SetIngesterAlive(context.Background(), ingesterID, nodeID, alive)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)

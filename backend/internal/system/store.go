@@ -126,6 +126,10 @@ type Store interface {
 	GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]TierPlacement, error)
 	SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []TierPlacement) error
 
+	// Ingester alive state (runtime — system-managed)
+	GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error)
+	SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, nodeID string, alive bool) error
+
 	// Node storage (per-node, runtime — discovered at enrollment)
 	GetNodeStorageConfig(ctx context.Context, nodeID string) (*NodeStorageConfig, error)
 	ListNodeStorageConfigs(ctx context.Context) ([]NodeStorageConfig, error)

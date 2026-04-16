@@ -386,6 +386,14 @@ func (s *Store) SetTierPlacements(ctx context.Context, tierID glid.GLID, placeme
 	return s.apply(command.NewSetTierPlacements(tierID, placements))
 }
 
+func (s *Store) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {
+	return s.fsm.Store().GetIngesterAlive(ctx, ingesterID)
+}
+
+func (s *Store) SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, nodeID string, alive bool) error {
+	return s.apply(command.NewSetIngesterAlive(ingesterID, nodeID, alive))
+}
+
 func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 	return s.fsm.Store().GetSetupWizardDismissed(ctx)
 }

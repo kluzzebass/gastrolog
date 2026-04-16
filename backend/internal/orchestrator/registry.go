@@ -28,13 +28,17 @@ func (o *Orchestrator) RegisterDigester(d Digester) {
 	o.digesters = append(o.digesters, d)
 }
 
-// RegisterIngester adds a ingester to the registry.
+// RegisterIngester adds an ingester to the registry.
 // Must be called before Start().
 func (o *Orchestrator) RegisterIngester(id glid.GLID, name, ingType string, r Ingester) {
+	o.registerIngester(id, name, ingType, false, r)
+}
+
+func (o *Orchestrator) registerIngester(id glid.GLID, name, ingType string, passive bool, r Ingester) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.ingesters[id] = r
-	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType}
+	o.ingesterMeta[id] = ingesterInfo{Name: name, Type: ingType, Passive: passive}
 	if o.ingesterStats[id] == nil {
 		o.ingesterStats[id] = &IngesterStats{}
 	}

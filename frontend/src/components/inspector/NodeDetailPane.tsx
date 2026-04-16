@@ -27,6 +27,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const { data: cluster } = useClusterStatus();
   const { data: config } = useConfig();
   const nodeInfo = cluster?.nodes.find((n) => encode(n.id) === nodeId);
+  const liveNodeIds = new Set((cluster?.nodes ?? []).map((n) => encode(n.id)));
 
   // Build vault ID → cloud tier type map from config tiers.
   const cloudProviders = new Map<string, string>();
@@ -102,6 +103,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
               <IngesterCard
                 key={iid}
                 ingester={ing}
+                liveNodeIds={liveNodeIds}
                 dark={dark}
                 expanded={!!expandedIngesters[iid]}
                 onToggle={() => setExpandedIngesters((prev) => ({ ...prev, [iid]: !prev[iid] }))}

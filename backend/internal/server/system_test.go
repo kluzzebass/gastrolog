@@ -706,6 +706,13 @@ func (m *mockPeerIngesterStats) FindIngesterStats(id string) *gastrologv1.Ingest
 	return m.stats[id]
 }
 
+func (m *mockPeerIngesterStats) CollectIngesterAlive(id string) map[string]bool {
+	if s := m.stats[id]; s != nil {
+		return map[string]bool{"peer": s.Running}
+	}
+	return nil
+}
+
 func TestListIngestersRemoteRunning(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -720,17 +727,11 @@ func TestListIngestersRemoteRunning(t *testing.T) {
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
-
-	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
-		remoteIngID.String(): {
-			Id: remoteIngID.Bytes(), Running: true,
-			MessagesIngested: 42, BytesIngested: 1024, Errors: 1,
-		},
-	}}
+	// Simulate remote node reporting alive via Raft store.
+	_ = cfgStore.SetIngesterAlive(ctx, remoteIngID, "node-B", true)
 
 	srv := server.New(orch, cfgStore, orchestrator.Factories{}, nil, server.Config{
-		NodeID:            "node-A",
-		PeerIngesterStats: peerStats,
+		NodeID: "node-A",
 	})
 	httpClient := &http.Client{Transport: &embeddedTransport{handler: srv.Handler()}}
 	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://embedded")
@@ -768,6 +769,8 @@ func TestGetIngesterStatusRemote(t *testing.T) {
 	_ = cfgStore.PutIngester(ctx, system.IngesterConfig{
 		ID: remoteIngID, Name: "remote-syslog", Enabled: true,
 	})
+	// Simulate remote node reporting alive via Raft store.
+	_ = cfgStore.SetIngesterAlive(ctx, remoteIngID, "node-B", true)
 
 	peerStats := &mockPeerIngesterStats{stats: map[string]*gastrologv1.IngesterNodeStats{
 		remoteIngID.String(): {

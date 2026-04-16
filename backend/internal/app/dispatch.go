@@ -120,7 +120,8 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 	case raftfsm.NotifyTierDeleted:
 		d.handleTierDeleted(ctx, n.ID, n.Drain)
 	case raftfsm.NotifyTierPlacementsSet, raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
-		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet:
+		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet,
+		raftfsm.NotifyIngesterAliveSet:
 		// No orchestrator side effects; configSignal fires below.
 	}
 

@@ -46,6 +46,7 @@ const (
 	NotifyTierPut
 	NotifyTierDeleted
 	NotifyTierPlacementsSet
+	NotifyIngesterAliveSet
 	NotifySetupWizardDismissedSet
 )
 
@@ -136,6 +137,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_PutTier,
 		*gastrologv1.SystemCommand_DeleteTier,
 		*gastrologv1.SystemCommand_SetTierPlacements,
+		*gastrologv1.SystemCommand_SetIngesterAlive,
 		*gastrologv1.SystemCommand_SetSetupWizardDismissed:
 		return f.applyConfig(ctx, cmd, l.Index)
 
@@ -261,6 +263,8 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		return f.applyDeleteTier(ctx, c.DeleteTier)
 	case *gastrologv1.SystemCommand_SetTierPlacements:
 		return f.applySetTierPlacements(ctx, c.SetTierPlacements)
+	case *gastrologv1.SystemCommand_SetIngesterAlive:
+		return f.applySetIngesterAlive(ctx, c.SetIngesterAlive)
 	case *gastrologv1.SystemCommand_SetSetupWizardDismissed:
 		if err := f.store.SetSetupWizardDismissed(ctx, c.SetSetupWizardDismissed.GetDismissed()); err != nil {
 			return nil, err
@@ -523,6 +527,14 @@ func (f *FSM) applySetTierPlacements(ctx context.Context, pb *gastrologv1.SetTie
 		return nil, err
 	}
 	return &Notification{Kind: NotifyTierPlacementsSet, ID: tierID}, nil
+}
+
+func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIngesterAliveCommand) (*Notification, error) {
+	ingesterID := glid.FromBytes(cmd.GetIngesterId())
+	if err := f.store.SetIngesterAlive(ctx, ingesterID, cmd.GetNodeId(), cmd.GetAlive()); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyIngesterAliveSet, ID: ingesterID}, nil
 }
 
 // applyUser dispatches user-management commands.
@@ -809,6 +821,13 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 	for tierID, placements := range rt.TierPlacements {
 		if err := newStore.SetTierPlacements(ctx, tierID, placements); err != nil {
 			return fmt.Errorf("restore tier placements %s: %w", tierID, err)
+		}
+	}
+	for ingesterID, nodes := range rt.IngesterAlive {
+		for nodeID, alive := range nodes {
+			if err := newStore.SetIngesterAlive(ctx, ingesterID, nodeID, alive); err != nil {
+				return fmt.Errorf("restore ingester alive %s: %w", ingesterID, err)
+			}
 		}
 	}
 	if err := newStore.SetSetupWizardDismissed(ctx, rt.SetupWizardDismissed); err != nil {

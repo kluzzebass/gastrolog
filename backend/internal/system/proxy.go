@@ -710,6 +710,24 @@ func (p *StoreProxy) SetTierPlacements(ctx context.Context, tierID glid.GLID, pl
 	return p.inner.SetTierPlacements(ctx, tierID, placements)
 }
 
+func (p *StoreProxy) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return nil, err
+	}
+	return p.inner.GetIngesterAlive(ctx, ingesterID)
+}
+
+func (p *StoreProxy) SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, nodeID string, alive bool) error {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	if err := p.check(); err != nil {
+		return err
+	}
+	return p.inner.SetIngesterAlive(ctx, ingesterID, nodeID, alive)
+}
+
 func (p *StoreProxy) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()

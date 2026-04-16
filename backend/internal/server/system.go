@@ -34,6 +34,7 @@ import (
 // Implemented by cluster.PeerState; nil in single-node mode.
 type PeerIngesterStatsProvider interface {
 	FindIngesterStats(ingesterID string) *apiv1.IngesterNodeStats
+	CollectIngesterAlive(ingesterID string) map[string]bool
 }
 
 // PeerRouteStatsProvider aggregates route stats from all cluster peer broadcasts.

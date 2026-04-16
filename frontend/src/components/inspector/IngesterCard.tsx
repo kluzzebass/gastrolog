@@ -1,6 +1,6 @@
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useIngesterStatus } from "../../api/hooks";
+import { useIngesterStatus, useConfig } from "../../api/hooks";
 import { formatBytes } from "../../utils/units";
 import { Badge } from "../Badge";
 import { CogIcon } from "../icons";
@@ -8,9 +8,13 @@ import { ExpandableCard } from "../settings/ExpandableCard";
 import { NodeBadge } from "../settings/NodeBadge";
 import { CrossLinkBadge } from "./CrossLinkBadge";
 import { encode } from "../../api/glid";
+import type { BadgeVariant } from "../Badge";
+
+type StatusVariant = Extract<BadgeVariant, "info" | "warn" | "error">;
 
 interface IngesterCardProps {
-  ingester: { id: Uint8Array; name: string; type: string; running: boolean; nodeIds: Uint8Array[] };
+  ingester: { id: Uint8Array; name: string; type: string; running: boolean; enabled: boolean; nodeIds: Uint8Array[]; nodeStatus: { [key: string]: boolean } };
+  liveNodeIds: Set<string>;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -20,6 +24,7 @@ interface IngesterCardProps {
 
 export function IngesterCard({
   ingester,
+  liveNodeIds,
   dark,
   expanded,
   onToggle,
@@ -27,6 +32,15 @@ export function IngesterCard({
   onOpenSettings,
 }: Readonly<IngesterCardProps>) {
   const ingId = encode(ingester.id);
+  const selected = ingester.nodeIds.length;
+  const running = Object.values(ingester.nodeStatus).filter(Boolean).length;
+
+  let statusVariant: StatusVariant = "info";
+  if (selected > 0 && running < selected) {
+    const hasDeadNode = ingester.nodeIds.some((nid) => !liveNodeIds.has(encode(nid)));
+    statusVariant = hasDeadNode ? "error" : "warn";
+  }
+
   return (
     <ExpandableCard
       id={ingester.name || ingId}
@@ -37,11 +51,7 @@ export function IngesterCard({
       headerRight={
         <span className="flex items-center gap-1.5">
           {showNodeBadge && ingester.nodeIds.length > 0 && <NodeBadge nodeId={encode(ingester.nodeIds[0]!)} dark={dark} />}
-          {ingester.running ? (
-            <Badge variant="info" dark={dark}>running</Badge>
-          ) : (
-            <Badge variant="muted" dark={dark}>stopped</Badge>
-          )}
+          <IngesterStatusBadge selected={selected} running={running} variant={statusVariant} enabled={ingester.enabled} dark={dark} />
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
               <CogIcon className="w-3 h-3" />
@@ -50,14 +60,29 @@ export function IngesterCard({
         </span>
       }
     >
-      <IngesterDetail id={ingId} dark={dark} />
+      <IngesterDetail id={ingId} nodeIds={ingester.nodeIds} nodeStatus={ingester.nodeStatus} liveNodeIds={liveNodeIds} dark={dark} />
     </ExpandableCard>
   );
 }
 
-function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
+function IngesterStatusBadge({ selected, running, variant, enabled, dark }: Readonly<{
+  selected: number; running: number; variant: StatusVariant; enabled: boolean; dark: boolean;
+}>) {
+  if (!enabled) return <Badge variant="muted" dark={dark}>stopped</Badge>;
+  if (selected > 0) return <Badge variant={variant} dark={dark}>{`${String(running)}/${String(selected)}`}</Badge>;
+  return <Badge variant="muted" dark={dark}>stopped</Badge>;
+}
+
+function IngesterDetail({ id, nodeIds, nodeStatus, liveNodeIds, dark }: Readonly<{
+  id: string;
+  nodeIds: Uint8Array[];
+  nodeStatus: { [key: string]: boolean };
+  liveNodeIds: Set<string>;
+  dark: boolean;
+}>) {
   const c = useThemeClass(dark);
   const { data, isLoading } = useIngesterStatus(id);
+  const { data: config } = useConfig();
 
   if (isLoading) {
     return <LoadingPlaceholder dark={dark} className="px-4 py-3" />;
@@ -124,6 +149,28 @@ function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
           </div>
         ))}
       </div>
+      {nodeIds.length > 0 && (
+        <div className="mt-3">
+          <div
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
+          >
+            Nodes
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {nodeIds.map((nid) => {
+              const nodeId = encode(nid);
+              const alive = nodeStatus[nodeId] ?? false;
+              const dead = !liveNodeIds.has(nodeId);
+              const nodeCfg = config?.nodeConfigs.find((n) => encode(n.id) === nodeId);
+              const label = nodeCfg?.name || nodeId;
+              let variant: StatusVariant = "info";
+              if (dead) variant = "error";
+              else if (!alive) variant = "warn";
+              return <Badge key={nodeId} variant={variant} dark={dark}>{label}</Badge>;
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

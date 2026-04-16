@@ -19,6 +19,10 @@ type Runtime struct {
 	// Cluster identity material (generated at cluster-init).
 	ClusterTLS *ClusterTLS `json:"cluster_tls,omitempty"`
 
+	// Ingester running state: ingesterID → (nodeID → alive).
+	// Updated by each node as ingesters start/stop/fail.
+	IngesterAlive map[glid.GLID]map[string]bool `json:"ingesterAlive,omitempty"`
+
 	// UI state.
 	SetupWizardDismissed bool `json:"setup_wizard_dismissed,omitempty"`
 }

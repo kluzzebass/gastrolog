@@ -58,10 +58,11 @@ type Store struct {
 	managedFiles       map[glid.GLID]system.ManagedFileConfig
 	cloudServices      map[glid.GLID]system.CloudService
 	tiers              map[glid.GLID]system.TierConfig
-	tierPlacements     map[glid.GLID][]system.TierPlacement // runtime: system-managed
-	nodeStorageConfigs map[string]system.NodeStorageConfig   // runtime: keyed by nodeID
-	clusterTLS         *system.ClusterTLS                   // runtime: cluster identity
-	setupWizardDismissed bool                               // runtime: UI state
+	tierPlacements     map[glid.GLID][]system.TierPlacement    // runtime: system-managed
+	ingesterAlive      map[glid.GLID]map[string]bool          // runtime: system-managed
+	nodeStorageConfigs map[string]system.NodeStorageConfig     // runtime: keyed by nodeID
+	clusterTLS         *system.ClusterTLS                     // runtime: cluster identity
+	setupWizardDismissed bool                                 // runtime: UI state
 }
 
 var _ system.Store = (*Store)(nil)
@@ -83,6 +84,7 @@ func NewStore() *Store {
 		cloudServices:      make(map[glid.GLID]system.CloudService),
 		tiers:              make(map[glid.GLID]system.TierConfig),
 		tierPlacements:     make(map[glid.GLID][]system.TierPlacement),
+		ingesterAlive:      make(map[glid.GLID]map[string]bool),
 		nodeStorageConfigs: make(map[string]system.NodeStorageConfig),
 	}
 }
@@ -149,6 +151,16 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 			cp := make([]system.TierPlacement, len(p))
 			copy(cp, p)
 			rt.TierPlacements[id] = cp
+		}
+	}
+
+	// Runtime: ingester alive state.
+	if len(s.ingesterAlive) > 0 {
+		rt.IngesterAlive = make(map[glid.GLID]map[string]bool, len(s.ingesterAlive))
+		for id, m := range s.ingesterAlive {
+			cp := make(map[string]bool, len(m))
+			maps.Copy(cp, m)
+			rt.IngesterAlive[id] = cp
 		}
 	}
 
@@ -1053,6 +1065,40 @@ func (s *Store) SetTierPlacements(_ context.Context, tierID glid.GLID, placement
 	cp := make([]system.TierPlacement, len(placements))
 	copy(cp, placements)
 	s.tierPlacements[tierID] = cp
+	return nil
+}
+
+// --- Ingester Alive (runtime) ---
+
+func (s *Store) GetIngesterAlive(_ context.Context, ingesterID glid.GLID) (map[string]bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m := s.ingesterAlive[ingesterID]
+	if len(m) == 0 {
+		return nil, nil
+	}
+	cp := make(map[string]bool, len(m))
+	maps.Copy(cp, m)
+	return cp, nil
+}
+
+func (s *Store) SetIngesterAlive(_ context.Context, ingesterID glid.GLID, nodeID string, alive bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ingesterAlive == nil {
+		s.ingesterAlive = make(map[glid.GLID]map[string]bool)
+	}
+	if !alive {
+		delete(s.ingesterAlive[ingesterID], nodeID)
+		if len(s.ingesterAlive[ingesterID]) == 0 {
+			delete(s.ingesterAlive, ingesterID)
+		}
+		return nil
+	}
+	if s.ingesterAlive[ingesterID] == nil {
+		s.ingesterAlive[ingesterID] = make(map[string]bool)
+	}
+	s.ingesterAlive[ingesterID][nodeID] = true
 	return nil
 }
 

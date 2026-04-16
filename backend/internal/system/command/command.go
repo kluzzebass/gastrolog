@@ -872,6 +872,13 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		snap.TierPlacements = append(snap.TierPlacements, cmd)
 	}
 
+	// Runtime: ingester alive state.
+	for ingesterID, nodes := range rt.IngesterAlive {
+		for nodeID, alive := range nodes {
+			snap.IngesterAlive = append(snap.IngesterAlive, NewSetIngesterAlive(ingesterID, nodeID, alive).GetSetIngesterAlive())
+		}
+	}
+
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
 
 	return snap
@@ -1022,6 +1029,18 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 				return nil, nil, nil, fmt.Errorf("restore tier placements: %w", err)
 			}
 			rt.TierPlacements[tierID] = placements
+		}
+	}
+
+	// Restore ingester alive state.
+	if len(snap.GetIngesterAlive()) > 0 {
+		rt.IngesterAlive = make(map[glid.GLID]map[string]bool)
+		for _, ia := range snap.GetIngesterAlive() {
+			ingesterID := glid.FromBytes(ia.GetIngesterId())
+			if rt.IngesterAlive[ingesterID] == nil {
+				rt.IngesterAlive[ingesterID] = make(map[string]bool)
+			}
+			rt.IngesterAlive[ingesterID][ia.GetNodeId()] = ia.GetAlive()
 		}
 	}
 

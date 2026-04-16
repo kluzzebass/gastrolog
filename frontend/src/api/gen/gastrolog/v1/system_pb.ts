@@ -788,6 +788,8 @@ export class IngesterInfo extends Message<IngesterInfo> {
   type = "";
 
   /**
+   * Deprecated: use node_status for per-node detail.
+   *
    * @generated from field: bool running = 3;
    */
   running = false;
@@ -812,6 +814,20 @@ export class IngesterInfo extends Message<IngesterInfo> {
    */
   nodeIds: Uint8Array[] = [];
 
+  /**
+   * Per-node running status: nodeID → alive.
+   *
+   * @generated from field: map<string, bool> node_status = 8;
+   */
+  nodeStatus: { [key: string]: boolean } = {};
+
+  /**
+   * Whether the ingester is enabled in config.
+   *
+   * @generated from field: bool enabled = 9;
+   */
+  enabled = false;
+
   constructor(data?: PartialMessage<IngesterInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -826,6 +842,8 @@ export class IngesterInfo extends Message<IngesterInfo> {
     { no: 4, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 6, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 8, name: "node_status", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 8 /* ScalarType.BOOL */} },
+    { no: 9, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {

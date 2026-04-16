@@ -246,6 +246,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: SetSetupWizardDismissedCommand;
     case: "setSetupWizardDismissed";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SetIngesterAliveCommand set_ingester_alive = 39;
+     */
+    value: SetIngesterAliveCommand;
+    case: "setIngesterAlive";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -294,6 +300,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 36, name: "delete_tier", kind: "message", T: DeleteTierCommand, oneof: "command" },
     { no: 37, name: "set_tier_placements", kind: "message", T: SetTierPlacementsCommand, oneof: "command" },
     { no: 38, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
+    { no: 39, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -2102,6 +2109,55 @@ export class SetSetupWizardDismissedCommand extends Message<SetSetupWizardDismis
 }
 
 /**
+ * @generated from message gastrolog.v1.SetIngesterAliveCommand
+ */
+export class SetIngesterAliveCommand extends Message<SetIngesterAliveCommand> {
+  /**
+   * @generated from field: bytes ingester_id = 1;
+   */
+  ingesterId = new Uint8Array(0);
+
+  /**
+   * @generated from field: string node_id = 2;
+   */
+  nodeId = "";
+
+  /**
+   * @generated from field: bool alive = 3;
+   */
+  alive = false;
+
+  constructor(data?: PartialMessage<SetIngesterAliveCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetIngesterAliveCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "node_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "alive", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetIngesterAliveCommand {
+    return new SetIngesterAliveCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetIngesterAliveCommand {
+    return new SetIngesterAliveCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetIngesterAliveCommand {
+    return new SetIngesterAliveCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetIngesterAliveCommand | PlainMessage<SetIngesterAliveCommand> | undefined, b: SetIngesterAliveCommand | PlainMessage<SetIngesterAliveCommand> | undefined): boolean {
+    return proto3.util.equals(SetIngesterAliveCommand, a, b);
+  }
+}
+
+/**
  * SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -2199,6 +2255,11 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   setupWizardDismissed = false;
 
+  /**
+   * @generated from field: repeated gastrolog.v1.SetIngesterAliveCommand ingester_alive = 19;
+   */
+  ingesterAlive: SetIngesterAliveCommand[] = [];
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2225,6 +2286,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 16, name: "tiers", kind: "message", T: PutTierCommand, repeated: true },
     { no: 17, name: "tier_placements", kind: "message", T: SetTierPlacementsCommand, repeated: true },
     { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 19, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

@@ -34,32 +34,25 @@ func (s *SystemServer) ListIngesters(
 		}
 	}
 
-	// Local orchestrator knows which ingesters are running on this node.
-	localIDs := make(map[glid.GLID]struct{})
-	for _, id := range s.orch.ListIngesters() {
-		localIDs[id] = struct{}{}
-	}
-
 	resp := &apiv1.ListIngestersResponse{
 		Ingesters: make([]*apiv1.IngesterInfo, 0, len(allIngesters)),
 	}
 
 	for _, ing := range allIngesters {
-		nodeIDs := make([][]byte, len(ing.NodeIDs))
-		for i, nid := range ing.NodeIDs {
-			nodeIDs[i] = []byte(nid)
-		}
-		_, isLocal := localIDs[ing.ID]
 		info := &apiv1.IngesterInfo{
-			Id:      ing.ID.ToProto(),
-			Name:    ing.Name,
-			Type:    ing.Type,
-			NodeIds: nodeIDs,
+			Id:         ing.ID.ToProto(),
+			Name:       ing.Name,
+			Type:       ing.Type,
+			Enabled:    ing.Enabled,
+			NodeIds:    stringsToBytes(ing.NodeIDs),
+			NodeStatus: s.collectIngesterNodeStatus(ing.ID),
 		}
-		if isLocal {
-			info.Running = s.orch.IsRunning()
-		} else if ps := s.findPeerIngesterStats(ing.ID); ps != nil {
-			info.Running = ps.Running
+		// Backwards compat: running = at least one node is alive.
+		for _, alive := range info.NodeStatus {
+			if alive {
+				info.Running = true
+				break
+			}
 		}
 		resp.Ingesters = append(resp.Ingesters, info)
 	}
@@ -100,15 +93,22 @@ func (s *SystemServer) GetIngesterStatus(
 		Type: ingCfg.Type,
 	}
 
-	// Local ingester: get live stats from orchestrator.
+	// Running state from Raft store (authoritative, cluster-wide).
+	if alive := s.collectIngesterNodeStatus(id); alive != nil {
+		for _, a := range alive {
+			if a {
+				resp.Running = true
+				break
+			}
+		}
+	}
+
+	// Counters: local orchestrator for this node, peer broadcast for remote.
 	if stats := s.orch.GetIngesterStats(id); stats != nil {
-		resp.Running = s.orch.IsRunning()
 		resp.MessagesIngested = stats.MessagesIngested.Load()
 		resp.Errors = stats.Errors.Load()
 		resp.BytesIngested = stats.BytesIngested.Load()
 	} else if ps := s.findPeerIngesterStats(id); ps != nil {
-		// Remote ingester: use peer broadcast stats.
-		resp.Running = ps.Running
 		resp.MessagesIngested = int64(ps.MessagesIngested) //nolint:gosec // G115: broadcast uses uint64
 		resp.Errors = int64(ps.Errors)                     //nolint:gosec // G115: broadcast uses uint64
 		resp.BytesIngested = int64(ps.BytesIngested)       //nolint:gosec // G115: broadcast uses uint64
@@ -473,6 +473,15 @@ func (s *SystemServer) findPeerIngesterStats(id glid.GLID) *apiv1.IngesterNodeSt
 		return nil
 	}
 	return s.peerStats.FindIngesterStats(id.String())
+}
+
+// collectIngesterNodeStatus reads per-node alive state from the Raft-replicated store.
+func (s *SystemServer) collectIngesterNodeStatus(id glid.GLID) map[string]bool {
+	alive, err := s.sysStore.GetIngesterAlive(context.Background(), id)
+	if err != nil || alive == nil {
+		return nil
+	}
+	return alive
 }
 
 // stringsToBytes converts a string slice to a [][]byte slice.

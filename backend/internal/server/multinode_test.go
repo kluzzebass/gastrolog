@@ -332,6 +332,20 @@ func (p *mnPeerIngesterStats) FindIngesterStats(ingesterID string) *gastrologv1.
 	return nil
 }
 
+func (p *mnPeerIngesterStats) CollectIngesterAlive(ingesterID string) map[string]bool {
+	id, err := glid.ParseUUID(ingesterID)
+	if err != nil {
+		return nil
+	}
+	result := make(map[string]bool)
+	for nodeID, orch := range p.nodes {
+		if orch.GetIngesterStats(id) != nil {
+			result[nodeID] = orch.IsIngesterRunning(id)
+		}
+	}
+	return result
+}
+
 // mnPeerVaultStats implements PeerVaultStatsProvider by scanning all
 // non-coordinator orchestrators for matching vault stats.
 type mnPeerVaultStats struct {
