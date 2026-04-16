@@ -57,11 +57,6 @@ export function useSystemMutation<TArgs, TResult>(
         // overwrite the correct setQueryData with old data.
         qc.invalidateQueries({ queryKey: ["system"] });
       }
-      // Invalidate all data-dependent caches. Any mutation can affect
-      // vault stats, chunk lists, and settings.
-      qc.invalidateQueries({ queryKey: ["vaults"] });
-      qc.invalidateQueries({ queryKey: ["stats"] });
-      qc.invalidateQueries({ queryKey: ["chunks"] });
       for (const key of extraInvalidateKeys) {
         qc.invalidateQueries({ queryKey: key });
       }
