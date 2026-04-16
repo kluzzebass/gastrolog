@@ -69,7 +69,7 @@ export function PasswordRules({ password, confirmPassword, config, dark }: Reado
 
   const c = dark ? (d: string) => d : (_: string, l: string) => l;
   const ruleColorCls = (error: boolean | undefined, theme: typeof c) =>
-    error ? "text-severity-error" : theme("text-text-ghost", "text-light-text-ghost");
+    error ? "text-severity-error" : theme("text-text-muted", "text-light-text-muted");
 
   return (
     <div className="-mt-2 flex flex-col gap-1">

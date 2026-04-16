@@ -35,13 +35,13 @@ export function QueryHistory({
         className={`flex items-center justify-between px-3 py-1.5 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
       >
         <span
-          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Recent queries
         </span>
         <button
           onClick={onClear}
-          className={`text-[0.7em] transition-colors ${c("text-text-ghost hover:text-severity-error", "text-light-text-ghost hover:text-severity-error")}`}
+          className={`text-[0.7em] transition-colors ${c("text-text-muted hover:text-severity-error", "text-light-text-muted hover:text-severity-error")}`}
         >
           Clear
         </button>
@@ -63,7 +63,7 @@ export function QueryHistory({
               e.stopPropagation();
               onRemove(entry.query);
             }}
-            className={`opacity-0 group-hover:opacity-100 text-[0.75em] transition-opacity ${c("text-text-ghost hover:text-severity-error", "text-light-text-ghost hover:text-severity-error")}`}
+            className={`opacity-0 group-hover:opacity-100 text-[0.75em] transition-opacity ${c("text-text-muted hover:text-severity-error", "text-light-text-muted hover:text-severity-error")}`}
             aria-label="Remove from history"
             title="Remove from history"
           >

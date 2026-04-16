@@ -38,7 +38,7 @@ export function TailForm({
           File Patterns
         </label>
         <p
-          className={`text-[0.7em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.7em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Glob patterns for files to tail, one per line. Supports ** for
           recursive matching.

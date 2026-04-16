@@ -75,11 +75,11 @@ export function FileDropZone({
           <span className={`font-mono ${c("text-text-bright", "text-light-text-bright")}`}>
             {displayFile.name}
           </span>
-          <span className={c("text-text-ghost", "text-light-text-ghost")}>
+          <span className={c("text-text-muted", "text-light-text-muted")}>
             {formatBytes(Number(displayFile.size))}
           </span>
           {"uploadedAt" in displayFile && displayFile.uploadedAt && (
-            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+            <span className={c("text-text-muted", "text-light-text-muted")}>
               &middot; {formatDateOnly(new Date(displayFile.uploadedAt))}
             </span>
           )}
@@ -128,7 +128,7 @@ export function FileDropZone({
             <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
               {displayFile ? "Replace" : "Drop"} {label}
             </span>
-            <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
               or click to browse
             </span>
           </>
@@ -137,11 +137,11 @@ export function FileDropZone({
 
       {pickableFiles && (filteredPickable.length > 0 || !currentFile) && (
         <div className={`flex flex-col gap-1 rounded-lg border p-2 ${c("border-ink-border-subtle bg-ink-surface/50", "border-light-border-subtle bg-light-surface/50")}`}>
-          <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
             Existing files
           </span>
           {filteredPickable.length === 0 ? (
-            <span className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span className={`text-[0.8em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
               No {accept} files uploaded yet
             </span>
           ) : (filteredPickable.map((f) => (
@@ -154,7 +154,7 @@ export function FileDropZone({
                 )}`}
               >
                 <span className={`font-mono ${c("text-text-bright", "text-light-text-bright")}`}>{f.name}</span>
-                <span className={c("text-text-ghost", "text-light-text-ghost")}>{formatBytes(Number(f.size))}</span>
+                <span className={c("text-text-muted", "text-light-text-muted")}>{formatBytes(Number(f.size))}</span>
               </button>
             ))
           )}

@@ -30,7 +30,7 @@ function Section({
   return (
     <div className="flex flex-col gap-1.5">
       <h3
-        className={`text-[0.8em] font-medium uppercase tracking-[0.1em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.8em] font-medium uppercase tracking-[0.1em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {title}
       </h3>
@@ -51,12 +51,12 @@ function SkippedSection({ title, dark }: Readonly<{ title: string; dark: boolean
   return (
     <div className="flex flex-col gap-1.5">
       <h3
-        className={`text-[0.8em] font-medium uppercase tracking-[0.1em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.8em] font-medium uppercase tracking-[0.1em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {title}
       </h3>
       <div
-        className={`text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`}
       >
         None
       </div>

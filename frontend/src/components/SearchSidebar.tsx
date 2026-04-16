@@ -79,8 +79,8 @@ export function SearchSidebar({
         <button
           onClick={() => setSidebarCollapsed(false)}
           className={`shrink-0 px-1 flex items-center border-r transition-colors ${c(
-            "border-ink-border-subtle bg-ink text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-            "border-light-border-subtle bg-light-raised text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            "border-ink-border-subtle bg-ink text-text-muted hover:text-text-muted hover:bg-ink-hover",
+            "border-light-border-subtle bg-light-raised text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
           )}`}
           aria-label="Expand sidebar"
           title="Expand sidebar"
@@ -135,7 +135,7 @@ export function SearchSidebar({
             )}
           </div>
           <div
-            className={`flex justify-between items-center px-2.5 pt-2 mt-1 border-t text-[0.8em] ${c("border-ink-border-subtle text-text-ghost", "border-light-border-subtle text-light-text-ghost")}`}
+            className={`flex justify-between items-center px-2.5 pt-2 mt-1 border-t text-[0.8em] ${c("border-ink-border-subtle text-text-muted", "border-light-border-subtle text-light-text-muted")}`}
           >
             <span>Total</span>
             <span className="font-mono">
@@ -195,8 +195,8 @@ export function SearchSidebar({
           <button
             onClick={() => setSidebarCollapsed(true)}
             className={`absolute top-2 -right-3 w-6 h-8 flex items-center justify-center text-[0.6em] rounded-r z-10 transition-colors ${c(
-              "bg-ink-surface border border-l-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
-              "bg-light-surface border border-l-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
+              "bg-ink-surface border border-l-0 border-ink-border-subtle text-text-muted hover:text-text-muted",
+              "bg-light-surface border border-l-0 border-light-border-subtle text-light-text-muted hover:text-light-text-muted",
             )}`}
             aria-label="Collapse sidebar"
             title="Collapse sidebar"

@@ -25,7 +25,7 @@ export function CopyButton({
 
   const color = copied
     ? "text-severity-info"
-    : c("text-text-ghost hover:text-copper", "text-light-text-ghost hover:text-copper");
+    : c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper");
 
   return (
     <button

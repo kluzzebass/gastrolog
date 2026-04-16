@@ -198,6 +198,13 @@ message RouteConfig {
   bool eject_only = 7;                          // when true, excluded from live ingestion FilterSet; usable only as eject target
 }
 
+// IngesterMode classifies how an ingester acquires data.
+enum IngesterMode {
+  INGESTER_MODE_UNSPECIFIED = 0;
+  INGESTER_MODE_PASSIVE = 1;  // Listeners — bind a port, passively accept incoming data.
+  INGESTER_MODE_ACTIVE = 2;   // Collectors — actively pull from data sources.
+}
+
 message IngesterConfig {
   bytes id = 1;
   string type = 2;
@@ -709,6 +716,7 @@ message GetIngesterDefaultsRequest {}
 
 message IngesterTypeDefaults {
   map<string, string> params = 1;
+  IngesterMode mode = 2;
 }
 
 message GetIngesterDefaultsResponse {

@@ -151,7 +151,7 @@ export function ResultsToolbar({
           {!isFollowMode && hasMore ? "+" : ""}
         </span>
         {isFollowMode && (
-          <span className={`flex items-center gap-1 font-mono text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <span className={`flex items-center gap-1 font-mono text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
             <span>/</span>
             <select
               value={followBufferSize}

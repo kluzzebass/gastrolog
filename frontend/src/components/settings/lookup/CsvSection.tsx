@@ -111,7 +111,7 @@ function CsvFileFields({
             <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
               Preview
               {data && !data.error && (
-                <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                <span className={c("text-text-muted", "text-light-text-muted")}>
                   {" "}&middot; {data.totalRows.toLocaleString()} rows
                 </span>
               )}
@@ -120,8 +120,8 @@ function CsvFileFields({
               onClick={() => preview.mutate({ fileId })}
               disabled={preview.isPending}
               className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
-                "text-text-ghost hover:text-copper hover:bg-ink-hover",
-                "text-light-text-ghost hover:text-copper hover:bg-light-hover",
+                "text-text-muted hover:text-copper hover:bg-ink-hover",
+                "text-light-text-muted hover:text-copper hover:bg-light-hover",
               )}`}
             >
               {preview.isPending ? "Loading..." : "Refresh"}
@@ -144,7 +144,7 @@ function CsvFileFields({
           )}
 
           {preview.isPending && !data && (
-            <div className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <div className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
               Loading preview...
             </div>
           )}
@@ -297,7 +297,7 @@ export function CsvCards({
             onToggle={() => toggle(`csv-${i}`)}
             onDelete={() => handleDelete(i)}
             status={resolvedFile && (
-              <span className={`font-mono text-[0.75em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`} title={resolvedFile.name}>
+              <span className={`font-mono text-[0.75em] truncate ${c("text-text-muted", "text-light-text-muted")}`} title={resolvedFile.name}>
                 {resolvedFile.name}
               </span>
             )}

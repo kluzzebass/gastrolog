@@ -45,7 +45,7 @@ function FilterDescription({ dark }: Readonly<{ dark: boolean }>) {
           <span className={code}>(level=error OR level=warn)</span>
         </p>
       </div>
-      <p className={c("text-text-ghost", "text-light-text-ghost")}>
+      <p className={c("text-text-muted", "text-light-text-muted")}>
         Empty expression means the vault receives nothing. Token search (free
         text) is not supported in filters — only key=value attribute matching.
       </p>

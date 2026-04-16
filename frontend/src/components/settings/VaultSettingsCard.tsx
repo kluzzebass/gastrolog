@@ -499,7 +499,7 @@ export function VaultSettingsCard({
       headerRight={
         <span className="flex items-center gap-2">
           {!vault.enabled && (
-            <Badge variant="ghost" dark={dark}>disabled</Badge>
+            <Badge variant="muted" dark={dark}>disabled</Badge>
           )}
           {warnings.length > 0 && (
             <span className="text-[0.85em] text-severity-warn">
@@ -530,11 +530,11 @@ export function VaultSettingsCard({
         />
         {/* Tier list */}
         <div className="flex flex-col gap-2">
-          <span className={`text-[0.75em] font-medium uppercase tracking-[0.12em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <span className={`text-[0.75em] font-medium uppercase tracking-[0.12em] ${c("text-text-muted", "text-light-text-muted")}`}>
             Tiers
           </span>
           {vaultTiers.length === 0 && !newTier && (
-            <span className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
               No tiers assigned.
             </span>
           )}
@@ -555,7 +555,7 @@ export function VaultSettingsCard({
                     )}`}
                   >
                     <div className="flex items-center gap-3">
-                      <span className={`text-[0.7em] font-mono tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                      <span className={`text-[0.7em] font-mono tabular-nums ${c("text-text-muted", "text-light-text-muted")}`}>
                         {i + 1}
                       </span>
                       <Badge variant="copper" dark={dark}>
@@ -572,8 +572,8 @@ export function VaultSettingsCard({
                           }}
                           disabled={i === 0}
                           className={`px-1 py-0.5 text-[0.75em] rounded transition-colors ${c(
-                            "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
-                            "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
+                            "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                            "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
                           )} disabled:opacity-20 disabled:pointer-events-none`}
                           title="Move up"
                         >
@@ -588,8 +588,8 @@ export function VaultSettingsCard({
                           }}
                           disabled={i === vaultTiers.length - 1}
                           className={`px-1 py-0.5 text-[0.75em] rounded transition-colors ${c(
-                            "text-text-ghost hover:text-text-bright hover:bg-ink-hover",
-                            "text-light-text-ghost hover:text-light-text-bright hover:bg-light-hover",
+                            "text-text-muted hover:text-text-bright hover:bg-ink-hover",
+                            "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
                           )} disabled:opacity-20 disabled:pointer-events-none`}
                           title="Move down"
                         >
@@ -641,8 +641,8 @@ export function VaultSettingsCard({
                         <button
                           onClick={() => setConfirmRemoveTier(encode(tier.id))}
                           className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                            "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                            "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                            "text-text-muted hover:text-severity-error hover:bg-ink-hover",
+                            "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
                           )}`}
                         >
                           Remove
@@ -651,7 +651,7 @@ export function VaultSettingsCard({
                     </div>
                     <div className={`flex items-center gap-3 pl-6 text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                       {nodeName && <span>{"node: " + nodeName}</span>}
-                      {!nodeName && <span className={c("text-text-ghost", "text-light-text-ghost")}>unplaced</span>}
+                      {!nodeName && <span className={c("text-text-muted", "text-light-text-muted")}>unplaced</span>}
                       {tier.type === TierType.FILE && tier.storageClass > 0 && (
                         <span className="font-mono">{`class ${String(tier.storageClass)}`}</span>
                       )}

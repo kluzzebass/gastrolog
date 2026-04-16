@@ -51,8 +51,8 @@ export function DetailSidebar({
           <button
             onClick={() => setDetailCollapsed(true)}
             className={`absolute top-2 -left-3 w-6 h-8 flex items-center justify-center text-[0.6em] rounded-l z-10 transition-colors ${c(
-              "bg-ink-surface border border-r-0 border-ink-border-subtle text-text-ghost hover:text-text-muted",
-              "bg-light-surface border border-r-0 border-light-border-subtle text-light-text-ghost hover:text-light-text-muted",
+              "bg-ink-surface border border-r-0 border-ink-border-subtle text-text-muted hover:text-text-muted",
+              "bg-light-surface border border-r-0 border-light-border-subtle text-light-text-muted hover:text-light-text-muted",
             )}`}
             aria-label="Collapse detail panel"
             title="Collapse detail panel"
@@ -69,8 +69,8 @@ export function DetailSidebar({
         <button
           onClick={() => setDetailCollapsed(false)}
           className={`shrink-0 px-1 flex items-center border-l transition-colors ${c(
-            "border-ink-border-subtle bg-ink-surface text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-            "border-light-border-subtle bg-light-surface text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            "border-ink-border-subtle bg-ink-surface text-text-muted hover:text-text-muted hover:bg-ink-hover",
+            "border-light-border-subtle bg-light-surface text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
           )}`}
           aria-label="Expand detail panel"
           title="Expand detail panel"
@@ -107,8 +107,8 @@ export function DetailSidebar({
               detailPinned
                 ? c("text-copper", "text-copper")
                 : c(
-                    "text-text-ghost hover:text-text-muted",
-                    "text-light-text-ghost hover:text-light-text-muted",
+                    "text-text-muted hover:text-text-muted",
+                    "text-light-text-muted hover:text-light-text-muted",
                   )
             }`}
           >
@@ -138,7 +138,7 @@ export function DetailSidebar({
         ) : (
           <div className="flex flex-col items-center justify-center h-48 px-4">
             <p
-              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               Select a record to view details
             </p>

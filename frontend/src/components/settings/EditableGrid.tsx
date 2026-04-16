@@ -275,16 +275,16 @@ export function EditableGrid({
 
   // ── Style classes ────────────────────────────────────────────────────────
   const inputClass = `w-full px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
-    "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-    "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+    "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+    "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
   )}`;
   const headerInputClass = `w-full px-2 py-1 text-[0.8em] font-mono font-medium border rounded focus:outline-none ${c(
-    "bg-ink-surface/80 border-ink-border text-copper placeholder:text-text-ghost focus:border-copper-dim",
-    "bg-light-surface/80 border-light-border text-copper placeholder:text-light-text-ghost focus:border-copper",
+    "bg-ink-surface/80 border-ink-border text-copper placeholder:text-text-muted focus:border-copper-dim",
+    "bg-light-surface/80 border-light-border text-copper placeholder:text-light-text-muted focus:border-copper",
   )}`;
   const inputErrorClass = `w-full px-2 py-1 text-[0.8em] font-mono rounded focus:outline-none border-2 ${c(
-    "bg-ink-surface border-severity-error/60 text-text-bright placeholder:text-text-ghost focus:border-severity-error",
-    "bg-light-surface border-severity-error/60 text-light-text-bright placeholder:text-light-text-ghost focus:border-severity-error",
+    "bg-ink-surface border-severity-error/60 text-text-bright placeholder:text-text-muted focus:border-severity-error",
+    "bg-light-surface border-severity-error/60 text-light-text-bright placeholder:text-light-text-muted focus:border-severity-error",
   )}`;
   const deleteClass = c("text-text-muted hover:text-severity-error transition-colors", "text-light-text-muted hover:text-severity-error transition-colors");
   const addClass = c("text-text-muted hover:text-copper transition-colors", "text-light-text-muted hover:text-copper transition-colors");
@@ -571,7 +571,7 @@ export function EditableGrid({
       {(emptyKeyIds.size > 0 || duplicateKeyIds.size > 0) && (
         <div className="px-3 py-1.5 text-[0.8em]">
           {emptyKeyIds.size > 0 && <span className="text-severity-error">Key column has empty values.</span>}
-          {emptyKeyIds.size > 0 && duplicateKeyIds.size > 0 && <span className={c("text-text-ghost", "text-light-text-ghost")}> · </span>}
+          {emptyKeyIds.size > 0 && duplicateKeyIds.size > 0 && <span className={c("text-text-muted", "text-light-text-muted")}> · </span>}
           {duplicateKeyIds.size > 0 && <span className="text-severity-warn">Duplicate key values.</span>}
         </div>
       )}

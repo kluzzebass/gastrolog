@@ -120,7 +120,7 @@ export function MmdbCards({
             onToggle={() => toggle(`mmdb-${i}`)}
             onDelete={() => handleDelete(i)}
             status={
-              <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
                 {dbLabel}{(() => {
                   if (resolvedFile) return ` — ${resolvedFile.name}`;
                   return m.fileId ? "" : " (auto-download)";
@@ -155,7 +155,7 @@ export function MmdbCards({
                 />
               </FormField>
               {!m.fileId && (
-                <p className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                   No file uploaded — will use auto-downloaded {dbLabel} database if MaxMind auto-download is enabled.
                 </p>
               )}

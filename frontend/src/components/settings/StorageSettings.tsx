@@ -298,7 +298,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
         )}
 
         {isLoading && (
-          <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <div className={`text-center py-8 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
             Loading...
           </div>
         )}
@@ -314,7 +314,7 @@ export function StorageSettings({ dark }: Readonly<{ dark: boolean }>) {
 
           if (!isLoading && allStorages.length === 0 && !addingStorage) {
             return (
-              <div className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              <div className={`text-center py-8 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
                 No file storage configured. Click &quot;Add File Storage&quot; to create one.
               </div>
             );

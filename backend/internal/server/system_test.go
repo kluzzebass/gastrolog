@@ -22,6 +22,7 @@ import (
 	indexfile "gastrolog/internal/index/file"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/ingester/syslog"
+	"gastrolog/internal/ingester/tail"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/server"
 
@@ -1032,6 +1033,58 @@ func TestPutIngesterExternalPortConflict(t *testing.T) {
 	}
 	if connect.CodeOf(err) != connect.CodeInvalidArgument {
 		t.Fatalf("expected CodeInvalidArgument, got %v: %v", connect.CodeOf(err), err)
+	}
+}
+
+func TestGetIngesterDefaultsModes(t *testing.T) {
+	t.Parallel()
+
+	cfgStore := sysmem.NewStore()
+	orch, err := orchestrator.New(orchestrator.Config{SystemLoader: cfgStore})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	factories := orchestrator.Factories{
+		ChunkManagers: map[string]chunk.ManagerFactory{
+			"memory": chunkmem.NewFactory(),
+		},
+		IndexManagers: map[string]index.ManagerFactory{
+			"memory": indexmem.NewFactory(),
+		},
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
+			"tail":   {Factory: tail.NewFactory(), Defaults: tail.ParamDefaults},
+		},
+	}
+
+	srv := server.New(orch, cfgStore, factories, nil, server.Config{})
+	handler := srv.Handler()
+	httpClient := &http.Client{Transport: &embeddedTransport{handler: handler}}
+	client := gastrologv1connect.NewSystemServiceClient(httpClient, "http://test")
+	ctx := context.Background()
+
+	resp, err := client.GetIngesterDefaults(ctx, connect.NewRequest(&gastrologv1.GetIngesterDefaultsRequest{}))
+	if err != nil {
+		t.Fatalf("GetIngesterDefaults: %v", err)
+	}
+
+	// syslog has ListenAddrs → passive.
+	syslogDef := resp.Msg.Types["syslog"]
+	if syslogDef == nil {
+		t.Fatal("expected syslog in types")
+	}
+	if syslogDef.Mode != gastrologv1.IngesterMode_INGESTER_MODE_PASSIVE {
+		t.Errorf("syslog: expected PASSIVE, got %v", syslogDef.Mode)
+	}
+
+	// tail has no ListenAddrs → active.
+	tailDef := resp.Msg.Types["tail"]
+	if tailDef == nil {
+		t.Fatal("expected tail in types")
+	}
+	if tailDef.Mode != gastrologv1.IngesterMode_INGESTER_MODE_ACTIVE {
+		t.Errorf("tail: expected ACTIVE, got %v", tailDef.Mode)
 	}
 }
 

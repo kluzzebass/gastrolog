@@ -7,12 +7,12 @@ export function EmptyState({ dark }: Readonly<{ dark: boolean }>) {
         &empty;
       </div>
       <p
-        className={`text-[0.9em] ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`text-[0.9em] ${dark ? "text-text-muted" : "text-light-text-muted"}`}
       >
         Enter a query to search your logs
       </p>
       <p
-        className={`text-[0.8em] mt-1 font-mono ${dark ? "text-text-ghost/60" : "text-light-text-ghost/60"}`}
+        className={`text-[0.8em] mt-1 font-mono ${dark ? "text-text-muted/60" : "text-light-text-muted/60"}`}
       >
         press Enter to execute
       </p>

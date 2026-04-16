@@ -1,18 +1,22 @@
 import { useQuery } from "@tanstack/react-query";
 import { systemClient } from "../client";
+import { IngesterMode } from "../gen/gastrolog/v1/system_pb";
 
 export type IngesterDefaults = Record<string, Record<string, string>>;
+export type IngesterModes = Record<string, IngesterMode>;
 
 export function useIngesterDefaults() {
   return useQuery({
     queryKey: ["ingesterDefaults"],
-    queryFn: async (): Promise<IngesterDefaults> => {
+    queryFn: async (): Promise<{ defaults: IngesterDefaults; modes: IngesterModes }> => {
       const response = await systemClient.getIngesterDefaults({});
-      const result: IngesterDefaults = {};
-      for (const [type, defaults] of Object.entries(response.types)) {
-        result[type] = defaults.params;
+      const defaults: IngesterDefaults = {};
+      const modes: IngesterModes = {};
+      for (const [type, td] of Object.entries(response.types)) {
+        defaults[type] = td.params;
+        modes[type] = td.mode;
       }
-      return result;
+      return { defaults, modes };
     },
     staleTime: Infinity, // Never refetch — defaults don't change at runtime.
   });

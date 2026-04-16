@@ -56,8 +56,8 @@ export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>)
           <button
             onClick={onClose}
             className={`w-7 h-7 flex items-center justify-center rounded ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+              "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
             )}`}
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
@@ -81,7 +81,7 @@ export function AlertPanel({ alerts, dark, onClose }: Readonly<AlertPanelProps>)
                 <p className={`text-sm ${c("text-text-normal", "text-light-text-normal")}`}>
                   {a.message}
                 </p>
-                <div className={`flex gap-3 mt-1 text-xs font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                <div className={`flex gap-3 mt-1 text-xs font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
                   <span>{a.nodeName}</span>
                   <span>{a.source}</span>
                   <span title="First seen">{formatTime(a.firstSeen?.seconds)}</span>

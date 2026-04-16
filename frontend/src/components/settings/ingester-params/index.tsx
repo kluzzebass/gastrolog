@@ -51,8 +51,8 @@ export function IngesterParamsForm({
   ingesterId,
   ingesterNodeId,
 }: Readonly<IngesterParamsFormProps>) {
-  const { data: allDefaults } = useIngesterDefaults();
-  const defaults = allDefaults?.[ingesterType] ?? {};
+  const { data: ingesterMeta } = useIngesterDefaults();
+  const defaults = ingesterMeta?.defaults[ingesterType] ?? {};
 
   const Form = FORM_MAP[ingesterType];
   if (!Form) return null;

@@ -60,7 +60,7 @@ export function ExampleValues({
   if (!examples?.length || value) return null;
   return (
     <div
-      className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+      className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}
     >
       {examples.map((ex, i) => (
         <span key={ex}>
@@ -114,8 +114,8 @@ export function TextInput({
         className={`px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none transition-colors ${
           mono ? "font-mono" : ""
         } ${c(
-          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
         )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       />
       <ExampleValues examples={examples} value={value} onChange={onChange} dark={dark} />
@@ -198,8 +198,8 @@ export function NumberInput({
         placeholder={placeholder}
         disabled={disabled}
         className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
         )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       />
       <ExampleValues examples={examples} value={value} onChange={onChange} dark={dark} />
@@ -318,8 +318,8 @@ export function TextArea({
       disabled={disabled}
       rows={rows}
       className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors resize-y ${c(
-        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
       )} ${disabled ? "opacity-50 cursor-not-allowed" : ""} ${className ?? ""}`}
     />
   );
@@ -376,8 +376,8 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
           <button
             onClick={() => handleRemove(key)}
             className={`px-3 py-1 text-[0.8em] rounded border transition-colors ${c(
-              "border-ink-border text-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
-              "border-light-border text-light-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
+              "border-ink-border text-text-muted hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
+              "border-light-border text-light-text-muted hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
             )}`}
           >
             Remove
@@ -392,8 +392,8 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
           placeholder="key"
           aria-label="Parameter key"
           className={`w-28 shrink-0 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
-            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
           )}`}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
         />
@@ -404,8 +404,8 @@ export function ParamsEditor({ params, onChange, dark }: Readonly<ParamsEditorPr
           placeholder="value"
           aria-label="Parameter value"
           className={`flex-1 px-2 py-1 text-[0.8em] font-mono border rounded focus:outline-none ${c(
-            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
           )}`}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
         />

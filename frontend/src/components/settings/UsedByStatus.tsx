@@ -12,7 +12,7 @@ export function UsedByStatus({ dark, refs, onNavigate }: Readonly<UsedByStatusPr
   if (refs.length === 0) return;
   return (
     <span
-      className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+      className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}
     >
       used by:{" "}
       {refs.map((ref, i) => (

@@ -167,7 +167,7 @@ function Section({
     <section>
       <div className="flex items-center gap-2 mb-3">
         <h3
-          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
           {title}
         </h3>
@@ -186,7 +186,7 @@ function EmptyMessage({
 }: Readonly<{ dark: boolean; children: React.ReactNode }>) {
   const c = useThemeClass(dark);
   return (
-    <div className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+    <div className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
       {children}
     </div>
   );

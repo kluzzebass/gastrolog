@@ -77,7 +77,7 @@ export function IngesterStep({ dark, data, onChange, namePlaceholder }: Readonly
           >
             <span className="text-[0.85em] font-medium">{t.label}</span>
             <span
-              className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               {t.description}
             </span>

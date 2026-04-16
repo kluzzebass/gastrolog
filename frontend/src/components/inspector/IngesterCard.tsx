@@ -40,7 +40,7 @@ export function IngesterCard({
           {ingester.running ? (
             <Badge variant="info" dark={dark}>running</Badge>
           ) : (
-            <Badge variant="ghost" dark={dark}>stopped</Badge>
+            <Badge variant="muted" dark={dark}>stopped</Badge>
           )}
           {onOpenSettings && (
             <CrossLinkBadge dark={dark} title="Open in Settings" onClick={onOpenSettings}>
@@ -66,7 +66,7 @@ function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
   if (!data) {
     return (
       <div
-        className={`px-4 py-3 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`px-4 py-3 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
         No status available.
       </div>
@@ -90,7 +90,7 @@ function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
   return (
     <div className={`px-4 py-3 ${c("bg-ink-raised", "bg-light-bg")}`}>
       <div
-        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Metrics
       </div>
@@ -107,7 +107,7 @@ function IngesterDetail({ id, dark }: Readonly<{ id: string; dark: boolean }>) {
                 {stat.label}
               </span>
               {stat.hint && (
-                <div className={`text-[0.8em] leading-tight mt-0.5 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                <div className={`text-[0.8em] leading-tight mt-0.5 ${c("text-text-muted", "text-light-text-muted")}`}>
                   {stat.hint}
                 </div>
               )}

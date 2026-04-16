@@ -129,7 +129,7 @@ export function SettingsDialog({
           className={`min-w-fit shrink-0 border-r overflow-y-auto app-scroll p-3 ${c("border-ink-border", "border-light-border")}`}
         >
           <h2
-            className={`text-[0.75em] uppercase tracking-wider font-medium mb-3 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.75em] uppercase tracking-wider font-medium mb-3 px-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Settings
           </h2>

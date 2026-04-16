@@ -173,7 +173,7 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
                 strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className={`absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 pointer-events-none ${c("text-text-muted", "text-light-text-muted")}`}
               >
                 <circle cx="11" cy="11" r="8" />
                 <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -185,14 +185,14 @@ export function HelpDialog({ dark, topicId, onClose, onNavigate, onOpenSettings 
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search help..."
                 className={`w-full pl-7 pr-2 py-1.5 text-[0.8em] rounded border focus:outline-none focus:border-copper ${c(
-                  "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
-                  "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
+                  "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted",
+                  "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted",
                 )}`}
               />
               {search && (
                 <button
                   onClick={() => { setSearch(""); searchRef.current?.focus(); }}
-                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-sm text-[0.7em] leading-none ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
+                  className={`absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-sm text-[0.7em] leading-none ${c("text-text-muted hover:text-text-muted", "text-light-text-muted hover:text-light-text-muted")}`}
                   aria-label="Clear search"
                 >
                   &times;
@@ -326,7 +326,7 @@ function SidebarContent({ dark, activeId, expanded, searchResults, search, onSel
     return (
       <>
         <h2
-          className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.75em] uppercase tracking-wider font-medium mb-2 px-2 ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Topics
         </h2>
@@ -348,7 +348,7 @@ function SidebarContent({ dark, activeId, expanded, searchResults, search, onSel
   }
   if (searchResults.length === 0) {
     return (
-      <p className={`text-[0.8em] px-2 py-1 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      <p className={`text-[0.8em] px-2 py-1 ${c("text-text-muted", "text-light-text-muted")}`}>
         No results
       </p>
     );
@@ -372,7 +372,7 @@ function SidebarContent({ dark, activeId, expanded, searchResults, search, onSel
           >
             <span>{entry.topic.title}</span>
             {snippet && (
-              <span className={`text-[0.8em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              <span className={`text-[0.8em] truncate ${c("text-text-muted", "text-light-text-muted")}`}>
                 {snippet}
               </span>
             )}
@@ -404,13 +404,13 @@ function ContentPanel({ dark, topic, topicContent, loadingContent, onNavigate, o
   }
   if (topic) {
     return (
-      <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      <p className={`text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
         Loading...
       </p>
     );
   }
   return (
-    <p className={`text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+    <p className={`text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}>
       Select a topic from the sidebar.
     </p>
   );

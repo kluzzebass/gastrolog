@@ -86,7 +86,7 @@ export function buildMarkdownComponents(
       }
       if (className.includes("language-mermaid")) {
         const chart = childrenToText(children);
-        return <Suspense fallback={<div className="py-4 text-center text-text-ghost text-[0.85em]">Loading diagram...</div>}><MermaidDiagram chart={chart.trim()} dark={dark} /></Suspense>;
+        return <Suspense fallback={<div className="py-4 text-center text-text-muted text-[0.85em]">Loading diagram...</div>}><MermaidDiagram chart={chart.trim()} dark={dark} /></Suspense>;
       }
       return <code className={`font-mono text-[0.85em] ${c("text-text-normal", "text-light-text-normal")} ${className}`}>{children}</code>;
     },
@@ -164,7 +164,7 @@ export function buildMarkdownComponents(
     ),
     th: ({ children }: { children?: React.ReactNode }) => (
       <th
-        className={`text-left py-1.5 px-2 border-b font-medium text-[0.85em] uppercase tracking-wider ${c("border-ink-border text-text-ghost", "border-light-border text-light-text-ghost")}`}
+        className={`text-left py-1.5 px-2 border-b font-medium text-[0.85em] uppercase tracking-wider ${c("border-ink-border text-text-muted", "border-light-border text-light-text-muted")}`}
       >
         {children}
       </th>

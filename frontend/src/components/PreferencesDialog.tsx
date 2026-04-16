@@ -136,7 +136,7 @@ function PreferenceGroup({
   return (
     <div>
       <div
-        className={`text-[0.75em] font-medium uppercase tracking-widest mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.75em] font-medium uppercase tracking-widest mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {label}
       </div>

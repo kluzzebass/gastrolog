@@ -249,7 +249,7 @@ export function TierEntryCard({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span
-            className={`text-[0.7em] font-mono tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] font-mono tabular-nums ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {index + 1}
           </span>
@@ -263,7 +263,7 @@ export function TierEntryCard({
           </span>
           {index === 0 && (
             <span
-              className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               hottest
             </span>
@@ -273,8 +273,8 @@ export function TierEntryCard({
           type="button"
           onClick={onRemove}
           className={`px-1.5 py-0.5 text-[0.8em] rounded transition-colors ${c(
-            "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+            "text-text-muted hover:text-severity-error hover:bg-ink-hover",
+            "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
           )}`}
           aria-label="Remove tier"
         >
@@ -667,7 +667,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
                 Tiers
                 {addForm.tiers.length === 0 && (
                   <span
-                    className={`ml-2 text-[0.9em] font-normal ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    className={`ml-2 text-[0.9em] font-normal ${c("text-text-muted", "text-light-text-muted")}`}
                   >
                     at least one required
                   </span>
@@ -687,7 +687,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
 
             {addForm.tiers.length > 0 && (
               <p
-                className={`text-[0.75em] leading-snug ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`text-[0.75em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}
               >
                 First tier is hottest. Data migrates down the list as it ages.
               </p>

@@ -146,7 +146,7 @@ function PipelineStagesBar({
         >
           Pipeline
         </span>
-        <span className={`font-mono text-xs ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        <span className={`font-mono text-xs ${c("text-text-muted", "text-light-text-muted")}`}>
           {stages.length} {stages.length === 1 ? "stage" : "stages"}
         </span>
       </div>
@@ -256,7 +256,7 @@ function CostSummary({ chunks, dark }: Readonly<{ chunks: ChunkPlan[]; dark: boo
           <strong className={c("text-text-bright", "text-light-text-bright")}>
             ~{totalScan.toLocaleString()}
           </strong>
-          <span className={c("text-text-ghost", "text-light-text-ghost")}>
+          <span className={c("text-text-muted", "text-light-text-muted")}>
             {" "}
             / {totalRecords.toLocaleString()} records
           </span>
@@ -267,7 +267,7 @@ function CostSummary({ chunks, dark }: Readonly<{ chunks: ChunkPlan[]; dark: boo
             {scanned.length}
           </strong>
           {skipped.length > 0 && (
-            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+            <span className={c("text-text-muted", "text-light-text-muted")}>
               {" "}
               ({skipped.length} skipped)
             </span>

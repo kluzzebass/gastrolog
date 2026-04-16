@@ -140,7 +140,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
             <span className={`text-[0.85em] font-medium ${c("text-text-bright", "text-light-text-bright")}`}>
               Drop a file here to upload
             </span>
-            <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
               or click to browse
             </span>
           </>
@@ -159,8 +159,8 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
         <button
           onClick={() => setMaxmindVisible(true)}
           className={`w-full rounded-lg border border-dashed px-4 py-3 text-[0.8em] transition-colors ${c(
-            "border-ink-border text-text-ghost hover:border-copper-dim hover:text-text-muted",
-            "border-light-border text-light-text-ghost hover:border-copper hover:text-light-text-muted",
+            "border-ink-border text-text-muted hover:border-copper-dim hover:text-text-muted",
+            "border-light-border text-light-text-muted hover:border-copper hover:text-light-text-muted",
           )}`}
         >
           Enable MaxMind Auto-Download
@@ -168,7 +168,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
       )}
 
       {groups.length === 0 && !maxmindVisible && (
-        <p className={`text-[0.8em] text-center py-4 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        <p className={`text-[0.8em] text-center py-4 ${c("text-text-muted", "text-light-text-muted")}`}>
           No managed files. Upload a file above to get started.
         </p>
       )}
@@ -200,7 +200,7 @@ export function FilesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
               {older.length > 0 && (
                 <div className="flex flex-col gap-2">
-                  <span className={`text-[0.75em] uppercase tracking-wider font-medium ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                  <span className={`text-[0.75em] uppercase tracking-wider font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
                     Previous versions ({older.length})
                   </span>
                   {older.map((v) => (
@@ -237,11 +237,11 @@ function VersionRow({
           <span className={`font-mono truncate ${c("text-text-muted", "text-light-text-muted")}`}>
             sha256:{file.sha256.slice(0, 12)}
           </span>
-          <span className={c("text-text-ghost", "text-light-text-ghost")}>
+          <span className={c("text-text-muted", "text-light-text-muted")}>
             {formatBytes(Number(file.size))}
           </span>
           {file.uploadedAt && (
-            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+            <span className={c("text-text-muted", "text-light-text-muted")}>
               {formatDateTimestamp(new Date(file.uploadedAt))}
             </span>
           )}
@@ -255,8 +255,8 @@ function VersionRow({
         <button
           onClick={() => setConfirmDelete(true)}
           className={`shrink-0 px-2 py-1 rounded text-[0.85em] transition-colors ${c(
-            "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+            "text-text-muted hover:text-severity-error hover:bg-ink-hover",
+            "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
           )}`}
         >
           Delete

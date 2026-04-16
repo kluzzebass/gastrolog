@@ -42,8 +42,8 @@ export function StringListEditor({
           <button
             onClick={() => onChange(values.filter((_, j) => j !== i))}
             className={`px-2 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-              "border-ink-border text-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
-              "border-light-border text-light-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
+              "border-ink-border text-text-muted hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
+              "border-light-border text-light-text-muted hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
             )}`}
           >
             Remove
@@ -58,8 +58,8 @@ export function StringListEditor({
           placeholder={placeholder}
           onKeyDown={(e) => e.key === "Enter" && handleAdd()}
           className={`flex-1 px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none ${c(
-            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
           )}`}
         />
         <button
@@ -102,8 +102,8 @@ export function ParameterListEditor({
               disabled={i === 0}
               onClick={() => swap(i, i - 1)}
               className={`px-1 py-0 text-[0.7em] leading-none rounded transition-colors disabled:opacity-20 ${c(
-                "text-text-ghost hover:text-copper",
-                "text-light-text-ghost hover:text-copper",
+                "text-text-muted hover:text-copper",
+                "text-light-text-muted hover:text-copper",
               )}`}
             >
               ▲
@@ -112,8 +112,8 @@ export function ParameterListEditor({
               disabled={i === values.length - 1}
               onClick={() => swap(i, i + 1)}
               className={`px-1 py-0 text-[0.7em] leading-none rounded transition-colors disabled:opacity-20 ${c(
-                "text-text-ghost hover:text-copper",
-                "text-light-text-ghost hover:text-copper",
+                "text-text-muted hover:text-copper",
+                "text-light-text-muted hover:text-copper",
               )}`}
             >
               ▼
@@ -129,8 +129,8 @@ export function ParameterListEditor({
             }}
             placeholder="name"
             className={`w-32 px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none ${c(
-              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
             )}`}
           />
           <input
@@ -143,15 +143,15 @@ export function ParameterListEditor({
             }}
             placeholder="description"
             className={`flex-1 px-2.5 py-1.5 text-[0.85em] border rounded focus:outline-none ${c(
-              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
             )}`}
           />
           <button
             onClick={() => onChange(values.filter((_, j) => j !== i))}
             className={`px-2 py-1.5 text-[0.8em] rounded border transition-colors ${c(
-              "border-ink-border text-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
-              "border-light-border text-light-text-ghost hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
+              "border-ink-border text-text-muted hover:text-severity-error hover:border-severity-error hover:bg-ink-hover",
+              "border-light-border text-light-text-muted hover:text-severity-error hover:border-severity-error hover:bg-light-hover",
             )}`}
           >
             Remove
@@ -191,8 +191,8 @@ export function PasswordInput({
       placeholder={placeholder}
       autoComplete="off"
       className={`px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+        "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+        "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
       )}`}
     />
   );

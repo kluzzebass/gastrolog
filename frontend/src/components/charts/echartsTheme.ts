@@ -7,8 +7,8 @@ import { cssVar } from "./chartColors";
  */
 export function buildThemeOption(dark: boolean): EChartsOption {
   const textGhost = dark
-    ? cssVar("--color-text-ghost")
-    : cssVar("--color-light-text-ghost");
+    ? cssVar("--color-text-muted")
+    : cssVar("--color-light-text-muted");
   // Grid lines use low-opacity white/black — palette-neutral on any dark/light bg.
   const gridLine = dark ? "rgba(255,255,255,0.06)" : "rgba(0,0,0,0.06)";
   const tooltipBg = dark

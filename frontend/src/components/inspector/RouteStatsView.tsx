@@ -87,7 +87,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       {sorted.length > 0 && (
         <div>
           <h3
-            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Per-vault delivery
           </h3>
@@ -95,7 +95,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-ghost border-ink-border-subtle bg-ink-well", "text-light-text-ghost border-light-border-subtle bg-light-well")}`}
+              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
             >
               <span>Vault</span>
               <span className="text-right">Matched</span>
@@ -125,7 +125,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                       {formatCount(vs.recordsForwarded)}
                     </Badge>
                   ) : (
-                    <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                    <span className={c("text-text-muted", "text-light-text-muted")}>
                       0
                     </span>
                   )}
@@ -141,7 +141,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
       {sortedRoutes.length > 0 && (
         <div>
           <h3
-            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.75em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Per-route delivery
           </h3>
@@ -149,7 +149,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
             className={`rounded-lg border overflow-hidden ${c("border-ink-border", "border-light-border")}`}
           >
             <div
-              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-ghost border-ink-border-subtle bg-ink-well", "text-light-text-ghost border-light-border-subtle bg-light-well")}`}
+              className={`grid grid-cols-[1fr_7rem_7rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c("text-text-muted border-ink-border-subtle bg-ink-well", "text-light-text-muted border-light-border-subtle bg-light-well")}`}
             >
               <span>Route</span>
               <span className="text-right">Matched</span>
@@ -179,7 +179,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
                       {formatCount(rs.recordsForwarded)}
                     </Badge>
                   ) : (
-                    <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                    <span className={c("text-text-muted", "text-light-text-muted")}>
                       0
                     </span>
                   )}
@@ -193,7 +193,7 @@ export function RouteStatsView({ dark }: Readonly<RouteStatsViewProps>) {
 
       {sorted.length === 0 && stats.filterSetActive && (
         <div
-          className={`text-center text-[0.9em] py-4 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-center text-[0.9em] py-4 ${c("text-text-muted", "text-light-text-muted")}`}
         >
           No records have been routed yet.
         </div>
@@ -222,7 +222,7 @@ function StatBox({
   return (
     <div>
       <div
-        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {label}
       </div>

@@ -26,7 +26,7 @@ export function ContextRecord({
 
   const borderClass = isAnchor
     ? c("border-l-copper bg-copper/10 text-text-normal", "border-l-copper bg-copper/8 text-light-text-normal")
-    : c("border-l-transparent text-text-ghost hover:text-text-muted", "border-l-transparent text-light-text-ghost hover:text-light-text-muted");
+    : c("border-l-transparent text-text-muted hover:text-text-muted", "border-l-transparent text-light-text-muted hover:text-light-text-muted");
 
   const children = (
     <>

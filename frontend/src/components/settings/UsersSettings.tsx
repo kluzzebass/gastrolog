@@ -274,7 +274,7 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
                 <PasswordRules password={edit.newPassword} config={settings} dark={dark} />
               )}
               <div
-                className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}
               >
                 Created{" "}
                 {formatDateOnly(new Date(Number(user.createdAt) * 1000))}
@@ -312,16 +312,16 @@ function PasswordInput({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={`w-full px-2.5 py-1.5 pr-9 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+          "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+          "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
         )}`}
       />
       <button
         type="button"
         onClick={onToggle}
         className={`absolute right-2 top-1/2 -translate-y-1/2 transition-colors ${c(
-          "text-text-ghost hover:text-text-muted",
-          "text-light-text-ghost hover:text-light-text-muted",
+          "text-text-muted hover:text-text-muted",
+          "text-light-text-muted hover:text-light-text-muted",
         )}`}
       >
         {show ? (

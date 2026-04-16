@@ -55,8 +55,8 @@ export function SettingsCard({
               <button
                 onClick={() => setConfirmDelete(true)}
                 className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                  "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                  "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                  "text-text-muted hover:text-severity-error hover:bg-ink-hover",
+                  "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
                 )}`}
               >
                 {deleteLabel || "Delete"}

@@ -348,9 +348,16 @@ func (s *SystemServer) GetIngesterDefaults(
 ) (*connect.Response[apiv1.GetIngesterDefaultsResponse], error) {
 	types := make(map[string]*apiv1.IngesterTypeDefaults, len(s.factories.IngesterTypes))
 	for name, reg := range s.factories.IngesterTypes {
-		if reg.Defaults != nil {
-			types[name] = &apiv1.IngesterTypeDefaults{Params: reg.Defaults()}
+		td := &apiv1.IngesterTypeDefaults{
+			Mode: apiv1.IngesterMode_INGESTER_MODE_ACTIVE,
 		}
+		if reg.ListenAddrs != nil {
+			td.Mode = apiv1.IngesterMode_INGESTER_MODE_PASSIVE
+		}
+		if reg.Defaults != nil {
+			td.Params = reg.Defaults()
+		}
+		types[name] = td
 	}
 	return connect.NewResponse(&apiv1.GetIngesterDefaultsResponse{Types: types}), nil
 }

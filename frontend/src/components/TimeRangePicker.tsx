@@ -150,7 +150,7 @@ export function TimeRangePicker({
       <div className="space-y-1">
         <div className="flex items-center gap-1.5">
           <span
-            className={`text-[0.7em] w-8 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] w-8 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             From
           </span>
@@ -176,7 +176,7 @@ export function TimeRangePicker({
         </div>
         <div className="flex items-center gap-1.5">
           <span
-            className={`text-[0.7em] w-8 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] w-8 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             To
           </span>
@@ -207,7 +207,7 @@ export function TimeRangePicker({
         <button
           onClick={() => dispatch({ type: "prevMonth" })}
           aria-label="Previous month"
-          className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
+          className={`text-[0.8em] px-1 rounded ${c("text-text-muted hover:text-text-muted", "text-light-text-muted hover:text-light-text-muted")}`}
         >
           {"\u25C2"}
         </button>
@@ -219,7 +219,7 @@ export function TimeRangePicker({
         <button
           onClick={() => dispatch({ type: "nextMonth" })}
           aria-label="Next month"
-          className={`text-[0.8em] px-1 rounded ${c("text-text-ghost hover:text-text-muted", "text-light-text-ghost hover:text-light-text-muted")}`}
+          className={`text-[0.8em] px-1 rounded ${c("text-text-muted hover:text-text-muted", "text-light-text-muted hover:text-light-text-muted")}`}
         >
           {"\u25B8"}
         </button>
@@ -231,7 +231,7 @@ export function TimeRangePicker({
           {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => (
             <div
               key={d}
-              className={`text-center text-[0.65em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-center text-[0.65em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
             >
               {d}
             </div>
@@ -260,7 +260,7 @@ export function TimeRangePicker({
             } else if (inMonth) {
               dayCls = c("text-text-muted hover:bg-ink-hover hover:text-text-normal", "text-light-text-muted hover:bg-light-hover hover:text-light-text-normal");
             } else {
-              dayCls = c("text-text-ghost/40", "text-light-text-ghost/40");
+              dayCls = c("text-text-muted/40", "text-light-text-muted/40");
             }
             const todayCls = isToday && !selected ? " underline decoration-copper" : "";
 

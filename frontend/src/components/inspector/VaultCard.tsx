@@ -141,7 +141,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
   if (isLoading) {
     return (
       <div
-        className={`px-4 py-3 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`px-4 py-3 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Loading chunks...
       </div>
@@ -212,8 +212,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
             <div
               key={tierId}
               className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
-                "text-text-ghost border-ink-border-subtle bg-ink-base/30",
-                "text-light-text-ghost border-light-border-subtle bg-light-base/30",
+                "text-text-muted border-ink-border-subtle bg-ink-base/30",
+                "text-light-text-muted border-light-border-subtle bg-light-base/30",
               )}`}
             >
               <Badge variant="muted" dark={dark}>{`Tier ${String(pos)}: ${remote.type}`}</Badge>
@@ -261,8 +261,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
         <div key={tierId}>
           <div
             className={`flex items-center gap-2 px-4 py-1.5 text-[0.75em] font-medium uppercase tracking-[0.12em] border-b ${c(
-              "text-text-ghost border-ink-border-subtle bg-ink-base/30",
-              "text-light-text-ghost border-light-border-subtle bg-light-base/30",
+              "text-text-muted border-ink-border-subtle bg-ink-base/30",
+              "text-light-text-muted border-light-border-subtle bg-light-base/30",
             )}`}
           >
             <Badge variant="copper" dark={dark}>{label}</Badge>
@@ -304,8 +304,8 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
             <thead>
               <tr
                 className={`text-left text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
-                  "text-text-ghost border-ink-border-subtle",
-                  "text-light-text-ghost border-light-border-subtle",
+                  "text-text-muted border-ink-border-subtle",
+                  "text-light-text-muted border-light-border-subtle",
                 )}`}
               >
                 <th className="px-4 py-2 font-medium">Chunk ID</th>
@@ -405,7 +405,7 @@ function ChunkRow({
             className={`text-[0.95em] whitespace-nowrap ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {start ? formatDateTimeShort(start) : "\u2014"}
-            <span className={`mx-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span className={`mx-1.5 ${c("text-text-muted", "text-light-text-muted")}`}>
               {"\u2192"}
             </span>
             {end ? formatDateTimeShort(end) : "\u2014"}
@@ -507,7 +507,7 @@ function ChunkDetail({
       {/* Full chunk ID — selectable for copy/paste */}
       <div className="mb-3">
         <div
-          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Chunk ID
         </div>
@@ -522,7 +522,7 @@ function ChunkDetail({
       {rf > 1 && (
         <div className="mb-3">
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Replicas
           </div>
@@ -535,7 +535,7 @@ function ChunkDetail({
                 {`${String(replicas)}/${String(rf)}`}
               </span>
               {replicaNodes.length > 0 && (
-                <span className={c("text-text-ghost", "text-light-text-ghost")}>
+                <span className={c("text-text-muted", "text-light-text-muted")}>
                   {replicaNodes.join(", ")}
                 </span>
               )}
@@ -553,7 +553,7 @@ function ChunkDetail({
       {showCompression && (
         <div className="mb-3">
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Compression
           </div>
@@ -564,7 +564,7 @@ function ChunkDetail({
               {formatBytes(logicalBytes)} &rarr; {formatBytes(diskBytes)}
             </span>
             <span
-              className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
             >
               {reductionPct}% reduction
             </span>
@@ -575,7 +575,7 @@ function ChunkDetail({
       {/* Active chunks: no indexes yet */}
       {!chunk.sealed && (
         <div
-          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Indexes are built when the chunk is sealed.
         </div>
@@ -583,7 +583,7 @@ function ChunkDetail({
       {chunk.sealed && chunk.cloudBacked && (
         <>
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Cloud Storage
           </div>
@@ -593,7 +593,7 @@ function ChunkDetail({
               <span className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}>
                 {formatBytes(Number(chunk.diskBytes))}
               </span>
-              <span className={c("text-text-ghost", "text-light-text-ghost")}>
+              <span className={c("text-text-muted", "text-light-text-muted")}>
                 GLCB{chunk.numFrames > 0 ? `, ${chunk.numFrames} seekable zstd frames` : ", seekable zstd"}
               </span>
             </div>
@@ -623,21 +623,21 @@ function ChunkDetail({
         <>
           {/* Local indexes */}
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Indexes
           </div>
 
           {isLoading && (
             <div
-              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               Loading indexes...
             </div>
           )}
           {!isLoading && (!data?.indexes || data.indexes.length === 0) && (
             <div
-              className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               No indexes.
             </div>
@@ -663,13 +663,13 @@ function ChunkDetail({
                         {Number(idx.entryCount).toLocaleString()} entries
                       </span>
                       <span
-                        className={`font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                        className={`font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                       >
                         {formatBytes(Number(idx.sizeBytes))}
                       </span>
                     </>
                   ) : (
-                    <Badge variant="ghost" dark={dark}>missing</Badge>
+                    <Badge variant="muted" dark={dark}>missing</Badge>
                   )}
                 </div>
               ))}

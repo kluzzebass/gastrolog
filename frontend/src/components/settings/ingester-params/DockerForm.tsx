@@ -100,7 +100,7 @@ export function DockerForm({
         {params["tls"] !== "false" && (
           <div className="flex flex-col gap-2 mt-1">
             <p
-              className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               Select certificates from the Certificates tab. Leave empty to use
               system CAs without client authentication.

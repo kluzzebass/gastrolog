@@ -249,7 +249,7 @@ function ArchivalSection({
             dark={dark}
           />
         </div>
-        <p className={`text-[0.7em] leading-snug ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        <p className={`text-[0.7em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}>
           {values.archivalMode === "active"
             ? "GastroLog automatically transitions chunks between storage classes based on age."
             : "Storage class transitions are handled outside GastroLog (e.g. S3 Lifecycle Rules, Azure Management Policies)."}
@@ -258,7 +258,7 @@ function ArchivalSection({
 
       {isActive && (
         <div className="flex flex-col gap-2">
-          <p className={`text-[0.75em] leading-snug ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <p className={`text-[0.75em] leading-snug ${c("text-text-muted", "text-light-text-muted")}`}>
             Transitions are applied in order by chunk age.
           </p>
 
@@ -287,8 +287,8 @@ function ArchivalSection({
               <button
                 onClick={() => removeTransition(i)}
                 className={`px-2 py-1 text-[0.75em] rounded transition-colors ${c(
-                  "text-text-ghost hover:text-severity-error hover:bg-ink-hover",
-                  "text-light-text-ghost hover:text-severity-error hover:bg-light-hover",
+                  "text-text-muted hover:text-severity-error hover:bg-ink-hover",
+                  "text-light-text-muted hover:text-severity-error hover:bg-light-hover",
                 )}`}
               >
                 Remove

@@ -59,8 +59,8 @@ export const AuthFormField = forwardRef<HTMLInputElement, AuthFormFieldProps>(
                   "border-light-border focus:border-copper",
                 )
           } ${c(
-            "bg-ink text-text-bright placeholder:text-text-ghost",
-            "bg-light-bg text-light-text-bright placeholder:text-light-text-ghost",
+            "bg-ink text-text-bright placeholder:text-text-muted",
+            "bg-light-bg text-light-text-bright placeholder:text-light-text-muted",
           )} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
         />
       </div>

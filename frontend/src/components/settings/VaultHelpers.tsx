@@ -142,7 +142,7 @@ export function RetentionRuleEditor({
       </div>
       {!enabled && (
         <span
-          className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.8em] italic ${c("text-text-muted", "text-light-text-muted")}`}
         >
           No retention rule
         </span>
@@ -244,7 +244,7 @@ function EjectRoutesPicker({
           />
         )}
         {selectedIds.length === 0 && available.length === 0 && (
-          <p className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
             No eject-only routes available. Create a route with "Eject Only" enabled first.
           </p>
         )}

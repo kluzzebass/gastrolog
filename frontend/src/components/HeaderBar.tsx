@@ -157,8 +157,8 @@ export function HeaderBar({
           aria-label="Help"
           title="Help"
           className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
-            "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+            "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
           )}`}
         >
           <svg
@@ -181,8 +181,8 @@ export function HeaderBar({
           aria-label="Inspector"
           title="Inspector"
           className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-500 ${c(
-            "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+            "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
           )} ${inspectorGlow ? "text-copper drop-shadow-[0_0_4px_var(--color-copper)]" : ""}`}
         >
           <svg
@@ -203,8 +203,8 @@ export function HeaderBar({
           aria-label="Settings"
           title="Settings"
           className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
-            "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+            "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+            "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
           )}`}
         >
           <svg
@@ -236,8 +236,8 @@ export function HeaderBar({
             aria-label="Preferences"
             title="Preferences"
             className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+              "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
             )}`}
           >
             <SlidersIcon className="w-4 h-4" />

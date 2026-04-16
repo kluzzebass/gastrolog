@@ -99,13 +99,13 @@ export const LogEntry = forwardRef<
     >
       {rowIndex != null && (
         <span
-          className={`hidden lg:block font-mono text-[0.65em] tabular-nums self-center text-right pr-1 ${dark ? "text-text-ghost/50" : "text-light-text-ghost/50"}`}
+          className={`hidden lg:block font-mono text-[0.65em] tabular-nums self-center text-right pr-1 ${dark ? "text-text-muted/50" : "text-light-text-muted/50"}`}
         >
           {rowIndex}
         </span>
       )}
       <span
-        className={`hidden lg:block font-mono text-[0.8em] tabular-nums self-center ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`hidden lg:block font-mono text-[0.8em] tabular-nums self-center ${dark ? "text-text-muted" : "text-light-text-muted"}`}
       >
         {ts}
       </span>

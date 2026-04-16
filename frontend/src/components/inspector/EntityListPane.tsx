@@ -317,7 +317,7 @@ function JobRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       </span>
       <JobStatusBadge status={job.status} dark={dark} />
       {Number(job.chunksTotal) > 0 && (
-        <span className={`font-mono text-[0.9em] shrink-0 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        <span className={`font-mono text-[0.9em] shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}>
           {Number(job.chunksDone)}/{Number(job.chunksTotal)} chunks
         </span>
       )}
@@ -336,7 +336,7 @@ function ScheduledHeader({ dark }: Readonly<{ dark: boolean }>) {
   const c = useThemeClass(dark);
   return (
     <div
-      className={`${scheduledGrid} px-4 py-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+      className={`${scheduledGrid} px-4 py-1.5 text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
     >
       <span>Description</span>
       <span>Schedule</span>
@@ -379,7 +379,7 @@ function ScheduledRow({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
 function JobStatusBadge({ status, dark }: Readonly<{ status: JobStatus; dark: boolean }>) {
   switch (status) {
     case JobStatus.PENDING:
-      return <Badge variant="ghost" dark={dark}>pending</Badge>;
+      return <Badge variant="muted" dark={dark}>pending</Badge>;
     case JobStatus.RUNNING:
       return <Badge variant="info" dark={dark}>running</Badge>;
     case JobStatus.COMPLETED:
@@ -487,7 +487,7 @@ function EntityHeader({
 function SectionLabel({ dark, children }: Readonly<{ dark: boolean; children: React.ReactNode }>) {
   const c = useThemeClass(dark);
   return (
-    <div className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+    <div className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}>
       {children}
     </div>
   );
@@ -501,7 +501,7 @@ function Empty({ dark, children }: Readonly<{ dark: boolean; children: React.Rea
   const c = useThemeClass(dark);
   return (
     <div
-      className={`flex items-center justify-center h-full text-[0.9em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+      className={`flex items-center justify-center h-full text-[0.9em] ${c("text-text-muted", "text-light-text-muted")}`}
     >
       {children}
     </div>

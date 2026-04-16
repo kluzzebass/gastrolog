@@ -509,8 +509,8 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
                           onChange={(e) => dispatch({ type: "set", field: "httpsPort", value: e.target.value })}
                           placeholder="auto"
                           className={`w-full px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none transition-colors ${c(
-                            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+                            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+                            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
                           )}`}
                         />
                       </FormField>

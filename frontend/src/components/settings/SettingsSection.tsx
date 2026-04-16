@@ -69,7 +69,7 @@ export function SettingsSection({
 
         {isEmpty && !adding && (
           <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-center py-8 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
           >
             {emptyMessage}
           </div>

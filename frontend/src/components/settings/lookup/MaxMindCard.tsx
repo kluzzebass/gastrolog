@@ -84,7 +84,7 @@ export function MaxMindCard({
       deleteLabel="Disable"
       status={
         autoDownload ? (
-          <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>enabled</span>
+          <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>enabled</span>
         ) : undefined
       }
       footer={
@@ -136,7 +136,7 @@ export function MaxMindCard({
         </FormField>
 
         {savedMaxmind?.lastUpdate && (
-          <div className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <div className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
             Last updated: {formatDateTimestamp(new Date(savedMaxmind.lastUpdate))}
           </div>
         )}

@@ -8,7 +8,7 @@ export function HelpButton({ topicId }: Readonly<{ topicId?: string }>) {
       onClick={() => openHelp(topicId)}
       aria-label="Help"
       title="Help"
-      className="w-5 h-5 flex items-center justify-center rounded-full text-text-ghost hover:text-copper hover:bg-copper/10 transition-colors cursor-pointer"
+      className="w-5 h-5 flex items-center justify-center rounded-full text-text-muted hover:text-copper hover:bg-copper/10 transition-colors cursor-pointer"
     >
       <svg
         viewBox="0 0 24 24"

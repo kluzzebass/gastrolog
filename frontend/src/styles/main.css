@@ -21,7 +21,6 @@
   --color-text-bright: #e8e4df;
   --color-text-normal: #b8b2aa;
   --color-text-muted: #8a8480;
-  --color-text-ghost: #656058;
 
   /* Semantic - muted, refined */
   --color-severity-error: #c45040;
@@ -57,7 +56,6 @@
   --color-light-text-bright: #1a1610;
   --color-light-text-normal: #3a3630;
   --color-light-text-muted: #706860;
-  --color-light-text-ghost: #918a80;
 
   /* Fonts */
   --font-display: "Cormorant Garamond", serif;
@@ -85,7 +83,6 @@
   --color-text-bright: #eceff4;
   --color-text-normal: #d8dee9;
   --color-text-muted: #a0aabb;
-  --color-text-ghost: #717e91;
 
   --color-severity-error: #bf616a;
   --color-severity-warn: #ebcb8b;
@@ -116,7 +113,6 @@
   --color-light-text-bright: #2e3440;
   --color-light-text-normal: #3b4252;
   --color-light-text-muted: #616e80;
-  --color-light-text-ghost: #808a96;
 }
 
 /* Solarized — precision etched */
@@ -137,7 +133,6 @@
   --color-text-bright: #fdf6e3;
   --color-text-normal: #eee8d5;
   --color-text-muted: #93a1a1;
-  --color-text-ghost: #657b83;
 
   --color-severity-error: #dc322f;
   --color-severity-warn: #b58900;
@@ -168,7 +163,6 @@
   --color-light-text-bright: #002b36;
   --color-light-text-normal: #073642;
   --color-light-text-muted: #586e75;
-  --color-light-text-ghost: #838e8e;
 }
 
 /* Dracula — vivid neon */
@@ -189,7 +183,6 @@
   --color-text-bright: #f8f8f2;
   --color-text-normal: #d4d4cc;
   --color-text-muted: #a0a0a0;
-  --color-text-ghost: #6272a4;
 
   --color-severity-error: #ff5555;
   --color-severity-warn: #f1fa8c;
@@ -220,7 +213,6 @@
   --color-light-text-bright: #282a36;
   --color-light-text-normal: #383a46;
   --color-light-text-muted: #626480;
-  --color-light-text-ghost: #848ca3;
 }
 
 /* Catppuccin Mocha — soft pastels on warm dark */
@@ -241,7 +233,6 @@
   --color-text-bright: #cdd6f4;
   --color-text-normal: #bac2de;
   --color-text-muted: #a6adc8;
-  --color-text-ghost: #6c7086;
 
   --color-severity-error: #f38ba8;
   --color-severity-warn: #f9e2af;
@@ -272,7 +263,6 @@
   --color-light-text-bright: #4c4f69;
   --color-light-text-normal: #5c5f77;
   --color-light-text-muted: #696c81;
-  --color-light-text-ghost: #848797;
 }
 
 /* Gruvbox — retro earthy warmth */
@@ -293,7 +283,6 @@
   --color-text-bright: #ebdbb2;
   --color-text-normal: #d5c4a1;
   --color-text-muted: #a89984;
-  --color-text-ghost: #7c6f64;
 
   --color-severity-error: #fb4934;
   --color-severity-warn: #fabd2f;
@@ -324,7 +313,6 @@
   --color-light-text-bright: #282828;
   --color-light-text-normal: #3c3836;
   --color-light-text-muted: #665c54;
-  --color-light-text-ghost: #928374;
 }
 
 /* Tokyo Night — city lights */
@@ -345,7 +333,6 @@
   --color-text-bright: #c0caf5;
   --color-text-normal: #a9b1d6;
   --color-text-muted: #80849f;
-  --color-text-ghost: #606990;
 
   --color-severity-error: #f7768e;
   --color-severity-warn: #e0af68;
@@ -376,7 +363,6 @@
   --color-light-text-bright: #1a1b26;
   --color-light-text-normal: #343b58;
   --color-light-text-muted: #556694;
-  --color-light-text-ghost: #7c84a1;
 }
 
 /* Rosé Pine — elegant naturals */
@@ -397,7 +383,6 @@
   --color-text-bright: #e0def4;
   --color-text-normal: #c4c0d8;
   --color-text-muted: #908caa;
-  --color-text-ghost: #6e6a86;
 
   --color-severity-error: #eb6f92;
   --color-severity-warn: #f6c177;
@@ -428,7 +413,6 @@
   --color-light-text-bright: #575279;
   --color-light-text-normal: #625e80;
   --color-light-text-muted: #6e6b87;
-  --color-light-text-ghost: #8f8b9b;
 }
 
 /* Everforest — nature, easy on the eyes */
@@ -449,7 +433,6 @@
   --color-text-bright: #d3c6aa;
   --color-text-normal: #c0b48e;
   --color-text-muted: #9da9a0;
-  --color-text-ghost: #7a8478;
 
   --color-severity-error: #e67e80;
   --color-severity-warn: #dbbc7f;
@@ -480,7 +463,6 @@
   --color-light-text-bright: #5c6a72;
   --color-light-text-normal: #708089;
   --color-light-text-muted: #606b5f;
-  --color-light-text-ghost: #7e867a;
 }
 
 /* Synthwave — neon 80s retrofuture */
@@ -501,7 +483,6 @@
   --color-text-bright: #edf0ff;
   --color-text-normal: #c8cce8;
   --color-text-muted: #9898c0;
-  --color-text-ghost: #6860a0;
 
   --color-severity-error: #ff3860;
   --color-severity-warn: #fee440;
@@ -532,7 +513,6 @@
   --color-light-text-bright: #1a1028;
   --color-light-text-normal: #382250;
   --color-light-text-muted: #6860a0;
-  --color-light-text-ghost: #8787aa;
 }
 
 /* Base */

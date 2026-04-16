@@ -260,8 +260,8 @@ export function SetupWizard() {
               );
             } else {
               stepClass = c(
-                "bg-ink-surface text-text-ghost",
-                "bg-light-well text-light-text-ghost",
+                "bg-ink-surface text-text-muted",
+                "bg-light-well text-light-text-muted",
               );
             }
             return (

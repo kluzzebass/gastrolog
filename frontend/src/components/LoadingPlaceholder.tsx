@@ -7,7 +7,7 @@ export function LoadingPlaceholder({
   const c = useThemeClass(dark);
   return (
     <div
-      className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")} ${className ?? ""}`}
+      className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")} ${className ?? ""}`}
     >
       Loading...
     </div>

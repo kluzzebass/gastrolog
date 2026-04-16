@@ -145,7 +145,7 @@ export function StaticCards({
           onToggle={() => toggle(cardKey)}
           onDelete={() => handleDelete(i)}
           status={
-            <span className={`font-mono text-[0.75em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}>
+            <span className={`font-mono text-[0.75em] truncate ${c("text-text-muted", "text-light-text-muted")}`}>
               {s.rows.length} row{s.rows.length === 1 ? "" : "s"}
             </span>
           }

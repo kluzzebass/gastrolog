@@ -68,7 +68,7 @@ export function ChatterboxForm({
           Log Formats
         </legend>
         <p
-          className={`text-[0.7em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.7em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Select which formats to generate and their relative weights. Higher
           weight means more frequent.
@@ -99,14 +99,14 @@ export function ChatterboxForm({
                 <div className="flex-1 min-w-0">
                   <span
                     className={`text-[0.85em] font-medium ${c(
-                      isOn ? "text-text-bright" : "text-text-ghost",
-                      isOn ? "text-light-text-bright" : "text-light-text-ghost",
+                      isOn ? "text-text-bright" : "text-text-muted",
+                      isOn ? "text-light-text-bright" : "text-light-text-muted",
                     )}`}
                   >
                     {f.label}
                   </span>
                   <span
-                    className={`text-[0.75em] ml-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+                    className={`text-[0.75em] ml-2 ${c("text-text-muted", "text-light-text-muted")}`}
                   >
                     {f.description}
                   </span>
@@ -130,7 +130,7 @@ export function ChatterboxForm({
                       )}`}
                     />
                     <span
-                      className={`text-[0.7em] w-8 text-right font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                      className={`text-[0.7em] w-8 text-right font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                     >
                       {pct}%
                     </span>

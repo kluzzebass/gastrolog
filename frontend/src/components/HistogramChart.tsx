@@ -176,7 +176,7 @@ export function HistogramChart({
         <div className="flex items-baseline justify-between mb-1.5">
           <div className="flex items-baseline gap-3">
             <span
-              className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               Volume
             </span>
@@ -256,8 +256,8 @@ export function HistogramChart({
           <button
             onClick={() => handlePanStep(-1)}
             className={`text-[0.7em] px-1 rounded transition-colors shrink-0 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+              "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
             )}`}
             aria-label="Pan backward"
             title="Pan backward"
@@ -280,7 +280,7 @@ export function HistogramChart({
             return (
               <span
                 key={`tick-${ts.getTime()}`}
-                className={`text-[0.65em] font-mono select-none ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`text-[0.65em] font-mono select-none ${c("text-text-muted", "text-light-text-muted")}`}
               >
                 {formatTime(ts)}
               </span>
@@ -291,8 +291,8 @@ export function HistogramChart({
           <button
             onClick={() => handlePanStep(1)}
             className={`text-[0.7em] px-1 rounded transition-colors shrink-0 ${c(
-              "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-              "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+              "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+              "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
             )}`}
             aria-label="Pan forward"
             title="Pan forward"

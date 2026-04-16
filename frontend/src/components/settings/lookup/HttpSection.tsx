@@ -166,8 +166,8 @@ export function HttpCards({
                           onChange={(e) => setTestValues((prev) => ({ ...prev, [i]: { ...prev[i], [p.name]: e.target.value } }))}
                           placeholder={p.description || p.name}
                           className={`flex-1 px-2.5 py-1.5 text-[0.85em] font-mono border rounded focus:outline-none ${c(
-                            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-                            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+                            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+                            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
                           )}`}
                         />
                       </div>

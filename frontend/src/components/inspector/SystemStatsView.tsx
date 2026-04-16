@@ -23,7 +23,7 @@ export function SystemStatsView({
     return <CompactView stats={nodeStats} dark={dark} />;
   }
   return (
-    <div className={`text-[0.85em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}>
+    <div className={`text-[0.85em] italic ${c("text-text-muted", "text-light-text-muted")}`}>
       Waiting for node stats...
     </div>
   );
@@ -138,7 +138,7 @@ function CompactStatRow({
   return (
     <div className="flex items-baseline justify-between gap-4">
       <span
-        className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.75em] font-medium uppercase tracking-wider shrink-0 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {label}
       </span>
@@ -155,7 +155,7 @@ function CompactSectionLabel({ label, dark }: Readonly<{ label: string; dark: bo
   const c = useThemeClass(dark);
   return (
     <span
-      className={`text-[0.7em] font-medium uppercase tracking-wider mb-1.5 block ${c("text-text-ghost", "text-light-text-ghost")}`}
+      className={`text-[0.7em] font-medium uppercase tracking-wider mb-1.5 block ${c("text-text-muted", "text-light-text-muted")}`}
     >
       {label}
     </span>

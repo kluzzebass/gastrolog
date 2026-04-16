@@ -83,8 +83,8 @@ export function ScheduledJobsTable({
       {/* Column headers */}
       <div
         className={`grid grid-cols-[1fr_8rem_9rem_9rem] gap-3 px-4 py-2 text-[0.7em] font-medium uppercase tracking-[0.15em] border-b ${c(
-          "text-text-ghost border-ink-border-subtle",
-          "text-light-text-ghost border-light-border-subtle",
+          "text-text-muted border-ink-border-subtle",
+          "text-light-text-muted border-light-border-subtle",
         )}`}
       >
         <span>Description</span>
@@ -141,7 +141,7 @@ function StatusBadge({
 }>) {
   switch (status) {
     case JobStatus.PENDING:
-      return <Badge variant="ghost" dark={dark}>pending</Badge>;
+      return <Badge variant="muted" dark={dark}>pending</Badge>;
     case JobStatus.RUNNING:
       return <Badge variant="info" dark={dark}>running</Badge>;
     case JobStatus.COMPLETED:
@@ -172,7 +172,7 @@ function TaskProgress({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
 
   return (
     <span
-      className={`text-[0.8em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+      className={`text-[0.8em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
     >
       {chunksTotal > 0 && (
         <>
@@ -241,7 +241,7 @@ function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
       {job.errorDetails.length > 0 && (
         <div className="mt-3">
           <div
-            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
           >
             Details
           </div>
@@ -257,7 +257,7 @@ function TaskDetail({ job, dark }: Readonly<{ job: Job; dark: boolean }>) {
 
       {stats.length === 0 && job.errorDetails.length === 0 && (
         <div
-          className={`text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
           No details available.
         </div>

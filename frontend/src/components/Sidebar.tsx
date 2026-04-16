@@ -16,7 +16,7 @@ export function SidebarSection({
   return (
     <section className="mb-5">
       <h3
-        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-2 ${c("text-text-muted", "text-light-text-muted")}`}
       >
         {title}
       </h3>
@@ -42,7 +42,7 @@ export function FieldExplorer({
   if (fields.length === 0) {
     return (
       <div
-        className={`text-[0.8em] italic ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.8em] italic ${c("text-text-muted", "text-light-text-muted")}`}
       >
         No fields
       </div>
@@ -69,13 +69,13 @@ export function FieldExplorer({
               className={`w-full flex items-center gap-1.5 px-1.5 py-1.5 text-left text-[0.8em] rounded transition-colors ${c("hover:bg-ink-hover text-text-muted hover:text-text-normal", "hover:bg-light-hover text-light-text-muted hover:text-light-text-normal")}`}
             >
               <span
-                className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}
               >
                 {isExpanded ? "\u25BE" : "\u25B8"}
               </span>
               <span className="flex-1 font-mono truncate">{key}</span>
               <span
-                className={`text-[0.85em] tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}
+                className={`text-[0.85em] tabular-nums ${c("text-text-muted", "text-light-text-muted")}`}
               >
                 {count}
               </span>
@@ -97,7 +97,7 @@ export function FieldExplorer({
                         if (isActive) {
                           return `${base} ${c("bg-copper/15 text-copper", "bg-copper/10 text-copper")}`;
                         }
-                        return `${base} ${c("hover:bg-ink-hover text-text-ghost hover:text-copper-glow", "hover:bg-light-hover text-light-text-ghost hover:text-copper")}`;
+                        return `${base} ${c("hover:bg-ink-hover text-text-muted hover:text-copper-glow", "hover:bg-light-hover text-light-text-muted hover:text-copper")}`;
                       })()}
                     >
                       <span className="flex-1 font-mono truncate">{value}</span>
@@ -132,7 +132,7 @@ export function VaultButton({
   remote?: boolean;
 }>) {
   const c = useThemeClass(dark);
-  const ghostCls = c("text-text-ghost", "text-light-text-ghost");
+  const ghostCls = c("text-text-muted", "text-light-text-muted");
 
   return (
     <button

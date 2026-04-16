@@ -238,7 +238,7 @@ export function QueryBar({
                 : "Search logs..."}
             </span>
             {hiddenCount > 0 && (
-              <span className={`shrink-0 text-xs tabular-nums ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              <span className={`shrink-0 text-xs tabular-nums ${c("text-text-muted", "text-light-text-muted")}`}>
                 +{hiddenCount} line{hiddenCount > 1 ? "s" : ""}
               </span>
             )}
@@ -331,8 +331,8 @@ export function QueryBar({
                   setShowSavedQueries(false);
                 }}
                 className={`transition-colors ${c(
-                  "text-text-ghost hover:text-copper",
-                  "text-light-text-ghost hover:text-copper",
+                  "text-text-muted hover:text-copper",
+                  "text-light-text-muted hover:text-copper",
                 )}`}
                 aria-label="Query history"
                 title="Query history"
@@ -347,8 +347,8 @@ export function QueryBar({
                   setShowHistory(false);
                 }}
                 className={`transition-colors ${c(
-                  "text-text-ghost hover:text-copper",
-                  "text-light-text-ghost hover:text-copper",
+                  "text-text-muted hover:text-copper",
+                  "text-light-text-muted hover:text-copper",
                 )}`}
                 aria-label="Saved queries"
                 title="Saved queries"
@@ -365,8 +365,8 @@ export function QueryBar({
                   }
                 }}
                 className={`transition-colors ${c(
-                  "text-text-ghost hover:text-copper",
-                  "text-light-text-ghost hover:text-copper",
+                  "text-text-muted hover:text-copper",
+                  "text-light-text-muted hover:text-copper",
                 )}`}
                 aria-label="Format query"
                 title="Format query"
@@ -376,8 +376,8 @@ export function QueryBar({
               <button
                 onClick={() => openHelp("query-language")}
                 className={`transition-colors ${c(
-                  "text-text-ghost hover:text-copper",
-                  "text-light-text-ghost hover:text-copper",
+                  "text-text-muted hover:text-copper",
+                  "text-light-text-muted hover:text-copper",
                 )}`}
                 aria-label="Query language help"
                 title="Query language help"

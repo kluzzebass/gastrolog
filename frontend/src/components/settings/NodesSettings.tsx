@@ -201,7 +201,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
                   )}
                   {!isLocal && (confirmRemoveId === node.id ? (
                     <>
-                      <span className={`text-[0.75em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                      <span className={`text-[0.75em] ${c("text-text-muted", "text-light-text-muted")}`}>
                         This will evict the node from the cluster.
                       </span>
                       <Button variant="danger"
@@ -235,7 +235,7 @@ export function NodesSettings({ dark }: Readonly<{ dark: boolean }>) {
 
         {nodes.length === 0 && (
           <div
-            className={`text-center py-8 text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+            className={`text-center py-8 text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}
           >
             No nodes found.
           </div>
@@ -286,7 +286,7 @@ function JoinClusterCard({ dark }: Readonly<{ dark: boolean }>) {
       <h3 className={`text-[0.85em] font-semibold mb-1 ${c("text-text-bright", "text-light-text-bright")}`}>
         Join Cluster
       </h3>
-      <p className={`text-[0.75em] mb-3 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      <p className={`text-[0.75em] mb-3 ${c("text-text-muted", "text-light-text-muted")}`}>
         Join an existing cluster at runtime. This node's local configuration will be replaced by the cluster's configuration.
       </p>
       <div className="flex flex-col gap-2.5">
@@ -375,7 +375,7 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
             <button
               type="button"
               onClick={() => setShowToken(!showToken)}
-              className={`shrink-0 transition-colors ${c("text-text-ghost hover:text-copper", "text-light-text-ghost hover:text-copper")}`}
+              className={`shrink-0 transition-colors ${c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")}`}
               title={showToken ? "Hide token" : "Reveal token"}
             >
               {showToken ? <EyeOffIcon className="w-3.5 h-3.5" /> : <EyeIcon className="w-3.5 h-3.5" />}
@@ -389,8 +389,8 @@ function JoinInfoCard({ dark, joinToken, clusterAddress }: Readonly<{ dark: bool
           </span>
           <div className="flex items-start gap-1.5">
             <code className={`text-[0.75em] font-mono break-all leading-relaxed ${c(
-              "text-text-ghost bg-ink-well px-2 py-1.5 rounded",
-              "text-light-text-ghost bg-light-well px-2 py-1.5 rounded",
+              "text-text-muted bg-ink-well px-2 py-1.5 rounded",
+              "text-light-text-muted bg-light-well px-2 py-1.5 rounded",
             )}`}>
               {joinCmd}
             </code>

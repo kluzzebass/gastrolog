@@ -51,7 +51,7 @@ export function HeatmapChart({ columns, rows, dark }: Readonly<HeatmapChartProps
   // Traditional blue → yellow → red heatmap ramp.
   const colorRange = ["#313695", "#4575b4", "#74add1", "#fee090", "#f46d43", "#d73027"];
 
-  const textGhost = dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost");
+  const textGhost = dark ? cssVar("--color-text-muted") : cssVar("--color-light-text-muted");
 
   const option: EChartsOption = {
     ...theme,

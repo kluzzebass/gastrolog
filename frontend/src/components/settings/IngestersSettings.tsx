@@ -18,7 +18,7 @@ import { NodeSelect } from "./NodeSelect";
 import { sortByName } from "../../lib/sort";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
-import type { IngesterConfig } from "../../api/gen/gastrolog/v1/system_pb";
+import { IngesterMode, type IngesterConfig } from "../../api/gen/gastrolog/v1/system_pb";
 import type { IngesterDefaults } from "../../api/hooks/useIngesterDefaults";
 
 const ingesterTypes = [
@@ -84,8 +84,9 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const putIngester = usePutIngester();
   const deleteIngester = useDeleteIngester();
   const generateName = useGenerateName();
-  const { data: ingesterDefaults } = useIngesterDefaults();
-  const allDefaults = ingesterDefaults ?? {};
+  const { data: ingesterMeta } = useIngesterDefaults();
+  const allDefaults = ingesterMeta?.defaults ?? {};
+  const ingesterModes = ingesterMeta?.modes ?? {};
   const { addToast } = useToast();
 
   const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
@@ -194,11 +195,13 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
               dark={dark}
             />
           </FormField>
-          <NodeSelect
-            value={newNodeId}
-            onChange={(v) => dispatchAdd({ type: "setNewNodeId", value: v })}
-            dark={dark}
-          />
+          {(ingesterModes[newType] ?? IngesterMode.ACTIVE) === IngesterMode.ACTIVE && (
+            <NodeSelect
+              value={newNodeId}
+              onChange={(v) => dispatchAdd({ type: "setNewNodeId", value: v })}
+              dark={dark}
+            />
+          )}
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}
@@ -219,6 +222,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           ing={ing}
           allIngesters={ingesters}
           allDefaults={allDefaults}
+          mode={ingesterModes[ing.type] ?? IngesterMode.ACTIVE}
           dark={dark}
           expanded={isExpanded(encode(ing.id))}
           onToggle={() => toggleCard(encode(ing.id))}
@@ -239,6 +243,7 @@ function IngesterCard({
   ing,
   allIngesters,
   allDefaults,
+  mode,
   dark,
   expanded,
   onToggle,
@@ -253,6 +258,7 @@ function IngesterCard({
   ing: IngesterConfig;
   allIngesters: readonly IngesterConfig[];
   allDefaults: IngesterDefaults;
+  mode: IngesterMode;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -279,9 +285,13 @@ function IngesterCard({
       onDelete={onDelete}
       headerRight={
         <span className="flex items-center gap-2">
-          <NodeBadge nodeId={encode(ing.nodeId)} dark={dark} />
+          <Badge variant="muted" dark={dark}>{mode === IngesterMode.PASSIVE ? "listener" : "collector"}</Badge>
+          {mode === IngesterMode.PASSIVE
+            ? <Badge variant="info" dark={dark}>all nodes</Badge>
+            : <NodeBadge nodeId={encode(ing.nodeId)} dark={dark} />
+          }
           {!ing.enabled && (
-            <Badge variant="ghost" dark={dark}>disabled</Badge>
+            <Badge variant="muted" dark={dark}>disabled</Badge>
           )}
           {onOpenInspector && (
             <CrossLinkBadge dark={dark} title="Open in Inspector" onClick={() => onOpenInspector(`entities:ingesters:${ing.name || encode(ing.id)}`)}>
@@ -313,11 +323,13 @@ function IngesterCard({
           label="Enabled"
           dark={dark}
         />
-        <NodeSelect
-          value={edit.nodeId}
-          onChange={(v) => setEdit({ nodeId: v })}
-          dark={dark}
-        />
+        {mode === IngesterMode.ACTIVE && (
+          <NodeSelect
+            value={edit.nodeId}
+            onChange={(v) => setEdit({ nodeId: v })}
+            dark={dark}
+          />
+        )}
         <IngesterParamsForm
           ingesterType={ing.type}
           params={edit.params}

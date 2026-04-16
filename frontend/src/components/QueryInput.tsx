@@ -24,7 +24,7 @@ export function roleStyle(role: string, dark: boolean): React.CSSProperties {
       return { color: "var(--color-copper)" };
     case "eq":
     case "compare-op":
-      return { color: "var(--color-text-ghost)" };
+      return { color: "var(--color-text-muted)" };
     case "value":
     case "token":
       return {
@@ -39,7 +39,7 @@ export function roleStyle(role: string, dark: boolean): React.CSSProperties {
     case "regex":
       return { color: "var(--color-severity-debug)", fontStyle: "italic" };
     case "paren":
-      return { color: "var(--color-text-ghost)" };
+      return { color: "var(--color-text-muted)" };
     case "star":
       return { color: "var(--color-severity-debug)" };
     case "pipe":
@@ -49,9 +49,9 @@ export function roleStyle(role: string, dark: boolean): React.CSSProperties {
     case "function":
       return { color: "var(--color-copper)" };
     case "comma":
-      return { color: "var(--color-text-ghost)" };
+      return { color: "var(--color-text-muted)" };
     case "comment":
-      return { color: "var(--color-text-ghost)", fontStyle: "italic" };
+      return { color: "var(--color-text-muted)", fontStyle: "italic" };
     case "error":
       return {
         color: "var(--color-severity-error)",
@@ -217,8 +217,8 @@ export const QueryInput = forwardRef<HTMLTextAreaElement, QueryInputProps>(
             } as React.CSSProperties
           }
           className={`query-input w-full pl-3 pr-14 py-2 text-[0.9em] leading-normal font-mono border rounded resize-none overflow-hidden focus:outline-none ${c(
-            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost",
-            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost",
+            "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted",
+            "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted",
           )} selection:bg-copper/30`}
         />
 

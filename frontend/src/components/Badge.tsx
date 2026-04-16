@@ -6,8 +6,7 @@ export type BadgeVariant =
   | "info"
   | "warn"
   | "error"
-  | "muted"
-  | "ghost";
+  | "muted";
 
 interface BadgeProps {
   variant: BadgeVariant;
@@ -24,7 +23,6 @@ const variantClasses: Record<BadgeVariant, string | ((c: ReturnType<typeof useTh
   warn: "bg-severity-warn/15 text-severity-warn",
   error: "bg-severity-error/15 text-severity-error",
   muted: (c) => c("bg-ink-hover text-text-muted", "bg-light-hover text-light-text-muted"),
-  ghost: (c) => c("bg-ink-hover text-text-ghost", "bg-light-hover text-light-text-ghost"),
 };
 
 /**

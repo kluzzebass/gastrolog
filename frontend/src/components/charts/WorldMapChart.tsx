@@ -361,7 +361,7 @@ export function WorldMapChart({
     copper: copperBase,
     border: dark ? cssVar("--color-ink-border") : cssVar("--color-light-border"),
     empty: dark ? cssVar("--color-ink-hover") : cssVar("--color-light-hover"),
-    textGhost: dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost"),
+    textGhost: dark ? cssVar("--color-text-muted") : cssVar("--color-light-text-muted"),
   };
 
   const isScatter = mode === "scatter";

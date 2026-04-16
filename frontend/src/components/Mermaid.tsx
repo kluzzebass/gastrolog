@@ -146,7 +146,7 @@ export function MermaidDiagram({ chart, dark }: Readonly<MermaidDiagramProps>) {
   if (error) {
     return (
       <div
-        className={`mb-3 p-3 rounded text-[0.85em] ${c("bg-ink-surface text-text-ghost", "bg-light-hover text-light-text-ghost")}`}
+        className={`mb-3 p-3 rounded text-[0.85em] ${c("bg-ink-surface text-text-muted", "bg-light-hover text-light-text-muted")}`}
       >
         {error}
       </div>

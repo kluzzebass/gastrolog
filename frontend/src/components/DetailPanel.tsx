@@ -34,8 +34,8 @@ interface DetailStyles {
 }
 
 function buildStyles(c: ReturnType<typeof useThemeClass>): DetailStyles {
-  const headerCls = `pt-4 pb-1.5 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`;
-  const keyCls = `py-1 pr-2 w-0 text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-ghost", "text-light-text-ghost")}`;
+  const headerCls = `pt-4 pb-1.5 text-left text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`;
+  const keyCls = `py-1 pr-2 w-0 text-[0.8em] font-mono whitespace-nowrap align-top ${c("text-text-muted", "text-light-text-muted")}`;
   const borderCls = `border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`;
   const valCls = `py-1 text-[0.8em] font-mono align-top ${borderCls}`;
   return { headerCls, keyCls, borderCls, valCls, c };
@@ -317,12 +317,12 @@ export function DetailPanelContent({
                       <div className={`break-all ${c("text-text-normal", "text-light-text-normal")}`}>
                         {instantToISO(instant)}
                       </div>
-                      <div className={`text-[0.7em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+                      <div className={`text-[0.7em] ${c("text-text-muted", "text-light-text-muted")}`}>
                         {relativeTime(instant)}
                       </div>
                     </>
                   ) : (
-                    <div className={c("text-text-ghost", "text-light-text-ghost")}>
+                    <div className={c("text-text-muted", "text-light-text-muted")}>
                       {"\u2014"}
                     </div>
                   )}
@@ -495,7 +495,7 @@ function ContextSection({
 
   if (contextLoading) {
     return (
-      <div className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      <div className={`text-[0.8em] font-mono py-2 ${c("text-text-muted", "text-light-text-muted")}`}>
         Loading context...
       </div>
     );
@@ -504,7 +504,7 @@ function ContextSection({
   const hasContext = (contextBefore?.length ?? 0) > 0 || (contextAfter?.length ?? 0) > 0;
   if (!hasContext) {
     return (
-      <div className={`text-[0.8em] font-mono py-2 ${c("text-text-ghost", "text-light-text-ghost")}`}>
+      <div className={`text-[0.8em] font-mono py-2 ${c("text-text-muted", "text-light-text-muted")}`}>
         No surrounding records
       </div>
     );

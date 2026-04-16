@@ -101,7 +101,7 @@ export function SearchResults({
     return (
       <div className="flex-1 flex flex-col overflow-hidden">
         <div className="flex-1 flex items-center justify-center">
-          <div className={`text-center font-mono text-[0.85em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <div className={`text-center font-mono text-[0.85em] ${c("text-text-muted", "text-light-text-muted")}`}>
             <div className="inline-block w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" />
             <div>Running pipeline...</div>
           </div>
@@ -179,7 +179,7 @@ export function SearchResults({
           {isEmpty && !isSearching && !isFollowMode && <EmptyState dark={dark} />}
           {isEmpty && isFollowMode && (
             <div
-              className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`py-8 text-center text-[0.85em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
             >
               Waiting for new records...
             </div>
@@ -225,7 +225,7 @@ export function SearchResults({
               <div ref={sentinelRef} className="h-1" />
               {(isSearching && records.length > 0) && (
                 <div
-                  className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  className={`py-3 text-center text-[0.85em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
                 >
                   Loading more...
                 </div>

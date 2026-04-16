@@ -8,6 +8,38 @@ import { Message, proto3, protoInt64 } from "@bufbuild/protobuf";
 import { CloudService, NodeStorageConfig } from "./storage_pb.js";
 
 /**
+ * IngesterMode classifies how an ingester acquires data.
+ *
+ * @generated from enum gastrolog.v1.IngesterMode
+ */
+export enum IngesterMode {
+  /**
+   * @generated from enum value: INGESTER_MODE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * Listeners — bind a port, passively accept incoming data.
+   *
+   * @generated from enum value: INGESTER_MODE_PASSIVE = 1;
+   */
+  PASSIVE = 1,
+
+  /**
+   * Collectors — actively pull from data sources.
+   *
+   * @generated from enum value: INGESTER_MODE_ACTIVE = 2;
+   */
+  ACTIVE = 2,
+}
+// Retrieve enum metadata with: proto3.getEnumType(IngesterMode)
+proto3.util.setEnumType(IngesterMode, "gastrolog.v1.IngesterMode", [
+  { no: 0, name: "INGESTER_MODE_UNSPECIFIED" },
+  { no: 1, name: "INGESTER_MODE_PASSIVE" },
+  { no: 2, name: "INGESTER_MODE_ACTIVE" },
+]);
+
+/**
  * TierType identifies the storage medium for a tier.
  *
  * @generated from enum gastrolog.v1.TierType
@@ -4733,6 +4765,11 @@ export class IngesterTypeDefaults extends Message<IngesterTypeDefaults> {
    */
   params: { [key: string]: string } = {};
 
+  /**
+   * @generated from field: gastrolog.v1.IngesterMode mode = 2;
+   */
+  mode = IngesterMode.UNSPECIFIED;
+
   constructor(data?: PartialMessage<IngesterTypeDefaults>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4742,6 +4779,7 @@ export class IngesterTypeDefaults extends Message<IngesterTypeDefaults> {
   static readonly typeName = "gastrolog.v1.IngesterTypeDefaults";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+    { no: 2, name: "mode", kind: "enum", T: proto3.getEnumType(IngesterMode) },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterTypeDefaults {

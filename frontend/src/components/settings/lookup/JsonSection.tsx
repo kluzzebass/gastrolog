@@ -61,7 +61,7 @@ function JsonPreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable }
         <span className={`text-[0.75em] font-medium ${c("text-text-muted", "text-light-text-muted")}`}>
           Preview
           {data && !data.error && (
-            <span className={c("text-text-ghost", "text-light-text-ghost")}>
+            <span className={c("text-text-muted", "text-light-text-muted")}>
               {" "}&middot; {Number(data.totalSize).toLocaleString()} bytes
             </span>
           )}
@@ -78,8 +78,8 @@ function JsonPreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable }
           }).catch(() => {})}
           disabled={preview.isPending}
           className={`text-[0.7em] px-2 py-0.5 rounded transition-colors ${c(
-            "text-text-ghost hover:text-copper hover:bg-ink-hover",
-            "text-light-text-ghost hover:text-copper hover:bg-light-hover",
+            "text-text-muted hover:text-copper hover:bg-ink-hover",
+            "text-light-text-muted hover:text-copper hover:bg-light-hover",
           )}`}
         >
           {preview.isPending ? "Loading..." : "Refresh"}
@@ -99,8 +99,8 @@ function JsonPreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable }
           </pre>
           {data.truncated && (
             <div className={`px-3 py-1.5 text-[0.7em] border-t ${c(
-              "border-ink-border-subtle text-text-ghost",
-              "border-light-border-subtle text-light-text-ghost",
+              "border-ink-border-subtle text-text-muted",
+              "border-light-border-subtle text-light-text-muted",
             )}`}>
               Truncated
             </div>
@@ -137,7 +137,7 @@ function JsonPreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable }
       )}
 
       {preview.isPending && !data && (
-        <div className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+        <div className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
           Loading preview...
         </div>
       )}
@@ -424,7 +424,7 @@ export function JsonCards({
             onToggle={() => toggle(`json-${i}`)}
             onDelete={() => handleDelete(i)}
             status={resolvedFile && (
-              <span className={`font-mono text-[0.75em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`} title={resolvedFile.name}>
+              <span className={`font-mono text-[0.75em] truncate ${c("text-text-muted", "text-light-text-muted")}`} title={resolvedFile.name}>
                 {resolvedFile.name}
               </span>
             )}

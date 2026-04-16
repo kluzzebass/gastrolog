@@ -233,7 +233,7 @@ export function RoutesSettings({ dark, onNavigateTo: _onNavigateTo }: Readonly<{
             onDelete={() => handleDelete(id)}
             typeBadge={route.distribution || "fanout"}
             status={
-              <span className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+              <span className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
                 {filterName || "no filter"}
                 {destNames ? ` \u2192 ${destNames}` : ""}
                 {!route.enabled && " (disabled)"}
@@ -358,7 +358,7 @@ function DestinationsEditor({
           />
         )}
         {destinations.length === 0 && availableVaults.length === 0 && (
-          <p className={`text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}>
+          <p className={`text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}>
             No vaults available
           </p>
         )}

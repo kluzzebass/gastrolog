@@ -39,7 +39,7 @@ export function MigrateVaultForm({
       )}`}
     >
       <div
-        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Migrate Vault
       </div>
@@ -122,7 +122,7 @@ export function MergeVaultForm({
       )}`}
     >
       <div
-        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+        className={`text-[0.75em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
       >
         Merge Into Another Vault
       </div>

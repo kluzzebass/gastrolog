@@ -121,7 +121,7 @@ export function TimeSeriesChart({ columns, rows, dark }: Readonly<TimeSeriesChar
       trigger: "axis",
       axisPointer: {
         type: "cross",
-        crossStyle: { color: dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost") },
+        crossStyle: { color: dark ? cssVar("--color-text-muted") : cssVar("--color-light-text-muted") },
       },
       formatter: (params: any) => {
         const items = Array.isArray(params) ? params : [params];

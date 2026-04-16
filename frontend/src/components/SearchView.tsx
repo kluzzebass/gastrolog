@@ -115,12 +115,12 @@ export function SearchView() {
               size="lg"
             >
               {sv.isExplaining && (
-                <div className={`text-[0.9em] ${sv.c("text-text-ghost", "text-light-text-ghost")}`}>
+                <div className={`text-[0.9em] ${sv.c("text-text-muted", "text-light-text-muted")}`}>
                   Analyzing query plan...
                 </div>
               )}
               {!sv.isExplaining && sv.explainChunks.length === 0 && (
-                <div className={`text-[0.9em] ${sv.c("text-text-ghost", "text-light-text-ghost")}`}>
+                <div className={`text-[0.9em] ${sv.c("text-text-muted", "text-light-text-muted")}`}>
                   Run a query to see the execution plan.
                 </div>
               )}
@@ -232,7 +232,7 @@ export function SearchView() {
               ) : (
                 <div className="relative">
                   <div className="flex items-baseline justify-between mb-1.5">
-                    <span className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${sv.c("text-text-ghost", "text-light-text-ghost")}`}>
+                    <span className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${sv.c("text-text-muted", "text-light-text-muted")}`}>
                       Volume
                     </span>
                     <span className={`font-mono text-[0.75em] ${sv.c("text-text-muted", "text-light-text-muted")}`}>
@@ -241,10 +241,10 @@ export function SearchView() {
                   </div>
                   <div className={`rounded h-12 ${sv.c("bg-ink-surface/30", "bg-light-hover/30")}`} />
                   <div className="flex justify-between mt-1 min-h-5">
-                    <span className={`text-[0.65em] font-mono ${sv.c("text-text-ghost", "text-light-text-ghost")}`}>
+                    <span className={`text-[0.65em] font-mono ${sv.c("text-text-muted", "text-light-text-muted")}`}>
                       &mdash;
                     </span>
-                    <span className={`text-[0.65em] font-mono ${sv.c("text-text-ghost", "text-light-text-ghost")}`}>
+                    <span className={`text-[0.65em] font-mono ${sv.c("text-text-muted", "text-light-text-muted")}`}>
                       &mdash;
                     </span>
                   </div>

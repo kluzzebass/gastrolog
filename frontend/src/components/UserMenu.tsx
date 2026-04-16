@@ -34,8 +34,8 @@ export function UserMenu({
         aria-label={`User menu: ${username}`}
         title={username}
         className={`w-9 h-9 flex items-center justify-center rounded transition-all duration-200 ${c(
-          "text-text-ghost hover:text-text-muted hover:bg-ink-hover",
-          "text-light-text-ghost hover:text-light-text-muted hover:bg-light-hover",
+          "text-text-muted hover:text-text-muted hover:bg-ink-hover",
+          "text-light-text-muted hover:text-light-text-muted hover:bg-light-hover",
         )} ${open ? c("text-text-muted bg-ink-hover", "text-light-text-muted bg-light-hover") : ""}`}
       >
         <UserIcon className="w-4 h-4" />
@@ -58,7 +58,7 @@ export function UserMenu({
               {username}
             </div>
             <div
-              className={`text-[0.7em] uppercase tracking-widest mt-0.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] uppercase tracking-widest mt-0.5 ${c("text-text-muted", "text-light-text-muted")}`}
             >
               {role}
             </div>

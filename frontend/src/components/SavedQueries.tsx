@@ -50,7 +50,7 @@ export function SavedQueries({
         className={`px-3 py-2 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
       >
         <div
-          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`text-[0.7em] font-medium uppercase tracking-[0.15em] mb-1.5 ${c("text-text-muted", "text-light-text-muted")}`}
         >
           Save Current Query
         </div>
@@ -69,8 +69,8 @@ export function SavedQueries({
             placeholder="Query name..."
             aria-label="Query name"
             className={`flex-1 px-2 py-1 text-[0.8em] border rounded focus:outline-none transition-colors ${c(
-              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-ghost focus:border-copper-dim",
-              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-ghost focus:border-copper",
+              "bg-ink-surface border-ink-border text-text-bright placeholder:text-text-muted focus:border-copper-dim",
+              "bg-light-surface border-light-border text-light-text-bright placeholder:text-light-text-muted focus:border-copper",
             )}`}
           />
           <button
@@ -86,7 +86,7 @@ export function SavedQueries({
       {/* Saved queries list */}
       {queries.length === 0 ? (
         <div
-          className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+          className={`px-3 py-3 text-center text-[0.8em] ${c("text-text-muted", "text-light-text-muted")}`}
         >
           No saved queries yet
         </div>
@@ -96,7 +96,7 @@ export function SavedQueries({
             className={`px-3 py-1.5 border-b ${c("border-ink-border-subtle", "border-light-border-subtle")}`}
           >
             <span
-              className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.7em] font-medium uppercase tracking-[0.15em] ${c("text-text-muted", "text-light-text-muted")}`}
             >
               Saved Queries
             </span>
@@ -115,7 +115,7 @@ export function SavedQueries({
                   {entry.name}
                 </div>
                 <div
-                  className={`font-mono text-[0.7em] truncate ${c("text-text-ghost", "text-light-text-ghost")}`}
+                  className={`font-mono text-[0.7em] truncate ${c("text-text-muted", "text-light-text-muted")}`}
                 >
                   {entry.query}
                 </div>
@@ -125,7 +125,7 @@ export function SavedQueries({
                   e.stopPropagation();
                   onDelete(entry.name);
                 }}
-                className={`opacity-0 group-hover:opacity-100 text-[0.75em] transition-opacity ${c("text-text-ghost hover:text-severity-error", "text-light-text-ghost hover:text-severity-error")}`}
+                className={`opacity-0 group-hover:opacity-100 text-[0.75em] transition-opacity ${c("text-text-muted hover:text-severity-error", "text-light-text-muted hover:text-severity-error")}`}
                 aria-label="Delete saved query"
                 title="Delete saved query"
               >

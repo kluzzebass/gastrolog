@@ -15,7 +15,7 @@ export function StatPill({
         {value}
       </span>
       <span
-        className={`text-[0.7em] uppercase tracking-wider ${dark ? "text-text-ghost" : "text-light-text-ghost"}`}
+        className={`text-[0.7em] uppercase tracking-wider ${dark ? "text-text-muted" : "text-light-text-muted"}`}
       >
         {label}
       </span>

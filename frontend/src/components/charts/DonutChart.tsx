@@ -35,7 +35,7 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
   });
 
   const total = data.reduce((sum, d) => sum + d.value, 0);
-  const textGhost = dark ? cssVar("--color-text-ghost") : cssVar("--color-light-text-ghost");
+  const textGhost = dark ? cssVar("--color-text-muted") : cssVar("--color-light-text-muted");
   const textBright = dark ? cssVar("--color-text-bright") : cssVar("--color-light-text-bright");
 
   const option: EChartsOption = {
@@ -161,7 +161,7 @@ export function DonutChart({ columns, rows, dark }: Readonly<DonutChartProps>) {
               {d.label}
             </span>
             <span
-              className={`text-[0.75em] font-mono ${c("text-text-ghost", "text-light-text-ghost")}`}
+              className={`text-[0.75em] font-mono ${c("text-text-muted", "text-light-text-muted")}`}
             >
               {formatChartValue(d.value)}
             </span>
