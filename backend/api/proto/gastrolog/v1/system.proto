@@ -146,6 +146,9 @@ service SystemService {
   // Tiers
   rpc PutTier(PutTierRequest) returns (PutTierResponse);
   rpc DeleteTier(DeleteTierRequest) returns (DeleteTierResponse);
+
+  // DeleteLookup removes a lookup table by name (any type).
+  rpc DeleteLookup(DeleteLookupRequest) returns (DeleteLookupResponse);
 }
 
 message GetSystemRequest {}
@@ -444,9 +447,9 @@ message JSONFileLookupEntry {
   string name = 1;                            // registry name (e.g. "hosts")
   bytes file_id = 2;                          // managed file ID
   string query = 3;                           // jq expression that produces an array of objects (the lookup table)
-  reserved 4, 5;                              // was: response_paths, parameters (replaced by key_column/value_columns)
-  string key_column = 6;                      // column used as the lookup key; empty = first column
-  repeated string value_columns = 7;          // columns to include in output; empty = all non-key
+  reserved 4;                                 // was: parameters (lookup key is determined by key_column)
+  string key_column = 5;                      // column used as the lookup key; empty = first column
+  repeated string value_columns = 6;          // columns to include in output; empty = all non-key
 }
 
 // CSVLookupEntry defines a CSV file-backed lookup table for key→row enrichment.
@@ -928,3 +931,9 @@ message DeleteTierRequest {
 message DeleteTierResponse {
   GetSystemResponse system = 1;
 }
+
+message DeleteLookupRequest {
+  string name = 1; // Lookup name (unique across all types).
+}
+
+message DeleteLookupResponse {}

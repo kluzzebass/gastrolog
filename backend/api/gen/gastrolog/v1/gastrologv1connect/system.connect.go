@@ -169,6 +169,9 @@ const (
 	// SystemServiceDeleteTierProcedure is the fully-qualified name of the SystemService's DeleteTier
 	// RPC.
 	SystemServiceDeleteTierProcedure = "/gastrolog.v1.SystemService/DeleteTier"
+	// SystemServiceDeleteLookupProcedure is the fully-qualified name of the SystemService's
+	// DeleteLookup RPC.
+	SystemServiceDeleteLookupProcedure = "/gastrolog.v1.SystemService/DeleteLookup"
 )
 
 // SystemServiceClient is a client for the gastrolog.v1.SystemService service.
@@ -267,6 +270,8 @@ type SystemServiceClient interface {
 	// Tiers
 	PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error)
 	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
+	// DeleteLookup removes a lookup table by name (any type).
+	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
 }
 
 // NewSystemServiceClient constructs a client for the gastrolog.v1.SystemService service. By
@@ -562,6 +567,12 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("DeleteTier")),
 			connect.WithClientOptions(opts...),
 		),
+		deleteLookup: connect.NewClient[v1.DeleteLookupRequest, v1.DeleteLookupResponse](
+			httpClient,
+			baseURL+SystemServiceDeleteLookupProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("DeleteLookup")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -614,6 +625,7 @@ type systemServiceClient struct {
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
 	putTier               *connect.Client[v1.PutTierRequest, v1.PutTierResponse]
 	deleteTier            *connect.Client[v1.DeleteTierRequest, v1.DeleteTierResponse]
+	deleteLookup          *connect.Client[v1.DeleteLookupRequest, v1.DeleteLookupResponse]
 }
 
 // GetSystem calls gastrolog.v1.SystemService.GetSystem.
@@ -851,6 +863,11 @@ func (c *systemServiceClient) DeleteTier(ctx context.Context, req *connect.Reque
 	return c.deleteTier.CallUnary(ctx, req)
 }
 
+// DeleteLookup calls gastrolog.v1.SystemService.DeleteLookup.
+func (c *systemServiceClient) DeleteLookup(ctx context.Context, req *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
+	return c.deleteLookup.CallUnary(ctx, req)
+}
+
 // SystemServiceHandler is an implementation of the gastrolog.v1.SystemService service.
 type SystemServiceHandler interface {
 	// GetConfig returns the current configuration.
@@ -947,6 +964,8 @@ type SystemServiceHandler interface {
 	// Tiers
 	PutTier(context.Context, *connect.Request[v1.PutTierRequest]) (*connect.Response[v1.PutTierResponse], error)
 	DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error)
+	// DeleteLookup removes a lookup table by name (any type).
+	DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error)
 }
 
 // NewSystemServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -1238,6 +1257,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("DeleteTier")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServiceDeleteLookupHandler := connect.NewUnaryHandler(
+		SystemServiceDeleteLookupProcedure,
+		svc.DeleteLookup,
+		connect.WithSchema(systemServiceMethods.ByName("DeleteLookup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/gastrolog.v1.SystemService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SystemServiceGetSystemProcedure:
@@ -1334,6 +1359,8 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServicePutTierHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteTierProcedure:
 			systemServiceDeleteTierHandler.ServeHTTP(w, r)
+		case SystemServiceDeleteLookupProcedure:
+			systemServiceDeleteLookupHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -1529,4 +1556,8 @@ func (UnimplementedSystemServiceHandler) PutTier(context.Context, *connect.Reque
 
 func (UnimplementedSystemServiceHandler) DeleteTier(context.Context, *connect.Request[v1.DeleteTierRequest]) (*connect.Response[v1.DeleteTierResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.DeleteTier is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) DeleteLookup(context.Context, *connect.Request[v1.DeleteLookupRequest]) (*connect.Response[v1.DeleteLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.DeleteLookup is not implemented"))
 }

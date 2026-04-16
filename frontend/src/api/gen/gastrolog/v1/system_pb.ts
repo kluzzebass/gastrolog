@@ -2468,14 +2468,14 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
   /**
    * column used as the lookup key; empty = first column
    *
-   * @generated from field: string key_column = 6;
+   * @generated from field: string key_column = 5;
    */
   keyColumn = "";
 
   /**
    * columns to include in output; empty = all non-key
    *
-   * @generated from field: repeated string value_columns = 7;
+   * @generated from field: repeated string value_columns = 6;
    */
   valueColumns: string[] = [];
 
@@ -2490,8 +2490,8 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
     { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 2, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 6, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
-    { no: 7, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+    { no: 5, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JSONFileLookupEntry {
@@ -6531,6 +6531,76 @@ export class DeleteTierResponse extends Message<DeleteTierResponse> {
 
   static equals(a: DeleteTierResponse | PlainMessage<DeleteTierResponse> | undefined, b: DeleteTierResponse | PlainMessage<DeleteTierResponse> | undefined): boolean {
     return proto3.util.equals(DeleteTierResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteLookupRequest
+ */
+export class DeleteLookupRequest extends Message<DeleteLookupRequest> {
+  /**
+   * Lookup name (unique across all types).
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  constructor(data?: PartialMessage<DeleteLookupRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteLookupRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteLookupRequest {
+    return new DeleteLookupRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteLookupRequest {
+    return new DeleteLookupRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteLookupRequest {
+    return new DeleteLookupRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteLookupRequest | PlainMessage<DeleteLookupRequest> | undefined, b: DeleteLookupRequest | PlainMessage<DeleteLookupRequest> | undefined): boolean {
+    return proto3.util.equals(DeleteLookupRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.DeleteLookupResponse
+ */
+export class DeleteLookupResponse extends Message<DeleteLookupResponse> {
+  constructor(data?: PartialMessage<DeleteLookupResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.DeleteLookupResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteLookupResponse {
+    return new DeleteLookupResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DeleteLookupResponse {
+    return new DeleteLookupResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DeleteLookupResponse {
+    return new DeleteLookupResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DeleteLookupResponse | PlainMessage<DeleteLookupResponse> | undefined, b: DeleteLookupResponse | PlainMessage<DeleteLookupResponse> | undefined): boolean {
+    return proto3.util.equals(DeleteLookupResponse, a, b);
   }
 }
 

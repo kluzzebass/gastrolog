@@ -221,6 +221,9 @@ func (s *Server) registerJSONFileLookups(cfg system.LookupConfig, registry looku
 			s.logger.Warn("failed to watch JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)
 		}
 
+		if dups := jf.DuplicateKeys(); dups > 0 {
+			s.logger.Warn("JSON lookup has duplicate keys (first occurrence wins)", "name", jcfg.Name, "duplicates", dups)
+		}
 		registry[jcfg.Name] = jf
 		s.logger.Info("registered JSON file lookup table", "name", jcfg.Name, "path", filePath)
 	}

@@ -10,7 +10,7 @@ import { AddFormCard } from "../AddFormCard";
 import { type StaticLookupDraft, emptyStaticDraft, staticLookupEqual } from "./types";
 import type { StaticLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
-function serializeStaticLookups(lookups: StaticLookupDraft[]) {
+export function serializeStaticLookups(lookups: StaticLookupDraft[]) {
   return lookups
     .filter((s) => s.name && s.keyColumn)
     .map((s) => ({

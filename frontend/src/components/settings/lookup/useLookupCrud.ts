@@ -3,7 +3,7 @@
  * Extracted from HttpSection, JsonSection, MmdbSection, CsvSection.
  */
 import { useState } from "react";
-import { usePutSettings } from "../../../api/hooks/useSettings";
+import { usePutSettings, useDeleteLookup } from "../../../api/hooks/useSettings";
 import { useToast } from "../../Toast";
 
 interface LookupCrudOptions<T, S> {
@@ -32,6 +32,7 @@ export function useLookupCrud<T, S>(opts: LookupCrudOptions<T, S>) {
   } = opts;
 
   const putConfig = usePutSettings();
+  const deleteLookup = useDeleteLookup();
   const { addToast } = useToast();
   const [justSaved, setJustSaved] = useState(false);
 
@@ -55,10 +56,10 @@ export function useLookupCrud<T, S>(opts: LookupCrudOptions<T, S>) {
   };
 
   const handleDelete = async (i: number) => {
-    const name = lookups[i] ? getName(lookups[i]!) : `${typeLabel} Lookup ${i + 1}`;
-    const remaining = lookups.filter((_, j) => j !== i);
+    const item = lookups[i];
+    const name = item ? getName(item) : `${typeLabel} Lookup ${i + 1}`;
     try {
-      await putConfig.mutateAsync({ lookup: { [lookupKey]: serialize(remaining) } });
+      await deleteLookup.mutateAsync(name);
       onDelete(i);
       addToast(`"${name}" deleted`, "info");
     } catch (err: unknown) {

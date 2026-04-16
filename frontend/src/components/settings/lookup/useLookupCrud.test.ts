@@ -16,6 +16,7 @@ const getName = (d: Draft) => d.name;
 
 beforeEach(() => {
   m(mocks.systemClient, "putSettings").mockClear();
+  m(mocks.systemClient, "deleteLookup").mockClear();
 });
 
 function renderCrud(overrides: Partial<Parameters<typeof useLookupCrud<Draft, Saved>>[0]> = {}) {
@@ -83,20 +84,20 @@ describe("useLookupCrud", () => {
 
   // ── handleDelete ──────────────────────────────────────────────
 
-  test("handleDelete calls putSettings with remaining items", async () => {
-    m(mocks.systemClient, "putSettings").mockResolvedValueOnce({});
+  test("handleDelete calls deleteLookup with the item name", async () => {
+    m(mocks.systemClient, "deleteLookup").mockResolvedValueOnce({});
     const { result, onDelete } = renderCrud({
       lookups: [{ name: "a", value: "1" }, { name: "b", value: "2" }],
     });
 
     await act(() => result.current.handleDelete(0));
 
-    expect(m(mocks.systemClient, "putSettings")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "deleteLookup")).toHaveBeenCalledTimes(1);
     expect(onDelete).toHaveBeenCalledWith(0);
   });
 
   test("handleDelete shows error toast on failure", async () => {
-    m(mocks.systemClient, "putSettings").mockRejectedValueOnce(new Error("fail"));
+    m(mocks.systemClient, "deleteLookup").mockRejectedValueOnce(new Error("fail"));
     const { result, onDelete } = renderCrud();
 
     await act(() => result.current.handleDelete(0));

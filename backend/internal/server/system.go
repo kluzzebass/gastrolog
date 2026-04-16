@@ -540,6 +540,66 @@ func (s *SystemServer) PutSettings(
 	return connect.NewResponse(&apiv1.PutSettingsResponse{}), nil
 }
 
+// DeleteLookup removes a lookup table by name from whichever type list it
+// belongs to (HTTP, JSON file, MMDB, CSV, or static).
+func (s *SystemServer) DeleteLookup(
+	ctx context.Context,
+	req *connect.Request[apiv1.DeleteLookupRequest],
+) (*connect.Response[apiv1.DeleteLookupResponse], error) {
+	name := req.Msg.Name
+	if name == "" {
+		return nil, errRequired("name")
+	}
+
+	ss, err := s.loadServerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	found := false
+	ss.Lookup.HTTPLookups = slicesDeleteFunc(ss.Lookup.HTTPLookups, func(l system.HTTPLookupConfig) bool {
+		if l.Name == name { found = true; return true }; return false
+	})
+	ss.Lookup.JSONFileLookups = slicesDeleteFunc(ss.Lookup.JSONFileLookups, func(l system.JSONFileLookupConfig) bool {
+		if l.Name == name { found = true; return true }; return false
+	})
+	ss.Lookup.MMDBLookups = slicesDeleteFunc(ss.Lookup.MMDBLookups, func(l system.MMDBLookupConfig) bool {
+		if l.Name == name { found = true; return true }; return false
+	})
+	ss.Lookup.CSVLookups = slicesDeleteFunc(ss.Lookup.CSVLookups, func(l system.CSVLookupConfig) bool {
+		if l.Name == name { found = true; return true }; return false
+	})
+	ss.Lookup.StaticLookups = slicesDeleteFunc(ss.Lookup.StaticLookups, func(l system.StaticLookupConfig) bool {
+		if l.Name == name { found = true; return true }; return false
+	})
+
+	if !found {
+		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("lookup %q not found", name))
+	}
+
+	if err := s.sysStore.SaveServerSettings(ctx, ss); err != nil {
+		return nil, errInternal(err)
+	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+
+	if s.onLookupConfigChange != nil {
+		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
+	}
+
+	return connect.NewResponse(&apiv1.DeleteLookupResponse{}), nil
+}
+
+// slicesDeleteFunc returns a new slice with elements matching f removed.
+func slicesDeleteFunc[T any](s []T, f func(T) bool) []T {
+	out := s[:0:0]
+	for _, v := range s {
+		if !f(v) {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // RegenerateJwtSecret generates a new random JWT signing secret, replacing the
 // existing one. All active sessions are immediately invalidated because the old
 // secret can no longer verify existing tokens.

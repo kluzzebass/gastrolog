@@ -13,7 +13,7 @@ import { FileDropZone } from "../FileDropZone";
 import { type CSVLookupDraft, type LookupSectionProps, emptyCsvDraft, csvLookupEqual } from "./types";
 import type { CSVLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
-function serializeCsvLookups(lookups: CSVLookupDraft[]) {
+export function serializeCsvLookups(lookups: CSVLookupDraft[]) {
   return lookups
     .filter((c) => c.name && c.fileId)
     .map((c) => ({

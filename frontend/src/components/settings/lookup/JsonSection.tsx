@@ -145,7 +145,7 @@ function JsonPreviewPanel({ dark, fileId, query, keyColumn, onColumnsAvailable }
   );
 }
 
-function serializeJsonLookups(lookups: JSONFileLookupDraft[]) {
+export function serializeJsonLookups(lookups: JSONFileLookupDraft[]) {
   return lookups
     .filter((j) => j.name && j.fileId)
     .map((j) => ({

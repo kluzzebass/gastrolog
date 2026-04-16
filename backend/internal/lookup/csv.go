@@ -24,15 +24,16 @@ type CSVConfig struct {
 // Row data lives in the mmap region, not on the heap.
 // Only the key strings and their offsets are heap-allocated.
 type csvData struct {
-	mmapData   []byte   // memory-mapped file contents
-	file       *os.File // kept open while mmap is active
-	rowOffsets []int    // byte offset of each data row (excludes header)
-	keyIndex   map[string]int // key value → index into rowOffsets
-	header     []string
-	keyIdx     int          // column index of the key
-	mappings   []colMapping // value column indices and names
-	suffixes   []string     // output column names
-	delimiter  rune
+	mmapData      []byte   // memory-mapped file contents
+	file          *os.File // kept open while mmap is active
+	rowOffsets    []int    // byte offset of each data row (excludes header)
+	keyIndex      map[string]int // key value → index into rowOffsets
+	header        []string
+	keyIdx        int          // column index of the key
+	mappings      []colMapping // value column indices and names
+	suffixes      []string     // output column names
+	delimiter     rune
+	duplicateKeys int // number of rows skipped due to duplicate keys
 }
 
 func (d *csvData) close() {
@@ -246,6 +247,7 @@ func (c *CSV) Load(path string) error {
 
 	// Build key index by parsing only the key column from each row.
 	keyIndex := make(map[string]int, len(dataOffsets))
+	var duplicateKeys int
 	for i, off := range dataOffsets {
 		end := len(mmapData)
 		if i+1 < len(dataOffsets) {
@@ -263,21 +265,23 @@ func (c *CSV) Load(path string) error {
 			continue
 		}
 		if _, exists := keyIndex[key]; exists {
+			duplicateKeys++
 			continue // first occurrence wins
 		}
 		keyIndex[key] = i
 	}
 
 	newData := &csvData{
-		mmapData:   mmapData,
-		file:       f,
-		rowOffsets: dataOffsets,
-		keyIndex:   keyIndex,
-		header:     header,
-		keyIdx:     keyIdx,
-		mappings:   mappings,
-		suffixes:   suffixes,
-		delimiter:  c.delimiter,
+		mmapData:      mmapData,
+		file:          f,
+		rowOffsets:    dataOffsets,
+		keyIndex:      keyIndex,
+		header:        header,
+		keyIdx:        keyIdx,
+		mappings:      mappings,
+		suffixes:      suffixes,
+		delimiter:     c.delimiter,
+		duplicateKeys: duplicateKeys,
 	}
 
 	old := c.data.Swap(newData)

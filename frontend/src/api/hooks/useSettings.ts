@@ -215,6 +215,19 @@ export function usePreviewJSONLookup() {
   });
 }
 
+export function useDeleteLookup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (name: string) => {
+      return systemClient.deleteLookup({ name });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["settings"] });
+      qc.invalidateQueries({ queryKey: ["system"] });
+    },
+  });
+}
+
 export function useRegenerateJwtSecret() {
   return useSystemMutation(async () => {
     return systemClient.regenerateJwtSecret({});

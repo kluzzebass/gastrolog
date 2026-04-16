@@ -200,6 +200,39 @@ func TestJSONFile_Parameters(t *testing.T) {
 	}
 }
 
+func TestJSONFile_DuplicateKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "data.json")
+	os.WriteFile(path, []byte(`[
+		{"ip": "10.0.0.1", "hostname": "web-1"},
+		{"ip": "10.0.0.1", "hostname": "web-2"},
+		{"ip": "10.0.0.2", "hostname": "db-1"}
+	]`), 0o644)
+
+	jf, err := NewJSONFile(JSONFileConfig{Query: `.`, KeyColumn: "ip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jf.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	defer jf.Close()
+
+	// First occurrence wins.
+	result := jf.LookupValues(context.Background(), map[string]string{"value": "10.0.0.1"})
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result["hostname"] != "web-1" {
+		t.Errorf("hostname = %q, want web-1 (first occurrence)", result["hostname"])
+	}
+
+	// DuplicateKeys reports the count.
+	if dups := jf.DuplicateKeys(); dups != 1 {
+		t.Errorf("DuplicateKeys() = %d, want 1", dups)
+	}
+}
+
 func TestJSONFile_HotReload(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "data.json")
@@ -248,7 +281,7 @@ func TestJSONFile_HotReload(t *testing.T) {
 func TestJSONFile_MmapRelease(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "data.json")
-	os.WriteFile(path, []byte(`[{"k": "v"}]`), 0o644)
+	os.WriteFile(path, []byte(`[{"k": "a", "v": "1"}]`), 0o644)
 
 	jf, err := NewJSONFile(JSONFileConfig{Query: `.`})
 	if err != nil {
@@ -259,7 +292,7 @@ func TestJSONFile_MmapRelease(t *testing.T) {
 	}
 
 	// Reload — old mmap should be released.
-	os.WriteFile(path, []byte(`[{"k": "v2"}]`), 0o644)
+	os.WriteFile(path, []byte(`[{"k": "b", "v": "2"}]`), 0o644)
 	if err := jf.Load(path); err != nil {
 		t.Fatal(err)
 	}

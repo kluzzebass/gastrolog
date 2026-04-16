@@ -12,7 +12,7 @@ import { FileDropZone } from "../FileDropZone";
 import { type MMDBLookupDraft, type LookupSectionProps, mmdbDbTypes, mmdbDefaultName, emptyMmdbDraft, mmdbLookupEqual } from "./types";
 import type { MMDBLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
-function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
+export function serializeMmdbLookups(lookups: MMDBLookupDraft[]) {
   return lookups
     .filter((m) => m.name)
     .map((m) => ({

@@ -11,7 +11,7 @@ import { StringListEditor, ParameterListEditor } from "./FormHelpers";
 import { type HTTPLookupDraft, type LookupSectionProps, emptyHttpDraft, httpLookupEqual } from "./types";
 import type { HTTPLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 
-function serializeHttpLookups(lookups: HTTPLookupDraft[]) {
+export function serializeHttpLookups(lookups: HTTPLookupDraft[]) {
   return lookups
     .filter((h) => h.name && h.urlTemplate)
     .map((h) => ({
