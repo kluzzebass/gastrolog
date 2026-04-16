@@ -64,22 +64,25 @@ function findAddrOverlap(wanted: ListenAddr[], other: ListenAddr[]): string | nu
   return null;
 }
 
-/** Check if an ingester's listen addresses conflict with any other configured ingester on the same node. */
+/** Check if an ingester's listen addresses conflict with any other configured ingester whose node set overlaps. */
 export function listenAddrConflict(
   selfId: string,
   selfType: string,
   selfParams: Record<string, string>,
-  selfNodeId: string,
-  allIngesters: readonly { id: Uint8Array; type: string; params: { [key: string]: string }; nodeId: Uint8Array }[],
+  selfNodeIds: string[],
+  allIngesters: readonly { id: Uint8Array; type: string; params: { [key: string]: string }; nodeIds: Uint8Array[] }[],
   allDefaults: Record<string, Record<string, string>>,
 ): string | null {
   const selfDefaults = allDefaults[selfType] ?? {};
   const wanted = getListenAddrs(selfType, selfParams, selfDefaults);
   if (wanted.length === 0) return null;
 
+  const selfSet = new Set(selfNodeIds);
   for (const other of allIngesters) {
     if (encode(other.id) === selfId) continue;
-    if (encode(other.nodeId) !== selfNodeId) continue;
+    const otherNodeIds = other.nodeIds.map(encode);
+    // Empty set = all nodes → always overlaps. Otherwise check intersection.
+    if (selfSet.size > 0 && otherNodeIds.length > 0 && !otherNodeIds.some((n) => selfSet.has(n))) continue;
     const otherDefaults = allDefaults[other.type] ?? {};
     const otherAddrs = getListenAddrs(other.type, other.params, otherDefaults);
     const conflict = findAddrOverlap(wanted, otherAddrs);

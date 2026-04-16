@@ -48,7 +48,7 @@ export function usePutIngester() {
       type: string;
       enabled: boolean;
       params: Record<string, string>;
-      nodeId?: string;
+      nodeIds?: string[];
     }) => {
       return systemClient.putIngester({
         config: {
@@ -57,7 +57,7 @@ export function usePutIngester() {
           type: args.type,
           enabled: args.enabled,
           params: stripEmptyParams(args.params),
-          nodeId: args.nodeId ? encodeString(args.nodeId) : new Uint8Array(0),
+          nodeIds: (args.nodeIds ?? []).map(encodeString),
         },
       });
     },

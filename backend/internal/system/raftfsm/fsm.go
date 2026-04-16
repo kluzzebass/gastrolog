@@ -55,7 +55,8 @@ type Notification struct {
 	ID         glid.GLID // entity ID (zero for settings)
 	Name       string    // entity name (populated on deletes where config is read pre-delete)
 	Key        string    // settings key (empty for entity mutations)
-	NodeID     string    // owning node (populated on vault/ingester deletes)
+	NodeID     string    // owning node (populated on vault deletes)
+	NodeIDs    []string  // allowed nodes (populated on ingester deletes)
 	Dir        string    // file vault directory (populated on file vault deletes)
 	DeleteData bool      // when true, vault data directory should be removed from disk
 	Drain      bool      // when true, drain tier data to next tier before deleting
@@ -390,7 +391,7 @@ func (f *FSM) applyDeleteIngester(ctx context.Context, pb *gastrologv1.DeleteIng
 	note := &Notification{Kind: NotifyIngesterDeleted, ID: id}
 	if existing, _ := f.store.GetIngester(ctx, id); existing != nil {
 		note.Name = existing.Name
-		note.NodeID = existing.NodeID
+		note.NodeIDs = existing.NodeIDs
 	}
 	if err := f.store.DeleteIngester(ctx, id); err != nil {
 		return nil, err

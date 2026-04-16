@@ -1697,10 +1697,10 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 
 	// Also register it in the config store so ListIngesters can find it.
 	_ = h.cfgStore.PutIngester(ctx, system.IngesterConfig{
-		ID:     ingID,
-		Name:   "test-ing",
-		Type:   "mqtt",
-		NodeID: "data-1",
+		ID:      ingID,
+		Name:    "test-ing",
+		Type:    "mqtt",
+		NodeIDs: []string{"data-1"},
 	})
 
 	resp, err := h.configClient.ListIngesters(ctx, connect.NewRequest(&gastrologv1.ListIngestersRequest{}))
@@ -1715,8 +1715,8 @@ func TestMultiNode_ListIngestersCrossNode(t *testing.T) {
 	if glid.FromBytes(ing.Id) != ingID {
 		t.Errorf("ingester ID = %q, want %q", glid.FromBytes(ing.Id), ingID)
 	}
-	if string(ing.NodeId) != "data-1" {
-		t.Errorf("ingester NodeId = %q, want data-1", string(ing.NodeId))
+	if len(ing.NodeIds) != 1 || string(ing.NodeIds[0]) != "data-1" {
+		t.Errorf("ingester NodeIds = %v, want [data-1]", ing.NodeIds)
 	}
 	if ing.Name != "test-ing" {
 		t.Errorf("ingester Name = %q, want test-ing", ing.Name)
@@ -1733,10 +1733,10 @@ func TestMultiNode_GetIngesterStatusCrossNode(t *testing.T) {
 	h.Node(t, "data-1").orch.RegisterIngester(ingID, "test-ing", "mqtt", nil)
 
 	_ = h.cfgStore.PutIngester(ctx, system.IngesterConfig{
-		ID:     ingID,
-		Name:   "test-ing",
-		Type:   "mqtt",
-		NodeID: "data-1",
+		ID:      ingID,
+		Name:    "test-ing",
+		Type:    "mqtt",
+		NodeIDs: []string{"data-1"},
 	})
 
 	// Simulate some ingester activity by bumping stats on data-1.

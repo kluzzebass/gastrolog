@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/chunk"
@@ -211,8 +212,8 @@ func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) e
 		}
 		ingesterIDs[recvCfg.ID] = true
 
-		// Skip ingesters belonging to another node.
-		if recvCfg.NodeID != "" && recvCfg.NodeID != o.localNodeID {
+		// Skip ingesters not assigned to this node.
+		if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
 			continue
 		}
 

@@ -122,9 +122,9 @@ type IngesterConfig struct {
 	// the params. There is no schema enforcement at the ConfigVault level.
 	Params map[string]string `json:"params,omitempty"`
 
-	// NodeID is the raft server ID of the node that owns this ingester.
-	// Empty means unscoped (legacy/migration compatibility).
-	NodeID string `json:"nodeId,omitempty"`
+	// NodeIDs lists the raft server IDs of nodes allowed to run this ingester.
+	// Passive ingesters attempt all listed nodes. Active ingesters run on one.
+	NodeIDs []string `json:"nodeIds,omitempty"`
 }
 
 // CertPEM holds certificate content. Either stored PEM or file paths (directory monitoring).

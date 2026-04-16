@@ -10,7 +10,7 @@ import { CrossLinkBadge } from "./CrossLinkBadge";
 import { encode } from "../../api/glid";
 
 interface IngesterCardProps {
-  ingester: { id: Uint8Array; name: string; type: string; running: boolean; nodeId: Uint8Array };
+  ingester: { id: Uint8Array; name: string; type: string; running: boolean; nodeIds: Uint8Array[] };
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
@@ -36,7 +36,7 @@ export function IngesterCard({
       onToggle={onToggle}
       headerRight={
         <span className="flex items-center gap-1.5">
-          {showNodeBadge && <NodeBadge nodeId={encode(ingester.nodeId)} dark={dark} />}
+          {showNodeBadge && ingester.nodeIds.length > 0 && <NodeBadge nodeId={encode(ingester.nodeIds[0]!)} dark={dark} />}
           {ingester.running ? (
             <Badge variant="info" dark={dark}>running</Badge>
           ) : (

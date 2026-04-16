@@ -480,9 +480,19 @@ export class IngesterConfig extends Message<IngesterConfig> {
   name = "";
 
   /**
-   * @generated from field: bytes node_id = 6;
+   * Legacy single-node assignment. Use node_ids.
+   *
+   * @generated from field: bytes node_id = 6 [deprecated = true];
+   * @deprecated
    */
   nodeId = new Uint8Array(0);
+
+  /**
+   * Allowed nodes. Passive: try all. Active: place on one.
+   *
+   * @generated from field: repeated bytes node_ids = 7;
+   */
+  nodeIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<IngesterConfig>) {
     super();
@@ -498,6 +508,7 @@ export class IngesterConfig extends Message<IngesterConfig> {
     { no: 4, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 7, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterConfig {
@@ -787,9 +798,19 @@ export class IngesterInfo extends Message<IngesterInfo> {
   name = "";
 
   /**
-   * @generated from field: bytes node_id = 5;
+   * Legacy. Use node_ids.
+   *
+   * @generated from field: bytes node_id = 5 [deprecated = true];
+   * @deprecated
    */
   nodeId = new Uint8Array(0);
+
+  /**
+   * Allowed nodes from config.
+   *
+   * @generated from field: repeated bytes node_ids = 6;
+   */
+  nodeIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<IngesterInfo>) {
     super();
@@ -804,6 +825,7 @@ export class IngesterInfo extends Message<IngesterInfo> {
     { no: 3, name: "running", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 4, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 6, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {

@@ -44,7 +44,7 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const { jobs } = useWatchJobs({ onError: toastError });
 
   const vaults = (allVaults ?? []).filter((v) => (encode(v.nodeId) || localNodeId) === nodeId);
-  const ingesters = (allIngesters ?? []).filter((i) => (encode(i.nodeId) || localNodeId) === nodeId);
+  const ingesters = (allIngesters ?? []).filter((i) => i.nodeIds.length === 0 || i.nodeIds.some((n) => encode(n) === nodeId));
   const nodeJobs = jobs.filter((j) => (encode(j.nodeId) || localNodeId) === nodeId);
   const tasks = nodeJobs.filter((j) => j.kind === JobKind.TASK);
   const scheduled = nodeJobs.filter((j) => j.kind === JobKind.SCHEDULED);

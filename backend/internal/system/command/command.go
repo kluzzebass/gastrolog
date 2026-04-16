@@ -237,13 +237,17 @@ func ExtractDeleteVault(cmd *gastrologv1.DeleteVaultCommand) (glid.GLID, error) 
 // ---------------------------------------------------------------------------
 
 func putIngesterCmd(cfg system.IngesterConfig) *gastrologv1.PutIngesterCommand {
+	nodeIDs := make([][]byte, len(cfg.NodeIDs))
+	for i, nid := range cfg.NodeIDs {
+		nodeIDs[i] = []byte(nid)
+	}
 	return &gastrologv1.PutIngesterCommand{
 		Id:      cfg.ID.ToProto(),
 		Name:    cfg.Name,
 		Type:    cfg.Type,
 		Enabled: cfg.Enabled,
 		Params:  cfg.Params,
-		NodeId:  []byte(cfg.NodeID),
+		NodeIds: nodeIDs,
 	}
 }
 
@@ -264,14 +268,23 @@ func NewDeleteIngester(id glid.GLID) *gastrologv1.SystemCommand {
 }
 
 // ExtractPutIngester converts a PutIngesterCommand back to an IngesterConfig.
+// Handles migration from legacy single node_id (field 6) to node_ids (field 7).
 func ExtractPutIngester(cmd *gastrologv1.PutIngesterCommand) (system.IngesterConfig, error) {
+	var nodeIDs []string
+	for _, nid := range cmd.GetNodeIds() {
+		nodeIDs = append(nodeIDs, string(nid))
+	}
+	// Migrate legacy single node_id if node_ids is empty.
+	if len(nodeIDs) == 0 && len(cmd.GetNodeId()) > 0 {
+		nodeIDs = []string{string(cmd.GetNodeId())}
+	}
 	return system.IngesterConfig{
 		ID:      glid.FromBytes(cmd.GetId()),
 		Name:    cmd.GetName(),
 		Type:    cmd.GetType(),
 		Enabled: cmd.GetEnabled(),
 		Params:  nilIfEmpty(cmd.GetParams()),
-		NodeID:  string(cmd.GetNodeId()),
+		NodeIDs: nodeIDs,
 	}, nil
 }
 

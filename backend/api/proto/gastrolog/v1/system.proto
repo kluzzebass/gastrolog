@@ -211,7 +211,8 @@ message IngesterConfig {
   map<string, string> params = 3;
   bool enabled = 4;
   string name = 5;
-  bytes node_id = 6;
+  bytes node_id = 6 [deprecated = true]; // Legacy single-node assignment. Use node_ids.
+  repeated bytes node_ids = 7;           // Allowed nodes. Passive: try all. Active: place on one.
 }
 
 message FilterConfig {
@@ -248,7 +249,8 @@ message IngesterInfo {
   string type = 2;
   bool running = 3;
   string name = 4;
-  bytes node_id = 5;
+  bytes node_id = 5 [deprecated = true]; // Legacy. Use node_ids.
+  repeated bytes node_ids = 6;           // Allowed nodes from config.
 }
 
 message GetIngesterStatusRequest {

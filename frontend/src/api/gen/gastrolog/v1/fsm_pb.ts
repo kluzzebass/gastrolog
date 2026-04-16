@@ -728,9 +728,19 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
   params: { [key: string]: string } = {};
 
   /**
-   * @generated from field: bytes node_id = 6;
+   * Legacy. Use node_ids.
+   *
+   * @generated from field: bytes node_id = 6 [deprecated = true];
+   * @deprecated
    */
   nodeId = new Uint8Array(0);
+
+  /**
+   * Allowed nodes.
+   *
+   * @generated from field: repeated bytes node_ids = 7;
+   */
+  nodeIds: Uint8Array[] = [];
 
   constructor(data?: PartialMessage<PutIngesterCommand>) {
     super();
@@ -746,6 +756,7 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
     { no: 4, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 7, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutIngesterCommand {

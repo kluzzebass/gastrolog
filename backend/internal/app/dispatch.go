@@ -301,13 +301,13 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 		return
 	}
 
-	if ingCfg.NodeID != "" && ingCfg.NodeID != d.localNodeID {
-		// Ingester assigned to another node — stop it locally if running.
+	if len(ingCfg.NodeIDs) > 0 && !slices.Contains(ingCfg.NodeIDs, d.localNodeID) {
+		// This node is not in the allowed set — stop it locally if running.
 		if slices.Contains(d.orch.ListIngesters(), id) {
 			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
-				d.logger.Error("dispatch: remove ingester reassigned to remote node", "id", id, "name", ingCfg.Name, "node", ingCfg.NodeID, "error", err)
+				d.logger.Error("dispatch: remove ingester not assigned to this node", "id", id, "name", ingCfg.Name, "error", err)
 			} else {
-				d.logger.Info("dispatch: ingester reassigned, stopped locally", "id", id, "name", ingCfg.Name, "target_node", ingCfg.NodeID)
+				d.logger.Info("dispatch: ingester removed, not assigned to this node", "id", id, "name", ingCfg.Name)
 			}
 		}
 		return

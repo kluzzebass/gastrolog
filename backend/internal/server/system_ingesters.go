@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"slices"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -44,16 +45,16 @@ func (s *SystemServer) ListIngesters(
 	}
 
 	for _, ing := range allIngesters {
-		nodeID := ing.NodeID
-		if nodeID == "" {
-			nodeID = s.localNodeID
+		nodeIDs := make([][]byte, len(ing.NodeIDs))
+		for i, nid := range ing.NodeIDs {
+			nodeIDs[i] = []byte(nid)
 		}
 		_, isLocal := localIDs[ing.ID]
 		info := &apiv1.IngesterInfo{
-			Id:     ing.ID.ToProto(),
-			Name:   ing.Name,
-			Type:   ing.Type,
-			NodeId: []byte(nodeID),
+			Id:      ing.ID.ToProto(),
+			Name:    ing.Name,
+			Type:    ing.Type,
+			NodeIds: nodeIDs,
 		}
 		if isLocal {
 			info.Running = s.orch.IsRunning()
@@ -148,18 +149,21 @@ func (s *SystemServer) PutIngester(
 		return nil, connErr
 	}
 
+	nodeIDs := make([]string, len(req.Msg.Config.NodeIds))
+	for i, nid := range req.Msg.Config.NodeIds {
+		nodeIDs[i] = string(nid)
+	}
+	// Migrate legacy single node_id if node_ids is empty.
+	if len(nodeIDs) == 0 && len(req.Msg.Config.NodeId) > 0 {
+		nodeIDs = []string{string(req.Msg.Config.NodeId)}
+	}
 	ingCfg := system.IngesterConfig{
 		ID:      id,
 		Name:    req.Msg.Config.Name,
 		Type:    req.Msg.Config.Type,
 		Enabled: req.Msg.Config.Enabled,
 		Params:  req.Msg.Config.Params,
-		NodeID:  string(req.Msg.Config.NodeId),
-	}
-
-	// Auto-assign local node ID when not specified.
-	if ingCfg.NodeID == "" {
-		ingCfg.NodeID = s.localNodeID
+		NodeIDs: nodeIDs,
 	}
 
 	// Dry-run validation: verify type is known and factory can construct the
@@ -189,8 +193,8 @@ func (s *SystemServer) validateIngester(ingCfg system.IngesterConfig, existing [
 	if !ok {
 		return connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("unknown ingester type: %s", ingCfg.Type))
 	}
-	if ingCfg.NodeID != s.localNodeID {
-		return nil // skip construction test for remote ingesters
+	if len(ingCfg.NodeIDs) > 0 && !slices.Contains(ingCfg.NodeIDs, s.localNodeID) {
+		return nil // skip construction test — this node isn't in the allowed set
 	}
 	params := ingCfg.Params
 	if s.factories.HomeDir != "" {
@@ -265,38 +269,64 @@ func tryBind(network, address string) error {
 }
 
 // checkListenAddrConflicts detects address collisions between listener
-// ingesters. Two ingesters on the same node cannot bind the same
-// network+address pair.
+// ingesters whose node sets overlap (they could run on the same node).
 func (s *SystemServer) checkListenAddrConflicts(ingCfg system.IngesterConfig, existing []system.IngesterConfig) error {
 	reg := s.factories.IngesterTypes[ingCfg.Type]
 	wanted := reg.ListenAddrs(ingCfg.Params)
 
 	for _, other := range existing {
 		if other.ID == ingCfg.ID {
-			continue // same ingester — updating self
-		}
-		otherReg, ok := s.factories.IngesterTypes[other.Type]
-		if !ok || otherReg.ListenAddrs == nil {
 			continue
 		}
-		// Only compare ingesters on the same node.
-		otherNode := other.NodeID
-		if otherNode == "" {
-			otherNode = s.localNodeID
-		}
-		if otherNode != ingCfg.NodeID {
+		otherAddrs := s.comparableListenAddrs(other, ingCfg.NodeIDs)
+		if otherAddrs == nil {
 			continue
 		}
-		for _, w := range wanted {
-			for _, o := range otherReg.ListenAddrs(other.Params) {
-				if w.Network == o.Network && w.Address == o.Address {
-					return connect.NewError(connect.CodeInvalidArgument,
-						fmt.Errorf("listen address %s %s is already used by ingester %q", w.Network, w.Address, other.Name))
-				}
+		if conflict := findAddrOverlap(wanted, otherAddrs); conflict != nil {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("listen address %s %s is already used by ingester %q", conflict.Network, conflict.Address, other.Name))
+		}
+	}
+	return nil
+}
+
+// comparableListenAddrs returns listen addresses for other if its node set
+// overlaps with selfNodeIDs (meaning they could conflict). Returns nil otherwise.
+func (s *SystemServer) comparableListenAddrs(other system.IngesterConfig, selfNodeIDs []string) []orchestrator.ListenAddr {
+	otherReg, ok := s.factories.IngesterTypes[other.Type]
+	if !ok || otherReg.ListenAddrs == nil {
+		return nil
+	}
+	if !nodeIDsOverlap(selfNodeIDs, other.NodeIDs) {
+		return nil
+	}
+	return otherReg.ListenAddrs(other.Params)
+}
+
+// findAddrOverlap returns the first address that appears in both slices, or nil.
+func findAddrOverlap(a, b []orchestrator.ListenAddr) *orchestrator.ListenAddr {
+	for i := range a {
+		for j := range b {
+			if a[i].Network == b[j].Network && a[i].Address == b[j].Address {
+				return &a[i]
 			}
 		}
 	}
 	return nil
+}
+
+// nodeIDsOverlap returns true if the two node sets share any node,
+// or if either set is empty (empty = all nodes = always overlaps).
+func nodeIDsOverlap(a, b []string) bool {
+	if len(a) == 0 || len(b) == 0 {
+		return true
+	}
+	for _, id := range a {
+		if slices.Contains(b, id) {
+			return true
+		}
+	}
+	return false
 }
 
 // DeleteIngester removes an ingester.
@@ -443,4 +473,13 @@ func (s *SystemServer) findPeerIngesterStats(id glid.GLID) *apiv1.IngesterNodeSt
 		return nil
 	}
 	return s.peerStats.FindIngesterStats(id.String())
+}
+
+// stringsToBytes converts a string slice to a [][]byte slice.
+func stringsToBytes(ss []string) [][]byte {
+	out := make([][]byte, len(ss))
+	for i, s := range ss {
+		out[i] = []byte(s)
+	}
+	return out
 }

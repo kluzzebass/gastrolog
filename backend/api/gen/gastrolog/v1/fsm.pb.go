@@ -1150,13 +1150,15 @@ func (x *DeleteVaultCommand) GetDeleteData() bool {
 }
 
 type PutIngesterCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Type          string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
-	Enabled       bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
-	Params        map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	NodeId        []byte                 `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Id      []byte                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name    string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Type    string                 `protobuf:"bytes,3,opt,name=type,proto3" json:"type,omitempty"`
+	Enabled bool                   `protobuf:"varint,4,opt,name=enabled,proto3" json:"enabled,omitempty"`
+	Params  map[string]string      `protobuf:"bytes,5,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Deprecated: Marked as deprecated in gastrolog/v1/fsm.proto.
+	NodeId        []byte   `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // Legacy. Use node_ids.
+	NodeIds       [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"` // Allowed nodes.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1226,9 +1228,17 @@ func (x *PutIngesterCommand) GetParams() map[string]string {
 	return nil
 }
 
+// Deprecated: Marked as deprecated in gastrolog/v1/fsm.proto.
 func (x *PutIngesterCommand) GetNodeId() []byte {
 	if x != nil {
 		return x.NodeId
+	}
+	return nil
+}
+
+func (x *PutIngesterCommand) GetNodeIds() [][]byte {
+	if x != nil {
+		return x.NodeIds
 	}
 	return nil
 }
@@ -3105,14 +3115,15 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x12DeleteVaultCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x1f\n" +
 	"\vdelete_data\x18\x02 \x01(\bR\n" +
-	"deleteData\"\x80\x02\n" +
+	"deleteData\"\x9f\x02\n" +
 	"\x12PutIngesterCommand\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x12\n" +
 	"\x04type\x18\x03 \x01(\tR\x04type\x12\x18\n" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12D\n" +
-	"\x06params\x18\x05 \x03(\v2,.gastrolog.v1.PutIngesterCommand.ParamsEntryR\x06params\x12\x17\n" +
-	"\anode_id\x18\x06 \x01(\fR\x06nodeId\x1a9\n" +
+	"\x06params\x18\x05 \x03(\v2,.gastrolog.v1.PutIngesterCommand.ParamsEntryR\x06params\x12\x1b\n" +
+	"\anode_id\x18\x06 \x01(\fB\x02\x18\x01R\x06nodeId\x12\x19\n" +
+	"\bnode_ids\x18\a \x03(\fR\anodeIds\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +

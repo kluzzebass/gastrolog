@@ -44,7 +44,7 @@ interface AddIngesterFormState {
   newName: string;
   newType: string;
   newParams: Record<string, string>;
-  newNodeId: string;
+  newNodeIds: string[];
 }
 
 const addIngesterFormInitial: AddIngesterFormState = {
@@ -52,14 +52,14 @@ const addIngesterFormInitial: AddIngesterFormState = {
   newName: "",
   newType: "chatterbox",
   newParams: {},
-  newNodeId: "",
+  newNodeIds: [],
 };
 
 type AddIngesterFormAction =
   | { type: "startAdd"; ingesterType: string }
   | { type: "setNewName"; value: string }
   | { type: "setNewParams"; value: Record<string, string> }
-  | { type: "setNewNodeId"; value: string }
+  | { type: "setNewNodeIds"; value: string[] }
   | { type: "resetForm" };
 
 function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngesterFormAction): AddIngesterFormState {
@@ -70,8 +70,8 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
       return { ...state, newName: action.value };
     case "setNewParams":
       return { ...state, newParams: action.value };
-    case "setNewNodeId":
-      return { ...state, newNodeId: action.value };
+    case "setNewNodeIds":
+      return { ...state, newNodeIds: action.value };
     case "resetForm":
       return addIngesterFormInitial;
     default:
@@ -92,7 +92,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
-  const { adding, newName, newType, newParams, newNodeId } = addForm;
+  const { adding, newName, newType, newParams, newNodeIds } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const configIngesters = config?.ingesters;
@@ -111,15 +111,15 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const existingNames = new Set(ingesters.map((i) => i.name));
   const effectiveName = newName.trim() || namePlaceholder || newType;
   const nameConflict = existingNames.has(effectiveName);
-  const newAddrConflict = listenAddrConflict("", newType, newParams, newNodeId, ingesters, allDefaults);
+  const newAddrConflict = listenAddrConflict("", newType, newParams, newNodeIds, ingesters, allDefaults);
   const newPortCheck = useCheckListenAddrs(newType, newParams, "");
   const newPortError = !newAddrConflict && newPortCheck.data && !newPortCheck.data.success ? newPortCheck.data.message : null;
   const newListenError = newAddrConflict ?? newPortError;
 
   const defaults = (id: string) => {
     const ing = ingesters.find((i) => encode(i.id) === id);
-    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string>, nodeId: "" };
-    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeId: encode(ing.nodeId) };
+    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string>, nodeIds: [] as string[] };
+    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeIds: ing.nodeIds.map(encode) };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -130,14 +130,14 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
     label: "Ingester",
     onSaveTransform: (
       id,
-      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string; nodeId: string },
+      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string; nodeIds: string[] },
     ) => ({
       id,
       name: edit.name,
       type: edit.type,
       enabled: edit.enabled,
       params: edit.params,
-      nodeId: edit.nodeId,
+      nodeIds: edit.nodeIds,
     }),
     clearEdit,
   });
@@ -151,7 +151,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
         type: newType,
         enabled: true,
         params: newParams,
-        nodeId: newNodeId,
+        nodeIds: newNodeIds,
       });
       addToast(`Ingester "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
@@ -197,8 +197,8 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           </FormField>
           {(ingesterModes[newType] ?? IngesterMode.ACTIVE) === IngesterMode.ACTIVE && (
             <NodeSelect
-              value={newNodeId}
-              onChange={(v) => dispatchAdd({ type: "setNewNodeId", value: v })}
+              value={newNodeIds[0] ?? ""}
+              onChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v ? [v] : [] })}
               dark={dark}
             />
           )}
@@ -239,6 +239,13 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   );
 }
 
+function IngesterNodeBadge({ nodeIds, mode, dark }: Readonly<{ nodeIds: Uint8Array[]; mode: IngesterMode; dark: boolean }>) {
+  if (mode === IngesterMode.PASSIVE) return <Badge variant="info" dark={dark}>all nodes</Badge>;
+  if (nodeIds.length > 1) return <Badge variant="muted" dark={dark}>{String(nodeIds.length)} nodes</Badge>;
+  if (nodeIds.length === 1) return <NodeBadge nodeId={encode(nodeIds[0]!)} dark={dark} />; // NOSONAR — length check guards access
+  return null;
+}
+
 function IngesterCard({
   ing,
   allIngesters,
@@ -265,12 +272,12 @@ function IngesterCard({
   onDelete: () => void;
   onSave: (id: string) => void;
   isSaving: boolean;
-  edit: { name: string; enabled: boolean; params: Record<string, string>; nodeId: string };
-  setEdit: (patch: Partial<{ name: string; enabled: boolean; params: Record<string, string>; nodeId: string }>) => void;
+  edit: { name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[] };
+  setEdit: (patch: Partial<{ name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[] }>) => void;
   isDirty: boolean;
   onOpenInspector?: (inspectorParam: string) => void;
 }>) {
-  const addrConflict = listenAddrConflict(encode(ing.id), ing.type, edit.params, edit.nodeId, allIngesters, allDefaults);
+  const addrConflict = listenAddrConflict(encode(ing.id), ing.type, edit.params, edit.nodeIds, allIngesters, allDefaults);
   const portCheck = useCheckListenAddrs(ing.type, edit.params, encode(ing.id));
   const portError = !addrConflict && portCheck.data && !portCheck.data.success ? portCheck.data.message : null;
   const listenError = addrConflict ?? portError;
@@ -286,10 +293,7 @@ function IngesterCard({
       headerRight={
         <span className="flex items-center gap-2">
           <Badge variant="muted" dark={dark}>{mode === IngesterMode.PASSIVE ? "listener" : "collector"}</Badge>
-          {mode === IngesterMode.PASSIVE
-            ? <Badge variant="info" dark={dark}>all nodes</Badge>
-            : <NodeBadge nodeId={encode(ing.nodeId)} dark={dark} />
-          }
+          <IngesterNodeBadge nodeIds={ing.nodeIds} mode={mode} dark={dark} />
           {!ing.enabled && (
             <Badge variant="muted" dark={dark}>disabled</Badge>
           )}
@@ -325,8 +329,8 @@ function IngesterCard({
         />
         {mode === IngesterMode.ACTIVE && (
           <NodeSelect
-            value={edit.nodeId}
-            onChange={(v) => setEdit({ nodeId: v })}
+            value={edit.nodeIds[0] ?? ""}
+            onChange={(v) => setEdit({ nodeIds: v ? [v] : [] })}
             dark={dark}
           />
         )}
@@ -336,7 +340,7 @@ function IngesterCard({
           onChange={(p) => setEdit({ params: p })}
           dark={dark}
           ingesterId={encode(ing.id)}
-          ingesterNodeId={encode(ing.nodeId)}
+          ingesterNodeId={edit.nodeIds[0] ?? ""}
         />
         {listenError && (
           <p className={`text-[0.8em] text-severity-error`}>

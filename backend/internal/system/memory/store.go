@@ -957,7 +957,7 @@ func copyIngesterConfig(ing system.IngesterConfig) system.IngesterConfig {
 		Type:    ing.Type,
 		Enabled: ing.Enabled,
 		Params:  copyParams(ing.Params),
-		NodeID:  ing.NodeID,
+		NodeIDs: append([]string(nil), ing.NodeIDs...),
 	}
 }
 
