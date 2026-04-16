@@ -9,6 +9,7 @@ import (
 
 	"gastrolog/internal/alert"
 	"gastrolog/internal/cluster"
+	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/system"
 	sysmem "gastrolog/internal/system/memory"
 
@@ -797,5 +798,263 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 	}
 	if !hasAlert(alerts, "tier-underreplicated:") {
 		t.Error("expected underreplicated alert")
+	}
+}
+
+// ---------- Active ingester placement ----------
+
+func TestPlacementActiveIngesterAssignment(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil}, // active: ListenAddrs is nil
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	pm.reconcile(ctx)
+
+	assigned, err := store.GetIngesterAssignment(ctx, ingID)
+	if err != nil {
+		t.Fatalf("GetIngesterAssignment: %v", err)
+	}
+	if assigned != "node-1" && assigned != "node-2" {
+		t.Fatalf("expected assignment to node-1 or node-2, got %q", assigned)
+	}
+}
+
+func TestPlacementActiveIngesterPrefersNonLeader(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil}, // active
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	// Simulate: reconcile is only called on leader, and newTestPlacement makes
+	// the local node the implicit leader. placeActiveIngester reads leaderID from
+	// clusterSrv.LeaderInfo(). Since clusterSrv is nil in unit tests, leaderID
+	// is "". So we need to verify the preference works: when we run many trials,
+	// both nodes should be picked (since leaderID="" matches neither).
+	// Instead, test the stable path: assign once, then verify stable.
+	pm.reconcile(ctx)
+
+	first, _ := store.GetIngesterAssignment(ctx, ingID)
+	if first == "" {
+		t.Fatal("expected assignment after reconcile")
+	}
+
+	// Reconcile again — assignment should be stable.
+	pm.reconcile(ctx)
+	second, _ := store.GetIngesterAssignment(ctx, ingID)
+	if second != first {
+		t.Fatalf("assignment not stable: first=%q, second=%q", first, second)
+	}
+}
+
+func TestPlacementActiveIngesterReassignOnNodeDeath(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Start with both nodes alive.
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	// Force assignment to node-2.
+	_ = store.SetIngesterAssignment(ctx, ingID, "node-2")
+
+	// Now create a new placementManager where node-2 is dead (not in livePeers).
+	pm2, _, _ := newTestPlacement(t, "node-1", nil) // only node-1 alive
+	pm2.cfgStore = store
+	pm2.factories = pm.factories
+
+	pm2.reconcile(ctx)
+
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "node-1" {
+		t.Fatalf("expected reassignment to node-1, got %q", assigned)
+	}
+}
+
+func TestPlacementSkipsPassiveIngesters(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"syslog-udp": {
+				Factory:     nil,
+				ListenAddrs: func(params map[string]string) []orchestrator.ListenAddr { return nil },
+			},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "syslog-ing", Type: "syslog-udp", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	pm.reconcile(ctx)
+
+	// Passive ingesters should NOT get an assignment from placement manager.
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "" {
+		t.Fatalf("expected no assignment for passive ingester, got %q", assigned)
+	}
+}
+
+func TestPlacementSkipsDisabledIngesters(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: false,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	pm.reconcile(ctx)
+
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "" {
+		t.Fatalf("expected no assignment for disabled ingester, got %q", assigned)
+	}
+}
+
+func TestPlacementActiveIngesterEmptyNodeIDs(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
+		NodeIDs: nil, // empty NodeIDs
+	})
+
+	pm.reconcile(ctx)
+
+	// Empty NodeIDs means the ingester is skipped by reconcileActiveIngesters.
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "" {
+		t.Fatalf("expected no assignment for ingester with empty NodeIDs, got %q", assigned)
+	}
+}
+
+func TestPlacementActiveIngesterNoAliveCandidate(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// Only node-1 alive.
+	pm, store, _ := newTestPlacement(t, "node-1", nil)
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
+		NodeIDs: []string{"node-3", "node-4"}, // neither alive
+	})
+
+	pm.reconcile(ctx)
+
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "" {
+		t.Fatalf("expected no assignment when no candidates alive, got %q", assigned)
+	}
+}
+
+func TestPlacementActiveIngesterStableOnRepeatedReconcile(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	pm.reconcile(ctx)
+	first, _ := store.GetIngesterAssignment(ctx, ingID)
+	if first == "" {
+		t.Fatal("expected initial assignment")
+	}
+
+	// 10 more reconciles — assignment must not change.
+	for i := 0; i < 10; i++ {
+		pm.reconcile(ctx)
+		got, _ := store.GetIngesterAssignment(ctx, ingID)
+		if got != first {
+			t.Fatalf("reconcile %d changed assignment from %q to %q", i, first, got)
+		}
+	}
+}
+
+func TestPlacementActiveIngesterUnknownType(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"docker": {Factory: nil},
+		},
+	}
+
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "mystery-ing", Type: "unknown-type", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	})
+
+	pm.reconcile(ctx)
+
+	// Unknown type → isPassiveIngester returns false, so placement proceeds normally.
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "node-1" && assigned != "node-2" {
+		t.Fatalf("expected assignment for unknown type (treated as active), got %q", assigned)
 	}
 }

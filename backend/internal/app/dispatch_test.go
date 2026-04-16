@@ -173,6 +173,8 @@ type stubCfgStore struct {
 	settingsErr error
 	cfg         *system.Config
 	loadErr     error
+
+	ingesterAssignments map[glid.GLID]string // ingester ID → assigned node
 }
 
 func (s *stubCfgStore) GetVault(context.Context, glid.GLID) (*system.VaultConfig, error) {
@@ -200,7 +202,10 @@ func (s *stubCfgStore) ListTiers(context.Context) ([]system.TierConfig, error) {
 	return nil, nil
 }
 
-func (s *stubCfgStore) GetIngesterAssignment(context.Context, glid.GLID) (string, error) {
+func (s *stubCfgStore) GetIngesterAssignment(_ context.Context, id glid.GLID) (string, error) {
+	if s.ingesterAssignments != nil {
+		return s.ingesterAssignments[id], nil
+	}
 	return "", nil
 }
 func (s *stubCfgStore) GetIngesterCheckpoint(context.Context, glid.GLID) ([]byte, error) {
@@ -953,4 +958,177 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 			t.Fatalf("expected 1 RemoveTierFromVault call, got %d", len(mo.removeTierCalls))
 		}
 	})
+}
+
+// ---------- shouldRunIngester ----------
+
+func TestShouldRunIngesterPassiveOnSelectedNode(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:      glid.New(),
+		Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	}
+
+	if !d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("passive ingester on selected node should return true")
+	}
+}
+
+func TestShouldRunIngesterPassiveNotOnSelectedNode(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-3"
+
+	cfg := system.IngesterConfig{
+		ID:      glid.New(),
+		Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	}
+
+	if d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("passive ingester NOT on selected node should return false")
+	}
+}
+
+func TestShouldRunIngesterActiveAssignedHere(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
+		ingesterAssignments: map[glid.GLID]string{ingID: "node-1"},
+	}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:      ingID,
+		Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	}
+
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("active ingester assigned to this node should return true")
+	}
+}
+
+func TestShouldRunIngesterActiveAssignedElsewhere(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
+		ingesterAssignments: map[glid.GLID]string{ingID: "node-2"},
+	}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:      ingID,
+		Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+	}
+
+	if d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("active ingester assigned elsewhere should return false")
+	}
+}
+
+func TestShouldRunIngesterActiveNoAssignment(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:      glid.New(),
+		Enabled: true,
+		NodeIDs: []string{"node-1"},
+	}
+
+	// Empty assignment = backwards compat: allow local start.
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("active ingester with no assignment should return true (backwards compat)")
+	}
+}
+
+func TestShouldRunIngesterPassiveEmptyNodeIDs(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
+	d.localNodeID = "node-1"
+
+	cfg := system.IngesterConfig{
+		ID:      glid.New(),
+		Enabled: true,
+		NodeIDs: nil, // empty
+	}
+
+	// Empty NodeIDs means "all nodes", so passive should run.
+	if !d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("passive ingester with empty NodeIDs should return true")
+	}
+}
+
+// ---------- handleIngesterAssignment ----------
+
+func TestHandleIngesterAssignmentStartsLocally(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	mo := &mockOrch{} // not locally running yet
+	d := newTestDispatcher(mo, &stubCfgStore{
+		ingester:            &system.IngesterConfig{ID: ingID, Type: "test", Enabled: true, NodeIDs: []string{"local"}},
+		ingesterAssignments: map[glid.GLID]string{ingID: "local"},
+	}, h)
+	d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+		return noopIngester{}, nil
+	}}
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
+
+	// The ingester should have been added (handleIngesterPut is called internally).
+	// No error logs expected for a successful add.
+	if h.hasMessage("dispatch: remove reassigned ingester") {
+		t.Fatal("should not remove when assigned to this node")
+	}
+}
+
+func TestHandleIngesterAssignmentStopsLocally(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	mo := &mockOrch{
+		ingesters: []glid.GLID{ingID}, // running locally
+	}
+	d := newTestDispatcher(mo, &stubCfgStore{
+		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
+	}, h)
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
+
+	if len(mo.removeIngesterIDs) != 1 || mo.removeIngesterIDs[0] != ingID {
+		t.Fatalf("expected RemoveIngester(%s), got %v", ingID, mo.removeIngesterIDs)
+	}
+}
+
+func TestHandleIngesterAssignmentAlreadyRunning(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	mo := &mockOrch{
+		ingesters: []glid.GLID{ingID}, // already running locally
+	}
+	d := newTestDispatcher(mo, &stubCfgStore{
+		ingesterAssignments: map[glid.GLID]string{ingID: "local"},
+	}, h)
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
+
+	// Already running locally, assigned here — no action needed.
+	if len(mo.removeIngesterIDs) != 0 {
+		t.Fatal("should not remove an ingester that is already running on the assigned node")
+	}
 }

@@ -1016,3 +1016,150 @@ func TestStreamTypeString(t *testing.T) {
 	}
 }
 
+// --- Checkpoint round-trip tests ---
+
+func TestDockerCheckpointRoundTrip(t *testing.T) {
+	t.Parallel()
+	client := newFakeClient()
+
+	cfg := ingesterConfig{
+		ID:           "ckpt-test",
+		PollInterval: 0,
+		Stdout:       true,
+		Stderr:       true,
+		Logger:       logging.Discard(),
+	}
+	ing := newIngesterWithClient(cfg, client)
+
+	// Simulate some lastTS state (as if containers were tailed).
+	ts1 := time.Date(2025, 6, 15, 12, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2025, 6, 15, 13, 30, 0, 0, time.UTC)
+	ing.lastTS["container-aaa"] = ts1
+	ing.lastTS["container-bbb"] = ts2
+
+	// Save checkpoint.
+	data, err := ing.SaveCheckpoint()
+	if err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	if len(data) == 0 {
+		t.Fatal("expected non-empty checkpoint data")
+	}
+
+	// Create a new ingester and load the checkpoint.
+	ing2 := newIngesterWithClient(cfg, client)
+	if err := ing2.LoadCheckpoint(data); err != nil {
+		t.Fatalf("LoadCheckpoint: %v", err)
+	}
+
+	// Verify restored state.
+	if ing2.restoredState == nil {
+		t.Fatal("expected restoredState to be populated after LoadCheckpoint")
+	}
+	bm1, ok := ing2.restoredState.Containers["container-aaa"]
+	if !ok {
+		t.Fatal("container-aaa not found in restored state")
+	}
+	if !bm1.LastTimestamp.Equal(ts1) {
+		t.Errorf("container-aaa timestamp = %v, want %v", bm1.LastTimestamp, ts1)
+	}
+	bm2, ok := ing2.restoredState.Containers["container-bbb"]
+	if !ok {
+		t.Fatal("container-bbb not found in restored state")
+	}
+	if !bm2.LastTimestamp.Equal(ts2) {
+		t.Errorf("container-bbb timestamp = %v, want %v", bm2.LastTimestamp, ts2)
+	}
+}
+
+func TestDockerCheckpointEmptyState(t *testing.T) {
+	t.Parallel()
+	client := newFakeClient()
+
+	cfg := ingesterConfig{
+		ID:           "ckpt-empty",
+		PollInterval: 0,
+		Stdout:       true,
+		Stderr:       true,
+		Logger:       logging.Discard(),
+	}
+	ing := newIngesterWithClient(cfg, client)
+
+	// No lastTS state — SaveCheckpoint should return nil (no-op).
+	data, err := ing.SaveCheckpoint()
+	if err != nil {
+		t.Fatalf("SaveCheckpoint: %v", err)
+	}
+	if data != nil {
+		t.Fatalf("expected nil data for empty state, got %d bytes", len(data))
+	}
+}
+
+func TestDockerCheckpointCorruptDataReturnsError(t *testing.T) {
+	t.Parallel()
+	client := newFakeClient()
+
+	cfg := ingesterConfig{
+		ID:           "ckpt-corrupt",
+		PollInterval: 0,
+		Stdout:       true,
+		Stderr:       true,
+		Logger:       logging.Discard(),
+	}
+	ing := newIngesterWithClient(cfg, client)
+
+	err := ing.LoadCheckpoint([]byte("not valid json{{{"))
+	if err == nil {
+		t.Fatal("expected error for corrupt checkpoint data")
+	}
+}
+
+func TestDockerCheckpointOverwritesPreviousState(t *testing.T) {
+	t.Parallel()
+	client := newFakeClient()
+
+	cfg := ingesterConfig{
+		ID:           "ckpt-overwrite",
+		PollInterval: 0,
+		Stdout:       true,
+		Stderr:       true,
+		Logger:       logging.Discard(),
+	}
+
+	// First ingester: save with container-aaa.
+	ing1 := newIngesterWithClient(cfg, client)
+	ing1.lastTS["container-aaa"] = time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	data1, err := ing1.SaveCheckpoint()
+	if err != nil {
+		t.Fatalf("SaveCheckpoint 1: %v", err)
+	}
+
+	// Second ingester: save with container-bbb (different state).
+	ing2 := newIngesterWithClient(cfg, client)
+	ing2.lastTS["container-bbb"] = time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+	data2, err := ing2.SaveCheckpoint()
+	if err != nil {
+		t.Fatalf("SaveCheckpoint 2: %v", err)
+	}
+
+	// Third ingester: load data1, then load data2 (should overwrite).
+	ing3 := newIngesterWithClient(cfg, client)
+	if err := ing3.LoadCheckpoint(data1); err != nil {
+		t.Fatalf("LoadCheckpoint data1: %v", err)
+	}
+	if err := ing3.LoadCheckpoint(data2); err != nil {
+		t.Fatalf("LoadCheckpoint data2: %v", err)
+	}
+
+	// Only data2's state should survive.
+	if ing3.restoredState == nil {
+		t.Fatal("expected restoredState after second LoadCheckpoint")
+	}
+	if _, ok := ing3.restoredState.Containers["container-aaa"]; ok {
+		t.Fatal("container-aaa should not be in state after overwrite with data2")
+	}
+	if _, ok := ing3.restoredState.Containers["container-bbb"]; !ok {
+		t.Fatal("container-bbb should be in state after loading data2")
+	}
+}
+
