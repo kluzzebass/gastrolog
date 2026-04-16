@@ -37,7 +37,8 @@ func (o *Orchestrator) evaluateCloudHealth() {
 }
 
 // evaluateTierCloudHealth checks a single cloud tier's health and runs
-// backfill on every node. See gastrolog-68fqk.
+// backfill on the tier leader only. Followers skip backfill — they learn
+// about cloud-backed chunks via the tier Raft FSM.
 func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 	chk, ok := tier.Chunks.(cloudHealthChecker)
 	if !ok {
@@ -51,7 +52,9 @@ func (o *Orchestrator) evaluateTierCloudHealth(tier *TierInstance) {
 	} else {
 		o.alerts.Clear(alertID)
 	}
-	o.backfillCloudUploads(tier)
+	if tier.IsRaftLeader != nil && tier.IsRaftLeader() {
+		o.backfillCloudUploads(tier)
+	}
 }
 
 // backfillCloudUploads reconciles sealed chunks against the tier Raft FSM
@@ -90,7 +93,7 @@ func (o *Orchestrator) backfillCloudUploads(tier *TierInstance) {
 		o.scheduler.Describe(name, fmt.Sprintf("Cloud backfill upload for chunk %s", m.ID))
 	}
 	if backfilled > 0 {
-		o.logger.Info("cloud backfill: scheduled uploads",
+		o.logger.Debug("cloud backfill: scheduled uploads",
 			"tier", tier.TierID, "count", backfilled)
 	}
 }

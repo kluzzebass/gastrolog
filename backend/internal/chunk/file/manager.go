@@ -3275,7 +3275,7 @@ func (m *Manager) adoptCloudBlob(id chunk.ChunkID, blobSize int64) error {
 		}
 	}
 
-	m.logger.Info("chunk adopted from cloud",
+	m.logger.Debug("chunk adopted from cloud",
 		"chunk", id,
 		"bytes", blobSize,
 	)
