@@ -14,7 +14,7 @@ import { IngesterParamsForm, isIngesterParamsValid, listenAddrConflict } from ".
 import { Button } from "./Buttons";
 import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
-import { NodeSelect } from "./NodeSelect";
+import { NodeMultiSelect } from "./NodeMultiSelect";
 import { sortByName } from "../../lib/sort";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
@@ -195,13 +195,11 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
               dark={dark}
             />
           </FormField>
-          {(ingesterModes[newType] ?? IngesterMode.ACTIVE) === IngesterMode.ACTIVE && (
-            <NodeSelect
-              value={newNodeIds[0] ?? ""}
-              onChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v ? [v] : [] })}
-              dark={dark}
-            />
-          )}
+          <NodeMultiSelect
+            value={newNodeIds}
+            onChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v })}
+            dark={dark}
+          />
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}
@@ -327,13 +325,11 @@ function IngesterCard({
           label="Enabled"
           dark={dark}
         />
-        {mode === IngesterMode.ACTIVE && (
-          <NodeSelect
-            value={edit.nodeIds[0] ?? ""}
-            onChange={(v) => setEdit({ nodeIds: v ? [v] : [] })}
-            dark={dark}
-          />
-        )}
+        <NodeMultiSelect
+          value={edit.nodeIds}
+          onChange={(v) => setEdit({ nodeIds: v })}
+          dark={dark}
+        />
         <IngesterParamsForm
           ingesterType={ing.type}
           params={edit.params}
