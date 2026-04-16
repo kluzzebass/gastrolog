@@ -394,6 +394,14 @@ func (s *Store) SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, node
 	return s.apply(command.NewSetIngesterAlive(ingesterID, nodeID, alive))
 }
 
+func (s *Store) GetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID) ([]byte, error) {
+	return s.fsm.Store().GetIngesterCheckpoint(ctx, ingesterID)
+}
+
+func (s *Store) SetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID, data []byte) error {
+	return s.apply(command.NewSetIngesterCheckpoint(ingesterID, data))
+}
+
 func (s *Store) GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID) (string, error) {
 	return s.fsm.Store().GetIngesterAssignment(ctx, ingesterID)
 }

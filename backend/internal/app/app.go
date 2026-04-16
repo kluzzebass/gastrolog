@@ -167,6 +167,9 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
 			_ = cfgStore.SetIngesterAlive(context.Background(), ingesterID, nodeID, alive)
 		},
+		OnIngesterCheckpoint: func(ingesterID glid.GLID, data []byte) {
+			_ = cfgStore.SetIngesterCheckpoint(context.Background(), ingesterID, data)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create orchestrator: %w", err)

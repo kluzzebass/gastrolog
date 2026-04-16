@@ -260,7 +260,7 @@ func (o *Orchestrator) runIngester(id glid.GLID, r Ingester, ctx context.Context
 	stats := o.ingesterStats[id]
 	for {
 		o.setIngesterAlive(id, stats, true)
-		err := r.Run(ctx, out)
+		err := o.runWithCheckpoints(ctx, id, r, out)
 		o.setIngesterAlive(id, stats, false)
 		if ctx.Err() != nil || !meta.Passive {
 			return
@@ -272,6 +272,43 @@ func (o *Orchestrator) runIngester(id glid.GLID, r Ingester, ctx context.Context
 			return
 		case <-time.After(delay):
 		}
+	}
+}
+
+// runWithCheckpoints runs the ingester and, if it implements Checkpointable,
+// saves checkpoints every 5 seconds and once on exit.
+func (o *Orchestrator) runWithCheckpoints(ctx context.Context, id glid.GLID, r Ingester, out chan<- IngestMessage) error {
+	cp, isCheckpointable := r.(Checkpointable)
+	if !isCheckpointable || o.onIngesterCheckpoint == nil {
+		return r.Run(ctx, out)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- r.Run(ctx, out) }()
+
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case err := <-errCh:
+			o.saveCheckpointFrom(id, cp)
+			return err
+		case <-ticker.C:
+			o.saveCheckpointFrom(id, cp)
+		}
+	}
+}
+
+// saveCheckpointFrom saves checkpoint data from a Checkpointable ingester.
+func (o *Orchestrator) saveCheckpointFrom(id glid.GLID, cp Checkpointable) {
+	data, err := cp.SaveCheckpoint()
+	if err != nil {
+		o.logger.Error("ingester checkpoint save failed", "id", id, "error", err)
+		return
+	}
+	if len(data) > 0 {
+		o.onIngesterCheckpoint(id, data)
 	}
 }
 

@@ -47,6 +47,7 @@ const (
 	NotifyTierDeleted
 	NotifyTierPlacementsSet
 	NotifyIngesterAliveSet
+	NotifyIngesterCheckpointSet
 	NotifyIngesterAssignmentSet
 	NotifySetupWizardDismissedSet
 )
@@ -139,6 +140,7 @@ func (f *FSM) Apply(l *raft.Log) any {
 		*gastrologv1.SystemCommand_DeleteTier,
 		*gastrologv1.SystemCommand_SetTierPlacements,
 		*gastrologv1.SystemCommand_SetIngesterAlive,
+		*gastrologv1.SystemCommand_SetIngesterCheckpoint,
 		*gastrologv1.SystemCommand_SetIngesterAssignment,
 		*gastrologv1.SystemCommand_SetSetupWizardDismissed:
 		return f.applyConfig(ctx, cmd, l.Index)
@@ -267,6 +269,8 @@ func (f *FSM) dispatchConfig(ctx context.Context, cmd *gastrologv1.SystemCommand
 		return f.applySetTierPlacements(ctx, c.SetTierPlacements)
 	case *gastrologv1.SystemCommand_SetIngesterAlive:
 		return f.applySetIngesterAlive(ctx, c.SetIngesterAlive)
+	case *gastrologv1.SystemCommand_SetIngesterCheckpoint:
+		return f.applySetIngesterCheckpoint(ctx, c.SetIngesterCheckpoint)
 	case *gastrologv1.SystemCommand_SetIngesterAssignment:
 		return f.applySetIngesterAssignment(ctx, c.SetIngesterAssignment)
 	case *gastrologv1.SystemCommand_SetSetupWizardDismissed:
@@ -539,6 +543,14 @@ func (f *FSM) applySetIngesterAlive(ctx context.Context, cmd *gastrologv1.SetIng
 		return nil, err
 	}
 	return &Notification{Kind: NotifyIngesterAliveSet, ID: ingesterID}, nil
+}
+
+func (f *FSM) applySetIngesterCheckpoint(ctx context.Context, cmd *gastrologv1.SetIngesterCheckpointCommand) (*Notification, error) {
+	ingesterID := glid.FromBytes(cmd.GetIngesterId())
+	if err := f.store.SetIngesterCheckpoint(ctx, ingesterID, cmd.GetData()); err != nil {
+		return nil, err
+	}
+	return &Notification{Kind: NotifyIngesterCheckpointSet, ID: ingesterID}, nil
 }
 
 func (f *FSM) applySetIngesterAssignment(ctx context.Context, cmd *gastrologv1.SetIngesterAssignmentCommand) (*Notification, error) {
@@ -840,6 +852,11 @@ func (f *FSM) Restore(rc io.ReadCloser) error { //nolint:gocognit,gocyclo // sna
 			if err := newStore.SetIngesterAlive(ctx, ingesterID, nodeID, alive); err != nil {
 				return fmt.Errorf("restore ingester alive %s: %w", ingesterID, err)
 			}
+		}
+	}
+	for ingesterID, data := range rt.IngesterCheckpoints {
+		if err := newStore.SetIngesterCheckpoint(ctx, ingesterID, data); err != nil {
+			return fmt.Errorf("restore ingester checkpoint %s: %w", ingesterID, err)
 		}
 	}
 	for ingesterID, nodeID := range rt.IngesterAssignment {

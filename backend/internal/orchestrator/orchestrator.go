@@ -302,6 +302,9 @@ type Orchestrator struct {
 	// onIngesterAlive is called when an ingester's alive state changes.
 	onIngesterAlive func(ingesterID glid.GLID, alive bool)
 
+	// onIngesterCheckpoint is called when a Checkpointable ingester saves state.
+	onIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
+
 	// Logger for this orchestrator instance.
 	// Scoped with component="orchestrator" at construction time.
 	logger *slog.Logger
@@ -391,6 +394,10 @@ type Config struct {
 	// The app layer wires this to Raft to replicate the state cluster-wide.
 	OnIngesterAlive func(ingesterID glid.GLID, alive bool)
 
+	// OnIngesterCheckpoint is called when a Checkpointable ingester saves state.
+	// The app layer wires this to Raft to replicate checkpoints cluster-wide.
+	OnIngesterCheckpoint func(ingesterID glid.GLID, data []byte)
+
 	// Phase is the shared shutdown signal. When non-nil, the orchestrator
 	// consults phase.ShuttingDown() in hot-path replication helpers so that
 	// during the drain window (after BeginShutdown) remote forwards no-op
@@ -443,7 +450,8 @@ func New(cfg Config) (*Orchestrator, error) {
 		chunkSignal:     notify.NewSignal(),
 		tierLeaders:     newTierLeaderManager(logger),
 		phase:           cfg.Phase,
-		onIngesterAlive: cfg.OnIngesterAlive,
+		onIngesterAlive:      cfg.OnIngesterAlive,
+		onIngesterCheckpoint: cfg.OnIngesterCheckpoint,
 		now:             cfg.Now,
 		logger:          logger,
 	}

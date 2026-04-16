@@ -101,6 +101,18 @@ func NewSetIngesterAlive(ingesterID glid.GLID, nodeID string, alive bool) *gastr
 	}
 }
 
+// NewSetIngesterCheckpoint creates a SystemCommand for SetIngesterCheckpoint.
+func NewSetIngesterCheckpoint(ingesterID glid.GLID, data []byte) *gastrologv1.SystemCommand {
+	return &gastrologv1.SystemCommand{
+		Command: &gastrologv1.SystemCommand_SetIngesterCheckpoint{
+			SetIngesterCheckpoint: &gastrologv1.SetIngesterCheckpointCommand{
+				IngesterId: ingesterID.ToProto(),
+				Data:       data,
+			},
+		},
+	}
+}
+
 // NewSetIngesterAssignment creates a SystemCommand for SetIngesterAssignment.
 func NewSetIngesterAssignment(ingesterID glid.GLID, nodeID string) *gastrologv1.SystemCommand {
 	return &gastrologv1.SystemCommand{

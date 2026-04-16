@@ -52,6 +52,7 @@ message SystemCommand {
     SetSetupWizardDismissedCommand set_setup_wizard_dismissed = 38;
     SetIngesterAliveCommand set_ingester_alive = 39;
     SetIngesterAssignmentCommand set_ingester_assignment = 40;
+    SetIngesterCheckpointCommand set_ingester_checkpoint = 41;
   }
 }
 
@@ -323,6 +324,11 @@ message SetIngesterAssignmentCommand {
   string node_id = 2; // Assigned node. Empty = unassigned.
 }
 
+message SetIngesterCheckpointCommand {
+  bytes ingester_id = 1;
+  bytes data = 2; // Opaque checkpoint blob.
+}
+
 // --- Snapshot ---
 
 // SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
@@ -349,4 +355,5 @@ message SystemSnapshot {
   bool setup_wizard_dismissed = 18;
   repeated SetIngesterAliveCommand ingester_alive = 19;
   repeated SetIngesterAssignmentCommand ingester_assignments = 20;
+  repeated SetIngesterCheckpointCommand ingester_checkpoints = 21;
 }

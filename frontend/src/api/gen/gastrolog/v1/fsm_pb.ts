@@ -258,6 +258,12 @@ export class SystemCommand extends Message<SystemCommand> {
      */
     value: SetIngesterAssignmentCommand;
     case: "setIngesterAssignment";
+  } | {
+    /**
+     * @generated from field: gastrolog.v1.SetIngesterCheckpointCommand set_ingester_checkpoint = 41;
+     */
+    value: SetIngesterCheckpointCommand;
+    case: "setIngesterCheckpoint";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<SystemCommand>) {
@@ -308,6 +314,7 @@ export class SystemCommand extends Message<SystemCommand> {
     { no: 38, name: "set_setup_wizard_dismissed", kind: "message", T: SetSetupWizardDismissedCommand, oneof: "command" },
     { no: 39, name: "set_ingester_alive", kind: "message", T: SetIngesterAliveCommand, oneof: "command" },
     { no: 40, name: "set_ingester_assignment", kind: "message", T: SetIngesterAssignmentCommand, oneof: "command" },
+    { no: 41, name: "set_ingester_checkpoint", kind: "message", T: SetIngesterCheckpointCommand, oneof: "command" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemCommand {
@@ -2210,6 +2217,51 @@ export class SetIngesterAssignmentCommand extends Message<SetIngesterAssignmentC
 }
 
 /**
+ * @generated from message gastrolog.v1.SetIngesterCheckpointCommand
+ */
+export class SetIngesterCheckpointCommand extends Message<SetIngesterCheckpointCommand> {
+  /**
+   * @generated from field: bytes ingester_id = 1;
+   */
+  ingesterId = new Uint8Array(0);
+
+  /**
+   * Opaque checkpoint blob.
+   *
+   * @generated from field: bytes data = 2;
+   */
+  data = new Uint8Array(0);
+
+  constructor(data?: PartialMessage<SetIngesterCheckpointCommand>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SetIngesterCheckpointCommand";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "data", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetIngesterCheckpointCommand {
+    return new SetIngesterCheckpointCommand().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetIngesterCheckpointCommand {
+    return new SetIngesterCheckpointCommand().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetIngesterCheckpointCommand {
+    return new SetIngesterCheckpointCommand().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SetIngesterCheckpointCommand | PlainMessage<SetIngesterCheckpointCommand> | undefined, b: SetIngesterCheckpointCommand | PlainMessage<SetIngesterCheckpointCommand> | undefined): boolean {
+    return proto3.util.equals(SetIngesterCheckpointCommand, a, b);
+  }
+}
+
+/**
  * SystemSnapshot captures the full system state for FSM.Snapshot()/Restore().
  * Each repeated field contains one entry per entity, using the Put/Create
  * command messages to represent complete entity state.
@@ -2317,6 +2369,11 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
    */
   ingesterAssignments: SetIngesterAssignmentCommand[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.SetIngesterCheckpointCommand ingester_checkpoints = 21;
+   */
+  ingesterCheckpoints: SetIngesterCheckpointCommand[] = [];
+
   constructor(data?: PartialMessage<SystemSnapshot>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2345,6 +2402,7 @@ export class SystemSnapshot extends Message<SystemSnapshot> {
     { no: 18, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 19, name: "ingester_alive", kind: "message", T: SetIngesterAliveCommand, repeated: true },
     { no: 20, name: "ingester_assignments", kind: "message", T: SetIngesterAssignmentCommand, repeated: true },
+    { no: 21, name: "ingester_checkpoints", kind: "message", T: SetIngesterCheckpointCommand, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SystemSnapshot {

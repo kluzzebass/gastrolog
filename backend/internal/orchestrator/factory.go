@@ -215,7 +215,7 @@ func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) e
 		if !recvCfg.Enabled {
 			continue
 		}
-		if err := o.applyIngester(recvCfg, sys.Runtime.IngesterAssignment, factories); err != nil {
+		if err := o.applyIngester(recvCfg, sys.Runtime.IngesterAssignment, sys.Runtime.IngesterCheckpoints, factories); err != nil {
 			return err
 		}
 	}
@@ -224,7 +224,7 @@ func (o *Orchestrator) applyIngesters(sys *system.System, factories Factories) e
 }
 
 // applyIngester creates and registers a single ingester if it should run on this node.
-func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments map[glid.GLID]string, factories Factories) error {
+func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments map[glid.GLID]string, checkpoints map[glid.GLID][]byte, factories Factories) error {
 	reg, ok := factories.IngesterTypes[recvCfg.Type]
 	if !ok {
 		return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
@@ -263,6 +263,15 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 	recv, err := reg.Factory(recvCfg.ID, params, recvLogger)
 	if err != nil {
 		return fmt.Errorf("create ingester %s: %w", recvCfg.ID, err)
+	}
+
+	// Restore checkpoint if available (active ingesters resuming after failover).
+	if cp, ok := recv.(Checkpointable); ok {
+		if data := checkpoints[recvCfg.ID]; len(data) > 0 {
+			if err := cp.LoadCheckpoint(data); err != nil {
+				o.logger.Warn("ingester checkpoint load failed, starting fresh", "id", recvCfg.ID, "error", err)
+			}
+		}
 	}
 
 	o.registerIngester(recvCfg.ID, recvCfg.Name, recvCfg.Type, reg.ListenAddrs != nil, recv)

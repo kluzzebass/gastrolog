@@ -884,6 +884,11 @@ func BuildSnapshot(sys *system.System, users []system.User, tokens []system.Refr
 		snap.IngesterAssignments = append(snap.IngesterAssignments, NewSetIngesterAssignment(ingesterID, nodeID).GetSetIngesterAssignment())
 	}
 
+	// Runtime: ingester checkpoint state.
+	for ingesterID, data := range rt.IngesterCheckpoints {
+		snap.IngesterCheckpoints = append(snap.IngesterCheckpoints, NewSetIngesterCheckpoint(ingesterID, data).GetSetIngesterCheckpoint())
+	}
+
 	snap.SetupWizardDismissed = rt.SetupWizardDismissed
 
 	return snap
@@ -1055,6 +1060,15 @@ func RestoreSnapshot(snap *gastrologv1.SystemSnapshot) (*system.System, []system
 		for _, ia := range snap.GetIngesterAssignments() {
 			ingesterID := glid.FromBytes(ia.GetIngesterId())
 			rt.IngesterAssignment[ingesterID] = ia.GetNodeId()
+		}
+	}
+
+	// Restore ingester checkpoint state.
+	if len(snap.GetIngesterCheckpoints()) > 0 {
+		rt.IngesterCheckpoints = make(map[glid.GLID][]byte, len(snap.GetIngesterCheckpoints()))
+		for _, ic := range snap.GetIngesterCheckpoints() {
+			ingesterID := glid.FromBytes(ic.GetIngesterId())
+			rt.IngesterCheckpoints[ingesterID] = ic.GetData()
 		}
 	}
 

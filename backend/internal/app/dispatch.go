@@ -119,10 +119,12 @@ func (d *configDispatcher) Handle(n raftfsm.Notification) {
 		d.handleTierPut(ctx, n.ID)
 	case raftfsm.NotifyTierDeleted:
 		d.handleTierDeleted(ctx, n.ID, n.Drain)
+	case raftfsm.NotifyIngesterAssignmentSet:
+		d.handleIngesterAssignment(ctx, n.ID)
 	case raftfsm.NotifyTierPlacementsSet, raftfsm.NotifyCloudServicePut, raftfsm.NotifyCloudServiceDeleted,
 		raftfsm.NotifyNodeStorageConfigSet, raftfsm.NotifySetupWizardDismissedSet,
 		raftfsm.NotifyIngesterAliveSet,
-		raftfsm.NotifyIngesterAssignmentSet:
+		raftfsm.NotifyIngesterCheckpointSet:
 		// No orchestrator side effects; configSignal fires below.
 	}
 
@@ -347,6 +349,37 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 	if err := d.orch.AddIngester(ingCfg.ID, ingCfg.Name, ingCfg.Type, ingester); err != nil {
 		d.logger.Error("dispatch: add ingester", "id", id, "name", ingCfg.Name, "type", ingCfg.Type, "error", err)
 	}
+}
+
+// handleIngesterAssignment reacts to a Raft-replicated assignment change.
+// If the active ingester is now assigned to this node, start it.
+// If it was assigned here but no longer is, stop it.
+func (d *configDispatcher) handleIngesterAssignment(ctx context.Context, id glid.GLID) {
+	assigned, err := d.cfgStore.GetIngesterAssignment(ctx, id)
+	if err != nil {
+		d.logger.Error("dispatch: read ingester assignment", "id", id, "error", err)
+		return
+	}
+
+	isRunningLocally := slices.Contains(d.orch.ListIngesters(), id)
+
+	if assigned != d.localNodeID {
+		// Not assigned to this node — stop it if running.
+		if isRunningLocally {
+			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
+				d.logger.Error("dispatch: remove reassigned ingester", "id", id, "error", err)
+			} else {
+				d.logger.Info("dispatch: ingester reassigned away, stopped locally", "id", id, "new_node", assigned)
+			}
+		}
+		return
+	}
+
+	// Assigned to this node — start it if not already running.
+	if isRunningLocally {
+		return
+	}
+	d.handleIngesterPut(ctx, id)
 }
 
 func (d *configDispatcher) handleIngesterDeleted(n raftfsm.Notification) {

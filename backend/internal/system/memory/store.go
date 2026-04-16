@@ -59,8 +59,9 @@ type Store struct {
 	cloudServices      map[glid.GLID]system.CloudService
 	tiers              map[glid.GLID]system.TierConfig
 	tierPlacements     map[glid.GLID][]system.TierPlacement    // runtime: system-managed
-	ingesterAlive      map[glid.GLID]map[string]bool          // runtime: system-managed
-	ingesterAssignment map[glid.GLID]string                   // runtime: system-managed
+	ingesterAlive       map[glid.GLID]map[string]bool          // runtime: system-managed
+	ingesterCheckpoints map[glid.GLID][]byte                  // runtime: system-managed
+	ingesterAssignment  map[glid.GLID]string                  // runtime: system-managed
 	nodeStorageConfigs map[string]system.NodeStorageConfig     // runtime: keyed by nodeID
 	clusterTLS         *system.ClusterTLS                     // runtime: cluster identity
 	setupWizardDismissed bool                                 // runtime: UI state
@@ -85,8 +86,9 @@ func NewStore() *Store {
 		cloudServices:      make(map[glid.GLID]system.CloudService),
 		tiers:              make(map[glid.GLID]system.TierConfig),
 		tierPlacements:     make(map[glid.GLID][]system.TierPlacement),
-		ingesterAlive:      make(map[glid.GLID]map[string]bool),
-		ingesterAssignment: make(map[glid.GLID]string),
+		ingesterAlive:       make(map[glid.GLID]map[string]bool),
+		ingesterCheckpoints: make(map[glid.GLID][]byte),
+		ingesterAssignment:  make(map[glid.GLID]string),
 		nodeStorageConfigs: make(map[string]system.NodeStorageConfig),
 	}
 }
@@ -163,6 +165,16 @@ func (s *Store) Load(ctx context.Context) (*system.System, error) {
 			cp := make(map[string]bool, len(m))
 			maps.Copy(cp, m)
 			rt.IngesterAlive[id] = cp
+		}
+	}
+
+	// Runtime: ingester checkpoint state.
+	if len(s.ingesterCheckpoints) > 0 {
+		rt.IngesterCheckpoints = make(map[glid.GLID][]byte, len(s.ingesterCheckpoints))
+		for id, data := range s.ingesterCheckpoints {
+			cp := make([]byte, len(data))
+			copy(cp, data)
+			rt.IngesterCheckpoints[id] = cp
 		}
 	}
 
@@ -1107,6 +1119,36 @@ func (s *Store) SetIngesterAlive(_ context.Context, ingesterID glid.GLID, nodeID
 		s.ingesterAlive[ingesterID] = make(map[string]bool)
 	}
 	s.ingesterAlive[ingesterID][nodeID] = true
+	return nil
+}
+
+// --- Ingester Checkpoint (runtime) ---
+
+func (s *Store) GetIngesterCheckpoint(_ context.Context, ingesterID glid.GLID) ([]byte, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	data := s.ingesterCheckpoints[ingesterID]
+	if len(data) == 0 {
+		return nil, nil
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	return cp, nil
+}
+
+func (s *Store) SetIngesterCheckpoint(_ context.Context, ingesterID glid.GLID, data []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ingesterCheckpoints == nil {
+		s.ingesterCheckpoints = make(map[glid.GLID][]byte)
+	}
+	if len(data) == 0 {
+		delete(s.ingesterCheckpoints, ingesterID)
+		return nil
+	}
+	cp := make([]byte, len(data))
+	copy(cp, data)
+	s.ingesterCheckpoints[ingesterID] = cp
 	return nil
 }
 

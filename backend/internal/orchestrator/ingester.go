@@ -39,6 +39,15 @@ type Triggerable interface {
 	Trigger()
 }
 
+// Checkpointable is an optional interface for ingesters that persist
+// resumable state. The orchestrator periodically calls SaveCheckpoint and
+// replicates the opaque blob via Raft. On failover, LoadCheckpoint restores
+// state before Run() so the new instance resumes where the old one stopped.
+type Checkpointable interface {
+	SaveCheckpoint() ([]byte, error)
+	LoadCheckpoint(data []byte) error
+}
+
 // PressureAware is an optional interface for ingesters that can throttle
 // themselves when the ingest pipeline is backed up. The orchestrator calls
 // SetPressureGate before starting the ingester; the ingester then consults

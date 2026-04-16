@@ -130,6 +130,10 @@ type Store interface {
 	GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error)
 	SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, nodeID string, alive bool) error
 
+	// Ingester checkpoint (runtime — system-managed, opaque blob per ingester)
+	GetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID) ([]byte, error)
+	SetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID, data []byte) error
+
 	// Ingester assignment (runtime — system-managed, placement manager)
 	GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID) (string, error)
 	SetIngesterAssignment(ctx context.Context, ingesterID glid.GLID, nodeID string) error
