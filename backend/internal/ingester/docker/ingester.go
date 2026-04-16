@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"sync"
 	"time"
@@ -33,6 +34,8 @@ type ingester struct {
 	containers map[string]*trackedContainer
 	lastTS     map[string]time.Time // container ID -> last seen timestamp
 
+	restoredState *state // checkpoint loaded before Run()
+
 	// pressureGate throttles per-container log streaming when the ingest
 	// pipeline is backed up. Pausing emission makes the internal entries
 	// channel fill, blocking readRaw/readMultiplexed which in turn stops
@@ -46,13 +49,46 @@ func (ing *ingester) SetPressureGate(gate *chanwatch.PressureGate) {
 	ing.pressureGate = gate
 }
 
+// SaveCheckpoint returns the current container timestamps as a JSON blob.
+// Implements orchestrator.Checkpointable.
+func (ing *ingester) SaveCheckpoint() ([]byte, error) {
+	ing.mu.Lock()
+	st := state{Containers: make(map[string]containerBookmark, len(ing.lastTS))}
+	for id, ts := range ing.lastTS {
+		st.Containers[id] = containerBookmark{LastTimestamp: ts}
+	}
+	ing.mu.Unlock()
+	if len(st.Containers) == 0 {
+		return nil, nil
+	}
+	return json.Marshal(st)
+}
+
+// LoadCheckpoint restores container timestamps from a JSON blob. Called before Run().
+// Implements orchestrator.Checkpointable.
+func (ing *ingester) LoadCheckpoint(data []byte) error {
+	var st state
+	if err := json.Unmarshal(data, &st); err != nil {
+		return err
+	}
+	ing.restoredState = &st
+	return nil
+}
+
 // Run implements orchestrator.Ingester.
 func (ing *ingester) Run(ctx context.Context, out chan<- orchestrator.IngestMessage) error {
-	// Load bookmarks.
-	st, err := loadState(ing.stateFile)
-	if err != nil {
-		ing.logger.Warn("failed to load state, starting fresh", "error", err)
-		st = state{Containers: make(map[string]containerBookmark)}
+	// Load state: prefer Raft-replicated checkpoint, fall back to local file.
+	var st state
+	if ing.restoredState != nil {
+		st = *ing.restoredState
+		ing.restoredState = nil
+	} else {
+		var err error
+		st, err = loadState(ing.stateFile)
+		if err != nil {
+			ing.logger.Warn("failed to load state, starting fresh", "error", err)
+			st = state{Containers: make(map[string]containerBookmark)}
+		}
 	}
 
 	ing.mu.Lock()
