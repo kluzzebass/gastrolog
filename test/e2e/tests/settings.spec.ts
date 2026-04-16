@@ -357,6 +357,62 @@ test.describe.serial("Settings", () => {
     ).toBeVisible();
   });
 
+  test("create static lookup", async ({ page }) => {
+    const dialog = await openSettingsTab(page, "Lookups");
+
+    // Open the dropdown and select "Static".
+    await dialog.getByRole("button", { name: "Add Lookup" }).click();
+    const staticOption = page.getByRole("button", { name: "Static", exact: true });
+    await staticOption.waitFor({ state: "visible", timeout: 5_000 });
+    await staticOption.click();
+
+    // Fill the name.
+    await dialog.getByLabel("Name").fill("e2e-test-lookup");
+
+    // Fill the key column in the table header.
+    const keyInput = dialog.locator('thead input[placeholder="key"]');
+    await keyInput.fill("ip");
+
+    // Add a value column.
+    await dialog.getByRole("button", { name: "+ Col" }).click();
+
+    // Fill the new column header.
+    const colInput = dialog.locator('thead input[placeholder="column"]');
+    await colInput.fill("country");
+
+    // Create the lookup.
+    await dialog.getByRole("button", { name: "Create" }).click();
+
+    // Verify the card appears with name and type badge.
+    await expect(dialog.getByText("e2e-test-lookup")).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(dialog.getByText("static")).toBeVisible();
+  });
+
+  test("delete static lookup", async ({ page }) => {
+    const dialog = await openSettingsTab(page, "Lookups");
+
+    // Expand the lookup card.
+    await dialog.getByText("e2e-test-lookup").click();
+
+    // Click Delete, then confirm.
+    await dialog.getByRole("button", { name: "Delete" }).click();
+    await dialog.getByRole("button", { name: "Yes" }).click();
+
+    // Verify the card is gone.
+    await expect(dialog.getByText("e2e-test-lookup")).not.toBeVisible({
+      timeout: 10_000,
+    });
+
+    // Reload and verify deletion persisted.
+    await page.reload();
+    const dialog2 = await openSettingsTab(page, "Lookups");
+    await expect(dialog2.getByText("e2e-test-lookup")).not.toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   // ── Users tab (gastrolog-4ynbb) ─────────────────────────────────
 
   test("users tab shows admin user", async ({ page }) => {

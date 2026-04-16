@@ -47,6 +47,7 @@ const (
 	TypeAttrDict       = 'd' // Attribute key dictionary
 	TypeBTree          = 'b' // B+ tree index
 	TypeCloudBlob      = 'g' // GLCB cloud blob
+	TypeLookupTable    = 'L' // Binary lookup table (sorted key index + value data)
 
 	// Flag bits for raw.log, idx.log, and attr.log headers.
 	FlagSealed     = 0x01

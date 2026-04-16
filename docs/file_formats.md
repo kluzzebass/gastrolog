@@ -6,26 +6,61 @@ All multi-byte integers are **little-endian**. UUIDs are stored as raw 16-byte v
 
 ```
 <home>/
-  <chunk-uuid>/
-    raw.log             Raw log bytes (append-only)
-    idx.log             Record metadata entries (append-only)
-    attr.log            Record attributes (append-only)
-    attr_dict.log       Attribute string dictionary (append-only)
-    ingest.bt           B+ tree: IngestTS → record position (active only)
-    source.bt           B+ tree: SourceTS → record position (active only)
-    ingest.idx          IngestTS timestamp index (sealed only)
-    source.idx          SourceTS timestamp index (sealed only)
-    token.idx           Token inverted index (sealed only)
-    json.idx            Structural JSON index (sealed only)
-    attr_key.idx        Attribute key inverted index (sealed only)
-    attr_val.idx        Attribute value inverted index (sealed only)
-    attr_kv.idx         Attribute key-value pair index (sealed only)
-    kv_key.idx          Heuristic KV key inverted index (sealed only)
-    kv_val.idx          Heuristic KV value inverted index (sealed only)
-    kv_kv.idx           Heuristic KV pair index (sealed only)
+  node_id                   Persistent UUIDv7 node identity
+  node_name                 Human-readable petname
+  config.json / config.db   Config store (format depends on store type)
+  gastrolog.sock            Unix domain socket for local CLI access
+  cluster-tls.json          Cluster mTLS certificates and join token
+
+  raft/
+    raft.db                 BoltDB: Raft log + stable store
+    snapshots/              Raft file snapshot store
+
+  stores/                   Per-vault data ("stores" for backward compat)
+    <vault-id>/
+      .lock                 Exclusive lock file for vault directory
+      cloud.idx             B+ tree cache of cloud chunk metadata (if cloud enabled)
+
+      <chunk-id>/
+        raw.log             Raw log bytes (append-only)
+        idx.log             Record metadata entries (append-only)
+        attr.log            Record attributes (append-only)
+        attr_dict.log       Attribute string dictionary (append-only)
+        ingest.bt           B+ tree: IngestTS → record position (active only)
+        source.bt           B+ tree: SourceTS → record position (active only)
+        ingest.idx          IngestTS timestamp index (sealed only)
+        source.idx          SourceTS timestamp index (sealed only)
+        token.idx           Token inverted index (sealed only)
+        json.idx            Structural JSON index (sealed only)
+        attr_key.idx        Attribute key inverted index (sealed only)
+        attr_val.idx        Attribute value inverted index (sealed only)
+        attr_kv.idx         Attribute key-value pair index (sealed only)
+        kv_key.idx          Heuristic KV key inverted index (sealed only)
+        kv_val.idx          Heuristic KV value inverted index (sealed only)
+        kv_kv.idx           Heuristic KV pair index (sealed only)
+
+  managed-files/
+    <file-id>/
+      <filename>            Uploaded managed files (lookups, MMDB, etc.)
 ```
 
-Each chunk has its own subdirectory named by its UUID. Chunks are self-contained: all data needed to reconstruct records is stored within the chunk directory.
+### Identifiers
+
+All entity identifiers (vault, chunk, file, node, etc.) are **GLIDs**: UUIDv7 values encoded as 26-character lowercase base32hex strings (RFC 4648, no padding). The base32hex alphabet (`0-9a-v`) preserves lexicographic sort order, so directory listings are naturally ordered by creation time. On the proto wire format, GLIDs are raw 16-byte values.
+
+| Placeholder     | Description                                                  |
+|-----------------|--------------------------------------------------------------|
+| `<home>`        | GastroLog data directory (set via `--home` flag)             |
+| `<vault-id>`    | GLID of the vault that owns the chunks                       |
+| `<chunk-id>`    | GLID of the chunk (UUIDv7, time-ordered)                     |
+| `<file-id>`     | GLID of the managed file                                     |
+
+### Notes
+
+- `stores/` is the vault container directory (name kept for backward compatibility with existing data).
+- Each chunk is self-contained: all data needed to reconstruct records is stored within the chunk directory.
+- **Active chunks** have B+ tree indexes (`*.bt`) for mutable writes. **Sealed chunks** replace them with flat sorted indexes (`*.idx`) optimized for read-only access.
+- Managed files (under `managed-files/`) are user-uploaded data files used by lookup tables, MMDB databases, etc. They are replicated across cluster nodes via the Raft-managed file system.
 
 ## Common Header Pattern
 
@@ -58,6 +93,7 @@ All binary files share a common 4-byte header prefix:
 | `0x4D` | `M`  | kv_kv.idx         |
 | `0x4E` | `N`  | kv_key.idx        |
 | `0x4F` | `O`  | kv_val.idx        |
+| `0x4C` | `L`  | lookup table      |
 
 ### Flags
 
@@ -273,7 +309,7 @@ The `ChunkMeta` is derived from idx.log without a separate metadata file:
 
 ---
 
-## _ingest.idx / _source.idx -- Timestamp Indexes
+## ingest.idx / source.idx -- Timestamp Indexes
 
 Sorted timestamp indexes mapping IngestTS or SourceTS to record positions within a chunk. Only built for sealed chunks. Both files share the same format; they differ only in the type byte (`'I'` for ingest, `'s'` for source).
 
@@ -316,7 +352,7 @@ Entries are sorted by timestamp for binary search. Used by the query engine to s
 
 ---
 
-## _token.idx -- Token Index
+## token.idx -- Token Index
 
 Inverted index mapping each token to the list of record indices where that token appears within a chunk. Only built for sealed chunks.
 
@@ -583,6 +619,94 @@ When uploaded, the following user-defined metadata is set on the cloud object fo
 
 ---
 
+## Lookup Table -- Binary Lookup Index
+
+Sorted binary format for O(log n) key lookups with zero heap-allocated index. Used by JSON file and CSV lookup tables. The source data (JSON + jq transform, or CSV) is parsed once at load time and encoded into this format. The file is memory-mapped read-only for the lifetime of the lookup table.
+
+### Layout
+
+```
++---------------------------+
+|     Header (20 bytes)     |
++---------------------------+
+|     Column Names          |
++---------------------------+
+|     Key Offset Table      |
++---------------------------+
+|     Key Data (sorted)     |
++---------------------------+
+|     Value Data            |
++---------------------------+
+```
+
+### Header (20 bytes)
+
+| Offset | Size | Field           | Description                                  |
+|--------|------|-----------------|----------------------------------------------|
+| 0      | 1    | signature       | `0x69` (`'i'`)                               |
+| 1      | 1    | type            | `0x4C` (`'L'`)                               |
+| 2      | 1    | version         | `0x01`                                       |
+| 3      | 1    | flags           | Bit 0: complete (`0x01`)                     |
+| 4      | 4    | numRows         | Number of deduplicated rows (uint32)         |
+| 8      | 4    | numCols         | Number of value columns (uint32)             |
+| 12     | 4    | keyOffTblOffset | Byte offset of key offset table (uint32)     |
+| 16     | 4    | keyDataOffset   | Byte offset of key data section (uint32)     |
+
+### Column Names (starts at byte 20)
+
+Value column names in sorted order. Read once at load time for `Suffixes()`.
+
+```
+For each of numCols columns:
+    [uint16 nameLen][nameLen bytes]
+```
+
+### Key Offset Table (at keyOffTblOffset)
+
+Fixed-size array enabling O(1) access to the nth key during binary search.
+
+```
+For each of numRows entries:
+    [uint32 keyDataEntryOffset]   (relative to keyDataOffset)
+```
+
+Total size: `numRows x 4` bytes.
+
+### Key Data (at keyDataOffset, sorted lexicographically by key)
+
+```
+For each key:
+    [uint16 keyLen][keyLen bytes][uint32 valueDataOffset]
+```
+
+Keys are stored in lexicographic (byte) order. The `valueDataOffset` is an absolute byte offset into the file where this row's value data begins. It is stored adjacent to the key so that after a binary search comparison, the value pointer is in the same cache line.
+
+Duplicate keys are removed by the encoder (first occurrence wins). Empty keys are skipped.
+
+### Value Data
+
+```
+For each row (in sorted key order):
+    For each of numCols columns:
+        [uint16 valLen][valLen bytes]
+```
+
+All value columns are stored contiguously per row. The reader knows `numCols` from the header and reads that many length-prefixed strings sequentially.
+
+### Lookup Algorithm
+
+1. Binary search the key offset table using `sort.Search`.
+2. For each probe at index `mid`: read `keyOffTblOffset + mid*4` to get the key entry offset. Jump to `keyDataOffset + entryOffset`. Read the uint16 key length, then compare key bytes.
+3. On match: read the uint32 `valueDataOffset` that follows the key bytes. Jump to value data. Read `numCols` length-prefixed strings. Return as `map[string]string`.
+
+O(log n) comparisons. Each comparison requires two reads from the mmap (offset table entry + key bytes). Zero heap allocation for the search; only the result map is allocated per lookup.
+
+### String Length Limit
+
+All strings (column names, keys, values) use uint16 length prefixes: maximum 65535 bytes per string. The encoder rejects strings exceeding this limit.
+
+---
+
 ## Validation Summary
 
 All file formats include validation checks on decode:
@@ -602,3 +726,4 @@ All file formats include validation checks on decode:
 | attr_*.idx     | Min size, signature+type, version, complete flag               |
 | kv_*.idx       | Min size, signature+type, version, complete flag, status byte  |
 | cloud blob     | Signature+type, version, seekable zstd, TOC magic              |
+| lookup table   | Min size (20), signature+type, version, complete flag          |

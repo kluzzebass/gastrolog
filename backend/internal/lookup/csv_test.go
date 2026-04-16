@@ -160,6 +160,27 @@ func TestCSVLookupReload(t *testing.T) {
 	}
 }
 
+func TestCSVLookupDuplicateKeys(t *testing.T) {
+	csv := "ip,hostname\n10.0.0.1,web-1\n10.0.0.1,web-2\n10.0.0.2,db-1\n"
+	path := writeTestFile(t, "dupes.csv", csv)
+
+	ct := lookup.NewCSV(lookup.CSVConfig{})
+	if err := ct.Load(path); err != nil {
+		t.Fatal(err)
+	}
+	defer ct.Close()
+
+	// First occurrence wins.
+	result := ct.LookupValues(context.Background(), map[string]string{"value": "10.0.0.1"})
+	if result == nil || result["hostname"] != "web-1" {
+		t.Errorf("expected web-1 (first occurrence), got %v", result)
+	}
+
+	if dups := ct.DuplicateKeys(); dups != 1 {
+		t.Errorf("DuplicateKeys() = %d, want 1", dups)
+	}
+}
+
 func TestCSVLookupErrors(t *testing.T) {
 	ct := lookup.NewCSV(lookup.CSVConfig{})
 

@@ -1837,4 +1837,48 @@ func TestMultiNode_HistogramMatchesRecordCount(t *testing.T) {
 	}
 }
 
+func TestMultiNode_LookupDeletePropagation(t *testing.T) {
+	t.Parallel()
+	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
+	ctx := context.Background()
 
+	// Create an HTTP lookup via PutSettings on the coordinator.
+	_, err := h.configClient.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{
+			HttpLookups: []*gastrologv1.HTTPLookupEntry{
+				{Name: "geo-api", UrlTemplate: "http://geo.example.com/{ip}"},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutSettings (create lookup): %v", err)
+	}
+
+	// Verify the lookup exists in the shared config store.
+	ss, err := h.cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		t.Fatalf("LoadServerSettings: %v", err)
+	}
+	if len(ss.Lookup.HTTPLookups) != 1 {
+		t.Fatalf("expected 1 HTTP lookup, got %d", len(ss.Lookup.HTTPLookups))
+	}
+
+	// Delete the lookup via the coordinator (RouteLeader RPC — goes through leader).
+	_, err = h.configClient.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "geo-api",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteLookup: %v", err)
+	}
+
+	// Verify the lookup is gone via the shared config store. In production,
+	// config is replicated via Raft to all nodes; in the test harness, all
+	// nodes share a single cfgStore so propagation is immediate.
+	ss, err = h.cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		t.Fatalf("LoadServerSettings after delete: %v", err)
+	}
+	if len(ss.Lookup.HTTPLookups) != 0 {
+		t.Fatalf("expected 0 HTTP lookups after delete, got %d", len(ss.Lookup.HTTPLookups))
+	}
+}

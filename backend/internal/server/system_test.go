@@ -1152,3 +1152,197 @@ func TestPutRouteEjectOnly(t *testing.T) {
 // PutTier RPC is implemented.
 
 // Remaining eject tests removed — see comment above.
+
+// ---------------------------------------------------------------------------
+// DeleteLookup tests
+// ---------------------------------------------------------------------------
+
+func TestDeleteLookupHTTP(t *testing.T) {
+	t.Parallel()
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create an HTTP lookup via PutSettings.
+	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{
+			HttpLookups: []*gastrologv1.HTTPLookupEntry{
+				{Name: "weather-api", UrlTemplate: "http://weather.example.com/{city}"},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutSettings (create lookup): %v", err)
+	}
+
+	// Verify the lookup exists in the config store.
+	ss, err := cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		t.Fatalf("LoadServerSettings: %v", err)
+	}
+	if len(ss.Lookup.HTTPLookups) != 1 {
+		t.Fatalf("expected 1 HTTP lookup, got %d", len(ss.Lookup.HTTPLookups))
+	}
+	if ss.Lookup.HTTPLookups[0].Name != "weather-api" {
+		t.Fatalf("lookup name = %q, want %q", ss.Lookup.HTTPLookups[0].Name, "weather-api")
+	}
+
+	// Delete the lookup by name.
+	_, err = client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "weather-api",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteLookup: %v", err)
+	}
+
+	// Verify the lookup is gone.
+	ss, err = cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		t.Fatalf("LoadServerSettings after delete: %v", err)
+	}
+	if len(ss.Lookup.HTTPLookups) != 0 {
+		t.Fatalf("expected 0 HTTP lookups after delete, got %d", len(ss.Lookup.HTTPLookups))
+	}
+}
+
+func TestDeleteLookupNotFound(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	_, err := client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "nonexistent-lookup",
+	}))
+	if err == nil {
+		t.Fatal("expected error for nonexistent lookup")
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected NotFound, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestDeleteLookupEmptyName(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	_, err := client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "",
+	}))
+	if err == nil {
+		t.Fatal("expected error for empty name")
+	}
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", connect.CodeOf(err))
+	}
+}
+
+func TestDeleteLookupCSV(t *testing.T) {
+	t.Parallel()
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create a CSV lookup.
+	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{
+			CsvLookups: []*gastrologv1.CSVLookupEntry{
+				{Name: "hosts-csv", FileId: glid.New().Bytes()},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutSettings (create CSV lookup): %v", err)
+	}
+
+	// Delete it.
+	_, err = client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "hosts-csv",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteLookup CSV: %v", err)
+	}
+
+	// Verify gone.
+	ss, err := cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		t.Fatalf("LoadServerSettings after CSV delete: %v", err)
+	}
+	if len(ss.Lookup.CSVLookups) != 0 {
+		t.Fatalf("expected 0 CSV lookups after delete, got %d", len(ss.Lookup.CSVLookups))
+	}
+}
+
+func TestDeleteLookupOnlyRemovesTarget(t *testing.T) {
+	t.Parallel()
+	client, cfgStore, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create two HTTP lookups.
+	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{
+			HttpLookups: []*gastrologv1.HTTPLookupEntry{
+				{Name: "api-alpha", UrlTemplate: "http://alpha.example.com/{id}"},
+				{Name: "api-beta", UrlTemplate: "http://beta.example.com/{id}"},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutSettings (create two lookups): %v", err)
+	}
+
+	// Delete only one.
+	_, err = client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "api-alpha",
+	}))
+	if err != nil {
+		t.Fatalf("DeleteLookup: %v", err)
+	}
+
+	// Verify api-beta survives.
+	ss, err := cfgStore.LoadServerSettings(ctx)
+	if err != nil {
+		t.Fatalf("LoadServerSettings after partial delete: %v", err)
+	}
+	if len(ss.Lookup.HTTPLookups) != 1 {
+		t.Fatalf("expected 1 HTTP lookup remaining, got %d", len(ss.Lookup.HTTPLookups))
+	}
+	if ss.Lookup.HTTPLookups[0].Name != "api-beta" {
+		t.Fatalf("surviving lookup = %q, want %q", ss.Lookup.HTTPLookups[0].Name, "api-beta")
+	}
+}
+
+func TestDeleteLookupIdempotentSecondCallFails(t *testing.T) {
+	t.Parallel()
+	client, _, _ := newConfigTestSetup(t)
+	ctx := context.Background()
+
+	// Create an HTTP lookup.
+	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		Lookup: &gastrologv1.PutLookupSettings{
+			HttpLookups: []*gastrologv1.HTTPLookupEntry{
+				{Name: "once-only", UrlTemplate: "http://once.example.com/{x}"},
+			},
+		},
+	}))
+	if err != nil {
+		t.Fatalf("PutSettings: %v", err)
+	}
+
+	// First delete succeeds.
+	_, err = client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "once-only",
+	}))
+	if err != nil {
+		t.Fatalf("first DeleteLookup: %v", err)
+	}
+
+	// Second delete returns NotFound.
+	_, err = client.DeleteLookup(ctx, connect.NewRequest(&gastrologv1.DeleteLookupRequest{
+		Name: "once-only",
+	}))
+	if err == nil {
+		t.Fatal("expected error on second delete")
+	}
+	if connect.CodeOf(err) != connect.CodeNotFound {
+		t.Fatalf("expected NotFound on second delete, got %v", connect.CodeOf(err))
+	}
+}

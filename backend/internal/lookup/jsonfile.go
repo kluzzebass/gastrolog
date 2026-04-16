@@ -2,7 +2,6 @@ package lookup
 
 import (
 	"context"
-	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -29,10 +28,9 @@ type JSONFileConfig struct {
 // JSONFile is a lookup table backed by a JSON file transformed via a jq expression.
 //
 // On Load, the source JSON is parsed, transformed through the compiled jq
-// expression, and the results are written as CSV to a temp file. That CSV is
-// then memory-mapped using the same csvData structure as the CSV lookup — row
-// data lives in the mmap region, only key strings and byte offsets are on the
-// heap. The parsed JSON tree is transient and freed after the transform.
+// expression, and the results are encoded as a sorted binary lookup file.
+// That file is memory-mapped for O(log n) binary search lookups with zero
+// heap-allocated index — only column name strings live on the heap.
 //
 // JSON source files are limited to 10 MB. For larger datasets, use CSV format
 // which is memory-mapped directly without a transform step.
@@ -43,8 +41,8 @@ type JSONFile struct {
 	keyColumn    string
 	valueColumns map[string]struct{}
 
-	data    atomic.Pointer[csvData]
-	tmpPath atomic.Value // string: current temp CSV file path
+	data    atomic.Pointer[binData]
+	tmpPath atomic.Value // string: current temp file path
 
 	mu        sync.Mutex
 	watcher   *fsnotify.Watcher
@@ -103,7 +101,7 @@ func (j *JSONFile) Suffixes() []string {
 	return d.suffixes
 }
 
-// LookupValues performs an O(1) key lookup in the mmap'd transformed data.
+// LookupValues performs an O(log n) binary search lookup in the mmap'd data.
 func (j *JSONFile) LookupValues(_ context.Context, values map[string]string) map[string]string {
 	key := values["value"]
 	if key == "" {
@@ -113,37 +111,65 @@ func (j *JSONFile) LookupValues(_ context.Context, values map[string]string) map
 	if d == nil {
 		return nil
 	}
-	rowIdx, ok := d.keyIndex[key]
-	if !ok {
-		return nil
-	}
-	return d.parseRow(rowIdx)
+	return d.lookupKey(d.mmapData, key, d.suffixes)
 }
 
-// Load parses the JSON source, transforms it through jq, writes the results
-// as CSV, and memory-maps the CSV for lookups.
+// Load parses the JSON source, transforms it through jq, encodes as a
+// binary lookup file, and memory-maps it for lookups.
 func (j *JSONFile) Load(path string) error {
-	// Transform JSON → temp CSV.
-	tmpPath, err := j.transformToCSV(path)
+	// Transform JSON → binary lookup file.
+	tmpPath, dups, err := j.transformToBin(path)
 	if err != nil {
 		return err
 	}
 
-	// Mmap the CSV and build key index.
-	loader := &CSV{
-		keyColumn:    j.keyColumn,
-		valueColumns: j.valueColumns,
-		delimiter:    ',',
-	}
-	if err := loader.Load(tmpPath); err != nil {
+	// Mmap the binary file.
+	f, err := os.Open(tmpPath) //nolint:gosec // path from CreateTemp
+	if err != nil {
 		_ = os.Remove(tmpPath)
-		return fmt.Errorf("index transformed csv: %w", err)
+		return fmt.Errorf("open bin lookup: %w", err)
 	}
-	newData := loader.data.Swap(nil)
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	mmapData, err := syscall.Mmap(int(f.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("mmap bin lookup: %w", err)
+	}
+
+	// Decode header and column names.
+	newData, err := decodeBinHeader(mmapData)
+	if err != nil {
+		_ = syscall.Munmap(mmapData)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	cols, err := decodeBinColumns(mmapData, newData.numCols)
+	if err != nil {
+		_ = syscall.Munmap(mmapData)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
+		return err
+	}
+	newData.mmapData = mmapData
+	newData.file = f
+	newData.suffixes = cols
+	newData.duplicateKeys = dups
 
 	old := j.data.Swap(newData)
 	if old != nil {
+		oldMmap := old.mmapData
+		old.mmapData = nil
 		old.close()
+		if oldMmap != nil {
+			_ = syscall.Munmap(oldMmap)
+		}
 	}
 
 	if prev, _ := j.tmpPath.Load().(string); prev != "" && prev != tmpPath {
@@ -153,31 +179,32 @@ func (j *JSONFile) Load(path string) error {
 	return nil
 }
 
-// transformToCSV parses the JSON, runs jq, and writes results as CSV.
-func (j *JSONFile) transformToCSV(path string) (string, error) {
+// transformToBin parses the JSON, runs jq, and encodes the results as a
+// binary lookup file. Returns the temp file path.
+func (j *JSONFile) transformToBin(path string) (tmpPath string, duplicates int, err error) {
 	// Mmap source for reading.
 	srcFile, err := os.Open(path) //nolint:gosec // validated config path
 	if err != nil {
-		return "", fmt.Errorf("open %q: %w", path, err)
+		return "", 0, fmt.Errorf("open %q: %w", path, err)
 	}
 	info, err := srcFile.Stat()
 	if err != nil {
 		_ = srcFile.Close()
-		return "", fmt.Errorf("stat %q: %w", path, err)
+		return "", 0, fmt.Errorf("stat %q: %w", path, err)
 	}
 	size := info.Size()
 	if size == 0 {
 		_ = srcFile.Close()
-		return "", fmt.Errorf("json file %q is empty", path)
+		return "", 0, fmt.Errorf("json file %q is empty", path)
 	}
 	if size > maxJSONFileSize {
 		_ = srcFile.Close()
-		return "", fmt.Errorf("json file %q is %d bytes (max %d); use CSV format for large files", path, size, maxJSONFileSize)
+		return "", 0, fmt.Errorf("json file %q is %d bytes (max %d); use CSV format for large files", path, size, maxJSONFileSize)
 	}
 	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
 	if err != nil {
 		_ = srcFile.Close()
-		return "", fmt.Errorf("mmap %q: %w", path, err)
+		return "", 0, fmt.Errorf("mmap %q: %w", path, err)
 	}
 
 	// Parse (transient — freed after this function returns).
@@ -185,44 +212,128 @@ func (j *JSONFile) transformToCSV(path string) (string, error) {
 	if err := json.Unmarshal(mmapData, &root); err != nil {
 		_ = syscall.Munmap(mmapData)
 		_ = srcFile.Close()
-		return "", fmt.Errorf("parse %q: %w", path, err)
+		return "", 0, fmt.Errorf("parse %q: %w", path, err)
 	}
 
 	// Release source mmap — we only need the parsed tree now.
 	_ = syscall.Munmap(mmapData)
 	_ = srcFile.Close()
 
-	// Create temp file for CSV output.
-	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".jsonlookup-*.csv")
+	// Run jq and collect rows.
+	columns, rows, err := j.collectRows(root, path)
 	if err != nil {
-		return "", fmt.Errorf("create temp csv: %w", err)
+		return "", 0, err
 	}
-	tmpPath := tmpFile.Name()
 
-	// Run jq and stream results to CSV.
-	if err := j.writeCSV(root, tmpFile, path); err != nil {
+	// Encode to binary.
+	encoded, dups, err := encodeBinLookup(columns, rows)
+	if err != nil {
+		return "", 0, fmt.Errorf("encode bin lookup: %w", err)
+	}
+
+	// Write to temp file.
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".jsonlookup-*.bin")
+	if err != nil {
+		return "", 0, fmt.Errorf("create temp bin: %w", err)
+	}
+	tmpPath = tmpFile.Name()
+	if _, err := tmpFile.Write(encoded); err != nil {
 		_ = tmpFile.Close()
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: path from os.CreateTemp, not user input
-		return "", err
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return "", 0, fmt.Errorf("write bin lookup: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpPath) //nolint:gosec // G703: path from os.CreateTemp, not user input
-		return "", fmt.Errorf("close temp csv: %w", err)
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return "", 0, err
 	}
 
-	return tmpPath, nil
+	return tmpPath, dups, nil
 }
 
 const maxTransformRows = 100_000
 
-// writeCSV runs the compiled jq expression and writes results as CSV rows.
-func (j *JSONFile) writeCSV(root any, out *os.File, path string) error {
-	w := csv.NewWriter(out)
-	var header []string
-	rowCount := 0
+// resolveColumns determines the key column and value columns from the first
+// flattened row. Returns the key column name and the sorted value column names.
+func (j *JSONFile) resolveColumns(flat map[string]string) (string, []string) {
+	allCols := sortedStringKeys(flat)
+
+	// Resolve key column.
+	var keyCol string
+	if j.keyColumn != "" {
+		keyCol = j.keyColumn
+	} else if len(allCols) > 0 {
+		keyCol = allCols[0]
+	}
+
+	// Value columns: configured or all non-key.
+	var valueCols []string
+	for _, c := range allCols {
+		if c == keyCol {
+			continue
+		}
+		if j.valueColumns != nil {
+			if _, ok := j.valueColumns[c]; !ok {
+				continue
+			}
+		}
+		valueCols = append(valueCols, c)
+	}
+	return keyCol, valueCols
+}
+
+// toObjects coerces a jq output value into a slice of objects.
+// Non-object values are silently skipped.
+func toObjects(v any) []map[string]any {
+	switch tv := v.(type) {
+	case map[string]any:
+		return []map[string]any{tv}
+	case []any:
+		var out []map[string]any
+		for _, elem := range tv {
+			if obj, ok := elem.(map[string]any); ok {
+				out = append(out, obj)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+// rowCollector accumulates rows during jq iteration, resolving columns
+// from the first flattened object.
+type rowCollector struct {
+	j          *JSONFile
+	keyCol     string
+	allColumns []string
+	rows       []binRow
+}
+
+// addObject flattens an object and appends a row. Returns false if the
+// object was nil (skipped).
+func (rc *rowCollector) addObject(obj map[string]any) bool {
+	flat := flattenScalars(obj)
+	if flat == nil {
+		return false
+	}
+	if rc.allColumns == nil {
+		rc.keyCol, rc.allColumns = rc.j.resolveColumns(flat)
+	}
+	vals := make([]string, len(rc.allColumns))
+	for i, c := range rc.allColumns {
+		vals[i] = flat[c]
+	}
+	rc.rows = append(rc.rows, binRow{key: flat[rc.keyCol], values: vals})
+	return true
+}
+
+// collectRows runs the jq expression and collects flattened rows.
+// Returns the value column names (sorted, excluding key) and the rows.
+func (j *JSONFile) collectRows(root any, path string) ([]string, []binRow, error) {
+	rc := rowCollector{j: j}
 
 	iter := j.query.Run(root)
-	for rowCount < maxTransformRows {
+	for len(rc.rows) < maxTransformRows {
 		v, ok := iter.Next()
 		if !ok {
 			break
@@ -230,49 +341,18 @@ func (j *JSONFile) writeCSV(root any, out *os.File, path string) error {
 		if _, isErr := v.(error); isErr {
 			break
 		}
-
-		// Each result may be a single object or an array of objects.
-		var objects []map[string]any
-		switch tv := v.(type) {
-		case map[string]any:
-			objects = []map[string]any{tv}
-		case []any:
-			for _, elem := range tv {
-				if obj, ok := elem.(map[string]any); ok {
-					objects = append(objects, obj)
-				}
-			}
-		}
-
-		for _, obj := range objects {
-			flat := flattenScalars(obj)
-			if flat == nil {
-				continue
-			}
-			if header == nil {
-				header = sortedStringKeys(flat)
-				_ = w.Write(header)
-			}
-			record := make([]string, len(header))
-			for i, h := range header {
-				record[i] = flat[h]
-			}
-			_ = w.Write(record)
-			rowCount++
-			if rowCount >= maxTransformRows {
+		for _, obj := range toObjects(v) {
+			rc.addObject(obj)
+			if len(rc.rows) >= maxTransformRows {
 				break
 			}
 		}
 	}
 
-	w.Flush()
-	if err := w.Error(); err != nil {
-		return fmt.Errorf("write csv: %w", err)
+	if len(rc.rows) == 0 {
+		return nil, nil, fmt.Errorf("jq expression produced no results for %q", path)
 	}
-	if rowCount == 0 {
-		return fmt.Errorf("jq expression produced no results for %q", path)
-	}
-	return nil
+	return rc.allColumns, rc.rows, nil
 }
 
 // sortedStringKeys returns the sorted keys of a map.
@@ -344,7 +424,12 @@ func (j *JSONFile) Close() {
 	j.mu.Unlock()
 
 	if d := j.data.Swap(nil); d != nil {
+		mmap := d.mmapData
+		d.mmapData = nil
 		d.close()
+		if mmap != nil {
+			_ = syscall.Munmap(mmap)
+		}
 	}
 	if p, _ := j.tmpPath.Load().(string); p != "" {
 		_ = os.Remove(p)

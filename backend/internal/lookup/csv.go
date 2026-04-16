@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,41 +21,21 @@ type CSVConfig struct {
 	Delimiter    rune     // field delimiter; zero = ','
 }
 
-// csvData holds the mmap'd CSV file and its key index.
-// Row data lives in the mmap region, not on the heap.
-// Only the key strings and their offsets are heap-allocated.
-type csvData struct {
-	mmapData      []byte   // memory-mapped file contents
-	file          *os.File // kept open while mmap is active
-	rowOffsets    []int    // byte offset of each data row (excludes header)
-	keyIndex      map[string]int // key value → index into rowOffsets
-	header        []string
-	keyIdx        int          // column index of the key
-	mappings      []colMapping // value column indices and names
-	suffixes      []string     // output column names
-	delimiter     rune
-	duplicateKeys int // number of rows skipped due to duplicate keys
-}
-
-func (d *csvData) close() {
-	if d.mmapData != nil {
-		_ = syscall.Munmap(d.mmapData)
-	}
-	if d.file != nil {
-		_ = d.file.Close()
-	}
-}
-
-// CSV is a lookup table backed by a memory-mapped CSV file.
-// The file is mmap'd read-only; only the key index lives on the heap.
-// Row data is parsed on demand from the mmap region during lookups.
+// CSV is a lookup table backed by a CSV file.
+//
+// On Load, the source CSV is parsed and encoded as a sorted binary lookup
+// file. That file is memory-mapped for O(log n) binary search lookups with
+// zero heap-allocated index. The source CSV is only read during Load — the
+// mmap'd binary file serves all lookups.
+//
 // Safe for concurrent use; data is swapped atomically on reload.
 type CSV struct {
 	keyColumn    string
 	valueColumns map[string]struct{} // nil = all non-key columns
 	delimiter    rune
 
-	data atomic.Pointer[csvData]
+	data    atomic.Pointer[binData]
+	tmpPath atomic.Value // string: current temp binary file path
 
 	mu        sync.Mutex
 	watcher   *fsnotify.Watcher
@@ -96,8 +77,17 @@ func (c *CSV) Suffixes() []string {
 	return d.suffixes
 }
 
-// LookupValues looks up a key in the CSV table.
-// Parses the matching row on demand from the mmap'd file data.
+// DuplicateKeys returns the number of rows with duplicate key values
+// that were skipped during the last Load (first occurrence wins).
+func (c *CSV) DuplicateKeys() int {
+	d := c.data.Load()
+	if d == nil {
+		return 0
+	}
+	return d.duplicateKeys
+}
+
+// LookupValues performs an O(log n) binary search lookup.
 func (c *CSV) LookupValues(_ context.Context, values map[string]string) map[string]string {
 	key := values["value"]
 	if key == "" {
@@ -107,58 +97,165 @@ func (c *CSV) LookupValues(_ context.Context, values map[string]string) map[stri
 	if d == nil {
 		return nil
 	}
-	rowIdx, ok := d.keyIndex[key]
-	if !ok {
-		return nil
-	}
-	return d.parseRow(rowIdx)
+	return d.lookupKey(d.mmapData, key, d.suffixes)
 }
 
-// parseRow parses a single data row from the mmap'd bytes and returns the value columns.
-func (d *csvData) parseRow(rowIdx int) map[string]string {
-	start := d.rowOffsets[rowIdx]
-	end := len(d.mmapData)
-	if rowIdx+1 < len(d.rowOffsets) {
-		end = d.rowOffsets[rowIdx+1]
-	}
-
-	reader := csv.NewReader(bytes.NewReader(d.mmapData[start:end]))
-	reader.Comma = d.delimiter
-	reader.FieldsPerRecord = -1
-	record, err := reader.Read()
+// Load parses the source CSV, encodes it as a binary lookup file, and
+// memory-maps the binary file for lookups.
+func (c *CSV) Load(path string) error {
+	// Mmap source CSV for reading.
+	srcFile, err := os.Open(path) //nolint:gosec // path from validated config
 	if err != nil {
-		return nil
+		return fmt.Errorf("open csv file %q: %w", path, err)
+	}
+	info, err := srcFile.Stat()
+	if err != nil {
+		_ = srcFile.Close()
+		return fmt.Errorf("stat csv file %q: %w", path, err)
+	}
+	if info.Size() == 0 {
+		_ = srcFile.Close()
+		return fmt.Errorf("csv file %q is empty", path)
+	}
+	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(info.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	if err != nil {
+		_ = srcFile.Close()
+		return fmt.Errorf("mmap csv file %q: %w", path, err)
 	}
 
-	result := make(map[string]string, len(d.mappings))
-	for _, m := range d.mappings {
-		if m.idx < len(record) {
-			result[m.name] = record[m.idx]
+	// Parse CSV and collect rows.
+	columns, rows, err := c.parseCSVRows(mmapData, path)
+
+	// Release source mmap — we only need the collected rows now.
+	_ = syscall.Munmap(mmapData)
+	_ = srcFile.Close()
+
+	if err != nil {
+		return err
+	}
+
+	// Encode to binary.
+	encoded, dups, err := encodeBinLookup(columns, rows)
+	if err != nil {
+		return fmt.Errorf("encode bin lookup for %q: %w", path, err)
+	}
+
+	// Write to temp file.
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".csvlookup-*.bin")
+	if err != nil {
+		return fmt.Errorf("create temp bin: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(encoded); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return fmt.Errorf("write bin lookup: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return err
+	}
+
+	// Mmap the binary file.
+	binFile, err := os.Open(tmpPath) //nolint:gosec // path from CreateTemp
+	if err != nil {
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return err
+	}
+	binInfo, err := binFile.Stat()
+	if err != nil {
+		_ = binFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return err
+	}
+	binMmap, err := syscall.Mmap(int(binFile.Fd()), 0, int(binInfo.Size()), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
+	if err != nil {
+		_ = binFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return fmt.Errorf("mmap bin lookup: %w", err)
+	}
+
+	// Decode header.
+	newData, err := decodeBinHeader(binMmap)
+	if err != nil {
+		_ = syscall.Munmap(binMmap)
+		_ = binFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return err
+	}
+	cols, err := decodeBinColumns(binMmap, newData.numCols)
+	if err != nil {
+		_ = syscall.Munmap(binMmap)
+		_ = binFile.Close()
+		_ = os.Remove(tmpPath) //nolint:gosec // G703
+		return err
+	}
+	newData.mmapData = binMmap
+	newData.file = binFile
+	newData.suffixes = cols
+	newData.duplicateKeys = dups
+
+	old := c.data.Swap(newData)
+	if old != nil {
+		oldMmap := old.mmapData
+		old.mmapData = nil
+		old.close()
+		if oldMmap != nil {
+			_ = syscall.Munmap(oldMmap)
 		}
 	}
-	return result
+
+	if prev, _ := c.tmpPath.Load().(string); prev != "" && prev != tmpPath {
+		_ = os.Remove(prev)
+	}
+	c.tmpPath.Store(tmpPath)
+	return nil
 }
 
-type colMapping struct {
+// csvColMap maps a header column to its index.
+type csvColMap struct {
 	idx  int
 	name string
 }
 
-// resolveColumns determines the key column index and value column mappings from the header.
-func (c *CSV) resolveColumns(header []string, path string) (keyIdx int, mappings []colMapping, suffixes []string, err error) {
-	if c.keyColumn != "" {
-		keyIdx = -1
-		for i, h := range header {
-			if h == c.keyColumn {
-				keyIdx = i
-				break
-			}
+// findKeyColumnIndex returns the index of the named column in header, or -1.
+func findKeyColumnIndex(header []string, name string) int {
+	for i, h := range header {
+		if h == name {
+			return i
 		}
+	}
+	return -1
+}
+
+// resolveCSVColumns determines the key column index and value column mappings
+// from the CSV header. Returns the key index, the value column mappings, and
+// the value column names.
+func (c *CSV) resolveCSVColumns(header []string, path string) (int, []csvColMap, []string, error) {
+	keyIdx := 0
+	if c.keyColumn != "" {
+		keyIdx = findKeyColumnIndex(header, c.keyColumn)
 		if keyIdx < 0 {
 			return 0, nil, nil, fmt.Errorf("csv file %q: key column %q not found in header %v", path, c.keyColumn, header)
 		}
 	}
 
+	valCols := c.buildValueColumns(header, keyIdx)
+	if len(valCols) == 0 {
+		return 0, nil, nil, fmt.Errorf("csv file %q: no value columns after filtering", path)
+	}
+
+	columns := make([]string, len(valCols))
+	for i, vc := range valCols {
+		columns[i] = vc.name
+	}
+	return keyIdx, valCols, columns, nil
+}
+
+// buildValueColumns returns the value column mappings from the header,
+// excluding the key column and filtering by configured value columns.
+func (c *CSV) buildValueColumns(header []string, keyIdx int) []csvColMap {
+	var valCols []csvColMap
 	for i, h := range header {
 		if i == keyIdx {
 			continue
@@ -168,152 +265,68 @@ func (c *CSV) resolveColumns(header []string, path string) (keyIdx int, mappings
 				continue
 			}
 		}
-		mappings = append(mappings, colMapping{idx: i, name: h})
-		suffixes = append(suffixes, h)
+		valCols = append(valCols, csvColMap{idx: i, name: h})
 	}
-
-	if len(mappings) == 0 {
-		return 0, nil, nil, fmt.Errorf("csv file %q: no value columns after filtering", path)
-	}
-	return keyIdx, mappings, suffixes, nil
+	return valCols
 }
 
-// Load memory-maps a CSV file and builds a key index.
-// Row data stays in the mmap region; only key strings are heap-allocated.
-func (c *CSV) Load(path string) error {
-	f, err := os.Open(path) //nolint:gosec // path comes from validated config
-	if err != nil {
-		return fmt.Errorf("open csv file %q: %w", path, err)
-	}
-
-	info, err := f.Stat()
-	if err != nil {
-		_ = f.Close()
-		return fmt.Errorf("stat csv file %q: %w", path, err)
-	}
-	size := info.Size()
-	if size == 0 {
-		_ = f.Close()
-		return fmt.Errorf("csv file %q is empty", path)
-	}
-
-	mmapData, err := syscall.Mmap(int(f.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: int64→int safe on 64-bit
-	if err != nil {
-		_ = f.Close()
-		return fmt.Errorf("mmap csv file %q: %w", path, err)
-	}
-
-	// Scan row byte offsets with quote-aware newline detection.
-	rowOffsets := scanCSVRowOffsets(mmapData)
-	if len(rowOffsets) < 1 {
-		_ = syscall.Munmap(mmapData)
-		_ = f.Close()
-		return fmt.Errorf("csv file %q: no rows found", path)
-	}
-
-	// Parse header from the first row, skipping UTF-8 BOM if present.
-	headerStart := 0
-	if len(mmapData) >= 3 && mmapData[0] == 0xEF && mmapData[1] == 0xBB && mmapData[2] == 0xBF {
-		headerStart = 3
-	}
-	headerEnd := len(mmapData)
-	if len(rowOffsets) > 1 {
-		headerEnd = rowOffsets[1]
-	}
-	headerReader := csv.NewReader(bytes.NewReader(mmapData[headerStart:headerEnd]))
-	headerReader.Comma = c.delimiter
-	headerReader.FieldsPerRecord = -1
-	header, err := headerReader.Read()
-	if err != nil {
-		_ = syscall.Munmap(mmapData)
-		_ = f.Close()
-		return fmt.Errorf("read csv header from %q: %w", path, err)
-	}
-	if len(header) < 2 {
-		_ = syscall.Munmap(mmapData)
-		_ = f.Close()
-		return fmt.Errorf("csv file %q needs at least 2 columns (key + value)", path)
-	}
-
-	keyIdx, mappings, suffixes, err := c.resolveColumns(header, path)
-	if err != nil {
-		_ = syscall.Munmap(mmapData)
-		_ = f.Close()
-		return err
-	}
-
-	// Data rows start after the header (index 1 onward).
-	dataOffsets := rowOffsets[1:]
-
-	// Build key index by parsing only the key column from each row.
-	keyIndex := make(map[string]int, len(dataOffsets))
-	var duplicateKeys int
-	for i, off := range dataOffsets {
-		end := len(mmapData)
-		if i+1 < len(dataOffsets) {
-			end = dataOffsets[i+1]
+// readCSVDataRows reads all data records from the CSV reader and converts them to binRows.
+func readCSVDataRows(reader *csv.Reader, keyIdx int, valCols []csvColMap) []binRow {
+	var rows []binRow
+	for {
+		record, err := reader.Read()
+		if err != nil {
+			break
 		}
-		rowReader := csv.NewReader(bytes.NewReader(mmapData[off:end]))
-		rowReader.Comma = c.delimiter
-		rowReader.FieldsPerRecord = -1
-		record, err := rowReader.Read()
-		if err != nil || keyIdx >= len(record) {
+		if keyIdx >= len(record) {
 			continue
 		}
 		key := record[keyIdx]
 		if key == "" {
 			continue
 		}
-		if _, exists := keyIndex[key]; exists {
-			duplicateKeys++
-			continue // first occurrence wins
+		vals := make([]string, len(valCols))
+		for i, vc := range valCols {
+			if vc.idx < len(record) {
+				vals[i] = record[vc.idx]
+			}
 		}
-		keyIndex[key] = i
+		rows = append(rows, binRow{key: key, values: vals})
 	}
-
-	newData := &csvData{
-		mmapData:      mmapData,
-		file:          f,
-		rowOffsets:    dataOffsets,
-		keyIndex:      keyIndex,
-		header:        header,
-		keyIdx:        keyIdx,
-		mappings:      mappings,
-		suffixes:      suffixes,
-		delimiter:     c.delimiter,
-		duplicateKeys: duplicateKeys,
-	}
-
-	old := c.data.Swap(newData)
-	if old != nil {
-		old.close()
-	}
-	return nil
+	return rows
 }
 
-// scanCSVRowOffsets returns byte offsets of each row start (including the header at index 0).
-// Handles quoted fields that contain embedded newlines.
-func scanCSVRowOffsets(data []byte) []int {
-	offsets := []int{0}
-	inQuote := false
-	for i := 0; i < len(data); i++ {
-		b := data[i]
-		switch {
-		case inQuote && b == '"':
-			if i+1 < len(data) && data[i+1] == '"' {
-				i++ // skip escaped quote
-			} else {
-				inQuote = false
-			}
-		case !inQuote && b == '"':
-			inQuote = true
-		case !inQuote && b == '\n':
-			if i+1 < len(data) {
-				offsets = append(offsets, i+1)
-			}
-		}
+// parseCSVRows reads the mmap'd CSV data and returns value column names and rows.
+func (c *CSV) parseCSVRows(data []byte, path string) ([]string, []binRow, error) {
+	// Strip UTF-8 BOM.
+	src := data
+	if len(src) >= 3 && src[0] == 0xEF && src[1] == 0xBB && src[2] == 0xBF {
+		src = src[3:]
 	}
-	return offsets
+
+	reader := csv.NewReader(bytes.NewReader(src))
+	reader.Comma = c.delimiter
+	reader.FieldsPerRecord = -1
+
+	// Read header.
+	header, err := reader.Read()
+	if err != nil {
+		return nil, nil, fmt.Errorf("read csv header from %q: %w", path, err)
+	}
+	if len(header) < 2 {
+		return nil, nil, fmt.Errorf("csv file %q needs at least 2 columns (key + value)", path)
+	}
+
+	keyIdx, valCols, columns, err := c.resolveCSVColumns(header, path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rows := readCSVDataRows(reader, keyIdx, valCols)
+	if len(rows) == 0 {
+		return nil, nil, fmt.Errorf("csv file %q: no data rows", path)
+	}
+	return columns, rows, nil
 }
 
 // WatchFile watches the CSV file for changes and reloads on write/create.
@@ -374,8 +387,16 @@ func (c *CSV) Close() {
 	c.mu.Lock()
 	c.stopWatchLocked()
 	c.mu.Unlock()
-	old := c.data.Swap(nil)
-	if old != nil {
-		old.close()
+
+	if d := c.data.Swap(nil); d != nil {
+		mmap := d.mmapData
+		d.mmapData = nil
+		d.close()
+		if mmap != nil {
+			_ = syscall.Munmap(mmap)
+		}
+	}
+	if p, _ := c.tmpPath.Load().(string); p != "" {
+		_ = os.Remove(p)
 	}
 }
