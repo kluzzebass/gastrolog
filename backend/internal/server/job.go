@@ -4,16 +4,14 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"hash/fnv"
 	"slices"
-	"time"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -23,23 +21,33 @@ type JobScheduler interface {
 	ListJobs() []orchestrator.JobInfo
 }
 
-// PeerJobsProvider returns active jobs from peer cluster nodes.
+// PeerJobsProvider returns active jobs from peer cluster nodes plus a
+// signal that fires whenever the underlying peer data changes.
 type PeerJobsProvider interface {
 	GetAll() map[string][]*apiv1.Job
+	Changes() *notify.Signal
+}
+
+// JobEventSubscriber exposes per-transition job events from the local
+// scheduler. WatchJobs subscribes here instead of polling.
+type JobEventSubscriber interface {
+	Subscribe() (*orchestrator.JobSubscription, func())
 }
 
 // JobServer implements the JobService.
 type JobServer struct {
 	scheduler   JobScheduler
 	localNodeID string
-	peerJobs    PeerJobsProvider // nil in single-node mode
+	peerJobs    PeerJobsProvider   // nil in single-node mode
+	events      JobEventSubscriber // nil only in tests that don't exercise WatchJobs
 }
 
 var _ gastrologv1connect.JobServiceHandler = (*JobServer)(nil)
 
-// NewJobServer creates a new JobServer.
-func NewJobServer(scheduler JobScheduler, localNodeID string, peerJobs PeerJobsProvider) *JobServer {
-	return &JobServer{scheduler: scheduler, localNodeID: localNodeID, peerJobs: peerJobs}
+// NewJobServer creates a new JobServer. events may be nil in tests that
+// don't exercise WatchJobs; WatchJobs returns an error if so.
+func NewJobServer(scheduler JobScheduler, localNodeID string, peerJobs PeerJobsProvider, events JobEventSubscriber) *JobServer {
+	return &JobServer{scheduler: scheduler, localNodeID: localNodeID, peerJobs: peerJobs, events: events}
 }
 
 // GetJob returns a single job by ID, checking the local scheduler first
@@ -82,33 +90,74 @@ func (s *JobServer) ListJobs(
 	return connect.NewResponse(&apiv1.ListJobsResponse{Jobs: s.allJobs()}), nil
 }
 
-// WatchJobs streams the full job list (local + peer) whenever state changes.
+// WatchJobs streams the full job list (local + peer) on every state
+// transition. Event-driven: subscribes to the local scheduler's job-event
+// broker and to a change signal from the peer-jobs cache. No polling.
 func (s *JobServer) WatchJobs(
 	ctx context.Context,
 	req *connect.Request[apiv1.WatchJobsRequest],
 	stream *connect.ServerStream[apiv1.WatchJobsResponse],
 ) error {
-	var lastHash uint64
+	return s.watchJobsLoop(ctx, stream.Send)
+}
+
+// watchJobsLoop is the testable core of WatchJobs — parameterized on the
+// send function so tests can capture emissions without HTTP plumbing.
+func (s *JobServer) watchJobsLoop(ctx context.Context, send func(*apiv1.WatchJobsResponse) error) error {
+	if s.events == nil {
+		return connect.NewError(connect.CodeUnimplemented, errors.New("WatchJobs: no event source wired"))
+	}
+
+	// Initial snapshot so the client gets the current state immediately.
+	if err := send(&apiv1.WatchJobsResponse{Jobs: s.allJobs()}); err != nil {
+		return err
+	}
+
+	sub, cancel := s.events.Subscribe()
+	defer cancel()
+
+	var peerCh <-chan struct{} // nil == no peers to watch; read-from-nil blocks forever
+	if s.peerJobs != nil {
+		peerCh = s.peerJobs.Changes().C()
+	}
 
 	for {
-		resp := &apiv1.WatchJobsResponse{Jobs: s.allJobs()}
-
-		h := fnv.New64a()
-		data, _ := proto.Marshal(resp)
-		_, _ = h.Write(data)
-		hash := h.Sum64()
-
-		if hash != lastHash {
-			if err := stream.Send(resp); err != nil {
-				return err
-			}
-			lastHash = hash
-		}
-
+		// Wait for a change — any event or peer update.
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-time.After(500 * time.Millisecond):
+		case _, ok := <-sub.Events():
+			if !ok {
+				return nil // broker closed
+			}
+		case <-peerCh:
+			// Peer data changed — refresh the change-channel reference
+			// for the next wakeup (close-and-recreate pattern).
+			if s.peerJobs != nil {
+				peerCh = s.peerJobs.Changes().C()
+			}
+		}
+
+		// Drain additional wakeups without blocking so a burst of events
+		// coalesces into a single send.
+		coalescing := true
+		for coalescing {
+			select {
+			case _, ok := <-sub.Events():
+				if !ok {
+					return nil
+				}
+			case <-peerCh:
+				if s.peerJobs != nil {
+					peerCh = s.peerJobs.Changes().C()
+				}
+			default:
+				coalescing = false
+			}
+		}
+
+		if err := send(&apiv1.WatchJobsResponse{Jobs: s.allJobs()}); err != nil {
+			return err
 		}
 	}
 }

@@ -494,7 +494,7 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 		return nil
 	})
 	authServer := NewAuthServer(s.cfgStore, s.tokens, s.logger, s.noAuth)
-	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs)
+	jobServer := NewJobServer(s.orch.Scheduler(), s.localNodeID, s.peerJobs, s.orch.Scheduler().Events())
 
 	mux.Handle(gastrologv1connect.NewQueryServiceHandler(queryServer, handlerOpts...))
 	mux.Handle(gastrologv1connect.NewVaultServiceHandler(vaultServer, handlerOpts...))
