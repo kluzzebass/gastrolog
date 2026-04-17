@@ -2610,9 +2610,6 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierId
 //   - No records are lost or duplicated
 //   - Record count matches on the leader
 func TestClusterTransitionBurstNoOrphans(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: leader schedules ImportSealedChunk asynchronously; when retention fires immediately after seal (as this test does, unlike production), a late import can recreate the chunk on a follower after forwardDelete. Architectural fix tracked separately — skip under race until then.")
-	}
 	// Not parallel: heavy stress test (100 chunks × 2 tiers × 4 nodes).
 	// Running concurrently with other burst tests starves CPU under race detector.
 	h := setupCluster(t, []string{"leader", "follower-1", "follower-2", "follower-3"}, 2, 100)
@@ -2692,9 +2689,6 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 // 3 tiers and bursts 10K records through the full tier chain with 100-record
 // rotation. Verifies no orphans on any node and exact record preservation.
 func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: see TestClusterTransitionBurstNoOrphans for the same root cause.")
-	}
 	// Not parallel: heavy stress test (100 chunks × 3 tiers × 4 nodes).
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 3, 100)
 
@@ -2847,9 +2841,6 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 // is not safe (see gastrolog-3l7ow findings). Production serializes through
 // the digest loop. This test uses sequential ingestion to match that model.
 func TestClusterTransitionLargeBurst(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: see TestClusterTransitionBurstNoOrphans for the same root cause.")
-	}
 	// Not parallel: heavy stress test (100 chunks × 2 tiers × 4 nodes).
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
 
@@ -2910,9 +2901,6 @@ func TestClusterTransitionLargeBurst(t *testing.T) {
 // transition, the source tier's sealed chunks are cleaned up on follower nodes
 // (via deleteFromFollowers), not just on the leader.
 func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: see TestClusterTransitionBurstNoOrphans for the same root cause.")
-	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
 

@@ -73,6 +73,12 @@ func (s *Server) handleReplicationAppend(ctx context.Context, vaultID, tierID gl
 	for _, er := range cmd.GetRecords() {
 		rec := convert.ExportToRecord(er)
 		if err := s.recordTierAppender(ctx, vaultID, tierID, chunkID, rec); err != nil {
+			if isTombstonedErr(err) {
+				// Chunk was deleted between the leader scheduling this
+				// append and its arrival here. Ack as success — goal
+				// (chunk absent on this node) is already achieved.
+				return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+			}
 			return &gastrologv1.TierReplicationAck{
 				Ok:      false,
 				Error:   "append failed: " + err.Error(),
@@ -95,6 +101,9 @@ func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid
 	}
 
 	if err := s.sealTierExecutor(ctx, vaultID, tierID, chunkID); err != nil {
+		if isTombstonedErr(err) {
+			return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+		}
 		return &gastrologv1.TierReplicationAck{
 			Ok:      false,
 			Error:   "seal failed: " + err.Error(),
@@ -103,6 +112,14 @@ func (s *Server) handleReplicationSeal(ctx context.Context, vaultID, tierID glid
 	}
 
 	return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+}
+
+// isTombstonedErr reports whether err indicates the target chunk has been
+// tombstoned (deleted and within the retention window). Such errors are
+// translated into successful acks on the replication receive path — the
+// goal (chunk absent on this node) is already achieved.
+func isTombstonedErr(err error) bool {
+	return errors.Is(err, chunk.ErrChunkTombstoned)
 }
 
 func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID glid.GLID, cmd *gastrologv1.TierReplicationImport) *gastrologv1.TierReplicationAck {
@@ -128,6 +145,12 @@ func (s *Server) handleReplicationImport(ctx context.Context, vaultID, tierID gl
 	}
 
 	if err := s.tierRecordImporter(ctx, vaultID, tierID, chunkID, iter); err != nil {
+		if isTombstonedErr(err) {
+			// Chunk was deleted between leader scheduling ImportSealed
+			// and its arrival here. Ack as success — the cluster's
+			// desired state (chunk absent) already holds.
+			return &gastrologv1.TierReplicationAck{Ok: true, ChunkId: cmd.GetChunkId()}
+		}
 		return &gastrologv1.TierReplicationAck{
 			Ok:      false,
 			Error:   "import failed: " + err.Error(),

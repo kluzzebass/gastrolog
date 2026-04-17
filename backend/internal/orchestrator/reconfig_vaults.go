@@ -960,6 +960,7 @@ type tierRaftCallbacks struct {
 	applyTransitionStreamed  func(id chunk.ChunkID) error
 	applyTransitionReceived func(sourceChunkID chunk.ChunkID) error
 	hasTransitionReceipt    func(sourceChunkID chunk.ChunkID) bool
+	isTombstoned            func(id chunk.ChunkID) bool
 	listChunks              func() []chunk.ChunkID
 	listRetPending         func() []chunk.ChunkID
 	listTransitionStreamed  func() []chunk.ChunkID
@@ -1081,6 +1082,12 @@ func buildTierRaftCallbacks(r *hraft.Raft, fsm *tierfsm.FSM, applier tierfsm.App
 				return false
 			}
 			return fsm.HasTransitionReceipt(sourceChunkID)
+		},
+		isTombstoned: func(id chunk.ChunkID) bool {
+			if fsm == nil {
+				return false
+			}
+			return fsm.IsTombstoned(id)
 		},
 		listChunks: func() []chunk.ChunkID {
 			if fsm == nil {

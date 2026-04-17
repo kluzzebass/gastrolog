@@ -478,9 +478,6 @@ func TestClusterRetentionSweepDeletesOnAllNodes(t *testing.T) {
 // TestClusterRetentionSweepWithTTLOnAllNodes uses a TTL policy (expire chunks
 // older than 1 minute) with a frozen clock. Verifies cross-node cleanup.
 func TestClusterRetentionSweepWithTTLOnAllNodes(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: retention fires synchronously right after seal; a late ImportSealedChunk can recreate the chunk on a follower after forwardDelete. Production doesn't hit this because retention runs on a periodic sweep, not immediately after seal.")
-	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 1, 50)
 

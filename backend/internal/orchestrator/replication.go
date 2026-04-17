@@ -122,6 +122,18 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		return
 	}
 
+	// If retention deleted the chunk while this replication job was queued,
+	// the tier FSM now holds a tombstone for it. Skip the replication —
+	// sending ImportSealedChunk to followers would recreate a chunk the
+	// cluster has already decided to forget (ghost chunk). Closes the
+	// retention-beats-replication ordering at the leader; the receiver-side
+	// tombstone check closes the reverse ordering. See gastrolog-11rzz.
+	if tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+		o.logger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		return
+	}
+
 	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
 	// Followers learn about them via the tier Raft FSM's OnUpload callback
 	// and read directly from the bucket — no record streaming needed.

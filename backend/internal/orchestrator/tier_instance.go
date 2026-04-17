@@ -60,6 +60,15 @@ type TierInstance struct {
 	// given source chunk ID, meaning this tier has durably received its records.
 	HasTransitionReceipt func(sourceChunkID chunk.ChunkID) bool
 
+	// IsTombstoned returns true if the given chunk ID has been deleted from
+	// this tier's Raft FSM and is still within the tombstone retention
+	// window. Used to reject stale replication commands (ImportSealed,
+	// Append, Seal) that race with retention — without this check, a late
+	// ImportSealed RPC could recreate a chunk the cluster already deleted,
+	// producing a "ghost" chunk on the follower. See gastrolog-11rzz.
+	// Nil when no Raft group exists.
+	IsTombstoned func(id chunk.ChunkID) bool
+
 	// ApplyRaftDelete applies CmdDeleteChunk to the tier Raft group and blocks
 	// until committed. Returns an error if not leader or timeout. Nil when no
 	// Raft group exists.
@@ -102,6 +111,7 @@ func (t *TierInstance) applyRaftCallbacks(cb tierRaftCallbacks) {
 	t.ListTransitionStreamed = cb.listTransitionStreamed
 	t.ApplyRaftTransitionReceived = cb.applyTransitionReceived
 	t.HasTransitionReceipt = cb.hasTransitionReceipt
+	t.IsTombstoned = cb.isTombstoned
 	t.IsFSMReady = cb.isFSMReady
 	t.OverlayFromFSM = cb.overlayFromFSM
 }

@@ -366,6 +366,15 @@ func (o *Orchestrator) AppendToTier(vaultID, tierID glid.GLID, primaryChunkID ch
 		}
 		cm := tier.Chunks
 
+		// Reject writes targeting a tombstoned chunk ID — a stale replication
+		// RPC that would otherwise recreate a chunk the cluster has already
+		// deleted. Caller translates this into a benign ack on the receive
+		// path. See gastrolog-11rzz.
+		if primaryChunkID != (chunk.ChunkID{}) && tier.IsTombstoned != nil && tier.IsTombstoned(primaryChunkID) {
+			o.mu.RUnlock()
+			return fmt.Errorf("%w: append to tombstoned chunk %s", chunk.ErrChunkTombstoned, primaryChunkID)
+		}
+
 		// On followers, sync chunk ID with the leader. If the active
 		// chunk has a different ID (left over from a previous leader cycle),
 		// seal it so the next append opens a new chunk with the synced ID.
@@ -793,6 +802,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	type tierRef struct {
 		cm          chunk.ChunkManager
 		isFollower bool
+		isTombstoned func(chunk.ChunkID) bool
 	}
 	ref := func() *tierRef {
 		o.mu.RLock()
@@ -803,13 +813,21 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		}
 		for _, t := range vault.Tiers {
 			if t.TierID == tierID && (storageID == "" || t.StorageID == storageID) {
-				return &tierRef{cm: t.Chunks, isFollower: t.IsFollower}
+				return &tierRef{cm: t.Chunks, isFollower: t.IsFollower, isTombstoned: t.IsTombstoned}
 			}
 		}
 		return nil
 	}()
 	if ref == nil {
 		return fmt.Errorf("%w: tier %s in vault %s", ErrVaultNotFound, tierID, vaultID)
+	}
+	// Reject stale ImportSealed RPCs for chunks the cluster already deleted.
+	// The race is: leader schedules replication, retention fires, delete is
+	// committed via Raft (populates tombstone), then the late replication
+	// RPC arrives. Without this check the receiver would recreate the chunk.
+	// See gastrolog-11rzz.
+	if ref.isTombstoned != nil && ref.isTombstoned(chunkID) {
+		return fmt.Errorf("%w: import sealed chunk %s into tier %s", chunk.ErrChunkTombstoned, chunkID, tierID)
 	}
 	cm := ref.cm
 
@@ -859,18 +877,36 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 		"vault", vaultID, "tier", tierID,
 		"chunk", meta.ID.String(), "records", meta.RecordCount)
 
-	if meta.ID != (chunk.ChunkID{}) {
-		// Announce to tier Raft so the manifest tracks imported chunks.
-		// On the tier leader, this commits to the log. On followers,
-		// it's silently skipped (leader's announces are authoritative).
-		if ann, ok := cm.(chunk.AnnouncerGetter); ok {
-			if a := ann.GetAnnouncer(); a != nil {
-				a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
-				a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestEnd, meta.SourceEnd)
-			}
-		}
-		o.postSealWork(vaultID, cm, meta.ID)
+	return o.finalizeImportedChunk(vaultID, tierID, cm, meta, ref.isTombstoned)
+}
+
+// finalizeImportedChunk handles the post-import steps: tombstone re-check
+// (to catch the race where the tier FSM applied CmdDeleteChunk while we
+// were writing files, so onDelete's cleanup ran against a chunk that
+// didn't exist yet on disk), tier Raft announcement, and scheduling of
+// post-seal work (compression, index build). See gastrolog-11rzz for the
+// tombstone re-check rationale.
+func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk.ChunkManager, meta chunk.ChunkMeta, isTombstoned func(chunk.ChunkID) bool) error {
+	if meta.ID == (chunk.ChunkID{}) {
+		return nil
 	}
+	if isTombstoned != nil && isTombstoned(meta.ID) {
+		if del, ok := cm.(chunk.SilentDeleter); ok {
+			_ = del.DeleteSilent(meta.ID)
+		} else {
+			_ = cm.Delete(meta.ID)
+		}
+		o.logger.Debug("replication: post-import tombstone detected, deleted just-created chunk",
+			"vault", vaultID, "tier", tierID, "chunk", meta.ID.String())
+		return nil
+	}
+	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
+		if a := ann.GetAnnouncer(); a != nil {
+			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
+			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestEnd, meta.SourceEnd)
+		}
+	}
+	o.postSealWork(vaultID, cm, meta.ID)
 	return nil
 }
 

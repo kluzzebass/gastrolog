@@ -217,6 +217,93 @@ func TestFSMSnapshotRestore(t *testing.T) {
 	}
 }
 
+// TestFSMSnapshotRestoreTombstones verifies that tombstones round-trip
+// through Snapshot/Restore so receivers keep rejecting stale replication
+// commands across restarts and snapshot installs. See gastrolog-11rzz.
+func TestFSMSnapshotRestoreTombstones(t *testing.T) {
+	fsm := New()
+	now := time.Now().Truncate(time.Nanosecond)
+
+	// One live chunk, two deleted chunks (tombstoned).
+	live := testChunkID(1)
+	applyCmd(t, fsm, MarshalCreateChunk(live, now, now, now))
+	applyCmd(t, fsm, MarshalSealChunk(live, now.Add(time.Second), 10, 100, now.Add(time.Second), now.Add(time.Second)))
+
+	dead1 := testChunkID(2)
+	applyCmd(t, fsm, MarshalCreateChunk(dead1, now, now, now))
+	applyCmd(t, fsm, MarshalDeleteChunk(dead1))
+
+	dead2 := testChunkID(3)
+	applyCmd(t, fsm, MarshalCreateChunk(dead2, now, now, now))
+	applyCmd(t, fsm, MarshalDeleteChunk(dead2))
+
+	// Also tombstone a chunk that never existed in this FSM (e.g. out-of-order
+	// log replay). Tombstone should still be recorded so a subsequent stale
+	// create would be rejected.
+	ghost := testChunkID(4)
+	applyCmd(t, fsm, MarshalDeleteChunk(ghost))
+
+	if !fsm.IsTombstoned(dead1) || !fsm.IsTombstoned(dead2) || !fsm.IsTombstoned(ghost) {
+		t.Fatal("expected all three deleted chunks to be tombstoned before snapshot")
+	}
+	if fsm.IsTombstoned(live) {
+		t.Fatal("live chunk must not be tombstoned")
+	}
+
+	snap, err := fsm.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := snap.Persist(&bufSink{Writer: &buf}); err != nil {
+		t.Fatalf("Persist: %v", err)
+	}
+
+	fsm2 := New()
+	if err := fsm2.Restore(io.NopCloser(&buf)); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if !fsm2.IsTombstoned(dead1) || !fsm2.IsTombstoned(dead2) || !fsm2.IsTombstoned(ghost) {
+		t.Error("tombstones not preserved across Snapshot/Restore")
+	}
+	if fsm2.IsTombstoned(live) {
+		t.Error("live chunk wrongly tombstoned after restore")
+	}
+	if fsm2.Count() != 1 {
+		t.Errorf("expected 1 live chunk after restore, got %d", fsm2.Count())
+	}
+}
+
+func TestFSMPruneTombstones(t *testing.T) {
+	fsm := New()
+
+	// Three tombstones; we'll prune the two old ones.
+	for i := 1; i <= 3; i++ {
+		applyCmd(t, fsm, MarshalDeleteChunk(testChunkID(byte(i))))
+	}
+	if len(fsm.tombstones) != 3 {
+		t.Fatalf("expected 3 tombstones, got %d", len(fsm.tombstones))
+	}
+
+	// Age the first two so the prune sweep finds them.
+	old := time.Now().Add(-2 * time.Hour)
+	fsm.mu.Lock()
+	fsm.tombstones[testChunkID(1)] = old
+	fsm.tombstones[testChunkID(2)] = old
+	fsm.mu.Unlock()
+
+	pruned := fsm.PruneTombstones(time.Now().Add(-1 * time.Hour))
+	if pruned != 2 {
+		t.Errorf("expected 2 pruned, got %d", pruned)
+	}
+	if fsm.IsTombstoned(testChunkID(1)) || fsm.IsTombstoned(testChunkID(2)) {
+		t.Error("aged tombstones should have been pruned")
+	}
+	if !fsm.IsTombstoned(testChunkID(3)) {
+		t.Error("recent tombstone should still be present")
+	}
+}
+
 func TestFSMToChunkMeta(t *testing.T) {
 	// Not parallel — consistent with other multiraft tests.
 	fsm := New()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"sync"
 	"time"
 
@@ -93,6 +94,19 @@ type FSM struct {
 	// before expiring the source chunk. Keyed by source chunk ID.
 	// See gastrolog-4913n.
 	transitionReceipts map[chunk.ChunkID]bool
+
+	// tombstones records chunk IDs that have been deleted, with the apply
+	// timestamp of the delete. Consulted by the receive side of tier
+	// replication to reject stale ImportSealed / Append commands that
+	// arrive after a chunk has been deleted — closes the race between
+	// retention and post-seal replication where a late replication RPC
+	// could otherwise recreate a "ghost" chunk on a follower.
+	// See gastrolog-11rzz.
+	//
+	// Periodically pruned by the orchestrator (entries older than the
+	// replication-job deadline, typically a few minutes, cannot still be
+	// in flight and are safe to drop).
+	tombstones map[chunk.ChunkID]time.Time
 }
 
 // New creates an empty chunk metadata FSM.
@@ -100,7 +114,38 @@ func New() *FSM {
 	return &FSM{
 		chunks:             make(map[chunk.ChunkID]*Entry),
 		transitionReceipts: make(map[chunk.ChunkID]bool),
+		tombstones:         make(map[chunk.ChunkID]time.Time),
 	}
+}
+
+// IsTombstoned reports whether a chunk has been deleted and is still
+// within the tombstone retention window. Used by the replication receiver
+// to reject late commands that would otherwise recreate a deleted chunk.
+func (f *FSM) IsTombstoned(id chunk.ChunkID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, ok := f.tombstones[id]
+	return ok
+}
+
+// PruneTombstones removes tombstone entries whose delete time is older
+// than the given cutoff. Returns the number of entries pruned. Intended
+// to be called periodically from a non-Raft path on the leader — this
+// mutation is local only (not raft-replicated) because every node
+// independently applies identical tombstones via the delete command
+// and can safely prune them independently once the replication window
+// has elapsed.
+func (f *FSM) PruneTombstones(before time.Time) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for id, ts := range f.tombstones {
+		if ts.Before(before) {
+			delete(f.tombstones, id)
+			n++
+		}
+	}
+	return n
 }
 
 var _ hraft.FSM = (*FSM)(nil)
@@ -256,14 +301,16 @@ func (f *FSM) Snapshot() (hraft.FSMSnapshot, error) {
 	for id := range f.transitionReceipts {
 		receipts = append(receipts, id)
 	}
-	return &fsmSnapshot{entries: entries, receipts: receipts}, nil
+	tombstones := make(map[chunk.ChunkID]time.Time, len(f.tombstones))
+	maps.Copy(tombstones, f.tombstones)
+	return &fsmSnapshot{entries: entries, receipts: receipts, tombstones: tombstones}, nil
 }
 
 // Restore replaces FSM state from a snapshot.
 func (f *FSM) Restore(rc io.ReadCloser) error {
 	defer func() { _ = rc.Close() }()
 
-	entries, receipts, err := decodeSnapshot(rc)
+	entries, receipts, tombstones, err := decodeSnapshot(rc)
 	if err != nil {
 		return fmt.Errorf("restore chunk FSM: %w", err)
 	}
@@ -277,6 +324,10 @@ func (f *FSM) Restore(rc io.ReadCloser) error {
 	f.transitionReceipts = make(map[chunk.ChunkID]bool, len(receipts))
 	for _, id := range receipts {
 		f.transitionReceipts[id] = true
+	}
+	f.tombstones = tombstones
+	if f.tombstones == nil {
+		f.tombstones = make(map[chunk.ChunkID]time.Time)
 	}
 	f.ready = true
 	return nil
@@ -373,6 +424,14 @@ func (f *FSM) applyDelete(data []byte) (*chunk.ChunkID, error) {
 	}
 	var id chunk.ChunkID
 	copy(id[:], data[:16])
+	// Always record the tombstone — even when the chunk isn't currently in
+	// the map. A CmdDeleteChunk that races with a pre-delete CmdCreateChunk
+	// (via retry or reordered apply) could arrive first; the tombstone
+	// ensures the late create-path still gets rejected. Timestamp uses the
+	// FSM's notion of "now" — acceptable because every replica applies the
+	// same log entry at the same logical time and the tombstone is only
+	// used locally to short-circuit replication receivers.
+	f.tombstones[id] = time.Now()
 	if _, existed := f.chunks[id]; !existed {
 		return nil, nil
 	}
@@ -508,33 +567,76 @@ func MarshalTransitionStreamed(id chunk.ChunkID) []byte {
 }
 
 // ---------- Snapshot ----------
+//
+// Format (version 1):
+//
+//	[8 bytes magic "GLTRSNAP"]
+//	[4 bytes version: uint32 big-endian]
+//	[repeating sections until EOF:]
+//	  [1 byte sectionKind]
+//	  [4 bytes payload length: uint32 big-endian]
+//	  [payload bytes]
+//
+// Section kinds:
+//	1 = chunk entries   (payload: N×126 byte fixed entries)
+//	2 = transition receipts (payload: 4 byte count + N×16 byte IDs)
+//	3 = tombstones      (payload: 4 byte count + N×(16 ID + 8 nanos))
+//
+// Replaces an older sentinel-based layout that read 126-byte entries until
+// EOF and used impossible-ChunkID markers to in-band the extra sections.
+// The sentinel approach worked but grew brittle with each new section and
+// assumed first-byte values that new identity schemes could eventually
+// violate. Versioned header lets the decoder switch cleanly and gives us
+// real room to evolve. Old snapshots that predate this format are NOT
+// backward-readable by design; Raft will regenerate snapshots from the
+// log on next apply cycle, and pre-production data dirs get wiped anyway.
 
-// receiptMagic is a 16-byte sentinel written after all chunk entries in a
-// snapshot to mark the start of the transition receipts section. Chosen to
-// be an invalid ChunkID so old decoders (which read fixed-size entries
-// until EOF) stop at this point with a short-read/EOF — safe degradation.
-var receiptMagic = [16]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE}
+var snapshotMagic = [8]byte{'G', 'L', 'T', 'R', 'S', 'N', 'A', 'P'}
+
+const snapshotVersion uint32 = 1
+
+type sectionKind byte
+
+const (
+	sectionEntries    sectionKind = 1
+	sectionReceipts   sectionKind = 2
+	sectionTombstones sectionKind = 3
+)
 
 type fsmSnapshot struct {
-	entries  []Entry
-	receipts []chunk.ChunkID
+	entries    []Entry
+	receipts   []chunk.ChunkID
+	tombstones map[chunk.ChunkID]time.Time
 }
 
 func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
+	if err := writeSnapshotHeader(sink); err != nil {
+		_ = sink.Cancel()
+		return err
+	}
+
+	// Section: entries. Payload is N×entrySize bytes.
+	entriesPayloadLen := uint32(len(s.entries)) * entrySize //nolint:gosec // G115: entry count fits uint32
+	if err := writeSectionHeader(sink, sectionEntries, entriesPayloadLen); err != nil {
+		_ = sink.Cancel()
+		return err
+	}
 	for i := range s.entries {
 		if err := encodeEntry(sink, &s.entries[i]); err != nil {
 			_ = sink.Cancel()
 			return err
 		}
 	}
-	// Write receipt section: magic sentinel + 4-byte count + N×16-byte IDs.
+
+	// Section: receipts. Payload is 4-byte count + N×16 IDs.
 	if len(s.receipts) > 0 {
-		if _, err := sink.Write(receiptMagic[:]); err != nil {
+		payloadLen := uint32(4 + len(s.receipts)*16) //nolint:gosec // G115: fits uint32
+		if err := writeSectionHeader(sink, sectionReceipts, payloadLen); err != nil {
 			_ = sink.Cancel()
 			return err
 		}
 		var countBuf [4]byte
-		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.receipts))) //nolint:gosec // G115: receipt count fits uint32
+		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.receipts))) //nolint:gosec // G115: fits uint32
 		if _, err := sink.Write(countBuf[:]); err != nil {
 			_ = sink.Cancel()
 			return err
@@ -546,7 +648,56 @@ func (s *fsmSnapshot) Persist(sink hraft.SnapshotSink) error {
 			}
 		}
 	}
+
+	// Section: tombstones. Payload is 4-byte count + N×(16 ID + 8 nanos).
+	if len(s.tombstones) > 0 {
+		payloadLen := uint32(4 + len(s.tombstones)*24) //nolint:gosec // G115: fits uint32
+		if err := writeSectionHeader(sink, sectionTombstones, payloadLen); err != nil {
+			_ = sink.Cancel()
+			return err
+		}
+		var countBuf [4]byte
+		binary.BigEndian.PutUint32(countBuf[:], uint32(len(s.tombstones))) //nolint:gosec // G115: fits uint32
+		if _, err := sink.Write(countBuf[:]); err != nil {
+			_ = sink.Cancel()
+			return err
+		}
+		var tsBuf [24]byte
+		for id, ts := range s.tombstones {
+			copy(tsBuf[0:16], id[:])
+			binary.BigEndian.PutUint64(tsBuf[16:24], uint64(ts.UnixNano()))
+			if _, err := sink.Write(tsBuf[:]); err != nil {
+				_ = sink.Cancel()
+				return err
+			}
+		}
+	}
+
 	return sink.Close()
+}
+
+// writeSnapshotHeader writes the 12-byte header (8 magic + 4 version).
+func writeSnapshotHeader(w io.Writer) error {
+	if _, err := w.Write(snapshotMagic[:]); err != nil {
+		return fmt.Errorf("write snapshot magic: %w", err)
+	}
+	var verBuf [4]byte
+	binary.BigEndian.PutUint32(verBuf[:], snapshotVersion)
+	if _, err := w.Write(verBuf[:]); err != nil {
+		return fmt.Errorf("write snapshot version: %w", err)
+	}
+	return nil
+}
+
+// writeSectionHeader writes the 5-byte section header (1 kind + 4 length).
+func writeSectionHeader(w io.Writer, kind sectionKind, payloadLen uint32) error {
+	var buf [5]byte
+	buf[0] = byte(kind)
+	binary.BigEndian.PutUint32(buf[1:5], payloadLen)
+	if _, err := w.Write(buf[:]); err != nil {
+		return fmt.Errorf("write section header (kind=%d): %w", kind, err)
+	}
+	return nil
 }
 
 func (s *fsmSnapshot) Release() {}
@@ -614,119 +765,157 @@ func encodeEntry(w io.Writer, e *Entry) error {
 	return err
 }
 
-func decodeSnapshot(r io.Reader) ([]Entry, []chunk.ChunkID, error) {
+// decodeSnapshot reads a versioned snapshot. Returns the entries, receipts,
+// and tombstones. Unknown section kinds are skipped (forward compatibility
+// within the same version); unknown versions are rejected.
+func decodeSnapshot(r io.Reader) ([]Entry, []chunk.ChunkID, map[chunk.ChunkID]time.Time, error) {
+	if err := readSnapshotHeader(r); err != nil {
+		return nil, nil, nil, err
+	}
+
 	var entries []Entry
 	var receipts []chunk.ChunkID
-	var buf [entrySize]byte
+	var tombstones map[chunk.ChunkID]time.Time
+
+	var hdr [5]byte
 	for {
-		_, err := io.ReadFull(r, buf[:])
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
-			return entries, receipts, nil
+		n, err := io.ReadFull(r, hdr[:])
+		if n == 0 {
+			break // clean end-of-stream
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, fmt.Errorf("read section header: %w", err)
 		}
+		kind := sectionKind(hdr[0])
+		payloadLen := binary.BigEndian.Uint32(hdr[1:5])
 
-		// Check for the receipt section sentinel. The first 16 bytes of
-		// each entry are the ChunkID; if they match the magic marker,
-		// this is the start of the receipts section, not a chunk entry.
+		section := io.LimitReader(r, int64(payloadLen))
+		switch kind {
+		case sectionEntries:
+			entries, err = readEntriesSection(section, payloadLen)
+		case sectionReceipts:
+			receipts, err = readReceiptsSection(section)
+		case sectionTombstones:
+			tombstones, err = readTombstonesSection(section)
+		default:
+			// Unknown section — skip. Forward-compat for new sections in
+			// the same format version.
+			_, err = io.Copy(io.Discard, section)
+		}
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("section kind=%d: %w", kind, err)
+		}
+		// Drain any bytes the section reader didn't consume (defensive).
+		if _, err := io.Copy(io.Discard, section); err != nil {
+			return nil, nil, nil, fmt.Errorf("drain section kind=%d: %w", kind, err)
+		}
+	}
+
+	return entries, receipts, tombstones, nil
+}
+
+// readSnapshotHeader validates the magic and version. Returns an error if
+// the magic is wrong (corrupt or old-format snapshot) or version is not
+// recognized.
+func readSnapshotHeader(r io.Reader) error {
+	var magic [8]byte
+	if _, err := io.ReadFull(r, magic[:]); err != nil {
+		return fmt.Errorf("read snapshot magic: %w", err)
+	}
+	if magic != snapshotMagic {
+		return errors.New("snapshot magic mismatch — incompatible or corrupt format")
+	}
+	var verBuf [4]byte
+	if _, err := io.ReadFull(r, verBuf[:]); err != nil {
+		return fmt.Errorf("read snapshot version: %w", err)
+	}
+	version := binary.BigEndian.Uint32(verBuf[:])
+	if version != snapshotVersion {
+		return fmt.Errorf("snapshot version %d unsupported (this build handles %d)", version, snapshotVersion)
+	}
+	return nil
+}
+
+func readEntriesSection(r io.Reader, payloadLen uint32) ([]Entry, error) {
+	if payloadLen%entrySize != 0 {
+		return nil, fmt.Errorf("entries payload %d bytes not a multiple of %d", payloadLen, entrySize)
+	}
+	count := payloadLen / entrySize
+	entries := make([]Entry, 0, count)
+	var buf [entrySize]byte
+	for i := range count {
+		if _, err := io.ReadFull(r, buf[:]); err != nil {
+			return nil, fmt.Errorf("read entry %d: %w", i, err)
+		}
 		var id chunk.ChunkID
 		copy(id[:], buf[0:16])
-		if id == chunk.ChunkID(receiptMagic) {
-			// The rest of buf contains the tail of the last entry-sized
-			// read, but we only need the 4-byte count that follows the
-			// 16-byte magic. The magic consumed 16 bytes of this read;
-			// the count is at buf[16:20] — BUT the magic was at the
-			// start of a new entrySize block, so the count is actually
-			// in the NEXT read, not this one. Re-read just the count.
-			var countBuf [4]byte
-			// The magic consumed 16 of the entrySize bytes we just read.
-			// The count is somewhere in the remaining bytes. Rather than
-			// parse the partial block, just read the count fresh — the
-			// magic was written as 16 standalone bytes, followed by 4
-			// count bytes, followed by N×16 receipt IDs.
-			//
-			// But we already consumed entrySize bytes that started with
-			// the magic. So: count starts at buf[16:20] only if the
-			// Persist wrote magic as part of the entry stream. Let's
-			// check — Persist writes magic (16 bytes) + count (4 bytes)
-			// + IDs (N×16) as separate Write calls AFTER all entries.
-			// The decoder reads entrySize (126) bytes at a time. If the
-			// magic (16 bytes) is read as the first 16 bytes of a 126-
-			// byte block, the remaining 110 bytes contain: count (4) +
-			// up to 6 receipt IDs (6×16=96) + partial next ID (10).
-			//
-			// This is getting complicated. Simpler: re-read from the
-			// underlying reader since we know the format after the magic.
-			// But we already consumed bytes. Let's extract what we can
-			// from buf and then read more.
-			//
-			// Actually, the magic was written separately. The io.ReadFull
-			// reads 126 bytes which starts with the 16-byte magic. So
-			// buf[16:20] contains the 4-byte count IF the magic+count
-			// were written contiguously. They were: Persist writes
-			// magic (16) then countBuf (4) sequentially to the sink.
-			copy(countBuf[:], buf[16:20])
-			count := binary.BigEndian.Uint32(countBuf[:])
-
-			// We've consumed 20 bytes of useful data from this 126-byte
-			// block. The remaining 106 bytes contain receipt IDs (each
-			// 16 bytes). Read what's in the buffer first, then read more.
-			remaining := buf[20:entrySize]
-			receipts = decodeReceiptIDs(remaining, count, r)
-			return entries, receipts, nil
-		}
-
 		flags := binary.BigEndian.Uint16(buf[124:126])
 		entries = append(entries, Entry{
 			ID:              id,
-			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))), //nolint:gosec // G115: round-trip
-			WriteEnd:        time.Unix(0, int64(binary.BigEndian.Uint64(buf[24:32]))), //nolint:gosec // G115: round-trip
-			RecordCount:     int64(binary.BigEndian.Uint64(buf[32:40])), //nolint:gosec // G115: round-trip
-			Bytes:           int64(binary.BigEndian.Uint64(buf[40:48])), //nolint:gosec // G115: round-trip
-			DiskBytes:       int64(binary.BigEndian.Uint64(buf[48:56])), //nolint:gosec // G115: round-trip
-			IngestStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[56:64]))), //nolint:gosec // G115: round-trip
-			IngestEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[64:72]))), //nolint:gosec // G115: round-trip
-			SourceStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[72:80]))), //nolint:gosec // G115: round-trip
-			SourceEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[80:88]))), //nolint:gosec // G115: round-trip
-			IngestIdxOffset: int64(binary.BigEndian.Uint64(buf[88:96])), //nolint:gosec // G115: round-trip
-			IngestIdxSize:   int64(binary.BigEndian.Uint64(buf[96:104])), //nolint:gosec // G115: round-trip
-			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])), //nolint:gosec // G115: round-trip
-			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])), //nolint:gosec // G115: round-trip
-			NumFrames:       int32(binary.BigEndian.Uint32(buf[120:124])), //nolint:gosec // G115: round-trip
-			Sealed:           flags&(1<<0) != 0,
-			Compressed:       flags&(1<<1) != 0,
-			CloudBacked:      flags&(1<<2) != 0,
-			Archived:         flags&(1<<3) != 0,
+			WriteStart:      time.Unix(0, int64(binary.BigEndian.Uint64(buf[16:24]))),  //nolint:gosec // G115: round-trip
+			WriteEnd:        time.Unix(0, int64(binary.BigEndian.Uint64(buf[24:32]))),  //nolint:gosec // G115: round-trip
+			RecordCount:     int64(binary.BigEndian.Uint64(buf[32:40])),                //nolint:gosec // G115: round-trip
+			Bytes:           int64(binary.BigEndian.Uint64(buf[40:48])),                //nolint:gosec // G115: round-trip
+			DiskBytes:       int64(binary.BigEndian.Uint64(buf[48:56])),                //nolint:gosec // G115: round-trip
+			IngestStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[56:64]))),  //nolint:gosec // G115: round-trip
+			IngestEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[64:72]))),  //nolint:gosec // G115: round-trip
+			SourceStart:     time.Unix(0, int64(binary.BigEndian.Uint64(buf[72:80]))),  //nolint:gosec // G115: round-trip
+			SourceEnd:       time.Unix(0, int64(binary.BigEndian.Uint64(buf[80:88]))),  //nolint:gosec // G115: round-trip
+			IngestIdxOffset: int64(binary.BigEndian.Uint64(buf[88:96])),                //nolint:gosec // G115: round-trip
+			IngestIdxSize:   int64(binary.BigEndian.Uint64(buf[96:104])),               //nolint:gosec // G115: round-trip
+			SourceIdxOffset: int64(binary.BigEndian.Uint64(buf[104:112])),              //nolint:gosec // G115: round-trip
+			SourceIdxSize:   int64(binary.BigEndian.Uint64(buf[112:120])),              //nolint:gosec // G115: round-trip
+			NumFrames:       int32(binary.BigEndian.Uint32(buf[120:124])),              //nolint:gosec // G115: round-trip
+			Sealed:             flags&(1<<0) != 0,
+			Compressed:         flags&(1<<1) != 0,
+			CloudBacked:        flags&(1<<2) != 0,
+			Archived:           flags&(1<<3) != 0,
 			RetentionPending:   flags&(1<<4) != 0,
 			TransitionStreamed: flags&(1<<5) != 0,
 		})
 	}
+	return entries, nil
 }
 
-// decodeReceiptIDs reads receipt chunk IDs from a mix of an already-read
-// buffer tail and the underlying reader. The first `remaining` bytes may
-// contain partial IDs; additional IDs are read from r.
-func decodeReceiptIDs(remaining []byte, count uint32, r io.Reader) []chunk.ChunkID {
+func readReceiptsSection(r io.Reader) ([]chunk.ChunkID, error) {
+	var countBuf [4]byte
+	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
+		return nil, fmt.Errorf("read receipts count: %w", err)
+	}
+	count := binary.BigEndian.Uint32(countBuf[:])
 	if count == 0 {
-		return nil
+		return nil, nil
 	}
-	// Collect all receipt bytes: what's left in the buffer + whatever
-	// is needed from the reader.
-	totalBytes := int(count) * 16
-	if totalBytes <= len(remaining) {
-		remaining = remaining[:totalBytes]
-	} else {
-		extra := make([]byte, totalBytes-len(remaining))
-		n, _ := io.ReadFull(r, extra)
-		remaining = append(remaining, extra[:n]...)
+	buf := make([]byte, int(count)*16)
+	if _, err := io.ReadFull(r, buf); err != nil {
+		return nil, fmt.Errorf("read receipts payload: %w", err)
 	}
-	ids := make([]chunk.ChunkID, 0, count)
-	for len(remaining) >= 16 {
+	ids := make([]chunk.ChunkID, count)
+	for i := range ids {
+		copy(ids[i][:], buf[i*16:(i+1)*16])
+	}
+	return ids, nil
+}
+
+func readTombstonesSection(r io.Reader) (map[chunk.ChunkID]time.Time, error) {
+	var countBuf [4]byte
+	if _, err := io.ReadFull(r, countBuf[:]); err != nil {
+		return nil, fmt.Errorf("read tombstones count: %w", err)
+	}
+	count := binary.BigEndian.Uint32(countBuf[:])
+	if count == 0 {
+		return nil, nil
+	}
+	out := make(map[chunk.ChunkID]time.Time, count)
+	var entry [24]byte
+	for i := range count {
+		if _, err := io.ReadFull(r, entry[:]); err != nil {
+			return nil, fmt.Errorf("read tombstone %d: %w", i, err)
+		}
 		var id chunk.ChunkID
-		copy(id[:], remaining[:16])
-		ids = append(ids, id)
-		remaining = remaining[16:]
+		copy(id[:], entry[0:16])
+		ns := int64(binary.BigEndian.Uint64(entry[16:24])) //nolint:gosec // G115: nano timestamp round-trip
+		out[id] = time.Unix(0, ns)
 	}
-	return ids
+	return out, nil
 }
