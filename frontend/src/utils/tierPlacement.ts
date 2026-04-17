@@ -20,8 +20,15 @@ interface NSC {
   fileStorages: StorageRef[];
 }
 
-/** Returns the encoded node ID that owns the given file storage, or "" if not found. */
+const SYNTHETIC_STORAGE_PREFIX = "node:";
+
+/** Returns the encoded node ID that owns the given storage, or "" if not found.
+ * Handles synthetic storage IDs ("node:<nodeId>") used by memory tiers on nodes
+ * without file storages — see system.SyntheticStorageID. */
 export function nodeIdForStorage(storageId: string, nscs: readonly NSC[]): string {
+  if (storageId.startsWith(SYNTHETIC_STORAGE_PREFIX)) {
+    return storageId.slice(SYNTHETIC_STORAGE_PREFIX.length);
+  }
   for (const nsc of nscs) {
     if (nsc.fileStorages.some((a) => encode(a.id) === storageId)) return encode(nsc.nodeId);
   }
