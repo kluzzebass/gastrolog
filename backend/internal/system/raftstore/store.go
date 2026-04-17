@@ -58,23 +58,27 @@ func (s *Store) SetForwarder(f Forwarder) {
 // apply serializes a ConfigCommand and submits it through raft.Apply().
 // If this node is not the leader and a forwarder is configured, the command
 // is forwarded to the leader transparently.
-func (s *Store) apply(cmd *gastrologv1.SystemCommand) error {
+//
+// The effective timeout is min(ctx deadline, s.applyTimeout). Callers that
+// want a tighter bound (e.g. orchestrator shutdown under lost quorum) pass
+// a context with a shorter deadline.
+func (s *Store) apply(ctx context.Context, cmd *gastrologv1.SystemCommand) error {
 	data, err := command.Marshal(cmd)
 	if err != nil {
 		return fmt.Errorf("marshal command: %w", err)
 	}
-	return s.applyRaw(data)
+	return s.applyRaw(ctx, data)
 }
 
 // applyRaw submits pre-marshaled command bytes through raft.Apply(),
 // forwarding to the leader if this node is a follower.
-func (s *Store) applyRaw(data []byte) error {
-	future := s.raft.Apply(data, s.applyTimeout)
+func (s *Store) applyRaw(ctx context.Context, data []byte) error {
+	future := s.raft.Apply(data, s.effectiveTimeout(ctx))
 	if err := future.Error(); err != nil {
 		if errors.Is(err, raft.ErrNotLeader) && s.forwarder != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), s.applyTimeout)
+			fwdCtx, cancel := context.WithTimeout(ctx, s.effectiveTimeout(ctx))
 			defer cancel()
-			return s.forwarder.Forward(ctx, data)
+			return s.forwarder.Forward(fwdCtx, data)
 		}
 		return fmt.Errorf("raft apply: %w", err)
 	}
@@ -86,10 +90,24 @@ func (s *Store) applyRaw(data []byte) error {
 	return nil
 }
 
+// effectiveTimeout returns min(ctx deadline, s.applyTimeout). Raft.Apply
+// doesn't accept a context, only a duration — so we translate.
+func (s *Store) effectiveTimeout(ctx context.Context) time.Duration {
+	if deadline, ok := ctx.Deadline(); ok {
+		if d := time.Until(deadline); d < s.applyTimeout {
+			if d < 0 {
+				return 0
+			}
+			return d
+		}
+	}
+	return s.applyTimeout
+}
+
 // ApplyRaw applies pre-marshaled command bytes. Used by the cluster
 // ForwardApply handler on the leader to apply commands received from followers.
 func (s *Store) ApplyRaw(data []byte) error {
-	return s.applyRaw(data)
+	return s.applyRaw(context.Background(), data)
 }
 
 // ---------------------------------------------------------------------------
@@ -233,59 +251,59 @@ func (s *Store) ListNodeStorageConfigs(ctx context.Context) ([]system.NodeStorag
 // ---------------------------------------------------------------------------
 
 func (s *Store) PutFilter(ctx context.Context, cfg system.FilterConfig) error {
-	return s.apply(command.NewPutFilter(cfg))
+	return s.apply(ctx, command.NewPutFilter(cfg))
 }
 
 func (s *Store) DeleteFilter(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteFilter(id))
+	return s.apply(ctx, command.NewDeleteFilter(id))
 }
 
 func (s *Store) PutRotationPolicy(ctx context.Context, cfg system.RotationPolicyConfig) error {
-	return s.apply(command.NewPutRotationPolicy(cfg))
+	return s.apply(ctx, command.NewPutRotationPolicy(cfg))
 }
 
 func (s *Store) DeleteRotationPolicy(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteRotationPolicy(id))
+	return s.apply(ctx, command.NewDeleteRotationPolicy(id))
 }
 
 func (s *Store) PutRetentionPolicy(ctx context.Context, cfg system.RetentionPolicyConfig) error {
-	return s.apply(command.NewPutRetentionPolicy(cfg))
+	return s.apply(ctx, command.NewPutRetentionPolicy(cfg))
 }
 
 func (s *Store) DeleteRetentionPolicy(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteRetentionPolicy(id))
+	return s.apply(ctx, command.NewDeleteRetentionPolicy(id))
 }
 
 func (s *Store) PutVault(ctx context.Context, cfg system.VaultConfig) error {
-	return s.apply(command.NewPutVault(cfg))
+	return s.apply(ctx, command.NewPutVault(cfg))
 }
 
 func (s *Store) DeleteVault(ctx context.Context, id glid.GLID, deleteData bool) error {
-	return s.apply(command.NewDeleteVault(id, deleteData))
+	return s.apply(ctx, command.NewDeleteVault(id, deleteData))
 }
 
 func (s *Store) PutIngester(ctx context.Context, cfg system.IngesterConfig) error {
-	return s.apply(command.NewPutIngester(cfg))
+	return s.apply(ctx, command.NewPutIngester(cfg))
 }
 
 func (s *Store) DeleteIngester(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteIngester(id))
+	return s.apply(ctx, command.NewDeleteIngester(id))
 }
 
 func (s *Store) PutRoute(ctx context.Context, cfg system.RouteConfig) error {
-	return s.apply(command.NewPutRoute(cfg))
+	return s.apply(ctx, command.NewPutRoute(cfg))
 }
 
 func (s *Store) DeleteRoute(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteRoute(id))
+	return s.apply(ctx, command.NewDeleteRoute(id))
 }
 
 func (s *Store) PutManagedFile(ctx context.Context, cfg system.ManagedFileConfig) error {
-	return s.apply(command.NewPutManagedFile(cfg))
+	return s.apply(ctx, command.NewPutManagedFile(cfg))
 }
 
 func (s *Store) DeleteManagedFile(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteManagedFile(id))
+	return s.apply(ctx, command.NewDeleteManagedFile(id))
 }
 
 func (s *Store) SaveServerSettings(ctx context.Context, ss system.ServerSettings) error {
@@ -293,87 +311,87 @@ func (s *Store) SaveServerSettings(ctx context.Context, ss system.ServerSettings
 	if err != nil {
 		return err
 	}
-	return s.apply(cmd)
+	return s.apply(ctx, cmd)
 }
 
 func (s *Store) PutClusterTLS(ctx context.Context, tls system.ClusterTLS) error {
-	return s.apply(command.NewPutClusterTLS(tls))
+	return s.apply(ctx, command.NewPutClusterTLS(tls))
 }
 
 func (s *Store) PutNode(ctx context.Context, node system.NodeConfig) error {
-	return s.apply(command.NewPutNodeConfig(node))
+	return s.apply(ctx, command.NewPutNodeConfig(node))
 }
 
 func (s *Store) DeleteNode(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteNodeConfig(id))
+	return s.apply(ctx, command.NewDeleteNodeConfig(id))
 }
 
 func (s *Store) PutCertificate(ctx context.Context, cert system.CertPEM) error {
-	return s.apply(command.NewPutCertificate(cert))
+	return s.apply(ctx, command.NewPutCertificate(cert))
 }
 
 func (s *Store) DeleteCertificate(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteCertificate(id))
+	return s.apply(ctx, command.NewDeleteCertificate(id))
 }
 
 func (s *Store) CreateUser(ctx context.Context, user system.User) error {
-	return s.apply(command.NewCreateUser(user))
+	return s.apply(ctx, command.NewCreateUser(user))
 }
 
 func (s *Store) UpdatePassword(ctx context.Context, id glid.GLID, passwordHash string) error {
-	return s.apply(command.NewUpdatePassword(id, passwordHash))
+	return s.apply(ctx, command.NewUpdatePassword(id, passwordHash))
 }
 
 func (s *Store) UpdateUserRole(ctx context.Context, id glid.GLID, role string) error {
-	return s.apply(command.NewUpdateUserRole(id, role))
+	return s.apply(ctx, command.NewUpdateUserRole(id, role))
 }
 
 func (s *Store) UpdateUsername(ctx context.Context, id glid.GLID, username string) error {
-	return s.apply(command.NewUpdateUsername(id, username))
+	return s.apply(ctx, command.NewUpdateUsername(id, username))
 }
 
 func (s *Store) DeleteUser(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteUser(id))
+	return s.apply(ctx, command.NewDeleteUser(id))
 }
 
 func (s *Store) InvalidateTokens(ctx context.Context, id glid.GLID, at time.Time) error {
-	return s.apply(command.NewInvalidateTokens(id, at))
+	return s.apply(ctx, command.NewInvalidateTokens(id, at))
 }
 
 func (s *Store) PutUserPreferences(ctx context.Context, id glid.GLID, prefs string) error {
-	return s.apply(command.NewPutUserPreferences(id, prefs))
+	return s.apply(ctx, command.NewPutUserPreferences(id, prefs))
 }
 
 func (s *Store) CreateRefreshToken(ctx context.Context, token system.RefreshToken) error {
-	return s.apply(command.NewCreateRefreshToken(token))
+	return s.apply(ctx, command.NewCreateRefreshToken(token))
 }
 
 func (s *Store) DeleteRefreshToken(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteRefreshToken(id))
+	return s.apply(ctx, command.NewDeleteRefreshToken(id))
 }
 
 func (s *Store) DeleteUserRefreshTokens(ctx context.Context, userID glid.GLID) error {
-	return s.apply(command.NewDeleteUserRefreshTokens(userID))
+	return s.apply(ctx, command.NewDeleteUserRefreshTokens(userID))
 }
 
 func (s *Store) PutCloudService(ctx context.Context, svc system.CloudService) error {
-	return s.apply(command.NewPutCloudService(svc))
+	return s.apply(ctx, command.NewPutCloudService(svc))
 }
 
 func (s *Store) DeleteCloudService(ctx context.Context, id glid.GLID) error {
-	return s.apply(command.NewDeleteCloudService(id))
+	return s.apply(ctx, command.NewDeleteCloudService(id))
 }
 
 func (s *Store) PutTier(ctx context.Context, tier system.TierConfig) error {
-	return s.apply(command.NewPutTier(tier))
+	return s.apply(ctx, command.NewPutTier(tier))
 }
 
 func (s *Store) DeleteTier(ctx context.Context, id glid.GLID, drain bool) error {
-	return s.apply(command.NewDeleteTier(id, drain))
+	return s.apply(ctx, command.NewDeleteTier(id, drain))
 }
 
 func (s *Store) SetNodeStorageConfig(ctx context.Context, cfg system.NodeStorageConfig) error {
-	return s.apply(command.NewSetNodeStorageConfig(cfg))
+	return s.apply(ctx, command.NewSetNodeStorageConfig(cfg))
 }
 
 // --- Runtime methods (delegate to inner store for reads, apply for writes) ---
@@ -383,7 +401,7 @@ func (s *Store) GetTierPlacements(ctx context.Context, tierID glid.GLID) ([]syst
 }
 
 func (s *Store) SetTierPlacements(ctx context.Context, tierID glid.GLID, placements []system.TierPlacement) error {
-	return s.apply(command.NewSetTierPlacements(tierID, placements))
+	return s.apply(ctx, command.NewSetTierPlacements(tierID, placements))
 }
 
 func (s *Store) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map[string]bool, error) {
@@ -391,7 +409,7 @@ func (s *Store) GetIngesterAlive(ctx context.Context, ingesterID glid.GLID) (map
 }
 
 func (s *Store) SetIngesterAlive(ctx context.Context, ingesterID glid.GLID, nodeID string, alive bool) error {
-	return s.apply(command.NewSetIngesterAlive(ingesterID, nodeID, alive))
+	return s.apply(ctx, command.NewSetIngesterAlive(ingesterID, nodeID, alive))
 }
 
 func (s *Store) GetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID) ([]byte, error) {
@@ -399,7 +417,7 @@ func (s *Store) GetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID)
 }
 
 func (s *Store) SetIngesterCheckpoint(ctx context.Context, ingesterID glid.GLID, data []byte) error {
-	return s.apply(command.NewSetIngesterCheckpoint(ingesterID, data))
+	return s.apply(ctx, command.NewSetIngesterCheckpoint(ingesterID, data))
 }
 
 func (s *Store) GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID) (string, error) {
@@ -407,7 +425,7 @@ func (s *Store) GetIngesterAssignment(ctx context.Context, ingesterID glid.GLID)
 }
 
 func (s *Store) SetIngesterAssignment(ctx context.Context, ingesterID glid.GLID, nodeID string) error {
-	return s.apply(command.NewSetIngesterAssignment(ingesterID, nodeID))
+	return s.apply(ctx, command.NewSetIngesterAssignment(ingesterID, nodeID))
 }
 
 func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
@@ -415,5 +433,5 @@ func (s *Store) GetSetupWizardDismissed(ctx context.Context) (bool, error) {
 }
 
 func (s *Store) SetSetupWizardDismissed(ctx context.Context, dismissed bool) error {
-	return s.apply(command.NewSetSetupWizardDismissed(dismissed))
+	return s.apply(ctx, command.NewSetSetupWizardDismissed(dismissed))
 }
