@@ -347,3 +347,43 @@ func observeLeaderChanges(r *hraft.Raft, logger *slog.Logger) {
 		}
 	}()
 }
+
+// peerEvictor is the minimal contract the peer-removal observer needs —
+// anything with a Delete(nodeID string) method. Both cluster.PeerState and
+// cluster.PeerJobState satisfy it.
+type peerEvictor interface {
+	Delete(nodeID string)
+}
+
+// observePeerRemovals registers a Raft observer for PeerObservation events
+// and drives the removal loop. Blocking-mode observer so removals can't be
+// silently dropped. Stops when ctx is cancelled.
+func observePeerRemovals(ctx context.Context, clusterSrv *cluster.Server, peerState, peerJobState peerEvictor, logger *slog.Logger) {
+	ch := make(chan hraft.Observation, 16)
+	clusterSrv.RegisterPeerObserver(ch)
+	go runPeerRemovalLoop(ctx, ch, peerState, peerJobState, logger)
+}
+
+// runPeerRemovalLoop consumes observations from ch and evicts each removed
+// peer from both caches. Exposed for tests so the loop can be driven by
+// synthetic observations without standing up a real Raft cluster.
+func runPeerRemovalLoop(ctx context.Context, ch <-chan hraft.Observation, peerState, peerJobState peerEvictor, logger *slog.Logger) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case obs, ok := <-ch:
+			if !ok {
+				return
+			}
+			po, ok := obs.Data.(hraft.PeerObservation)
+			if !ok || !po.Removed {
+				continue
+			}
+			id := string(po.Peer.ID)
+			peerState.Delete(id)
+			peerJobState.Delete(id)
+			logger.Info("cluster peer removed, evicted from peer caches", "node_id", id)
+		}
+	}
+}

@@ -32,6 +32,17 @@ func (p *PeerState) MarkUnreachable(nodeID string) {
 	}
 }
 
+// Delete removes a peer's entry entirely. Unlike MarkUnreachable (transient
+// — a future broadcast restores the entry), Delete is for permanent removal
+// (e.g. the node was dropped from the Raft configuration) so the entry never
+// comes back on its own. Used by the Raft peer-removal observer to keep the
+// entries map from growing unboundedly across cluster scale-downs.
+func (p *PeerState) Delete(nodeID string) {
+	p.mu.Lock()
+	delete(p.entries, nodeID)
+	p.mu.Unlock()
+}
+
 // NewPeerState creates a PeerState with the given TTL.
 func NewPeerState(ttl time.Duration) *PeerState {
 	return &PeerState{

@@ -35,6 +35,15 @@ func (p *PeerJobState) Update(senderID string, jobs []*gastrologv1.Job, received
 	p.mu.Unlock()
 }
 
+// Delete removes a peer's entry entirely. Used when the node is permanently
+// removed from the Raft configuration so the entries map doesn't retain
+// zombie data from departed peers.
+func (p *PeerJobState) Delete(senderID string) {
+	p.mu.Lock()
+	delete(p.entries, senderID)
+	p.mu.Unlock()
+}
+
 // GetAll returns all non-expired peer job lists, keyed by sender node ID.
 func (p *PeerJobState) GetAll() map[string][]*gastrologv1.Job {
 	p.mu.RLock()
