@@ -572,22 +572,24 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
+//
+// Canonical source: the system-raft StableStore (see resolveNodeID).
+// For memory-only config (tests, ephemeral single-node), a fresh ID is
+// generated per process — memory mode has no raft WAL to consult.
 func resolveIdentity(logger *slog.Logger, cfg RunConfig, hd home.Dir) (string, error) {
-	if cfg.ConfigType != "memory" {
-		if err := hd.EnsureExists(); err != nil {
-			return "", err
-		}
-		logger.Info("home directory", "path", hd.Root())
-	}
-
 	if cfg.ConfigType == "memory" {
 		return glid.New().String(), nil
 	}
-	nodeID, err := hd.NodeID()
+	if err := hd.EnsureExists(); err != nil {
+		return "", err
+	}
+	logger.Info("home directory", "path", hd.Root())
+
+	id, err := resolveNodeID(hd, logger)
 	if err != nil {
 		return "", fmt.Errorf("resolve node ID: %w", err)
 	}
-	return nodeID, nil
+	return id.String(), nil
 }
 
 // loadLocalConfig attempts to load config from the local FSM or bootstrap.
