@@ -3,11 +3,28 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
+	"sort"
 	"time"
 
+	"gastrolog/internal/cluster"
 	"gastrolog/internal/orchestrator"
 )
+
+// BroadcastMetricsProvider reports cluster broadcast send/error counters.
+// Implemented by *cluster.Broadcaster.
+type BroadcastMetricsProvider interface {
+	MetricsSnapshot() (sent, errors []cluster.BroadcastCounter)
+}
+
+// PeerReceivedAtProvider reports the most-recent receive timestamp for each
+// peer's broadcasts. Implemented by *cluster.PeerState and
+// *cluster.PeerJobState. Entries cover all known peers, including expired
+// ones — the metrics writer compares against time.Now() for staleness.
+type PeerReceivedAtProvider interface {
+	ReceivedAt() map[string]time.Time
+}
 
 // registerMetrics registers the /metrics endpoint for Prometheus scraping.
 // This endpoint is unauthenticated (standard for Prometheus targets).
@@ -52,6 +69,87 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 
 	// -- Vault metrics --
 	s.writeVaultMetrics(w, orch)
+
+	// -- Cluster broadcast metrics --
+	s.writeBroadcastMetrics(w)
+}
+
+// writeBroadcastMetrics emits Prometheus counters for cluster broadcast
+// send totals, error totals, and per-peer message-age gauges. Single-node
+// deployments (all providers nil) emit nothing.
+func (s *Server) writeBroadcastMetrics(w io.Writer) {
+	if s.broadcastMetrics != nil {
+		sent, errors := s.broadcastMetrics.MetricsSnapshot()
+		writeBroadcastCounters(w,
+			"gastrolog_broadcast_send_total",
+			"Total broadcast messages sent to each peer, by payload type.",
+			sent)
+		writeBroadcastCounters(w,
+			"gastrolog_broadcast_send_errors_total",
+			"Total broadcast send failures to each peer, by payload type.",
+			errors)
+	}
+	writeBroadcastPeerAge(w,
+		"gastrolog_broadcast_peer_message_age_seconds",
+		"Seconds since the most recent broadcast was received from each peer, by payload type.",
+		s.peerStatsAges, "node_stats",
+		s.peerJobsAges, "node_jobs")
+}
+
+// writeBroadcastCounters emits one Prometheus counter family with stable
+// ordering. Empty input emits only the HELP/TYPE lines (cheap).
+func writeBroadcastCounters(w io.Writer, name, help string, counters []cluster.BroadcastCounter) {
+	_, _ = fmt.Fprintf(w, "# HELP %s %s\n", name, help)
+	_, _ = fmt.Fprintf(w, "# TYPE %s counter\n", name)
+	sort.Slice(counters, func(i, j int) bool {
+		if counters[i].Peer != counters[j].Peer {
+			return counters[i].Peer < counters[j].Peer
+		}
+		return counters[i].Type < counters[j].Type
+	})
+	for _, c := range counters {
+		_, _ = fmt.Fprintf(w, "%s{peer=%q,type=%q} %d\n", name, c.Peer, c.Type, c.Value)
+	}
+}
+
+// writeBroadcastPeerAge emits a single gauge family merging stats-age and
+// jobs-age entries, labeled by peer + type. Peers that have never sent a
+// broadcast are omitted. Zero-time entries are also skipped — they
+// represent "never received" rather than "received just now".
+func writeBroadcastPeerAge(w io.Writer, name, help string,
+	statsAges PeerReceivedAtProvider, statsType string,
+	jobsAges PeerReceivedAtProvider, jobsType string) {
+	_, _ = fmt.Fprintf(w, "# HELP %s %s\n", name, help)
+	_, _ = fmt.Fprintf(w, "# TYPE %s gauge\n", name)
+	now := time.Now()
+	type entry struct {
+		peer string
+		typ  string
+		age  float64
+	}
+	var rows []entry
+	collect := func(p PeerReceivedAtProvider, typ string) {
+		if p == nil {
+			return
+		}
+		for id, t := range p.ReceivedAt() {
+			if t.IsZero() {
+				continue
+			}
+			rows = append(rows, entry{peer: id, typ: typ, age: now.Sub(t).Seconds()})
+		}
+	}
+	collect(statsAges, statsType)
+	collect(jobsAges, jobsType)
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].peer != rows[j].peer {
+			return rows[i].peer < rows[j].peer
+		}
+		return rows[i].typ < rows[j].typ
+	})
+	for _, r := range rows {
+		_, _ = fmt.Fprintf(w, "%s{peer=%q,type=%q} %.3f\n", name, r.peer, r.typ, r.age)
+	}
 }
 
 func (s *Server) writeIngesterMetrics(w http.ResponseWriter, orch *orchestrator.Orchestrator) {

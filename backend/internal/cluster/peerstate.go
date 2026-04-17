@@ -32,6 +32,17 @@ func (p *PeerState) MarkUnreachable(nodeID string) {
 	}
 }
 
+// Delete removes a peer's entry entirely. Unlike MarkUnreachable (transient
+// — a future broadcast restores the entry), Delete is for permanent removal
+// (e.g. the node was dropped from the Raft configuration) so the entry never
+// comes back on its own. Used by the Raft peer-removal observer to keep the
+// entries map from growing unboundedly across cluster scale-downs.
+func (p *PeerState) Delete(nodeID string) {
+	p.mu.Lock()
+	delete(p.entries, nodeID)
+	p.mu.Unlock()
+}
+
 // NewPeerState creates a PeerState with the given TTL.
 func NewPeerState(ttl time.Duration) *PeerState {
 	return &PeerState{
@@ -175,6 +186,19 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 		routeStats = append(routeStats, rs)
 	}
 	return
+}
+
+// ReceivedAt returns the time each peer's most recent broadcast was
+// received. Includes expired entries — callers that want a freshness view
+// compare against time.Now() themselves (e.g. Prometheus age gauges).
+func (p *PeerState) ReceivedAt() map[string]time.Time {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[string]time.Time, len(p.entries))
+	for id, e := range p.entries {
+		out[id] = e.received
+	}
+	return out
 }
 
 // LivePeers returns the node IDs of all peers whose stats have not expired.
