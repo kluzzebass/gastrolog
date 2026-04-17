@@ -387,7 +387,6 @@ export function VaultSettingsCard({
     <SettingsCard
       key={encode(vault.id)}
       id={vault.name || encode(vault.id)}
-      typeBadge={vaultTiers.length > 0 ? vaultTiers.map((t) => tierTypeLabel(t.type)).join(", ") : undefined}
       dark={dark}
       expanded={expanded}
       onToggle={onToggle}

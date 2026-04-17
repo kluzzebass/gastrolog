@@ -60,7 +60,7 @@ describe("VaultsSettings", () => {
     expect(getByText(/No vaults configured/)).toBeTruthy();
   });
 
-  test("renders vault cards with names and type badges", () => {
+  test("renders vault cards with names", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], sampleConfig);
 
@@ -70,8 +70,6 @@ describe("VaultsSettings", () => {
 
     expect(getByText("vault-alpha")).toBeTruthy();
     expect(getByText("vault-beta")).toBeTruthy();
-    // vault-alpha has a local tier
-    expect(getByText("file")).toBeTruthy();
   });
 
   test("shows disabled badge for disabled vaults", () => {
