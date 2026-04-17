@@ -198,30 +198,33 @@ func (o *Orchestrator) Stop() error {
 	// Cancel main context (for digest loop).
 	cancel()
 
-	// Stage 1: Wait for ingesters to exit, then close the ingest channel.
+	// Each stage logs entry so a hang pinpoints which WaitGroup / subsystem
+	// is holding up shutdown. Temporary diagnostic; remove once shutdown is
+	// consistently sub-second.
+	o.logger.Info("orch stop: waiting ingesters")
 	o.ingesterWg.Wait()
 	close(ingestCh)
 
-	// Stage 2: Wait for digest loop to drain, then close the intermediate channel.
+	o.logger.Info("orch stop: waiting digest")
 	o.digestWg.Wait()
 	close(digestedCh)
 
-	// Stage 3: Wait for write loop to drain remaining records.
+	o.logger.Info("orch stop: waiting write")
 	o.writeWg.Wait()
 
-	// Stage 4: Wait for in-flight ack-gated replication goroutines.
+	o.logger.Info("orch stop: waiting ack")
 	o.ackWg.Wait()
 
-	// Stage 5: Wait for auxiliary goroutines (watchdog, etc.).
+	o.logger.Info("orch stop: waiting aux")
 	o.auxWg.Wait()
 
-	// Stop shared scheduler — waits for running jobs (index builds,
-	// cron rotation, retention) to finish.
+	o.logger.Info("orch stop: stopping scheduler")
 	_ = o.scheduler.Stop()
 
-	// Stop all per-tier leader loops (after the scheduler so reconcile
-	// passes don't fight retention deletes during shutdown).
+	o.logger.Info("orch stop: stopping tier leaders")
 	o.tierLeaders.StopAll()
+
+	o.logger.Info("orch stop: done")
 
 	o.mu.Lock()
 	o.running = false
