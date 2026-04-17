@@ -528,6 +528,12 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 	peerJobState := cluster.NewPeerJobState(15 * time.Second)
 	clusterSrv.Subscribe(peerJobState.HandleBroadcast)
 
+	// Evict peer-cache entries immediately when a node is removed from the
+	// Raft configuration. Without this the TTL-only expiry leaves zombie
+	// entries for nodes that were permanently decommissioned — the maps
+	// grow unboundedly on clusters that churn nodes. See gastrolog-19bq4.
+	observePeerRemovals(ctx, clusterSrv, peerState, peerJobState, logger)
+
 	collector := cluster.NewStatsCollector(cluster.StatsCollectorConfig{
 		Broadcaster: broadcaster,
 		RaftStats:   clusterSrv,

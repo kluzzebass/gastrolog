@@ -665,6 +665,20 @@ func (s *Server) RegisterLeaderObserver(ch chan hraft.Observation) {
 	}))
 }
 
+// RegisterPeerObserver registers a channel to receive Raft PeerObservation
+// events (peer added to / removed from the cluster configuration). Used by
+// the peer-state cache to evict entries for permanently removed nodes
+// without waiting for TTL expiry.
+func (s *Server) RegisterPeerObserver(ch chan hraft.Observation) {
+	if s.raft == nil {
+		return
+	}
+	s.raft.RegisterObserver(hraft.NewObserver(ch, true, func(o *hraft.Observation) bool {
+		_, ok := o.Data.(hraft.PeerObservation)
+		return ok
+	}))
+}
+
 // Addr returns the listener address, or empty if not started.
 func (s *Server) Addr() string {
 	if s.listener != nil {
