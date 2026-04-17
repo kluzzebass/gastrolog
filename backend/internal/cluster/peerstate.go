@@ -177,6 +177,19 @@ func (p *PeerState) AggregateRouteStats() (ingested, dropped, routed int64, filt
 	return
 }
 
+// ReceivedAt returns the time each peer's most recent broadcast was
+// received. Includes expired entries — callers that want a freshness view
+// compare against time.Now() themselves (e.g. Prometheus age gauges).
+func (p *PeerState) ReceivedAt() map[string]time.Time {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[string]time.Time, len(p.entries))
+	for id, e := range p.entries {
+		out[id] = e.received
+	}
+	return out
+}
+
 // LivePeers returns the node IDs of all peers whose stats have not expired.
 func (p *PeerState) LivePeers() []string {
 	p.mu.RLock()

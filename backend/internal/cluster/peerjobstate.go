@@ -35,6 +35,19 @@ func (p *PeerJobState) Update(senderID string, jobs []*gastrologv1.Job, received
 	p.mu.Unlock()
 }
 
+// ReceivedAt returns the time each peer's most recent broadcast was
+// received. Includes expired entries — callers compare against time.Now()
+// themselves (e.g. Prometheus age gauges).
+func (p *PeerJobState) ReceivedAt() map[string]time.Time {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	out := make(map[string]time.Time, len(p.entries))
+	for id, e := range p.entries {
+		out[id] = e.received
+	}
+	return out
+}
+
 // GetAll returns all non-expired peer job lists, keyed by sender node ID.
 func (p *PeerJobState) GetAll() map[string][]*gastrologv1.Job {
 	p.mu.RLock()
