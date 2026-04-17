@@ -165,10 +165,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Alerts:            alertCollector,
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
-			_ = cfgStore.SetIngesterAlive(context.Background(), ingesterID, nodeID, alive)
+			// Bounded timeout so that if quorum is lost during shutdown, the
+			// orchestrator's Stop path doesn't hang 10s per running ingester
+			// waiting for a raft apply that can never land. Normal case
+			// (quorum intact) completes in milliseconds.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = cfgStore.SetIngesterAlive(ctx, ingesterID, nodeID, alive)
 		},
 		OnIngesterCheckpoint: func(ingesterID glid.GLID, data []byte) {
-			_ = cfgStore.SetIngesterCheckpoint(context.Background(), ingesterID, data)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = cfgStore.SetIngesterCheckpoint(ctx, ingesterID, data)
 		},
 	})
 	if err != nil {
@@ -220,6 +228,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		return err
 	}
 	close(orchReady)
+
+	// Clear any stale "alive" entries in Raft for ingesters this node is
+	// configured to know about but isn't running (e.g. last session crashed
+	// before setIngesterAlive(false), or config was edited while down).
+	// Must happen AFTER orch.Start so ListIngesters() reflects reality.
+	clearStaleIngesterAlive(ctx, cfgStore, orch, nodeID, logger)
 
 	// Wire the ForwardTierApply handler so other nodes can forward tier
 	// Raft applies to us when we're the tier Raft leader.

@@ -264,6 +264,7 @@ func newRaftConfig(nodeID string, logger *slog.Logger) *hraft.Config {
 		"pipelining replication",
 		"aborting pipeline replication",
 		"failed to contact",
+		"failed to make requestVote RPC",
 	)
 	conf.LogOutput = nil
 

@@ -722,6 +722,52 @@ func testIngesters(t *testing.T, newStore func(t *testing.T) system.Store) {
 		}
 	})
 
+	t.Run("DeleteIngesterCascadesRuntimeState", func(t *testing.T) {
+		s := newStore(t)
+		ctx := context.Background()
+
+		id := newID()
+		if err := s.PutIngester(ctx, system.IngesterConfig{ID: id, Name: "cascade", Type: "test"}); err != nil {
+			t.Fatalf("Put: %v", err)
+		}
+		// Seed all three pieces of runtime state.
+		if err := s.SetIngesterAlive(ctx, id, "node-A", true); err != nil {
+			t.Fatalf("SetIngesterAlive: %v", err)
+		}
+		if err := s.SetIngesterAssignment(ctx, id, "node-A"); err != nil {
+			t.Fatalf("SetIngesterAssignment: %v", err)
+		}
+		if err := s.SetIngesterCheckpoint(ctx, id, []byte("state")); err != nil {
+			t.Fatalf("SetIngesterCheckpoint: %v", err)
+		}
+
+		if err := s.DeleteIngester(ctx, id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		alive, err := s.GetIngesterAlive(ctx, id)
+		if err != nil {
+			t.Fatalf("GetIngesterAlive: %v", err)
+		}
+		if len(alive) != 0 {
+			t.Errorf("alive state leaked after delete: %v", alive)
+		}
+		assigned, err := s.GetIngesterAssignment(ctx, id)
+		if err != nil {
+			t.Fatalf("GetIngesterAssignment: %v", err)
+		}
+		if assigned != "" {
+			t.Errorf("assignment leaked after delete: %q", assigned)
+		}
+		cp, err := s.GetIngesterCheckpoint(ctx, id)
+		if err != nil {
+			t.Fatalf("GetIngesterCheckpoint: %v", err)
+		}
+		if len(cp) != 0 {
+			t.Errorf("checkpoint leaked after delete: %v", cp)
+		}
+	})
+
 	t.Run("NilIngesterParams", func(t *testing.T) {
 		s := newStore(t)
 		ctx := context.Background()
