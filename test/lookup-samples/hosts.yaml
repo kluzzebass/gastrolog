@@ -1,0 +1,68 @@
+# Sample YAML host inventory for exercising the YAML file lookup feature.
+# Mirrors the shape of a typical Ansible-style inventory — nested groups,
+# vars inside each host, and mixed scalar/list values. Any jq expression
+# that works on the equivalent JSON shape works here unchanged (YAML is
+# parsed into the same map[string]any tree).
+
+hosts:
+  - name: web-01
+    ip: 10.0.1.10
+    env: production
+    region: eu-west-1
+    role: frontend
+    owner: platform-team
+    tags:
+      - http
+      - public
+  - name: web-02
+    ip: 10.0.1.11
+    env: production
+    region: eu-west-1
+    role: frontend
+    owner: platform-team
+    tags:
+      - http
+      - public
+  - name: api-01
+    ip: 10.0.2.20
+    env: production
+    region: eu-west-1
+    role: backend
+    owner: api-team
+    tags:
+      - grpc
+      - internal
+  - name: db-primary
+    ip: 10.0.3.30
+    env: production
+    region: eu-west-1
+    role: database
+    owner: dba-team
+    tags:
+      - postgres
+      - primary
+  - name: db-replica
+    ip: 10.0.3.31
+    env: production
+    region: eu-west-1
+    role: database
+    owner: dba-team
+    tags:
+      - postgres
+      - replica
+  - name: staging-web
+    ip: 10.1.1.10
+    env: staging
+    region: eu-west-1
+    role: frontend
+    owner: platform-team
+    tags:
+      - http
+  - name: dev-sandbox
+    ip: 10.2.1.42
+    env: development
+    region: eu-west-1
+    role: mixed
+    owner: engineering
+    tags:
+      - sandbox
