@@ -6,6 +6,8 @@ The Vaults settings tab is where you create and manage vaults and their tier cha
 
 A vault needs a **Name** and at least one **tier**. Click "+ Add Tier" to add tiers to the chain. Tiers are ordered — records enter the first tier and flow down via retention eject rules.
 
+The **Enabled** checkbox controls whether the vault starts accepting records immediately. Uncheck it to create the vault in a disabled state — useful when you want to finish configuring the tier chain before routes start directing traffic into it. Toggle it on later from the vault card.
+
 ## Tier Settings
 
 Each tier has a **type** that determines how it stores data:

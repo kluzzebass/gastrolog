@@ -43,6 +43,7 @@ interface AddIngesterFormState {
   adding: boolean;
   newName: string;
   newType: string;
+  newEnabled: boolean;
   newParams: Record<string, string>;
   newNodeIds: string[];
 }
@@ -51,6 +52,7 @@ const addIngesterFormInitial: AddIngesterFormState = {
   adding: false,
   newName: "",
   newType: "chatterbox",
+  newEnabled: true,
   newParams: {},
   newNodeIds: [],
 };
@@ -58,6 +60,7 @@ const addIngesterFormInitial: AddIngesterFormState = {
 type AddIngesterFormAction =
   | { type: "startAdd"; ingesterType: string }
   | { type: "setNewName"; value: string }
+  | { type: "setNewEnabled"; value: boolean }
   | { type: "setNewParams"; value: Record<string, string> }
   | { type: "setNewNodeIds"; value: string[] }
   | { type: "resetForm" };
@@ -68,6 +71,8 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
       return { ...addIngesterFormInitial, adding: true, newType: action.ingesterType };
     case "setNewName":
       return { ...state, newName: action.value };
+    case "setNewEnabled":
+      return { ...state, newEnabled: action.value };
     case "setNewParams":
       return { ...state, newParams: action.value };
     case "setNewNodeIds":
@@ -92,7 +97,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
-  const { adding, newName, newType, newParams, newNodeIds } = addForm;
+  const { adding, newName, newType, newEnabled, newParams, newNodeIds } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const configIngesters = config?.ingesters;
@@ -149,7 +154,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
         id: encode(crypto.getRandomValues(new Uint8Array(16))),
         name,
         type: newType,
-        enabled: true,
+        enabled: newEnabled,
         params: newParams,
         nodeIds: newNodeIds,
       });
@@ -195,6 +200,12 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
               dark={dark}
             />
           </FormField>
+          <Checkbox
+            checked={newEnabled}
+            onChange={(v) => dispatchAdd({ type: "setNewEnabled", value: v })}
+            label="Enabled"
+            dark={dark}
+          />
           <NodeMultiSelect
             value={newNodeIds}
             onChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v })}

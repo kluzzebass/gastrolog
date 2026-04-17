@@ -15,6 +15,7 @@ import { useToast } from "../Toast";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
 import { FormField, TextInput, SelectInput, NumberInput, SpinnerInput } from "./FormField";
+import { Checkbox } from "./Checkbox";
 import { DropdownButton } from "./Buttons";
 import { sortByName } from "../../lib/sort";
 import { VaultSettingsCard } from "./VaultSettingsCard";
@@ -127,11 +128,12 @@ export function tierTypeLabel(type: TierType): string {
 async function createVaultWithTiers(
   vaultId: string,
   name: string,
-  putVault: { mutateAsync: (args: { id: string; name: string }) => Promise<unknown> },
+  enabled: boolean,
+  putVault: { mutateAsync: (args: { id: string; name: string; enabled?: boolean }) => Promise<unknown> },
   configs: TierConfig[],
   putTier: { mutateAsync: (args: { config: TierConfig }) => Promise<unknown> },
 ): Promise<void> {
-  await putVault.mutateAsync({ id: vaultId, name });
+  await putVault.mutateAsync({ id: vaultId, name, enabled });
   for (const config of configs) {
     await putTier.mutateAsync({ config });
   }
@@ -164,6 +166,7 @@ interface AddFormState {
   adding: boolean;
   name: string;
   namePlaceholder: string;
+  enabled: boolean;
   tiers: TierEntry[];
 }
 
@@ -171,6 +174,7 @@ const addFormInitial: AddFormState = {
   adding: false,
   name: "",
   namePlaceholder: "",
+  enabled: true,
   tiers: [],
 };
 
@@ -616,7 +620,7 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
     });
 
     setIsCreating(true);
-    createVaultWithTiers(vaultId, name, putVault, tierConfigs, putTier).then(
+    createVaultWithTiers(vaultId, name, addForm.enabled, putVault, tierConfigs, putTier).then(
       () => { setIsCreating(false); addToast(`Vault "${name}" created`, "info"); dispatchAdd({ type: "reset" }); },
       (err: unknown) => { setIsCreating(false); addToast(extractErrorMessage(err, "Failed to create vault"), "error"); },
     );
@@ -657,6 +661,12 @@ export function VaultsSettings({ dark, expandTarget, onExpandTargetConsumed, onO
               dark={dark}
             />
           </FormField>
+          <Checkbox
+            checked={addForm.enabled}
+            onChange={(v) => dispatchAdd({ type: "set", patch: { enabled: v } })}
+            label="Enabled"
+            dark={dark}
+          />
 
           {/* Tiers section */}
           <div className="flex flex-col gap-2 pt-1">
