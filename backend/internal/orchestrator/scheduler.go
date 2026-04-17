@@ -142,6 +142,11 @@ type Scheduler struct {
 	now           func() time.Time
 	logger        *slog.Logger
 	onJobChange   func() // optional; called (outside lock) when a job transitions state
+	// events is the fan-out broker that emits per-transition JobEvents for
+	// Watch-style subscribers (e.g. WatchJobs). Both onJobChange and events
+	// fire at the same points — the callback is a single-slot legacy path
+	// that will retire once all consumers migrate to the broker.
+	events *JobEventBroker
 }
 
 func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) (*Scheduler, error) {
@@ -170,6 +175,7 @@ func newScheduler(logger *slog.Logger, maxConcurrent int, now func() time.Time) 
 		maxConcurrent: maxConcurrent,
 		now:           now,
 		logger:        logger,
+		events:        NewJobEventBroker(0), // default buffer
 	}
 	// Start immediately so RunOnce jobs execute even without explicit Start().
 	// Cron jobs added later will begin executing as soon as they're registered.
@@ -225,10 +231,29 @@ func (s *Scheduler) MaxConcurrent() int {
 // SetOnJobChange registers a callback invoked (outside the lock) whenever a
 // job transitions state — started, completed, or failed. Used by the cluster
 // broadcast system for immediate peer notification.
+//
+// Deprecated (but kept live for back-compat while consumers migrate): new
+// code should subscribe to Events() instead, which fans out to multiple
+// listeners with per-event metadata rather than collapsing every transition
+// into a single "something changed" pulse.
 func (s *Scheduler) SetOnJobChange(fn func()) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onJobChange = fn
+}
+
+// Events returns the scheduler's job-event broker. Subscribers receive
+// per-transition JobEvents and get their own bounded channel; slow
+// subscribers drop events rather than stall the scheduler.
+func (s *Scheduler) Events() *JobEventBroker { return s.events }
+
+// publishEvent constructs a JobEvent and hands it to the broker. Called
+// outside any lock so the broker's non-blocking publish stays fast.
+func (s *Scheduler) publishEvent(kind JobEventKind, info JobInfo) {
+	if s.events == nil {
+		return
+	}
+	s.events.Publish(JobEvent{Kind: kind, Job: info})
 }
 
 // Rebuild recreates the gocron scheduler with a new concurrency limit,
@@ -477,7 +502,6 @@ func (s *Scheduler) Start() {}
 // progress info is retained for status polling.
 func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	j, err := s.scheduler.NewJob(
 		gocron.OneTimeJob(gocron.OneTimeJobStartImmediately()),
@@ -493,12 +517,25 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 		),
 	)
 	if err != nil {
+		s.mu.Unlock()
 		return fmt.Errorf("create one-time job %s: %w", name, err)
 	}
 
 	s.jobs[name] = j
 	s.schedules[name] = "once"
+	info := JobInfo{
+		ID:          j.ID().String(),
+		Name:        name,
+		Description: s.descriptions[name],
+		Schedule:    "once",
+	}
 	s.logger.Debug("one-time job scheduled", "name", name)
+	s.mu.Unlock()
+
+	// Publish outside the lock so slow subscribers can't stall scheduler
+	// operations. Broker.Publish is non-blocking but still takes its own
+	// RWMutex — keep the two lock domains disjoint.
+	s.publishEvent(JobEventScheduled, info)
 	return nil
 }
 
@@ -507,7 +544,6 @@ func (s *Scheduler) RunOnce(name string, taskFn any, args ...any) error {
 // JobProgress for reporting progress.
 func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	prog := &JobProgress{
 		Status:    JobStatusPending,
@@ -519,6 +555,22 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		if notify := s.onJobChange; notify != nil {
 			notify()
 		}
+		// Snapshot JobInfo for the Started event outside any scheduler lock
+		// (we're already inside the gocron worker goroutine).
+		s.mu.Lock()
+		startInfo := JobInfo{
+			ID:          "",
+			Name:        name,
+			Description: s.descriptions[name],
+			Schedule:    "once",
+			Progress:    prog,
+		}
+		if j := s.jobs[name]; j != nil {
+			startInfo.ID = j.ID().String()
+		}
+		s.mu.Unlock()
+		s.publishEvent(JobEventStarted, startInfo)
+
 		ctx := context.WithoutCancel(context.Background())
 		fn(ctx, prog)
 		// If fn didn't explicitly complete/fail, mark completed.
@@ -549,13 +601,16 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 		prog.Fail(s.now(), "failed to schedule: "+err.Error())
 		// Generate an ID for the failed job so the caller can still look it up.
 		failedID := glid.New().String()
-		s.completed[failedID] = JobInfo{
+		failedInfo := JobInfo{
 			ID:          failedID,
 			Name:        name,
 			Description: s.descriptions[name],
 			Schedule:    "once",
 			Progress:    prog,
 		}
+		s.completed[failedID] = failedInfo
+		s.mu.Unlock()
+		s.publishEvent(JobEventFailed, failedInfo)
 		return failedID
 	}
 
@@ -563,7 +618,16 @@ func (s *Scheduler) Submit(name string, fn func(context.Context, *JobProgress)) 
 	s.jobs[name] = j
 	s.schedules[name] = "once"
 	s.progress[id] = prog
+	scheduledInfo := JobInfo{
+		ID:          id,
+		Name:        name,
+		Description: s.descriptions[name],
+		Schedule:    "once",
+		Progress:    prog,
+	}
 	s.logger.Info("job submitted", "name", name, "id", id)
+	s.mu.Unlock()
+	s.publishEvent(JobEventScheduled, scheduledInfo)
 	return id
 }
 
@@ -601,6 +665,20 @@ func (s *Scheduler) completeOneTimeJob(name string) {
 	if notify != nil {
 		notify()
 	}
+	// Classify the terminal event. A Submit-registered job has a Progress
+	// record whose Status distinguishes completed vs failed. RunOnce jobs
+	// have no progress record — we treat them as Completed regardless of
+	// the task's return value (gocron calls AfterJobRuns on both success
+	// and error, and the task's error isn't propagated to us here).
+	kind := JobEventCompleted
+	if info.Progress != nil {
+		info.Progress.mu.RLock()
+		if info.Progress.Status == JobStatusFailed {
+			kind = JobEventFailed
+		}
+		info.Progress.mu.RUnlock()
+	}
+	s.publishEvent(kind, info)
 }
 
 // cleanupCompletedLocked removes completed jobs older than 1 hour.
