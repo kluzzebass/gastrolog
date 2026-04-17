@@ -136,6 +136,12 @@ func (o *Orchestrator) Start(ctx context.Context) error {
 	// raises/clears alerts as needed.
 	o.auxWg.Go(func() { o.runRateAlertEvaluator(ctx, 5*time.Second) })
 
+	// 1 Hz active-chunk progress ticker (gastrolog-4y03v). Fires the
+	// chunk-change signal when any active chunk's record count has grown
+	// since the last tick, so WatchChunks subscribers see live counter
+	// updates without polling.
+	o.auxWg.Go(func() { o.runActiveChunkProgressTicker(ctx, time.Second) })
+
 	return nil
 }
 
@@ -155,6 +161,71 @@ func (o *Orchestrator) runRateAlertEvaluator(ctx context.Context, interval time.
 			o.evaluateCloudHealth()
 		}
 	}
+}
+
+// runActiveChunkProgressTicker walks every tier's active chunk once per
+// interval and fires NotifyChunkChange() if any active chunk's record
+// count has grown since the last tick. Lifecycle events (seal / delete /
+// create) still notify directly on their own path; this ticker covers
+// the mid-chunk "records are being appended" case that would otherwise
+// require frontend polling. Bandwidth is negligible — one signal
+// close-and-recreate plus a re-fetch, and only when something actually
+// changed. Exits when ctx is cancelled.
+func (o *Orchestrator) runActiveChunkProgressTicker(ctx context.Context, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	// lastCounts tracks per-active-chunk record counts across ticks.
+	// Keyed by chunk ID because a tier's active chunk changes after
+	// rotation; the old ID is evicted in the seen-based sweep below.
+	lastCounts := make(map[chunk.ChunkID]int64)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			changed, seen := o.snapshotActiveChunkProgress(lastCounts)
+			for id := range lastCounts {
+				if _, ok := seen[id]; !ok {
+					delete(lastCounts, id)
+				}
+			}
+			if changed {
+				o.NotifyChunkChange()
+			}
+		}
+	}
+}
+
+// snapshotActiveChunkProgress iterates every vault's every tier's active
+// chunk, updates lastCounts in place, and returns (changed, seenIDs).
+// Extracted so the set of IDs we touched is available to the caller for
+// stale-entry eviction. Holds the orchestrator RLock while walking vaults
+// but defers Active() calls to each chunk manager's own mutex.
+func (o *Orchestrator) snapshotActiveChunkProgress(lastCounts map[chunk.ChunkID]int64) (bool, map[chunk.ChunkID]struct{}) {
+	seen := make(map[chunk.ChunkID]struct{})
+	changed := false
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for _, v := range o.vaults {
+		for _, t := range v.Tiers {
+			active := t.Chunks.Active()
+			if active == nil {
+				continue
+			}
+			seen[active.ID] = struct{}{}
+			prev, had := lastCounts[active.ID]
+			if !had || prev != active.RecordCount {
+				lastCounts[active.ID] = active.RecordCount
+				// First sighting only counts as "changed" when the
+				// chunk already has records — otherwise every new
+				// empty chunk would trigger a pointless broadcast.
+				if had || active.RecordCount > 0 {
+					changed = true
+				}
+			}
+		}
+	}
+	return changed, seen
 }
 
 // Stop cancels all ingesters, the digest/write pipeline, and in-flight index
