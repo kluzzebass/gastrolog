@@ -17,14 +17,6 @@ import { encode } from "../api/glid";
 const MAX_DISPLAY_LINES = 100;
 
 
-/** Format a 16-byte Uint8Array as a UUID string. */
-function formatUUID(bytes: Uint8Array): string {
-  if (bytes.length !== 16) return "";
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
-
-
 interface DetailStyles {
   headerCls: string;
   keyCls: string;
@@ -393,7 +385,7 @@ export function DetailPanelContent({
                   className={`cursor-pointer uppercase transition-colors ${c("hover:text-copper", "hover:text-copper")}`}
                   onClick={() => {
                     onMultiFieldSelect([
-                      ["ingester_id", formatUUID(record.ingesterId)],
+                      ["ingester_id", encode(record.ingesterId)],
                       ["ingest_seq", record.ingestSeq.toString()],
                       ["ingest_ts", instantToISO(protoToInstant(record.ingestTs!))],
                     ]);
@@ -409,8 +401,8 @@ export function DetailPanelContent({
           <tr>
             <td className={`${keyCls} ${borderCls}`}>ingester_id</td>
             <ValueCell
-              value={formatUUID(record.ingesterId)}
-              onClick={() => onFieldSelect("ingester_id", formatUUID(record.ingesterId))}
+              value={encode(record.ingesterId)}
+              onClick={() => onFieldSelect("ingester_id", encode(record.ingesterId))}
               styles={styles}
             />
           </tr>
