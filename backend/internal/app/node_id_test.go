@@ -1,11 +1,11 @@
 package app
 
 import (
-	"errors"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gastrolog/internal/glid"
@@ -40,6 +40,22 @@ func readStableStoreNodeID(t *testing.T, hd home.Dir) ([]byte, error) {
 	return gs.Get([]byte(nodeIDKey))
 }
 
+// readAdvisoryFile reads <home>/node_id and parses it as a GLID. The runtime
+// never reads this file (StableStore is canonical); tests inspect it only to
+// verify the advisory cache was refreshed.
+func readAdvisoryFile(t *testing.T, hd home.Dir) glid.GLID {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(hd.Root(), "node_id"))
+	if err != nil {
+		t.Fatalf("read advisory file: %v", err)
+	}
+	id, err := glid.Parse(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("parse advisory file: %v", err)
+	}
+	return id
+}
+
 func TestResolveNodeID_FreshDirectoryGeneratesAndPersists(t *testing.T) {
 	t.Parallel()
 	hd := newTestHome(t)
@@ -66,12 +82,8 @@ func TestResolveNodeID_FreshDirectoryGeneratesAndPersists(t *testing.T) {
 	}
 
 	// Advisory file mirrors the ID.
-	fileID, err := hd.ReadNodeIDFile()
-	if err != nil {
-		t.Fatalf("ReadNodeIDFile: %v", err)
-	}
-	if fileID != id {
-		t.Fatalf("advisory file id = %s, want %s", fileID, id)
+	if got := readAdvisoryFile(t, hd); got != id {
+		t.Fatalf("advisory file id = %s, want %s", got, id)
 	}
 }
 
@@ -93,44 +105,6 @@ func TestResolveNodeID_IdempotentAcrossCalls(t *testing.T) {
 	}
 }
 
-func TestResolveNodeID_MigratesFromLegacyFile(t *testing.T) {
-	t.Parallel()
-	hd := newTestHome(t)
-	logger := nodeIDTestLogger()
-
-	// Pre-populate a legacy <home>/node_id file as if from gastrolog-25z9.
-	legacyID := glid.New()
-	if err := hd.WriteNodeIDFile(legacyID); err != nil {
-		t.Fatalf("WriteNodeIDFile: %v", err)
-	}
-
-	got, err := resolveNodeID(hd, logger)
-	if err != nil {
-		t.Fatalf("resolveNodeID: %v", err)
-	}
-	if got != legacyID {
-		t.Fatalf("expected legacy ID %s, got %s", legacyID, got)
-	}
-
-	// StableStore now holds the migrated value.
-	raw, err := readStableStoreNodeID(t, hd)
-	if err != nil {
-		t.Fatalf("readStableStoreNodeID: %v", err)
-	}
-	if glid.FromBytes(raw) != legacyID {
-		t.Fatalf("stablestore id = %s, want %s (migrated)", glid.FromBytes(raw), legacyID)
-	}
-
-	// Subsequent call reads from StableStore (not the file).
-	got2, err := resolveNodeID(hd, logger)
-	if err != nil {
-		t.Fatalf("second resolveNodeID: %v", err)
-	}
-	if got2 != legacyID {
-		t.Fatalf("second resolve drifted: %s", got2)
-	}
-}
-
 func TestResolveNodeID_StableStoreOverridesWipedFile(t *testing.T) {
 	t.Parallel()
 	hd := newTestHome(t)
@@ -143,7 +117,7 @@ func TestResolveNodeID_StableStoreOverridesWipedFile(t *testing.T) {
 
 	// Operator deletes the advisory file — runtime must not treat this as
 	// identity loss. On next resolve the file gets rewritten from the
-	// StableStore value.
+	// StableStore value, not regenerated.
 	if err := os.Remove(filepath.Join(hd.Root(), "node_id")); err != nil {
 		t.Fatalf("remove advisory file: %v", err)
 	}
@@ -156,13 +130,41 @@ func TestResolveNodeID_StableStoreOverridesWipedFile(t *testing.T) {
 		t.Fatalf("identity regenerated after file wipe: first=%s got=%s", id, got)
 	}
 
-	// File was restored.
-	fileID, err := hd.ReadNodeIDFile()
-	if err != nil {
-		t.Fatalf("ReadNodeIDFile after resolve: %v", err)
+	if restored := readAdvisoryFile(t, hd); restored != id {
+		t.Fatalf("advisory file id = %s, want %s (restored)", restored, id)
 	}
-	if fileID != id {
-		t.Fatalf("advisory file id = %s, want %s (restored)", fileID, id)
+}
+
+func TestResolveNodeID_StaleAdvisoryFileIgnored(t *testing.T) {
+	t.Parallel()
+	hd := newTestHome(t)
+	logger := nodeIDTestLogger()
+
+	// Resolve once so StableStore has the canonical value.
+	id, err := resolveNodeID(hd, logger)
+	if err != nil {
+		t.Fatalf("resolveNodeID: %v", err)
+	}
+
+	// Overwrite the advisory file with an unrelated GLID. The runtime must
+	// keep the StableStore value and overwrite the stale file on next resolve.
+	stale := glid.New()
+	if stale == id {
+		t.Fatal("test precondition: stale GLID collided with canonical")
+	}
+	if err := hd.WriteNodeIDFile(stale); err != nil {
+		t.Fatalf("WriteNodeIDFile: %v", err)
+	}
+
+	got, err := resolveNodeID(hd, logger)
+	if err != nil {
+		t.Fatalf("second resolveNodeID: %v", err)
+	}
+	if got != id {
+		t.Fatalf("stale file won: got=%s, want canonical=%s", got, id)
+	}
+	if rewritten := readAdvisoryFile(t, hd); rewritten != id {
+		t.Fatalf("advisory file still stale: got=%s, want=%s", rewritten, id)
 	}
 }
 
@@ -188,20 +190,7 @@ func TestResolveNodeID_RejectsCorruptStableStoreValue(t *testing.T) {
 		t.Fatalf("close wal: %v", err)
 	}
 
-	_, err = resolveNodeID(hd, logger)
-	if err == nil {
+	if _, err := resolveNodeID(hd, logger); err == nil {
 		t.Fatal("expected error for corrupt stablestore value, got nil")
-	}
-}
-
-func TestReadNodeIDFile_MissingReturnsNotExist(t *testing.T) {
-	t.Parallel()
-	hd := newTestHome(t)
-	_, err := hd.ReadNodeIDFile()
-	if err == nil {
-		t.Fatal("expected error for missing file")
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("expected os.ErrNotExist, got %v", err)
 	}
 }

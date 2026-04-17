@@ -118,19 +118,6 @@ func (d Dir) EnsureExists() error {
 	return nil
 }
 
-// ReadNodeIDFile reads the advisory node_id file at <root>/node_id.
-// The raft StableStore is the canonical source — this file is a human
-// convenience (`cat data/node1/node_id`) and a migration fallback for
-// pre-gastrolog-61kjk clusters where the file WAS the canonical source.
-// Returns os.ErrNotExist when the file is absent.
-func (d Dir) ReadNodeIDFile() (glid.GLID, error) {
-	data, err := readSmall(filepath.Join(d.root, "node_id"))
-	if err != nil {
-		return glid.GLID{}, err
-	}
-	return glid.Parse(strings.TrimSpace(string(data)))
-}
-
 // WriteNodeIDFile writes the advisory node_id file. Called after the
 // canonical ID is resolved from (or written to) the raft StableStore so the
 // file always mirrors the true identity. Safe to overwrite.

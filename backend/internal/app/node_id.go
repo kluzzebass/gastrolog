@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -19,17 +18,12 @@ const nodeIDKey = "gastrolog:node_id"
 
 // resolveNodeID returns the canonical node identity for a non-memory config.
 // The system-raft StableStore is the source of truth; <home>/node_id is a
-// human-readable advisory cache.
+// human-readable advisory cache, rewritten after each resolution.
 //
-// Resolution order:
-//  1. StableStore has the key → decode and use it
-//  2. StableStore empty + <home>/node_id exists → migrate (one-shot for clusters
-//     upgraded from gastrolog-25z9 where the file WAS canonical)
-//  3. StableStore empty + no legacy file → generate a new GLID
-//
-// The StableStore is written synchronously (fsync'd via raftwal's batch writer)
-// before returning. The advisory file is also (re)written so operators can
-// still `cat data/node1/node_id` to see the ID.
+// On a pristine data directory a new GLID is generated and persisted to
+// StableStore before returning. On subsequent boots the StableStore is read.
+// There is no silent regeneration path — once StableStore has the key, it
+// wins; a corrupt value is an error, not an excuse to mint new identity.
 func resolveNodeID(hd home.Dir, logger *slog.Logger) (glid.GLID, error) {
 	walDir := filepath.Join(hd.RaftDir(), "wal")
 	if err := os.MkdirAll(walDir, 0o750); err != nil {
@@ -48,28 +42,18 @@ func resolveNodeID(hd home.Dir, logger *slog.Logger) (glid.GLID, error) {
 	if err != nil {
 		return glid.GLID{}, fmt.Errorf("read node_id key: %w", err)
 	}
-	if len(raw) == glid.Size {
+	switch {
+	case len(raw) == glid.Size:
 		id := glid.FromBytes(raw)
 		writeAdvisoryNodeID(hd, id, logger)
 		return id, nil
-	}
-	if len(raw) != 0 {
+	case len(raw) != 0:
 		return glid.GLID{}, fmt.Errorf("stablestore node_id is %d bytes, expected %d", len(raw), glid.Size)
 	}
 
-	// Not in StableStore — try the legacy file (migration path).
-	id, err := hd.ReadNodeIDFile()
-	switch {
-	case err == nil:
-		logger.Warn("migrating node_id from legacy home file to raft StableStore — file is now advisory",
-			"node_id", id.String())
-	case errors.Is(err, os.ErrNotExist):
-		id = glid.New()
-		logger.Info("generated new node_id", "node_id", id.String())
-	default:
-		return glid.GLID{}, fmt.Errorf("read legacy node_id file: %w", err)
-	}
-
+	// Pristine data dir: mint and persist.
+	id := glid.New()
+	logger.Info("generated new node_id", "node_id", id.String())
 	if err := gs.Set([]byte(nodeIDKey), id[:]); err != nil {
 		return glid.GLID{}, fmt.Errorf("persist node_id to stablestore: %w", err)
 	}
