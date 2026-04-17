@@ -330,8 +330,8 @@ func TestFileVersionConstants(t *testing.T) {
 	if RawLogVersion != 0x01 {
 		t.Fatalf("RawLogVersion: want 0x01, got 0x%02x", RawLogVersion)
 	}
-	if IdxLogVersion != 0x03 {
-		t.Fatalf("IdxLogVersion: want 0x03, got 0x%02x", IdxLogVersion)
+	if IdxLogVersion != 0x01 {
+		t.Fatalf("IdxLogVersion: want 0x01, got 0x%02x", IdxLogVersion)
 	}
 	if AttrLogVersion != 0x01 {
 		t.Fatalf("AttrLogVersion: want 0x01, got 0x%02x", AttrLogVersion)

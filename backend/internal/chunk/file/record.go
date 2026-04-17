@@ -36,11 +36,9 @@ const (
 	idxIngesterIDOffset  = 42
 	idxNodeIDOffset      = 58
 
-	// File versions. IdxLogVersion bumped to 0x03 for the 74-byte entry with
-	// NodeID (gastrolog-1k3l9). Chunks written with earlier versions are not
-	// readable by this code; operators must wipe and re-ingest.
+	// File versions.
 	RawLogVersion    = 0x01
-	IdxLogVersion    = 0x03
+	IdxLogVersion    = 0x01
 	AttrLogVersion   = 0x01
 	AttrDictVersion  = 0x01
 

@@ -67,9 +67,7 @@ import (
 )
 
 const (
-	// formatVersion 0x02: NodeID added to record frame (gastrolog-1k3l9).
-	// Chunks written with earlier versions are not readable by this code.
-	formatVersion = 0x02
+	formatVersion = 0x01
 	headerSize    = 96 // fixed header before dictionary
 
 	// Record index entry: byte offset (u64) + frame size (u32).
