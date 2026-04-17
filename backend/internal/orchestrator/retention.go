@@ -611,7 +611,7 @@ func (r *retentionRunner) forwardDeletionToFollowers(id chunk.ChunkID, _ bool) {
 // 3 retries on transient failures. "chunk not found" means the chunk is
 // already gone on the follower — goal achieved, no retry needed.
 func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID) {
-	const maxAttempts = 5
+	const maxAttempts = 10
 	for attempt := range maxAttempts {
 		err := r.sendDeleteToFollower(nodeID, id)
 		if err == nil {
@@ -623,7 +623,10 @@ func (r *retentionRunner) forwardDeleteWithRetry(nodeID string, id chunk.ChunkID
 			return
 		}
 		if attempt < maxAttempts-1 {
-			time.Sleep(time.Duration(attempt+1) * time.Second) // 1s, 2s, 3s, 4s backoff
+			// "cannot delete active chunk" means follower replication
+			// hasn't sealed yet — backoff and retry, it WILL seal.
+			// Other transient errors also benefit from backoff.
+			time.Sleep(time.Duration(attempt+1) * 200 * time.Millisecond)
 			continue
 		}
 		r.logger.Warn("retention: failed to forward chunk deletion to follower",

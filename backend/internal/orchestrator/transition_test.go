@@ -2572,7 +2572,8 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierId
 //   - No records are lost or duplicated
 //   - Record count matches on the leader
 func TestClusterTransitionBurstNoOrphans(t *testing.T) {
-	t.Parallel()
+	// Not parallel: heavy stress test (100 chunks × 2 tiers × 4 nodes).
+	// Running concurrently with other burst tests starves CPU under race detector.
 	h := setupCluster(t, []string{"leader", "follower-1", "follower-2", "follower-3"}, 2, 100)
 
 	leaderNode := h.nodes["leader"]
@@ -2656,7 +2657,7 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 // 3 tiers and bursts 10K records through the full tier chain with 100-record
 // rotation. Verifies no orphans on any node and exact record preservation.
 func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
-	t.Parallel()
+	// Not parallel: heavy stress test (100 chunks × 3 tiers × 4 nodes).
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 3, 100)
 
 	leaderNode := h.nodes["leader"]
@@ -2814,7 +2815,7 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 // is not safe (see gastrolog-3l7ow findings). Production serializes through
 // the digest loop. This test uses sequential ingestion to match that model.
 func TestClusterTransitionLargeBurst(t *testing.T) {
-	t.Parallel()
+	// Not parallel: heavy stress test (100 chunks × 2 tiers × 4 nodes).
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
 
 	leaderNode := h.nodes["leader"]

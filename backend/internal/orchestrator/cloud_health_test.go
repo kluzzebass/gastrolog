@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"gastrolog/internal/glid"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,10 +21,12 @@ type mockCloudChunkManager struct {
 	degraded           atomic.Bool
 	degradedErr        atomic.Value // string
 	chunks             []chunk.ChunkMeta
-	uploadCalls        []chunk.ChunkID
+
+	mu          sync.Mutex
+	uploadCalls []chunk.ChunkID
 }
 
-func (m *mockCloudChunkManager) CloudDegraded() bool       { return m.degraded.Load() }
+func (m *mockCloudChunkManager) CloudDegraded() bool { return m.degraded.Load() }
 func (m *mockCloudChunkManager) CloudDegradedError() string {
 	if v := m.degradedErr.Load(); v != nil {
 		return v.(string)
@@ -34,8 +37,38 @@ func (m *mockCloudChunkManager) List() ([]chunk.ChunkMeta, error) {
 	return m.chunks, nil
 }
 func (m *mockCloudChunkManager) UploadToCloud(id chunk.ChunkID) error {
+	m.mu.Lock()
 	m.uploadCalls = append(m.uploadCalls, id)
+	m.mu.Unlock()
 	return nil
+}
+
+// uploadCallCount returns the number of upload calls under lock.
+func (m *mockCloudChunkManager) uploadCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.uploadCalls)
+}
+
+// uploadCallsCopy returns a snapshot of upload calls under lock.
+func (m *mockCloudChunkManager) uploadCallsCopy() []chunk.ChunkID {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]chunk.ChunkID, len(m.uploadCalls))
+	copy(out, m.uploadCalls)
+	return out
+}
+
+// waitUploadCount polls until uploadCalls reaches the expected count or the
+// deadline passes. Returns the final count.
+func waitUploadCount(m *mockCloudChunkManager, want int, timeout time.Duration) int {
+	deadline := time.Now().Add(timeout)
+	for {
+		if got := m.uploadCallCount(); got >= want || time.Now().After(deadline) {
+			return got
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // ---------- evaluateCloudHealth ----------
@@ -152,14 +185,14 @@ func TestBackfillCloudUploads_SchedulesSealedNonCloudBacked(t *testing.T) {
 
 	// Wait for the scheduler job to run.
 	orch.Scheduler().Start()
-	time.Sleep(100 * time.Millisecond)
-	_ = orch.Scheduler().Stop()
+	defer func() { _ = orch.Scheduler().Stop() }()
 
-	if len(mock.uploadCalls) != 1 {
-		t.Fatalf("expected 1 upload call, got %d", len(mock.uploadCalls))
+	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+		t.Fatalf("expected 1 upload call, got %d", got)
 	}
-	if mock.uploadCalls[0] != chunkID {
-		t.Errorf("uploaded chunk = %s, want %s", mock.uploadCalls[0], chunkID)
+	calls := mock.uploadCallsCopy()
+	if calls[0] != chunkID {
+		t.Errorf("uploaded chunk = %s, want %s", calls[0], chunkID)
 	}
 }
 
@@ -185,11 +218,11 @@ func TestBackfillCloudUploads_SkipsCloudBacked(t *testing.T) {
 	orch.backfillCloudUploads(tier)
 
 	orch.Scheduler().Start()
-	time.Sleep(50 * time.Millisecond)
-	_ = orch.Scheduler().Stop()
+	defer func() { _ = orch.Scheduler().Stop() }()
+	time.Sleep(200 * time.Millisecond) // brief grace for scheduler to (not) run
 
-	if len(mock.uploadCalls) != 0 {
-		t.Fatalf("expected 0 upload calls for cloud-backed chunk, got %d", len(mock.uploadCalls))
+	if got := mock.uploadCallCount(); got != 0 {
+		t.Fatalf("expected 0 upload calls for cloud-backed chunk, got %d", got)
 	}
 }
 
@@ -215,11 +248,11 @@ func TestBackfillCloudUploads_SkipsUnsealed(t *testing.T) {
 	orch.backfillCloudUploads(tier)
 
 	orch.Scheduler().Start()
-	time.Sleep(50 * time.Millisecond)
-	_ = orch.Scheduler().Stop()
+	defer func() { _ = orch.Scheduler().Stop() }()
+	time.Sleep(200 * time.Millisecond)
 
-	if len(mock.uploadCalls) != 0 {
-		t.Fatalf("expected 0 upload calls for unsealed chunk, got %d", len(mock.uploadCalls))
+	if got := mock.uploadCallCount(); got != 0 {
+		t.Fatalf("expected 0 upload calls for unsealed chunk, got %d", got)
 	}
 }
 
@@ -251,15 +284,18 @@ func TestBackfillCloudUploads_SkipsWhenFSMOverlaySaysCloudBacked(t *testing.T) {
 	orch.backfillCloudUploads(tier)
 
 	orch.Scheduler().Start()
-	time.Sleep(50 * time.Millisecond)
-	_ = orch.Scheduler().Stop()
+	defer func() { _ = orch.Scheduler().Stop() }()
+	time.Sleep(200 * time.Millisecond)
 
-	if len(mock.uploadCalls) != 0 {
-		t.Fatalf("expected 0 uploads when FSM overlay says cloud-backed, got %d", len(mock.uploadCalls))
+	if got := mock.uploadCallCount(); got != 0 {
+		t.Fatalf("expected 0 uploads when FSM overlay says cloud-backed, got %d", got)
 	}
 }
 
-func TestBackfillCloudUploads_RunsOnAnyNode(t *testing.T) {
+// TestBackfillCloudUploadsLeaderOnly verifies backfill runs only on the tier
+// Raft leader. See gastrolog-2nngw — followers learn about cloud-backed
+// chunks via the FSM, so duplicate backfill on every node is wasteful.
+func TestBackfillCloudUploadsLeaderOnly(t *testing.T) {
 	t.Parallel()
 
 	ac := alert.New()
@@ -275,10 +311,52 @@ func TestBackfillCloudUploads_RunsOnAnyNode(t *testing.T) {
 	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
 	orch.alerts = ac
 
-	// Not the Raft leader — backfill should still run (any node
-	// with non-cloud-backed data participates). See gastrolog-68fqk.
 	tier := &TierInstance{
 		TierID:       tierID,
+		Type:         "cloud",
+		Chunks:       mock,
+		IsRaftLeader: func() bool { return true },
+	}
+	orch.RegisterVault(NewVault(glid.New(), tier))
+
+	orch.evaluateCloudHealth()
+
+	orch.Scheduler().Start()
+	defer func() { _ = orch.Scheduler().Stop() }()
+
+	// Poll for the upload — under race detector this can take several seconds.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		n := mock.uploadCallCount()
+		if n == 1 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("expected 1 upload on Raft leader with data, got %d", n)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestBackfillCloudUploadsSkippedOnFollower verifies non-leader tiers
+// don't run backfill — the leader handles it.
+func TestBackfillCloudUploadsSkippedOnFollower(t *testing.T) {
+	t.Parallel()
+
+	ac := alert.New()
+	chunkID := chunk.NewChunkID()
+	mock := &mockCloudChunkManager{
+		chunks: []chunk.ChunkMeta{
+			{ID: chunkID, Sealed: true, CloudBacked: false,
+				WriteStart: time.Now(), WriteEnd: time.Now()},
+		},
+	}
+
+	orch := newTestOrch(t, Config{LocalNodeID: "node1"})
+	orch.alerts = ac
+
+	tier := &TierInstance{
+		TierID:       glid.New(),
 		Type:         "cloud",
 		Chunks:       mock,
 		IsRaftLeader: func() bool { return false },
@@ -288,11 +366,13 @@ func TestBackfillCloudUploads_RunsOnAnyNode(t *testing.T) {
 	orch.evaluateCloudHealth()
 
 	orch.Scheduler().Start()
-	time.Sleep(100 * time.Millisecond)
-	_ = orch.Scheduler().Stop()
+	defer func() { _ = orch.Scheduler().Stop() }()
 
-	if len(mock.uploadCalls) != 1 {
-		t.Fatalf("expected 1 upload on non-Raft-leader node with data, got %d", len(mock.uploadCalls))
+	// Give the scheduler a moment to (not) run anything.
+	time.Sleep(200 * time.Millisecond)
+
+	if got := mock.uploadCallCount(); got != 0 {
+		t.Fatalf("expected 0 uploads on follower, got %d", got)
 	}
 }
 
@@ -322,10 +402,14 @@ func TestBackfillCloudUploads_DeduplicatesPendingJobs(t *testing.T) {
 	orch.backfillCloudUploads(tier)
 
 	orch.Scheduler().Start()
-	time.Sleep(100 * time.Millisecond)
-	_ = orch.Scheduler().Stop()
+	defer func() { _ = orch.Scheduler().Stop() }()
 
-	if len(mock.uploadCalls) != 1 {
-		t.Fatalf("expected 1 upload (deduped), got %d", len(mock.uploadCalls))
+	if got := waitUploadCount(mock, 1, 5*time.Second); got != 1 {
+		t.Fatalf("expected 1 upload (deduped), got %d", got)
+	}
+	// Brief grace period to ensure no second upload sneaks in.
+	time.Sleep(100 * time.Millisecond)
+	if got := mock.uploadCallCount(); got != 1 {
+		t.Fatalf("expected 1 upload (deduped), got %d", got)
 	}
 }

@@ -41,7 +41,12 @@ type JSONFile struct {
 	keyColumn    string
 	valueColumns map[string]struct{}
 
-	data    atomic.Pointer[binData]
+	// dataMu protects data and serializes mmap lifecycle. Lookups take a
+	// read lock for the duration of the lookup so the mmap cannot be
+	// unmapped underneath them. Load/Close take a write lock to swap and
+	// reclaim the old mmap.
+	dataMu  sync.RWMutex
+	data    *binData
 	tmpPath atomic.Value // string: current temp file path
 
 	mu        sync.Mutex
@@ -85,20 +90,22 @@ func (j *JSONFile) Parameters() []string { return []string{"value"} }
 // DuplicateKeys returns the number of rows with duplicate key values
 // that were skipped during the last Load (first occurrence wins).
 func (j *JSONFile) DuplicateKeys() int {
-	d := j.data.Load()
-	if d == nil {
+	j.dataMu.RLock()
+	defer j.dataMu.RUnlock()
+	if j.data == nil {
 		return 0
 	}
-	return d.duplicateKeys
+	return j.data.duplicateKeys
 }
 
 // Suffixes returns the output column names discovered from the loaded data.
 func (j *JSONFile) Suffixes() []string {
-	d := j.data.Load()
-	if d == nil {
+	j.dataMu.RLock()
+	defer j.dataMu.RUnlock()
+	if j.data == nil {
 		return nil
 	}
-	return d.suffixes
+	return j.data.suffixes
 }
 
 // LookupValues performs an O(log n) binary search lookup in the mmap'd data.
@@ -107,11 +114,12 @@ func (j *JSONFile) LookupValues(_ context.Context, values map[string]string) map
 	if key == "" {
 		return nil
 	}
-	d := j.data.Load()
-	if d == nil {
+	j.dataMu.RLock()
+	defer j.dataMu.RUnlock()
+	if j.data == nil {
 		return nil
 	}
-	return d.lookupKey(d.mmapData, key, d.suffixes)
+	return j.data.lookupKey(j.data.mmapData, key, j.data.suffixes)
 }
 
 // Load parses the JSON source, transforms it through jq, encodes as a
@@ -162,15 +170,20 @@ func (j *JSONFile) Load(path string) error {
 	newData.suffixes = cols
 	newData.duplicateKeys = dups
 
-	old := j.data.Swap(newData)
+	// Hold the write lock through swap AND mmap reclamation so no
+	// in-flight LookupValues call (holding the read lock) can be reading
+	// the old mmap when we Munmap it. SIGBUS otherwise.
+	j.dataMu.Lock()
+	old := j.data
+	j.data = newData
 	if old != nil {
 		oldMmap := old.mmapData
-		old.mmapData = nil
 		old.close()
 		if oldMmap != nil {
 			_ = syscall.Munmap(oldMmap)
 		}
 	}
+	j.dataMu.Unlock()
 
 	if prev, _ := j.tmpPath.Load().(string); prev != "" && prev != tmpPath {
 		_ = os.Remove(prev)
@@ -423,14 +436,17 @@ func (j *JSONFile) Close() {
 	j.stopWatchLocked()
 	j.mu.Unlock()
 
-	if d := j.data.Swap(nil); d != nil {
+	j.dataMu.Lock()
+	d := j.data
+	j.data = nil
+	if d != nil {
 		mmap := d.mmapData
-		d.mmapData = nil
 		d.close()
 		if mmap != nil {
 			_ = syscall.Munmap(mmap)
 		}
 	}
+	j.dataMu.Unlock()
 	if p, _ := j.tmpPath.Load().(string); p != "" {
 		_ = os.Remove(p)
 	}
