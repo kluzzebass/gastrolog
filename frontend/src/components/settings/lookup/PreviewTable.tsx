@@ -81,15 +81,24 @@ export function parseTabularResult(jsonStr: string): { columns: string[]; rows: 
 
   if (!Array.isArray(parsed) || parsed.length === 0) return null;
 
-  const first = parsed[0];
+  // Unwrap the single-value wrapper the backend adds when a jq expression
+  // emits one output that is itself an array. Without this, `[.hosts[] | {...}]`
+  // (bracket-wrapped, single emit) arrives as `[[{...}, {...}]]` and gets
+  // mistaken for a header-row CSV shape with objects as column names.
+  let items: unknown[] = parsed;
+  if (items.length === 1 && Array.isArray(items[0]) && items[0].every((e) => e !== null && typeof e === "object" && !Array.isArray(e))) {
+    items = items[0];
+  }
+
+  const first = items[0];
 
   // Shape 1: Array of arrays — first row is headers.
   if (Array.isArray(first)) {
     const columns = first.map(String);
     if (columns.length === 0) return null;
     const rows: string[][] = [];
-    for (let i = 1; i < parsed.length; i++) {
-      const row = parsed[i];
+    for (let i = 1; i < items.length; i++) {
+      const row = items[i];
       if (!Array.isArray(row)) return null;
       rows.push(row.map((v: unknown) => {
         if (v === null || v === undefined) return "";
@@ -107,7 +116,7 @@ export function parseTabularResult(jsonStr: string): { columns: string[]; rows: 
   if (columns.length === 0) return null;
 
   const rows: string[][] = [];
-  for (const item of parsed) {
+  for (const item of items) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
     const o = item as Record<string, unknown>;
     rows.push(columns.map((col) => {
