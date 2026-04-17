@@ -221,6 +221,12 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 	}
 	close(orchReady)
 
+	// Clear any stale "alive" entries in Raft for ingesters this node is
+	// configured to know about but isn't running (e.g. last session crashed
+	// before setIngesterAlive(false), or config was edited while down).
+	// Must happen AFTER orch.Start so ListIngesters() reflects reality.
+	clearStaleIngesterAlive(ctx, cfgStore, orch, nodeID, logger)
+
 	// Wire the ForwardTierApply handler so other nodes can forward tier
 	// Raft applies to us when we're the tier Raft leader.
 	if clusterSrv != nil && groupMgr != nil {

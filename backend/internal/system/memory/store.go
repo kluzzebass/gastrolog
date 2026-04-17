@@ -394,6 +394,11 @@ func (s *Store) DeleteIngester(ctx context.Context, id glid.GLID) error {
 	defer s.mu.Unlock()
 
 	delete(s.ingesters, id)
+	// Cascade-clean runtime state so the map doesn't retain orphaned
+	// entries keyed by a no-longer-existent ingester.
+	delete(s.ingesterAlive, id)
+	delete(s.ingesterAssignment, id)
+	delete(s.ingesterCheckpoints, id)
 	return nil
 }
 
