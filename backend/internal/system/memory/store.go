@@ -984,12 +984,13 @@ func copyVaultConfig(st system.VaultConfig) system.VaultConfig {
 
 func copyIngesterConfig(ing system.IngesterConfig) system.IngesterConfig {
 	return system.IngesterConfig{
-		ID:      ing.ID,
-		Name:    ing.Name,
-		Type:    ing.Type,
-		Enabled: ing.Enabled,
-		Params:  copyParams(ing.Params),
-		NodeIDs: append([]string(nil), ing.NodeIDs...),
+		ID:        ing.ID,
+		Name:      ing.Name,
+		Type:      ing.Type,
+		Enabled:   ing.Enabled,
+		Params:    copyParams(ing.Params),
+		NodeIDs:   append([]string(nil), ing.NodeIDs...),
+		Singleton: ing.Singleton,
 	}
 }
 

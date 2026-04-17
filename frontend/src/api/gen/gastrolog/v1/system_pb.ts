@@ -488,11 +488,18 @@ export class IngesterConfig extends Message<IngesterConfig> {
   nodeId = new Uint8Array(0);
 
   /**
-   * Allowed nodes. Passive: try all. Active: place on one.
+   * Allowed nodes. Parallel: run on all. Singleton: place on one.
    *
    * @generated from field: repeated bytes node_ids = 7;
    */
   nodeIds: Uint8Array[] = [];
+
+  /**
+   * HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
+   *
+   * @generated from field: bool singleton = 8;
+   */
+  singleton = false;
 
   constructor(data?: PartialMessage<IngesterConfig>) {
     super();
@@ -509,6 +516,7 @@ export class IngesterConfig extends Message<IngesterConfig> {
     { no: 5, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 8, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterConfig {
@@ -828,6 +836,13 @@ export class IngesterInfo extends Message<IngesterInfo> {
    */
   enabled = false;
 
+  /**
+   * HA semantics: false = parallel (every node_ids), true = Raft-assigned singleton.
+   *
+   * @generated from field: bool singleton = 10;
+   */
+  singleton = false;
+
   constructor(data?: PartialMessage<IngesterInfo>) {
     super();
     proto3.util.initPartial(data, this);
@@ -844,6 +859,7 @@ export class IngesterInfo extends Message<IngesterInfo> {
     { no: 6, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
     { no: 8, name: "node_status", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 8 /* ScalarType.BOOL */} },
     { no: 9, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 10, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterInfo {
@@ -4899,6 +4915,13 @@ export class IngesterTypeDefaults extends Message<IngesterTypeDefaults> {
    */
   mode = IngesterMode.UNSPECIFIED;
 
+  /**
+   * True iff the type meaningfully supports singleton HA placement (Raft-assigned, one node with failover).
+   *
+   * @generated from field: bool singleton_supported = 3;
+   */
+  singletonSupported = false;
+
   constructor(data?: PartialMessage<IngesterTypeDefaults>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4909,6 +4932,7 @@ export class IngesterTypeDefaults extends Message<IngesterTypeDefaults> {
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 2, name: "mode", kind: "enum", T: proto3.getEnumType(IngesterMode) },
+    { no: 3, name: "singleton_supported", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): IngesterTypeDefaults {

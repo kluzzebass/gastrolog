@@ -763,6 +763,13 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
    */
   nodeIds: Uint8Array[] = [];
 
+  /**
+   * HA semantics: false = parallel (run on every node), true = Raft-assigned singleton with failover.
+   *
+   * @generated from field: bool singleton = 8;
+   */
+  singleton = false;
+
   constructor(data?: PartialMessage<PutIngesterCommand>) {
     super();
     proto3.util.initPartial(data, this);
@@ -778,6 +785,7 @@ export class PutIngesterCommand extends Message<PutIngesterCommand> {
     { no: 5, name: "params", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
     { no: 6, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
     { no: 7, name: "node_ids", kind: "scalar", T: 12 /* ScalarType.BYTES */, repeated: true },
+    { no: 8, name: "singleton", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutIngesterCommand {

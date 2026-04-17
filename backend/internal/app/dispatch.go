@@ -307,8 +307,9 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 
 	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
 	isPassive := ok && reg.ListenAddrs != nil
+	isSingleton := ok && reg.SingletonSupported && ingCfg.Singleton
 
-	if !d.shouldRunIngester(ctx, *ingCfg, isPassive) {
+	if !d.shouldRunIngester(ctx, *ingCfg, isSingleton) {
 		if slices.Contains(d.orch.ListIngesters(), id) {
 			if err := d.orch.RemoveIngester(id); err != nil && !errors.Is(err, orchestrator.ErrIngesterNotFound) {
 				d.logger.Error("dispatch: remove ingester not assigned to this node", "id", id, "name", ingCfg.Name, "error", err)
@@ -363,13 +364,13 @@ func (d *configDispatcher) handleIngesterPut(ctx context.Context, id glid.GLID) 
 }
 
 // shouldRunIngester checks whether this node should run the given ingester.
-// Passive: this node must be in NodeIDs (or NodeIDs empty).
-// Active: this node must be the Raft-assigned node.
-func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.IngesterConfig, passive bool) bool {
+// Parallel ingesters: this node must be in NodeIDs (or NodeIDs empty).
+// Singleton ingesters: this node must additionally be the Raft-assigned node.
+func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.IngesterConfig, singleton bool) bool {
 	if len(cfg.NodeIDs) > 0 && !slices.Contains(cfg.NodeIDs, d.localNodeID) {
 		return false
 	}
-	if passive {
+	if !singleton {
 		return true
 	}
 	assigned, err := d.cfgStore.GetIngesterAssignment(ctx, cfg.ID)
@@ -377,15 +378,30 @@ func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.Ing
 		return false
 	}
 	// Empty assignment = not yet placed by the placement manager.
-	// Allow local start (single-node or pre-HA compat). The placement
-	// manager will assign it on the next reconcile cycle.
+	// Allow local start — the placement manager will narrow it down on the
+	// next reconcile cycle and cause the other nodes to stop via
+	// NotifyIngesterAssignmentSet.
 	return assigned == "" || assigned == d.localNodeID
 }
 
 // handleIngesterAssignment reacts to a Raft-replicated assignment change.
-// If the active ingester is now assigned to this node, start it.
-// If it was assigned here but no longer is, stop it.
+// Only meaningful for singleton ingesters — parallel ingesters ignore
+// assignments (they run on every selected node). A stale assignment from
+// a prior singleton era must not tear down a now-parallel ingester.
 func (d *configDispatcher) handleIngesterAssignment(ctx context.Context, id glid.GLID) {
+	ingCfg, err := d.cfgStore.GetIngester(ctx, id)
+	if err != nil || ingCfg == nil {
+		return
+	}
+	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
+	if !ok {
+		return
+	}
+	isSingleton := reg.SingletonSupported && ingCfg.Singleton
+	if !isSingleton {
+		return // parallel — assignment is irrelevant
+	}
+
 	assigned, err := d.cfgStore.GetIngesterAssignment(ctx, id)
 	if err != nil {
 		d.logger.Error("dispatch: read ingester assignment", "id", id, "error", err)

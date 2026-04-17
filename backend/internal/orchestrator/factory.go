@@ -50,6 +50,14 @@ type IngesterRegistration struct {
 	Defaults    func() map[string]string
 	Tester      ConnectionTester                      // nil if not supported
 	ListenAddrs func(params map[string]string) []ListenAddr // nil for non-listeners
+
+	// SingletonSupported indicates whether it is meaningful to run this
+	// ingester type in singleton (Raft-assigned, one-node) mode. When false,
+	// the per-instance IngesterConfig.Singleton flag is ignored — the ingester
+	// always runs in parallel on every node in NodeIDs. Set this to false for
+	// per-node-local data sources (docker, self, tail, metrics) and for
+	// listeners (OS-level port coordination handles the singleton case).
+	SingletonSupported bool
 }
 
 type Factories struct {
@@ -230,16 +238,19 @@ func (o *Orchestrator) applyIngester(recvCfg system.IngesterConfig, assignments 
 		return fmt.Errorf("unknown ingester type: %s", recvCfg.Type)
 	}
 
-	isPassive := reg.ListenAddrs != nil
-	if isPassive {
-		// Passive ingesters run on all selected nodes.
-		if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
-			return nil
-		}
-	} else {
-		// Active ingesters run only on the assigned node.
-		// Empty assignment = not yet placed — allow local start for
-		// single-node or pre-HA compat.
+	// Selected-node gate: if NodeIDs is non-empty, this node must be in it.
+	if len(recvCfg.NodeIDs) > 0 && !slices.Contains(recvCfg.NodeIDs, o.localNodeID) {
+		return nil
+	}
+
+	// Singleton gate: only applies when the type supports singleton mode
+	// and the instance is configured for it. Everything else is parallel —
+	// runs on every selected node with no central coordination.
+	isSingleton := reg.SingletonSupported && recvCfg.Singleton
+	if isSingleton {
+		// Raft-assigned singleton. Empty assignment = placement manager hasn't
+		// run yet — allow local start; it'll be narrowed down on the next
+		// reconcile via NotifyIngesterAssignmentSet.
 		assigned := assignments[recvCfg.ID]
 		if assigned != "" && assigned != o.localNodeID {
 			return nil

@@ -803,25 +803,37 @@ func TestPlacementRF3InsufficientNodes(t *testing.T) {
 
 // ---------- Active ingester placement ----------
 
-func TestPlacementActiveIngesterAssignment(t *testing.T) {
+// singletonFactories builds a Factories map with a singleton-capable "kafka"
+// registration (the real-world type most likely to use Singleton=true).
+func singletonFactories() *orchestrator.Factories {
+	return &orchestrator.Factories{
+		IngesterTypes: map[string]orchestrator.IngesterRegistration{
+			"kafka": {Factory: nil, SingletonSupported: true},
+		},
+	}
+}
+
+// singletonIngester returns an IngesterConfig with Singleton=true using the
+// kafka type from singletonFactories. Callers override fields as needed.
+func singletonIngester(name string, nodeIDs ...string) system.IngesterConfig {
+	return system.IngesterConfig{
+		ID: glid.New(), Name: name, Type: "kafka", Enabled: true,
+		NodeIDs: nodeIDs, Singleton: true,
+	}
+}
+
+func TestPlacementSingletonIngesterAssignment(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil}, // active: ListenAddrs is nil
-		},
-	}
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
-	})
+	ing := singletonIngester("kafka-ing", "node-1", "node-2")
+	_ = store.PutIngester(ctx, ing)
 
 	pm.reconcile(ctx)
 
-	assigned, err := store.GetIngesterAssignment(ctx, ingID)
+	assigned, err := store.GetIngesterAssignment(ctx, ing.ID)
 	if err != nil {
 		t.Fatalf("GetIngesterAssignment: %v", err)
 	}
@@ -830,101 +842,104 @@ func TestPlacementActiveIngesterAssignment(t *testing.T) {
 	}
 }
 
-func TestPlacementActiveIngesterPrefersNonLeader(t *testing.T) {
+func TestPlacementSingletonIngesterPrefersNonLeader(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil}, // active
-		},
-	}
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
-	})
+	ing := singletonIngester("kafka-ing", "node-1", "node-2")
+	_ = store.PutIngester(ctx, ing)
 
-	// Simulate: reconcile is only called on leader, and newTestPlacement makes
-	// the local node the implicit leader. placeActiveIngester reads leaderID from
-	// clusterSrv.LeaderInfo(). Since clusterSrv is nil in unit tests, leaderID
-	// is "". So we need to verify the preference works: when we run many trials,
-	// both nodes should be picked (since leaderID="" matches neither).
-	// Instead, test the stable path: assign once, then verify stable.
+	// clusterSrv is nil in unit tests so leaderID == "", which means the
+	// non-leader preference degrades to "pick any". Verify the stable path:
+	// once assigned, repeated reconciles do not move it.
 	pm.reconcile(ctx)
 
-	first, _ := store.GetIngesterAssignment(ctx, ingID)
+	first, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if first == "" {
 		t.Fatal("expected assignment after reconcile")
 	}
 
-	// Reconcile again — assignment should be stable.
 	pm.reconcile(ctx)
-	second, _ := store.GetIngesterAssignment(ctx, ingID)
+	second, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if second != first {
 		t.Fatalf("assignment not stable: first=%q, second=%q", first, second)
 	}
 }
 
-func TestPlacementActiveIngesterReassignOnNodeDeath(t *testing.T) {
+func TestPlacementSingletonIngesterReassignOnNodeDeath(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// Start with both nodes alive.
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil},
-		},
-	}
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
-	})
+	ing := singletonIngester("kafka-ing", "node-1", "node-2")
+	_ = store.PutIngester(ctx, ing)
 
 	// Force assignment to node-2.
-	_ = store.SetIngesterAssignment(ctx, ingID, "node-2")
+	_ = store.SetIngesterAssignment(ctx, ing.ID, "node-2")
 
-	// Now create a new placementManager where node-2 is dead (not in livePeers).
-	pm2, _, _ := newTestPlacement(t, "node-1", nil) // only node-1 alive
+	// New placementManager where node-2 is dead (not in livePeers).
+	pm2, _, _ := newTestPlacement(t, "node-1", nil)
 	pm2.cfgStore = store
 	pm2.factories = pm.factories
 
 	pm2.reconcile(ctx)
 
-	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	assigned, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if assigned != "node-1" {
 		t.Fatalf("expected reassignment to node-1, got %q", assigned)
 	}
 }
 
-func TestPlacementSkipsPassiveIngesters(t *testing.T) {
+func TestPlacementSkipsParallelIngesters(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	// "parallel" type: SingletonSupported=false, so Singleton=true is ignored.
 	pm.factories = &orchestrator.Factories{
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"syslog-udp": {
-				Factory:     nil,
-				ListenAddrs: func(params map[string]string) []orchestrator.ListenAddr { return nil },
-			},
+			"parallel": {Factory: nil}, // SingletonSupported defaults to false
 		},
 	}
 
 	ingID := glid.New()
 	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "syslog-ing", Type: "syslog-udp", Enabled: true,
+		ID: ingID, Name: "p-ing", Type: "parallel", Enabled: true,
 		NodeIDs: []string{"node-1", "node-2"},
+		// Singleton:true is ignored because the type has SingletonSupported=false.
+		Singleton: true,
 	})
 
 	pm.reconcile(ctx)
 
-	// Passive ingesters should NOT get an assignment from placement manager.
+	// Parallel ingesters should NOT get an assignment from placement manager.
 	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
 	if assigned != "" {
-		t.Fatalf("expected no assignment for passive ingester, got %q", assigned)
+		t.Fatalf("expected no assignment for parallel ingester, got %q", assigned)
+	}
+}
+
+func TestPlacementSkipsNonSingletonConfig(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
+	pm.factories = singletonFactories()
+
+	// Type supports singleton, but the instance has Singleton=false.
+	ingID := glid.New()
+	_ = store.PutIngester(ctx, system.IngesterConfig{
+		ID: ingID, Name: "kafka-ing", Type: "kafka", Enabled: true,
+		NodeIDs: []string{"node-1", "node-2"},
+		Singleton: false,
+	})
+
+	pm.reconcile(ctx)
+
+	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	if assigned != "" {
+		t.Fatalf("expected no assignment when Singleton=false, got %q", assigned)
 	}
 }
 
@@ -932,129 +947,96 @@ func TestPlacementSkipsDisabledIngesters(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil},
-		},
-	}
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: false,
-		NodeIDs: []string{"node-1", "node-2"},
-	})
+	ing := singletonIngester("kafka-ing", "node-1", "node-2")
+	ing.Enabled = false
+	_ = store.PutIngester(ctx, ing)
 
 	pm.reconcile(ctx)
 
-	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	assigned, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if assigned != "" {
 		t.Fatalf("expected no assignment for disabled ingester, got %q", assigned)
 	}
 }
 
-func TestPlacementActiveIngesterEmptyNodeIDs(t *testing.T) {
+func TestPlacementSingletonIngesterEmptyNodeIDs(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil},
-		},
-	}
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
-		NodeIDs: nil, // empty NodeIDs
-	})
+	ing := singletonIngester("kafka-ing") // empty NodeIDs
+	_ = store.PutIngester(ctx, ing)
 
 	pm.reconcile(ctx)
 
-	// Empty NodeIDs means the ingester is skipped by reconcileActiveIngesters.
-	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	assigned, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if assigned != "" {
 		t.Fatalf("expected no assignment for ingester with empty NodeIDs, got %q", assigned)
 	}
 }
 
-func TestPlacementActiveIngesterNoAliveCandidate(t *testing.T) {
+func TestPlacementSingletonIngesterNoAliveCandidate(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	// Only node-1 alive.
-	pm, store, _ := newTestPlacement(t, "node-1", nil)
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil},
-		},
-	}
+	pm, store, _ := newTestPlacement(t, "node-1", nil) // only node-1 alive
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
-		NodeIDs: []string{"node-3", "node-4"}, // neither alive
-	})
+	ing := singletonIngester("kafka-ing", "node-3", "node-4") // neither alive
+	_ = store.PutIngester(ctx, ing)
 
 	pm.reconcile(ctx)
 
-	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
+	assigned, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if assigned != "" {
 		t.Fatalf("expected no assignment when no candidates alive, got %q", assigned)
 	}
 }
 
-func TestPlacementActiveIngesterStableOnRepeatedReconcile(t *testing.T) {
+func TestPlacementSingletonIngesterStableOnRepeatedReconcile(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil},
-		},
-	}
+	pm.factories = singletonFactories()
 
-	ingID := glid.New()
-	_ = store.PutIngester(ctx, system.IngesterConfig{
-		ID: ingID, Name: "docker-ing", Type: "docker", Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
-	})
+	ing := singletonIngester("kafka-ing", "node-1", "node-2")
+	_ = store.PutIngester(ctx, ing)
 
 	pm.reconcile(ctx)
-	first, _ := store.GetIngesterAssignment(ctx, ingID)
+	first, _ := store.GetIngesterAssignment(ctx, ing.ID)
 	if first == "" {
 		t.Fatal("expected initial assignment")
 	}
 
-	// 10 more reconciles — assignment must not change.
 	for i := 0; i < 10; i++ {
 		pm.reconcile(ctx)
-		got, _ := store.GetIngesterAssignment(ctx, ingID)
+		got, _ := store.GetIngesterAssignment(ctx, ing.ID)
 		if got != first {
 			t.Fatalf("reconcile %d changed assignment from %q to %q", i, first, got)
 		}
 	}
 }
 
-func TestPlacementActiveIngesterUnknownType(t *testing.T) {
+func TestPlacementSingletonIngesterUnknownType(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	pm, store, _ := newTestPlacement(t, "node-1", []string{"node-2"})
-	pm.factories = &orchestrator.Factories{
-		IngesterTypes: map[string]orchestrator.IngesterRegistration{
-			"docker": {Factory: nil},
-		},
-	}
+	pm.factories = singletonFactories()
 
+	// Singleton=true but type is unknown → SingletonSupported check fails → skipped.
 	ingID := glid.New()
 	_ = store.PutIngester(ctx, system.IngesterConfig{
 		ID: ingID, Name: "mystery-ing", Type: "unknown-type", Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
+		NodeIDs:   []string{"node-1", "node-2"},
+		Singleton: true,
 	})
 
 	pm.reconcile(ctx)
 
-	// Unknown type → isPassiveIngester returns false, so placement proceeds normally.
 	assigned, _ := store.GetIngesterAssignment(ctx, ingID)
-	if assigned != "node-1" && assigned != "node-2" {
-		t.Fatalf("expected assignment for unknown type (treated as active), got %q", assigned)
+	if assigned != "" {
+		t.Fatalf("expected no assignment for unknown type, got %q", assigned)
 	}
 }

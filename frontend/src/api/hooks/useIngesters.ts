@@ -49,6 +49,7 @@ export function usePutIngester() {
       enabled: boolean;
       params: Record<string, string>;
       nodeIds?: string[];
+      singleton?: boolean;
     }) => {
       return systemClient.putIngester({
         config: {
@@ -58,6 +59,7 @@ export function usePutIngester() {
           enabled: args.enabled,
           params: stripEmptyParams(args.params),
           nodeIds: (args.nodeIds ?? []).map(encodeString),
+          singleton: args.singleton ?? false,
         },
       });
     },
