@@ -165,10 +165,18 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 		Alerts:            alertCollector,
 		Phase:             shutdownPhase,
 		OnIngesterAlive: func(ingesterID glid.GLID, alive bool) {
-			_ = cfgStore.SetIngesterAlive(context.Background(), ingesterID, nodeID, alive)
+			// Bounded timeout so that if quorum is lost during shutdown, the
+			// orchestrator's Stop path doesn't hang 10s per running ingester
+			// waiting for a raft apply that can never land. Normal case
+			// (quorum intact) completes in milliseconds.
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = cfgStore.SetIngesterAlive(ctx, ingesterID, nodeID, alive)
 		},
 		OnIngesterCheckpoint: func(ingesterID glid.GLID, data []byte) {
-			_ = cfgStore.SetIngesterCheckpoint(context.Background(), ingesterID, data)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = cfgStore.SetIngesterCheckpoint(ctx, ingesterID, data)
 		},
 	})
 	if err != nil {
