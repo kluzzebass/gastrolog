@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 )
 
@@ -30,11 +31,23 @@ func (s *stubScheduler) ListJobs() []orchestrator.JobInfo {
 
 // stubPeerJobs provides jobs from simulated peer nodes.
 type stubPeerJobs struct {
-	peers map[string][]*apiv1.Job
+	peers   map[string][]*apiv1.Job
+	changes *notify.Signal
+}
+
+func newStubPeerJobs(peers map[string][]*apiv1.Job) *stubPeerJobs {
+	return &stubPeerJobs{peers: peers, changes: notify.NewSignal()}
 }
 
 func (s *stubPeerJobs) GetAll() map[string][]*apiv1.Job {
 	return s.peers
+}
+
+func (s *stubPeerJobs) Changes() *notify.Signal {
+	if s.changes == nil {
+		s.changes = notify.NewSignal()
+	}
+	return s.changes
 }
 
 func TestGetJob_LocalOnly(t *testing.T) {

@@ -19,6 +19,7 @@ import (
 	chunkmem "gastrolog/internal/chunk/memory"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/memtest"
+	"gastrolog/internal/notify"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/server"
@@ -154,7 +155,7 @@ func setupMultiNode(t *testing.T, nodeIDs []string, opts ...mnOption) *multiNode
 	}
 	remoteSearcher := &directRemoteSearcher{nodes: remoteOrchestrators}
 
-	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}}
+	peerJobs := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{}, changes: notify.NewSignal()}
 
 	// Collect remote orchestrators for peer route stats.
 	peerRouteNodes := make(map[string]*orchestrator.Orchestrator)
@@ -242,11 +243,19 @@ func setupMNNodeNoVault(t *testing.T, nodeID string) multinodeTestNode {
 
 // mnPeerJobs provides jobs from simulated peer nodes.
 type mnPeerJobs struct {
-	peers map[string][]*gastrologv1.Job
+	peers   map[string][]*gastrologv1.Job
+	changes *notify.Signal
 }
 
 func (p *mnPeerJobs) GetAll() map[string][]*gastrologv1.Job {
 	return p.peers
+}
+
+func (p *mnPeerJobs) Changes() *notify.Signal {
+	if p.changes == nil {
+		p.changes = notify.NewSignal()
+	}
+	return p.changes
 }
 
 // mnPeerRouteStats simulates aggregated route stats from peer nodes.
@@ -1035,13 +1044,13 @@ func TestMultiNode_GetJobCrossNode(t *testing.T) {
 	t.Parallel()
 	h := setupMultiNode(t, []string{"node-A", "node-B"})
 
-	mockPeers := &mnPeerJobs{peers: map[string][]*gastrologv1.Job{
+	mockPeers := &mnPeerJobs{changes: notify.NewSignal(), peers: map[string][]*gastrologv1.Job{
 		"node-B": {
 			{Id: []byte("job-on-B"), Name: "compact-B", NodeId: []byte("node-B"),
 				Kind: gastrologv1.JobKind_JOB_KIND_SCHEDULED},
 		},
 	}}
-	jobSrv := server.NewJobServer(h.Node(t, "node-A").orch.Scheduler(), "node-A", mockPeers)
+	jobSrv := server.NewJobServer(h.Node(t, "node-A").orch.Scheduler(), "node-A", mockPeers, h.Node(t, "node-A").orch.Scheduler().Events())
 
 	resp, err := jobSrv.GetJob(context.Background(), connect.NewRequest(&gastrologv1.GetJobRequest{Id: []byte("job-on-B")}))
 	if err != nil {
