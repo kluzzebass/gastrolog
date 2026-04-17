@@ -2611,7 +2611,16 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 	// Guard: reject unsealed chunks upfront. Without this, CompressChunk
 	// silently no-ops and the index builders fail with ErrChunkNotSealed,
 	// producing a spurious WARN on every call. See gastrolog-89k15.
+	//
+	// closed check + postSealWg.Add must happen under the same lock Close()
+	// uses to set closed=true, otherwise Close's Wait can return on a zero
+	// counter between our unlock and Add and let the pipeline continue
+	// against a closed Manager.
 	m.mu.Lock()
+	if m.closed {
+		m.mu.Unlock()
+		return ErrManagerClosed
+	}
 	meta, ok := m.metas[id]
 	if !ok {
 		m.mu.Unlock()
@@ -2621,11 +2630,11 @@ func (m *Manager) PostSealProcess(ctx context.Context, id chunk.ChunkID) error {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotSealed
 	}
+	m.postSealWg.Add(1)
 	m.mu.Unlock()
 
 	done := make(chan struct{})
 	m.postSealActive.Store(id, done)
-	m.postSealWg.Add(1)
 	defer func() {
 		close(done)
 		m.postSealActive.Delete(id)
