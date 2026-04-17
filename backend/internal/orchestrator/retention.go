@@ -45,6 +45,12 @@ type retentionRunner struct {
 	mu         sync.Mutex
 	vaultID    glid.GLID
 	tierID     glid.GLID
+	// Cached for job descriptions so the Jobs inspector can tell sweep
+	// sub-jobs (transitions) apart by their vault/tier. Refreshed from
+	// config on every sweep via retentionTargetForTier.
+	vaultName    string
+	tierPosition int
+	tierType     string
 	cm         chunk.ChunkManager
 	im         index.IndexManager
 	inflight   map[chunk.ChunkID]bool // chunks currently being processed
@@ -327,7 +333,23 @@ func (o *Orchestrator) retentionTargetForTier(cfg *system.Config, vaultCfg syste
 	runner.applyRaftTransitionStreamed = tier.ApplyRaftTransitionStreamed
 	runner.isLeader = tier.IsLeader()
 	runner.followerTargets = tier.FollowerTargets
+	runner.vaultName = vaultCfg.Name
+	runner.tierType = string(tierCfg.Type)
+	runner.tierPosition = tierPositionInVault(cfg, vaultCfg.ID, tier.TierID)
 	return &sweepTarget{runner: runner, rules: rules}
+}
+
+// tierPositionInVault returns the 0-based index of tierID in the vault's
+// ordered tier list, or -1 if the tier isn't found (shouldn't happen for
+// an active sweep target).
+func tierPositionInVault(cfg *system.Config, vaultID, tierID glid.GLID) int {
+	tierIDs := system.VaultTierIDs(cfg.Tiers, vaultID)
+	for i, id := range tierIDs {
+		if id == tierID {
+			return i
+		}
+	}
+	return -1
 }
 
 // reconcileFollower compares on-disk chunks against the tier Raft manifest
@@ -508,7 +530,22 @@ func (r *retentionRunner) scheduleTransition(id chunk.ChunkID) {
 		r.logger.Warn("retention: failed to schedule transition",
 			"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(), "error", err)
 	}
-	r.orch.scheduler.Describe(name, fmt.Sprintf("Transition chunk %s to next tier", id))
+	r.orch.scheduler.Describe(name, r.transitionJobDescription(id))
+}
+
+// transitionJobDescription formats a transition job's description for the
+// Jobs inspector, including vault name and tier position/type so concurrent
+// transitions from different vaults or tiers are distinguishable.
+func (r *retentionRunner) transitionJobDescription(id chunk.ChunkID) string {
+	vaultName := r.vaultName
+	if vaultName == "" {
+		vaultName = r.vaultID.String()
+	}
+	if r.tierPosition < 0 || r.tierType == "" {
+		return fmt.Sprintf("Transition chunk %s in %q to next tier", id, vaultName)
+	}
+	return fmt.Sprintf("Transition chunk %s in %q tier %d (%s) to next tier",
+		id, vaultName, r.tierPosition, r.tierType)
 }
 
 // clearInflight removes a chunk from the in-flight set.
