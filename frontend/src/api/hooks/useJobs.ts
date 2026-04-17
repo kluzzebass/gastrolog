@@ -1,10 +1,8 @@
-import { useState, useCallback, useRef, useEffect, type MutableRefObject } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState, useCallback, useRef, useEffect, useMemo, type MutableRefObject } from "react";
 import { ConnectError, Code } from "@connectrpc/connect";
 import { jobClient } from "../client";
-import { JobStatus } from "../gen/gastrolog/v1/job_pb";
 import type { Job } from "../gen/gastrolog/v1/job_pb";
-import { decode } from "../glid";
+import { encode } from "../glid";
 
 const INITIAL_BACKOFF_MS = 1000;
 const MAX_BACKOFF_MS = 30_000;
@@ -150,20 +148,18 @@ export function useWatchJobs(options?: { onError?: (err: Error) => void }) {
   return state;
 }
 
+// useJob returns a live view of a single job by ID. Event-driven — no
+// polling. Derived from useWatchJobs(), which receives per-transition
+// events from the server over a streaming RPC; this hook just filters
+// the watched list by id.
+//
+// The returned shape is { data: Job | undefined } to match the previous
+// useQuery-based signature; callers don't need to change.
 export function useJob(jobId: string | null) {
-  return useQuery({
-    queryKey: ["job", jobId],
-    queryFn: async () => {
-      const response = await jobClient.getJob({ id: decode(jobId!) });
-      return response.job;
-    },
-    enabled: !!jobId,
-    // eslint-disable-next-line sonarjs/function-return-type -- TanStack Query requires number | false
-    refetchInterval: (query) => {
-      const status = query.state.data?.status;
-      if (status === JobStatus.COMPLETED || status === JobStatus.FAILED)
-        return false;
-      return 1000;
-    },
-  });
+  const { jobs } = useWatchJobs();
+  const data = useMemo(() => {
+    if (!jobId) return undefined;
+    return jobs.find((j) => encode(j.id) === jobId);
+  }, [jobs, jobId]);
+  return { data };
 }
