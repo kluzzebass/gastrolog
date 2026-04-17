@@ -249,7 +249,7 @@ func TestImportRecordsMemory(t *testing.T) {
 		}
 	}
 
-	meta, err := cm.ImportRecords(sliceIterator(records))
+	meta, err := cm.ImportRecords(chunk.ChunkID{}, sliceIterator(records))
 	if err != nil {
 		t.Fatalf("ImportRecords: %v", err)
 	}
@@ -302,7 +302,7 @@ func TestImportRecordsFile(t *testing.T) {
 		}
 	}
 
-	meta, err := cm.ImportRecords(sliceIterator(records))
+	meta, err := cm.ImportRecords(chunk.ChunkID{}, sliceIterator(records))
 	if err != nil {
 		t.Fatalf("ImportRecords: %v", err)
 	}
@@ -342,7 +342,7 @@ func TestImportRecordsEmpty(t *testing.T) {
 	t.Parallel()
 	cm := newMemVault(t)
 
-	meta, err := cm.ImportRecords(sliceIterator(nil))
+	meta, err := cm.ImportRecords(chunk.ChunkID{}, sliceIterator(nil))
 	if err != nil {
 		t.Fatalf("ImportRecords(nil): %v", err)
 	}

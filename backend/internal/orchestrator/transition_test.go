@@ -12,6 +12,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
@@ -1059,8 +1060,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	for i := range recs {
 		recs[i] = makeRecord("primary-rec")
 	}
-	followerCM.SetNextChunkID(chunkID)
-	_, importErr := followerCM.ImportRecords(testIterFromRecords(recs))
+	_, importErr := followerCM.ImportRecords(chunkID, testIterFromRecords(recs))
 	if importErr != nil {
 		t.Fatalf("follower import failed: %v", importErr)
 	}
@@ -2341,6 +2341,27 @@ func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
 //   - The leader's tiers have FollowerTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
+// newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
+// (including Debug) to /tmp/gastrolog-lifecycle-<testname>-<pid>-<ts>.log.
+// Path is outside t.TempDir() so the log survives test cleanup for
+// post-mortem inspection. On test failure, the log path is dumped to t.Log.
+func newClusterLifecycleLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+	name := strings.ReplaceAll(t.Name(), "/", "_")
+	logPath := filepath.Join("/tmp", fmt.Sprintf("gastrolog-lifecycle-%s-%d-%d.log",
+		name, os.Getpid(), time.Now().UnixNano()))
+	f, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create lifecycle log: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = f.Close()
+		t.Logf("lifecycle log: %s", logPath)
+	})
+	handler := slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(handler)
+}
+
 func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords uint64) *clusterHarness {
 	t.Helper()
 	if len(nodeIDs) < 2 {
@@ -2390,8 +2411,11 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	orchs := make(map[string]*Orchestrator)
 	nodes := make(map[string]*clusterTestNode)
 
+	logger := newClusterLifecycleLogger(t)
+
 	for _, nid := range nodeIDs {
-		orch := newTestOrch(t, Config{LocalNodeID: nid})
+		nodeLogger := logger.With("node", nid)
+		orch := newTestOrch(t, Config{LocalNodeID: nid, Logger: nodeLogger})
 		orch.sysLoader = &transitionSystemLoader{store: store}
 		orchs[nid] = orch
 
@@ -2405,6 +2429,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 				Dir:            dir,
 				Now:            time.Now,
 				RotationPolicy: chunk.NewRecordCountPolicy(rotationRecords),
+				Logger:         nodeLogger.With("tier", fmt.Sprintf("tier-%d", i)),
 			})
 			if cmErr != nil {
 				t.Fatal(cmErr)

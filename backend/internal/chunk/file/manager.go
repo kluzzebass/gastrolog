@@ -1584,6 +1584,7 @@ func (m *Manager) openImportFiles(id chunk.ChunkID, createdAt time.Time) (*impor
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
+	m.logger.Debug("chunk-lifecycle: import dir created", "chunk", id.String(), "dir", dir)
 
 	rawFile, err := m.createRawFile(id)
 	if err != nil {
@@ -1685,11 +1686,16 @@ func (s *importState) writeRecord(rec chunk.Record) error {
 	return nil
 }
 
-// ImportRecords creates a new sealed chunk by consuming records from the
-// iterator, preserving each record's WriteTS. The records are written to a new
-// chunk directory separate from the active chunk; concurrent Append calls are
-// not affected.
-func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, error) {
+// ImportRecords creates a new sealed chunk with the given ID by consuming
+// records from the iterator, preserving each record's WriteTS. The records
+// are written to a new chunk directory separate from the active chunk;
+// concurrent Append calls are not affected.
+//
+// If id is the zero ChunkID, a new ID is generated. Passing the ID directly
+// rather than via SetNextChunkID avoids a race where a concurrent Append
+// (via openLocked) could consume the pending ID and leave the import to
+// allocate a fresh, untracked one — see gastrolog-11rzz.
+func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1697,11 +1703,7 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		return chunk.ChunkMeta{}, ErrManagerClosed
 	}
 
-	var id chunk.ChunkID
-	if m.nextChunkID != nil {
-		id = *m.nextChunkID
-		m.nextChunkID = nil
-	} else {
+	if id == (chunk.ChunkID{}) {
 		id = chunk.NewChunkID()
 	}
 	files, err := m.openImportFiles(id, m.cfg.Now())
@@ -1723,16 +1725,21 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 		}
 		if iterErr != nil {
 			files.cleanup()
+			m.logger.Debug("chunk-lifecycle: import cleanup (iter err)",
+				"chunk", id.String(), "error", iterErr)
 			return chunk.ChunkMeta{}, iterErr
 		}
 		if err := s.writeRecord(rec); err != nil {
 			files.cleanup()
+			m.logger.Debug("chunk-lifecycle: import cleanup (write err)",
+				"chunk", id.String(), "error", err)
 			return chunk.ChunkMeta{}, err
 		}
 	}
 
 	if s.count == 0 {
 		files.cleanup()
+		m.logger.Debug("chunk-lifecycle: import cleanup (zero records)", "chunk", id.String())
 		return chunk.ChunkMeta{}, nil
 	}
 
@@ -1744,6 +1751,8 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 	for _, f := range []*os.File{files.raw, files.idx, files.attr, files.dict} {
 		if err := m.setSealedFlag(f); err != nil {
 			files.cleanup()
+			m.logger.Debug("chunk-lifecycle: import cleanup (seal flag err)",
+				"chunk", id.String(), "error", err)
 			return chunk.ChunkMeta{}, err
 		}
 	}
@@ -1761,6 +1770,8 @@ func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, err
 	s.meta.diskBytes = m.computeDiskBytes(id)
 
 	m.metas[id] = s.meta
+	m.logger.Debug("chunk-lifecycle: import registered in metas",
+		"chunk", id.String(), "records", s.count)
 	return s.meta.toChunkMeta(), nil
 }
 
@@ -2427,7 +2438,24 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 
 	meta := m.lookupMeta(id)
 	if meta == nil {
+		// Chunk is not tracked in metas, but a stray directory may still
+		// exist on disk from a partial import that raced with a tombstone.
+		// Remove the directory unconditionally — DeleteSilent's contract is
+		// "leave no trace of this chunk." Returning ErrChunkNotFound without
+		// checking disk leaves orphan directories that fail the cluster-
+		// transition invariant (see gastrolog-11rzz).
+		dir := m.chunkDir(id)
 		m.mu.Unlock()
+		if _, statErr := os.Stat(dir); statErr == nil {
+			if rmErr := os.RemoveAll(dir); rmErr != nil {
+				m.logger.Warn("chunk-lifecycle: orphan dir remove failed",
+					"chunk", id.String(), "dir", dir, "error", rmErr)
+				return fmt.Errorf("remove orphan chunk dir %s: %w", id, rmErr)
+			}
+			m.logger.Debug("chunk-lifecycle: removed orphan dir (not in metas)",
+				"chunk", id.String(), "dir", dir)
+			return nil
+		}
 		return chunk.ErrChunkNotFound
 	}
 
@@ -2462,8 +2490,12 @@ func (m *Manager) deleteInternal(id chunk.ChunkID) error {
 		m.mu.Lock()
 		if err := os.RemoveAll(dir); err != nil {
 			m.mu.Unlock()
+			m.logger.Warn("chunk-lifecycle: RemoveAll failed",
+				"chunk", id.String(), "dir", dir, "error", err)
 			return fmt.Errorf("remove chunk dir %s: %w", id, err)
 		}
+		m.logger.Debug("chunk-lifecycle: removed tracked chunk dir",
+			"chunk", id.String(), "dir", dir)
 	}
 
 	delete(m.metas, id)          // no-op for cloud chunks (not in metas)

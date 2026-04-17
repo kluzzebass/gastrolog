@@ -768,7 +768,7 @@ func (o *Orchestrator) ImportChunkRecords(ctx context.Context, vaultID glid.GLID
 		return err
 	}
 
-	meta, err := cm.ImportRecords(next)
+	meta, err := cm.ImportRecords(chunk.ChunkID{}, next)
 	if err != nil {
 		return fmt.Errorf("import records: %w", err)
 	}
@@ -868,8 +868,7 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
 	}
 
-	cm.SetNextChunkID(chunkID)
-	meta, err := cm.ImportRecords(next)
+	meta, err := cm.ImportRecords(chunkID, next)
 	if err != nil {
 		return fmt.Errorf("import to tier %s: %w", tierID, err)
 	}
@@ -880,16 +879,30 @@ func (o *Orchestrator) ImportToTierStorage(ctx context.Context, vaultID, tierID 
 	return o.finalizeImportedChunk(vaultID, tierID, cm, meta, ref.isTombstoned)
 }
 
-// finalizeImportedChunk handles the post-import steps: tombstone re-check
-// (to catch the race where the tier FSM applied CmdDeleteChunk while we
-// were writing files, so onDelete's cleanup ran against a chunk that
-// didn't exist yet on disk), tier Raft announcement, and scheduling of
-// post-seal work (compression, index build). See gastrolog-11rzz for the
-// tombstone re-check rationale.
+// finalizeImportedChunk handles the post-import steps: tier Raft
+// announcement, tombstone re-check, and (if not tombstoned) post-seal
+// work scheduling. See gastrolog-11rzz for the ordering rationale.
+//
+// Ordering matters: announce first, then re-check tombstone. This covers
+// the race where DeleteChunk applies between ImportRecords and our check
+// — if we checked first we'd miss it; announcing first propagates the
+// create through the tier FSM (which rejects it when tombstoned via the
+// applyCreate guard), so by the time we re-check the tombstone state is
+// authoritative and any on-disk files we wrote are orphans we must
+// clean up explicitly because the FSM onDelete callback fired before
+// the files existed.
 func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk.ChunkManager, meta chunk.ChunkMeta, isTombstoned func(chunk.ChunkID) bool) error {
 	if meta.ID == (chunk.ChunkID{}) {
 		return nil
 	}
+
+	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
+		if a := ann.GetAnnouncer(); a != nil {
+			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
+			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestEnd, meta.SourceEnd)
+		}
+	}
+
 	if isTombstoned != nil && isTombstoned(meta.ID) {
 		if del, ok := cm.(chunk.SilentDeleter); ok {
 			_ = del.DeleteSilent(meta.ID)
@@ -900,12 +913,7 @@ func (o *Orchestrator) finalizeImportedChunk(vaultID, tierID glid.GLID, cm chunk
 			"vault", vaultID, "tier", tierID, "chunk", meta.ID.String())
 		return nil
 	}
-	if ann, ok := cm.(chunk.AnnouncerGetter); ok {
-		if a := ann.GetAnnouncer(); a != nil {
-			a.AnnounceCreate(meta.ID, meta.WriteStart, meta.IngestStart, meta.SourceStart)
-			a.AnnounceSeal(meta.ID, meta.WriteEnd, meta.RecordCount, meta.Bytes, meta.IngestEnd, meta.SourceEnd)
-		}
-	}
+
 	o.postSealWork(vaultID, cm, meta.ID)
 	return nil
 }

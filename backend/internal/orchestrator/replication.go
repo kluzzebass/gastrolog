@@ -226,5 +226,21 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		}
 		records = append(records, rec)
 	}
+
+	// Final tombstone check right before sending: retention may have
+	// deleted this chunk while we were reading records. Without the
+	// recheck, a late ImportSealed would still land on the follower after
+	// the follower has already processed the delete via tier Raft, and
+	// the follower's post-import cleanup only catches the case where the
+	// tombstone is on its own FSM. This leader-side recheck short-
+	// circuits the RPC entirely when the leader already knows the chunk
+	// is gone. See gastrolog-11rzz.
+	tier := o.findLocalTier(vaultID, tierID)
+	if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID)
+		return nil
+	}
+
 	return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
 }

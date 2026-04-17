@@ -213,7 +213,9 @@ func (n *noopChunkManager) SetRotationPolicy(chunk.RotationPolicy) {
 	// routing tests that never exercise the rotation policy surface.
 }
 func (n *noopChunkManager) CheckRotation() *string                                             { return nil }
-func (n *noopChunkManager) ImportRecords(chunk.RecordIterator) (chunk.ChunkMeta, error)        { return chunk.ChunkMeta{}, nil }
+func (n *noopChunkManager) ImportRecords(chunk.ChunkID, chunk.RecordIterator) (chunk.ChunkMeta, error) {
+	return chunk.ChunkMeta{}, nil
+}
 func (n *noopChunkManager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.Attributes) bool) error {
 	return nil
 }

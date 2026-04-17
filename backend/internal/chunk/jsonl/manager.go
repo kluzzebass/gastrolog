@@ -167,7 +167,7 @@ func (m *Manager) ScanAttrs(_ chunk.ChunkID, _ uint64, _ func(time.Time, chunk.A
 	return nil
 }
 
-func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, error) {
+func (m *Manager) ImportRecords(_ chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	for {
 		rec, err := next()
 		if err != nil {

@@ -493,18 +493,17 @@ func (m *Manager) CheckRotation() *string {
 	return trigger
 }
 
-// ImportRecords creates a new sealed chunk by consuming records from the
-// iterator, preserving each record's WriteTS. The new chunk is independent
-// of the active chunk.
-func (m *Manager) ImportRecords(next chunk.RecordIterator) (chunk.ChunkMeta, error) {
+// ImportRecords creates a new sealed chunk with the given ID by consuming
+// records from the iterator, preserving each record's WriteTS. The new chunk
+// is independent of the active chunk.
+//
+// If id is the zero ChunkID, a new ID is generated. See gastrolog-11rzz for
+// why ID goes via an explicit parameter rather than SetNextChunkID.
+func (m *Manager) ImportRecords(id chunk.ChunkID, next chunk.RecordIterator) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var id chunk.ChunkID
-	if m.nextChunkID != nil {
-		id = *m.nextChunkID
-		m.nextChunkID = nil
-	} else {
+	if id == (chunk.ChunkID{}) {
 		id = chunk.NewChunkID()
 	}
 	state := &chunkState{

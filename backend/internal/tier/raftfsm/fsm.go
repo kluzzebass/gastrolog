@@ -346,6 +346,16 @@ func (f *FSM) applyCreate(data []byte) error {
 	ingestStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[24:32]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 	sourceStart := time.Unix(0, int64(binary.BigEndian.Uint64(data[32:40]))) //nolint:gosec // G115: safe round-trip from uint64 nano timestamp
 
+	// Reject creates for tombstoned chunk IDs. If the tier already applied
+	// a DeleteChunk for this ID, a later CreateChunk (late replication /
+	// out-of-order Raft apply) must not resurrect it in the live map —
+	// that's exactly the ghost-chunk bug from gastrolog-11rzz. The
+	// orchestrator's post-import path separately cleans up any on-disk
+	// files via the tombstone re-check after announce.
+	if _, dead := f.tombstones[id]; dead {
+		return nil
+	}
+
 	f.chunks[id] = &Entry{
 		ID:          id,
 		WriteStart:  writeStart,
