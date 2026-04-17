@@ -179,12 +179,13 @@ func (s *SystemServer) loadSystemIngesters(ctx context.Context, resp *apiv1.GetS
 	}
 	for _, ing := range ingesters {
 		resp.Ingesters = append(resp.Ingesters, &apiv1.IngesterConfig{
-			Id:      ing.ID.ToProto(),
-			Name:    ing.Name,
-			Type:    ing.Type,
-			Params:  ing.Params,
-			Enabled: ing.Enabled,
-			NodeIds: stringsToBytes(ing.NodeIDs),
+			Id:        ing.ID.ToProto(),
+			Name:      ing.Name,
+			Type:      ing.Type,
+			Params:    ing.Params,
+			Enabled:   ing.Enabled,
+			NodeIds:   stringsToBytes(ing.NodeIDs),
+			Singleton: ing.Singleton,
 		})
 	}
 	return nil
