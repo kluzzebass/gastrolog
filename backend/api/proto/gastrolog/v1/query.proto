@@ -162,7 +162,8 @@ message Record {
 
   // EventID fields for record identity and deduplication.
   uint32 ingest_seq = 7;   // Per-ingester rolling sequence counter
-  bytes ingester_id = 8;   // 16-byte UUID
+  bytes ingester_id = 8;   // 16-byte GLID
+  bytes node_id = 9;       // 16-byte GLID — emitting node, disambiguates parallel ingesters
 }
 
 message RecordRef {

@@ -524,7 +524,7 @@ func (c *msgPairCache) values() map[string]struct{} {
 
 // matchesKeyValue checks if all query key=value pairs are found in either
 // the record's attributes, message body, or first-class fields
-// (ingester_id, ingest_seq, ingest_ts, write_ts, source_ts).
+// (ingester_id, node_id, ingest_seq, ingest_ts, write_ts, source_ts).
 // Each filter must match. A filter with Key="" and Value="" is skipped.
 func matchesKeyValue(rec chunk.Record, queryFilters []KeyValueFilter) bool {
 	if len(queryFilters) == 0 {
@@ -639,6 +639,11 @@ func firstClassFieldValue(key string, rec chunk.Record) (string, bool) {
 	case "ingester_id":
 		if rec.EventID.IngesterID != (glid.GLID{}) {
 			return rec.EventID.IngesterID.String(), true
+		}
+		return "", false
+	case "node_id":
+		if rec.EventID.NodeID != (glid.GLID{}) {
+			return rec.EventID.NodeID.String(), true
 		}
 		return "", false
 	case "ingest_seq":
@@ -1410,7 +1415,7 @@ func matchesSingleKV(rec chunk.Record, pred *querylang.PredicateExpr) bool {
 	attrs := rec.Attrs
 	raw := rec.Raw
 
-	// First-class fields (ingester_id, ingest_seq, timestamps).
+	// First-class fields (ingester_id, node_id, ingest_seq, timestamps).
 	if v, ok := firstClassFieldValue(keyLower, rec); ok {
 		return matchFirstClassFilter(v, KeyValueFilter{Key: keyLower, Value: pred.Value, Op: pred.Op, ValuePat: pred.ValuePat})
 	}

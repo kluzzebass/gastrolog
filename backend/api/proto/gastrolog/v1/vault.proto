@@ -297,7 +297,8 @@ message ExportRecord {
 
   // EventID fields for record identity and deduplication.
   uint32 ingest_seq = 9;   // Per-ingester rolling sequence counter
-  bytes ingester_id = 10;  // 16-byte UUID
+  bytes ingester_id = 10;  // 16-byte GLID
+  bytes node_id = 11;      // 16-byte GLID — emitting node, disambiguates parallel ingesters
 }
 
 // ImportRecords appends a batch of records to a vault.

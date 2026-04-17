@@ -67,7 +67,9 @@ import (
 )
 
 const (
-	formatVersion = 0x01
+	// formatVersion 0x02: NodeID added to record frame (gastrolog-1k3l9).
+	// Chunks written with earlier versions are not readable by this code.
+	formatVersion = 0x02
 	headerSize    = 96 // fixed header before dictionary
 
 	// Record index entry: byte offset (u64) + frame size (u32).
@@ -77,9 +79,9 @@ const (
 	// enabling random access at frame granularity. Matches the file vault.
 	seekableFrameSize = 256 << 10 // 256 KB
 
-	// Minimum record frame: timestamps (3×8) + ingesterID (16) + ingestSeq (4)
-	// + attrCount (2) + rawLen (4) = 58 bytes.
-	minFrameSize = 58
+	// Minimum record frame: timestamps (3×8) + ingesterID (16) + nodeID (16)
+	// + ingestSeq (4) + attrCount (2) + rawLen (4) = 74 bytes.
+	minFrameSize = 74
 
 	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
 	tsIndexEntrySize = 12

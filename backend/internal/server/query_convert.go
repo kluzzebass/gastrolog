@@ -249,6 +249,7 @@ func recordToProto(rec chunk.Record) *apiv1.Record {
 		Raw:        rec.Raw,
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterId: rec.EventID.IngesterID[:],
+		NodeId:     rec.EventID.NodeID[:],
 		Ref: &apiv1.RecordRef{
 			ChunkId: glid.GLID(rec.Ref.ChunkID).ToProto(),
 			Pos:     rec.Ref.Pos,
@@ -270,6 +271,7 @@ func exportToRecord(er *apiv1.ExportRecord) *apiv1.Record {
 		WriteTs:    er.WriteTs,
 		IngestSeq:  er.IngestSeq,
 		IngesterId: er.IngesterId,
+		NodeId:     er.NodeId,
 	}
 	if len(er.Attrs) > 0 {
 		rec.Attrs = make(map[string]string, len(er.Attrs))

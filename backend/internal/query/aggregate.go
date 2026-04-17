@@ -54,6 +54,9 @@ func RecordToRow(rec chunk.Record) querylang.Row {
 	if rec.EventID.IngesterID != (glid.GLID{}) {
 		row["ingester_id"] = rec.EventID.IngesterID.String()
 	}
+	if rec.EventID.NodeID != (glid.GLID{}) {
+		row["node_id"] = rec.EventID.NodeID.String()
+	}
 	row["ingest_seq"] = strconv.FormatUint(uint64(rec.EventID.IngestSeq), 10)
 	// Expose all timestamp fields for pipeline operators (sort, project).
 	row["ingest_ts"] = rec.IngestTS.Format(time.RFC3339Nano)

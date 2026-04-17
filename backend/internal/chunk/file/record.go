@@ -10,7 +10,7 @@ import (
 
 )
 
-// idx.log entry layout (58 bytes):
+// idx.log entry layout (74 bytes):
 //
 //	sourceTS    (8 bytes, int64, Unix nanoseconds, 0 if not available)
 //	ingestTS    (8 bytes, int64, Unix nanoseconds)
@@ -20,9 +20,10 @@ import (
 //	attrOffset  (4 bytes, uint32, byte offset into attr.log data section)
 //	attrSize    (2 bytes, uint16, length of encoded attributes)
 //	ingestSeq   (4 bytes, uint32, per-ingester rolling counter)
-//	ingesterID  (16 bytes, UUID binary)
+//	ingesterID  (16 bytes, GLID binary)
+//	nodeID      (16 bytes, GLID binary — emitting node; disambiguates parallel ingesters)
 const (
-	IdxEntrySize = 58
+	IdxEntrySize = 74
 
 	idxSourceTSOffset    = 0
 	idxIngestTSOffset    = 8
@@ -33,10 +34,13 @@ const (
 	idxAttrSizeOffset    = 36
 	idxIngestSeqOffset   = 38
 	idxIngesterIDOffset  = 42
+	idxNodeIDOffset      = 58
 
-	// File versions.
+	// File versions. IdxLogVersion bumped to 0x03 for the 74-byte entry with
+	// NodeID (gastrolog-1k3l9). Chunks written with earlier versions are not
+	// readable by this code; operators must wipe and re-ingest.
 	RawLogVersion    = 0x01
-	IdxLogVersion    = 0x02
+	IdxLogVersion    = 0x03
 	AttrLogVersion   = 0x01
 	AttrDictVersion  = 0x01
 
@@ -70,10 +74,11 @@ type IdxEntry struct {
 	AttrOffset uint32    // Byte offset into attr.log (after header)
 	AttrSize   uint16    // Length of encoded attributes
 	IngestSeq  uint32    // Per-ingester rolling sequence counter
-	IngesterID glid.GLID // Ingester identity (16-byte UUID)
+	IngesterID glid.GLID // Ingester identity (16-byte GLID)
+	NodeID     glid.GLID // Emitting node identity (16-byte GLID)
 }
 
-// EncodeIdxEntry encodes an idx.log entry into a 58-byte buffer.
+// EncodeIdxEntry encodes an idx.log entry into a 74-byte buffer.
 // Timestamps are stored as Unix nanoseconds.
 func EncodeIdxEntry(e IdxEntry, buf []byte) {
 	binary.LittleEndian.PutUint64(buf[idxSourceTSOffset:], uint64(e.SourceTS.UnixNano()))
@@ -85,17 +90,19 @@ func EncodeIdxEntry(e IdxEntry, buf []byte) {
 	binary.LittleEndian.PutUint16(buf[idxAttrSizeOffset:], e.AttrSize)
 	binary.LittleEndian.PutUint32(buf[idxIngestSeqOffset:], e.IngestSeq)
 	copy(buf[idxIngesterIDOffset:idxIngesterIDOffset+16], e.IngesterID[:])
+	copy(buf[idxNodeIDOffset:idxNodeIDOffset+16], e.NodeID[:])
 }
 
-// DecodeIdxEntry decodes an idx.log entry from a 58-byte buffer.
+// DecodeIdxEntry decodes an idx.log entry from a 74-byte buffer.
 // Timestamps are stored as Unix nanoseconds.
 func DecodeIdxEntry(buf []byte) IdxEntry {
 	var sourceTS time.Time
 	if ns := int64(binary.LittleEndian.Uint64(buf[idxSourceTSOffset:])); ns > 0 { //nolint:gosec // G115: nanosecond timestamps fit in int64
 		sourceTS = time.Unix(0, ns)
 	}
-	var ingesterID glid.GLID
+	var ingesterID, nodeID glid.GLID
 	copy(ingesterID[:], buf[idxIngesterIDOffset:idxIngesterIDOffset+16])
+	copy(nodeID[:], buf[idxNodeIDOffset:idxNodeIDOffset+16])
 	return IdxEntry{
 		SourceTS:   sourceTS,
 		IngestTS:   time.Unix(0, int64(binary.LittleEndian.Uint64(buf[idxIngestTSOffset:]))),  //nolint:gosec // G115: nanosecond timestamps fit in int64
@@ -106,6 +113,7 @@ func DecodeIdxEntry(buf []byte) IdxEntry {
 		AttrSize:   binary.LittleEndian.Uint16(buf[idxAttrSizeOffset:]),
 		IngestSeq:  binary.LittleEndian.Uint32(buf[idxIngestSeqOffset:]),
 		IngesterID: ingesterID,
+		NodeID:     nodeID,
 	}
 }
 
@@ -131,6 +139,7 @@ func BuildRecord(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.Recor
 		WriteTS:  entry.WriteTS,
 		EventID: chunk.EventID{
 			IngesterID: entry.IngesterID,
+			NodeID:     entry.NodeID,
 			IngestTS:   entry.IngestTS,
 			IngestSeq:  entry.IngestSeq,
 		},
@@ -150,6 +159,7 @@ func BuildRecordCopy(entry IdxEntry, raw []byte, attrs chunk.Attributes) chunk.R
 		WriteTS:  entry.WriteTS,
 		EventID: chunk.EventID{
 			IngesterID: entry.IngesterID,
+			NodeID:     entry.NodeID,
 			IngestTS:   entry.IngestTS,
 			IngestSeq:  entry.IngestSeq,
 		},

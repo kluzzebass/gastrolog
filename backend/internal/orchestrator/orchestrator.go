@@ -266,6 +266,10 @@ type Orchestrator struct {
 
 	// Local node identity for multi-node filtering.
 	localNodeID string
+	// localNodeIDGLID is the parsed GLID form of localNodeID, pre-computed
+	// at construction for the hot EventID-stamping path in digestAndForward.
+	// Empty (zero GLID) for memory-config / no-node-id orchestrators.
+	localNodeIDGLID glid.GLID
 
 	// Per-ingester rolling sequence counter for EventID assignment.
 	// Only accessed from digestLoop (single goroutine), no lock needed.
@@ -315,6 +319,20 @@ type Orchestrator struct {
 // wired phase), preserving the pre-gastrolog-1e5ke behaviour.
 func (o *Orchestrator) shuttingDown() bool {
 	return o.phase != nil && o.phase.ShuttingDown()
+}
+
+// parseNodeGLID decodes the node identity string into a GLID for use in
+// record-level EventID. Empty or unparseable input yields the zero GLID —
+// memory-config tests and ad-hoc constructions use this path.
+func parseNodeGLID(id string) glid.GLID {
+	if id == "" {
+		return glid.GLID{}
+	}
+	g, err := glid.ParseAny(id)
+	if err != nil {
+		return glid.GLID{}
+	}
+	return g
 }
 
 // ChunkSignal returns the signal that fires on every chunk metadata change.
@@ -444,6 +462,7 @@ func New(cfg Config) (*Orchestrator, error) {
 		ingestSize:      cfg.IngestChannelSize,
 		sysLoader:       cfg.SystemLoader,
 		localNodeID:     cfg.LocalNodeID,
+		localNodeIDGLID: parseNodeGLID(cfg.LocalNodeID),
 		ingestSeqs:      make(map[string]uint32),
 		alerts:          cfg.Alerts,
 		suspects:        newSuspectTracker(),

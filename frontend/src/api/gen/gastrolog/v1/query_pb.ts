@@ -751,11 +751,18 @@ export class Record extends Message<Record> {
   ingestSeq = 0;
 
   /**
-   * 16-byte UUID
+   * 16-byte GLID
    *
    * @generated from field: bytes ingester_id = 8;
    */
   ingesterId = new Uint8Array(0);
+
+  /**
+   * 16-byte GLID — emitting node, disambiguates parallel ingesters
+   *
+   * @generated from field: bytes node_id = 9;
+   */
+  nodeId = new Uint8Array(0);
 
   constructor(data?: PartialMessage<Record>) {
     super();
@@ -773,6 +780,7 @@ export class Record extends Message<Record> {
     { no: 6, name: "source_ts", kind: "message", T: Timestamp },
     { no: 7, name: "ingest_seq", kind: "scalar", T: 13 /* ScalarType.UINT32 */ },
     { no: 8, name: "ingester_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 9, name: "node_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): Record {
