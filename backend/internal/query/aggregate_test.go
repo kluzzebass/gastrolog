@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/querylang"
 )
 
@@ -77,6 +78,46 @@ func TestRecordToRowNilAttrs(t *testing.T) {
 	row := RecordToRow(rec)
 	if row["raw"] != "hello" {
 		t.Errorf("raw = %q, want hello", row["raw"])
+	}
+}
+
+func TestRecordToRowSurfacesEventIDFields(t *testing.T) {
+	ingester := glid.New()
+	node := glid.New()
+	rec := chunk.Record{
+		IngestTS: baseTime,
+		WriteTS:  baseTime,
+		EventID: chunk.EventID{
+			IngesterID: ingester,
+			NodeID:     node,
+			IngestTS:   baseTime,
+			IngestSeq:  42,
+		},
+		Raw: []byte("hello"),
+	}
+	row := RecordToRow(rec)
+	if row["ingester_id"] != ingester.String() {
+		t.Errorf("ingester_id = %q, want %q", row["ingester_id"], ingester.String())
+	}
+	if row["node_id"] != node.String() {
+		t.Errorf("node_id = %q, want %q", row["node_id"], node.String())
+	}
+	if row["ingest_seq"] != "42" {
+		t.Errorf("ingest_seq = %q, want 42", row["ingest_seq"])
+	}
+}
+
+func TestRecordToRowOmitsZeroNodeID(t *testing.T) {
+	// Memory-config ingester or pre-NodeID test record: zero NodeID shouldn't
+	// appear as an empty-string field in the row.
+	rec := chunk.Record{
+		WriteTS: baseTime,
+		Raw:     []byte("x"),
+		EventID: chunk.EventID{IngesterID: glid.New(), IngestSeq: 1},
+	}
+	row := RecordToRow(rec)
+	if _, ok := row["node_id"]; ok {
+		t.Errorf("node_id should not be present when NodeID is zero, got %q", row["node_id"])
 	}
 }
 

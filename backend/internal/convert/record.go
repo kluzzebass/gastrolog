@@ -31,6 +31,7 @@ func RecordToExport(rec chunk.Record) *gastrologv1.ExportRecord {
 		Pos:        rec.Ref.Pos,
 		IngestSeq:  rec.EventID.IngestSeq,
 		IngesterId: rec.EventID.IngesterID[:],
+		NodeId:     rec.EventID.NodeID[:],
 	}
 	if !rec.SourceTS.IsZero() {
 		er.SourceTs = timestamppb.New(rec.SourceTS)
@@ -78,6 +79,9 @@ func ExportToRecord(er *gastrologv1.ExportRecord) chunk.Record {
 	rec.EventID.IngestSeq = er.GetIngestSeq()
 	if len(er.GetIngesterId()) == 16 {
 		copy(rec.EventID.IngesterID[:], er.GetIngesterId())
+	}
+	if len(er.GetNodeId()) == 16 {
+		copy(rec.EventID.NodeID[:], er.GetNodeId())
 	}
 	rec.EventID.IngestTS = rec.IngestTS
 	return rec

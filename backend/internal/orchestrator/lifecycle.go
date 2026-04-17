@@ -348,16 +348,9 @@ func (o *Orchestrator) digestLoop(ctx context.Context) {
 
 // digestAndForward digests a single message and sends the result to digestedCh.
 func (o *Orchestrator) digestAndForward(msg IngestMessage) {
-	// Stamp node_id attr so records are traceable to the ingesting node.
-	// IngesterID is now a first-class field on EventID, not an attribute.
-	if o.localNodeID != "" {
-		if msg.Attrs == nil {
-			msg.Attrs = make(map[string]string, 1)
-		}
-		msg.Attrs["node_id"] = o.localNodeID
-	}
-
 	// Apply digester pipeline (enriches attrs based on message content).
+	// NodeID lives on EventID as a first-class field (gastrolog-1k3l9);
+	// the orchestrator no longer stamps it as an attribute.
 	for _, d := range o.digesters {
 		d.Digest(&msg)
 	}
@@ -383,6 +376,7 @@ func (o *Orchestrator) digestAndForward(msg IngestMessage) {
 		if err == nil {
 			rec.EventID = chunk.EventID{
 				IngesterID: ingesterUUID,
+				NodeID:     o.localNodeIDGLID,
 				IngestTS:   msg.IngestTS,
 				IngestSeq:  seq,
 			}

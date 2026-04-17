@@ -156,12 +156,18 @@ type ChunkMeta struct {
 }
 
 // EventID uniquely identifies a record across the cluster.
-// Composed of the ingester's UUID, the ingestion timestamp, and a per-ingester
-// rolling sequence number. Entirely derivable from idx.log fields.
+// Composed of the ingester's UUID, the emitting node's UUID, the ingestion
+// timestamp, and a per-ingester rolling sequence number. NodeID is required
+// because singleton/parallel HA (gastrolog-2kcw4) allows the same ingester
+// to run concurrently on multiple nodes, each maintaining its own
+// per-ingester sequence counter — without NodeID in the identity key,
+// two nodes can legitimately mint the same (IngesterID, IngestTS, IngestSeq)
+// tuple in the same microsecond.
 // All fields are fixed-size value types, so EventID is comparable and usable
 // as a map key.
 type EventID struct {
 	IngesterID glid.GLID
+	NodeID     glid.GLID
 	IngestTS   time.Time
 	IngestSeq  uint32
 }

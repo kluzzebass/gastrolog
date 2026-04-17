@@ -77,9 +77,9 @@ const (
 	// enabling random access at frame granularity. Matches the file vault.
 	seekableFrameSize = 256 << 10 // 256 KB
 
-	// Minimum record frame: timestamps (3×8) + ingesterID (16) + ingestSeq (4)
-	// + attrCount (2) + rawLen (4) = 58 bytes.
-	minFrameSize = 58
+	// Minimum record frame: timestamps (3×8) + ingesterID (16) + nodeID (16)
+	// + ingestSeq (4) + attrCount (2) + rawLen (4) = 74 bytes.
+	minFrameSize = 74
 
 	// TS index entry: [tsNano:i64][pos:u32] = 12 bytes, sorted by TS.
 	tsIndexEntrySize = 12

@@ -418,6 +418,7 @@ func (m *Manager) Append(record chunk.Record) (chunk.ChunkID, uint64, error) {
 		AttrSize:   uint16(len(attrBytes)),       //nolint:gosec // G115: attribute size bounded by protocol
 		IngestSeq:  record.EventID.IngestSeq,
 		IngesterID: record.EventID.IngesterID,
+		NodeID:     record.EventID.NodeID,
 	}, idxBuf[:])
 
 	// Snapshot file handles and compute WriteAt positions.

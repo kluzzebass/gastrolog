@@ -825,7 +825,8 @@ type Record struct {
 	SourceTs *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=source_ts,json=sourceTs,proto3" json:"source_ts,omitempty"`
 	// EventID fields for record identity and deduplication.
 	IngestSeq     uint32 `protobuf:"varint,7,opt,name=ingest_seq,json=ingestSeq,proto3" json:"ingest_seq,omitempty"`   // Per-ingester rolling sequence counter
-	IngesterId    []byte `protobuf:"bytes,8,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte UUID
+	IngesterId    []byte `protobuf:"bytes,8,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte GLID
+	NodeId        []byte `protobuf:"bytes,9,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`             // 16-byte GLID — emitting node, disambiguates parallel ingesters
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -912,6 +913,13 @@ func (x *Record) GetIngestSeq() uint32 {
 func (x *Record) GetIngesterId() []byte {
 	if x != nil {
 		return x.IngesterId
+	}
+	return nil
+}
+
+func (x *Record) GetNodeId() []byte {
+	if x != nil {
+		return x.NodeId
 	}
 	return nil
 }
@@ -2379,7 +2387,7 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"expression\"5\n" +
 	"\vKVPredicate\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"\x9f\x03\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\xb8\x03\n" +
 	"\x06Record\x127\n" +
 	"\tingest_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x125\n" +
 	"\bwrite_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\awriteTs\x125\n" +
@@ -2390,7 +2398,8 @@ const file_gastrolog_v1_query_proto_rawDesc = "" +
 	"\n" +
 	"ingest_seq\x18\a \x01(\rR\tingestSeq\x12\x1f\n" +
 	"\vingester_id\x18\b \x01(\fR\n" +
-	"ingesterId\x1a8\n" +
+	"ingesterId\x12\x17\n" +
+	"\anode_id\x18\t \x01(\fR\x06nodeId\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

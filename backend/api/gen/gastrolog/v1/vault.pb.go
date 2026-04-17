@@ -1979,7 +1979,8 @@ type ExportRecord struct {
 	WriteTs *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=write_ts,json=writeTs,proto3" json:"write_ts,omitempty"`
 	// EventID fields for record identity and deduplication.
 	IngestSeq     uint32 `protobuf:"varint,9,opt,name=ingest_seq,json=ingestSeq,proto3" json:"ingest_seq,omitempty"`    // Per-ingester rolling sequence counter
-	IngesterId    []byte `protobuf:"bytes,10,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte UUID
+	IngesterId    []byte `protobuf:"bytes,10,opt,name=ingester_id,json=ingesterId,proto3" json:"ingester_id,omitempty"` // 16-byte GLID
+	NodeId        []byte `protobuf:"bytes,11,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`             // 16-byte GLID — emitting node, disambiguates parallel ingesters
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2080,6 +2081,13 @@ func (x *ExportRecord) GetIngestSeq() uint32 {
 func (x *ExportRecord) GetIngesterId() []byte {
 	if x != nil {
 		return x.IngesterId
+	}
+	return nil
+}
+
+func (x *ExportRecord) GetNodeId() []byte {
+	if x != nil {
+		return x.NodeId
 	}
 	return nil
 }
@@ -2823,7 +2831,7 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"\x05vault\x18\x01 \x01(\tR\x05vault\"f\n" +
 	"\x13ExportVaultResponse\x124\n" +
 	"\arecords\x18\x01 \x03(\v2\x1a.gastrolog.v1.ExportRecordR\arecords\x12\x19\n" +
-	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xc8\x03\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"\xe1\x03\n" +
 	"\fExportRecord\x127\n" +
 	"\tsource_ts\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\bsourceTs\x127\n" +
 	"\tingest_ts\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\bingestTs\x12;\n" +
@@ -2837,7 +2845,8 @@ const file_gastrolog_v1_vault_proto_rawDesc = "" +
 	"ingest_seq\x18\t \x01(\rR\tingestSeq\x12\x1f\n" +
 	"\vingester_id\x18\n" +
 	" \x01(\fR\n" +
-	"ingesterId\x1a8\n" +
+	"ingesterId\x12\x17\n" +
+	"\anode_id\x18\v \x01(\fR\x06nodeId\x1a8\n" +
 	"\n" +
 	"AttrsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +

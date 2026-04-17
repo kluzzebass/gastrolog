@@ -72,8 +72,8 @@ func (w *Writer) Add(rec chunk.Record) error {
 	}
 
 	// Build the record frame (without the 4-byte frameLen prefix).
-	//   3×i64 + 16 + u32 + attrData + u32 + raw
-	frameSize := 3*8 + 16 + 4 + len(attrData) + 4 + len(rec.Raw)
+	//   3×i64 + 16 (IngesterID) + 16 (NodeID) + u32 + attrData + u32 + raw
+	frameSize := 3*8 + 16 + 16 + 4 + len(attrData) + 4 + len(rec.Raw)
 	frame := make([]byte, frameSize)
 	off := 0
 
@@ -84,6 +84,8 @@ func (w *Writer) Add(rec chunk.Record) error {
 	binary.LittleEndian.PutUint64(frame[off:], tsNanos(rec.WriteTS))
 	off += 8
 	copy(frame[off:], rec.EventID.IngesterID[:])
+	off += 16
+	copy(frame[off:], rec.EventID.NodeID[:])
 	off += 16
 	binary.LittleEndian.PutUint32(frame[off:], rec.EventID.IngestSeq)
 	off += 4

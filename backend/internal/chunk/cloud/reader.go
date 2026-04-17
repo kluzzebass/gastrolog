@@ -253,6 +253,8 @@ func decodeFrame(frame []byte, dict *chunk.StringDict) (chunk.Record, error) {
 	off += 8
 	copy(rec.EventID.IngesterID[:], frame[off:off+16])
 	off += 16
+	copy(rec.EventID.NodeID[:], frame[off:off+16])
+	off += 16
 	rec.EventID.IngestSeq = binary.LittleEndian.Uint32(frame[off:])
 	off += 4
 	rec.EventID.IngestTS = rec.IngestTS

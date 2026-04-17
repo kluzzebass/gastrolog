@@ -114,9 +114,9 @@ func TestIdxEntryBinaryFormat(t *testing.T) {
 
 func TestIdxEntrySize(t *testing.T) {
 	// Verify the constant matches expected layout:
-	// 8 (SourceTS) + 8 (IngestTS) + 8 (WriteTS) + 4 (RawOffset) + 4 (RawSize) + 4 (AttrOffset) + 2 (AttrSize) + 4 (IngestSeq) + 16 (IngesterID) = 58
-	if IdxEntrySize != 58 {
-		t.Fatalf("IdxEntrySize should be 58, got %d", IdxEntrySize)
+	// 8 (SourceTS) + 8 (IngestTS) + 8 (WriteTS) + 4 (RawOffset) + 4 (RawSize) + 4 (AttrOffset) + 2 (AttrSize) + 4 (IngestSeq) + 16 (IngesterID) + 16 (NodeID) = 74
+	if IdxEntrySize != 74 {
+		t.Fatalf("IdxEntrySize should be 74, got %d", IdxEntrySize)
 	}
 }
 
@@ -330,8 +330,8 @@ func TestFileVersionConstants(t *testing.T) {
 	if RawLogVersion != 0x01 {
 		t.Fatalf("RawLogVersion: want 0x01, got 0x%02x", RawLogVersion)
 	}
-	if IdxLogVersion != 0x02 {
-		t.Fatalf("IdxLogVersion: want 0x02, got 0x%02x", IdxLogVersion)
+	if IdxLogVersion != 0x01 {
+		t.Fatalf("IdxLogVersion: want 0x01, got 0x%02x", IdxLogVersion)
 	}
 	if AttrLogVersion != 0x01 {
 		t.Fatalf("AttrLogVersion: want 0x01, got 0x%02x", AttrLogVersion)
@@ -580,9 +580,12 @@ func TestOffsetCalculationConsistency(t *testing.T) {
 	if idxIngesterIDOffset != 42 {
 		t.Fatalf("idxIngesterIDOffset should be 42, got %d", idxIngesterIDOffset)
 	}
+	if idxNodeIDOffset != 58 {
+		t.Fatalf("idxNodeIDOffset should be 58, got %d", idxNodeIDOffset)
+	}
 
-	// Verify total size matches
-	totalFromOffsets := idxIngesterIDOffset + 16 // last field offset + field size (UUID = 16 bytes)
+	// Verify total size matches (last field offset + field size = total).
+	totalFromOffsets := idxNodeIDOffset + 16
 	if totalFromOffsets != IdxEntrySize {
 		t.Fatalf("Offset calculation: %d != IdxEntrySize %d", totalFromOffsets, IdxEntrySize)
 	}
