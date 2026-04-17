@@ -44,6 +44,10 @@ func (s *Server) applyLookupConfig(cfg system.LookupConfig, mm system.MaxMindCon
 	// Register JSON file lookup tables from system.
 	s.registerJSONFileLookups(cfg, registry)
 
+	// Register YAML file lookup tables from system. Shares the FileLookup
+	// engine with JSON; format differs only in the unmarshaler.
+	s.registerYAMLFileLookups(cfg, registry)
+
 	// Register CSV lookup tables from system.
 	s.registerCSVLookups(cfg, registry)
 
@@ -159,73 +163,92 @@ func (s *Server) registerHTTPLookups(cfg system.LookupConfig, registry lookup.Re
 	}
 }
 
-// registerJSONFileLookups registers JSON file-backed lookup tables from config into the registry.
-// It also cleans up any previously registered JSON file lookups that are no longer in the system.
+// registerJSONFileLookups registers JSON file-backed lookup tables.
 func (s *Server) registerJSONFileLookups(cfg system.LookupConfig, registry lookup.Registry) {
+	s.registerFileLookups("json", cfg.JSONFileLookups, registry, lookup.NewJSONFile)
+}
+
+// registerYAMLFileLookups registers YAML file-backed lookup tables.
+func (s *Server) registerYAMLFileLookups(cfg system.LookupConfig, registry lookup.Registry) {
+	s.registerFileLookups("yaml", cfg.YAMLFileLookups, registry, lookup.NewYAMLFile)
+}
+
+// registerFileLookups is the shared registration path for JSON and YAML
+// file-backed lookups. Format differs only in the constructor — the Close /
+// Load / WatchFile / DuplicateKeys lifecycle is identical.
+func (s *Server) registerFileLookups(
+	format string,
+	entries []system.JSONFileLookupConfig,
+	registry lookup.Registry,
+	newFn func(lookup.FileLookupConfig) (*lookup.FileLookup, error),
+) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Build set of names that should exist.
-	keep := make(map[string]struct{}, len(cfg.JSONFileLookups))
-	for _, jcfg := range cfg.JSONFileLookups {
-		if jcfg.Name != "" {
-			keep[jcfg.Name] = struct{}{}
+	// Build set of names that should exist for this format.
+	keep := make(map[string]struct{}, len(entries))
+	for _, cfg := range entries {
+		if cfg.Name != "" {
+			keep[cfg.Name] = struct{}{}
 		}
 	}
 
-	// Close and remove any JSON file lookups no longer in system.
+	// Close and remove any lookups of this format no longer in system.
+	// JSONFile and YAMLFile share *FileLookup, so we filter by Format().
 	for name, table := range registry {
-		if jf, ok := table.(*lookup.JSONFile); ok {
-			if _, exists := keep[name]; !exists {
-				jf.Close()
-				delete(registry, name)
-				s.logger.Info("removed JSON file lookup table", "name", name)
-			}
+		fl, ok := table.(*lookup.FileLookup)
+		if !ok || fl.Format() != format {
+			continue
+		}
+		if _, exists := keep[name]; !exists {
+			fl.Close()
+			delete(registry, name)
+			s.logger.Info("removed file lookup table", "format", format, "name", name)
 		}
 	}
 
-	for _, jcfg := range cfg.JSONFileLookups {
-		if jcfg.Name == "" || jcfg.FileID == "" {
+	for _, cfg := range entries {
+		if cfg.Name == "" || cfg.FileID == "" {
 			continue
 		}
 
-		// Close any existing JSON file lookup with the same name (stops its watcher).
-		if existing, ok := registry[jcfg.Name]; ok {
-			if jf, ok := existing.(*lookup.JSONFile); ok {
-				jf.Close()
+		// Close any existing lookup with the same name (stops its watcher).
+		if existing, ok := registry[cfg.Name]; ok {
+			if fl, ok := existing.(*lookup.FileLookup); ok {
+				fl.Close()
 			}
 		}
 
-		filePath := s.ResolveManagedFileByID(ctx, jcfg.FileID)
+		filePath := s.ResolveManagedFileByID(ctx, cfg.FileID)
 		if filePath == "" {
-			s.logger.Warn("JSON lookup file not found", "name", jcfg.Name, "file_id", jcfg.FileID)
+			s.logger.Warn("file lookup source not found", "format", format, "name", cfg.Name, "file_id", cfg.FileID)
 			continue
 		}
 
-		jf, err := lookup.NewJSONFile(lookup.JSONFileConfig{
-			Name:         jcfg.Name,
-			Query:        jcfg.Query,
-			KeyColumn:    jcfg.KeyColumn,
-			ValueColumns: jcfg.ValueColumns,
+		fl, err := newFn(lookup.FileLookupConfig{
+			Name:         cfg.Name,
+			Query:        cfg.Query,
+			KeyColumn:    cfg.KeyColumn,
+			ValueColumns: cfg.ValueColumns,
 		})
 		if err != nil {
-			s.logger.Warn("failed to compile JSON lookup jq expression", "name", jcfg.Name, "error", err)
+			s.logger.Warn("failed to compile file lookup jq expression", "format", format, "name", cfg.Name, "error", err)
 			continue
 		}
 
-		if err := jf.Load(filePath); err != nil {
-			s.logger.Warn("failed to load JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)
+		if err := fl.Load(filePath); err != nil {
+			s.logger.Warn("failed to load file lookup", "format", format, "name", cfg.Name, "path", filePath, "error", err)
 			continue
 		}
-		if err := jf.WatchFile(filePath); err != nil {
-			s.logger.Warn("failed to watch JSON lookup file", "name", jcfg.Name, "path", filePath, "error", err)
+		if err := fl.WatchFile(filePath); err != nil {
+			s.logger.Warn("failed to watch file lookup", "format", format, "name", cfg.Name, "path", filePath, "error", err)
 		}
 
-		if dups := jf.DuplicateKeys(); dups > 0 {
-			s.logger.Warn("JSON lookup has duplicate keys (first occurrence wins)", "name", jcfg.Name, "duplicates", dups)
+		if dups := fl.DuplicateKeys(); dups > 0 {
+			s.logger.Warn("file lookup has duplicate keys (first occurrence wins)", "format", format, "name", cfg.Name, "duplicates", dups)
 		}
-		registry[jcfg.Name] = jf
-		s.logger.Info("registered JSON file lookup table", "name", jcfg.Name, "path", filePath)
+		registry[cfg.Name] = fl
+		s.logger.Info("registered file lookup table", "format", format, "name", cfg.Name, "path", filePath)
 	}
 }
 

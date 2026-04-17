@@ -155,6 +155,9 @@ const (
 	// SystemServicePreviewJSONLookupProcedure is the fully-qualified name of the SystemService's
 	// PreviewJSONLookup RPC.
 	SystemServicePreviewJSONLookupProcedure = "/gastrolog.v1.SystemService/PreviewJSONLookup"
+	// SystemServicePreviewYAMLLookupProcedure is the fully-qualified name of the SystemService's
+	// PreviewYAMLLookup RPC.
+	SystemServicePreviewYAMLLookupProcedure = "/gastrolog.v1.SystemService/PreviewYAMLLookup"
 	// SystemServicePutCloudServiceProcedure is the fully-qualified name of the SystemService's
 	// PutCloudService RPC.
 	SystemServicePutCloudServiceProcedure = "/gastrolog.v1.SystemService/PutCloudService"
@@ -262,6 +265,8 @@ type SystemServiceClient interface {
 	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
 	// PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
 	PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error)
+	// PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
+	PreviewYAMLLookup(context.Context, *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error)
 	// Cloud services
 	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
@@ -537,6 +542,12 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("PreviewJSONLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		previewYAMLLookup: connect.NewClient[v1.PreviewYAMLLookupRequest, v1.PreviewYAMLLookupResponse](
+			httpClient,
+			baseURL+SystemServicePreviewYAMLLookupProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PreviewYAMLLookup")),
+			connect.WithClientOptions(opts...),
+		),
 		putCloudService: connect.NewClient[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse](
 			httpClient,
 			baseURL+SystemServicePutCloudServiceProcedure,
@@ -620,6 +631,7 @@ type systemServiceClient struct {
 	testHTTPLookup        *connect.Client[v1.TestHTTPLookupRequest, v1.TestHTTPLookupResponse]
 	previewCSVLookup      *connect.Client[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse]
 	previewJSONLookup     *connect.Client[v1.PreviewJSONLookupRequest, v1.PreviewJSONLookupResponse]
+	previewYAMLLookup     *connect.Client[v1.PreviewYAMLLookupRequest, v1.PreviewYAMLLookupResponse]
 	putCloudService       *connect.Client[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse]
 	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
@@ -838,6 +850,11 @@ func (c *systemServiceClient) PreviewJSONLookup(ctx context.Context, req *connec
 	return c.previewJSONLookup.CallUnary(ctx, req)
 }
 
+// PreviewYAMLLookup calls gastrolog.v1.SystemService.PreviewYAMLLookup.
+func (c *systemServiceClient) PreviewYAMLLookup(ctx context.Context, req *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error) {
+	return c.previewYAMLLookup.CallUnary(ctx, req)
+}
+
 // PutCloudService calls gastrolog.v1.SystemService.PutCloudService.
 func (c *systemServiceClient) PutCloudService(ctx context.Context, req *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {
 	return c.putCloudService.CallUnary(ctx, req)
@@ -956,6 +973,8 @@ type SystemServiceHandler interface {
 	PreviewCSVLookup(context.Context, *connect.Request[v1.PreviewCSVLookupRequest]) (*connect.Response[v1.PreviewCSVLookupResponse], error)
 	// PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
 	PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error)
+	// PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
+	PreviewYAMLLookup(context.Context, *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error)
 	// Cloud services
 	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
@@ -1227,6 +1246,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("PreviewJSONLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServicePreviewYAMLLookupHandler := connect.NewUnaryHandler(
+		SystemServicePreviewYAMLLookupProcedure,
+		svc.PreviewYAMLLookup,
+		connect.WithSchema(systemServiceMethods.ByName("PreviewYAMLLookup")),
+		connect.WithHandlerOptions(opts...),
+	)
 	systemServicePutCloudServiceHandler := connect.NewUnaryHandler(
 		SystemServicePutCloudServiceProcedure,
 		svc.PutCloudService,
@@ -1349,6 +1374,8 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServicePreviewCSVLookupHandler.ServeHTTP(w, r)
 		case SystemServicePreviewJSONLookupProcedure:
 			systemServicePreviewJSONLookupHandler.ServeHTTP(w, r)
+		case SystemServicePreviewYAMLLookupProcedure:
+			systemServicePreviewYAMLLookupHandler.ServeHTTP(w, r)
 		case SystemServicePutCloudServiceProcedure:
 			systemServicePutCloudServiceHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteCloudServiceProcedure:
@@ -1536,6 +1563,10 @@ func (UnimplementedSystemServiceHandler) PreviewCSVLookup(context.Context, *conn
 
 func (UnimplementedSystemServiceHandler) PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PreviewJSONLookup is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) PreviewYAMLLookup(context.Context, *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PreviewYAMLLookup is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {

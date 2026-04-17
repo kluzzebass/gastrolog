@@ -2272,6 +2272,11 @@ export class LookupSettings extends Message<LookupSettings> {
    */
   staticLookups: StaticLookupEntry[] = [];
 
+  /**
+   * @generated from field: repeated gastrolog.v1.YAMLFileLookupEntry yaml_file_lookups = 9;
+   */
+  yamlFileLookups: YAMLFileLookupEntry[] = [];
+
   constructor(data?: PartialMessage<LookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -2285,6 +2290,7 @@ export class LookupSettings extends Message<LookupSettings> {
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
     { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
     { no: 8, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
+    { no: 9, name: "yaml_file_lookups", kind: "message", T: YAMLFileLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): LookupSettings {
@@ -2580,6 +2586,81 @@ export class JSONFileLookupEntry extends Message<JSONFileLookupEntry> {
 
   static equals(a: JSONFileLookupEntry | PlainMessage<JSONFileLookupEntry> | undefined, b: JSONFileLookupEntry | PlainMessage<JSONFileLookupEntry> | undefined): boolean {
     return proto3.util.equals(JSONFileLookupEntry, a, b);
+  }
+}
+
+/**
+ * YAMLFileLookupEntry defines a YAML file-backed lookup table. YAML parses
+ * into the same tree JSON does, so the jq / key / value-column semantics
+ * are identical — only the file format at rest differs.
+ *
+ * @generated from message gastrolog.v1.YAMLFileLookupEntry
+ */
+export class YAMLFileLookupEntry extends Message<YAMLFileLookupEntry> {
+  /**
+   * registry name (e.g. "hosts")
+   *
+   * @generated from field: string name = 1;
+   */
+  name = "";
+
+  /**
+   * managed file ID
+   *
+   * @generated from field: bytes file_id = 2;
+   */
+  fileId = new Uint8Array(0);
+
+  /**
+   * jq expression that produces an array of objects (the lookup table)
+   *
+   * @generated from field: string query = 3;
+   */
+  query = "";
+
+  /**
+   * column used as the lookup key; empty = first column
+   *
+   * @generated from field: string key_column = 4;
+   */
+  keyColumn = "";
+
+  /**
+   * columns to include in output; empty = all non-key
+   *
+   * @generated from field: repeated string value_columns = 5;
+   */
+  valueColumns: string[] = [];
+
+  constructor(data?: PartialMessage<YAMLFileLookupEntry>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.YAMLFileLookupEntry";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "key_column", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "value_columns", kind: "scalar", T: 9 /* ScalarType.STRING */, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): YAMLFileLookupEntry {
+    return new YAMLFileLookupEntry().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): YAMLFileLookupEntry {
+    return new YAMLFileLookupEntry().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): YAMLFileLookupEntry {
+    return new YAMLFileLookupEntry().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: YAMLFileLookupEntry | PlainMessage<YAMLFileLookupEntry> | undefined, b: YAMLFileLookupEntry | PlainMessage<YAMLFileLookupEntry> | undefined): boolean {
+    return proto3.util.equals(YAMLFileLookupEntry, a, b);
   }
 }
 
@@ -3230,6 +3311,13 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
    */
   staticLookups: StaticLookupEntry[] = [];
 
+  /**
+   * replaces the full list when present
+   *
+   * @generated from field: repeated gastrolog.v1.YAMLFileLookupEntry yaml_file_lookups = 9;
+   */
+  yamlFileLookups: YAMLFileLookupEntry[] = [];
+
   constructor(data?: PartialMessage<PutLookupSettings>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3243,6 +3331,7 @@ export class PutLookupSettings extends Message<PutLookupSettings> {
     { no: 6, name: "mmdb_lookups", kind: "message", T: MMDBLookupEntry, repeated: true },
     { no: 7, name: "csv_lookups", kind: "message", T: CSVLookupEntry, repeated: true },
     { no: 8, name: "static_lookups", kind: "message", T: StaticLookupEntry, repeated: true },
+    { no: 9, name: "yaml_file_lookups", kind: "message", T: YAMLFileLookupEntry, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettings {
@@ -6231,6 +6320,148 @@ export class PreviewJSONLookupResponse extends Message<PreviewJSONLookupResponse
 
   static equals(a: PreviewJSONLookupResponse | PlainMessage<PreviewJSONLookupResponse> | undefined, b: PreviewJSONLookupResponse | PlainMessage<PreviewJSONLookupResponse> | undefined): boolean {
     return proto3.util.equals(PreviewJSONLookupResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PreviewYAMLLookupRequest
+ */
+export class PreviewYAMLLookupRequest extends Message<PreviewYAMLLookupRequest> {
+  /**
+   * managed file ID
+   *
+   * @generated from field: bytes file_id = 1;
+   */
+  fileId = new Uint8Array(0);
+
+  /**
+   * max content bytes to return; 0 = default (4096)
+   *
+   * @generated from field: int32 max_bytes = 2;
+   */
+  maxBytes = 0;
+
+  /**
+   * optional jq query to evaluate against the file
+   *
+   * @generated from field: string query = 3;
+   */
+  query = "";
+
+  /**
+   * optional parameter values for {name} placeholders in query
+   *
+   * @generated from field: map<string, string> parameters = 4;
+   */
+  parameters: { [key: string]: string } = {};
+
+  constructor(data?: PartialMessage<PreviewYAMLLookupRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PreviewYAMLLookupRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "file_id", kind: "scalar", T: 12 /* ScalarType.BYTES */ },
+    { no: 2, name: "max_bytes", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 3, name: "query", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 4, name: "parameters", kind: "map", K: 9 /* ScalarType.STRING */, V: {kind: "scalar", T: 9 /* ScalarType.STRING */} },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewYAMLLookupRequest {
+    return new PreviewYAMLLookupRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PreviewYAMLLookupRequest {
+    return new PreviewYAMLLookupRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PreviewYAMLLookupRequest {
+    return new PreviewYAMLLookupRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PreviewYAMLLookupRequest | PlainMessage<PreviewYAMLLookupRequest> | undefined, b: PreviewYAMLLookupRequest | PlainMessage<PreviewYAMLLookupRequest> | undefined): boolean {
+    return proto3.util.equals(PreviewYAMLLookupRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PreviewYAMLLookupResponse
+ */
+export class PreviewYAMLLookupResponse extends Message<PreviewYAMLLookupResponse> {
+  /**
+   * raw YAML content, potentially truncated
+   *
+   * @generated from field: string content = 1;
+   */
+  content = "";
+
+  /**
+   * file size in bytes
+   *
+   * @generated from field: int64 total_size = 2;
+   */
+  totalSize = protoInt64.zero;
+
+  /**
+   * true if content was cut short
+   *
+   * @generated from field: bool truncated = 3;
+   */
+  truncated = false;
+
+  /**
+   * non-empty on failure
+   *
+   * @generated from field: string error = 4;
+   */
+  error = "";
+
+  /**
+   * pretty-printed jq query result (when query is provided)
+   *
+   * @generated from field: string query_result = 5;
+   */
+  queryResult = "";
+
+  /**
+   * jq evaluation error (when query is provided but fails)
+   *
+   * @generated from field: string query_error = 6;
+   */
+  queryError = "";
+
+  constructor(data?: PartialMessage<PreviewYAMLLookupResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PreviewYAMLLookupResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "content", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "total_size", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "truncated", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 4, name: "error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 5, name: "query_result", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "query_error", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PreviewYAMLLookupResponse {
+    return new PreviewYAMLLookupResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PreviewYAMLLookupResponse {
+    return new PreviewYAMLLookupResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PreviewYAMLLookupResponse {
+    return new PreviewYAMLLookupResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PreviewYAMLLookupResponse | PlainMessage<PreviewYAMLLookupResponse> | undefined, b: PreviewYAMLLookupResponse | PlainMessage<PreviewYAMLLookupResponse> | undefined): boolean {
+    return proto3.util.equals(PreviewYAMLLookupResponse, a, b);
   }
 }
 

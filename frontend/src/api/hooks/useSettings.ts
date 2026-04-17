@@ -215,6 +215,20 @@ export function usePreviewJSONLookup() {
   });
 }
 
+export function usePreviewYAMLLookup() {
+  return useMutation({
+    mutationFn: async (args: PreviewJSONLookupArgs) => {
+      const response = await systemClient.previewYAMLLookup({
+        fileId: decode(args.fileId),
+        maxBytes: args.maxBytes ?? 4096,
+        query: args.query ?? "",
+        parameters: args.parameters ?? {},
+      });
+      return response;
+    },
+  });
+}
+
 export function useDeleteLookup() {
   const qc = useQueryClient();
   return useMutation({

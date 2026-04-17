@@ -136,6 +136,9 @@ service SystemService {
   // PreviewJSONLookup reads a managed JSON file and returns pretty-printed content for structure inspection.
   rpc PreviewJSONLookup(PreviewJSONLookupRequest) returns (PreviewJSONLookupResponse);
 
+  // PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
+  rpc PreviewYAMLLookup(PreviewYAMLLookupRequest) returns (PreviewYAMLLookupResponse);
+
   // Cloud services
   rpc PutCloudService(PutCloudServiceRequest) returns (PutCloudServiceResponse);
   rpc DeleteCloudService(DeleteCloudServiceRequest) returns (DeleteCloudServiceResponse);
@@ -423,6 +426,7 @@ message LookupSettings {
   repeated MMDBLookupEntry mmdb_lookups = 6;
   repeated CSVLookupEntry csv_lookups = 7;
   repeated StaticLookupEntry static_lookups = 8;
+  repeated YAMLFileLookupEntry yaml_file_lookups = 9;
 }
 
 // MMDBLookupEntry defines a named MMDB-backed lookup table (GeoIP City or ASN).
@@ -461,6 +465,17 @@ message JSONFileLookupEntry {
   reserved 4;                                 // was: parameters (lookup key is determined by key_column)
   string key_column = 5;                      // column used as the lookup key; empty = first column
   repeated string value_columns = 6;          // columns to include in output; empty = all non-key
+}
+
+// YAMLFileLookupEntry defines a YAML file-backed lookup table. YAML parses
+// into the same tree JSON does, so the jq / key / value-column semantics
+// are identical — only the file format at rest differs.
+message YAMLFileLookupEntry {
+  string name = 1;                            // registry name (e.g. "hosts")
+  bytes file_id = 2;                          // managed file ID
+  string query = 3;                           // jq expression that produces an array of objects (the lookup table)
+  string key_column = 4;                      // column used as the lookup key; empty = first column
+  repeated string value_columns = 5;          // columns to include in output; empty = all non-key
 }
 
 // CSVLookupEntry defines a CSV file-backed lookup table for key→row enrichment.
@@ -551,6 +566,7 @@ message PutLookupSettings {
   repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
   repeated CSVLookupEntry csv_lookups = 7; // replaces the full list when present
   repeated StaticLookupEntry static_lookups = 8; // replaces the full list when present
+  repeated YAMLFileLookupEntry yaml_file_lookups = 9; // replaces the full list when present
 }
 
 message PutClusterSettings {
@@ -889,6 +905,22 @@ message PreviewJSONLookupRequest {
 
 message PreviewJSONLookupResponse {
   string content = 1;                    // pretty-printed JSON, potentially truncated
+  int64 total_size = 2;                  // file size in bytes
+  bool truncated = 3;                    // true if content was cut short
+  string error = 4;                      // non-empty on failure
+  string query_result = 5;              // pretty-printed jq query result (when query is provided)
+  string query_error = 6;              // jq evaluation error (when query is provided but fails)
+}
+
+message PreviewYAMLLookupRequest {
+  bytes file_id = 1;                     // managed file ID
+  int32 max_bytes = 2;                   // max content bytes to return; 0 = default (4096)
+  string query = 3;                      // optional jq query to evaluate against the file
+  map<string, string> parameters = 4;    // optional parameter values for {name} placeholders in query
+}
+
+message PreviewYAMLLookupResponse {
+  string content = 1;                    // raw YAML content, potentially truncated
   int64 total_size = 2;                  // file size in bytes
   bool truncated = 3;                    // true if content was cut short
   string error = 4;                      // non-empty on failure

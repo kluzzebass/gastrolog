@@ -1,5 +1,5 @@
 import { encode } from "../../../api/glid";
-import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry, StaticLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
+import type { CSVLookupEntry, HTTPLookupEntry, JSONFileLookupEntry, ManagedFileInfo, MMDBLookupEntry, StaticLookupEntry, YAMLFileLookupEntry } from "../../../api/gen/gastrolog/v1/system_pb";
 import type { useUploadManagedFile } from "../../../api/hooks/useUploadManagedFile";
 
 // ---------------------------------------------------------------------------
@@ -58,6 +58,7 @@ export const lookupTypes = [
   { value: "mmdb", label: "MMDB (GeoIP / ASN)" },
   { value: "http", label: "HTTP" },
   { value: "json", label: "JSON File" },
+  { value: "yaml", label: "YAML File" },
   { value: "csv", label: "CSV File" },
   { value: "static", label: "Static" },
 ];
@@ -157,6 +158,24 @@ export function csvLookupEqual(draft: CSVLookupDraft, saved: CSVLookupEntry): bo
 }
 
 export function jsonFileLookupEqual(draft: JSONFileLookupDraft, saved: JSONFileLookupEntry): boolean {
+  return (
+    draft.name === saved.name &&
+    draft.fileId === encode(saved.fileId) &&
+    draft.query === saved.query &&
+    draft.keyColumn === saved.keyColumn &&
+    arraysEqual(draft.valueColumns, saved.valueColumns)
+  );
+}
+
+// YAMLFileLookupDraft shares the JSON draft shape — the jq/key/value
+// semantics are identical; only the on-disk file format differs.
+export type YAMLFileLookupDraft = JSONFileLookupDraft;
+
+export function emptyYamlDraft(): YAMLFileLookupDraft {
+  return emptyJsonDraft();
+}
+
+export function yamlFileLookupEqual(draft: YAMLFileLookupDraft, saved: YAMLFileLookupEntry): boolean {
   return (
     draft.name === saved.name &&
     draft.fileId === encode(saved.fileId) &&

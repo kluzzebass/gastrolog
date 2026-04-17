@@ -19,6 +19,7 @@ import (
 
 	"connectrpc.com/connect"
 	petname "github.com/dustinkirkland/golang-petname"
+	"sigs.k8s.io/yaml"
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
@@ -480,6 +481,7 @@ func (s *SystemServer) GetSettings(
 		Lookup: &apiv1.LookupSettings{
 			HttpLookups:     httpLookupsToProto(ss.Lookup.HTTPLookups),
 			JsonFileLookups: jsonFileLookupsToProto(ss.Lookup.JSONFileLookups),
+			YamlFileLookups: yamlFileLookupsToProto(ss.Lookup.YAMLFileLookups),
 			MmdbLookups:     mmdbLookupsToProto(ss.Lookup.MMDBLookups),
 			CsvLookups:      csvLookupsToProto(ss.Lookup.CSVLookups),
 			StaticLookups:   staticLookupsToProto(ss.Lookup.StaticLookups),
@@ -562,6 +564,9 @@ func (s *SystemServer) DeleteLookup(
 		if l.Name == name { found = true; return true }; return false
 	})
 	ss.Lookup.JSONFileLookups = slicesDeleteFunc(ss.Lookup.JSONFileLookups, func(l system.JSONFileLookupConfig) bool {
+		if l.Name == name { found = true; return true }; return false
+	})
+	ss.Lookup.YAMLFileLookups = slicesDeleteFunc(ss.Lookup.YAMLFileLookups, func(l system.YAMLFileLookupConfig) bool {
 		if l.Name == name { found = true; return true }; return false
 	})
 	ss.Lookup.MMDBLookups = slicesDeleteFunc(ss.Lookup.MMDBLookups, func(l system.MMDBLookupConfig) bool {
@@ -858,6 +863,9 @@ func mergeLookup(l *apiv1.PutLookupSettings, lookup *system.LookupConfig) {
 	if l.JsonFileLookups != nil {
 		lookup.JSONFileLookups = jsonFileLookupsFromProto(l.JsonFileLookups)
 	}
+	if l.YamlFileLookups != nil {
+		lookup.YAMLFileLookups = yamlFileLookupsFromProto(l.YamlFileLookups)
+	}
 	if l.MmdbLookups != nil {
 		lookup.MMDBLookups = mmdbLookupsFromProto(l.MmdbLookups)
 	}
@@ -953,6 +961,40 @@ func jsonFileLookupsFromProto(entries []*apiv1.JSONFileLookupEntry) []system.JSO
 			continue
 		}
 		out = append(out, system.JSONFileLookupConfig{
+			Name:         e.Name,
+			FileID:       parseLookupFileID(e.FileId),
+			Query:        e.Query,
+			KeyColumn:    e.KeyColumn,
+			ValueColumns: e.ValueColumns,
+		})
+	}
+	return out
+}
+
+func yamlFileLookupsToProto(lookups []system.YAMLFileLookupConfig) []*apiv1.YAMLFileLookupEntry {
+	if len(lookups) == 0 {
+		return nil
+	}
+	out := make([]*apiv1.YAMLFileLookupEntry, len(lookups))
+	for i, l := range lookups {
+		out[i] = &apiv1.YAMLFileLookupEntry{
+			Name:         l.Name,
+			FileId:       glid.MustParse(l.FileID).ToProto(),
+			Query:        l.Query,
+			KeyColumn:    l.KeyColumn,
+			ValueColumns: l.ValueColumns,
+		}
+	}
+	return out
+}
+
+func yamlFileLookupsFromProto(entries []*apiv1.YAMLFileLookupEntry) []system.YAMLFileLookupConfig {
+	out := make([]system.YAMLFileLookupConfig, 0, len(entries))
+	for _, e := range entries {
+		if e.Name == "" || len(e.FileId) == 0 {
+			continue
+		}
+		out = append(out, system.YAMLFileLookupConfig{
 			Name:         e.Name,
 			FileID:       parseLookupFileID(e.FileId),
 			Query:        e.Query,
@@ -1138,6 +1180,13 @@ func validateLookupNames(lc system.LookupConfig) *connect.Error {
 		}
 		seen[l.Name] = "json file"
 	}
+	for _, l := range lc.YAMLFileLookups {
+		if prev, ok := seen[l.Name]; ok {
+			return connect.NewError(connect.CodeInvalidArgument,
+				fmt.Errorf("lookup name %q is used by both %s and yaml file lookup", l.Name, prev))
+		}
+		seen[l.Name] = "yaml file"
+	}
 	for _, l := range lc.MMDBLookups {
 		if prev, ok := seen[l.Name]; ok {
 			return connect.NewError(connect.CodeInvalidArgument,
@@ -1284,83 +1333,135 @@ func (s *SystemServer) PreviewJSONLookup(
 	ctx context.Context,
 	req *connect.Request[apiv1.PreviewJSONLookupRequest],
 ) (*connect.Response[apiv1.PreviewJSONLookupResponse], error) {
-	fileID := glid.FromBytes(req.Msg.GetFileId()).String()
+	prev := s.previewStructuredLookup(ctx, req.Msg.GetFileId(), int(req.Msg.GetMaxBytes()),
+		req.Msg.GetQuery(), req.Msg.GetParameters(), "json")
+	return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
+		Content:     prev.content,
+		TotalSize:   prev.totalSize,
+		Truncated:   prev.truncated,
+		Error:       prev.errMsg,
+		QueryResult: prev.queryResult,
+		QueryError:  prev.queryError,
+	}), nil
+}
+
+func (s *SystemServer) PreviewYAMLLookup(
+	ctx context.Context,
+	req *connect.Request[apiv1.PreviewYAMLLookupRequest],
+) (*connect.Response[apiv1.PreviewYAMLLookupResponse], error) {
+	prev := s.previewStructuredLookup(ctx, req.Msg.GetFileId(), int(req.Msg.GetMaxBytes()),
+		req.Msg.GetQuery(), req.Msg.GetParameters(), "yaml")
+	return connect.NewResponse(&apiv1.PreviewYAMLLookupResponse{
+		Content:     prev.content,
+		TotalSize:   prev.totalSize,
+		Truncated:   prev.truncated,
+		Error:       prev.errMsg,
+		QueryResult: prev.queryResult,
+		QueryError:  prev.queryError,
+	}), nil
+}
+
+type structuredPreview struct {
+	content     string
+	totalSize   int64
+	truncated   bool
+	errMsg      string
+	queryResult string
+	queryError  string
+}
+
+// previewStructuredLookup reads a managed structured file (JSON or YAML),
+// returns a truncated display body plus optional jq query result. Format
+// only affects (a) how bytes parse into the generic jq tree and (b) how
+// the display body is pretty-printed when parsing succeeds.
+func (s *SystemServer) previewStructuredLookup(
+	ctx context.Context,
+	fileIDBytes []byte,
+	maxBytes int,
+	query string,
+	params map[string]string,
+	format string,
+) structuredPreview {
+	fileID := glid.FromBytes(fileIDBytes).String()
 	if fileID == "" {
-		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
-			Error: "file_id is required",
-		}), nil
+		return structuredPreview{errMsg: "file_id is required"}
 	}
 
 	filePath := s.resolveManagedFile(ctx, fileID)
 	if filePath == "" {
-		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
-			Error: "file not found",
-		}), nil
+		return structuredPreview{errMsg: "file not found"}
 	}
 
 	info, err := os.Stat(filePath)
 	if err != nil {
-		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
-			Error: fmt.Sprintf("stat file: %v", err),
-		}), nil
+		return structuredPreview{errMsg: fmt.Sprintf("stat file: %v", err)}
 	}
 	totalSize := info.Size()
 
-	maxBytes := int(req.Msg.GetMaxBytes())
 	if maxBytes <= 0 {
 		maxBytes = 4096
 	}
 
 	f, err := os.Open(filePath) //nolint:gosec // path from validated managed file
 	if err != nil {
-		return connect.NewResponse(&apiv1.PreviewJSONLookupResponse{
-			Error: fmt.Sprintf("open file: %v", err),
-		}), nil
+		return structuredPreview{errMsg: fmt.Sprintf("open file: %v", err), totalSize: totalSize}
 	}
 	defer func() { _ = f.Close() }()
 
-	// Read full file for JSON parsing (needed for query evaluation).
-	// Cap at 10MB to prevent abuse.
+	// Read full file for parsing (needed for query evaluation). Cap at 10MB.
 	readLimit := min(totalSize, 10<<20)
 	fullBuf := make([]byte, readLimit)
 	n, _ := f.Read(fullBuf)
 	fullData := fullBuf[:n]
 
-	// Parse the full JSON for query evaluation.
+	// Parse into the generic tree jq operates on.
 	var parsed any
-	_ = json.Unmarshal(fullData, &parsed)
+	if format == "yaml" {
+		_ = yaml.Unmarshal(fullData, &parsed)
+	} else {
+		_ = json.Unmarshal(fullData, &parsed)
+	}
 
-	// Truncated preview for display.
-	displayData := fullData
+	displayData, truncated := previewDisplayBody(fullData, parsed, format, maxBytes, totalSize)
+
+	out := structuredPreview{
+		content:   string(displayData),
+		totalSize: totalSize,
+		truncated: truncated,
+	}
+	if query != "" && parsed != nil {
+		out.queryResult, out.queryError = evalJQ(query, params, parsed)
+	}
+	return out
+}
+
+// previewDisplayBody chooses the bytes shown in the preview pane and reports
+// whether they were cut short. JSON is re-encoded with indentation for
+// readability; YAML is shown raw so the user sees their own file back.
+func previewDisplayBody(raw []byte, parsed any, format string, maxBytes int, totalSize int64) ([]byte, bool) {
+	// Start with raw bytes clipped to maxBytes.
+	body := raw
 	truncated := false
-	if len(displayData) > maxBytes {
-		displayData = displayData[:maxBytes]
+	if len(body) > maxBytes {
+		body = body[:maxBytes]
 		truncated = true
 	}
-	if parsed != nil {
-		if pretty, err := json.MarshalIndent(parsed, "", "  "); err == nil {
-			if len(pretty) > maxBytes {
-				displayData = pretty[:maxBytes]
-				truncated = true
-			} else {
-				displayData = pretty
-				truncated = int64(len(pretty)) < totalSize
-			}
-		}
-	}
 
-	resp := &apiv1.PreviewJSONLookupResponse{
-		Content:   string(displayData),
-		TotalSize: totalSize,
-		Truncated: truncated,
+	if format == "yaml" {
+		return body, int64(len(body)) < totalSize
 	}
-
-	// Evaluate JSONPath query if provided.
-	if query := req.Msg.GetQuery(); query != "" && parsed != nil {
-		resp.QueryResult, resp.QueryError = evalJQ(query, req.Msg.GetParameters(), parsed)
+	// JSON: re-encode with indentation when parsing succeeded.
+	if parsed == nil {
+		return body, truncated
 	}
-
-	return connect.NewResponse(resp), nil
+	pretty, err := json.MarshalIndent(parsed, "", "  ")
+	if err != nil {
+		return body, truncated
+	}
+	if len(pretty) > maxBytes {
+		return pretty[:maxBytes], true
+	}
+	return pretty, int64(len(pretty)) < totalSize
 }
 
 // evalJQ evaluates a jq query with parameter substitution.
