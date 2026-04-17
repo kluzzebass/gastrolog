@@ -604,11 +604,13 @@ func (m *Manager) Active() *chunk.ChunkMeta {
 
 func (m *Manager) Meta(id chunk.ChunkID) (chunk.ChunkMeta, error) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	meta := m.lookupMeta(id)
-	m.mu.Unlock()
 	if meta == nil {
 		return chunk.ChunkMeta{}, chunk.ErrChunkNotFound
 	}
+	// Snapshot under the lock — toChunkMeta reads fields that
+	// CompressChunk/uploadToCloud mutate while holding m.mu.
 	return meta.toChunkMeta(), nil
 }
 
@@ -666,14 +668,20 @@ func (m *Manager) List() ([]chunk.ChunkMeta, error) {
 }
 
 func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
+	// Snapshot the meta flags we need under the lock — reading cloudBacked
+	// or sealed after unlocking races with CompressChunk/uploadToCloud which
+	// mutate those fields while holding m.mu.
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
-	m.mu.Unlock()
 	if meta == nil {
+		m.mu.Unlock()
 		return nil, chunk.ErrChunkNotFound
 	}
+	cloudBacked := meta.cloudBacked
+	sealed := meta.sealed
+	m.mu.Unlock()
 
-	if meta.cloudBacked {
+	if cloudBacked {
 		return m.openCloudCursor(id)
 	}
 
@@ -682,7 +690,7 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 	attrPath := m.attrLogPath(id)
 	dictPath := m.dictLogPath(id)
 
-	if meta.sealed {
+	if sealed {
 		return newMmapCursor(id, rawPath, idxPath, attrPath, dictPath)
 	}
 
@@ -693,17 +701,20 @@ func (m *Manager) OpenCursor(id chunk.ChunkID) (chunk.RecordCursor, error) {
 // skipping raw.log entirely. This enables O(~88 bytes/record) scans for
 // aggregation queries that never inspect message bodies.
 func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS time.Time, attrs chunk.Attributes) bool) error {
+	// Snapshot meta flags under the lock — reading them after unlocking
+	// races with CompressChunk/uploadToCloud which mutate them.
 	m.mu.Lock()
 	meta := m.lookupMeta(id)
 	if meta == nil {
 		m.mu.Unlock()
 		return chunk.ErrChunkNotFound
 	}
-
+	cloudBacked := meta.cloudBacked
+	sealed := meta.sealed
 	m.mu.Unlock()
 
 	// Cloud-backed chunks: download and iterate via cursor.
-	if meta.cloudBacked {
+	if cloudBacked {
 		return m.scanAttrsCloud(id, startPos, fn)
 	}
 
@@ -711,7 +722,7 @@ func (m *Manager) ScanAttrs(id chunk.ChunkID, startPos uint64, fn func(writeTS t
 	attrPath := m.attrLogPath(id)
 	dictPath := m.dictLogPath(id)
 
-	if meta.sealed {
+	if sealed {
 		return scanAttrsSealed(idxPath, attrPath, dictPath, startPos, fn)
 	}
 
