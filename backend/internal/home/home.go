@@ -6,11 +6,10 @@
 // Layout:
 //
 //	<root>/
-//	  node_id                          (persistent UUIDv7 node identity)
+//	  node_id                          (advisory cache — see app.resolveNodeID; the raft StableStore is canonical)
 //	  node_name                        (human-readable petname, mirrors config store)
-//	  config.json   or  config.db      (config store, type-dependent)
 //	  raft/
-//	    raft.db                        (boltdb: raft log + stable store)
+//	    wal/                           (raftwal: log + stable store)
 //	    snapshots/                     (raft file snapshot store)
 //	  stores/
 //	    <vault-id>/                    (per-vault chunk + index data)
@@ -119,12 +118,28 @@ func (d Dir) EnsureExists() error {
 	return nil
 }
 
-// NodeID reads the persistent node identity from <root>/node_id.
-// If the file doesn't exist, a new UUIDv7 is generated and written.
-func (d Dir) NodeID() (string, error) {
-	return d.readOrCreate("node_id", func() string {
-		return glid.New().String()
-	})
+// ReadNodeIDFile reads the advisory node_id file at <root>/node_id.
+// The raft StableStore is the canonical source — this file is a human
+// convenience (`cat data/node1/node_id`) and a migration fallback for
+// pre-gastrolog-61kjk clusters where the file WAS the canonical source.
+// Returns os.ErrNotExist when the file is absent.
+func (d Dir) ReadNodeIDFile() (glid.GLID, error) {
+	data, err := readSmall(filepath.Join(d.root, "node_id"))
+	if err != nil {
+		return glid.GLID{}, err
+	}
+	return glid.Parse(strings.TrimSpace(string(data)))
+}
+
+// WriteNodeIDFile writes the advisory node_id file. Called after the
+// canonical ID is resolved from (or written to) the raft StableStore so the
+// file always mirrors the true identity. Safe to overwrite.
+func (d Dir) WriteNodeIDFile(id glid.GLID) error {
+	p := filepath.Join(d.root, "node_id")
+	if err := os.WriteFile(p, []byte(id.String()+"\n"), 0o640); err != nil { //nolint:gosec // G306: node_id file is not secret
+		return fmt.Errorf("write node_id: %w", err)
+	}
+	return nil
 }
 
 // ReadNodeName reads the cached node name from <root>/node_name.
@@ -143,21 +158,4 @@ func (d Dir) ReadNodeName() string {
 func (d Dir) WriteNodeName(name string) error {
 	p := filepath.Join(d.root, "node_name")
 	return os.WriteFile(p, []byte(name+"\n"), 0o640) //nolint:gosec // G306: node_name is not secret
-}
-
-// readOrCreate reads a single-line value from <root>/<filename>.
-// If the file doesn't exist, generate() provides the default which is persisted.
-func (d Dir) readOrCreate(filename string, generate func() string) (string, error) {
-	p := filepath.Join(d.root, filename)
-	data, err := readSmall(p)
-	if err == nil {
-		if v := strings.TrimSpace(string(data)); v != "" {
-			return v, nil
-		}
-	}
-	v := generate()
-	if err := os.WriteFile(p, []byte(v+"\n"), 0o640); err != nil { //nolint:gosec // G306: node-id file is not secret, 0640 is intentional
-		return "", fmt.Errorf("write %s: %w", filename, err)
-	}
-	return v, nil
 }
