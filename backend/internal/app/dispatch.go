@@ -476,7 +476,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 	//
 	// Policy reloads (rotation/retention) still run below because they are
 	// independent of placement state.
-	d.applyTierMembershipChange(ctx, tierCfg, *v, tierID, leaderNodeID, followerNodeIDs)
+	d.applyTierMembershipChange(ctx, *v, tierID, leaderNodeID, followerNodeIDs)
 
 	// Update the desired tier Raft leader so TransferLeadership aligns
 	// the Raft leader with the placement leader.
@@ -522,7 +522,7 @@ func (d *configDispatcher) handleTierPut(ctx context.Context, tierID glid.GLID) 
 // the (complete) placement state, and either adds/rebuilds it locally or
 // removes it if it no longer belongs. Deferred entirely when placements are
 // incomplete — the next CmdPutTier from the placement manager will retry.
-func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCfg *system.TierConfig, v system.VaultConfig, tierID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
+func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, v system.VaultConfig, tierID glid.GLID, leaderNodeID string, followerNodeIDs []string) {
 	// Placements are "complete" when they include a leader. We can't gate on
 	// len(placements) >= RF because RF may be unsatisfiable when a node is
 	// down — the placement manager writes the best it can with surviving
@@ -542,16 +542,21 @@ func (d *configDispatcher) applyTierMembershipChange(ctx context.Context, tierCf
 		return
 	}
 
+	// Every node participates in every tier Raft group (gastrolog-292yi),
+	// whether or not it has a storage placement for this tier. Non-storage
+	// nodes still need to join as voters — without that, a tier with RF
+	// smaller than the cluster size can't reach quorum because most nodes
+	// never registered the group. AddTierToVault handles both cases: storage
+	// nodes get a TierInstance, non-storage nodes only get a Raft group.
 	tierBelongsHere := leaderNodeID == d.localNodeID || slices.Contains(followerNodeIDs, d.localNodeID)
-	if tierBelongsHere {
-		d.rebuildVaultIfTierMissing(ctx, v, tierID)
-		return
+	if !tierBelongsHere {
+		if existing := d.orch.FindLocalTierExported(v.ID, tierID); existing != nil {
+			// Tier moved away from this node — drop the storage instance.
+			// The Raft group itself stays (symmetric voting).
+			d.orch.RemoveTierFromVault(v.ID, tierID)
+		}
 	}
-
-	existing := d.orch.FindLocalTierExported(v.ID, tierID)
-	if existing != nil {
-		d.orch.RemoveTierFromVault(v.ID, tierID)
-	}
+	d.rebuildVaultIfTierMissing(ctx, v, tierID)
 }
 
 func (d *configDispatcher) registerVault(ctx context.Context, v system.VaultConfig, tierID glid.GLID) {
