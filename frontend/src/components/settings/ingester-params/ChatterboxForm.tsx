@@ -93,24 +93,25 @@ export function ChatterboxForm({
                   checked={isOn}
                   onChange={() => toggleFormat(f.id)}
                   dark={dark}
+                  className="flex-1 min-w-0"
+                  label={
+                    <div className="flex-1 min-w-0">
+                      <span
+                        className={`text-[0.85em] font-medium ${c(
+                          isOn ? "text-text-bright" : "text-text-muted",
+                          isOn ? "text-light-text-bright" : "text-light-text-muted",
+                        )}`}
+                      >
+                        {f.label}
+                      </span>
+                      <span
+                        className={`text-[0.75em] ml-2 ${c("text-text-muted", "text-light-text-muted")}`}
+                      >
+                        {f.description}
+                      </span>
+                    </div>
+                  }
                 />
-
-                {/* Label + description */}
-                <div className="flex-1 min-w-0">
-                  <span
-                    className={`text-[0.85em] font-medium ${c(
-                      isOn ? "text-text-bright" : "text-text-muted",
-                      isOn ? "text-light-text-bright" : "text-light-text-muted",
-                    )}`}
-                  >
-                    {f.label}
-                  </span>
-                  <span
-                    className={`text-[0.75em] ml-2 ${c("text-text-muted", "text-light-text-muted")}`}
-                  >
-                    {f.description}
-                  </span>
-                </div>
 
                 {/* Weight input + percentage */}
                 {isOn && (

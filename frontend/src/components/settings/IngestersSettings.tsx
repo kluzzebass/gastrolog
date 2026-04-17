@@ -9,12 +9,10 @@ import { Badge } from "../Badge";
 import { SettingsCard } from "./SettingsCard";
 import { SettingsSection } from "./SettingsSection";
 import { AddFormCard } from "./AddFormCard";
-import { FormField, TextInput } from "./FormField";
+import { IngesterCommonFields } from "./IngesterCommonFields";
 import { IngesterParamsForm, isIngesterParamsValid, listenAddrConflict } from "./ingester-params";
 import { Button } from "./Buttons";
-import { Checkbox } from "./Checkbox";
 import { NodeBadge } from "./NodeBadge";
-import { NodeMultiSelect } from "./NodeMultiSelect";
 import { sortByName } from "../../lib/sort";
 import { PulseIcon } from "../icons";
 import { CrossLinkBadge } from "../inspector/CrossLinkBadge";
@@ -200,33 +198,19 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           createDisabled={nameConflict || !!newListenError || !isIngesterParamsValid(newType, newParams)}
           typeBadge={newType}
         >
-          <FormField label="Name" dark={dark}>
-            <TextInput
-              value={newName}
-              onChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
-              placeholder={namePlaceholder || newType}
-              dark={dark}
-            />
-          </FormField>
-          <Checkbox
-            checked={newEnabled}
-            onChange={(v) => dispatchAdd({ type: "setNewEnabled", value: v })}
-            label="Enabled"
+          <IngesterCommonFields
+            name={newName}
+            namePlaceholder={namePlaceholder || newType}
+            onNameChange={(v) => dispatchAdd({ type: "setNewName", value: v })}
+            enabled={newEnabled}
+            onEnabledChange={(v) => dispatchAdd({ type: "setNewEnabled", value: v })}
+            nodeIds={newNodeIds}
+            onNodeIdsChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v })}
+            singleton={newSingleton}
+            onSingletonChange={(v) => dispatchAdd({ type: "setNewSingleton", value: v })}
+            singletonSupported={singletonSupport[newType] ?? false}
             dark={dark}
           />
-          <NodeMultiSelect
-            value={newNodeIds}
-            onChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v })}
-            dark={dark}
-          />
-          {singletonSupport[newType] && (
-            <Checkbox
-              checked={newSingleton}
-              onChange={(v) => dispatchAdd({ type: "setNewSingleton", value: v })}
-              label="Singleton (run on one node with automatic failover)"
-              dark={dark}
-            />
-          )}
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}
@@ -342,32 +326,18 @@ function IngesterCard({
       }
     >
       <div className="flex flex-col gap-3">
-        <FormField label="Name" dark={dark}>
-          <TextInput
-            value={edit.name}
-            onChange={(v) => setEdit({ name: v })}
-            dark={dark}
-          />
-        </FormField>
-        <Checkbox
-          checked={edit.enabled}
-          onChange={(v) => setEdit({ enabled: v })}
-          label="Enabled"
+        <IngesterCommonFields
+          name={edit.name}
+          onNameChange={(v) => setEdit({ name: v })}
+          enabled={edit.enabled}
+          onEnabledChange={(v) => setEdit({ enabled: v })}
+          nodeIds={edit.nodeIds}
+          onNodeIdsChange={(v) => setEdit({ nodeIds: v })}
+          singleton={edit.singleton}
+          onSingletonChange={(v) => setEdit({ singleton: v })}
+          singletonSupported={singletonSupported}
           dark={dark}
         />
-        <NodeMultiSelect
-          value={edit.nodeIds}
-          onChange={(v) => setEdit({ nodeIds: v })}
-          dark={dark}
-        />
-        {singletonSupported && (
-          <Checkbox
-            checked={edit.singleton}
-            onChange={(v) => setEdit({ singleton: v })}
-            label="Singleton (run on one node with automatic failover)"
-            dark={dark}
-          />
-        )}
         <IngesterParamsForm
           ingesterType={ing.type}
           params={edit.params}
