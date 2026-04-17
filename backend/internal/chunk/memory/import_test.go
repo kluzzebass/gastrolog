@@ -7,12 +7,11 @@ import (
 	"gastrolog/internal/chunk"
 )
 
-func TestImportRecordsHonorsSetNextChunkID(t *testing.T) {
+func TestImportRecordsHonorsExplicitID(t *testing.T) {
 	t.Parallel()
 	mgr := newImportTestManager(t)
 
 	targetID := chunk.NewChunkID()
-	mgr.SetNextChunkID(targetID)
 
 	i := 0
 	recs := []chunk.Record{
@@ -28,7 +27,7 @@ func TestImportRecordsHonorsSetNextChunkID(t *testing.T) {
 		return r, nil
 	})
 
-	meta, err := mgr.ImportRecords(iter)
+	meta, err := mgr.ImportRecords(targetID, iter)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +39,7 @@ func TestImportRecordsHonorsSetNextChunkID(t *testing.T) {
 	}
 }
 
-func TestImportRecordsWithoutSetNextChunkID(t *testing.T) {
+func TestImportRecordsWithZeroIDGeneratesNew(t *testing.T) {
 	t.Parallel()
 	mgr := newImportTestManager(t)
 
@@ -55,7 +54,7 @@ func TestImportRecordsWithoutSetNextChunkID(t *testing.T) {
 		return r, nil
 	})
 
-	meta, err := mgr.ImportRecords(iter)
+	meta, err := mgr.ImportRecords(chunk.ChunkID{}, iter)
 	if err != nil {
 		t.Fatal(err)
 	}

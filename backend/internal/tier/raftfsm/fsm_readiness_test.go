@@ -30,10 +30,26 @@ func TestFSMReadyAfterApply(t *testing.T) {
 
 func TestFSMReadyAfterRestore(t *testing.T) {
 	t.Parallel()
-	fsm := New()
 
-	// Restore from an empty snapshot (0 entries).
-	fsm.Restore(io.NopCloser(&emptyReader{}))
+	// Real restore path: produce a snapshot via Persist (which writes the
+	// versioned header) and restore it into a fresh FSM. An FSM whose
+	// chunk map happens to be empty still goes through the header + section
+	// framing — that's what Raft actually feeds us at runtime.
+	src := New()
+	snap, err := src.Snapshot()
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	pr, pw := io.Pipe()
+	go func() {
+		_ = snap.Persist(&pipeSink{pw})
+		_ = pw.Close()
+	}()
+
+	fsm := New()
+	if err := fsm.Restore(io.NopCloser(pr)); err != nil {
+		t.Fatalf("restore: %v", err)
+	}
 	if !fsm.Ready() {
 		t.Error("expected Ready()=true after Restore, even with empty snapshot")
 	}

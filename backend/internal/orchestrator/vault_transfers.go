@@ -51,7 +51,7 @@ func (o *Orchestrator) MoveChunk(ctx context.Context, chunkID chunk.ChunkID, src
 		return fmt.Errorf("open chunk %s: %w", chunkID, err)
 	}
 	defer func() { _ = cursor.Close() }()
-	imported, err := dstCM.ImportRecords(chunk.CursorIterator(cursor))
+	imported, err := dstCM.ImportRecords(chunkID, chunk.CursorIterator(cursor))
 	if err != nil {
 		return fmt.Errorf("import records into destination: %w", err)
 	}

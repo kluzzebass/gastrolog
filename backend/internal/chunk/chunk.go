@@ -84,12 +84,16 @@ type ChunkManager interface {
 	// occurred, nil otherwise. Safe to call from background sweeps.
 	CheckRotation() *string
 
-	// ImportRecords creates a new sealed chunk by consuming records from the
-	// iterator, re-stamping each record's WriteTS with a fresh monotonic
-	// timestamp. The new chunk is independent of the active chunk; concurrent
-	// Append calls are not affected.
-	// Returns the metadata of the newly created sealed chunk.
-	ImportRecords(next RecordIterator) (ChunkMeta, error)
+	// ImportRecords creates a new sealed chunk with the given ID by consuming
+	// records from the iterator, re-stamping each record's WriteTS with a
+	// fresh monotonic timestamp. The new chunk is independent of the active
+	// chunk; concurrent Append calls are not affected.
+	//
+	// If id is the zero ChunkID, a new ID is generated. Passing a non-zero id
+	// atomically assigns that ID to the imported chunk without going through
+	// Manager-wide state — this is the only way to pin an import's ID when
+	// concurrent Appends may also be creating chunks. See gastrolog-11rzz.
+	ImportRecords(id ChunkID, next RecordIterator) (ChunkMeta, error)
 
 	// ScanAttrs iterates records in a chunk starting from startPos, calling fn
 	// with each record's WriteTS and Attributes. fn returns true to continue,

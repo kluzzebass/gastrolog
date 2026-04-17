@@ -16,6 +16,14 @@ import (
 var (
 	ErrAttrsTooLarge    = errors.New("attributes too large to encode")
 	ErrInvalidAttrsData = errors.New("invalid attributes data")
+	// ErrChunkTombstoned signals that an append/import/seal targeted a chunk
+	// that has been deleted and is still within the tier FSM's tombstone
+	// retention window. Callers on the replication receive path treat this
+	// as a benign no-op (chunk absent = goal achieved). Lives in this shared
+	// package so both the orchestrator (producer) and cluster replication
+	// handlers (consumer) can reference it without circular imports.
+	// See gastrolog-11rzz.
+	ErrChunkTombstoned = errors.New("chunk is tombstoned")
 )
 
 // Attributes represents record metadata as key-value pairs.

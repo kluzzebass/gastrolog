@@ -122,6 +122,18 @@ func (o *Orchestrator) replicateSealedChunk(ctx context.Context, vaultID, tierID
 		return
 	}
 
+	// If retention deleted the chunk while this replication job was queued,
+	// the tier FSM now holds a tombstone for it. Skip the replication —
+	// sending ImportSealedChunk to followers would recreate a chunk the
+	// cluster has already decided to forget (ghost chunk). Closes the
+	// retention-beats-replication ordering at the leader; the receiver-side
+	// tombstone check closes the reverse ordering. See gastrolog-11rzz.
+	if tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+		o.logger.Debug("replication: skipping tombstoned chunk (retention beat replication)",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String())
+		return
+	}
+
 	// Cloud-backed chunks live in shared object storage (S3/GCS/Azure).
 	// Followers learn about them via the tier Raft FSM's OnUpload callback
 	// and read directly from the bucket — no record streaming needed.
@@ -214,5 +226,21 @@ func (o *Orchestrator) replicateToFollower(ctx context.Context, vaultID, tierID 
 		}
 		records = append(records, rec)
 	}
+
+	// Final tombstone check right before sending: retention may have
+	// deleted this chunk while we were reading records. Without the
+	// recheck, a late ImportSealed would still land on the follower after
+	// the follower has already processed the delete via tier Raft, and
+	// the follower's post-import cleanup only catches the case where the
+	// tombstone is on its own FSM. This leader-side recheck short-
+	// circuits the RPC entirely when the leader already knows the chunk
+	// is gone. See gastrolog-11rzz.
+	tier := o.findLocalTier(vaultID, tierID)
+	if tier != nil && tier.IsTombstoned != nil && tier.IsTombstoned(chunkID) {
+		o.logger.Debug("replication: chunk tombstoned after cursor read, aborting send",
+			"vault", vaultID, "tier", tierID, "chunk", chunkID.String(), "node", nodeID)
+		return nil
+	}
+
 	return o.tierReplicator.ImportSealedChunk(ctx, nodeID, vaultID, tierID, chunkID, records)
 }

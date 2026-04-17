@@ -12,6 +12,7 @@ import (
 
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gastrolog/internal/blobstore"
 	"gastrolog/internal/chunk"
@@ -1059,8 +1060,7 @@ func TestTransitionCloudTierFollowerDoesNotOverwriteBlob(t *testing.T) {
 	for i := range recs {
 		recs[i] = makeRecord("primary-rec")
 	}
-	followerCM.SetNextChunkID(chunkID)
-	_, importErr := followerCM.ImportRecords(testIterFromRecords(recs))
+	_, importErr := followerCM.ImportRecords(chunkID, testIterFromRecords(recs))
 	if importErr != nil {
 		t.Fatalf("follower import failed: %v", importErr)
 	}
@@ -2341,6 +2341,27 @@ func (h *clusterHarness) countChunksOnTier(t *testing.T, tierIdx int) map[string
 //   - rotationRecords controls the rotation policy (e.g., 100 = seal every 100 records)
 //   - The leader's tiers have FollowerTargets pointing to all followers
 //   - Every node has a directTransferrer wired to all other nodes
+// newClusterLifecycleLogger returns a slog.Logger that writes ALL levels
+// (including Debug) to /tmp/gastrolog-lifecycle-<testname>-<pid>-<ts>.log.
+// Path is outside t.TempDir() so the log survives test cleanup for
+// post-mortem inspection. On test failure, the log path is dumped to t.Log.
+func newClusterLifecycleLogger(t *testing.T) *slog.Logger {
+	t.Helper()
+	name := strings.ReplaceAll(t.Name(), "/", "_")
+	logPath := filepath.Join("/tmp", fmt.Sprintf("gastrolog-lifecycle-%s-%d-%d.log",
+		name, os.Getpid(), time.Now().UnixNano()))
+	f, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create lifecycle log: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = f.Close()
+		t.Logf("lifecycle log: %s", logPath)
+	})
+	handler := slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug})
+	return slog.New(handler)
+}
+
 func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords uint64) *clusterHarness {
 	t.Helper()
 	if len(nodeIDs) < 2 {
@@ -2390,8 +2411,11 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 	orchs := make(map[string]*Orchestrator)
 	nodes := make(map[string]*clusterTestNode)
 
+	logger := newClusterLifecycleLogger(t)
+
 	for _, nid := range nodeIDs {
-		orch := newTestOrch(t, Config{LocalNodeID: nid})
+		nodeLogger := logger.With("node", nid)
+		orch := newTestOrch(t, Config{LocalNodeID: nid, Logger: nodeLogger})
 		orch.sysLoader = &transitionSystemLoader{store: store}
 		orchs[nid] = orch
 
@@ -2405,6 +2429,7 @@ func setupCluster(t *testing.T, nodeIDs []string, tierCount int, rotationRecords
 				Dir:            dir,
 				Now:            time.Now,
 				RotationPolicy: chunk.NewRecordCountPolicy(rotationRecords),
+				Logger:         nodeLogger.With("tier", fmt.Sprintf("tier-%d", i)),
 			})
 			if cmErr != nil {
 				t.Fatal(cmErr)
@@ -2610,9 +2635,6 @@ func (h *clusterHarness) listChunkDirsOnNode(t *testing.T, nodeID string, tierId
 //   - No records are lost or duplicated
 //   - Record count matches on the leader
 func TestClusterTransitionBurstNoOrphans(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: leader schedules ImportSealedChunk asynchronously; when retention fires immediately after seal (as this test does, unlike production), a late import can recreate the chunk on a follower after forwardDelete. Architectural fix tracked separately — skip under race until then.")
-	}
 	// Not parallel: heavy stress test (100 chunks × 2 tiers × 4 nodes).
 	// Running concurrently with other burst tests starves CPU under race detector.
 	h := setupCluster(t, []string{"leader", "follower-1", "follower-2", "follower-3"}, 2, 100)
@@ -2692,9 +2714,6 @@ func TestClusterTransitionBurstNoOrphans(t *testing.T) {
 // 3 tiers and bursts 10K records through the full tier chain with 100-record
 // rotation. Verifies no orphans on any node and exact record preservation.
 func TestClusterTransitionThreeTierChainBurst(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: see TestClusterTransitionBurstNoOrphans for the same root cause.")
-	}
 	// Not parallel: heavy stress test (100 chunks × 3 tiers × 4 nodes).
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 3, 100)
 
@@ -2847,9 +2866,6 @@ func TestClusterTransitionEventIDPreservedAcrossNodes(t *testing.T) {
 // is not safe (see gastrolog-3l7ow findings). Production serializes through
 // the digest loop. This test uses sequential ingestion to match that model.
 func TestClusterTransitionLargeBurst(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: see TestClusterTransitionBurstNoOrphans for the same root cause.")
-	}
 	// Not parallel: heavy stress test (100 chunks × 2 tiers × 4 nodes).
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
 
@@ -2910,9 +2926,6 @@ func TestClusterTransitionLargeBurst(t *testing.T) {
 // transition, the source tier's sealed chunks are cleaned up on follower nodes
 // (via deleteFromFollowers), not just on the leader.
 func TestClusterTransitionNoChunksLeftBehindOnFollowers(t *testing.T) {
-	if raceEnabled {
-		t.Skip("flaky under -race: see TestClusterTransitionBurstNoOrphans for the same root cause.")
-	}
 	t.Parallel()
 	h := setupCluster(t, []string{"leader", "f1", "f2", "f3"}, 2, 100)
 
