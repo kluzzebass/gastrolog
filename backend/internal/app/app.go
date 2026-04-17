@@ -1077,20 +1077,28 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
+	regHA := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
+		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester, SingletonSupported: true}
+	}
 	listen := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, addrs func(map[string]string) []orchestrator.ListenAddr) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, ListenAddrs: addrs}
 	}
+	// SingletonSupported table (see gastrolog-2kcw4):
+	//   chatterbox / scatterbox  — synthetic, both parallel and singleton-with-failover are legitimate
+	//   kafka / mqtt             — depends on broker setup (consumer group / shared subscription)
+	//   docker / self / tail / metrics — per-node-local source, singleton would hide 3/4 of cluster data
+	//   listeners                — OS-level port coordination, concept doesn't apply
 	ingesterTypes := map[string]orchestrator.IngesterRegistration{
-		"chatterbox": reg(chatterbox.NewIngester, chatterbox.ParamDefaults, nil),
-		"scatterbox": reg(scatterbox.NewIngester, scatterbox.ParamDefaults, nil),
+		"chatterbox": regHA(chatterbox.NewIngester, chatterbox.ParamDefaults, nil),
+		"scatterbox": regHA(scatterbox.NewIngester, scatterbox.ParamDefaults, nil),
 		"docker": reg(ingestdocker.NewFactory(cfgStore), ingestdocker.ParamDefaults,
 			func(ctx context.Context, params map[string]string) (string, error) {
 				return ingestdocker.TestConnection(ctx, params, cfgStore)
 			}),
 		"fluentfwd": listen(ingestfluentfwd.NewFactory(), ingestfluentfwd.ParamDefaults, ingestfluentfwd.ListenAddrs),
 		"http":      listen(ingesthttp.NewFactory(), ingesthttp.ParamDefaults, ingesthttp.ListenAddrs),
-		"kafka":     reg(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
-		"mqtt":      reg(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
+		"kafka":     regHA(ingestkafka.NewFactory(), ingestkafka.ParamDefaults, ingestkafka.TestConnection),
+		"mqtt":      regHA(ingestmqtt.NewFactory(), ingestmqtt.ParamDefaults, ingestmqtt.TestConnection),
 		"metrics":   reg(ingestmetrics.NewFactory(orch), ingestmetrics.ParamDefaults, nil),
 		"otlp":      listen(ingestotlp.NewFactory(), ingestotlp.ParamDefaults, ingestotlp.ListenAddrs),
 		"relp":      listen(ingestrelp.NewFactory(certMgr), ingestrelp.ParamDefaults, ingestrelp.ListenAddrs),

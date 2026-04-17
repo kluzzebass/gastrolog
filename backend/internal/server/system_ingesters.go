@@ -45,6 +45,7 @@ func (s *SystemServer) ListIngesters(
 			Type:       ing.Type,
 			Enabled:    ing.Enabled,
 			NodeIds:    stringsToBytes(ing.NodeIDs),
+			Singleton:  ing.Singleton,
 			NodeStatus: s.collectIngesterNodeStatus(ing.ID),
 		}
 		// Backwards compat: running = at least one node is alive.
@@ -158,12 +159,13 @@ func (s *SystemServer) PutIngester(
 		nodeIDs = []string{string(req.Msg.Config.NodeId)}
 	}
 	ingCfg := system.IngesterConfig{
-		ID:      id,
-		Name:    req.Msg.Config.Name,
-		Type:    req.Msg.Config.Type,
-		Enabled: req.Msg.Config.Enabled,
-		Params:  req.Msg.Config.Params,
-		NodeIDs: nodeIDs,
+		ID:        id,
+		Name:      req.Msg.Config.Name,
+		Type:      req.Msg.Config.Type,
+		Enabled:   req.Msg.Config.Enabled,
+		Params:    req.Msg.Config.Params,
+		NodeIDs:   nodeIDs,
+		Singleton: req.Msg.Config.Singleton,
 	}
 
 	// Dry-run validation: verify type is known and factory can construct the
@@ -379,7 +381,8 @@ func (s *SystemServer) GetIngesterDefaults(
 	types := make(map[string]*apiv1.IngesterTypeDefaults, len(s.factories.IngesterTypes))
 	for name, reg := range s.factories.IngesterTypes {
 		td := &apiv1.IngesterTypeDefaults{
-			Mode: apiv1.IngesterMode_INGESTER_MODE_ACTIVE,
+			Mode:               apiv1.IngesterMode_INGESTER_MODE_ACTIVE,
+			SingletonSupported: reg.SingletonSupported,
 		}
 		if reg.ListenAddrs != nil {
 			td.Mode = apiv1.IngesterMode_INGESTER_MODE_PASSIVE

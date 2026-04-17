@@ -215,7 +215,8 @@ message IngesterConfig {
   bool enabled = 4;
   string name = 5;
   bytes node_id = 6 [deprecated = true]; // Legacy single-node assignment. Use node_ids.
-  repeated bytes node_ids = 7;           // Allowed nodes. Passive: try all. Active: place on one.
+  repeated bytes node_ids = 7;           // Allowed nodes. Parallel: run on all. Singleton: place on one.
+  bool singleton = 8;                    // HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
 }
 
 message FilterConfig {
@@ -256,6 +257,7 @@ message IngesterInfo {
   repeated bytes node_ids = 6;           // Allowed nodes from config.
   map<string, bool> node_status = 8;     // Per-node running status: nodeID → alive.
   bool enabled = 9;                      // Whether the ingester is enabled in config.
+  bool singleton = 10;                    // HA semantics: false = parallel (every node_ids), true = Raft-assigned singleton.
 }
 
 message GetIngesterStatusRequest {
@@ -737,6 +739,7 @@ message GetIngesterDefaultsRequest {}
 message IngesterTypeDefaults {
   map<string, string> params = 1;
   IngesterMode mode = 2;
+  bool singleton_supported = 3; // True iff the type meaningfully supports singleton HA placement (Raft-assigned, one node with failover).
 }
 
 message GetIngesterDefaultsResponse {

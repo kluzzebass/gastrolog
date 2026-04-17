@@ -1058,6 +1058,7 @@ func TestGetIngesterDefaultsModes(t *testing.T) {
 		IngesterTypes: map[string]orchestrator.IngesterRegistration{
 			"syslog": {Factory: syslog.NewFactory(), Defaults: syslog.ParamDefaults, ListenAddrs: syslog.ListenAddrs},
 			"tail":   {Factory: tail.NewFactory(), Defaults: tail.ParamDefaults},
+			"kafka":  {Factory: nil, Defaults: nil, SingletonSupported: true}, // non-listener with singleton support
 		},
 	}
 
@@ -1080,14 +1081,29 @@ func TestGetIngesterDefaultsModes(t *testing.T) {
 	if syslogDef.Mode != gastrologv1.IngesterMode_INGESTER_MODE_PASSIVE {
 		t.Errorf("syslog: expected PASSIVE, got %v", syslogDef.Mode)
 	}
+	if syslogDef.SingletonSupported {
+		t.Errorf("syslog: expected SingletonSupported=false, got true")
+	}
 
-	// tail has no ListenAddrs → active.
+	// tail has no ListenAddrs → active. Not singleton-supported.
 	tailDef := resp.Msg.Types["tail"]
 	if tailDef == nil {
 		t.Fatal("expected tail in types")
 	}
 	if tailDef.Mode != gastrologv1.IngesterMode_INGESTER_MODE_ACTIVE {
 		t.Errorf("tail: expected ACTIVE, got %v", tailDef.Mode)
+	}
+	if tailDef.SingletonSupported {
+		t.Errorf("tail: expected SingletonSupported=false, got true")
+	}
+
+	// kafka: non-listener with singleton support.
+	kafkaDef := resp.Msg.Types["kafka"]
+	if kafkaDef == nil {
+		t.Fatal("expected kafka in types")
+	}
+	if !kafkaDef.SingletonSupported {
+		t.Errorf("kafka: expected SingletonSupported=true, got false")
 	}
 }
 

@@ -46,6 +46,7 @@ interface AddIngesterFormState {
   newEnabled: boolean;
   newParams: Record<string, string>;
   newNodeIds: string[];
+  newSingleton: boolean;
 }
 
 const addIngesterFormInitial: AddIngesterFormState = {
@@ -55,6 +56,7 @@ const addIngesterFormInitial: AddIngesterFormState = {
   newEnabled: true,
   newParams: {},
   newNodeIds: [],
+  newSingleton: false,
 };
 
 type AddIngesterFormAction =
@@ -63,6 +65,7 @@ type AddIngesterFormAction =
   | { type: "setNewEnabled"; value: boolean }
   | { type: "setNewParams"; value: Record<string, string> }
   | { type: "setNewNodeIds"; value: string[] }
+  | { type: "setNewSingleton"; value: boolean }
   | { type: "resetForm" };
 
 function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngesterFormAction): AddIngesterFormState {
@@ -77,6 +80,8 @@ function addIngesterFormReducer(state: AddIngesterFormState, action: AddIngester
       return { ...state, newParams: action.value };
     case "setNewNodeIds":
       return { ...state, newNodeIds: action.value };
+    case "setNewSingleton":
+      return { ...state, newSingleton: action.value };
     case "resetForm":
       return addIngesterFormInitial;
     default:
@@ -92,12 +97,13 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
   const { data: ingesterMeta } = useIngesterDefaults();
   const allDefaults = ingesterMeta?.defaults ?? {};
   const ingesterModes = ingesterMeta?.modes ?? {};
+  const singletonSupport = ingesterMeta?.singletonSupported ?? {};
   const { addToast } = useToast();
 
   const { isExpanded, toggle: toggleCard, setExpandedCards } = useExpandedCards();
 
   const [addForm, dispatchAdd] = useReducer(addIngesterFormReducer, addIngesterFormInitial);
-  const { adding, newName, newType, newEnabled, newParams, newNodeIds } = addForm;
+  const { adding, newName, newType, newEnabled, newParams, newNodeIds, newSingleton } = addForm;
   const [namePlaceholder, setNamePlaceholder] = useState("");
 
   const configIngesters = config?.ingesters;
@@ -123,8 +129,8 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
 
   const defaults = (id: string) => {
     const ing = ingesters.find((i) => encode(i.id) === id);
-    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string>, nodeIds: [] as string[] };
-    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeIds: ing.nodeIds.map(encode) };
+    if (!ing) return { name: "", enabled: true, params: {} as Record<string, string>, nodeIds: [] as string[], singleton: false };
+    return { name: ing.name, enabled: ing.enabled, params: { ...ing.params }, nodeIds: ing.nodeIds.map(encode), singleton: ing.singleton };
   };
 
   const { getEdit, setEdit, clearEdit, isDirty } = useEditState(defaults);
@@ -135,7 +141,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
     label: "Ingester",
     onSaveTransform: (
       id,
-      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string; nodeIds: string[] },
+      edit: { name: string; enabled: boolean; params: Record<string, string>; type: string; nodeIds: string[]; singleton: boolean },
     ) => ({
       id,
       name: edit.name,
@@ -143,6 +149,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
       enabled: edit.enabled,
       params: edit.params,
       nodeIds: edit.nodeIds,
+      singleton: edit.singleton,
     }),
     clearEdit,
   });
@@ -157,6 +164,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
         enabled: newEnabled,
         params: newParams,
         nodeIds: newNodeIds,
+        singleton: newSingleton,
       });
       addToast(`Ingester "${name}" created`, "info");
       dispatchAdd({ type: "resetForm" });
@@ -211,6 +219,14 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
             onChange={(v) => dispatchAdd({ type: "setNewNodeIds", value: v })}
             dark={dark}
           />
+          {singletonSupport[newType] && (
+            <Checkbox
+              checked={newSingleton}
+              onChange={(v) => dispatchAdd({ type: "setNewSingleton", value: v })}
+              label="Singleton (run on one node with automatic failover)"
+              dark={dark}
+            />
+          )}
           <IngesterParamsForm
             ingesterType={newType}
             params={newParams}
@@ -232,6 +248,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           allIngesters={ingesters}
           allDefaults={allDefaults}
           mode={ingesterModes[ing.type] ?? IngesterMode.ACTIVE}
+          singletonSupported={singletonSupport[ing.type] ?? false}
           dark={dark}
           expanded={isExpanded(encode(ing.id))}
           onToggle={() => toggleCard(encode(ing.id))}
@@ -260,6 +277,7 @@ function IngesterCard({
   allIngesters,
   allDefaults,
   mode,
+  singletonSupported,
   dark,
   expanded,
   onToggle,
@@ -275,14 +293,15 @@ function IngesterCard({
   allIngesters: readonly IngesterConfig[];
   allDefaults: IngesterDefaults;
   mode: IngesterMode;
+  singletonSupported: boolean;
   dark: boolean;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
   onSave: (id: string) => void;
   isSaving: boolean;
-  edit: { name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[] };
-  setEdit: (patch: Partial<{ name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[] }>) => void;
+  edit: { name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[]; singleton: boolean };
+  setEdit: (patch: Partial<{ name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[]; singleton: boolean }>) => void;
   isDirty: boolean;
   onOpenInspector?: (inspectorParam: string) => void;
 }>) {
@@ -341,6 +360,14 @@ function IngesterCard({
           onChange={(v) => setEdit({ nodeIds: v })}
           dark={dark}
         />
+        {singletonSupported && (
+          <Checkbox
+            checked={edit.singleton}
+            onChange={(v) => setEdit({ singleton: v })}
+            label="Singleton (run on one node with automatic failover)"
+            dark={dark}
+          />
+        )}
         <IngesterParamsForm
           ingesterType={ing.type}
           params={edit.params}

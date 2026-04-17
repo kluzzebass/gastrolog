@@ -123,6 +123,7 @@ message PutIngesterCommand {
   map<string, string> params = 5;
   bytes node_id = 6 [deprecated = true]; // Legacy. Use node_ids.
   repeated bytes node_ids = 7;           // Allowed nodes.
+  bool singleton = 8;                    // HA semantics: false = parallel (run on every node), true = Raft-assigned singleton with failover.
 }
 
 message DeleteIngesterCommand {

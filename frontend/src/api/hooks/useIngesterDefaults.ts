@@ -4,19 +4,26 @@ import { IngesterMode } from "../gen/gastrolog/v1/system_pb";
 
 export type IngesterDefaults = Record<string, Record<string, string>>;
 export type IngesterModes = Record<string, IngesterMode>;
+export type IngesterSingletonSupport = Record<string, boolean>;
 
 export function useIngesterDefaults() {
   return useQuery({
     queryKey: ["ingesterDefaults"],
-    queryFn: async (): Promise<{ defaults: IngesterDefaults; modes: IngesterModes }> => {
+    queryFn: async (): Promise<{
+      defaults: IngesterDefaults;
+      modes: IngesterModes;
+      singletonSupported: IngesterSingletonSupport;
+    }> => {
       const response = await systemClient.getIngesterDefaults({});
       const defaults: IngesterDefaults = {};
       const modes: IngesterModes = {};
+      const singletonSupported: IngesterSingletonSupport = {};
       for (const [type, td] of Object.entries(response.types)) {
         defaults[type] = td.params;
         modes[type] = td.mode;
+        singletonSupported[type] = td.singletonSupported;
       }
-      return { defaults, modes };
+      return { defaults, modes, singletonSupported };
     },
     staleTime: Infinity, // Never refetch — defaults don't change at runtime.
   });

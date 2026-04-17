@@ -50,6 +50,14 @@ type IngesterRegistration struct {
 	Defaults    func() map[string]string
 	Tester      ConnectionTester                      // nil if not supported
 	ListenAddrs func(params map[string]string) []ListenAddr // nil for non-listeners
+
+	// SingletonSupported indicates whether it is meaningful to run this
+	// ingester type in singleton (Raft-assigned, one-node) mode. When false,
+	// the per-instance IngesterConfig.Singleton flag is ignored — the ingester
+	// always runs in parallel on every node in NodeIDs. Set this to false for
+	// per-node-local data sources (docker, self, tail, metrics) and for
+	// listeners (OS-level port coordination handles the singleton case).
+	SingletonSupported bool
 }
 
 type Factories struct {

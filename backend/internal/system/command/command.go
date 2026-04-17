@@ -242,12 +242,13 @@ func putIngesterCmd(cfg system.IngesterConfig) *gastrologv1.PutIngesterCommand {
 		nodeIDs[i] = []byte(nid)
 	}
 	return &gastrologv1.PutIngesterCommand{
-		Id:      cfg.ID.ToProto(),
-		Name:    cfg.Name,
-		Type:    cfg.Type,
-		Enabled: cfg.Enabled,
-		Params:  cfg.Params,
-		NodeIds: nodeIDs,
+		Id:        cfg.ID.ToProto(),
+		Name:      cfg.Name,
+		Type:      cfg.Type,
+		Enabled:   cfg.Enabled,
+		Params:    cfg.Params,
+		NodeIds:   nodeIDs,
+		Singleton: cfg.Singleton,
 	}
 }
 
@@ -279,12 +280,13 @@ func ExtractPutIngester(cmd *gastrologv1.PutIngesterCommand) (system.IngesterCon
 		nodeIDs = []string{string(cmd.GetNodeId())}
 	}
 	return system.IngesterConfig{
-		ID:      glid.FromBytes(cmd.GetId()),
-		Name:    cmd.GetName(),
-		Type:    cmd.GetType(),
-		Enabled: cmd.GetEnabled(),
-		Params:  nilIfEmpty(cmd.GetParams()),
-		NodeIDs: nodeIDs,
+		ID:        glid.FromBytes(cmd.GetId()),
+		Name:      cmd.GetName(),
+		Type:      cmd.GetType(),
+		Enabled:   cmd.GetEnabled(),
+		Params:    nilIfEmpty(cmd.GetParams()),
+		NodeIDs:   nodeIDs,
+		Singleton: cmd.GetSingleton(),
 	}, nil
 }
 

@@ -578,7 +578,8 @@ type IngesterConfig struct {
 	Name    string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
 	// Deprecated: Marked as deprecated in gastrolog/v1/system.proto.
 	NodeId        []byte   `protobuf:"bytes,6,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`    // Legacy single-node assignment. Use node_ids.
-	NodeIds       [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"` // Allowed nodes. Passive: try all. Active: place on one.
+	NodeIds       [][]byte `protobuf:"bytes,7,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"` // Allowed nodes. Parallel: run on all. Singleton: place on one.
+	Singleton     bool     `protobuf:"varint,8,opt,name=singleton,proto3" json:"singleton,omitempty"`           // HA semantics: false = run on every node in node_ids (parallel); true = Raft-assigned to one node with failover. Only takes effect when the ingester type has SingletonSupported=true.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -661,6 +662,13 @@ func (x *IngesterConfig) GetNodeIds() [][]byte {
 		return x.NodeIds
 	}
 	return nil
+}
+
+func (x *IngesterConfig) GetSingleton() bool {
+	if x != nil {
+		return x.Singleton
+	}
+	return false
 }
 
 type FilterConfig struct {
@@ -974,6 +982,7 @@ type IngesterInfo struct {
 	NodeIds       [][]byte        `protobuf:"bytes,6,rep,name=node_ids,json=nodeIds,proto3" json:"node_ids,omitempty"`                                                                                     // Allowed nodes from config.
 	NodeStatus    map[string]bool `protobuf:"bytes,8,rep,name=node_status,json=nodeStatus,proto3" json:"node_status,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"` // Per-node running status: nodeID → alive.
 	Enabled       bool            `protobuf:"varint,9,opt,name=enabled,proto3" json:"enabled,omitempty"`                                                                                                   // Whether the ingester is enabled in config.
+	Singleton     bool            `protobuf:"varint,10,opt,name=singleton,proto3" json:"singleton,omitempty"`                                                                                              // HA semantics: false = parallel (every node_ids), true = Raft-assigned singleton.
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1061,6 +1070,13 @@ func (x *IngesterInfo) GetNodeStatus() map[string]bool {
 func (x *IngesterInfo) GetEnabled() bool {
 	if x != nil {
 		return x.Enabled
+	}
+	return false
+}
+
+func (x *IngesterInfo) GetSingleton() bool {
+	if x != nil {
+		return x.Singleton
 	}
 	return false
 }
@@ -5799,11 +5815,12 @@ func (*GetIngesterDefaultsRequest) Descriptor() ([]byte, []int) {
 }
 
 type IngesterTypeDefaults struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Params        map[string]string      `protobuf:"bytes,1,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	Mode          IngesterMode           `protobuf:"varint,2,opt,name=mode,proto3,enum=gastrolog.v1.IngesterMode" json:"mode,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Params             map[string]string      `protobuf:"bytes,1,rep,name=params,proto3" json:"params,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Mode               IngesterMode           `protobuf:"varint,2,opt,name=mode,proto3,enum=gastrolog.v1.IngesterMode" json:"mode,omitempty"`
+	SingletonSupported bool                   `protobuf:"varint,3,opt,name=singleton_supported,json=singletonSupported,proto3" json:"singleton_supported,omitempty"` // True iff the type meaningfully supports singleton HA placement (Raft-assigned, one node with failover).
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *IngesterTypeDefaults) Reset() {
@@ -5848,6 +5865,13 @@ func (x *IngesterTypeDefaults) GetMode() IngesterMode {
 		return x.Mode
 	}
 	return IngesterMode_INGESTER_MODE_UNSPECIFIED
+}
+
+func (x *IngesterTypeDefaults) GetSingletonSupported() bool {
+	if x != nil {
+		return x.SingletonSupported
+	}
+	return false
 }
 
 type GetIngesterDefaultsResponse struct {
@@ -8144,7 +8168,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\fdistribution\x18\x05 \x01(\tR\fdistribution\x12\x18\n" +
 	"\aenabled\x18\x06 \x01(\bR\aenabled\x12\x1d\n" +
 	"\n" +
-	"eject_only\x18\a \x01(\bR\tejectOnly\"\x97\x02\n" +
+	"eject_only\x18\a \x01(\bR\tejectOnly\"\xb5\x02\n" +
 	"\x0eIngesterConfig\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12@\n" +
@@ -8152,7 +8176,8 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\aenabled\x18\x04 \x01(\bR\aenabled\x12\x12\n" +
 	"\x04name\x18\x05 \x01(\tR\x04name\x12\x1b\n" +
 	"\anode_id\x18\x06 \x01(\fB\x02\x18\x01R\x06nodeId\x12\x19\n" +
-	"\bnode_ids\x18\a \x03(\fR\anodeIds\x1a9\n" +
+	"\bnode_ids\x18\a \x03(\fR\anodeIds\x12\x1c\n" +
+	"\tsingleton\x18\b \x01(\bR\tsingleton\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"R\n" +
@@ -8179,7 +8204,7 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x04name\x18\x05 \x01(\tR\x04name\"\x16\n" +
 	"\x14ListIngestersRequest\"Q\n" +
 	"\x15ListIngestersResponse\x128\n" +
-	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"\xbe\x02\n" +
+	"\tingesters\x18\x01 \x03(\v2\x1a.gastrolog.v1.IngesterInfoR\tingesters\"\xdc\x02\n" +
 	"\fIngesterInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\fR\x02id\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
@@ -8189,7 +8214,9 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\bnode_ids\x18\x06 \x03(\fR\anodeIds\x12K\n" +
 	"\vnode_status\x18\b \x03(\v2*.gastrolog.v1.IngesterInfo.NodeStatusEntryR\n" +
 	"nodeStatus\x12\x18\n" +
-	"\aenabled\x18\t \x01(\bR\aenabled\x1a=\n" +
+	"\aenabled\x18\t \x01(\bR\aenabled\x12\x1c\n" +
+	"\tsingleton\x18\n" +
+	" \x01(\bR\tsingleton\x1a=\n" +
 	"\x0fNodeStatusEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\bR\x05value:\x028\x01\"*\n" +
@@ -8531,10 +8558,11 @@ const file_gastrolog_v1_system_proto_rawDesc = "" +
 	"\x18TestCloudServiceResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"\x1c\n" +
-	"\x1aGetIngesterDefaultsRequest\"\xc9\x01\n" +
+	"\x1aGetIngesterDefaultsRequest\"\xfa\x01\n" +
 	"\x14IngesterTypeDefaults\x12F\n" +
 	"\x06params\x18\x01 \x03(\v2..gastrolog.v1.IngesterTypeDefaults.ParamsEntryR\x06params\x12.\n" +
-	"\x04mode\x18\x02 \x01(\x0e2\x1a.gastrolog.v1.IngesterModeR\x04mode\x1a9\n" +
+	"\x04mode\x18\x02 \x01(\x0e2\x1a.gastrolog.v1.IngesterModeR\x04mode\x12/\n" +
+	"\x13singleton_supported\x18\x03 \x01(\bR\x12singletonSupported\x1a9\n" +
 	"\vParamsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc7\x01\n" +

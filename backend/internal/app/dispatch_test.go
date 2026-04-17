@@ -962,7 +962,7 @@ func TestHandleTierDeleted_DrainOnlyOnLeader(t *testing.T) {
 
 // ---------- shouldRunIngester ----------
 
-func TestShouldRunIngesterPassiveOnSelectedNode(t *testing.T) {
+func TestShouldRunIngesterParallelOnSelectedNode(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
@@ -974,12 +974,12 @@ func TestShouldRunIngesterPassiveOnSelectedNode(t *testing.T) {
 		NodeIDs: []string{"node-1", "node-2"},
 	}
 
-	if !d.shouldRunIngester(context.Background(), cfg, true) {
-		t.Fatal("passive ingester on selected node should return true")
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("parallel ingester on selected node should return true")
 	}
 }
 
-func TestShouldRunIngesterPassiveNotOnSelectedNode(t *testing.T) {
+func TestShouldRunIngesterParallelNotOnSelectedNode(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
@@ -991,12 +991,12 @@ func TestShouldRunIngesterPassiveNotOnSelectedNode(t *testing.T) {
 		NodeIDs: []string{"node-1", "node-2"},
 	}
 
-	if d.shouldRunIngester(context.Background(), cfg, true) {
-		t.Fatal("passive ingester NOT on selected node should return false")
+	if d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("parallel ingester NOT on selected node should return false")
 	}
 }
 
-func TestShouldRunIngesterActiveAssignedHere(t *testing.T) {
+func TestShouldRunIngesterSingletonAssignedHere(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	ingID := glid.New()
@@ -1006,17 +1006,18 @@ func TestShouldRunIngesterActiveAssignedHere(t *testing.T) {
 	d.localNodeID = "node-1"
 
 	cfg := system.IngesterConfig{
-		ID:      ingID,
-		Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
+		ID:        ingID,
+		Enabled:   true,
+		NodeIDs:   []string{"node-1", "node-2"},
+		Singleton: true,
 	}
 
-	if !d.shouldRunIngester(context.Background(), cfg, false) {
-		t.Fatal("active ingester assigned to this node should return true")
+	if !d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("singleton ingester assigned to this node should return true")
 	}
 }
 
-func TestShouldRunIngesterActiveAssignedElsewhere(t *testing.T) {
+func TestShouldRunIngesterSingletonAssignedElsewhere(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	ingID := glid.New()
@@ -1026,35 +1027,38 @@ func TestShouldRunIngesterActiveAssignedElsewhere(t *testing.T) {
 	d.localNodeID = "node-1"
 
 	cfg := system.IngesterConfig{
-		ID:      ingID,
-		Enabled: true,
-		NodeIDs: []string{"node-1", "node-2"},
+		ID:        ingID,
+		Enabled:   true,
+		NodeIDs:   []string{"node-1", "node-2"},
+		Singleton: true,
 	}
 
-	if d.shouldRunIngester(context.Background(), cfg, false) {
-		t.Fatal("active ingester assigned elsewhere should return false")
+	if d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("singleton ingester assigned elsewhere should return false")
 	}
 }
 
-func TestShouldRunIngesterActiveNoAssignment(t *testing.T) {
+func TestShouldRunIngesterSingletonNoAssignment(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
 	d.localNodeID = "node-1"
 
 	cfg := system.IngesterConfig{
-		ID:      glid.New(),
-		Enabled: true,
-		NodeIDs: []string{"node-1"},
+		ID:        glid.New(),
+		Enabled:   true,
+		NodeIDs:   []string{"node-1"},
+		Singleton: true,
 	}
 
-	// Empty assignment = backwards compat: allow local start.
-	if !d.shouldRunIngester(context.Background(), cfg, false) {
-		t.Fatal("active ingester with no assignment should return true (backwards compat)")
+	// Empty assignment = placement manager hasn't run yet. Allow local start;
+	// placement will narrow it down on the next reconcile cycle.
+	if !d.shouldRunIngester(context.Background(), cfg, true) {
+		t.Fatal("singleton ingester with no assignment should return true (pre-placement)")
 	}
 }
 
-func TestShouldRunIngesterPassiveEmptyNodeIDs(t *testing.T) {
+func TestShouldRunIngesterParallelEmptyNodeIDs(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	d := newTestDispatcher(&mockOrch{}, &stubCfgStore{}, h)
@@ -1066,9 +1070,9 @@ func TestShouldRunIngesterPassiveEmptyNodeIDs(t *testing.T) {
 		NodeIDs: nil, // empty
 	}
 
-	// Empty NodeIDs means "all nodes", so passive should run.
-	if !d.shouldRunIngester(context.Background(), cfg, true) {
-		t.Fatal("passive ingester with empty NodeIDs should return true")
+	// Empty NodeIDs means "all nodes", so parallel should run.
+	if !d.shouldRunIngester(context.Background(), cfg, false) {
+		t.Fatal("parallel ingester with empty NodeIDs should return true")
 	}
 }
 

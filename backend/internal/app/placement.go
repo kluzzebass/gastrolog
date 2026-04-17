@@ -142,12 +142,15 @@ func (pm *placementManager) reconcile(ctx context.Context) {
 		pm.placeTier(ctx, tier, alive, nscs, tierCount)
 	}
 
-	pm.reconcileActiveIngesters(ctx, alive)
+	pm.reconcileSingletonIngesters(ctx, alive)
 }
 
-// reconcileActiveIngesters assigns each active (collector) ingester to exactly
-// one alive node from its allowed set, preferring non-leader nodes.
-func (pm *placementManager) reconcileActiveIngesters(ctx context.Context, alive map[string]bool) {
+// reconcileSingletonIngesters assigns each singleton ingester to exactly one
+// alive node from its allowed set, preferring non-leader nodes. Parallel
+// ingesters are skipped — they run on every selected node without central
+// coordination. An ingester is singleton when both the registered type has
+// SingletonSupported and the instance's Singleton flag is set.
+func (pm *placementManager) reconcileSingletonIngesters(ctx context.Context, alive map[string]bool) {
 	ingesters, err := pm.cfgStore.ListIngesters(ctx)
 	if err != nil {
 		pm.logger.Error("placement: list ingesters", "error", err)
@@ -163,16 +166,15 @@ func (pm *placementManager) reconcileActiveIngesters(ctx context.Context, alive 
 		if !ing.Enabled || len(ing.NodeIDs) == 0 {
 			continue
 		}
-		// Skip passive (listener) ingesters — they manage themselves.
-		if pm.isPassiveIngester(ing.Type) {
+		if !pm.isSingletonIngester(ing) {
 			continue
 		}
-		pm.placeActiveIngester(ctx, ing, alive, leaderID)
+		pm.placeSingletonIngester(ctx, ing, alive, leaderID)
 	}
 }
 
-// placeActiveIngester assigns a single active ingester to one alive node.
-func (pm *placementManager) placeActiveIngester(ctx context.Context, ing system.IngesterConfig, alive map[string]bool, leaderID string) {
+// placeSingletonIngester assigns a single singleton ingester to one alive node.
+func (pm *placementManager) placeSingletonIngester(ctx context.Context, ing system.IngesterConfig, alive map[string]bool, leaderID string) {
 	current, _ := pm.cfgStore.GetIngesterAssignment(ctx, ing.ID)
 
 	// Current assignment still valid?
@@ -212,13 +214,18 @@ func (pm *placementManager) placeActiveIngester(ctx context.Context, ing system.
 	pm.logger.Info("placement: assigned active ingester", "id", ing.ID, "name", ing.Name, "node", best, "prev", current)
 }
 
-// isPassiveIngester checks if the type has ListenAddrs registered.
-func (pm *placementManager) isPassiveIngester(ingType string) bool {
+// isSingletonIngester returns true when the ingester instance should be
+// placed via Raft on a single node (failover mode). Requires both the type
+// to declare SingletonSupported and the instance to have Singleton=true.
+func (pm *placementManager) isSingletonIngester(ing system.IngesterConfig) bool {
+	if !ing.Singleton {
+		return false
+	}
 	if pm.factories == nil {
 		return false
 	}
-	reg, ok := pm.factories.IngesterTypes[ingType]
-	return ok && reg.ListenAddrs != nil
+	reg, ok := pm.factories.IngesterTypes[ing.Type]
+	return ok && reg.SingletonSupported
 }
 
 // placeTier evaluates a single tier and assigns it to an eligible node if needed.

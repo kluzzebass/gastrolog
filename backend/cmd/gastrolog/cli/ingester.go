@@ -89,6 +89,7 @@ func newIngesterGetCmd() *cobra.Command {
 						{"Type", ig.Type},
 						{"Enabled", strconv.FormatBool(ig.Enabled)},
 						{"Node", string(ig.NodeId)},
+						{"Singleton", strconv.FormatBool(ig.Singleton)},
 					}
 					for k, v := range ig.Params {
 						pairs = append(pairs, [2]string{"Param: " + k, v})
@@ -146,6 +147,9 @@ func newIngesterCreateCmd() *cobra.Command {
 				params, _ := cmd.Flags().GetStringSlice("param")
 				cfg.Params = parseParams(params)
 			}
+			if cmd.Flags().Changed("singleton") {
+				cfg.Singleton, _ = cmd.Flags().GetBool("singleton")
+			}
 
 			if cfg.Type == "" {
 				return errors.New("--type is required for new ingesters")
@@ -169,6 +173,7 @@ func newIngesterCreateCmd() *cobra.Command {
 	cmd.Flags().StringSlice("param", nil, "key=value parameter (repeatable)")
 	cmd.Flags().Bool("enabled", true, "enable the ingester")
 	cmd.Flags().String("node-id", "", "node ID to assign")
+	cmd.Flags().Bool("singleton", false, "run on one node with Raft-coordinated failover (only meaningful for types that support it)")
 	_ = cmd.MarkFlagRequired("name")
 	return cmd
 }
