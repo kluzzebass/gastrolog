@@ -1078,18 +1078,31 @@ func TestShouldRunIngesterParallelEmptyNodeIDs(t *testing.T) {
 
 // ---------- handleIngesterAssignment ----------
 
+// singletonTestIngester builds an IngesterConfig + registration for
+// exercising handleIngesterAssignment. Instance has Singleton=true, the
+// registered type has SingletonSupported=true.
+func singletonTestIngester(ingID glid.GLID, nodeIDs ...string) (*system.IngesterConfig, orchestrator.IngesterRegistration) {
+	return &system.IngesterConfig{
+			ID: ingID, Type: "test", Enabled: true, NodeIDs: nodeIDs, Singleton: true,
+		}, orchestrator.IngesterRegistration{
+			Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+				return noopIngester{}, nil
+			},
+			SingletonSupported: true,
+		}
+}
+
 func TestHandleIngesterAssignmentStartsLocally(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	ingID := glid.New()
+	ing, reg := singletonTestIngester(ingID, "local")
 	mo := &mockOrch{} // not locally running yet
 	d := newTestDispatcher(mo, &stubCfgStore{
-		ingester:            &system.IngesterConfig{ID: ingID, Type: "test", Enabled: true, NodeIDs: []string{"local"}},
+		ingester:            ing,
 		ingesterAssignments: map[glid.GLID]string{ingID: "local"},
 	}, h)
-	d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
-		return noopIngester{}, nil
-	}}
+	d.factories.IngesterTypes["test"] = reg
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
@@ -1104,12 +1117,15 @@ func TestHandleIngesterAssignmentStopsLocally(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	ingID := glid.New()
+	ing, reg := singletonTestIngester(ingID, "local", "other-node")
 	mo := &mockOrch{
 		ingesters: []glid.GLID{ingID}, // running locally
 	}
 	d := newTestDispatcher(mo, &stubCfgStore{
+		ingester:            ing,
 		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
 	}, h)
+	d.factories.IngesterTypes["test"] = reg
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
@@ -1122,17 +1138,44 @@ func TestHandleIngesterAssignmentAlreadyRunning(t *testing.T) {
 	t.Parallel()
 	h := &captureHandler{}
 	ingID := glid.New()
+	ing, reg := singletonTestIngester(ingID, "local")
 	mo := &mockOrch{
 		ingesters: []glid.GLID{ingID}, // already running locally
 	}
 	d := newTestDispatcher(mo, &stubCfgStore{
+		ingester:            ing,
 		ingesterAssignments: map[glid.GLID]string{ingID: "local"},
 	}, h)
+	d.factories.IngesterTypes["test"] = reg
 
 	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
 
 	// Already running locally, assigned here — no action needed.
 	if len(mo.removeIngesterIDs) != 0 {
 		t.Fatal("should not remove an ingester that is already running on the assigned node")
+	}
+}
+
+func TestHandleIngesterAssignmentIgnoresParallel(t *testing.T) {
+	t.Parallel()
+	h := &captureHandler{}
+	ingID := glid.New()
+	// Parallel ingester (Singleton=false) with a stale assignment pointing elsewhere.
+	mo := &mockOrch{ingesters: []glid.GLID{ingID}}
+	d := newTestDispatcher(mo, &stubCfgStore{
+		ingester:            &system.IngesterConfig{ID: ingID, Type: "test", Enabled: true, NodeIDs: []string{"local"}, Singleton: false},
+		ingesterAssignments: map[glid.GLID]string{ingID: "other-node"},
+	}, h)
+	d.factories.IngesterTypes["test"] = orchestrator.IngesterRegistration{
+		Factory: func(glid.GLID, map[string]string, *slog.Logger) (orchestrator.Ingester, error) {
+			return noopIngester{}, nil
+		},
+		SingletonSupported: true,
+	}
+
+	d.Handle(raftfsm.Notification{Kind: raftfsm.NotifyIngesterAssignmentSet, ID: ingID})
+
+	if len(mo.removeIngesterIDs) != 0 {
+		t.Fatalf("parallel ingester must not be removed on assignment change, got %v", mo.removeIngesterIDs)
 	}
 }

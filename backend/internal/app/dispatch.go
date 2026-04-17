@@ -385,9 +385,23 @@ func (d *configDispatcher) shouldRunIngester(ctx context.Context, cfg system.Ing
 }
 
 // handleIngesterAssignment reacts to a Raft-replicated assignment change.
-// If the active ingester is now assigned to this node, start it.
-// If it was assigned here but no longer is, stop it.
+// Only meaningful for singleton ingesters — parallel ingesters ignore
+// assignments (they run on every selected node). A stale assignment from
+// a prior singleton era must not tear down a now-parallel ingester.
 func (d *configDispatcher) handleIngesterAssignment(ctx context.Context, id glid.GLID) {
+	ingCfg, err := d.cfgStore.GetIngester(ctx, id)
+	if err != nil || ingCfg == nil {
+		return
+	}
+	reg, ok := d.factories.IngesterTypes[ingCfg.Type]
+	if !ok {
+		return
+	}
+	isSingleton := reg.SingletonSupported && ingCfg.Singleton
+	if !isSingleton {
+		return // parallel — assignment is irrelevant
+	}
+
 	assigned, err := d.cfgStore.GetIngesterAssignment(ctx, id)
 	if err != nil {
 		d.logger.Error("dispatch: read ingester assignment", "id", id, "error", err)
