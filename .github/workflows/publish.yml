@@ -87,7 +87,7 @@ jobs:
           echo "sha256_linux_arm=$SHA256_LINUX_ARM" >> $GITHUB_OUTPUT
 
       - name: Checkout homebrew-tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: kluzzebass/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
