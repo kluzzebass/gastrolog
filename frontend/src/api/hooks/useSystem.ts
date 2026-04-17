@@ -44,7 +44,7 @@ export function useSystemMutation<TArgs, TResult>(
   return useMutation({
     mutationFn: fn,
     onSuccess: (result: TResult) => {
-      const cfg = result != null && typeof result === "object" && "config" in result
+      const cfg = result != null && typeof result === "object" && "system" in result
         ? (result as { system?: GetSystemResponse }).system
         : undefined;
       if (cfg) {
