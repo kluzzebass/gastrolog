@@ -13,33 +13,48 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/itchyny/gojq"
+	"sigs.k8s.io/yaml"
 )
 
-const maxJSONFileSize = 10 << 20 // 10 MB; larger files should use CSV format
+const maxStructuredFileSize = 10 << 20 // 10 MB; larger files should use CSV format
 
-// JSONFileConfig configures a JSON file-backed lookup table.
-type JSONFileConfig struct {
+// FileLookupConfig configures a structured-file-backed lookup table
+// (JSON or YAML). Format differs only in how the raw bytes parse into the
+// map[string]any / []any tree that jq operates on.
+type FileLookupConfig struct {
 	Name         string
 	Query        string   // jq expression that produces an array of objects
 	KeyColumn    string   // field used as the lookup key; empty = first column
 	ValueColumns []string // columns to include in output; empty = all non-key
 }
 
-// JSONFile is a lookup table backed by a JSON file transformed via a jq expression.
+// JSONFileConfig is an alias for FileLookupConfig on the JSON path.
+type JSONFileConfig = FileLookupConfig
+
+// YAMLFileConfig is an alias for FileLookupConfig on the YAML path.
+type YAMLFileConfig = FileLookupConfig
+
+// unmarshalFn parses raw source bytes into the generic tree jq needs.
+type unmarshalFn func([]byte, any) error
+
+// FileLookup is a lookup table backed by a structured file (JSON or YAML)
+// transformed via a jq expression.
 //
-// On Load, the source JSON is parsed, transformed through the compiled jq
+// On Load the source file is parsed, transformed through the compiled jq
 // expression, and the results are encoded as a sorted binary lookup file.
 // That file is memory-mapped for O(log n) binary search lookups with zero
 // heap-allocated index — only column name strings live on the heap.
 //
-// JSON source files are limited to 10 MB. For larger datasets, use CSV format
+// Source files are limited to 10 MB. For larger datasets, use CSV format
 // which is memory-mapped directly without a transform step.
 //
 // Safe for concurrent use; the data is swapped atomically on reload.
-type JSONFile struct {
+type FileLookup struct {
 	query        *gojq.Code
 	keyColumn    string
 	valueColumns map[string]struct{}
+	unmarshal    unmarshalFn
+	format       string // "json" / "yaml" — used in error messages
 
 	// dataMu protects data and serializes mmap lifecycle. Lookups take a
 	// read lock for the duration of the lookup so the mmap cannot be
@@ -55,11 +70,27 @@ type JSONFile struct {
 	watchDone chan struct{}
 }
 
-var _ LookupTable = (*JSONFile)(nil)
+// JSONFile is retained as a type alias so existing call sites keep working.
+type JSONFile = FileLookup
+
+var _ LookupTable = (*FileLookup)(nil)
 
 // NewJSONFile creates a JSON file lookup table.
-// The jq expression is compiled once here and reused on every Load.
-func NewJSONFile(cfg JSONFileConfig) (*JSONFile, error) {
+func NewJSONFile(cfg JSONFileConfig) (*FileLookup, error) {
+	return newFileLookup(cfg, "json", json.Unmarshal)
+}
+
+// NewYAMLFile creates a YAML file lookup table. YAML parses into the
+// same map[string]any / []any tree as JSON (via sigs.k8s.io/yaml, which
+// routes through a JSON round-trip so map keys end up as strings), so the
+// jq expression, column resolution, and mmap storage are identical.
+func NewYAMLFile(cfg YAMLFileConfig) (*FileLookup, error) {
+	return newFileLookup(cfg, "yaml", func(b []byte, v any) error { return yaml.Unmarshal(b, v) })
+}
+
+// newFileLookup is the shared constructor. The jq expression is compiled
+// once here and reused on every Load.
+func newFileLookup(cfg FileLookupConfig, format string, unmarshal unmarshalFn) (*FileLookup, error) {
 	parsed, err := gojq.Parse(cfg.Query)
 	if err != nil {
 		return nil, fmt.Errorf("parse jq expression %q: %w", cfg.Query, err)
@@ -77,19 +108,25 @@ func NewJSONFile(cfg JSONFileConfig) (*JSONFile, error) {
 		}
 	}
 
-	return &JSONFile{
+	return &FileLookup{
 		query:        code,
 		keyColumn:    cfg.KeyColumn,
 		valueColumns: valCols,
+		unmarshal:    unmarshal,
+		format:       format,
 	}, nil
 }
 
 // Parameters returns the single input parameter name.
-func (j *JSONFile) Parameters() []string { return []string{"value"} }
+func (j *FileLookup) Parameters() []string { return []string{"value"} }
+
+// Format returns "json" or "yaml" — used by the server to distinguish
+// formats when JSONFile and YAMLFile share the same underlying type.
+func (j *FileLookup) Format() string { return j.format }
 
 // DuplicateKeys returns the number of rows with duplicate key values
 // that were skipped during the last Load (first occurrence wins).
-func (j *JSONFile) DuplicateKeys() int {
+func (j *FileLookup) DuplicateKeys() int {
 	j.dataMu.RLock()
 	defer j.dataMu.RUnlock()
 	if j.data == nil {
@@ -99,7 +136,7 @@ func (j *JSONFile) DuplicateKeys() int {
 }
 
 // Suffixes returns the output column names discovered from the loaded data.
-func (j *JSONFile) Suffixes() []string {
+func (j *FileLookup) Suffixes() []string {
 	j.dataMu.RLock()
 	defer j.dataMu.RUnlock()
 	if j.data == nil {
@@ -109,7 +146,7 @@ func (j *JSONFile) Suffixes() []string {
 }
 
 // LookupValues performs an O(log n) binary search lookup in the mmap'd data.
-func (j *JSONFile) LookupValues(_ context.Context, values map[string]string) map[string]string {
+func (j *FileLookup) LookupValues(_ context.Context, values map[string]string) map[string]string {
 	key := values["value"]
 	if key == "" {
 		return nil
@@ -122,10 +159,10 @@ func (j *JSONFile) LookupValues(_ context.Context, values map[string]string) map
 	return j.data.lookupKey(j.data.mmapData, key, j.data.suffixes)
 }
 
-// Load parses the JSON source, transforms it through jq, encodes as a
+// Load parses the source, transforms it through jq, encodes as a
 // binary lookup file, and memory-maps it for lookups.
-func (j *JSONFile) Load(path string) error {
-	// Transform JSON → binary lookup file.
+func (j *FileLookup) Load(path string) error {
+	// Transform source → binary lookup file.
 	tmpPath, dups, err := j.transformToBin(path)
 	if err != nil {
 		return err
@@ -192,9 +229,9 @@ func (j *JSONFile) Load(path string) error {
 	return nil
 }
 
-// transformToBin parses the JSON, runs jq, and encodes the results as a
+// transformToBin parses source, runs jq, and encodes the results as a
 // binary lookup file. Returns the temp file path.
-func (j *JSONFile) transformToBin(path string) (tmpPath string, duplicates int, err error) {
+func (j *FileLookup) transformToBin(path string) (tmpPath string, duplicates int, err error) {
 	// Mmap source for reading.
 	srcFile, err := os.Open(path) //nolint:gosec // validated config path
 	if err != nil {
@@ -208,11 +245,11 @@ func (j *JSONFile) transformToBin(path string) (tmpPath string, duplicates int, 
 	size := info.Size()
 	if size == 0 {
 		_ = srcFile.Close()
-		return "", 0, fmt.Errorf("json file %q is empty", path)
+		return "", 0, fmt.Errorf("%s file %q is empty", j.format, path)
 	}
-	if size > maxJSONFileSize {
+	if size > maxStructuredFileSize {
 		_ = srcFile.Close()
-		return "", 0, fmt.Errorf("json file %q is %d bytes (max %d); use CSV format for large files", path, size, maxJSONFileSize)
+		return "", 0, fmt.Errorf("%s file %q is %d bytes (max %d); use CSV format for large files", j.format, path, size, maxStructuredFileSize)
 	}
 	mmapData, err := syscall.Mmap(int(srcFile.Fd()), 0, int(size), syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115
 	if err != nil {
@@ -222,7 +259,7 @@ func (j *JSONFile) transformToBin(path string) (tmpPath string, duplicates int, 
 
 	// Parse (transient — freed after this function returns).
 	var root any
-	if err := json.Unmarshal(mmapData, &root); err != nil {
+	if err := j.unmarshal(mmapData, &root); err != nil {
 		_ = syscall.Munmap(mmapData)
 		_ = srcFile.Close()
 		return "", 0, fmt.Errorf("parse %q: %w", path, err)
@@ -245,7 +282,7 @@ func (j *JSONFile) transformToBin(path string) (tmpPath string, duplicates int, 
 	}
 
 	// Write to temp file.
-	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".jsonlookup-*.bin")
+	tmpFile, err := os.CreateTemp(filepath.Dir(path), ".filelookup-*.bin")
 	if err != nil {
 		return "", 0, fmt.Errorf("create temp bin: %w", err)
 	}
@@ -267,7 +304,7 @@ const maxTransformRows = 100_000
 
 // resolveColumns determines the key column and value columns from the first
 // flattened row. Returns the key column name and the sorted value column names.
-func (j *JSONFile) resolveColumns(flat map[string]string) (string, []string) {
+func (j *FileLookup) resolveColumns(flat map[string]string) (string, []string) {
 	allCols := sortedStringKeys(flat)
 
 	// Resolve key column.
@@ -316,7 +353,7 @@ func toObjects(v any) []map[string]any {
 // rowCollector accumulates rows during jq iteration, resolving columns
 // from the first flattened object.
 type rowCollector struct {
-	j          *JSONFile
+	j          *FileLookup
 	keyCol     string
 	allColumns []string
 	rows       []binRow
@@ -342,7 +379,7 @@ func (rc *rowCollector) addObject(obj map[string]any) bool {
 
 // collectRows runs the jq expression and collects flattened rows.
 // Returns the value column names (sorted, excluding key) and the rows.
-func (j *JSONFile) collectRows(root any, path string) ([]string, []binRow, error) {
+func (j *FileLookup) collectRows(root any, path string) ([]string, []binRow, error) {
 	rc := rowCollector{j: j}
 
 	iter := j.query.Run(root)
@@ -378,8 +415,8 @@ func sortedStringKeys(m map[string]string) []string {
 	return keys
 }
 
-// WatchFile watches a JSON file for changes using fsnotify.
-func (j *JSONFile) WatchFile(path string) error {
+// WatchFile watches a file for changes using fsnotify.
+func (j *FileLookup) WatchFile(path string) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
@@ -401,7 +438,7 @@ func (j *JSONFile) WatchFile(path string) error {
 	return nil
 }
 
-func (j *JSONFile) watchLoop(w *fsnotify.Watcher, path string, done chan struct{}) {
+func (j *FileLookup) watchLoop(w *fsnotify.Watcher, path string, done chan struct{}) {
 	defer close(done)
 	for {
 		select {
@@ -420,7 +457,7 @@ func (j *JSONFile) watchLoop(w *fsnotify.Watcher, path string, done chan struct{
 	}
 }
 
-func (j *JSONFile) stopWatchLocked() {
+func (j *FileLookup) stopWatchLocked() {
 	if j.watcher != nil {
 		_ = j.watcher.Close()
 		<-j.watchDone
@@ -431,7 +468,7 @@ func (j *JSONFile) stopWatchLocked() {
 }
 
 // Close stops the file watcher and releases all resources including temp files.
-func (j *JSONFile) Close() {
+func (j *FileLookup) Close() {
 	j.mu.Lock()
 	j.stopWatchLocked()
 	j.mu.Unlock()

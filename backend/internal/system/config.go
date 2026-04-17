@@ -129,6 +129,7 @@ type TLSConfig struct {
 type LookupConfig struct {
 	HTTPLookups     []HTTPLookupConfig     `json:"http_lookups,omitempty"`
 	JSONFileLookups []JSONFileLookupConfig `json:"json_file_lookups,omitempty"`
+	YAMLFileLookups []YAMLFileLookupConfig `json:"yaml_file_lookups,omitempty"`
 	MMDBLookups     []MMDBLookupConfig     `json:"mmdb_lookups,omitempty"`
 	CSVLookups      []CSVLookupConfig      `json:"csv_lookups,omitempty"`
 	StaticLookups   []StaticLookupConfig   `json:"staticLookups,omitempty"`
@@ -168,6 +169,11 @@ type JSONFileLookupConfig struct {
 	KeyColumn    string   `json:"key_column,omitempty"`    // field used as the lookup key; empty = first column
 	ValueColumns []string `json:"value_columns,omitempty"` // columns to include in output; empty = all non-key
 }
+
+// YAMLFileLookupConfig defines a YAML file-backed lookup table. Shares
+// the same jq/key/value-column semantics as JSON — format only affects
+// how raw bytes parse into the generic jq tree.
+type YAMLFileLookupConfig = JSONFileLookupConfig
 
 // CSVLookupConfig defines a CSV file-backed lookup table.
 type CSVLookupConfig struct {

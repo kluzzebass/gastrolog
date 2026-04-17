@@ -72,3 +72,11 @@ JSON file lookups query a managed JSON file using a jq-style expression. Useful 
 - **Query** — a jq expression with `{param}` placeholders. The expression is evaluated against the JSON file with parameter values substituted. For example: `.hosts[] | select(.ip == "{value}")` finds the host object whose `ip` field matches the lookup value.
 - **Parameters** — named parameters that map to `{name}` placeholders in the query expression. Fields map positionally in queries, just like HTTP lookups.
 - **Response Paths** — jq expressions to extract specific fields from the query result. Leave empty to flatten the entire matched object into key-value pairs.
+
+Source files are limited to 10 MB — for larger datasets use CSV, which is mmapped directly without a transform step.
+
+## YAML File Lookups
+
+YAML file lookups work identically to JSON file lookups — same jq transform, same key/value column picker, same 10 MB cap. The only difference is the file format at rest: `.yaml` / `.yml` instead of `.json`. Use YAML when your reference data is already in YAML (Kubernetes manifests, Ansible inventories, etc.) and you'd rather not convert it.
+
+Under the hood the YAML is parsed into the same tree JSON produces, so any jq expression that works on one works on the other.

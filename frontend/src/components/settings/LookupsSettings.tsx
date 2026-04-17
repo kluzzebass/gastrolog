@@ -8,9 +8,10 @@ import { SettingsSection } from "./SettingsSection";
 import { MmdbAddForm, MmdbCards } from "./lookup/MmdbSection";
 import { HttpAddForm, HttpCards } from "./lookup/HttpSection";
 import { JsonAddForm, JsonCards } from "./lookup/JsonSection";
+import { YamlAddForm, YamlCards } from "./lookup/YamlSection";
 import { CsvAddForm, CsvCards } from "./lookup/CsvSection";
 import { StaticAddForm, StaticCards } from "./lookup/StaticSection";
-import { lookupTypes, type MMDBLookupDraft, type HTTPLookupDraft, type JSONFileLookupDraft, type CSVLookupDraft, type StaticLookupDraft } from "./lookup/types";
+import { lookupTypes, type MMDBLookupDraft, type HTTPLookupDraft, type JSONFileLookupDraft, type YAMLFileLookupDraft, type CSVLookupDraft, type StaticLookupDraft } from "./lookup/types";
 
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data, isLoading } = useSettings();
@@ -26,6 +27,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const [mmdbLookups, setMmdbLookups] = useState<MMDBLookupDraft[]>([]);
   const [httpLookups, setHttpLookups] = useState<HTTPLookupDraft[]>([]);
   const [jsonFileLookups, setJsonFileLookups] = useState<JSONFileLookupDraft[]>([]);
+  const [yamlFileLookups, setYamlFileLookups] = useState<YAMLFileLookupDraft[]>([]);
   const [csvLookups, setCsvLookups] = useState<CSVLookupDraft[]>([]);
   const [staticLookups, setStaticLookups] = useState<StaticLookupDraft[]>([]);
   const [addingType, setAddingType] = useState<string | null>(null);
@@ -61,6 +63,15 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         valueColumns: [...j.valueColumns],
       })),
     );
+    setYamlFileLookups(
+      (data.lookup?.yamlFileLookups ?? []).map((y) => ({
+        name: y.name,
+        fileId: encode(y.fileId),
+        query: y.query,
+        keyColumn: y.keyColumn,
+        valueColumns: [...y.valueColumns],
+      })),
+    );
     setCsvLookups(
       (data.lookup?.csvLookups ?? []).map((c) => ({
         name: c.name,
@@ -89,7 +100,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   };
 
   const closeAdd = () => setAddingType(null);
-  const isEmpty = mmdbLookups.length === 0 && httpLookups.length === 0 && jsonFileLookups.length === 0 && csvLookups.length === 0 && staticLookups.length === 0;
+  const isEmpty = mmdbLookups.length === 0 && httpLookups.length === 0 && jsonFileLookups.length === 0 && yamlFileLookups.length === 0 && csvLookups.length === 0 && staticLookups.length === 0;
   const sectionProps = { dark, managedFiles, uploadFile, addToast };
 
   // -- Render -----------------------------------------------------------------
@@ -130,6 +141,15 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
           existingLookups={jsonFileLookups}
           namePlaceholder={namePlaceholder}
           onCreated={(draft) => { setJsonFileLookups((prev) => [...prev, draft]); closeAdd(); }}
+          onCancel={closeAdd}
+        />
+      )}
+      {addingType === "yaml" && (
+        <YamlAddForm
+          {...sectionProps}
+          existingLookups={yamlFileLookups}
+          namePlaceholder={namePlaceholder}
+          onCreated={(draft) => { setYamlFileLookups((prev) => [...prev, draft]); closeAdd(); }}
           onCancel={closeAdd}
         />
       )}
@@ -175,6 +195,13 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.jsonFileLookups ?? []}
         onUpdate={(i, patch) => setJsonFileLookups((prev) => prev.map((j, k) => (k === i ? { ...j, ...patch } : j)))}
         onDelete={(i) => setJsonFileLookups((prev) => prev.filter((_, j) => j !== i))}
+      />
+      <YamlCards
+        {...sectionProps}
+        lookups={yamlFileLookups}
+        savedLookups={data?.lookup?.yamlFileLookups ?? []}
+        onUpdate={(i, patch) => setYamlFileLookups((prev) => prev.map((y, k) => (k === i ? { ...y, ...patch } : y)))}
+        onDelete={(i) => setYamlFileLookups((prev) => prev.filter((_, j) => j !== i))}
       />
       <CsvCards
         {...sectionProps}

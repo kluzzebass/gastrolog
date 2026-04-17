@@ -48,7 +48,7 @@ func (lw *lineWriter) writeTo(w *os.File, prefix, color, line string) {
 	_, _ = io.WriteString(w, formatted) //#nosec G705 -- terminal output only
 	if lw.teeFile != nil {
 		// Write without ANSI colors to the tee file.
-		_, _ = io.WriteString(lw.teeFile, "["+prefix+"] "+line+"\n")
+		_, _ = io.WriteString(lw.teeFile, "["+prefix+"] "+line+"\n") //#nosec G705 -- dev log file, same as terminal above
 	}
 	lw.mu.Unlock()
 }
