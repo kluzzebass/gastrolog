@@ -69,13 +69,99 @@ func (s *SystemServer) GetIngesterStatus(
 	if len(req.Msg.Id) == 0 {
 		return nil, errRequired("id")
 	}
-
 	id, connErr := parseProtoID(req.Msg.Id)
 	if connErr != nil {
 		return nil, connErr
 	}
+	resp, err := s.buildIngesterStatus(ctx, id, req.Msg.Id)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
 
-	// Check config store for existence (cluster-wide).
+// WatchIngesterStatus streams a single ingester's status whenever underlying
+// state changes. Initial snapshot on subscribe; subsequent sends triggered
+// by configSignal (config edits) or statsSignal (broadcast tick with new
+// alive/counter data).
+func (s *SystemServer) WatchIngesterStatus(
+	ctx context.Context,
+	req *connect.Request[apiv1.WatchIngesterStatusRequest],
+	stream *connect.ServerStream[apiv1.WatchIngesterStatusResponse],
+) error {
+	if len(req.Msg.Id) == 0 {
+		return errRequired("id")
+	}
+	id, connErr := parseProtoID(req.Msg.Id)
+	if connErr != nil {
+		return connErr
+	}
+
+	build := func() (*apiv1.WatchIngesterStatusResponse, error) {
+		get, err := s.buildIngesterStatus(ctx, id, req.Msg.Id)
+		if err != nil {
+			return nil, err
+		}
+		return &apiv1.WatchIngesterStatusResponse{
+			Id:               get.Id,
+			Type:             get.Type,
+			Running:          get.Running,
+			MessagesIngested: get.MessagesIngested,
+			Errors:           get.Errors,
+			BytesIngested:    get.BytesIngested,
+		}, nil
+	}
+
+	// Initial snapshot.
+	snap, err := build()
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(snap); err != nil {
+		return err
+	}
+
+	// No signals in single-node or in tests — park on ctx.Done and exit.
+	if s.statsSignal == nil && s.configSignal == nil {
+		<-ctx.Done()
+		return nil
+	}
+
+	for {
+		statsCh := nilCh()
+		if s.statsSignal != nil {
+			statsCh = s.statsSignal.C()
+		}
+		configCh := nilCh()
+		if s.configSignal != nil {
+			configCh = s.configSignal.C()
+		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-statsCh:
+		case <-configCh:
+		}
+
+		snap, err := build()
+		if err != nil {
+			// Ingester removed from config — end the stream cleanly.
+			if connect.CodeOf(err) == connect.CodeNotFound {
+				return nil
+			}
+			return err
+		}
+		if err := stream.Send(snap); err != nil {
+			return err
+		}
+	}
+}
+
+// buildIngesterStatus assembles the current status for one ingester from
+// config, the alive registry, local orchestrator counters, and peer stats.
+// Shared by GetIngesterStatus (unary) and WatchIngesterStatus (stream).
+func (s *SystemServer) buildIngesterStatus(ctx context.Context, id glid.GLID, rawID []byte) (*apiv1.GetIngesterStatusResponse, error) {
 	var ingCfg *system.IngesterConfig
 	if s.sysStore != nil {
 		var ingErr error
@@ -89,7 +175,7 @@ func (s *SystemServer) GetIngesterStatus(
 	}
 
 	resp := &apiv1.GetIngesterStatusResponse{
-		Id:   req.Msg.Id,
+		Id:   rawID,
 		Type: ingCfg.Type,
 	}
 
@@ -114,8 +200,12 @@ func (s *SystemServer) GetIngesterStatus(
 		resp.BytesIngested = int64(ps.BytesIngested)       //nolint:gosec // G115: broadcast uses uint64
 	}
 
-	return connect.NewResponse(resp), nil
+	return resp, nil
 }
+
+// nilCh returns a nil channel — reads block forever. Used in select stmts
+// where a signal is optional.
+func nilCh() <-chan struct{} { return nil }
 
 // PutIngester creates or updates an ingester.
 func (s *SystemServer) PutIngester(

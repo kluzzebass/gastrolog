@@ -56,6 +56,7 @@ func DefaultRoutes() map[string]RPCRoute {
 		gastrologv1connect.SystemServicePreviewCSVLookupProcedure:     {Strategy: RouteLocal},
 		gastrologv1connect.SystemServicePreviewJSONLookupProcedure:    {Strategy: RouteLocal},
 		gastrologv1connect.SystemServicePreviewYAMLLookupProcedure:    {Strategy: RouteLocal},
+		gastrologv1connect.SystemServiceWatchIngesterStatusProcedure:  {Strategy: RouteLocal, IsStreaming: true},
 		// Config mutations — go through Raft Apply.
 		gastrologv1connect.SystemServicePutFilterProcedure:            {Strategy: RouteLeader},
 		gastrologv1connect.SystemServiceDeleteFilterProcedure:         {Strategy: RouteLeader},

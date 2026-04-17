@@ -158,6 +158,9 @@ const (
 	// SystemServicePreviewYAMLLookupProcedure is the fully-qualified name of the SystemService's
 	// PreviewYAMLLookup RPC.
 	SystemServicePreviewYAMLLookupProcedure = "/gastrolog.v1.SystemService/PreviewYAMLLookup"
+	// SystemServiceWatchIngesterStatusProcedure is the fully-qualified name of the SystemService's
+	// WatchIngesterStatus RPC.
+	SystemServiceWatchIngesterStatusProcedure = "/gastrolog.v1.SystemService/WatchIngesterStatus"
 	// SystemServicePutCloudServiceProcedure is the fully-qualified name of the SystemService's
 	// PutCloudService RPC.
 	SystemServicePutCloudServiceProcedure = "/gastrolog.v1.SystemService/PutCloudService"
@@ -267,6 +270,10 @@ type SystemServiceClient interface {
 	PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error)
 	// PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
 	PreviewYAMLLookup(context.Context, *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error)
+	// WatchIngesterStatus streams a single ingester's status whenever underlying state changes
+	// (config edits, alive-state transitions, or broadcast stats updates). Event-driven replacement
+	// for polling GetIngesterStatus. Initial snapshot sent on subscribe.
+	WatchIngesterStatus(context.Context, *connect.Request[v1.WatchIngesterStatusRequest]) (*connect.ServerStreamForClient[v1.WatchIngesterStatusResponse], error)
 	// Cloud services
 	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
@@ -548,6 +555,12 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("PreviewYAMLLookup")),
 			connect.WithClientOptions(opts...),
 		),
+		watchIngesterStatus: connect.NewClient[v1.WatchIngesterStatusRequest, v1.WatchIngesterStatusResponse](
+			httpClient,
+			baseURL+SystemServiceWatchIngesterStatusProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("WatchIngesterStatus")),
+			connect.WithClientOptions(opts...),
+		),
 		putCloudService: connect.NewClient[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse](
 			httpClient,
 			baseURL+SystemServicePutCloudServiceProcedure,
@@ -632,6 +645,7 @@ type systemServiceClient struct {
 	previewCSVLookup      *connect.Client[v1.PreviewCSVLookupRequest, v1.PreviewCSVLookupResponse]
 	previewJSONLookup     *connect.Client[v1.PreviewJSONLookupRequest, v1.PreviewJSONLookupResponse]
 	previewYAMLLookup     *connect.Client[v1.PreviewYAMLLookupRequest, v1.PreviewYAMLLookupResponse]
+	watchIngesterStatus   *connect.Client[v1.WatchIngesterStatusRequest, v1.WatchIngesterStatusResponse]
 	putCloudService       *connect.Client[v1.PutCloudServiceRequest, v1.PutCloudServiceResponse]
 	deleteCloudService    *connect.Client[v1.DeleteCloudServiceRequest, v1.DeleteCloudServiceResponse]
 	setNodeStorageConfig  *connect.Client[v1.SetNodeStorageConfigRequest, v1.SetNodeStorageConfigResponse]
@@ -855,6 +869,11 @@ func (c *systemServiceClient) PreviewYAMLLookup(ctx context.Context, req *connec
 	return c.previewYAMLLookup.CallUnary(ctx, req)
 }
 
+// WatchIngesterStatus calls gastrolog.v1.SystemService.WatchIngesterStatus.
+func (c *systemServiceClient) WatchIngesterStatus(ctx context.Context, req *connect.Request[v1.WatchIngesterStatusRequest]) (*connect.ServerStreamForClient[v1.WatchIngesterStatusResponse], error) {
+	return c.watchIngesterStatus.CallServerStream(ctx, req)
+}
+
 // PutCloudService calls gastrolog.v1.SystemService.PutCloudService.
 func (c *systemServiceClient) PutCloudService(ctx context.Context, req *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {
 	return c.putCloudService.CallUnary(ctx, req)
@@ -975,6 +994,10 @@ type SystemServiceHandler interface {
 	PreviewJSONLookup(context.Context, *connect.Request[v1.PreviewJSONLookupRequest]) (*connect.Response[v1.PreviewJSONLookupResponse], error)
 	// PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
 	PreviewYAMLLookup(context.Context, *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error)
+	// WatchIngesterStatus streams a single ingester's status whenever underlying state changes
+	// (config edits, alive-state transitions, or broadcast stats updates). Event-driven replacement
+	// for polling GetIngesterStatus. Initial snapshot sent on subscribe.
+	WatchIngesterStatus(context.Context, *connect.Request[v1.WatchIngesterStatusRequest], *connect.ServerStream[v1.WatchIngesterStatusResponse]) error
 	// Cloud services
 	PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error)
 	DeleteCloudService(context.Context, *connect.Request[v1.DeleteCloudServiceRequest]) (*connect.Response[v1.DeleteCloudServiceResponse], error)
@@ -1252,6 +1275,12 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("PreviewYAMLLookup")),
 		connect.WithHandlerOptions(opts...),
 	)
+	systemServiceWatchIngesterStatusHandler := connect.NewServerStreamHandler(
+		SystemServiceWatchIngesterStatusProcedure,
+		svc.WatchIngesterStatus,
+		connect.WithSchema(systemServiceMethods.ByName("WatchIngesterStatus")),
+		connect.WithHandlerOptions(opts...),
+	)
 	systemServicePutCloudServiceHandler := connect.NewUnaryHandler(
 		SystemServicePutCloudServiceProcedure,
 		svc.PutCloudService,
@@ -1376,6 +1405,8 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServicePreviewJSONLookupHandler.ServeHTTP(w, r)
 		case SystemServicePreviewYAMLLookupProcedure:
 			systemServicePreviewYAMLLookupHandler.ServeHTTP(w, r)
+		case SystemServiceWatchIngesterStatusProcedure:
+			systemServiceWatchIngesterStatusHandler.ServeHTTP(w, r)
 		case SystemServicePutCloudServiceProcedure:
 			systemServicePutCloudServiceHandler.ServeHTTP(w, r)
 		case SystemServiceDeleteCloudServiceProcedure:
@@ -1567,6 +1598,10 @@ func (UnimplementedSystemServiceHandler) PreviewJSONLookup(context.Context, *con
 
 func (UnimplementedSystemServiceHandler) PreviewYAMLLookup(context.Context, *connect.Request[v1.PreviewYAMLLookupRequest]) (*connect.Response[v1.PreviewYAMLLookupResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PreviewYAMLLookup is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) WatchIngesterStatus(context.Context, *connect.Request[v1.WatchIngesterStatusRequest], *connect.ServerStream[v1.WatchIngesterStatusResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.WatchIngesterStatus is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) PutCloudService(context.Context, *connect.Request[v1.PutCloudServiceRequest]) (*connect.Response[v1.PutCloudServiceResponse], error) {

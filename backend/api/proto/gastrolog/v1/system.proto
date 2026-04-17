@@ -139,6 +139,11 @@ service SystemService {
   // PreviewYAMLLookup reads a managed YAML file and returns pretty-printed content for structure inspection.
   rpc PreviewYAMLLookup(PreviewYAMLLookupRequest) returns (PreviewYAMLLookupResponse);
 
+  // WatchIngesterStatus streams a single ingester's status whenever underlying state changes
+  // (config edits, alive-state transitions, or broadcast stats updates). Event-driven replacement
+  // for polling GetIngesterStatus. Initial snapshot sent on subscribe.
+  rpc WatchIngesterStatus(WatchIngesterStatusRequest) returns (stream WatchIngesterStatusResponse);
+
   // Cloud services
   rpc PutCloudService(PutCloudServiceRequest) returns (PutCloudServiceResponse);
   rpc DeleteCloudService(DeleteCloudServiceRequest) returns (DeleteCloudServiceResponse);
@@ -263,6 +268,22 @@ message GetIngesterStatusRequest {
 }
 
 message GetIngesterStatusResponse {
+  bytes id = 1;
+  string type = 2;
+  bool running = 3;
+  int64 messages_ingested = 4;
+  int64 errors = 5;
+  int64 bytes_ingested = 6;
+}
+
+// WatchIngesterStatusRequest selects which ingester's live status to stream.
+message WatchIngesterStatusRequest {
+  bytes id = 1;
+}
+
+// WatchIngesterStatusResponse carries the same fields as GetIngesterStatusResponse
+// — clients can reuse their existing parsing logic.
+message WatchIngesterStatusResponse {
   bytes id = 1;
   string type = 2;
   bool running = 3;

@@ -55,6 +55,7 @@ type SystemServerConfig struct {
 	LocalNodeID        string
 	AfterConfigApply   func(raftfsm.Notification)
 	ConfigSignal       *notify.Signal
+	StatsSignal        *notify.Signal
 	ResolveManagedFile func(ctx context.Context, fileID string) string
 	OnTLSConfigChange  func()
 	OnLookupConfigChange func(system.LookupConfig, system.MaxMindConfig)
@@ -76,6 +77,7 @@ type SystemServer struct {
 	onLookupConfigChange  func(system.LookupConfig, system.MaxMindConfig)
 	afterConfigApply      func(raftfsm.Notification)
 	configSignal          *notify.Signal
+	statsSignal           *notify.Signal
 	resolveManagedFile    func(ctx context.Context, fileID string) string
 	cloudTesters          map[string]CloudServiceTester
 	tokens                *auth.TokenService
@@ -96,6 +98,7 @@ func NewSystemServer(cfg SystemServerConfig) *SystemServer {
 		localNodeID:          cfg.LocalNodeID,
 		afterConfigApply:     cfg.AfterConfigApply,
 		configSignal:         cfg.ConfigSignal,
+		statsSignal:          cfg.StatsSignal,
 		resolveManagedFile:   cfg.ResolveManagedFile,
 		onTLSConfigChange:    cfg.OnTLSConfigChange,
 		onLookupConfigChange: cfg.OnLookupConfigChange,
