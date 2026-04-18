@@ -1118,6 +1118,68 @@ func TestCloudClusterReconcileSweepDetectsMissingBlobs(t *testing.T) {
 	t.Logf("leader: %d suspect chunks after reconciliation", suspectCount)
 }
 
+// TestCloudClusterReconcileSkipsTombstoned verifies that reconcile ignores
+// chunks our own retention just deleted. Without this, every retention
+// sweep on a cloud tier produced a paired WARN per evicted chunk
+// (cache/download fallback + reconcile/mark-suspect) and corresponding UI
+// alerts — dozens per second. See gastrolog-2c96i.
+func TestCloudClusterReconcileSkipsTombstoned(t *testing.T) {
+	t.Parallel()
+	h := setupCloudCluster(t, nil)
+
+	leaderNode := h.nodes["leader"]
+	leaderCM := leaderNode.tiers[0].Chunks.(*chunkfile.Manager)
+
+	// Produce some sealed + uploaded cloud chunks.
+	t0 := time.Date(2025, 6, 15, 10, 0, 0, 0, time.UTC)
+	for i := range 200 {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		_ = leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts, WriteTS: ts, Raw: fmt.Appendf(nil, "reconcile-tombstone-%d", i),
+		})
+	}
+	if active := leaderCM.Active(); active != nil && active.RecordCount > 0 {
+		_ = leaderCM.Seal()
+	}
+	metas, _ := leaderCM.List()
+	for _, m := range metas {
+		if m.Sealed {
+			_ = leaderCM.PostSealProcess(context.Background(), m.ID)
+		}
+	}
+	metasBefore, _ := leaderCM.List()
+	if len(metasBefore) == 0 {
+		t.Fatal("setup produced no chunks")
+	}
+
+	// Simulate what retention looks like from reconcile's point of view:
+	// the blobs are gone from cloud AND the tier FSM has tombstoned every
+	// chunk. The local cloud index still carries stale entries (that's
+	// the window reconcile historically noticed).
+	_ = h.cloudStore.List(context.Background(), "", func(info blobstore.BlobInfo) error {
+		return h.cloudStore.Delete(context.Background(), info.Key)
+	})
+	tombstoned := make(map[chunk.ChunkID]bool, len(metasBefore))
+	for _, m := range metasBefore {
+		tombstoned[m.ID] = true
+	}
+	leaderNode.tiers[0].IsTombstoned = func(id chunk.ChunkID) bool {
+		return tombstoned[id]
+	}
+
+	// Reconcile: must skip every tombstoned chunk silently — no suspects,
+	// no alerts, no log spam.
+	leaderNode.orch.reconcileSweepAll()
+
+	if leaderNode.orch.suspects != nil {
+		for _, m := range metasBefore {
+			if _, ok := leaderNode.orch.suspects.suspectSince(m.ID); ok {
+				t.Errorf("tombstoned chunk %s should not be marked suspect by reconcile", m.ID)
+			}
+		}
+	}
+}
+
 // --- Warm cache cluster test ---
 
 func TestCloudClusterCachePopulatedAfterUpload(t *testing.T) {
