@@ -30,6 +30,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useThemeClass } from "../../hooks/useThemeClass";
+import { IconButton } from "./Buttons";
 
 export interface EditableGridProps {
   dark: boolean;
@@ -108,6 +109,7 @@ function validateKeys(
 
 interface SortableRowProps {
   id: string;
+  dark: boolean;
   row: Record<string, string>;
   columns: string[];
   keyColumnIndex: number;
@@ -118,13 +120,11 @@ interface SortableRowProps {
   onDelete: () => void;
   onAddRow: () => void;
   onCellChange: (col: string, val: string) => void;
-  deleteClass: string;
-  addClass: string;
   borderClass: string;
 }
 
 function SortableRow({
-  id, row, columns, keyColumnIndex, keyError, inputClass, inputErrorClass, inputsDisabled, onDelete, onAddRow, onCellChange, deleteClass, addClass, borderClass,
+  id, dark, row, columns, keyColumnIndex, keyError, inputClass, inputErrorClass, inputsDisabled, onDelete, onAddRow, onCellChange, borderClass,
 }: Readonly<SortableRowProps>) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
 
@@ -138,7 +138,10 @@ function SortableRow({
       {...listeners}
     >
       {columns.map((col, ci) => (
-        <td key={col || `col-${ci}`} className="px-1 py-1">
+        // Key by position, not by col name — keying by name would remount
+        // every cell each time the header is renamed, and could collide
+        // across multiple unnamed columns (all keyed "").
+        <td key={`col-${ci}`} className="px-1 py-1">
           <div className="flex items-center gap-0.5">
             {ci === 0 && (
               <div
@@ -151,10 +154,10 @@ function SortableRow({
             )}
             <input
               type="text"
-              value={(col && row[col]) ?? ""}
-              onChange={(e) => col && onCellChange(col, e.target.value)}
+              value={row[col] ?? ""}
+              onChange={(e) => onCellChange(col, e.target.value)}
               onPointerDown={(e) => e.stopPropagation()}
-              disabled={!col || inputsDisabled}
+              disabled={inputsDisabled}
               className={`flex-1 min-w-0 cursor-text ${ci === keyColumnIndex && keyError ? inputErrorClass : inputClass}`}
             />
           </div>
@@ -163,26 +166,24 @@ function SortableRow({
 
       {/* Delete row */}
       <td className="w-7 px-1 py-1 text-center">
-        <button
+        <IconButton
+          intent="remove"
           onClick={onDelete}
           onPointerDown={(e) => e.stopPropagation()}
-          className={`p-1.5 rounded cursor-pointer text-base font-medium leading-none ${deleteClass}`}
           title="Delete row"
-        >
-          ×
-        </button>
+          dark={dark}
+        />
       </td>
 
-      {/* Add column */}
+      {/* Insert row below */}
       <td className="w-7 px-1 py-1 text-center">
-        <button
+        <IconButton
+          intent="add"
           onClick={onAddRow}
           onPointerDown={(e) => e.stopPropagation()}
-          className={`p-1.5 rounded cursor-pointer text-[0.9em] font-medium leading-none ${addClass}`}
-          title="Add column"
-        >
-          +
-        </button>
+          title="Insert row below"
+          dark={dark}
+        />
       </td>
     </tr>
   );
@@ -206,10 +207,10 @@ function RowOverlay({ row, columns, overlayClass, keyClass, valClass }: Readonly
       <GripDots className="shrink-0 mx-0.5 text-copper" />
       {columns.map((col, ci) => (
         <div
-          key={col || `col-${ci}`}
+          key={`col-${ci}`}
           className={`flex-1 min-w-0 text-[0.8em] font-mono truncate px-2 py-0.5 rounded border ${ci === 0 ? keyClass : valClass}`}
         >
-          {col ? (row[col] ?? "") : ""}
+          {row[col] ?? ""}
         </div>
       ))}
     </div>
@@ -286,8 +287,6 @@ export function EditableGrid({
     "bg-ink-surface border-severity-error/60 text-text-bright placeholder:text-text-muted focus:border-severity-error",
     "bg-light-surface border-severity-error/60 text-light-text-bright placeholder:text-light-text-muted focus:border-severity-error",
   )}`;
-  const deleteClass = c("text-text-muted hover:text-severity-error transition-colors", "text-light-text-muted hover:text-severity-error transition-colors");
-  const addClass = c("text-text-muted hover:text-copper transition-colors", "text-light-text-muted hover:text-copper transition-colors");
   const rowBorderClass = c("border-ink-border-subtle", "border-light-border-subtle");
   const overlayClass = c(
     "bg-ink-raised border-copper/60 shadow-black/60",
@@ -309,7 +308,11 @@ export function EditableGrid({
     const next = [...columns];
     next[ci] = newName;
     onColumnsChange(next);
-    if (oldName && oldName !== newName) {
+    if (oldName !== newName) {
+      // Migrate row values from old key to new key. Empty oldName is a
+      // real case: cells under an unnamed column are stored at row[""],
+      // and when the user finally types the header we need to carry that
+      // data forward rather than orphan it.
       onRowsChange(
         rows.map((r) => {
           const cp = { ...r };
@@ -358,6 +361,8 @@ export function EditableGrid({
     next.splice(idx + 1, 0, emptyRow());
     onRowsChange?.(next);
   };
+
+  const addRow = () => onRowsChange?.([...rows, emptyRow()]);
 
   const deleteRow = (rowId: string) => {
     const idx = ids.indexOf(rowId);
@@ -471,7 +476,11 @@ export function EditableGrid({
               <tr className={c("bg-ink-surface/80", "bg-light-surface/80")}>
                 {displayCols.map((col, ci) => (
                   <th
-                    key={col || `col-${ci}`}
+                    // Key by position, not by `col`. Keying by col name means
+                    // every keystroke in the header input changes the React
+                    // key → input unmounts and remounts → focus is lost
+                    // after each character.
+                    key={`col-${ci}`}
                     ref={(el) => { colRefs.current[ci] = el; }}
                     className={`px-1 py-1.5 ${dragColIdx === ci ? "opacity-30" : ""}`}
                   >
@@ -498,28 +507,30 @@ export function EditableGrid({
                         )}
                       </div>
                       {displayCols.length > 1 && (
-                        <button
+                        <IconButton
+                          intent="remove"
                           onClick={() => removeColumn(ci)}
-                          className={`shrink-0 p-1.5 rounded text-base font-medium leading-none ${deleteClass}`}
                           title="Remove column"
-                        >
-                          ×
-                        </button>
+                          dark={dark}
+                        />
                       )}
                     </div>
                   </th>
                 ))}
-                {/* Spacer aligns with row delete column */}
-                <th className="w-7" />
-                {/* Add-row button aligns with each row's add-column cell */}
-                <th className="w-7 pr-1.5 text-center">
-                  <button
+                {/* Spacer aligns with row delete column. Padding matches
+                    SortableRow's action-cell padding (px-1 py-1) so the
+                    header column boundaries line up with the row cells. */}
+                <th className="w-7 px-1 py-1" />
+                {/* Add-column button aligns with each row's insert-row cell.
+                    Padding must match SortableRow's `<td className="w-7 px-1 py-1 text-center">`
+                    exactly — otherwise the centered button drifts horizontally. */}
+                <th className="w-7 px-1 py-1 text-center">
+                  <IconButton
+                    intent="add"
                     onClick={addColumn}
-                    className={`p-1.5 rounded text-base font-medium leading-none ${addClass}`}
                     title="Add column"
-                  >
-                    +
-                  </button>
+                    dark={dark}
+                  />
                 </th>
               </tr>
             </thead>
@@ -533,6 +544,7 @@ export function EditableGrid({
                   <SortableRow
                     key={id}
                     id={id}
+                    dark={dark}
                     row={row}
                     columns={displayCols}
                     keyColumnIndex={keyColumnIndex}
@@ -543,8 +555,6 @@ export function EditableGrid({
                     onDelete={() => deleteRow(id)}
                     onAddRow={() => insertRowAfter(id)}
                     onCellChange={(col, val) => updateCell(id, col, val)}
-                    deleteClass={deleteClass}
-                    addClass={addClass}
                     borderClass={rowBorderClass}
                   />
                   );
@@ -552,6 +562,20 @@ export function EditableGrid({
               </tbody>
             </SortableContext>
           </table>
+        </div>
+
+        {/* Always-visible Add row button. Per-row `+` only handles mid-list
+            insertion; this handles the empty-state and end-of-list cases. */}
+        <div className={`border-t ${c("border-ink-border-subtle", "border-light-border-subtle")}`}>
+          <button
+            onClick={addRow}
+            className={`w-full px-2 py-1.5 text-[0.8em] font-mono text-left cursor-pointer ${c(
+              "text-text-muted hover:text-copper hover:bg-ink-hover",
+              "text-light-text-muted hover:text-copper hover:bg-light-hover",
+            )} transition-colors`}
+          >
+            + Add row
+          </button>
         </div>
 
         {/* Row drag ghost — renders via portal to document.body */}

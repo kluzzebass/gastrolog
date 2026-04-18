@@ -1,4 +1,3 @@
-import { encode } from "../../api/glid";
 import { useState } from "react";
 import { useSettings } from "../../api/hooks/useSettings";
 import { useConfig, useGenerateName } from "../../api/hooks/useSystem";
@@ -11,7 +10,21 @@ import { JsonAddForm, JsonCards } from "./lookup/JsonSection";
 import { YamlAddForm, YamlCards } from "./lookup/YamlSection";
 import { CsvAddForm, CsvCards } from "./lookup/CsvSection";
 import { StaticAddForm, StaticCards } from "./lookup/StaticSection";
-import { lookupTypes, type MMDBLookupDraft, type HTTPLookupDraft, type JSONFileLookupDraft, type YAMLFileLookupDraft, type CSVLookupDraft, type StaticLookupDraft } from "./lookup/types";
+import {
+  lookupTypes,
+  httpEntryToDraft,
+  mmdbEntryToDraft,
+  jsonFileEntryToDraft,
+  yamlFileEntryToDraft,
+  csvEntryToDraft,
+  staticEntryToDraft,
+  type MMDBLookupDraft,
+  type HTTPLookupDraft,
+  type JSONFileLookupDraft,
+  type YAMLFileLookupDraft,
+  type CSVLookupDraft,
+  type StaticLookupDraft,
+} from "./lookup/types";
 
 export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
   const { data, isLoading } = useSettings();
@@ -35,59 +48,12 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
 
   // -- Init from server (once) -----------------------------------------------
   if (data && !initialized) {
-    setMmdbLookups(
-      (data.lookup?.mmdbLookups ?? []).map((m) => ({
-        name: m.name,
-        dbType: m.dbType,
-        fileId: encode(m.fileId),
-      })),
-    );
-    setHttpLookups(
-      (data.lookup?.httpLookups ?? []).map((h) => ({
-        name: h.name,
-        urlTemplate: h.urlTemplate,
-        headers: { ...h.headers },
-        responsePaths: [...h.responsePaths],
-        parameters: h.parameters.map((p) => ({ name: p.name, description: p.description })),
-        timeout: h.timeout,
-        cacheTtl: h.cacheTtl,
-        cacheSize: h.cacheSize,
-      })),
-    );
-    setJsonFileLookups(
-      (data.lookup?.jsonFileLookups ?? []).map((j) => ({
-        name: j.name,
-        fileId: encode(j.fileId),
-        query: j.query,
-        keyColumn: j.keyColumn,
-        valueColumns: [...j.valueColumns],
-      })),
-    );
-    setYamlFileLookups(
-      (data.lookup?.yamlFileLookups ?? []).map((y) => ({
-        name: y.name,
-        fileId: encode(y.fileId),
-        query: y.query,
-        keyColumn: y.keyColumn,
-        valueColumns: [...y.valueColumns],
-      })),
-    );
-    setCsvLookups(
-      (data.lookup?.csvLookups ?? []).map((c) => ({
-        name: c.name,
-        fileId: encode(c.fileId),
-        keyColumn: c.keyColumn,
-        valueColumns: [...c.valueColumns],
-      })),
-    );
-    setStaticLookups(
-      (data.lookup?.staticLookups ?? []).map((s) => ({
-        name: s.name,
-        keyColumn: s.keyColumn,
-        valueColumns: [...s.valueColumns],
-        rows: s.rows.map((r) => ({ ...r.values })),
-      })),
-    );
+    setMmdbLookups((data.lookup?.mmdbLookups ?? []).map(mmdbEntryToDraft));
+    setHttpLookups((data.lookup?.httpLookups ?? []).map(httpEntryToDraft));
+    setJsonFileLookups((data.lookup?.jsonFileLookups ?? []).map(jsonFileEntryToDraft));
+    setYamlFileLookups((data.lookup?.yamlFileLookups ?? []).map(yamlFileEntryToDraft));
+    setCsvLookups((data.lookup?.csvLookups ?? []).map(csvEntryToDraft));
+    setStaticLookups((data.lookup?.staticLookups ?? []).map(staticEntryToDraft));
     setInitialized(true);
   }
 
@@ -180,6 +146,10 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.mmdbLookups ?? []}
         onUpdate={(i, patch) => setMmdbLookups((prev) => prev.map((m, j) => (j === i ? { ...m, ...patch } : m)))}
         onDelete={(i) => setMmdbLookups((prev) => prev.filter((_, j) => j !== i))}
+        onRevert={(i) => {
+          const saved = data?.lookup?.mmdbLookups[i];
+          if (saved) setMmdbLookups((prev) => prev.map((m, j) => j === i ? mmdbEntryToDraft(saved) : m));
+        }}
       />
       <HttpCards
         dark={dark}
@@ -188,6 +158,10 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.httpLookups ?? []}
         onUpdate={(i, patch) => setHttpLookups((prev) => prev.map((h, j) => (j === i ? { ...h, ...patch } : h)))}
         onDelete={(i) => setHttpLookups((prev) => prev.filter((_, j) => j !== i))}
+        onRevert={(i) => {
+          const saved = data?.lookup?.httpLookups[i];
+          if (saved) setHttpLookups((prev) => prev.map((h, j) => j === i ? httpEntryToDraft(saved) : h));
+        }}
       />
       <JsonCards
         {...sectionProps}
@@ -195,6 +169,10 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.jsonFileLookups ?? []}
         onUpdate={(i, patch) => setJsonFileLookups((prev) => prev.map((j, k) => (k === i ? { ...j, ...patch } : j)))}
         onDelete={(i) => setJsonFileLookups((prev) => prev.filter((_, j) => j !== i))}
+        onRevert={(i) => {
+          const saved = data?.lookup?.jsonFileLookups[i];
+          if (saved) setJsonFileLookups((prev) => prev.map((j, k) => k === i ? jsonFileEntryToDraft(saved) : j));
+        }}
       />
       <YamlCards
         {...sectionProps}
@@ -202,6 +180,10 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.yamlFileLookups ?? []}
         onUpdate={(i, patch) => setYamlFileLookups((prev) => prev.map((y, k) => (k === i ? { ...y, ...patch } : y)))}
         onDelete={(i) => setYamlFileLookups((prev) => prev.filter((_, j) => j !== i))}
+        onRevert={(i) => {
+          const saved = data?.lookup?.yamlFileLookups[i];
+          if (saved) setYamlFileLookups((prev) => prev.map((y, k) => k === i ? yamlFileEntryToDraft(saved) : y));
+        }}
       />
       <CsvCards
         {...sectionProps}
@@ -209,6 +191,10 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         savedLookups={data?.lookup?.csvLookups ?? []}
         onUpdate={(i, patch) => setCsvLookups((prev) => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)))}
         onDelete={(i) => setCsvLookups((prev) => prev.filter((_, j) => j !== i))}
+        onRevert={(i) => {
+          const saved = data?.lookup?.csvLookups[i];
+          if (saved) setCsvLookups((prev) => prev.map((c, j) => j === i ? csvEntryToDraft(saved) : c));
+        }}
       />
       <StaticCards
         dark={dark}
@@ -218,12 +204,7 @@ export function LookupsSettings({ dark }: Readonly<{ dark: boolean }>) {
         onDelete={(i) => setStaticLookups((prev) => prev.filter((_, j) => j !== i))}
         onRevert={(i) => {
           const saved = data?.lookup?.staticLookups[i];
-          if (saved) setStaticLookups((prev) => prev.map((s, j) => j === i ? {
-            name: saved.name,
-            keyColumn: saved.keyColumn,
-            valueColumns: [...saved.valueColumns],
-            rows: saved.rows.map((r) => ({ ...r.values })),
-          } : s));
+          if (saved) setStaticLookups((prev) => prev.map((s, j) => j === i ? staticEntryToDraft(saved) : s));
         }}
       />
     </SettingsSection>

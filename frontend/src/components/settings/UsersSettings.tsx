@@ -232,12 +232,24 @@ export function UsersSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAuth
             onToggle={() => toggleCard(encode(user.id))}
             onDelete={isSelf ? undefined : () => handleDeleteUser({ id: encode(user.id), username: user.username })}
             footer={
-              <Button
-                onClick={() => handleSave(encode(user.id))}
-                disabled={isSaving || !isDirty(encode(user.id))}
-              >
-                {isSaving ? "Saving..." : "Save"}
-              </Button>
+              <>
+                {isDirty(encode(user.id)) && (
+                  <Button
+                    onClick={() => clearEdit(encode(user.id))}
+                    disabled={isSaving}
+                    dark={dark}
+                    variant="ghost"
+                  >
+                    Discard
+                  </Button>
+                )}
+                <Button
+                  onClick={() => handleSave(encode(user.id))}
+                  disabled={isSaving || !isDirty(encode(user.id))}
+                >
+                  {isSaving ? "Saving..." : "Save"}
+                </Button>
+              </>
             }
           >
             <div className="flex flex-col gap-3">

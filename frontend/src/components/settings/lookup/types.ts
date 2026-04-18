@@ -95,6 +95,65 @@ export function emptyStaticDraft(): StaticLookupDraft {
 }
 
 // ---------------------------------------------------------------------------
+// Saved-entry → draft converters (used by init + Discard revert)
+// ---------------------------------------------------------------------------
+
+export function httpEntryToDraft(h: HTTPLookupEntry): HTTPLookupDraft {
+  return {
+    name: h.name,
+    urlTemplate: h.urlTemplate,
+    headers: { ...h.headers },
+    responsePaths: [...h.responsePaths],
+    parameters: h.parameters.map((p) => ({ name: p.name, description: p.description })),
+    timeout: h.timeout,
+    cacheTtl: h.cacheTtl,
+    cacheSize: h.cacheSize,
+  };
+}
+
+export function mmdbEntryToDraft(m: MMDBLookupEntry): MMDBLookupDraft {
+  return { name: m.name, dbType: m.dbType, fileId: encode(m.fileId) };
+}
+
+export function jsonFileEntryToDraft(j: JSONFileLookupEntry): JSONFileLookupDraft {
+  return {
+    name: j.name,
+    fileId: encode(j.fileId),
+    query: j.query,
+    keyColumn: j.keyColumn,
+    valueColumns: [...j.valueColumns],
+  };
+}
+
+export function yamlFileEntryToDraft(y: YAMLFileLookupEntry): YAMLFileLookupDraft {
+  return {
+    name: y.name,
+    fileId: encode(y.fileId),
+    query: y.query,
+    keyColumn: y.keyColumn,
+    valueColumns: [...y.valueColumns],
+  };
+}
+
+export function csvEntryToDraft(c: CSVLookupEntry): CSVLookupDraft {
+  return {
+    name: c.name,
+    fileId: encode(c.fileId),
+    keyColumn: c.keyColumn,
+    valueColumns: [...c.valueColumns],
+  };
+}
+
+export function staticEntryToDraft(s: StaticLookupEntry): StaticLookupDraft {
+  return {
+    name: s.name,
+    keyColumn: s.keyColumn,
+    valueColumns: [...s.valueColumns],
+    rows: s.rows.map((r) => ({ ...r.values })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Shared props passed from orchestrator to each section
 // ---------------------------------------------------------------------------
 

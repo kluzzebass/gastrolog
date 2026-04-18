@@ -417,12 +417,14 @@ export function FileLookupCards({
   savedLookups,
   onUpdate,
   onDelete,
+  onRevert,
   spec,
 }: LookupSectionProps & {
   lookups: JSONFileLookupDraft[];
   savedLookups: (JSONFileLookupEntry | YAMLFileLookupEntry)[];
   onUpdate: (i: number, patch: Partial<JSONFileLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
   spec: FormatSpec;
 }) {
   const c = useThemeClass(dark);
@@ -451,12 +453,19 @@ export function FileLookupCards({
               </span>
             )}
             footer={
-              <Button
-                onClick={() => save(i)}
-                disabled={!isDirty(i) || !j.name || putConfig.isPending}
-              >
-                {putConfig.isPending ? "Saving..." : "Save"}
-              </Button>
+              <>
+                {isDirty(i) && (
+                  <Button onClick={() => onRevert(i)} disabled={putConfig.isPending} dark={dark} variant="ghost">
+                    Discard
+                  </Button>
+                )}
+                <Button
+                  onClick={() => save(i)}
+                  disabled={!isDirty(i) || !j.name || putConfig.isPending}
+                >
+                  {putConfig.isPending ? "Saving..." : "Save"}
+                </Button>
+              </>
             }
           >
             <FileLookupCardBody

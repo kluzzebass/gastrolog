@@ -91,11 +91,13 @@ export function HttpCards({
   savedLookups,
   onUpdate,
   onDelete,
+  onRevert,
 }: Omit<LookupSectionProps, "managedFiles" | "uploadFile"> & {
   lookups: HTTPLookupDraft[];
   savedLookups: HTTPLookupEntry[];
   onUpdate: (i: number, patch: Partial<HTTPLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
   const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
@@ -121,12 +123,19 @@ export function HttpCards({
           onToggle={() => toggle(`http-${i}`)}
           onDelete={() => handleDelete(i)}
           footer={
-            <Button
-              onClick={() => save(i)}
-              disabled={!isDirty(i) || !h.name || !h.urlTemplate || putConfig.isPending}
-            >
-              {putConfig.isPending ? "Saving..." : "Save"}
-            </Button>
+            <>
+              {isDirty(i) && (
+                <Button onClick={() => onRevert(i)} disabled={putConfig.isPending} dark={dark} variant="ghost">
+                  Discard
+                </Button>
+              )}
+              <Button
+                onClick={() => save(i)}
+                disabled={!isDirty(i) || !h.name || !h.urlTemplate || putConfig.isPending}
+              >
+                {putConfig.isPending ? "Saving..." : "Save"}
+              </Button>
+            </>
           }
         >
           <div className="flex flex-col gap-3">

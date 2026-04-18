@@ -42,6 +42,7 @@ type orchActions interface {
 	AddIngester(id glid.GLID, name, ingType string, passive bool, r orchestrator.Ingester) error
 	RemoveIngester(id glid.GLID) error
 	UpdateMaxConcurrentJobs(n int) error
+	MaxConcurrentJobs() int
 	FindLocalTierExported(vaultID, tierID glid.GLID) *orchestrator.TierInstance
 	StopTierLeaderLoop(tierID glid.GLID)
 	SetDesiredTierLeader(tierID glid.GLID, leaderNodeID string)
@@ -445,7 +446,12 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 		d.logger.Error("dispatch: load server settings", "error", err)
 		return
 	}
-	if ss.Scheduler.MaxConcurrentJobs > 0 {
+	// Only rebuild when MaxConcurrentJobs actually changed. PutSettings is
+	// also used for lookups, TLS, auth, etc., all of which fire this same
+	// NotifySettingPut("server") — rebuilding the scheduler on every one of
+	// those calls shuts down the whole scheduler and waits for in-flight
+	// jobs, which causes gocron Shutdown timeouts on busy nodes.
+	if ss.Scheduler.MaxConcurrentJobs > 0 && ss.Scheduler.MaxConcurrentJobs != d.orch.MaxConcurrentJobs() {
 		if err := d.orch.UpdateMaxConcurrentJobs(ss.Scheduler.MaxConcurrentJobs); err != nil {
 			d.logger.Error("dispatch: update max concurrent jobs", "error", err)
 		}

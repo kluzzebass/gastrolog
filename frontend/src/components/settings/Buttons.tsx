@@ -59,6 +59,53 @@ export function Button({
   );
 }
 
+// ---------------------------------------------------------------------------
+// IconButton — compact square action button for inline table/grid affordances
+// (add column, remove column, add row, delete row, etc). Use this for any
+// place a single-glyph action would otherwise be inlined as a styled
+// <button>; it keeps size, cursor, hover color, and semantics in one place.
+// ---------------------------------------------------------------------------
+
+type IconButtonIntent = "add" | "remove";
+
+interface IconButtonProps {
+  intent: IconButtonIntent;
+  onClick: () => void;
+  title: string;
+  dark?: boolean;
+  disabled?: boolean;
+  // Forwarded to the underlying <button>. Grid rows use this to stop
+  // drag-reorder pointer handlers from swallowing the click.
+  onPointerDown?: (e: React.PointerEvent) => void;
+}
+
+export function IconButton({
+  intent,
+  onClick,
+  title,
+  dark = true,
+  disabled,
+  onPointerDown,
+}: Readonly<IconButtonProps>) {
+  const c = useThemeClass(dark);
+  const glyph = intent === "add" ? "+" : "×";
+  const hoverClass = intent === "add"
+    ? c("text-text-muted hover:text-copper", "text-light-text-muted hover:text-copper")
+    : c("text-text-muted hover:text-severity-error", "text-light-text-muted hover:text-severity-error");
+
+  return (
+    <button
+      onClick={onClick}
+      onPointerDown={onPointerDown}
+      disabled={disabled}
+      title={title}
+      className={`shrink-0 p-1.5 rounded cursor-pointer text-base font-medium leading-none transition-colors disabled:opacity-50 ${hoverClass}`}
+    >
+      {glyph}
+    </button>
+  );
+}
+
 interface DropdownItem {
   value: string;
   label: string;

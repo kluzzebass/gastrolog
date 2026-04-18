@@ -23,6 +23,7 @@ export function YamlCards(props: LookupSectionProps & {
   savedLookups: YAMLFileLookupEntry[];
   onUpdate: (i: number, patch: Partial<YAMLFileLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
 }) {
   return <FileLookupCards {...props} spec={yamlFormatSpec} />;
 }
