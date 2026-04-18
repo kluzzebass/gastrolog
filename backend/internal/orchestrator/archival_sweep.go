@@ -243,74 +243,96 @@ func (o *Orchestrator) reconcileTier(tier *TierInstance, cs *system.CloudService
 		if !m.CloudBacked {
 			continue
 		}
-
-		// Try to read the blob header to check existence + storage class.
-		cursor, readErr := tier.Chunks.OpenCursor(m.ID)
-		if readErr == nil {
-			_ = cursor.Close()
-			// Blob exists and is readable — clear any suspect status.
-			if o.suspects != nil {
-				o.suspects.clear(m.ID)
-			}
-			if o.alerts != nil {
-				o.alerts.Clear("chunk-suspect:" + m.ID.String())
-			}
+		// Skip chunks our own retention just deleted. The blob is gone by
+		// design — reading it would 404, we'd mark it suspect, and the
+		// operator would see a flood of alerts for a chunk WE deleted.
+		// Tombstone propagation is faster than local cloud-index purge,
+		// so checking the tombstone here catches the gap. See
+		// gastrolog-2c96i.
+		if tier.IsTombstoned != nil && tier.IsTombstoned(m.ID) {
 			continue
 		}
-
-		// Check if it's a suspect (404).
-		if !isChunkSuspect(readErr) {
-			continue // transient error or archived — not a missing blob
-		}
-
-		if o.suspects == nil {
-			continue
-		}
-
-		since, wasSuspect := o.suspects.suspectSince(m.ID)
-		if !wasSuspect {
-			// First time seeing this chunk missing — mark as suspect, don't remove.
-			o.suspects.mark(m.ID, now)
-			if o.alerts != nil {
-				o.alerts.Set(
-					"chunk-suspect:"+m.ID.String(),
-					1, // Warning
-					"cloud-reconcile",
-					"Cloud chunk "+m.ID.String()+" not found in blob store — monitoring",
-				)
-			}
-			o.logger.Warn("reconcile: chunk not found, marking suspect",
-				"tier", tier.TierID, "chunk", m.ID.String())
-			continue
-		}
-
-		// Been suspect for a while — check grace period.
-		suspectDays := uint32(now.Sub(since).Hours() / 24)
-		if suspectDays < graceDays {
-			o.logger.Info("reconcile: chunk still suspect",
-				"tier", tier.TierID, "chunk", m.ID.String(),
-				"suspectDays", suspectDays, "graceDays", graceDays)
-			continue
-		}
-
-		// Grace period exceeded — remove from index.
-		if err := tier.Chunks.Delete(m.ID); err != nil {
-			o.logger.Error("reconcile: failed to remove suspect chunk from index",
-				"tier", tier.TierID, "chunk", m.ID.String(), "error", err)
-			continue
-		}
-		o.suspects.clear(m.ID)
-		if o.alerts != nil {
-			o.alerts.Set(
-				"chunk-suspect:"+m.ID.String(),
-				2, // Error
-				"cloud-reconcile",
-				fmt.Sprintf("Cloud chunk %s removed from index after %d days missing", m.ID, suspectDays),
-			)
-		}
-		o.logger.Warn("reconcile: removed chunk from index after grace period",
-			"tier", tier.TierID, "chunk", m.ID.String(), "suspectDays", suspectDays)
+		o.reconcileCloudChunk(tier, m.ID, graceDays, now)
 	}
+}
+
+// reconcileCloudChunk probes one cloud chunk against the blob store and
+// advances its suspect-tracking state.
+func (o *Orchestrator) reconcileCloudChunk(tier *TierInstance, id chunk.ChunkID, graceDays uint32, now time.Time) {
+	cursor, readErr := tier.Chunks.OpenCursor(id)
+	if readErr == nil {
+		_ = cursor.Close()
+		o.clearSuspect(id)
+		return
+	}
+	if !isChunkSuspect(readErr) {
+		return // transient error or archived — not a missing blob
+	}
+	if o.suspects == nil {
+		return
+	}
+
+	since, wasSuspect := o.suspects.suspectSince(id)
+	if !wasSuspect {
+		o.markSuspect(tier, id, now)
+		return
+	}
+
+	suspectDays := uint32(now.Sub(since).Hours() / 24)
+	if suspectDays < graceDays {
+		o.logger.Info("reconcile: chunk still suspect",
+			"tier", tier.TierID, "chunk", id.String(),
+			"suspectDays", suspectDays, "graceDays", graceDays)
+		return
+	}
+	o.expireSuspect(tier, id, suspectDays)
+}
+
+// clearSuspect drops any suspect bookkeeping for a chunk that just proved
+// readable.
+func (o *Orchestrator) clearSuspect(id chunk.ChunkID) {
+	if o.suspects != nil {
+		o.suspects.clear(id)
+	}
+	if o.alerts != nil {
+		o.alerts.Clear("chunk-suspect:" + id.String())
+	}
+}
+
+// markSuspect records a first-time missing-blob observation.
+func (o *Orchestrator) markSuspect(tier *TierInstance, id chunk.ChunkID, now time.Time) {
+	o.suspects.mark(id, now)
+	if o.alerts != nil {
+		o.alerts.Set(
+			"chunk-suspect:"+id.String(),
+			1, // Warning
+			"cloud-reconcile",
+			"Cloud chunk "+id.String()+" not found in blob store — monitoring",
+		)
+	}
+	o.logger.Warn("reconcile: chunk not found, marking suspect",
+		"tier", tier.TierID, "chunk", id.String())
+}
+
+// expireSuspect removes a chunk from the index after its grace period has
+// elapsed without the blob reappearing.
+func (o *Orchestrator) expireSuspect(tier *TierInstance, id chunk.ChunkID, suspectDays uint32) {
+	if err := tier.Chunks.Delete(id); err != nil {
+		o.logger.Error("reconcile: failed to remove suspect chunk from index",
+			"tier", tier.TierID, "chunk", id.String(), "error", err)
+		return
+	}
+	o.suspects.clear(id)
+	if o.alerts != nil {
+		o.alerts.Set(
+			"chunk-suspect:"+id.String(),
+			2, // Error
+			"cloud-reconcile",
+			fmt.Sprintf("Cloud chunk %s removed from index after %d days missing", id, suspectDays),
+		)
+	}
+	o.logger.Warn("reconcile: removed chunk from index after grace period",
+		"tier", tier.TierID, "chunk", id.String(), "suspectDays", suspectDays)
 }
 
 // isChunkSuspect returns true if the error indicates a 404 (blob not found).

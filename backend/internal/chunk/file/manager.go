@@ -3457,7 +3457,14 @@ func (m *Manager) openCloudCursor(id chunk.ChunkID) (chunk.RecordCursor, error) 
 		if cursor, err := m.downloadAndCacheCursor(id); err == nil {
 			return cursor, nil
 		} else {
-			m.logger.Warn("cache: download-and-cache failed, falling back to range requests",
+			// Debug, not Warn: this fires on every cloud cursor that
+			// races with retention-driven blob deletion. The range-
+			// request fallback handles genuinely missing blobs the
+			// same way — callers that need a real error see the
+			// bubbled-up failure from there. Raising WARN here meant
+			// operator log noise + UI alert-panel floods during every
+			// retention sweep. See gastrolog-2c96i.
+			m.logger.Debug("cache: download-and-cache failed, falling back to range requests",
 				"chunk", id, "error", err)
 		}
 	}
