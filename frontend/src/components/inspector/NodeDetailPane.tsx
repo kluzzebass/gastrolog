@@ -12,6 +12,7 @@ import { VaultCard } from "./VaultCard";
 import { IngesterCard } from "./IngesterCard";
 import { JobCard, ScheduledJobsTable } from "./JobCard";
 import { SystemStatsView } from "./SystemStatsView";
+import { PeerBytesSection } from "./PeerBytesSection";
 import { Badge } from "../Badge";
 
 interface NodeDetailPaneProps {
@@ -28,6 +29,14 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
   const { data: config } = useConfig();
   const nodeInfo = cluster?.nodes.find((n) => encode(n.id) === nodeId);
   const liveNodeIds = new Set((cluster?.nodes ?? []).map((n) => encode(n.id)));
+
+  // Node ID → display name lookup for the Network section. Falls back to
+  // the raw ID when no name is set.
+  const peerNameById = new Map<string, string>();
+  for (const n of cluster?.nodes ?? []) {
+    const id = encode(n.id);
+    peerNameById.set(id, n.name || id);
+  }
 
   // Build vault ID → cloud tier type map from config tiers.
   const cloudProviders = new Map<string, string>();
@@ -114,6 +123,15 @@ export function NodeDetailPane({ nodeId, dark, onOpenSettings }: Readonly<NodeDe
             })}
           </div>
         )}
+      </Section>
+
+      {/* Network section — per-peer tx/rx across all inter-node transport. */}
+      <Section title="Network" dark={dark}>
+        <PeerBytesSection
+          nodeStats={nodeInfo?.stats ?? null}
+          peerNameById={peerNameById}
+          dark={dark}
+        />
       </Section>
 
       {/* Scheduled jobs section */}

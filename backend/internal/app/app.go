@@ -553,6 +553,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 		RaftStats:   clusterSrv,
 		Stats:       &orchStatsAdapter{orch: orch},
 		Forwarding:  &forwardingStatsAdapter{srv: clusterSrv, fwd: recordForwarder},
+		PeerBytes:   clusterSrv.ByteMetrics(),
 		Alerts:      alerts,
 		Jobs:        &jobBroadcastAdapter{scheduler: orch.Scheduler(), nodeID: nodeID},
 		NodeID:      nodeID,
