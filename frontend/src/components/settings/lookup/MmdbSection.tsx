@@ -90,11 +90,13 @@ export function MmdbCards({
   savedLookups,
   onUpdate,
   onDelete,
+  onRevert,
 }: LookupSectionProps & {
   lookups: MMDBLookupDraft[];
   savedLookups: MMDBLookupEntry[];
   onUpdate: (i: number, patch: Partial<MMDBLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
   const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
@@ -128,12 +130,19 @@ export function MmdbCards({
               </span>
             }
             footer={
-              <Button
-                onClick={() => save(i)}
-                disabled={!isDirty(i) || !m.name || putConfig.isPending}
-              >
-                {putConfig.isPending ? "Saving..." : "Save"}
-              </Button>
+              <>
+                {isDirty(i) && (
+                  <Button onClick={() => onRevert(i)} disabled={putConfig.isPending} dark={dark} variant="ghost">
+                    Discard
+                  </Button>
+                )}
+                <Button
+                  onClick={() => save(i)}
+                  disabled={!isDirty(i) || !m.name || putConfig.isPending}
+                >
+                  {putConfig.isPending ? "Saving..." : "Save"}
+                </Button>
+              </>
             }
           >
             <div className="flex flex-col gap-3">

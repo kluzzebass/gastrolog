@@ -34,6 +34,15 @@ function hasKeyErrors(rows: Record<string, string>[], keyColumn: string): boolea
   return false;
 }
 
+// Returns true if any column header (key or value) is empty. Empty headers
+// get silently dropped by serializeStaticLookups, so the UI must block
+// Create/Save while they're present — otherwise the user saves something
+// visibly different from what they typed.
+function hasEmptyColumns(keyColumn: string, valueColumns: string[]): boolean {
+  if (!keyColumn.trim()) return true;
+  return valueColumns.some((c) => !c.trim());
+}
+
 // Helper: merge keyColumn + valueColumns into a single array for EditableGrid.
 function mergeColumns(key: string, values: string[]): string[] {
   return [key, ...values];
@@ -85,7 +94,7 @@ export function StaticAddForm({
       onCancel={onCancel}
       onCreate={handleCreate}
       isPending={putConfig.isPending}
-      createDisabled={(!draft.name.trim() && !namePlaceholder) || !draft.keyColumn.trim() || hasKeyErrors(draft.rows, draft.keyColumn)}
+      createDisabled={(!draft.name.trim() && !namePlaceholder) || hasEmptyColumns(draft.keyColumn, draft.valueColumns) || hasKeyErrors(draft.rows, draft.keyColumn)}
       typeBadge="static"
     >
       <FormField label="Name" description="Registry name used in queries, e.g. | lookup teams" dark={dark}>
@@ -152,19 +161,13 @@ export function StaticCards({
           footer={
             <>
               {isDirty(i) && (
-                <button
-                  onClick={() => onRevert(i)}
-                  className={`px-3 py-1.5 text-[0.8em] rounded transition-colors ${c(
-                    "text-text-muted hover:text-text-bright hover:bg-ink-hover",
-                    "text-light-text-muted hover:text-light-text-bright hover:bg-light-hover",
-                  )}`}
-                >
+                <Button onClick={() => onRevert(i)} disabled={putConfig.isPending} dark={dark} variant="ghost">
                   Discard
-                </button>
+                </Button>
               )}
               <Button
                 onClick={() => save(i)}
-                disabled={!isDirty(i) || !s.name || !s.keyColumn || putConfig.isPending || hasKeyErrors(s.rows, s.keyColumn)}
+                disabled={!isDirty(i) || !s.name || hasEmptyColumns(s.keyColumn, s.valueColumns) || putConfig.isPending || hasKeyErrors(s.rows, s.keyColumn)}
               >
                 {putConfig.isPending ? "Saving..." : "Save"}
               </Button>

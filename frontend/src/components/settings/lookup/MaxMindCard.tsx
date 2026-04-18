@@ -38,6 +38,12 @@ export function MaxMindCard({
       accountId !== "" ||
       licenseKey !== "");
 
+  const discard = () => {
+    setAutoDownload(savedMaxmind?.autoDownload ?? false);
+    setAccountId("");
+    setLicenseKey("");
+  };
+
   const save = async () => {
     const maxmind = {
       autoDownload,
@@ -88,9 +94,16 @@ export function MaxMindCard({
         ) : undefined
       }
       footer={
-        <Button onClick={save} disabled={!isDirty || putConfig.isPending}>
-          {putConfig.isPending ? "Saving..." : "Save"}
-        </Button>
+        <>
+          {isDirty && (
+            <Button onClick={discard} disabled={putConfig.isPending} dark={dark} variant="ghost">
+              Discard
+            </Button>
+          )}
+          <Button onClick={save} disabled={!isDirty || putConfig.isPending}>
+            {putConfig.isPending ? "Saving..." : "Save"}
+          </Button>
+        </>
       }
     >
       <div className="flex flex-col gap-4">

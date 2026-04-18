@@ -270,11 +270,13 @@ export function CsvCards({
   savedLookups,
   onUpdate,
   onDelete,
+  onRevert,
 }: LookupSectionProps & {
   lookups: CSVLookupDraft[];
   savedLookups: CSVLookupEntry[];
   onUpdate: (i: number, patch: Partial<CSVLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
 }) {
   const c = useThemeClass(dark);
   const { isDirty, save, handleDelete, putConfig } = useLookupCrud({
@@ -302,12 +304,19 @@ export function CsvCards({
               </span>
             )}
             footer={
-              <Button
-                onClick={() => save(i)}
-                disabled={!isDirty(i) || !cv.name || putConfig.isPending}
-              >
-                {putConfig.isPending ? "Saving..." : "Save"}
-              </Button>
+              <>
+                {isDirty(i) && (
+                  <Button onClick={() => onRevert(i)} disabled={putConfig.isPending} dark={dark} variant="ghost">
+                    Discard
+                  </Button>
+                )}
+                <Button
+                  onClick={() => save(i)}
+                  disabled={!isDirty(i) || !cv.name || putConfig.isPending}
+                >
+                  {putConfig.isPending ? "Saving..." : "Save"}
+                </Button>
+              </>
             }
           >
             <div className="flex flex-col gap-3">

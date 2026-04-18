@@ -81,6 +81,7 @@ type mockOrch struct {
 	addIngesterErr     error
 	removeIngesterErr  error
 	updateMaxJobsErr   error
+	currentMaxJobs     int
 
 	drainCalls          []glid.GLID // IDs passed to DrainVault
 	cancelDrainIDs      []glid.GLID // IDs passed to CancelDrain
@@ -150,7 +151,13 @@ func (m *mockOrch) RemoveIngester(id glid.GLID) error {
 	m.removeIngesterIDs = append(m.removeIngesterIDs, id)
 	return m.removeIngesterErr
 }
-func (m *mockOrch) UpdateMaxConcurrentJobs(int) error            { return m.updateMaxJobsErr }
+func (m *mockOrch) UpdateMaxConcurrentJobs(n int) error {
+	if m.updateMaxJobsErr == nil {
+		m.currentMaxJobs = n
+	}
+	return m.updateMaxJobsErr
+}
+func (m *mockOrch) MaxConcurrentJobs() int { return m.currentMaxJobs }
 
 func (m *mockOrch) AddIngester(glid.GLID, string, string, bool, orchestrator.Ingester) error {
 	return m.addIngesterErr
@@ -646,6 +653,46 @@ func TestHandle_SettingPut(t *testing.T) {
 
 		if h.count() != 0 {
 			t.Fatal("zero MaxConcurrentJobs should not trigger update")
+		}
+	})
+
+	t.Run("unchanged_max_jobs_skipped", func(t *testing.T) {
+		// PutSettings fires NotifySettingPut("server") for every setting
+		// change — lookups, TLS, auth, etc. Rebuilding the scheduler on
+		// every one of those calls stops all jobs and caused gocron
+		// Shutdown timeouts on busy nodes. This test pins the fix: when
+		// the desired concurrency equals the current value, no rebuild.
+		h := &captureHandler{}
+		mo := &mockOrch{
+			currentMaxJobs:   8,
+			updateMaxJobsErr: errors.New("should not be called"),
+		}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			settings: system.ServerSettings{
+				Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 8},
+			},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+
+		if h.count() != 0 {
+			t.Fatalf("unchanged MaxConcurrentJobs should not trigger update, got logs: %d", h.count())
+		}
+	})
+
+	t.Run("changed_max_jobs_rebuilds", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{currentMaxJobs: 4}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			settings: system.ServerSettings{
+				Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 8},
+			},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+
+		if mo.currentMaxJobs != 8 {
+			t.Fatalf("expected MaxConcurrentJobs to update to 8, got %d", mo.currentMaxJobs)
 		}
 	})
 }

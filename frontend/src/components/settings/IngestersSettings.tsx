@@ -238,6 +238,7 @@ export function IngestersSettings({ dark, expandTarget, onExpandTargetConsumed, 
           onToggle={() => toggleCard(encode(ing.id))}
           onDelete={() => handleDelete(encode(ing.id))}
           onSave={(id) => saveIngester(id, { ...getEdit(id), type: ing.type })}
+          onDiscard={() => clearEdit(encode(ing.id))}
           isSaving={putIngester.isPending}
           edit={getEdit(encode(ing.id))}
           setEdit={(patch) => setEdit(encode(ing.id), patch)}
@@ -267,6 +268,7 @@ function IngesterCard({
   onToggle,
   onDelete,
   onSave,
+  onDiscard,
   isSaving,
   edit,
   setEdit,
@@ -283,6 +285,7 @@ function IngesterCard({
   onToggle: () => void;
   onDelete: () => void;
   onSave: (id: string) => void;
+  onDiscard: () => void;
   isSaving: boolean;
   edit: { name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[]; singleton: boolean };
   setEdit: (patch: Partial<{ name: string; enabled: boolean; params: Record<string, string>; nodeIds: string[]; singleton: boolean }>) => void;
@@ -317,12 +320,19 @@ function IngesterCard({
         </span>
       }
       footer={
-        <Button
-          onClick={() => onSave(encode(ing.id))}
-          disabled={isSaving || !isDirty || !!listenError || !isIngesterParamsValid(ing.type, edit.params)}
-        >
-          {isSaving ? "Saving..." : "Save"}
-        </Button>
+        <>
+          {isDirty && (
+            <Button onClick={onDiscard} disabled={isSaving} dark={dark} variant="ghost">
+              Discard
+            </Button>
+          )}
+          <Button
+            onClick={() => onSave(encode(ing.id))}
+            disabled={isSaving || !isDirty || !!listenError || !isIngesterParamsValid(ing.type, edit.params)}
+          >
+            {isSaving ? "Saving..." : "Save"}
+          </Button>
+        </>
       }
     >
       <div className="flex flex-col gap-3">

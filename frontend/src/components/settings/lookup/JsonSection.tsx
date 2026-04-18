@@ -23,6 +23,7 @@ export function JsonCards(props: LookupSectionProps & {
   savedLookups: JSONFileLookupEntry[];
   onUpdate: (i: number, patch: Partial<JSONFileLookupDraft>) => void;
   onDelete: (i: number) => void;
+  onRevert: (i: number) => void;
 }) {
   return <FileLookupCards {...props} spec={jsonFormatSpec} />;
 }
