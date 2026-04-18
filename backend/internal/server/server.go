@@ -138,19 +138,6 @@ type Config struct {
 	// tier placements. Nil in single-node or non-cluster mode.
 	PlacementReconcile func(ctx context.Context)
 
-	// BroadcastMetrics reports cluster broadcast send/error counters. Nil in
-	// non-cluster mode; typically *cluster.Broadcaster.
-	BroadcastMetrics BroadcastMetricsProvider
-
-	// PeerStatsAges reports the timestamp of the most recent NodeStats
-	// broadcast received from each peer. Nil in non-cluster mode; typically
-	// *cluster.PeerState.
-	PeerStatsAges PeerReceivedAtProvider
-
-	// PeerJobsAges reports the timestamp of the most recent NodeJobs
-	// broadcast received from each peer. Nil in non-cluster mode; typically
-	// *cluster.PeerJobState.
-	PeerJobsAges PeerReceivedAtProvider
 }
 
 // CertManager interface for TLS certificate management.
@@ -195,10 +182,6 @@ type Server struct {
 	queryServer        *QueryServer              // stored for ExportToVault executor wiring
 	routingForwarder      routing.UnaryForwarder     // forwards requests to remote nodes; nil in single-node
 	placementReconcile   func(ctx context.Context)  // synchronous placement; nil in non-cluster mode
-	broadcastMetrics     BroadcastMetricsProvider
-	peerStatsAges        PeerReceivedAtProvider
-	peerJobsAges         PeerReceivedAtProvider
-
 	mu       sync.Mutex
 	listener net.Listener
 	server   *http.Server
@@ -257,9 +240,6 @@ func New(orch *orchestrator.Orchestrator, cfgStore system.Store, factories orche
 		statsSignal:       cfg.StatsSignal,
 		routingForwarder:      cfg.RoutingForwarder,
 		placementReconcile:   cfg.PlacementReconcile,
-		broadcastMetrics:     cfg.BroadcastMetrics,
-		peerStatsAges:        cfg.PeerStatsAges,
-		peerJobsAges:         cfg.PeerJobsAges,
 		shutdown:              make(chan struct{}),
 		rl:          newRateLimiter(5.0/60.0, 5), // 5 req/min per IP, burst of 5
 	}
@@ -504,7 +484,6 @@ func (s *Server) buildMux(overrideOpts ...connect.HandlerOption) *http.ServeMux 
 	mux.Handle(gastrologv1connect.NewJobServiceHandler(jobServer, handlerOpts...))
 
 	s.registerProbes(mux)
-	s.registerMetrics(mux)
 	s.registerUploadHandler(mux)
 
 	if h := frontend.Handler(); h != nil {

@@ -32,16 +32,8 @@ type Broadcaster struct {
 	// ctx carries a tighter deadline, that deadline wins.
 	perPeerTimeout time.Duration
 
-	mu      sync.Mutex
-	failed  map[string]bool      // true = peer is unreachable (suppress repeated logs)
-	sent    map[metricsKey]int64 // per (peer, type) success counter
-	errored map[metricsKey]int64 // per (peer, type) failure counter
-}
-
-// metricsKey identifies a (peer, message-type) bucket for counters.
-type metricsKey struct {
-	peer string
-	typ  string
+	mu     sync.Mutex
+	failed map[string]bool // true = peer is unreachable (suppress repeated logs)
 }
 
 // NewBroadcaster creates a Broadcaster that uses the shared PeerConns pool.
@@ -57,8 +49,6 @@ func newBroadcaster(peers broadcastPeerSource, logger *slog.Logger, perPeerTimeo
 		logger:         logger,
 		perPeerTimeout: perPeerTimeout,
 		failed:         make(map[string]bool),
-		sent:           make(map[metricsKey]int64),
-		errored:        make(map[metricsKey]int64),
 	}
 }
 
@@ -77,26 +67,24 @@ func (b *Broadcaster) Send(ctx context.Context, msg *gastrologv1.BroadcastMessag
 		return
 	}
 
-	typ := PayloadType(msg)
 	req := &gastrologv1.BroadcastRequest{Message: msg}
 	var wg sync.WaitGroup
 	wg.Add(len(peers))
 	for _, p := range peers {
 		go func(id string) {
 			defer wg.Done()
-			b.sendToPeer(ctx, id, typ, req)
+			b.sendToPeer(ctx, id, req)
 		}(string(p.ID))
 	}
 	wg.Wait()
 }
 
 // sendToPeer handles one peer's delivery: dial → per-peer-timeout context →
-// Invoke → record metrics for the outcome.
-func (b *Broadcaster) sendToPeer(ctx context.Context, id, typ string, req *gastrologv1.BroadcastRequest) {
+// Invoke.
+func (b *Broadcaster) sendToPeer(ctx context.Context, id string, req *gastrologv1.BroadcastRequest) {
 	conn, err := b.peers.Conn(id)
 	if err != nil {
 		b.logPeerError(id, "dial peer", err)
-		b.recordError(id, typ)
 		return
 	}
 
@@ -105,12 +93,10 @@ func (b *Broadcaster) sendToPeer(ctx context.Context, id, typ string, req *gastr
 
 	if err := b.sendOne(peerCtx, conn, req); err != nil {
 		b.logPeerError(id, "send", err)
-		b.recordError(id, typ)
 		b.peers.Invalidate(id)
 		return
 	}
 	b.clearPeerError(id)
-	b.recordSent(id, typ)
 }
 
 // peerContext derives a per-peer context from the caller's ctx. If the
@@ -123,62 +109,6 @@ func (b *Broadcaster) peerContext(parent context.Context) (context.Context, cont
 		return context.WithCancel(parent)
 	}
 	return context.WithTimeout(parent, b.perPeerTimeout)
-}
-
-// recordSent bumps the success counter for (peer, type).
-func (b *Broadcaster) recordSent(peer, typ string) {
-	b.mu.Lock()
-	b.sent[metricsKey{peer: peer, typ: typ}]++
-	b.mu.Unlock()
-}
-
-// recordError bumps the error counter for (peer, type).
-func (b *Broadcaster) recordError(peer, typ string) {
-	b.mu.Lock()
-	b.errored[metricsKey{peer: peer, typ: typ}]++
-	b.mu.Unlock()
-}
-
-// BroadcastCounter is a (peer, type, value) triplet used by the metrics
-// writer. Exposed for consumers that want to emit Prometheus text.
-type BroadcastCounter struct {
-	Peer  string
-	Type  string
-	Value int64
-}
-
-// MetricsSnapshot returns the current send / error counters for all (peer,
-// type) combinations that have seen traffic. Stable ordering left to the
-// caller; the underlying maps are not sorted here.
-func (b *Broadcaster) MetricsSnapshot() (sent, errors []BroadcastCounter) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	sent = make([]BroadcastCounter, 0, len(b.sent))
-	for k, v := range b.sent {
-		sent = append(sent, BroadcastCounter{Peer: k.peer, Type: k.typ, Value: v})
-	}
-	errors = make([]BroadcastCounter, 0, len(b.errored))
-	for k, v := range b.errored {
-		errors = append(errors, BroadcastCounter{Peer: k.peer, Type: k.typ, Value: v})
-	}
-	return sent, errors
-}
-
-// PayloadType returns the broadcast payload's oneof variant as a stable
-// label ("node_stats", "node_jobs", or "unknown"). Used for Prometheus
-// metrics labels and log fields.
-func PayloadType(msg *gastrologv1.BroadcastMessage) string {
-	if msg == nil {
-		return "unknown"
-	}
-	switch msg.Payload.(type) {
-	case *gastrologv1.BroadcastMessage_NodeStats:
-		return "node_stats"
-	case *gastrologv1.BroadcastMessage_NodeJobs:
-		return "node_jobs"
-	default:
-		return "unknown"
-	}
 }
 
 // logPeerError logs the first error for a peer, then suppresses repeats.

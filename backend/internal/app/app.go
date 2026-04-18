@@ -942,9 +942,6 @@ func serveAndAwaitShutdown(ctx context.Context, deps serverDeps) error {
 				"file": chunkcloud.NewConnectionTester(),
 			},
 			PlacementReconcile: deps.PlacementReconcile,
-			BroadcastMetrics:   deps.Broadcaster,
-			PeerStatsAges:      deps.PeerState,
-			PeerJobsAges:       deps.PeerJobState,
 		})
 		// Provide the cluster's ForwardRPC handler with the internal mux.
 		// NoAuthInterceptor + no routing interceptor prevents loops.
