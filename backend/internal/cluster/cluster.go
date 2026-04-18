@@ -57,6 +57,12 @@ type Config struct {
 	// When nil, the cluster port uses insecure credentials (tests, single-node).
 	TLS *ClusterTLS
 
+	// ByteMetrics tracks cumulative per-peer gRPC wire bytes. When non-nil,
+	// a stats handler is installed that records inbound RPC bytes, attributed
+	// by the x-gastrolog-node-id header set by PeerConns' outgoing
+	// interceptor. See gastrolog-47u85.
+	ByteMetrics *PeerByteMetrics
+
 	// Logger for structured logging.
 	Logger *slog.Logger
 }
@@ -319,6 +325,15 @@ func (s *Server) SetRaft(r *hraft.Raft) {
 	} else {
 		s.peerConns = NewPeerConns(r, s.cfg.TLS, s.cfg.NodeID)
 	}
+	// Share the byte-metrics tracker with the outbound pool so tx/rx is
+	// attributed from every dialed connection.
+	s.peerConns.SetByteMetrics(s.cfg.ByteMetrics)
+}
+
+// ByteMetrics returns the shared per-peer byte-counter tracker. Returns
+// nil if byte tracking is not configured. See gastrolog-47u85.
+func (s *Server) ByteMetrics() *PeerByteMetrics {
+	return s.cfg.ByteMetrics
 }
 
 // PeerConns returns the shared peer connection pool. All components that
@@ -331,8 +346,11 @@ func (s *Server) PeerConns() *PeerConns {
 // NewPeerConnsPool creates an independent connection pool using the same
 // Raft discovery and TLS system. Use for bulk traffic (replication, migration)
 // that shouldn't compete for HTTP/2 flow control with queries and config RPCs.
+// Inherits the shared byte-metrics tracker so bulk traffic is counted too.
 func (s *Server) NewPeerConnsPool() *PeerConns {
-	return NewPeerConns(s.raft, s.cfg.TLS, s.cfg.NodeID)
+	p := NewPeerConns(s.raft, s.cfg.TLS, s.cfg.NodeID)
+	p.SetByteMetrics(s.cfg.ByteMetrics)
+	return p
 }
 
 // AddVoter adds a new node to the Raft cluster as a voter.
@@ -432,6 +450,10 @@ func (s *Server) Start() error {
 			grpc.ChainUnaryInterceptor(s.mTLSUnaryInterceptor),
 			grpc.ChainStreamInterceptor(s.mTLSStreamInterceptor),
 		)
+	}
+
+	if s.cfg.ByteMetrics != nil {
+		opts = append(opts, grpc.StatsHandler(newServerStatsHandler(s.cfg.ByteMetrics)))
 	}
 
 	s.grpcSrv = grpc.NewServer(opts...)

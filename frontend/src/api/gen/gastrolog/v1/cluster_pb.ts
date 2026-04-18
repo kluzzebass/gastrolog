@@ -590,6 +590,16 @@ export class NodeStats extends Message<NodeStats> {
    */
   alerts: SystemAlert[] = [];
 
+  /**
+   * Per-peer inter-node gRPC transport bytes, from this node's perspective.
+   * Populated from the cluster transport stats handlers — includes Raft,
+   * broadcast, tier replication, query forwarding, chunk streaming, etc.
+   * See gastrolog-47u85.
+   *
+   * @generated from field: repeated gastrolog.v1.PeerBytesStat peer_bytes = 37;
+   */
+  peerBytes: PeerBytesStat[] = [];
+
   constructor(data?: PartialMessage<NodeStats>) {
     super();
     proto3.util.initPartial(data, this);
@@ -634,6 +644,7 @@ export class NodeStats extends Message<NodeStats> {
     { no: 34, name: "forwarded_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 35, name: "forwarded_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
     { no: 36, name: "alerts", kind: "message", T: SystemAlert, repeated: true },
+    { no: 37, name: "peer_bytes", kind: "message", T: PeerBytesStat, repeated: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): NodeStats {
@@ -650,6 +661,65 @@ export class NodeStats extends Message<NodeStats> {
 
   static equals(a: NodeStats | PlainMessage<NodeStats> | undefined, b: NodeStats | PlainMessage<NodeStats> | undefined): boolean {
     return proto3.util.equals(NodeStats, a, b);
+  }
+}
+
+/**
+ * PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
+ * a single peer, since the emitting node started. Rate is left to the
+ * consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
+ *
+ * @generated from message gastrolog.v1.PeerBytesStat
+ */
+export class PeerBytesStat extends Message<PeerBytesStat> {
+  /**
+   * target node ID
+   *
+   * @generated from field: string peer = 1;
+   */
+  peer = "";
+
+  /**
+   * bytes this node has sent to peer
+   *
+   * @generated from field: int64 bytes_sent = 2;
+   */
+  bytesSent = protoInt64.zero;
+
+  /**
+   * bytes this node has received from peer
+   *
+   * @generated from field: int64 bytes_received = 3;
+   */
+  bytesReceived = protoInt64.zero;
+
+  constructor(data?: PartialMessage<PeerBytesStat>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PeerBytesStat";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "peer", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "bytes_sent", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+    { no: 3, name: "bytes_received", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PeerBytesStat {
+    return new PeerBytesStat().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PeerBytesStat {
+    return new PeerBytesStat().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PeerBytesStat {
+    return new PeerBytesStat().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PeerBytesStat | PlainMessage<PeerBytesStat> | undefined, b: PeerBytesStat | PlainMessage<PeerBytesStat> | undefined): boolean {
+    return proto3.util.equals(PeerBytesStat, a, b);
   }
 }
 

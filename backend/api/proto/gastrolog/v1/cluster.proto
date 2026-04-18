@@ -110,6 +110,21 @@ message NodeStats {
 
   // Active system alerts on this node.
   repeated SystemAlert alerts = 36;
+
+  // Per-peer inter-node gRPC transport bytes, from this node's perspective.
+  // Populated from the cluster transport stats handlers — includes Raft,
+  // broadcast, tier replication, query forwarding, chunk streaming, etc.
+  // See gastrolog-47u85.
+  repeated PeerBytesStat peer_bytes = 37;
+}
+
+// PeerBytesStat reports cumulative gRPC wire bytes sent to and received from
+// a single peer, since the emitting node started. Rate is left to the
+// consumer (UI / PromQL-equivalent delta) — these are monotonic counters.
+message PeerBytesStat {
+  string peer = 1;        // target node ID
+  int64 bytes_sent = 2;   // bytes this node has sent to peer
+  int64 bytes_received = 3; // bytes this node has received from peer
 }
 
 // SystemAlert represents a runtime condition that operators should be aware of.

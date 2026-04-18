@@ -1,6 +1,7 @@
 package cluster
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 )
 
 // invalidateGracePeriod is how long Invalidate/Reset wait before closing a
@@ -30,6 +32,7 @@ type PeerConns struct {
 	raft       *hraft.Raft
 	clusterTLS *ClusterTLS
 	nodeID     string
+	byteMetrics *PeerByteMetrics // optional; nil disables per-peer byte tracking
 
 	mu    sync.Mutex
 	conns map[string]*grpc.ClientConn
@@ -43,6 +46,28 @@ func NewPeerConns(r *hraft.Raft, clusterTLS *ClusterTLS, nodeID string) *PeerCon
 		nodeID:     nodeID,
 		conns:      make(map[string]*grpc.ClientConn),
 	}
+}
+
+// SetByteMetrics attaches a PeerByteMetrics tracker. Must be called before
+// any Conn() — connections dialed before this have no stats handler and
+// won't be tracked. Pass nil to disable tracking.
+func (p *PeerConns) SetByteMetrics(m *PeerByteMetrics) {
+	p.mu.Lock()
+	p.byteMetrics = m
+	p.mu.Unlock()
+}
+
+// attachNodeIDUnaryInterceptor stamps the local node ID into outgoing
+// metadata on every unary RPC. Server-side stats handler reads this to
+// attribute inbound bytes to the right peer.
+func (p *PeerConns) attachNodeIDUnaryInterceptor(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return invoker(metadata.AppendToOutgoingContext(ctx, NodeIDMetadataKey, p.nodeID), method, req, reply, cc, opts...)
+}
+
+// attachNodeIDStreamInterceptor stamps the local node ID into outgoing
+// metadata on every stream RPC.
+func (p *PeerConns) attachNodeIDStreamInterceptor(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+	return streamer(metadata.AppendToOutgoingContext(ctx, NodeIDMetadataKey, p.nodeID), desc, cc, method, opts...)
 }
 
 // Conn returns a cached or newly dialed gRPC connection for the given node.
@@ -75,7 +100,7 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 		creds = insecure.NewCredentials()
 	}
 
-	conn, err := grpc.NewClient(addr,
+	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(creds),
 		grpc.WithConnectParams(grpc.ConnectParams{
 			Backoff: backoff.Config{
@@ -85,7 +110,13 @@ func (p *PeerConns) Conn(nodeID string) (*grpc.ClientConn, error) {
 				MaxDelay:   3 * time.Second,
 			},
 		}),
-	)
+		grpc.WithUnaryInterceptor(p.attachNodeIDUnaryInterceptor),
+		grpc.WithStreamInterceptor(p.attachNodeIDStreamInterceptor),
+	}
+	if p.byteMetrics != nil {
+		dialOpts = append(dialOpts, grpc.WithStatsHandler(newClientStatsHandler(nodeID, p.byteMetrics)))
+	}
+	conn, err := grpc.NewClient(addr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("dial node %s at %s: %w", nodeID, addr, err)
 	}

@@ -72,6 +72,12 @@ type ForwardingStatsProvider interface {
 	ForwardingStats() (sent, received int64)
 }
 
+// PeerBytesProvider exposes cumulative per-peer inter-node gRPC byte
+// counters. Satisfied by *PeerByteMetrics.
+type PeerBytesProvider interface {
+	Snapshot() []PeerByteCounter
+}
+
 // AlertProvider exposes active system alerts for broadcast.
 // Satisfied by *alert.Collector.
 type AlertProvider interface {
@@ -90,6 +96,7 @@ type StatsCollectorConfig struct {
 	RaftStats         RaftStatsProvider
 	Stats             StatsProvider
 	Forwarding        ForwardingStatsProvider // optional; nil if no forwarding
+	PeerBytes         PeerBytesProvider        // optional; nil disables per-peer byte stats
 	Alerts            AlertProvider            // optional; nil if no alert collector
 	Jobs              JobsProvider // optional; nil in single-node mode
 	NodeID            string
@@ -223,6 +230,17 @@ func (c *StatsCollector) CollectLocal() *gastrologv1.NodeStats {
 	// Forwarding stats.
 	if c.cfg.Forwarding != nil {
 		stats.ForwardedSent, stats.ForwardedReceived = c.cfg.Forwarding.ForwardingStats()
+	}
+
+	// Per-peer inter-node byte counters. See gastrolog-47u85.
+	if c.cfg.PeerBytes != nil {
+		for _, pc := range c.cfg.PeerBytes.Snapshot() {
+			stats.PeerBytes = append(stats.PeerBytes, &gastrologv1.PeerBytesStat{
+				Peer:          pc.Peer,
+				BytesSent:     pc.Sent,
+				BytesReceived: pc.Received,
+			})
+		}
 	}
 
 	// Active alerts.
