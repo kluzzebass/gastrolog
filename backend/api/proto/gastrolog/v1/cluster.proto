@@ -125,6 +125,17 @@ message PeerBytesStat {
   string peer = 1;        // target node ID
   int64 bytes_sent = 2;   // bytes this node has sent to peer
   int64 bytes_received = 3; // bytes this node has received from peer
+
+  // Backend-derived rates (bytes/sec) computed by differencing consecutive
+  // monotonic samples on the node. These exist to avoid UI cold-start and to
+  // make the inspector immediately useful after mount.
+  double tx_bytes_per_sec = 4;
+  double rx_bytes_per_sec = 5;
+
+  // Rolling sparkline windows (bytes/sec), oldest → newest.
+  // Kept short (e.g. 20 points) so inspector renders quickly.
+  repeated double tx_spark = 6;
+  repeated double rx_spark = 7;
 }
 
 // SystemAlert represents a runtime condition that operators should be aware of.

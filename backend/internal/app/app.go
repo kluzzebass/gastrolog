@@ -583,7 +583,7 @@ func setupClusterStats(ctx context.Context, logger *slog.Logger, cfgStore system
 
 	go collector.Run(ctx)
 
-	return broadcaster, peerState, peerJobState, collector.CollectLocal
+	return broadcaster, peerState, peerJobState, collector.CollectLocalSnapshot
 }
 
 // resolveIdentity ensures the home directory exists and resolves the node ID.
