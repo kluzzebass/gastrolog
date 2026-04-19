@@ -8,6 +8,14 @@ GastroLog is a fully distributed system. There is no primary node. Any node can 
 
 When implementing anything new, ask: **"Does this work if the user is on a different node than the data?"** If the answer is no, redesign before proceeding.
 
+### Local cluster nodes: Unix sockets and repo-local data
+
+When talking to **local** GastroLog processes (dev cluster, `just cluster-run`, etc.), **prefer the Unix socket**, not HTTP + JWT on `--listen`.
+
+- The **`gastrolog` CLI** uses the socket automatically when **`--addr` is not set** and there is no token: it dials **`gastrolog.sock`** under the node’s **`--home`** directory (`tryUnixSocket` / `home.SocketPath()`). Passing **`--addr http://localhost:4564`** disables that path and forces TCP, which then requires **`--token`** / **`GASTROLOG_TOKEN`** — avoid that for local nodes unless you mean to test HTTP explicitly.
+- To target a specific local node: **`gastrolog --home <path-to-node-home> …`** (still omit `--addr` unless you need TCP), or **`--addr unix://<absolute-path-to>/gastrolog.sock`**.
+- **Cluster dev layout:** keep node state **inside the repo** under **`data/node{N}`** (or another directory already **gitignored**, e.g. root `.gitignore` includes **`data`**). That way agents and scripts have a **stable path** to sockets and stores; relying only on **`/tmp/gastrolog`** is brittle in sandboxes and fresh environments. Align **`GLOG_DATA_DIR`** / **`scripts/cluster.sh --data-dir`** with that layout when you bootstrap the cluster (`backend/justfile` **`cluster-kill`** assumes homes like **`data/node*`**).
+
 ## Do not suggest creating PRs.
 
 ## Always create new branches before picking up issues.
