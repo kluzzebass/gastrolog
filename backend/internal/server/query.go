@@ -1,10 +1,10 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"iter"
 	"log/slog"
 	"maps"
@@ -14,11 +14,11 @@ import (
 
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/orchestrator"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/system"
 
 	"gastrolog/api/gen/gastrolog/v1/gastrologv1connect"
 )
@@ -183,7 +183,22 @@ func (s *QueryServer) searchDirect(
 		return token
 	}
 
-	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), transform, histogram, stream)
+	var streamedHistogram *streamedHistogramBuilder
+	multiNodeVault := false
+	if s.cfgStore != nil && s.remoteSearcher != nil {
+		selectedVaults, _ := query.ExtractVaultFilter(q.Normalize().BoolExpr, nil)
+		byNodeForBuilder := s.remoteVaultsByNode(ctx, selectedVaults)
+		multiNodeVault = hasMultiNodeVault(byNodeForBuilder)
+	}
+	start, end, hasRange := normalizedRange(q.Start, q.End)
+	if transform == nil && multiNodeVault && hasRange {
+		hist, _, err := s.computeDedupHistogram(ctx, eng, q, start, end)
+		if err == nil {
+			histogram = hist
+		}
+	}
+
+	return s.mergeAndStream(ctx, localIter, getToken, remoteIter, q.OrderBy, q.Reverse(), transform, histogram, streamedHistogram, stream)
 }
 
 // splitResumeToken separates a unified resume token into local positions
@@ -244,18 +259,19 @@ func (s *QueryServer) mergeAndStream(
 	reverse bool,
 	transform *query.RecordTransform,
 	histogram []*apiv1.HistogramBucket,
+	streamedHistogram *streamedHistogramBuilder,
 	stream *connect.ServerStream[apiv1.SearchResponse],
 ) error {
 	sb := newStreamBatcher(stream, 100)
 
 	if remoteIter != nil {
 		// Two-way sorted merge of local and remote iterators.
-		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, transform); err != nil {
+		if err := mergeIterators(ctx, sb, localIter, remoteIter, orderBy, reverse, transform, streamedHistogram); err != nil {
 			return err
 		}
 	} else {
 		// Fast path: no remote results, just stream local.
-		if err := streamLocal(ctx, sb, localIter, transform); err != nil {
+		if err := streamLocal(ctx, sb, localIter, transform, streamedHistogram); err != nil {
 			return err
 		}
 	}
@@ -268,21 +284,26 @@ func (s *QueryServer) mergeAndStream(
 			tokenBytes = ResumeTokenToProto(token)
 		}
 	}
+	finalHistogram := histogram
+	if streamedHistogram != nil {
+		finalHistogram = streamedHistogram.toProto()
+	}
+
 	return stream.Send(&apiv1.SearchResponse{
 		Records:     sb.pending(),
 		ResumeToken: tokenBytes,
 		HasMore:     len(tokenBytes) > 0,
-		Histogram:   histogram,
+		Histogram:   finalHistogram,
 	})
 }
 
 // streamLocal streams local iterator results through the batcher.
-func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform) error {
+func streamLocal(ctx context.Context, sb *streamBatcher, localIter iter.Seq2[chunk.Record, error], transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder) error {
 	for rec, err := range localIter {
 		if err != nil {
 			return mapSearchError(err)
 		}
-		done, emitErr := emitRecord(ctx, sb, rec, transform)
+		done, emitErr := emitRecord(ctx, sb, rec, transform, streamedHistogram)
 		if emitErr != nil {
 			return emitErr
 		}
@@ -302,6 +323,7 @@ func mergeIterators(
 	orderBy query.OrderBy,
 	reverse bool,
 	transform *query.RecordTransform,
+	streamedHistogram *streamedHistogramBuilder,
 ) error {
 	isBefore := func(a, b time.Time) bool {
 		if reverse {
@@ -374,7 +396,7 @@ func mergeIterators(
 			}
 		}
 
-		done, err := emitRecord(ctx, sb, rec, transform)
+		done, err := emitRecord(ctx, sb, rec, transform, streamedHistogram)
 		if err != nil {
 			return err
 		}
@@ -387,7 +409,10 @@ func mergeIterators(
 
 // emitRecord applies an optional transform to a record and writes it to the
 // batcher. Returns (done, err) where done=true means the transform is exhausted.
-func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform) (bool, error) {
+func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transform *query.RecordTransform, streamedHistogram *streamedHistogramBuilder) (bool, error) {
+	if streamedHistogram != nil {
+		streamedHistogram.add(rec)
+	}
 	if transform != nil {
 		rec, ok := transform.Apply(ctx, rec)
 		if !ok {
@@ -399,6 +424,204 @@ func emitRecord(ctx context.Context, sb *streamBatcher, rec chunk.Record, transf
 		return transform.Done(), nil
 	}
 	return false, sb.add(recordToProto(rec))
+}
+
+func normalizedRange(start, end time.Time) (time.Time, time.Time, bool) {
+	if !start.IsZero() && !end.IsZero() && end.Before(start) {
+		start, end = end, start
+	}
+	if start.IsZero() || end.IsZero() || !start.Before(end) {
+		return time.Time{}, time.Time{}, false
+	}
+	return start, end, true
+}
+
+func hasMultiNodeVault(byNode map[string][]glid.GLID) bool {
+	if len(byNode) <= 1 {
+		return false
+	}
+	counts := make(map[glid.GLID]int)
+	for _, vaultIDs := range byNode {
+		for _, id := range vaultIDs {
+			counts[id]++
+			if counts[id] > 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+type dedupHistogramStats struct {
+	histTotal    int64
+	uniqueCount  int64
+	dedupedCount int64
+}
+
+func (s *QueryServer) computeDedupHistogram(ctx context.Context, eng *query.Engine, q query.Query, start, end time.Time) ([]*apiv1.HistogramBucket, dedupHistogramStats, error) {
+	qHist := q
+	qHist.Limit = 0
+	builder := newStreamedHistogramBuilder(start, end, 50)
+
+	localIter, _ := eng.Search(ctx, qHist, nil)
+	remoteIter, _, _ := s.collectRemote(ctx, qHist, nil)
+
+	if remoteIter == nil {
+		for rec, err := range localIter {
+			if err != nil {
+				return nil, dedupHistogramStats{}, err
+			}
+			builder.add(rec)
+		}
+	} else {
+		if err := consumeMergedForHistogram(localIter, remoteIter, q.OrderBy, q.Reverse(), builder); err != nil {
+			return nil, dedupHistogramStats{}, err
+		}
+	}
+
+	return builder.toProto(), dedupHistogramStats{
+		histTotal:    builder.totalCount(),
+		uniqueCount:  builder.uniqueCount,
+		dedupedCount: builder.dedupedCount,
+	}, nil
+}
+
+func consumeMergedForHistogram(
+	localIter, remoteIter iter.Seq2[chunk.Record, error],
+	orderBy query.OrderBy,
+	reverse bool,
+	builder *streamedHistogramBuilder,
+) error {
+	localNext, stopLocal := iter.Pull2(localIter)
+	defer stopLocal()
+	remoteNext, stopRemote := iter.Pull2(remoteIter)
+	defer stopRemote()
+
+	localRec, localErr, localOK := localNext()
+	remoteRec, remoteErr, remoteOK := remoteNext()
+
+	isBefore := func(a, b time.Time) bool {
+		if reverse {
+			return a.After(b)
+		}
+		return a.Before(b)
+	}
+
+	for localOK || remoteOK {
+		if localErr != nil {
+			return localErr
+		}
+		if remoteErr != nil {
+			return remoteErr
+		}
+		switch {
+		case !localOK:
+			builder.add(remoteRec)
+			remoteRec, remoteErr, remoteOK = remoteNext()
+		case !remoteOK:
+			builder.add(localRec)
+			localRec, localErr, localOK = localNext()
+		default:
+			localTS := orderBy.RecordTS(localRec)
+			remoteTS := orderBy.RecordTS(remoteRec)
+			if isBefore(localTS, remoteTS) {
+				builder.add(localRec)
+				localRec, localErr, localOK = localNext()
+			} else {
+				builder.add(remoteRec)
+				remoteRec, remoteErr, remoteOK = remoteNext()
+			}
+		}
+	}
+
+	return nil
+}
+
+type streamedHistogramBuilder struct {
+	start        time.Time
+	end          time.Time
+	bucketWidth  time.Duration
+	counts       []int64
+	groupCounts  []map[string]int64
+	seen         map[chunk.EventID]struct{}
+	uniqueCount  int64
+	dedupedCount int64
+}
+
+func newStreamedHistogramBuilder(start, end time.Time, numBuckets int) *streamedHistogramBuilder {
+	if numBuckets <= 0 {
+		numBuckets = 50
+	}
+	width := end.Sub(start) / time.Duration(numBuckets)
+	if width <= 0 {
+		width = time.Second
+	}
+	groupCounts := make([]map[string]int64, numBuckets)
+	for i := range groupCounts {
+		groupCounts[i] = make(map[string]int64)
+	}
+	return &streamedHistogramBuilder{
+		start:       start,
+		end:         end,
+		bucketWidth: width,
+		counts:      make([]int64, numBuckets),
+		groupCounts: groupCounts,
+		seen:        make(map[chunk.EventID]struct{}),
+	}
+}
+
+func (h *streamedHistogramBuilder) add(rec chunk.Record) {
+	if rec.IngestTS.Before(h.start) || !rec.IngestTS.Before(h.end) {
+		return
+	}
+	if rec.EventID != (chunk.EventID{}) {
+		if _, exists := h.seen[rec.EventID]; exists {
+			h.dedupedCount++
+			return
+		}
+		h.seen[rec.EventID] = struct{}{}
+	}
+	idx := int(rec.IngestTS.Sub(h.start) / h.bucketWidth)
+	if idx >= len(h.counts) {
+		idx = len(h.counts) - 1
+	}
+	h.counts[idx]++
+	if lvl := rec.Attrs["level"]; lvl != "" {
+		h.groupCounts[idx][lvl]++
+	}
+	h.uniqueCount++
+}
+
+func (h *streamedHistogramBuilder) totalCount() int64 {
+	var total int64
+	for _, c := range h.counts {
+		total += c
+	}
+	return total
+}
+
+func (h *streamedHistogramBuilder) toProto() []*apiv1.HistogramBucket {
+	out := make([]*apiv1.HistogramBucket, len(h.counts))
+	for i := range h.counts {
+		ts := h.start.Add(h.bucketWidth * time.Duration(i)).UnixMilli()
+		gc := h.groupCounts[i]
+		var known int64
+		for _, v := range gc {
+			known += v
+		}
+		if other := h.counts[i] - known; other > 0 {
+			if gc == nil {
+				gc = make(map[string]int64)
+			}
+			gc["other"] = other
+		}
+		out[i] = &apiv1.HistogramBucket{
+			TimestampMs: ts,
+			Count:       h.counts[i],
+			GroupCounts: gc,
+		}
+	}
+	return out
 }
 
 // streamBatcher accumulates records and flushes them to a server stream

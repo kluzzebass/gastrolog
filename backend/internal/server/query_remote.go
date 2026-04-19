@@ -1,20 +1,19 @@
 package server
 
 import (
-	"gastrolog/internal/glid"
 	"cmp"
 	"context"
+	"gastrolog/internal/glid"
 	"iter"
 	"slices"
 	"sync"
 
-
 	apiv1 "gastrolog/api/gen/gastrolog/v1"
 	"gastrolog/internal/chunk"
-	"gastrolog/internal/system"
 	"gastrolog/internal/convert"
 	"gastrolog/internal/query"
 	"gastrolog/internal/querylang"
+	"gastrolog/internal/system"
 )
 
 // collectRemote opens streaming ForwardSearch RPCs to all remote vaults and
@@ -147,7 +146,7 @@ func (s *QueryServer) remoteVaultsByNode(ctx context.Context, selectedVaults []g
 				continue
 			}
 			placements, _ := s.cfgStore.GetTierPlacements(ctx, tc.ID)
-		leaderNodeID := system.LeaderNodeID(placements, nscs)
+			leaderNodeID := system.LeaderNodeID(placements, nscs)
 			if leaderNodeID == "" || leaderNodeID == s.localNodeID {
 				continue
 			}

@@ -1,17 +1,16 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"slices"
 	"time"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/cluster"
 	"gastrolog/internal/system"
-
 )
 
 // transitionChunk streams all records from a sealed chunk to the next tier
@@ -209,9 +208,11 @@ func (r *retentionRunner) confirmStreamedTransitions(cfg *system.Config) {
 	}
 
 	destTier := r.findDestTierInstance(nextTierID)
+	confirmedCount := 0
 
 	for _, id := range streamed {
 		if r.isReceiptConfirmed(destTier, id) {
+			confirmedCount++
 			r.expireChunk(id)
 			r.logger.Debug("transition: receipt confirmed, expired",
 				"vault", r.vaultID, "tier", r.tierID, "chunk", id.String(),
@@ -297,6 +298,3 @@ func (r *retentionRunner) streamLocal(cursor chunk.RecordCursor, nextTierID glid
 		}
 	}
 }
-
-
-

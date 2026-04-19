@@ -1,11 +1,10 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
-
 )
 
 // Vault bundles tier instances for a single vault.

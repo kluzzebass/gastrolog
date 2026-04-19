@@ -1,10 +1,10 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"container/heap"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"iter"
 	"math"
 	"slices"
@@ -12,7 +12,6 @@ import (
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/querylang"
-
 )
 
 // positionExhausted is a sentinel value indicating a chunk has been fully consumed.
@@ -447,9 +446,9 @@ func (e *Engine) openAndPrimeScanner(
 type mergeLoopResult int
 
 const (
-	mergeCompleted   mergeLoopResult = iota // all records consumed
-	mergeStopped                            // yield returned false or limit hit
-	mergeError                              // context error or iterator error
+	mergeCompleted mergeLoopResult = iota // all records consumed
+	mergeStopped                          // yield returned false or limit hit
+	mergeError                            // context error or iterator error
 )
 
 // runMergeLoop pops entries from the heap, yields them, and advances scanners.
