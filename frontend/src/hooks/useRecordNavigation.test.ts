@@ -246,7 +246,7 @@ describe("useRecordNavigation", () => {
         input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
       });
       expect(result.current.selectedRecord).toBeNull();
-      document.body.removeChild(input);
+      input.remove();
     });
   });
 

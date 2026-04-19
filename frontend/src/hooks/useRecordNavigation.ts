@@ -100,7 +100,15 @@ export function useRecordNavigation(deps: RecordNavigationDeps) {
     };
     globalThis.addEventListener("keydown", handler);
     return () => globalThis.removeEventListener("keydown", handler);
-  }, [detailPinned, showPlan, isFollowMode, setDetailCollapsed, setShowPlan]);
+  }, [
+    detailPinned,
+    showPlan,
+    isFollowMode,
+    followRecordsRef,
+    recordsRef,
+    setDetailCollapsed,
+    setShowPlan,
+  ]);
 
   return { selectedRecord, setSelectedRecord, selectedRecordRef };
 }

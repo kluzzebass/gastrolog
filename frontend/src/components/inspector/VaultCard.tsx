@@ -160,7 +160,7 @@ function ChunkList({ vaultId, dark }: Readonly<{ vaultId: string; dark: boolean 
     if (existing) {
       existing.chunks.push(chunk);
     } else {
-      tierGroups.set(key, { tierType: chunk.tierType ?? "unknown", chunks: [chunk] });
+      tierGroups.set(key, { tierType: chunk.tierType, chunks: [chunk] });
     }
   }
 

@@ -22,6 +22,38 @@ interface HeaderBarProps {
   onLogout: () => void;
 }
 
+function sortNodesByName(nodes: readonly ClusterNode[]) {
+  return [...nodes].toSorted((a, b) =>
+    (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)),
+  );
+}
+
+function sumClusterStats(nodes: readonly ClusterNode[]) {
+  let totalCpu = 0;
+  let totalMemory = 0;
+  let totalStorage = 0;
+  for (const node of nodes) {
+    const s = node.stats;
+    if (!s) continue;
+    totalCpu += s.cpuPercent;
+    totalMemory += Number(s.memoryRss);
+    for (const v of s.vaults) {
+      totalStorage += Number(v.dataBytes);
+    }
+  }
+  return { totalCpu, totalMemory, totalStorage };
+}
+
+function computeNoQuorum(
+  cluster: { clusterEnabled: boolean; nodes: readonly ClusterNode[]; leaderId: Uint8Array } | null | undefined,
+  isLoading: boolean,
+) {
+  if (isLoading) return false;
+  if (!cluster?.clusterEnabled) return false;
+  if (cluster.nodes.length <= 1) return false;
+  return cluster.leaderId.length === 0;
+}
+
 export function HeaderBar({
   dark,
   onShowHelp,
@@ -34,9 +66,7 @@ export function HeaderBar({
 }: Readonly<HeaderBarProps>) {
   const c = useThemeClass(dark);
   const { data: cluster, isLoading } = useClusterStatus();
-  const nodes = (cluster?.nodes ?? []).toSorted((a, b) =>
-    (a.name || encode(a.id)).localeCompare(b.name || encode(b.id)),
-  );
+  const nodes = sortNodesByName(cluster?.nodes ?? []);
 
   // Inspector glow: briefly flash when system status data arrives.
   // CSS transition handles the visual — React only tracks the trigger count.
@@ -61,25 +91,13 @@ export function HeaderBar({
   }, [glowCount, glowOff]);
   const inspectorGlow = glowCount > 0 && glowCount !== glowOff;
 
-  // Aggregate stats across all nodes.
-  let totalCpu = 0;
-  let totalMemory = 0;
-  let totalStorage = 0;
-  for (const node of nodes) {
-    const s = node.stats;
-    if (!s) continue;
-    totalCpu += s.cpuPercent;
-    totalMemory += Number(s.memoryRss);
-    for (const v of s.vaults) {
-      totalStorage += Number(v.dataBytes);
-    }
-  }
+  const { totalCpu, totalMemory, totalStorage } = sumClusterStats(nodes);
 
   const { alerts, maxSeverity } = useAlerts();
   const [alertPanelOpen, setAlertPanelOpen] = useState(false);
 
   const loading = isLoading || nodes.length === 0;
-  const noQuorum = !isLoading && cluster?.clusterEnabled && nodes.length > 1 && !cluster.leaderId;
+  const noQuorum = computeNoQuorum(cluster ?? null, isLoading);
 
   return (
     <header

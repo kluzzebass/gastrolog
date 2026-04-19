@@ -7,7 +7,6 @@ import {
   stripSeverity,
   stripChunk,
   stripPos,
-  stripTimeRange,
   buildSeverityExpr,
   injectVault,
   injectTimeRange,
@@ -43,9 +42,9 @@ interface QueryHandlerDeps {
 
 export function useQueryHandlers(deps: QueryHandlerDeps) {
   const {
-    q, setUrlQuery, navigate,
+    q, setUrlQuery, navigate: _navigate,
     selectedVault, setSelectedVault,
-    isFollowMode, isReversed, timeRange, followReversed, setFollowReversed,
+    isFollowMode, isReversed, timeRange, followReversed: _followReversed, setFollowReversed,
     draft, setDraft, cursorRef, queryInputRef,
   } = deps;
 

@@ -86,7 +86,7 @@ export function HttpAddForm({
 
 export function HttpCards({
   dark,
-  addToast,
+  addToast: _addToast,
   lookups,
   savedLookups,
   onUpdate,

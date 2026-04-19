@@ -1,5 +1,58 @@
 import { useThemeClass } from "../../../hooks/useThemeClass";
 
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
+function cellString(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (typeof v === "string") return v;
+  if (typeof v === "number") return String(v);
+  if (typeof v === "boolean") return v ? "true" : "false";
+  if (typeof v === "bigint") return v.toString(10);
+  if (typeof v === "symbol") return v.description ?? v.toString();
+  if (typeof v === "function") return v.name ? `[function ${v.name}]` : "[function]";
+  return JSON.stringify(v);
+}
+
+function unwrapJqSingleArrayEmit(items: unknown[]): unknown[] {
+  if (
+    items.length === 1 &&
+    Array.isArray(items[0]) &&
+    items[0].every((e) => isPlainObject(e))
+  ) {
+    return items[0];
+  }
+  return items;
+}
+
+function parseArrayOfArrays(items: unknown[]): { columns: string[]; rows: string[][] } | null {
+  const first = items[0];
+  if (!Array.isArray(first)) return null;
+  const columns = first.map(cellString);
+  if (columns.length === 0) return null;
+  const rows: string[][] = [];
+  for (let i = 1; i < items.length; i++) {
+    const row = items[i];
+    if (!Array.isArray(row)) return null;
+    rows.push(row.map(cellString));
+  }
+  return { columns, rows };
+}
+
+function parseArrayOfObjects(items: unknown[]): { columns: string[]; rows: string[][] } | null {
+  const first = items[0];
+  if (!isPlainObject(first)) return null;
+  const columns = Object.keys(first);
+  if (columns.length === 0) return null;
+  const rows: string[][] = [];
+  for (const item of items) {
+    if (!isPlainObject(item)) return null;
+    rows.push(columns.map((col) => cellString(item[col])));
+  }
+  return { columns, rows };
+}
+
 /**
  * Shared preview table for CSV and JSON lookup results.
  * Renders column headers with an optional highlighted key column,
@@ -85,47 +138,6 @@ export function parseTabularResult(jsonStr: string): { columns: string[]; rows: 
   // emits one output that is itself an array. Without this, `[.hosts[] | {...}]`
   // (bracket-wrapped, single emit) arrives as `[[{...}, {...}]]` and gets
   // mistaken for a header-row CSV shape with objects as column names.
-  let items: unknown[] = parsed;
-  if (items.length === 1 && Array.isArray(items[0]) && items[0].every((e) => e !== null && typeof e === "object" && !Array.isArray(e))) {
-    items = items[0];
-  }
-
-  const first = items[0];
-
-  // Shape 1: Array of arrays — first row is headers.
-  if (Array.isArray(first)) {
-    const columns = first.map(String);
-    if (columns.length === 0) return null;
-    const rows: string[][] = [];
-    for (let i = 1; i < items.length; i++) {
-      const row = items[i];
-      if (!Array.isArray(row)) return null;
-      rows.push(row.map((v: unknown) => {
-        if (v === null || v === undefined) return "";
-        if (typeof v === "object") return JSON.stringify(v);
-        return String(v);
-      }));
-    }
-    return { columns, rows };
-  }
-
-  // Shape 2: Array of objects — keys from first object.
-  if (typeof first !== "object" || first === null) return null;
-  const obj = first as Record<string, unknown>;
-  const columns = Object.keys(obj);
-  if (columns.length === 0) return null;
-
-  const rows: string[][] = [];
-  for (const item of items) {
-    if (typeof item !== "object" || item === null || Array.isArray(item)) return null;
-    const o = item as Record<string, unknown>;
-    rows.push(columns.map((col) => {
-      const v = o[col];
-      if (v === null || v === undefined) return "";
-      if (typeof v === "object") return JSON.stringify(v);
-      return String(v);
-    }));
-  }
-
-  return { columns, rows };
+  const items = unwrapJqSingleArrayEmit(parsed);
+  return parseArrayOfArrays(items) ?? parseArrayOfObjects(items);
 }

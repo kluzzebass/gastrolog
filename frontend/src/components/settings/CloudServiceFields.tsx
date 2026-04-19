@@ -221,7 +221,12 @@ function ArchivalSection({
 
   const addTransition = () => {
     const existing = values.transitions;
-    const defaultAfter = isMemory ? "0s" : existing.length === 0 ? "90d" : "";
+    let defaultAfter = "";
+    if (isMemory) {
+      defaultAfter = "0s";
+    } else if (existing.length === 0) {
+      defaultAfter = "90d";
+    }
     const firstClass = classOptions[0]?.value ?? "";
     onChange({
       transitions: [...existing, { after: defaultAfter, storageClass: firstClass }],

@@ -235,13 +235,7 @@ export function emptyYamlDraft(): YAMLFileLookupDraft {
 }
 
 export function yamlFileLookupEqual(draft: YAMLFileLookupDraft, saved: YAMLFileLookupEntry): boolean {
-  return (
-    draft.name === saved.name &&
-    draft.fileId === encode(saved.fileId) &&
-    draft.query === saved.query &&
-    draft.keyColumn === saved.keyColumn &&
-    arraysEqual(draft.valueColumns, saved.valueColumns)
-  );
+  return jsonFileLookupEqual(draft, saved);
 }
 
 export function staticLookupEqual(draft: StaticLookupDraft, saved: StaticLookupEntry): boolean {

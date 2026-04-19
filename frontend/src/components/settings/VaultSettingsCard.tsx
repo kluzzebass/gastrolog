@@ -60,6 +60,115 @@ interface VaultSettingsCardProps {
   onOpenInspector?: (inspectorParam: string) => void;
 }
 
+function buildNewTierConfig(
+  newTier: TierEntry,
+  vaultId: Uint8Array,
+  position: number,
+  existingTierCount: number,
+): TierConfig {
+  // TierConfig fields use Uint8Array<ArrayBuffer>; proto bytes may be ArrayBufferLike.
+  const normalizedVaultId = new Uint8Array(vaultId);
+  return new TierConfig({
+    name: newTier.type,
+    type: tierTypeEnum(newTier.type),
+    vaultId: normalizedVaultId,
+    position,
+    storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
+    cloudServiceId:
+      newTier.type === "cloud" && newTier.cloudServiceId
+        ? decode(newTier.cloudServiceId)
+        : new Uint8Array(0),
+    activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
+    cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
+    cacheEviction: newTier.type === "cloud" ? (newTier.cacheEviction || "lru") : "",
+    cacheBudget: newTier.type === "cloud" ? (newTier.cacheBudget || "") : "",
+    cacheTtl: newTier.type === "cloud" ? (newTier.cacheTTL || "") : "",
+    memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
+    rotationPolicyId: newTier.rotationPolicyId ? decode(newTier.rotationPolicyId) : new Uint8Array(0),
+    retentionRules: newTier.retentionPolicyId
+      ? [
+          new RetentionRule({
+            retentionPolicyId: decode(newTier.retentionPolicyId),
+            action: retentionActionForPosition(existingTierCount, existingTierCount + 1),
+          }),
+        ]
+      : [],
+    replicationFactor: newTier.type === "jsonl" ? 1 : parseInt(newTier.replicationFactor, 10) || 1,
+    path: newTier.type === "jsonl" ? newTier.path : "",
+  });
+}
+
+function maybeUpdatedTier(
+  tier: TierConfig,
+  tierIndex: number,
+  tierCount: number,
+  vaultId: Uint8Array,
+  edit: Partial<{
+    rotationPolicyId: string;
+    retentionPolicyId: string;
+    replicationFactor: string;
+    storageClass: string;
+    activeChunkClass: string;
+    cacheClass: string;
+    cacheEviction: string;
+    cacheBudget: string;
+    cacheTTL: string;
+  }>,
+) {
+  const rpId = edit.rotationPolicyId ?? encode(tier.rotationPolicyId);
+  const retPolicyId =
+    edit.retentionPolicyId ??
+    (tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "");
+  const rfStr = edit.replicationFactor ?? String(tier.replicationFactor || 1);
+  const scStr = edit.storageClass ?? String(tier.storageClass || 0);
+  const accStr = edit.activeChunkClass ?? String(tier.activeChunkClass || 0);
+  const ccStr = edit.cacheClass ?? String(tier.cacheClass || 0);
+  const ceStr = edit.cacheEviction ?? (tier.cacheEviction || "lru");
+  const cbStr = edit.cacheBudget ?? (tier.cacheBudget || "");
+  const ctStr = edit.cacheTTL ?? (tier.cacheTtl || "");
+
+  const rf = parseInt(rfStr, 10) || 1;
+  const sc = parseInt(scStr, 10) || 0;
+  const acc = parseInt(accStr, 10) || 0;
+  const cc = parseInt(ccStr, 10) || 0;
+
+  const expectedAction = retentionActionForPosition(tierIndex, tierCount);
+  const currentAction = tier.retentionRules[0]?.action;
+  const currentRetId = tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "";
+
+  const changed =
+    rpId !== encode(tier.rotationPolicyId) ||
+    retPolicyId !== currentRetId ||
+    (!!retPolicyId && currentAction !== expectedAction) ||
+    rf !== (tier.replicationFactor || 1) ||
+    sc !== (tier.storageClass || 0) ||
+    acc !== (tier.activeChunkClass || 0) ||
+    cc !== (tier.cacheClass || 0) ||
+    ceStr !== (tier.cacheEviction || "lru") ||
+    cbStr !== (tier.cacheBudget || "") ||
+    ctStr !== (tier.cacheTtl || "") ||
+    tier.position !== tierIndex;
+
+  if (!changed && tier.vaultId === vaultId) return null;
+
+  const updated = tier.clone();
+  updated.rotationPolicyId = rpId ? decode(rpId) : new Uint8Array(0);
+  updated.replicationFactor = rf;
+  updated.storageClass = sc;
+  updated.activeChunkClass = acc;
+  updated.cacheClass = cc;
+  updated.cacheEviction = ceStr;
+  updated.cacheBudget = cbStr || "";
+  updated.cacheTtl = ctStr;
+  updated.vaultId = new Uint8Array(vaultId);
+  updated.position = tierIndex;
+  updated.retentionRules = retPolicyId
+    ? [new RetentionRule({ retentionPolicyId: decode(retPolicyId), action: expectedAction })]
+    : [];
+
+  return updated;
+}
+
 export function VaultSettingsCard({
   vault,
   vaults,
@@ -255,29 +364,7 @@ export function VaultSettingsCard({
   /** Create a staged new tier and return the updated tier ID list, or null on failure. */
   const createStagedTier = async (tierIds: string[]): Promise<string[] | null> => {
     if (!newTier || !isTierComplete(newTier, cloudServiceOptions.length > 0)) return tierIds;
-    const tierCfg = new TierConfig({
-      name: newTier.type,
-      type: tierTypeEnum(newTier.type),
-      vaultId: vault.id,  // already Uint8Array from proto
-      position: tierIds.length,
-      storageClass: newTier.type === "file" ? parseInt(newTier.storageClass, 10) || 0 : 0,
-      cloudServiceId: newTier.type === "cloud" && newTier.cloudServiceId ? decode(newTier.cloudServiceId) : new Uint8Array(0),
-      activeChunkClass: newTier.type === "cloud" ? parseInt(newTier.activeChunkClass, 10) || 0 : 0,
-      cacheClass: newTier.type === "cloud" ? parseInt(newTier.cacheClass, 10) || 0 : 0,
-      cacheEviction: newTier.type === "cloud" ? (newTier.cacheEviction || "lru") : "",
-      cacheBudget: newTier.type === "cloud" ? (newTier.cacheBudget || "") : "",
-      cacheTtl: newTier.type === "cloud" ? (newTier.cacheTTL || "") : "",
-      memoryBudgetBytes: newTier.type === "memory" ? parseMemoryBudget(newTier.memoryBudget) : protoInt64.zero,
-      rotationPolicyId: newTier.rotationPolicyId ? decode(newTier.rotationPolicyId) : new Uint8Array(0),
-      retentionRules: newTier.retentionPolicyId
-        ? [new RetentionRule({
-            retentionPolicyId: decode(newTier.retentionPolicyId),
-            action: retentionActionForPosition(vaultTiers.length, vaultTiers.length + 1),
-          })]
-        : [],
-      replicationFactor: newTier.type === "jsonl" ? 1 : parseInt(newTier.replicationFactor, 10) || 1,
-      path: newTier.type === "jsonl" ? newTier.path : "",
-    });
+    const tierCfg = buildNewTierConfig(newTier, vault.id, tierIds.length, vaultTiers.length);
     try {
       await putTier.mutateAsync({ config: tierCfg });
       // Server assigns the tier ID; the config cache refresh after mutation will pick it up.
@@ -297,52 +384,14 @@ export function VaultSettingsCard({
       const tier = tiers.find((t) => encode(t.id) === tierId);
       if (!tier) continue;
 
-      const rpId = edit.tierEdits[tierId]?.rotationPolicyId ?? encode(tier.rotationPolicyId);
-      const retPolicyId = edit.tierEdits[tierId]?.retentionPolicyId ?? (tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "");
-      const rfStr = edit.tierEdits[tierId]?.replicationFactor ?? String(tier.replicationFactor || 1);
-      const rf = parseInt(rfStr, 10) || 1;
-      const scStr = edit.tierEdits[tierId]?.storageClass ?? String(tier.storageClass || 0);
-      const sc = parseInt(scStr, 10) || 0;
-      const accStr = edit.tierEdits[tierId]?.activeChunkClass ?? String(tier.activeChunkClass || 0);
-      const acc = parseInt(accStr, 10) || 0;
-      const ccStr = edit.tierEdits[tierId]?.cacheClass ?? String(tier.cacheClass || 0);
-      const cc = parseInt(ccStr, 10) || 0;
-      const ceStr = edit.tierEdits[tierId]?.cacheEviction ?? (tier.cacheEviction || "lru");
-      const cbStr = edit.tierEdits[tierId]?.cacheBudget ?? (tier.cacheBudget || "");
-      const ctStr = edit.tierEdits[tierId]?.cacheTTL ?? (tier.cacheTtl || "");
-
-      const expectedAction = retentionActionForPosition(tierIndex, tierIds.length);
-      const currentAction = tier.retentionRules[0]?.action;
-      const currentRetId = tier.retentionRules[0] ? encode(tier.retentionRules[0].retentionPolicyId) : "";
-
-      const rotChanged = rpId !== encode(tier.rotationPolicyId);
-      const retChanged = retPolicyId !== currentRetId || (retPolicyId && currentAction !== expectedAction);
-      const rfChanged = rf !== (tier.replicationFactor || 1);
-      const scChanged = sc !== (tier.storageClass || 0);
-      const accChanged = acc !== (tier.activeChunkClass || 0);
-      const ccChanged = cc !== (tier.cacheClass || 0);
-      const ceChanged = ceStr !== (tier.cacheEviction || "lru");
-      const cbChanged = cbStr !== (tier.cacheBudget || "");
-      const ctChanged = ctStr !== (tier.cacheTtl || "");
-      const posChanged = tier.position !== tierIndex;
-      const vaultIdChanged = tier.vaultId !== vault.id;
-
-      if (!rotChanged && !retChanged && !rfChanged && !scChanged && !accChanged && !ccChanged && !ceChanged && !cbChanged && !ctChanged && !posChanged && !vaultIdChanged) continue;
-
-      const updated = tier.clone();
-      if (rotChanged) updated.rotationPolicyId = rpId ? decode(rpId) : new Uint8Array(0);
-      if (rfChanged) updated.replicationFactor = rf;
-      if (scChanged) updated.storageClass = sc;
-      if (accChanged) updated.activeChunkClass = acc;
-      if (ccChanged) updated.cacheClass = cc;
-      if (ceChanged) updated.cacheEviction = ceStr;
-      if (cbChanged) updated.cacheBudget = cbStr || "";
-      if (ctChanged) updated.cacheTtl = ctStr;
-      updated.vaultId = vault.id;
-      updated.position = tierIndex;
-      updated.retentionRules = retPolicyId
-        ? [new RetentionRule({ retentionPolicyId: decode(retPolicyId), action: expectedAction })]
-        : [];
+      const updated = maybeUpdatedTier(
+        tier,
+        tierIndex,
+        tierIds.length,
+        vault.id,
+        edit.tierEdits[tierId] ?? {},
+      );
+      if (!updated) continue;
       try {
         await putTier.mutateAsync({ config: updated });
       } catch (err: unknown) {
@@ -543,8 +592,11 @@ export function VaultSettingsCard({
               {vaultTiers.map((tier, i) => {
                 const pnId = leaderNodeId(tier, nodeStorageConfigs);
                 const nodeName = pnId ? resolveNodeName(nodeNameMap, pnId) : null;
-                const csName = tier.cloudServiceId
-                  ? cloudServiceOptions.find((cs) => cs.value === encode(tier.cloudServiceId))?.label || encode(tier.cloudServiceId)
+                // Tests and partial configs may supply plain tier objects without every proto default.
+                const cloudSvc = (tier as { cloudServiceId?: Uint8Array }).cloudServiceId ?? new Uint8Array(0);
+                const csId = cloudSvc.length > 0 ? encode(cloudSvc) : "";
+                const csName = csId
+                  ? cloudServiceOptions.find((cs) => cs.value === csId)?.label || csId
                   : null;
                 return (
                   <div

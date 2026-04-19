@@ -467,7 +467,7 @@ describe("handleSaveAll", () => {
     const qc = createTestQueryClient();
     qc.setQueryData(["system"], twoTierConfig);
 
-    const { getByText, getAllByText } = render(<VaultsSettings dark />, {
+    const { getByText } = render(<VaultsSettings dark />, {
       wrapper: settingsWrapper(qc),
     });
 
@@ -476,7 +476,7 @@ describe("handleSaveAll", () => {
     // Remove the second tier — click its remove button
     const removeButtons = document.querySelectorAll("[aria-label='Remove tier']");
     if (removeButtons.length > 0) {
-      fireEvent.click(removeButtons[removeButtons.length - 1]!);
+      fireEvent.click(removeButtons.item(removeButtons.length - 1));
       // Confirm removal if there's a confirm step
       const confirmBtns = document.querySelectorAll("button");
       for (const btn of confirmBtns) {
