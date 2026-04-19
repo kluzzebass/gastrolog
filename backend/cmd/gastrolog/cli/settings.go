@@ -42,16 +42,17 @@ type settingsGroup struct {
 	short   string
 	fields  []settingsField
 	getPath []string // path from GetSettingsResponse to the Get sub-message
-	setPath []string // path from PutSettingsRequest to the Put sub-message
+	setPath []string // path from PutServiceSettingsRequest / PutMaxMindSettingsRequest to the Put sub-message
+	putRoot string   // "service" or "maxmind" — which RPC handles writes
 }
 
 // Groups mirror the internal config hierarchy.
 var settingsGroups = []settingsGroup{
-	{name: "auth", short: "Configure authentication", getPath: []string{"auth"}, setPath: []string{"auth"}, fields: []settingsField{
+	{name: "auth", short: "Configure authentication", putRoot: "service", getPath: []string{"auth"}, setPath: []string{"auth"}, fields: []settingsField{
 		{flag: "token-duration", label: "token_duration", getKey: "token_duration", setKey: "token_duration", desc: "Access token lifetime (e.g. \"15m\", \"1h\")"},
 		{flag: "refresh-duration", label: "refresh_token_duration", getKey: "refresh_token_duration", setKey: "refresh_token_duration", desc: "Refresh token lifetime (e.g. \"168h\")"},
 	}},
-	{name: "password-policy", short: "Configure password policy", getPath: []string{"auth", "password_policy"}, setPath: []string{"auth", "password_policy"}, fields: []settingsField{
+	{name: "password-policy", short: "Configure password policy", putRoot: "service", getPath: []string{"auth", "password_policy"}, setPath: []string{"auth", "password_policy"}, fields: []settingsField{
 		{flag: "min-length", label: "min_length", getKey: "min_length", setKey: "min_length", desc: "Minimum password length"},
 		{flag: "require-mixed-case", label: "require_mixed_case", getKey: "require_mixed_case", setKey: "require_mixed_case", desc: "Require upper and lowercase letters"},
 		{flag: "require-digit", label: "require_digit", getKey: "require_digit", setKey: "require_digit", desc: "Require at least one digit"},
@@ -59,21 +60,21 @@ var settingsGroups = []settingsGroup{
 		{flag: "max-consecutive-repeats", label: "max_consecutive_repeats", getKey: "max_consecutive_repeats", setKey: "max_consecutive_repeats", desc: "Max consecutive repeated characters (0 = no limit)"},
 		{flag: "forbid-animal-noise", label: "forbid_animal_noise", getKey: "forbid_animal_noise", setKey: "forbid_animal_noise", desc: "Forbid animal noises as passwords"},
 	}},
-	{name: "query", short: "Configure query engine", getPath: []string{"query"}, setPath: []string{"query"}, fields: []settingsField{
+	{name: "query", short: "Configure query engine", putRoot: "service", getPath: []string{"query"}, setPath: []string{"query"}, fields: []settingsField{
 		{flag: "timeout", label: "timeout", getKey: "timeout", setKey: "timeout", desc: "Query timeout (e.g. \"30s\", \"1m\")"},
 		{flag: "max-follow-duration", label: "max_follow_duration", getKey: "max_follow_duration", setKey: "max_follow_duration", desc: "Max Follow stream lifetime (e.g. \"4h\")"},
 		{flag: "max-result-count", label: "max_result_count", getKey: "max_result_count", setKey: "max_result_count", desc: "Max records per Search request (0 = unlimited)"},
 	}},
-	{name: "scheduler", short: "Configure job scheduler", getPath: []string{"scheduler"}, setPath: []string{"scheduler"}, fields: []settingsField{
+	{name: "scheduler", short: "Configure job scheduler", putRoot: "service", getPath: []string{"scheduler"}, setPath: []string{"scheduler"}, fields: []settingsField{
 		{flag: "max-concurrent-jobs", label: "max_concurrent_jobs", getKey: "max_concurrent_jobs", setKey: "max_concurrent_jobs", desc: "Maximum concurrent background jobs"},
 	}},
-	{name: "tls", short: "Configure TLS", getPath: []string{"tls"}, setPath: []string{"tls"}, fields: []settingsField{
+	{name: "tls", short: "Configure TLS", putRoot: "service", getPath: []string{"tls"}, setPath: []string{"tls"}, fields: []settingsField{
 		{flag: "enabled", label: "enabled", getKey: "enabled", setKey: "enabled", desc: "Enable HTTPS"},
 		{flag: "default-cert", label: "default_cert", getKey: "default_cert", setKey: "default_cert", desc: "Certificate ID for HTTPS"},
 		{flag: "http-redirect", label: "http_to_https_redirect", getKey: "http_to_https_redirect", setKey: "http_to_https_redirect", desc: "Redirect HTTP to HTTPS"},
 		{flag: "https-port", label: "https_port", getKey: "https_port", setKey: "https_port", desc: "HTTPS port (empty = HTTP port + 1)"},
 	}},
-	{name: "maxmind", short: "Configure MaxMind database downloads", getPath: []string{"maxmind"}, setPath: []string{"maxmind"}, fields: []settingsField{
+	{name: "maxmind", short: "Configure MaxMind database downloads", putRoot: "maxmind", getPath: []string{"maxmind"}, setPath: []string{"maxmind"}, fields: []settingsField{
 		{flag: "auto-download", label: "auto_download", getKey: "auto_download", setKey: "auto_download", desc: "Auto-download MaxMind databases"},
 		{flag: "account-id", label: "account_id", setKey: "account_id", desc: "MaxMind account ID (write-only)"},
 		{flag: "license-key", label: "license_key", getKey: "license_configured", setKey: "license_key", desc: "MaxMind license key", secret: true},
@@ -95,6 +96,17 @@ func newTLSCmd() *cobra.Command       { return newGroupCmd("tls") }
 
 func newMaxMindCmd() *cobra.Command { return newGroupCmd("maxmind") }
 
+func putRequestDescriptor(putRoot string) protoreflect.MessageDescriptor {
+	switch putRoot {
+	case "service":
+		return (&v1.PutServiceSettingsRequest{}).ProtoReflect().Descriptor()
+	case "maxmind":
+		return (&v1.PutMaxMindSettingsRequest{}).ProtoReflect().Descriptor()
+	default:
+		panic("settings: unknown putRoot " + putRoot)
+	}
+}
+
 func newGroupCmd(name string) *cobra.Command {
 	g, err := findGroup(name)
 	if err != nil {
@@ -103,10 +115,7 @@ func newGroupCmd(name string) *cobra.Command {
 	}
 
 	// Resolve the Put sub-message descriptor for flag registration.
-	putSubDesc := navigateDescriptor(
-		(&v1.PutSettingsRequest{}).ProtoReflect().Descriptor(),
-		g.setPath,
-	)
+	putSubDesc := navigateDescriptor(putRequestDescriptor(g.putRoot), g.setPath)
 
 	cmd := &cobra.Command{
 		Use:   g.name,
@@ -132,15 +141,31 @@ func newGroupCmd(name string) *cobra.Command {
 
 func groupSet(cmd *cobra.Command, g settingsGroup, changed []settingsField) error {
 	client := clientFromCmd(cmd)
-	req := &v1.PutSettingsRequest{}
-	subMsg := ensureSubMessage(req.ProtoReflect(), g.setPath)
-	for _, f := range changed {
-		if err := applyFlag(cmd, subMsg, f); err != nil {
+	switch g.putRoot {
+	case "service":
+		req := &v1.PutServiceSettingsRequest{}
+		subMsg := ensureSubMessage(req.ProtoReflect(), g.setPath)
+		for _, f := range changed {
+			if err := applyFlag(cmd, subMsg, f); err != nil {
+				return err
+			}
+		}
+		if _, err := client.System.PutServiceSettings(context.Background(), connect.NewRequest(req)); err != nil {
 			return err
 		}
-	}
-	if _, err := client.System.PutSettings(context.Background(), connect.NewRequest(req)); err != nil {
-		return err
+	case "maxmind":
+		req := &v1.PutMaxMindSettingsRequest{}
+		subMsg := ensureSubMessage(req.ProtoReflect(), g.setPath)
+		for _, f := range changed {
+			if err := applyFlag(cmd, subMsg, f); err != nil {
+				return err
+			}
+		}
+		if _, err := client.System.PutMaxMindSettings(context.Background(), connect.NewRequest(req)); err != nil {
+			return err
+		}
+	default:
+		panic("settings: unknown putRoot " + g.putRoot)
 	}
 	for _, f := range changed {
 		val := cmd.Flags().Lookup(f.flag).Value.String()
@@ -344,12 +369,11 @@ func fieldDisplayValue(msg protoreflect.Message, f settingsField) string {
 
 func init() {
 	getDesc := (&v1.GetSettingsResponse{}).ProtoReflect().Descriptor()
-	putDesc := (&v1.PutSettingsRequest{}).ProtoReflect().Descriptor()
 
 	var missing []string
 	for _, g := range settingsGroups {
 		getSubDesc := navigateDescriptor(getDesc, g.getPath)
-		putSubDesc := navigateDescriptor(putDesc, g.setPath)
+		putSubDesc := navigateDescriptor(putRequestDescriptor(g.putRoot), g.setPath)
 		for _, f := range g.fields {
 			if f.getKey != "" {
 				if getSubDesc == nil || getSubDesc.Fields().ByName(protoreflect.Name(f.getKey)) == nil {

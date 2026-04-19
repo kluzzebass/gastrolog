@@ -605,7 +605,7 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("lookup_names_across_types", func(t *testing.T) {
 		// Two lookups with the same name across different types should conflict.
-		_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		_, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 			Lookup: &gastrologv1.PutLookupSettings{
 				HttpLookups: []*gastrologv1.HTTPLookupEntry{
 					{Name: "duped", UrlTemplate: "http://example.com/{ip}"},
@@ -625,7 +625,7 @@ func TestDuplicateEntityNames(t *testing.T) {
 
 	t.Run("lookup_names_within_type", func(t *testing.T) {
 		// Two lookups with the same name within the same type should also conflict.
-		_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+		_, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 			Lookup: &gastrologv1.PutLookupSettings{
 				HttpLookups: []*gastrologv1.HTTPLookupEntry{
 					{Name: "api-a", UrlTemplate: "http://a.example.com/{ip}"},
@@ -1234,8 +1234,8 @@ func TestDeleteLookupHTTP(t *testing.T) {
 	client, cfgStore, _ := newConfigTestSetup(t)
 	ctx := context.Background()
 
-	// Create an HTTP lookup via PutSettings.
-	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+	// Create an HTTP lookup via PutLookupSettings.
+	_, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 		Lookup: &gastrologv1.PutLookupSettings{
 			HttpLookups: []*gastrologv1.HTTPLookupEntry{
 				{Name: "weather-api", UrlTemplate: "http://weather.example.com/{city}"},
@@ -1243,7 +1243,7 @@ func TestDeleteLookupHTTP(t *testing.T) {
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutSettings (create lookup): %v", err)
+		t.Fatalf("PutLookupSettings (create lookup): %v", err)
 	}
 
 	// Verify the lookup exists in the config store.
@@ -1314,7 +1314,7 @@ func TestDeleteLookupCSV(t *testing.T) {
 	ctx := context.Background()
 
 	// Create a CSV lookup.
-	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+	_, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 		Lookup: &gastrologv1.PutLookupSettings{
 			CsvLookups: []*gastrologv1.CSVLookupEntry{
 				{Name: "hosts-csv", FileId: glid.New().Bytes()},
@@ -1322,7 +1322,7 @@ func TestDeleteLookupCSV(t *testing.T) {
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutSettings (create CSV lookup): %v", err)
+		t.Fatalf("PutLookupSettings (create CSV lookup): %v", err)
 	}
 
 	// Delete it.
@@ -1349,7 +1349,7 @@ func TestDeleteLookupOnlyRemovesTarget(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two HTTP lookups.
-	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+	_, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 		Lookup: &gastrologv1.PutLookupSettings{
 			HttpLookups: []*gastrologv1.HTTPLookupEntry{
 				{Name: "api-alpha", UrlTemplate: "http://alpha.example.com/{id}"},
@@ -1358,7 +1358,7 @@ func TestDeleteLookupOnlyRemovesTarget(t *testing.T) {
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutSettings (create two lookups): %v", err)
+		t.Fatalf("PutLookupSettings (create two lookups): %v", err)
 	}
 
 	// Delete only one.
@@ -1388,7 +1388,7 @@ func TestDeleteLookupIdempotentSecondCallFails(t *testing.T) {
 	ctx := context.Background()
 
 	// Create an HTTP lookup.
-	_, err := client.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+	_, err := client.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 		Lookup: &gastrologv1.PutLookupSettings{
 			HttpLookups: []*gastrologv1.HTTPLookupEntry{
 				{Name: "once-only", UrlTemplate: "http://once.example.com/{x}"},
@@ -1396,7 +1396,7 @@ func TestDeleteLookupIdempotentSecondCallFails(t *testing.T) {
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutSettings: %v", err)
+		t.Fatalf("PutLookupSettings: %v", err)
 	}
 
 	// First delete succeeds.

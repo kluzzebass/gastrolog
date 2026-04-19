@@ -135,6 +135,9 @@ message DeleteIngesterCommand {
 message PutSettingCommand {
   string key = 1;
   string value = 2;
+  // When non-empty, NotifySettingPut uses this value instead of key (which
+  // stays "server" for the JSON blob). Empty preserves legacy "server" behavior.
+  optional string notify_key = 3;
 }
 
 message DeleteSettingCommand {

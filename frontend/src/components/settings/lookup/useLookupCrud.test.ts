@@ -15,7 +15,7 @@ const equal = (a: Draft, b: Saved) => a.name === b.name && a.value === b.value;
 const getName = (d: Draft) => d.name;
 
 beforeEach(() => {
-  m(mocks.systemClient, "putSettings").mockClear();
+  m(mocks.systemClient, "putLookupSettings").mockClear();
   m(mocks.systemClient, "deleteLookup").mockClear();
 });
 
@@ -65,17 +65,17 @@ describe("useLookupCrud", () => {
 
   // ── save ──────────────────────────────────────────────────────
 
-  test("save calls putSettings with serialized lookups", async () => {
-    m(mocks.systemClient, "putSettings").mockResolvedValueOnce({});
+  test("save calls putLookupSettings with serialized lookups", async () => {
+    m(mocks.systemClient, "putLookupSettings").mockResolvedValueOnce({});
     const { result } = renderCrud();
 
     await act(() => result.current.save(0));
 
-    expect(m(mocks.systemClient, "putSettings")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "putLookupSettings")).toHaveBeenCalledTimes(1);
   });
 
   test("save shows error toast on failure", async () => {
-    m(mocks.systemClient, "putSettings").mockRejectedValueOnce(new Error("network"));
+    m(mocks.systemClient, "putLookupSettings").mockRejectedValueOnce(new Error("network"));
     const { result } = renderCrud();
 
     // Should not throw — error is caught and toasted.

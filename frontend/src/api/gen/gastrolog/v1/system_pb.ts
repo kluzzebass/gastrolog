@@ -3405,9 +3405,9 @@ export class PutClusterSettings extends Message<PutClusterSettings> {
 }
 
 /**
- * @generated from message gastrolog.v1.PutSettingsRequest
+ * @generated from message gastrolog.v1.PutServiceSettingsRequest
  */
-export class PutSettingsRequest extends Message<PutSettingsRequest> {
+export class PutServiceSettingsRequest extends Message<PutServiceSettingsRequest> {
   /**
    * @generated from field: gastrolog.v1.PutAuthSettings auth = 1;
    */
@@ -3429,104 +3429,274 @@ export class PutSettingsRequest extends Message<PutSettingsRequest> {
   tls?: PutTLSSettings;
 
   /**
-   * @generated from field: gastrolog.v1.PutLookupSettings lookup = 5;
-   */
-  lookup?: PutLookupSettings;
-
-  /**
-   * @generated from field: optional bool setup_wizard_dismissed = 6;
-   */
-  setupWizardDismissed?: boolean;
-
-  /**
-   * @generated from field: gastrolog.v1.PutClusterSettings cluster = 7;
+   * @generated from field: gastrolog.v1.PutClusterSettings cluster = 5;
    */
   cluster?: PutClusterSettings;
 
-  /**
-   * @generated from field: gastrolog.v1.PutMaxMindSettings maxmind = 8;
-   */
-  maxmind?: PutMaxMindSettings;
-
-  constructor(data?: PartialMessage<PutSettingsRequest>) {
+  constructor(data?: PartialMessage<PutServiceSettingsRequest>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutSettingsRequest";
+  static readonly typeName = "gastrolog.v1.PutServiceSettingsRequest";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 1, name: "auth", kind: "message", T: PutAuthSettings },
     { no: 2, name: "query", kind: "message", T: PutQuerySettings },
     { no: 3, name: "scheduler", kind: "message", T: PutSchedulerSettings },
     { no: 4, name: "tls", kind: "message", T: PutTLSSettings },
-    { no: 5, name: "lookup", kind: "message", T: PutLookupSettings },
-    { no: 6, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
-    { no: 7, name: "cluster", kind: "message", T: PutClusterSettings },
-    { no: 8, name: "maxmind", kind: "message", T: PutMaxMindSettings },
+    { no: 5, name: "cluster", kind: "message", T: PutClusterSettings },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSettingsRequest {
-    return new PutSettingsRequest().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServiceSettingsRequest {
+    return new PutServiceSettingsRequest().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSettingsRequest {
-    return new PutSettingsRequest().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutServiceSettingsRequest {
+    return new PutServiceSettingsRequest().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSettingsRequest {
-    return new PutSettingsRequest().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutServiceSettingsRequest {
+    return new PutServiceSettingsRequest().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutSettingsRequest | PlainMessage<PutSettingsRequest> | undefined, b: PutSettingsRequest | PlainMessage<PutSettingsRequest> | undefined): boolean {
-    return proto3.util.equals(PutSettingsRequest, a, b);
+  static equals(a: PutServiceSettingsRequest | PlainMessage<PutServiceSettingsRequest> | undefined, b: PutServiceSettingsRequest | PlainMessage<PutServiceSettingsRequest> | undefined): boolean {
+    return proto3.util.equals(PutServiceSettingsRequest, a, b);
   }
 }
 
 /**
- * @generated from message gastrolog.v1.PutSettingsResponse
+ * @generated from message gastrolog.v1.PutServiceSettingsResponse
  */
-export class PutSettingsResponse extends Message<PutSettingsResponse> {
-  /**
-   * Populated when geoip_db_path was set.
-   *
-   * @generated from field: gastrolog.v1.MmdbValidation geoip_validation = 1;
-   */
-  geoipValidation?: MmdbValidation;
-
-  /**
-   * Populated when asn_db_path was set.
-   *
-   * @generated from field: gastrolog.v1.MmdbValidation asn_validation = 2;
-   */
-  asnValidation?: MmdbValidation;
-
-  constructor(data?: PartialMessage<PutSettingsResponse>) {
+export class PutServiceSettingsResponse extends Message<PutServiceSettingsResponse> {
+  constructor(data?: PartialMessage<PutServiceSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
   }
 
   static readonly runtime: typeof proto3 = proto3;
-  static readonly typeName = "gastrolog.v1.PutSettingsResponse";
+  static readonly typeName = "gastrolog.v1.PutServiceSettingsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "geoip_validation", kind: "message", T: MmdbValidation },
-    { no: 2, name: "asn_validation", kind: "message", T: MmdbValidation },
   ]);
 
-  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSettingsResponse {
-    return new PutSettingsResponse().fromBinary(bytes, options);
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServiceSettingsResponse {
+    return new PutServiceSettingsResponse().fromBinary(bytes, options);
   }
 
-  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSettingsResponse {
-    return new PutSettingsResponse().fromJson(jsonValue, options);
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutServiceSettingsResponse {
+    return new PutServiceSettingsResponse().fromJson(jsonValue, options);
   }
 
-  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSettingsResponse {
-    return new PutSettingsResponse().fromJsonString(jsonString, options);
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutServiceSettingsResponse {
+    return new PutServiceSettingsResponse().fromJsonString(jsonString, options);
   }
 
-  static equals(a: PutSettingsResponse | PlainMessage<PutSettingsResponse> | undefined, b: PutSettingsResponse | PlainMessage<PutSettingsResponse> | undefined): boolean {
-    return proto3.util.equals(PutSettingsResponse, a, b);
+  static equals(a: PutServiceSettingsResponse | PlainMessage<PutServiceSettingsResponse> | undefined, b: PutServiceSettingsResponse | PlainMessage<PutServiceSettingsResponse> | undefined): boolean {
+    return proto3.util.equals(PutServiceSettingsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutLookupSettingsRequest
+ */
+export class PutLookupSettingsRequest extends Message<PutLookupSettingsRequest> {
+  /**
+   * @generated from field: gastrolog.v1.PutLookupSettings lookup = 1;
+   */
+  lookup?: PutLookupSettings;
+
+  constructor(data?: PartialMessage<PutLookupSettingsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLookupSettingsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "lookup", kind: "message", T: PutLookupSettings },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettingsRequest {
+    return new PutLookupSettingsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLookupSettingsRequest {
+    return new PutLookupSettingsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLookupSettingsRequest {
+    return new PutLookupSettingsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLookupSettingsRequest | PlainMessage<PutLookupSettingsRequest> | undefined, b: PutLookupSettingsRequest | PlainMessage<PutLookupSettingsRequest> | undefined): boolean {
+    return proto3.util.equals(PutLookupSettingsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutLookupSettingsResponse
+ */
+export class PutLookupSettingsResponse extends Message<PutLookupSettingsResponse> {
+  constructor(data?: PartialMessage<PutLookupSettingsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutLookupSettingsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettingsResponse {
+    return new PutLookupSettingsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutLookupSettingsResponse {
+    return new PutLookupSettingsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutLookupSettingsResponse {
+    return new PutLookupSettingsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutLookupSettingsResponse | PlainMessage<PutLookupSettingsResponse> | undefined, b: PutLookupSettingsResponse | PlainMessage<PutLookupSettingsResponse> | undefined): boolean {
+    return proto3.util.equals(PutLookupSettingsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutMaxMindSettingsRequest
+ */
+export class PutMaxMindSettingsRequest extends Message<PutMaxMindSettingsRequest> {
+  /**
+   * @generated from field: gastrolog.v1.PutMaxMindSettings maxmind = 1;
+   */
+  maxmind?: PutMaxMindSettings;
+
+  constructor(data?: PartialMessage<PutMaxMindSettingsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutMaxMindSettingsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "maxmind", kind: "message", T: PutMaxMindSettings },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutMaxMindSettingsRequest {
+    return new PutMaxMindSettingsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutMaxMindSettingsRequest {
+    return new PutMaxMindSettingsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutMaxMindSettingsRequest {
+    return new PutMaxMindSettingsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutMaxMindSettingsRequest | PlainMessage<PutMaxMindSettingsRequest> | undefined, b: PutMaxMindSettingsRequest | PlainMessage<PutMaxMindSettingsRequest> | undefined): boolean {
+    return proto3.util.equals(PutMaxMindSettingsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutMaxMindSettingsResponse
+ */
+export class PutMaxMindSettingsResponse extends Message<PutMaxMindSettingsResponse> {
+  constructor(data?: PartialMessage<PutMaxMindSettingsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutMaxMindSettingsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutMaxMindSettingsResponse {
+    return new PutMaxMindSettingsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutMaxMindSettingsResponse {
+    return new PutMaxMindSettingsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutMaxMindSettingsResponse {
+    return new PutMaxMindSettingsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutMaxMindSettingsResponse | PlainMessage<PutMaxMindSettingsResponse> | undefined, b: PutMaxMindSettingsResponse | PlainMessage<PutMaxMindSettingsResponse> | undefined): boolean {
+    return proto3.util.equals(PutMaxMindSettingsResponse, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSetupSettingsRequest
+ */
+export class PutSetupSettingsRequest extends Message<PutSetupSettingsRequest> {
+  /**
+   * @generated from field: optional bool setup_wizard_dismissed = 1;
+   */
+  setupWizardDismissed?: boolean;
+
+  constructor(data?: PartialMessage<PutSetupSettingsRequest>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutSetupSettingsRequest";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "setup_wizard_dismissed", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSetupSettingsRequest {
+    return new PutSetupSettingsRequest().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSetupSettingsRequest {
+    return new PutSetupSettingsRequest().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSetupSettingsRequest {
+    return new PutSetupSettingsRequest().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutSetupSettingsRequest | PlainMessage<PutSetupSettingsRequest> | undefined, b: PutSetupSettingsRequest | PlainMessage<PutSetupSettingsRequest> | undefined): boolean {
+    return proto3.util.equals(PutSetupSettingsRequest, a, b);
+  }
+}
+
+/**
+ * @generated from message gastrolog.v1.PutSetupSettingsResponse
+ */
+export class PutSetupSettingsResponse extends Message<PutSetupSettingsResponse> {
+  constructor(data?: PartialMessage<PutSetupSettingsResponse>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.PutSetupSettingsResponse";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSetupSettingsResponse {
+    return new PutSetupSettingsResponse().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): PutSetupSettingsResponse {
+    return new PutSetupSettingsResponse().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): PutSetupSettingsResponse {
+    return new PutSetupSettingsResponse().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: PutSetupSettingsResponse | PlainMessage<PutSetupSettingsResponse> | undefined, b: PutSetupSettingsResponse | PlainMessage<PutSetupSettingsResponse> | undefined): boolean {
+    return proto3.util.equals(PutSetupSettingsResponse, a, b);
   }
 }
 

@@ -401,15 +401,20 @@ func ExtractDeleteManagedFile(cmd *gastrologv1.DeleteManagedFileCommand) (glid.G
 
 // NewPutServerSettings creates a ConfigCommand for persisting server-level settings.
 // The settings are serialized as JSON inside a PutSettingCommand with key="server"
-// for wire/snapshot compatibility.
-func NewPutServerSettings(ss system.ServerSettings) (*gastrologv1.SystemCommand, error) {
+// for wire/snapshot compatibility. When notifyKey is non-empty it is stored on the
+// command so the FSM can emit NotifySettingPut with a granular key.
+func NewPutServerSettings(ss system.ServerSettings, notifyKey string) (*gastrologv1.SystemCommand, error) {
 	blob, err := json.Marshal(ss)
 	if err != nil {
 		return nil, fmt.Errorf("marshal server settings: %w", err)
 	}
+	psc := &gastrologv1.PutSettingCommand{Key: "server", Value: string(blob)}
+	if notifyKey != "" {
+		psc.NotifyKey = &notifyKey
+	}
 	return &gastrologv1.SystemCommand{
 		Command: &gastrologv1.SystemCommand_PutSetting{
-			PutSetting: &gastrologv1.PutSettingCommand{Key: "server", Value: string(blob)},
+			PutSetting: psc,
 		},
 	}, nil
 }

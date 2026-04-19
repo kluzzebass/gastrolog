@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { usePutSettings } from "../../../api/hooks/useSettings";
+import { usePutLookupSettings } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput } from "../FormField";
@@ -72,7 +72,7 @@ export function StaticAddForm({
   existingLookups: StaticLookupDraft[];
   namePlaceholder: string;
 }>) {
-  const putConfig = usePutSettings();
+  const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<StaticLookupDraft>(() => emptyStaticDraft());
 
   const handleCreate = async () => {
@@ -80,7 +80,7 @@ export function StaticAddForm({
     if (!final.name) return;
     const updated = [...existingLookups, final];
     try {
-      await putConfig.mutateAsync({ lookup: { staticLookups: serializeStaticLookups(updated) } });
+      await putConfig.mutateAsync({ staticLookups: serializeStaticLookups(updated) });
       onCreated(final);
       addToast(`Static lookup "${final.name}" created`, "info");
     } catch (err: unknown) {

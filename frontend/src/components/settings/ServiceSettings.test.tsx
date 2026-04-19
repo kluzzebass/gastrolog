@@ -35,7 +35,7 @@ const sampleSettings = {
 
 beforeEach(() => {
   m(mocks.systemClient, "getSettings").mockClear();
-  m(mocks.systemClient, "putSettings").mockClear();
+  m(mocks.systemClient, "putServiceSettings").mockClear();
   m(mocks.systemClient, "listCertificates").mockClear();
 });
 

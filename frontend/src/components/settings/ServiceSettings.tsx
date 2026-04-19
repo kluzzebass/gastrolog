@@ -2,7 +2,7 @@ import { encode } from "../../api/glid";
 import { useReducer, useState } from "react";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { LoadingPlaceholder } from "../LoadingPlaceholder";
-import { useSettings, usePutSettings, useRegenerateJwtSecret } from "../../api/hooks/useSettings";
+import { useSettings, usePutServiceSettings, useRegenerateJwtSecret } from "../../api/hooks/useSettings";
 import { useCertificates } from "../../api/hooks/useCertificates";
 import { useToast } from "../Toast";
 import { FormField, TextInput, NumberInput } from "./FormField";
@@ -115,7 +115,7 @@ export function ServiceSettings({ dark, noAuth }: Readonly<{ dark: boolean; noAu
   const c = useThemeClass(dark);
   const { data, isLoading } = useSettings();
   const { data: certData } = useCertificates();
-  const putConfig = usePutSettings();
+  const putConfig = usePutServiceSettings();
   const regenerateJwt = useRegenerateJwtSecret();
   const { addToast } = useToast();
   const [confirmRegenerate, setConfirmRegenerate] = useState(false);

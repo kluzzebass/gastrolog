@@ -1,7 +1,7 @@
 import { encode } from "../../../api/glid";
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { usePutSettings, usePreviewJSONLookup, usePreviewYAMLLookup } from "../../../api/hooks/useSettings";
+import { usePutLookupSettings, usePreviewJSONLookup, usePreviewYAMLLookup, type PutLookupWire } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput, SelectInput } from "../FormField";
@@ -23,7 +23,7 @@ interface FormatSpec {
   typeBadge: string;       // "json" / "yaml" — lowercase badge text
   accept: string;          // accepted file extensions for the drop zone
   fileExtensions: string[]; // filter for managed-file picker
-  lookupKey: "jsonFileLookups" | "yamlFileLookups"; // PutSettings payload field
+  lookupKey: "jsonFileLookups" | "yamlFileLookups"; // putLookupSettings payload field
   equal: (draft: JSONFileLookupDraft, saved: JSONFileLookupEntry | YAMLFileLookupEntry) => boolean;
   usePreview: typeof usePreviewJSONLookup;
 }
@@ -191,7 +191,7 @@ export function FileLookupAddForm({
   spec: FormatSpec;
 }) {
   const c = useThemeClass(dark);
-  const putConfig = usePutSettings();
+  const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<JSONFileLookupDraft>(() => emptyJsonDraft());
   const [tableColumns, setTableColumns] = useState<string[]>([]);
 
@@ -219,7 +219,7 @@ export function FileLookupAddForm({
     if (!final.name) return;
     const updated = [...existingLookups, final];
     try {
-      await putConfig.mutateAsync({ lookup: { [spec.lookupKey]: serializeFileLookups(updated) } });
+      await putConfig.mutateAsync({ [spec.lookupKey]: serializeFileLookups(updated) } as PutLookupWire);
       onCreated(final);
       addToast(`${spec.label} lookup "${final.name}" created`, "info");
     } catch (err: unknown) {

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { usePutSettings, useTestHTTPLookup } from "../../../api/hooks/useSettings";
+import { usePutLookupSettings, useTestHTTPLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput, ParamsEditor } from "../FormField";
@@ -39,7 +39,7 @@ export function HttpAddForm({
   existingLookups: HTTPLookupDraft[];
   namePlaceholder: string;
 }) {
-  const putConfig = usePutSettings();
+  const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<HTTPLookupDraft>(() => emptyHttpDraft());
 
   const handleCreate = async () => {
@@ -47,7 +47,7 @@ export function HttpAddForm({
     if (!final.name) return;
     const updated = [...existingLookups, final];
     try {
-      await putConfig.mutateAsync({ lookup: { httpLookups: serializeHttpLookups(updated) } });
+      await putConfig.mutateAsync({ httpLookups: serializeHttpLookups(updated) });
       onCreated(final);
       addToast(`HTTP lookup "${final.name}" created`, "info");
     } catch (err: unknown) {

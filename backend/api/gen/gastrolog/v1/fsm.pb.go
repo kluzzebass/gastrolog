@@ -1344,9 +1344,12 @@ func (x *DeleteIngesterCommand) GetId() []byte {
 }
 
 type PutSettingCommand struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
-	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Key   string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	// When non-empty, NotifySettingPut uses this value instead of key (which
+	// stays "server" for the JSON blob). Empty preserves legacy "server" behavior.
+	NotifyKey     *string `protobuf:"bytes,3,opt,name=notify_key,json=notifyKey,proto3,oneof" json:"notify_key,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1391,6 +1394,13 @@ func (x *PutSettingCommand) GetKey() string {
 func (x *PutSettingCommand) GetValue() string {
 	if x != nil {
 		return x.Value
+	}
+	return ""
+}
+
+func (x *PutSettingCommand) GetNotifyKey() string {
+	if x != nil && x.NotifyKey != nil {
+		return *x.NotifyKey
 	}
 	return ""
 }
@@ -3376,10 +3386,13 @@ const file_gastrolog_v1_fsm_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"'\n" +
 	"\x15DeleteIngesterCommand\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\fR\x02id\";\n" +
+	"\x02id\x18\x01 \x01(\fR\x02id\"n\n" +
 	"\x11PutSettingCommand\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value\"(\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\x12\"\n" +
+	"\n" +
+	"notify_key\x18\x03 \x01(\tH\x00R\tnotifyKey\x88\x01\x01B\r\n" +
+	"\v_notify_key\"(\n" +
 	"\x14DeleteSettingCommand\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\"\xa7\x01\n" +
 	"\x15PutCertificateCommand\x12\x0e\n" +
@@ -3721,6 +3734,7 @@ func file_gastrolog_v1_fsm_proto_init() {
 	}
 	file_gastrolog_v1_fsm_proto_msgTypes[3].OneofWrappers = []any{}
 	file_gastrolog_v1_fsm_proto_msgTypes[5].OneofWrappers = []any{}
+	file_gastrolog_v1_fsm_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

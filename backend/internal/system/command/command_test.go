@@ -184,7 +184,7 @@ func TestPutServerSettings(t *testing.T) {
 		Auth:      system.AuthConfig{JWTSecret: "s3cret"},
 		Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 4},
 	}
-	cmd, err := NewPutServerSettings(want)
+	cmd, err := NewPutServerSettings(want, "")
 	if err != nil {
 		t.Fatalf("NewPutServerSettings: %v", err)
 	}

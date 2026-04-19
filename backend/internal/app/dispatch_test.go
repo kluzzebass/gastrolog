@@ -613,6 +613,19 @@ func TestHandle_SettingPut(t *testing.T) {
 		}
 	})
 
+	t.Run("lookup_settings_key_skipped", func(t *testing.T) {
+		h := &captureHandler{}
+		d := newTestDispatcher(&mockOrch{updateMaxJobsErr: errors.New("should not be called")}, &stubCfgStore{
+			settingsErr: errors.New("should not be called"),
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyLookupSettings})
+
+		if h.count() != 0 {
+			t.Fatal("lookup_settings should not load settings or update scheduler")
+		}
+	})
+
 	t.Run("load_settings_error", func(t *testing.T) {
 		h := &captureHandler{}
 		d := newTestDispatcher(&mockOrch{}, &stubCfgStore{
@@ -657,11 +670,10 @@ func TestHandle_SettingPut(t *testing.T) {
 	})
 
 	t.Run("unchanged_max_jobs_skipped", func(t *testing.T) {
-		// PutSettings fires NotifySettingPut("server") for every setting
-		// change — lookups, TLS, auth, etc. Rebuilding the scheduler on
-		// every one of those calls stops all jobs and caused gocron
-		// Shutdown timeouts on busy nodes. This test pins the fix: when
-		// the desired concurrency equals the current value, no rebuild.
+		// Legacy Raft entries and service saves use NotifySettingPut with
+		// keys that may touch the scheduler. Lookup-only saves use a
+		// different key so this path is not hit. When the desired
+		// concurrency equals the current value, no rebuild.
 		h := &captureHandler{}
 		mo := &mockOrch{
 			currentMaxJobs:   8,
@@ -690,6 +702,22 @@ func TestHandle_SettingPut(t *testing.T) {
 		}, h)
 
 		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+
+		if mo.currentMaxJobs != 8 {
+			t.Fatalf("expected MaxConcurrentJobs to update to 8, got %d", mo.currentMaxJobs)
+		}
+	})
+
+	t.Run("changed_max_jobs_rebuilds_service_key", func(t *testing.T) {
+		h := &captureHandler{}
+		mo := &mockOrch{currentMaxJobs: 4}
+		d := newTestDispatcher(mo, &stubCfgStore{
+			settings: system.ServerSettings{
+				Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 8},
+			},
+		}, h)
+
+		d.Handle(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyServiceSettings})
 
 		if mo.currentMaxJobs != 8 {
 			t.Fatalf("expected MaxConcurrentJobs to update to 8, got %d", mo.currentMaxJobs)

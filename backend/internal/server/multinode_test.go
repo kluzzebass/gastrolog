@@ -1856,8 +1856,8 @@ func TestMultiNode_LookupDeletePropagation(t *testing.T) {
 	h := setupMultiNode(t, []string{"coord", "data-1", "data-2"}, WithoutVault("coord"))
 	ctx := context.Background()
 
-	// Create an HTTP lookup via PutSettings on the coordinator.
-	_, err := h.configClient.PutSettings(ctx, connect.NewRequest(&gastrologv1.PutSettingsRequest{
+	// Create an HTTP lookup via PutLookupSettings on the coordinator.
+	_, err := h.configClient.PutLookupSettings(ctx, connect.NewRequest(&gastrologv1.PutLookupSettingsRequest{
 		Lookup: &gastrologv1.PutLookupSettings{
 			HttpLookups: []*gastrologv1.HTTPLookupEntry{
 				{Name: "geo-api", UrlTemplate: "http://geo.example.com/{ip}"},
@@ -1865,7 +1865,7 @@ func TestMultiNode_LookupDeletePropagation(t *testing.T) {
 		},
 	}))
 	if err != nil {
-		t.Fatalf("PutSettings (create lookup): %v", err)
+		t.Fatalf("PutLookupSettings (create lookup): %v", err)
 	}
 
 	// Verify the lookup exists in the shared config store.

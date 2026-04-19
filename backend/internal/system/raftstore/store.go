@@ -307,7 +307,7 @@ func (s *Store) DeleteManagedFile(ctx context.Context, id glid.GLID) error {
 }
 
 func (s *Store) SaveServerSettings(ctx context.Context, ss system.ServerSettings) error {
-	cmd, err := command.NewPutServerSettings(ss)
+	cmd, err := command.NewPutServerSettings(ss, system.SaveServerSettingsNotifyKey(ctx))
 	if err != nil {
 		return err
 	}

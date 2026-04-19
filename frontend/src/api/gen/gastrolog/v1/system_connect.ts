@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutSettingsRequest, PutSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
+import { DeleteCertificateRequest, DeleteCertificateResponse, DeleteCloudServiceRequest, DeleteCloudServiceResponse, DeleteFilterRequest, DeleteFilterResponse, DeleteIngesterRequest, DeleteIngesterResponse, DeleteLookupRequest, DeleteLookupResponse, DeleteManagedFileRequest, DeleteManagedFileResponse, DeleteRetentionPolicyRequest, DeleteRetentionPolicyResponse, DeleteRotationPolicyRequest, DeleteRotationPolicyResponse, DeleteRouteRequest, DeleteRouteResponse, DeleteSavedQueryRequest, DeleteSavedQueryResponse, DeleteTierRequest, DeleteTierResponse, DeleteVaultRequest, DeleteVaultResponse, GenerateNameRequest, GenerateNameResponse, GetCertificateRequest, GetCertificateResponse, GetIngesterDefaultsRequest, GetIngesterDefaultsResponse, GetIngesterStatusRequest, GetIngesterStatusResponse, GetPreferencesRequest, GetPreferencesResponse, GetRouteStatsRequest, GetRouteStatsResponse, GetSavedQueriesRequest, GetSavedQueriesResponse, GetSettingsRequest, GetSettingsResponse, GetSystemRequest, GetSystemResponse, ListCertificatesRequest, ListCertificatesResponse, ListIngestersRequest, ListIngestersResponse, ListManagedFilesRequest, ListManagedFilesResponse, PauseVaultRequest, PauseVaultResponse, PreviewCSVLookupRequest, PreviewCSVLookupResponse, PreviewJSONLookupRequest, PreviewJSONLookupResponse, PreviewYAMLLookupRequest, PreviewYAMLLookupResponse, PutCertificateRequest, PutCertificateResponse, PutCloudServiceRequest, PutCloudServiceResponse, PutFilterRequest, PutFilterResponse, PutIngesterRequest, PutIngesterResponse, PutLookupSettingsRequest, PutLookupSettingsResponse, PutMaxMindSettingsRequest, PutMaxMindSettingsResponse, PutNodeConfigRequest, PutNodeConfigResponse, PutPreferencesRequest, PutPreferencesResponse, PutRetentionPolicyRequest, PutRetentionPolicyResponse, PutRotationPolicyRequest, PutRotationPolicyResponse, PutRouteRequest, PutRouteResponse, PutSavedQueryRequest, PutSavedQueryResponse, PutServiceSettingsRequest, PutServiceSettingsResponse, PutSetupSettingsRequest, PutSetupSettingsResponse, PutTierRequest, PutTierResponse, PutVaultRequest, PutVaultResponse, RegenerateJwtSecretRequest, RegenerateJwtSecretResponse, ResumeVaultRequest, ResumeVaultResponse, SetNodeStorageConfigRequest, SetNodeStorageConfigResponse, TestCloudServiceRequest, TestCloudServiceResponse, TestHTTPLookupRequest, TestHTTPLookupResponse, TestIngesterRequest, TestIngesterResponse, TriggerIngesterRequest, TriggerIngesterResponse, WatchSystemRequest, WatchSystemResponse } from "./system_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -169,14 +169,48 @@ export const SystemService = {
       kind: MethodKind.Unary,
     },
     /**
-     * PutSettings updates system settings. Only fields explicitly set are updated.
+     * PutServiceSettings updates auth, query, scheduler, TLS, and cluster settings.
+     * Only fields explicitly set in the request are merged.
      *
-     * @generated from rpc gastrolog.v1.SystemService.PutSettings
+     * @generated from rpc gastrolog.v1.SystemService.PutServiceSettings
      */
-    putSettings: {
-      name: "PutSettings",
-      I: PutSettingsRequest,
-      O: PutSettingsResponse,
+    putServiceSettings: {
+      name: "PutServiceSettings",
+      I: PutServiceSettingsRequest,
+      O: PutServiceSettingsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutLookupSettings updates HTTP/JSON/YAML/MMDB/CSV/static lookup tables.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.PutLookupSettings
+     */
+    putLookupSettings: {
+      name: "PutLookupSettings",
+      I: PutLookupSettingsRequest,
+      O: PutLookupSettingsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutMaxMindSettings updates MaxMind auto-download configuration.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.PutMaxMindSettings
+     */
+    putMaxMindSettings: {
+      name: "PutMaxMindSettings",
+      I: PutMaxMindSettingsRequest,
+      O: PutMaxMindSettingsResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * PutSetupSettings updates setup-wizard dismissal state.
+     *
+     * @generated from rpc gastrolog.v1.SystemService.PutSetupSettings
+     */
+    putSetupSettings: {
+      name: "PutSetupSettings",
+      I: PutSetupSettingsRequest,
+      O: PutSetupSettingsResponse,
       kind: MethodKind.Unary,
     },
     /**

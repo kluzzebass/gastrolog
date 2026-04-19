@@ -424,7 +424,11 @@ func (f *FSM) applyPutSetting(ctx context.Context, pb *gastrologv1.PutSettingCom
 	if err := f.store.SaveServerSettings(ctx, ss); err != nil {
 		return nil, err
 	}
-	return &Notification{Kind: NotifySettingPut, Key: key}, nil
+	notifyKey := key
+	if nk := pb.GetNotifyKey(); nk != "" {
+		notifyKey = nk
+	}
+	return &Notification{Kind: NotifySettingPut, Key: notifyKey}, nil
 }
 
 func (f *FSM) applyPutRoute(ctx context.Context, pb *gastrologv1.PutRouteCommand) (*Notification, error) {

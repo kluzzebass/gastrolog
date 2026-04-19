@@ -504,44 +504,95 @@ func (s *SystemServer) GetSettings(
 	return connect.NewResponse(resp), nil
 }
 
-// PutSettings updates the server-level configuration. Merges with existing; only
-// fields explicitly set in the request are updated.
-func (s *SystemServer) PutSettings(
+// PutServiceSettings updates auth, query, scheduler, TLS, and cluster settings.
+func (s *SystemServer) PutServiceSettings(
 	ctx context.Context,
-	req *connect.Request[apiv1.PutSettingsRequest],
-) (*connect.Response[apiv1.PutSettingsResponse], error) {
+	req *connect.Request[apiv1.PutServiceSettingsRequest],
+) (*connect.Response[apiv1.PutServiceSettingsResponse], error) {
 	ss, err := s.loadServerSettings(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	if connErr := mergeSettingsFields(req.Msg, &ss); connErr != nil {
+	if connErr := mergeServiceSettingsFields(req.Msg, &ss); connErr != nil {
 		return nil, connErr
 	}
-
 	if connErr := validateTokenDurations(ss.Auth); connErr != nil {
 		return nil, connErr
 	}
+	saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyServiceSettings)
+	if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
+		return nil, errInternal(err)
+	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyServiceSettings})
+	if s.onTLSConfigChange != nil && req.Msg.Tls != nil {
+		s.onTLSConfigChange()
+	}
+	return connect.NewResponse(&apiv1.PutServiceSettingsResponse{}), nil
+}
 
+// PutLookupSettings replaces lookup table configuration.
+func (s *SystemServer) PutLookupSettings(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutLookupSettingsRequest],
+) (*connect.Response[apiv1.PutLookupSettingsResponse], error) {
+	if req.Msg.Lookup == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("lookup is required"))
+	}
+	ss, err := s.loadServerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mergeLookup(req.Msg.Lookup, &ss.Lookup)
 	if connErr := validateLookupNames(ss.Lookup); connErr != nil {
 		return nil, connErr
 	}
-
-	if err := s.sysStore.SaveServerSettings(ctx, ss); err != nil {
+	saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyLookupSettings)
+	if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
 		return nil, errInternal(err)
 	}
-	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
-
-	if s.onTLSConfigChange != nil {
-		s.onTLSConfigChange()
-	}
-
-	lookupChanged := req.Msg.Lookup != nil || req.Msg.Maxmind != nil
-	if s.onLookupConfigChange != nil && lookupChanged {
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyLookupSettings})
+	if s.onLookupConfigChange != nil {
 		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
 	}
+	return connect.NewResponse(&apiv1.PutLookupSettingsResponse{}), nil
+}
 
-	return connect.NewResponse(&apiv1.PutSettingsResponse{}), nil
+// PutMaxMindSettings updates MaxMind auto-download configuration.
+func (s *SystemServer) PutMaxMindSettings(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutMaxMindSettingsRequest],
+) (*connect.Response[apiv1.PutMaxMindSettingsResponse], error) {
+	if req.Msg.Maxmind == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("maxmind is required"))
+	}
+	ss, err := s.loadServerSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	mergeMaxMind(req.Msg.Maxmind, &ss.MaxMind)
+	saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyMaxMindSettings)
+	if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
+		return nil, errInternal(err)
+	}
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyMaxMindSettings})
+	if s.onLookupConfigChange != nil {
+		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
+	}
+	return connect.NewResponse(&apiv1.PutMaxMindSettingsResponse{}), nil
+}
+
+// PutSetupSettings updates setup wizard dismissal state.
+func (s *SystemServer) PutSetupSettings(
+	ctx context.Context,
+	req *connect.Request[apiv1.PutSetupSettingsRequest],
+) (*connect.Response[apiv1.PutSetupSettingsResponse], error) {
+	if req.Msg.SetupWizardDismissed == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("setup_wizard_dismissed is required"))
+	}
+	if err := s.sysStore.SetSetupWizardDismissed(ctx, *req.Msg.SetupWizardDismissed); err != nil {
+		return nil, errInternal(err)
+	}
+	return connect.NewResponse(&apiv1.PutSetupSettingsResponse{}), nil
 }
 
 // DeleteLookup removes a lookup table by name from whichever type list it
@@ -584,10 +635,11 @@ func (s *SystemServer) DeleteLookup(
 		return nil, connect.NewError(connect.CodeNotFound, fmt.Errorf("lookup %q not found", name))
 	}
 
-	if err := s.sysStore.SaveServerSettings(ctx, ss); err != nil {
+	saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyLookupSettings)
+	if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
 		return nil, errInternal(err)
 	}
-	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyLookupSettings})
 
 	if s.onLookupConfigChange != nil {
 		s.onLookupConfigChange(ss.Lookup, ss.MaxMind)
@@ -625,7 +677,8 @@ func (s *SystemServer) RegenerateJwtSecret(
 	}
 	ss.Auth.JWTSecret = base64.StdEncoding.EncodeToString(secret)
 
-	if err := s.sysStore.SaveServerSettings(ctx, ss); err != nil {
+	saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyServiceSettings)
+	if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
 		return nil, errInternal(err)
 	}
 
@@ -646,7 +699,7 @@ func (s *SystemServer) RegenerateJwtSecret(
 		}
 	}
 
-	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: "server"})
+	s.notify(raftfsm.Notification{Kind: raftfsm.NotifySettingPut, Key: system.NotifyKeyServiceSettings})
 
 	return connect.NewResponse(&apiv1.RegenerateJwtSecretResponse{}), nil
 }
@@ -751,7 +804,7 @@ func (s *SystemServer) loadServerSettings(ctx context.Context) (system.ServerSet
 	return ss, nil
 }
 
-func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *system.ServerSettings) *connect.Error {
+func mergeServiceSettingsFields(msg *apiv1.PutServiceSettingsRequest, ss *system.ServerSettings) *connect.Error {
 	if msg.Auth != nil {
 		mergeAuth(msg.Auth, &ss.Auth)
 	}
@@ -768,18 +821,11 @@ func mergeSettingsFields(msg *apiv1.PutSettingsRequest, ss *system.ServerSetting
 	if msg.Tls != nil {
 		mergeTLS(msg.Tls, &ss.TLS)
 	}
-	if msg.Lookup != nil {
-		mergeLookup(msg.Lookup, &ss.Lookup)
-	}
-	if msg.Maxmind != nil {
-		mergeMaxMind(msg.Maxmind, &ss.MaxMind)
-	}
 	if msg.Cluster != nil {
 		if err := mergeCluster(msg.Cluster, &ss.Cluster); err != nil {
 			return err
 		}
 	}
-	// SetupWizardDismissed handled via SetSetupWizardDismissed in PutSettings
 	return nil
 }
 

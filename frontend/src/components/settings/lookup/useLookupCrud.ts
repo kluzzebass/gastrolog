@@ -3,7 +3,7 @@
  * Extracted from HttpSection, JsonSection, MmdbSection, CsvSection.
  */
 import { useState } from "react";
-import { usePutSettings, useDeleteLookup } from "../../../api/hooks/useSettings";
+import { usePutLookupSettings, useDeleteLookup, type PutLookupWire } from "../../../api/hooks/useSettings";
 import { useToast } from "../../Toast";
 
 interface LookupCrudOptions<T, S> {
@@ -11,7 +11,7 @@ interface LookupCrudOptions<T, S> {
   lookups: T[];
   /** Saved lookups from the last successful load (for dirty detection). */
   savedLookups: S[];
-  /** Serialize drafts to the wire format for putSettings. */
+  /** Serialize drafts to the wire format for putLookupSettings. */
   serialize: (items: T[]) => unknown[];
   /** Compare a draft against a saved entry for equality (dirty detection). */
   equal: (draft: T, saved: S) => boolean;
@@ -31,7 +31,7 @@ export function useLookupCrud<T, S>(opts: LookupCrudOptions<T, S>) {
     lookupKey, typeLabel, getName, onDelete,
   } = opts;
 
-  const putConfig = usePutSettings();
+  const putConfig = usePutLookupSettings();
   const deleteLookup = useDeleteLookup();
   const { addToast } = useToast();
   const [justSaved, setJustSaved] = useState(false);
@@ -46,7 +46,7 @@ export function useLookupCrud<T, S>(opts: LookupCrudOptions<T, S>) {
   const save = async (i: number) => {
     const draft = lookups[i]!;
     try {
-      await putConfig.mutateAsync({ lookup: { [lookupKey]: serialize(lookups) } });
+      await putConfig.mutateAsync({ [lookupKey]: serialize(lookups) } as PutLookupWire);
       setJustSaved(true);
       requestAnimationFrame(() => setJustSaved(false));
       addToast(`${typeLabel} lookup "${getName(draft)}" saved`, "info");

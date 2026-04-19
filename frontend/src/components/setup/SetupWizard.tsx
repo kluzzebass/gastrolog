@@ -4,7 +4,7 @@ import { useThemeSync } from "../../hooks/useThemeSync";
 import { useThemeClass } from "../../hooks/useThemeClass";
 import { useToast } from "../Toast";
 import { systemClient } from "../../api/client";
-import { usePutSettings } from "../../api/hooks/useSettings";
+import { usePutSetupSettings } from "../../api/hooks/useSettings";
 import { useGenerateName } from "../../api/hooks/useSystem";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "../settings/Buttons";
@@ -67,7 +67,7 @@ export function SetupWizard() {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const queryClient = useQueryClient();
-  const putSettings = usePutSettings();
+  const putSetupSettings = usePutSetupSettings();
 
   const [step, setStep] = useState(0);
   const [creating, setCreating] = useState(false);
@@ -217,7 +217,7 @@ export function SetupWizard() {
         }),
       ]);
 
-      await putSettings.mutateAsync({ setupWizardDismissed: true });
+      await putSetupSettings.mutateAsync(true);
       // Optimistically update the cache so SearchView's redirect doesn't
       // fire before the follower's FSM applies the Raft log entry.
       queryClient.setQueryData(["settings"], (old: Record<string, unknown> | undefined) => {
@@ -345,7 +345,7 @@ export function SetupWizard() {
             )}
             <Button variant="ghost"
               onClick={async () => {
-                await putSettings.mutateAsync({ setupWizardDismissed: true });
+                await putSetupSettings.mutateAsync(true);
                 queryClient.setQueryData(["settings"], (old: Record<string, unknown> | undefined) =>
                   old ? { ...old, setupWizardDismissed: true } : old,
                 );

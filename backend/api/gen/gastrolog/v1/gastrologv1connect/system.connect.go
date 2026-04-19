@@ -72,9 +72,18 @@ const (
 	// SystemServiceGetSettingsProcedure is the fully-qualified name of the SystemService's GetSettings
 	// RPC.
 	SystemServiceGetSettingsProcedure = "/gastrolog.v1.SystemService/GetSettings"
-	// SystemServicePutSettingsProcedure is the fully-qualified name of the SystemService's PutSettings
-	// RPC.
-	SystemServicePutSettingsProcedure = "/gastrolog.v1.SystemService/PutSettings"
+	// SystemServicePutServiceSettingsProcedure is the fully-qualified name of the SystemService's
+	// PutServiceSettings RPC.
+	SystemServicePutServiceSettingsProcedure = "/gastrolog.v1.SystemService/PutServiceSettings"
+	// SystemServicePutLookupSettingsProcedure is the fully-qualified name of the SystemService's
+	// PutLookupSettings RPC.
+	SystemServicePutLookupSettingsProcedure = "/gastrolog.v1.SystemService/PutLookupSettings"
+	// SystemServicePutMaxMindSettingsProcedure is the fully-qualified name of the SystemService's
+	// PutMaxMindSettings RPC.
+	SystemServicePutMaxMindSettingsProcedure = "/gastrolog.v1.SystemService/PutMaxMindSettings"
+	// SystemServicePutSetupSettingsProcedure is the fully-qualified name of the SystemService's
+	// PutSetupSettings RPC.
+	SystemServicePutSetupSettingsProcedure = "/gastrolog.v1.SystemService/PutSetupSettings"
 	// SystemServiceRegenerateJwtSecretProcedure is the fully-qualified name of the SystemService's
 	// RegenerateJwtSecret RPC.
 	SystemServiceRegenerateJwtSecretProcedure = "/gastrolog.v1.SystemService/RegenerateJwtSecret"
@@ -207,8 +216,15 @@ type SystemServiceClient interface {
 	DeleteIngester(context.Context, *connect.Request[v1.DeleteIngesterRequest]) (*connect.Response[v1.DeleteIngesterResponse], error)
 	// GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
 	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
-	// PutSettings updates system settings. Only fields explicitly set are updated.
-	PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error)
+	// PutServiceSettings updates auth, query, scheduler, TLS, and cluster settings.
+	// Only fields explicitly set in the request are merged.
+	PutServiceSettings(context.Context, *connect.Request[v1.PutServiceSettingsRequest]) (*connect.Response[v1.PutServiceSettingsResponse], error)
+	// PutLookupSettings updates HTTP/JSON/YAML/MMDB/CSV/static lookup tables.
+	PutLookupSettings(context.Context, *connect.Request[v1.PutLookupSettingsRequest]) (*connect.Response[v1.PutLookupSettingsResponse], error)
+	// PutMaxMindSettings updates MaxMind auto-download configuration.
+	PutMaxMindSettings(context.Context, *connect.Request[v1.PutMaxMindSettingsRequest]) (*connect.Response[v1.PutMaxMindSettingsResponse], error)
+	// PutSetupSettings updates setup-wizard dismissal state.
+	PutSetupSettings(context.Context, *connect.Request[v1.PutSetupSettingsRequest]) (*connect.Response[v1.PutSetupSettingsResponse], error)
 	// RegenerateJwtSecret generates a new random JWT signing secret, replacing the
 	// existing one. All active sessions are immediately invalidated cluster-wide.
 	RegenerateJwtSecret(context.Context, *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error)
@@ -374,10 +390,28 @@ func NewSystemServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(systemServiceMethods.ByName("GetSettings")),
 			connect.WithClientOptions(opts...),
 		),
-		putSettings: connect.NewClient[v1.PutSettingsRequest, v1.PutSettingsResponse](
+		putServiceSettings: connect.NewClient[v1.PutServiceSettingsRequest, v1.PutServiceSettingsResponse](
 			httpClient,
-			baseURL+SystemServicePutSettingsProcedure,
-			connect.WithSchema(systemServiceMethods.ByName("PutSettings")),
+			baseURL+SystemServicePutServiceSettingsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PutServiceSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		putLookupSettings: connect.NewClient[v1.PutLookupSettingsRequest, v1.PutLookupSettingsResponse](
+			httpClient,
+			baseURL+SystemServicePutLookupSettingsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PutLookupSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		putMaxMindSettings: connect.NewClient[v1.PutMaxMindSettingsRequest, v1.PutMaxMindSettingsResponse](
+			httpClient,
+			baseURL+SystemServicePutMaxMindSettingsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PutMaxMindSettings")),
+			connect.WithClientOptions(opts...),
+		),
+		putSetupSettings: connect.NewClient[v1.PutSetupSettingsRequest, v1.PutSetupSettingsResponse](
+			httpClient,
+			baseURL+SystemServicePutSetupSettingsProcedure,
+			connect.WithSchema(systemServiceMethods.ByName("PutSetupSettings")),
 			connect.WithClientOptions(opts...),
 		),
 		regenerateJwtSecret: connect.NewClient[v1.RegenerateJwtSecretRequest, v1.RegenerateJwtSecretResponse](
@@ -603,7 +637,10 @@ type systemServiceClient struct {
 	putIngester           *connect.Client[v1.PutIngesterRequest, v1.PutIngesterResponse]
 	deleteIngester        *connect.Client[v1.DeleteIngesterRequest, v1.DeleteIngesterResponse]
 	getSettings           *connect.Client[v1.GetSettingsRequest, v1.GetSettingsResponse]
-	putSettings           *connect.Client[v1.PutSettingsRequest, v1.PutSettingsResponse]
+	putServiceSettings    *connect.Client[v1.PutServiceSettingsRequest, v1.PutServiceSettingsResponse]
+	putLookupSettings     *connect.Client[v1.PutLookupSettingsRequest, v1.PutLookupSettingsResponse]
+	putMaxMindSettings    *connect.Client[v1.PutMaxMindSettingsRequest, v1.PutMaxMindSettingsResponse]
+	putSetupSettings      *connect.Client[v1.PutSetupSettingsRequest, v1.PutSetupSettingsResponse]
 	regenerateJwtSecret   *connect.Client[v1.RegenerateJwtSecretRequest, v1.RegenerateJwtSecretResponse]
 	getPreferences        *connect.Client[v1.GetPreferencesRequest, v1.GetPreferencesResponse]
 	putPreferences        *connect.Client[v1.PutPreferencesRequest, v1.PutPreferencesResponse]
@@ -710,9 +747,24 @@ func (c *systemServiceClient) GetSettings(ctx context.Context, req *connect.Requ
 	return c.getSettings.CallUnary(ctx, req)
 }
 
-// PutSettings calls gastrolog.v1.SystemService.PutSettings.
-func (c *systemServiceClient) PutSettings(ctx context.Context, req *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error) {
-	return c.putSettings.CallUnary(ctx, req)
+// PutServiceSettings calls gastrolog.v1.SystemService.PutServiceSettings.
+func (c *systemServiceClient) PutServiceSettings(ctx context.Context, req *connect.Request[v1.PutServiceSettingsRequest]) (*connect.Response[v1.PutServiceSettingsResponse], error) {
+	return c.putServiceSettings.CallUnary(ctx, req)
+}
+
+// PutLookupSettings calls gastrolog.v1.SystemService.PutLookupSettings.
+func (c *systemServiceClient) PutLookupSettings(ctx context.Context, req *connect.Request[v1.PutLookupSettingsRequest]) (*connect.Response[v1.PutLookupSettingsResponse], error) {
+	return c.putLookupSettings.CallUnary(ctx, req)
+}
+
+// PutMaxMindSettings calls gastrolog.v1.SystemService.PutMaxMindSettings.
+func (c *systemServiceClient) PutMaxMindSettings(ctx context.Context, req *connect.Request[v1.PutMaxMindSettingsRequest]) (*connect.Response[v1.PutMaxMindSettingsResponse], error) {
+	return c.putMaxMindSettings.CallUnary(ctx, req)
+}
+
+// PutSetupSettings calls gastrolog.v1.SystemService.PutSetupSettings.
+func (c *systemServiceClient) PutSetupSettings(ctx context.Context, req *connect.Request[v1.PutSetupSettingsRequest]) (*connect.Response[v1.PutSetupSettingsResponse], error) {
+	return c.putSetupSettings.CallUnary(ctx, req)
 }
 
 // RegenerateJwtSecret calls gastrolog.v1.SystemService.RegenerateJwtSecret.
@@ -915,8 +967,15 @@ type SystemServiceHandler interface {
 	DeleteIngester(context.Context, *connect.Request[v1.DeleteIngesterRequest]) (*connect.Response[v1.DeleteIngesterResponse], error)
 	// GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
 	GetSettings(context.Context, *connect.Request[v1.GetSettingsRequest]) (*connect.Response[v1.GetSettingsResponse], error)
-	// PutSettings updates system settings. Only fields explicitly set are updated.
-	PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error)
+	// PutServiceSettings updates auth, query, scheduler, TLS, and cluster settings.
+	// Only fields explicitly set in the request are merged.
+	PutServiceSettings(context.Context, *connect.Request[v1.PutServiceSettingsRequest]) (*connect.Response[v1.PutServiceSettingsResponse], error)
+	// PutLookupSettings updates HTTP/JSON/YAML/MMDB/CSV/static lookup tables.
+	PutLookupSettings(context.Context, *connect.Request[v1.PutLookupSettingsRequest]) (*connect.Response[v1.PutLookupSettingsResponse], error)
+	// PutMaxMindSettings updates MaxMind auto-download configuration.
+	PutMaxMindSettings(context.Context, *connect.Request[v1.PutMaxMindSettingsRequest]) (*connect.Response[v1.PutMaxMindSettingsResponse], error)
+	// PutSetupSettings updates setup-wizard dismissal state.
+	PutSetupSettings(context.Context, *connect.Request[v1.PutSetupSettingsRequest]) (*connect.Response[v1.PutSetupSettingsResponse], error)
 	// RegenerateJwtSecret generates a new random JWT signing secret, replacing the
 	// existing one. All active sessions are immediately invalidated cluster-wide.
 	RegenerateJwtSecret(context.Context, *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error)
@@ -1078,10 +1137,28 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(systemServiceMethods.ByName("GetSettings")),
 		connect.WithHandlerOptions(opts...),
 	)
-	systemServicePutSettingsHandler := connect.NewUnaryHandler(
-		SystemServicePutSettingsProcedure,
-		svc.PutSettings,
-		connect.WithSchema(systemServiceMethods.ByName("PutSettings")),
+	systemServicePutServiceSettingsHandler := connect.NewUnaryHandler(
+		SystemServicePutServiceSettingsProcedure,
+		svc.PutServiceSettings,
+		connect.WithSchema(systemServiceMethods.ByName("PutServiceSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	systemServicePutLookupSettingsHandler := connect.NewUnaryHandler(
+		SystemServicePutLookupSettingsProcedure,
+		svc.PutLookupSettings,
+		connect.WithSchema(systemServiceMethods.ByName("PutLookupSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	systemServicePutMaxMindSettingsHandler := connect.NewUnaryHandler(
+		SystemServicePutMaxMindSettingsProcedure,
+		svc.PutMaxMindSettings,
+		connect.WithSchema(systemServiceMethods.ByName("PutMaxMindSettings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	systemServicePutSetupSettingsHandler := connect.NewUnaryHandler(
+		SystemServicePutSetupSettingsProcedure,
+		svc.PutSetupSettings,
+		connect.WithSchema(systemServiceMethods.ByName("PutSetupSettings")),
 		connect.WithHandlerOptions(opts...),
 	)
 	systemServiceRegenerateJwtSecretHandler := connect.NewUnaryHandler(
@@ -1318,8 +1395,14 @@ func NewSystemServiceHandler(svc SystemServiceHandler, opts ...connect.HandlerOp
 			systemServiceDeleteIngesterHandler.ServeHTTP(w, r)
 		case SystemServiceGetSettingsProcedure:
 			systemServiceGetSettingsHandler.ServeHTTP(w, r)
-		case SystemServicePutSettingsProcedure:
-			systemServicePutSettingsHandler.ServeHTTP(w, r)
+		case SystemServicePutServiceSettingsProcedure:
+			systemServicePutServiceSettingsHandler.ServeHTTP(w, r)
+		case SystemServicePutLookupSettingsProcedure:
+			systemServicePutLookupSettingsHandler.ServeHTTP(w, r)
+		case SystemServicePutMaxMindSettingsProcedure:
+			systemServicePutMaxMindSettingsHandler.ServeHTTP(w, r)
+		case SystemServicePutSetupSettingsProcedure:
+			systemServicePutSetupSettingsHandler.ServeHTTP(w, r)
 		case SystemServiceRegenerateJwtSecretProcedure:
 			systemServiceRegenerateJwtSecretHandler.ServeHTTP(w, r)
 		case SystemServiceGetPreferencesProcedure:
@@ -1453,8 +1536,20 @@ func (UnimplementedSystemServiceHandler) GetSettings(context.Context, *connect.R
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.GetSettings is not implemented"))
 }
 
-func (UnimplementedSystemServiceHandler) PutSettings(context.Context, *connect.Request[v1.PutSettingsRequest]) (*connect.Response[v1.PutSettingsResponse], error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutSettings is not implemented"))
+func (UnimplementedSystemServiceHandler) PutServiceSettings(context.Context, *connect.Request[v1.PutServiceSettingsRequest]) (*connect.Response[v1.PutServiceSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutServiceSettings is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) PutLookupSettings(context.Context, *connect.Request[v1.PutLookupSettingsRequest]) (*connect.Response[v1.PutLookupSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutLookupSettings is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) PutMaxMindSettings(context.Context, *connect.Request[v1.PutMaxMindSettingsRequest]) (*connect.Response[v1.PutMaxMindSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutMaxMindSettings is not implemented"))
+}
+
+func (UnimplementedSystemServiceHandler) PutSetupSettings(context.Context, *connect.Request[v1.PutSetupSettingsRequest]) (*connect.Response[v1.PutSetupSettingsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("gastrolog.v1.SystemService.PutSetupSettings is not implemented"))
 }
 
 func (UnimplementedSystemServiceHandler) RegenerateJwtSecret(context.Context, *connect.Request[v1.RegenerateJwtSecretRequest]) (*connect.Response[v1.RegenerateJwtSecretResponse], error) {

@@ -242,7 +242,8 @@ func (s *SystemServer) setDefaultCert(ctx context.Context, name string) error {
 		return errInternal(err)
 	}
 	ss.TLS.DefaultCert = name
-	if err := s.sysStore.SaveServerSettings(ctx, ss); err != nil {
+	saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyServiceSettings)
+	if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
 		return errInternal(err)
 	}
 	return nil
@@ -282,7 +283,8 @@ func (s *SystemServer) DeleteCertificate(
 		ss.TLS.DefaultCert = ""
 		ss.TLS.TLSEnabled = false
 		ss.TLS.HTTPToHTTPSRedirect = false
-		if err := s.sysStore.SaveServerSettings(ctx, ss); err != nil {
+		saveCtx := system.WithSaveServerSettingsNotifyKey(ctx, system.NotifyKeyServiceSettings)
+		if err := s.sysStore.SaveServerSettings(saveCtx, ss); err != nil {
 			return nil, errInternal(err)
 		}
 	}

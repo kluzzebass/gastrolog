@@ -49,21 +49,21 @@ func TestNavigateDescriptor(t *testing.T) {
 }
 
 func TestNavigateDescriptorPut(t *testing.T) {
-	putDesc := (&v1.PutSettingsRequest{}).ProtoReflect().Descriptor()
-
 	tests := []struct {
-		name   string
-		path   []string
-		expect string
+		name    string
+		putRoot string
+		path    []string
+		expect  string
 	}{
-		{"put auth", []string{"auth"}, "gastrolog.v1.PutAuthSettings"},
-		{"put auth.password_policy", []string{"auth", "password_policy"}, "gastrolog.v1.PutPasswordPolicySettings"},
-		{"put query", []string{"query"}, "gastrolog.v1.PutQuerySettings"},
-		{"put maxmind", []string{"maxmind"}, "gastrolog.v1.PutMaxMindSettings"},
+		{"put auth", "service", []string{"auth"}, "gastrolog.v1.PutAuthSettings"},
+		{"put auth.password_policy", "service", []string{"auth", "password_policy"}, "gastrolog.v1.PutPasswordPolicySettings"},
+		{"put query", "service", []string{"query"}, "gastrolog.v1.PutQuerySettings"},
+		{"put maxmind", "maxmind", []string{"maxmind"}, "gastrolog.v1.PutMaxMindSettings"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			putDesc := putRequestDescriptor(tt.putRoot)
 			got := navigateDescriptor(putDesc, tt.path)
 			if got == nil {
 				t.Fatalf("expected %s, got nil", tt.expect)
@@ -130,8 +130,8 @@ func TestNavigateMessage(t *testing.T) {
 }
 
 func TestEnsureSubMessage(t *testing.T) {
-	req := &v1.PutSettingsRequest{}
-	msg := req.ProtoReflect()
+	svc := &v1.PutServiceSettingsRequest{}
+	msg := svc.ProtoReflect()
 
 	// Ensure auth sub-message is created.
 	auth := ensureSubMessage(msg, []string{"auth"})
@@ -146,12 +146,11 @@ func TestEnsureSubMessage(t *testing.T) {
 	}
 	auth.Set(fd, protoreflect.ValueOfString("1h"))
 
-	// Verify the PutSettingsRequest was mutated.
-	if req.Auth == nil {
+	if svc.Auth == nil {
 		t.Fatal("expected Auth to be set on request")
 	}
-	if *req.Auth.TokenDuration != "1h" {
-		t.Fatalf("expected 1h, got %v", req.Auth.TokenDuration)
+	if *svc.Auth.TokenDuration != "1h" {
+		t.Fatalf("expected 1h, got %v", svc.Auth.TokenDuration)
 	}
 
 	// Ensure nested path creates intermediate messages.
@@ -162,25 +161,26 @@ func TestEnsureSubMessage(t *testing.T) {
 	fd = pp.Descriptor().Fields().ByName("min_length")
 	pp.Set(fd, protoreflect.ValueOfInt32(12))
 
-	if req.Auth.PasswordPolicy == nil {
+	if svc.Auth.PasswordPolicy == nil {
 		t.Fatal("expected PasswordPolicy to be set")
 	}
-	if *req.Auth.PasswordPolicy.MinLength != 12 {
-		t.Fatalf("expected 12, got %v", req.Auth.PasswordPolicy.MinLength)
+	if *svc.Auth.PasswordPolicy.MinLength != 12 {
+		t.Fatalf("expected 12, got %v", svc.Auth.PasswordPolicy.MinLength)
 	}
 
-	// Ensure top-level maxmind creates the sub-message (was previously nested under lookup).
-	mm := ensureSubMessage(msg, []string{"maxmind"})
+	mmReq := &v1.PutMaxMindSettingsRequest{}
+	mmMsg := mmReq.ProtoReflect()
+	mm := ensureSubMessage(mmMsg, []string{"maxmind"})
 	if mm == nil {
 		t.Fatal("expected non-nil maxmind sub-message")
 	}
 	fd = mm.Descriptor().Fields().ByName("auto_download")
 	mm.Set(fd, protoreflect.ValueOfBool(true))
 
-	if req.Maxmind == nil {
+	if mmReq.Maxmind == nil {
 		t.Fatal("expected Maxmind to be set")
 	}
-	if *req.Maxmind.AutoDownload != true {
+	if *mmReq.Maxmind.AutoDownload != true {
 		t.Fatal("expected auto_download to be true")
 	}
 }
@@ -268,11 +268,10 @@ func TestSettingsGroupsFieldMappings(t *testing.T) {
 	// This validates the same thing as init() but as an explicit test
 	// that provides clearer diagnostics if it fails.
 	getDesc := (&v1.GetSettingsResponse{}).ProtoReflect().Descriptor()
-	putDesc := (&v1.PutSettingsRequest{}).ProtoReflect().Descriptor()
 
 	for _, g := range settingsGroups {
 		getSubDesc := navigateDescriptor(getDesc, g.getPath)
-		putSubDesc := navigateDescriptor(putDesc, g.setPath)
+		putSubDesc := navigateDescriptor(putRequestDescriptor(g.putRoot), g.setPath)
 
 		if getSubDesc == nil {
 			t.Errorf("group %q: getPath %v does not resolve to a message", g.name, g.getPath)
@@ -389,8 +388,7 @@ func TestProtoGetTyped(t *testing.T) {
 }
 
 func TestApplyFlag(t *testing.T) {
-	// Build a PutSettingsRequest and get sub-messages to mutate.
-	req := &v1.PutSettingsRequest{}
+	req := &v1.PutServiceSettingsRequest{}
 	msg := req.ProtoReflect()
 
 	// String field: auth.token_duration.

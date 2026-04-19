@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
 import { formatDateTimestamp } from "../../../utils/temporal";
-import { usePutSettings, MAXMIND_KEEP } from "../../../api/hooks/useSettings";
+import { usePutMaxMindSettings, MAXMIND_KEEP } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { FormField, TextInput } from "../FormField";
 import { Checkbox } from "../Checkbox";
@@ -24,7 +24,7 @@ export function MaxMindCard({
   addToast: (msg: string, type: "info" | "error") => void;
 }>) {
   const c = useThemeClass(dark);
-  const putConfig = usePutSettings();
+  const putConfig = usePutMaxMindSettings();
   const { isExpanded, toggle } = useExpandedCards();
 
   const [autoDownload, setAutoDownload] = useState(savedMaxmind?.autoDownload ?? false);
@@ -51,7 +51,7 @@ export function MaxMindCard({
       licenseKey: licenseKey || MAXMIND_KEEP,
     };
     try {
-      await putConfig.mutateAsync({ maxmind });
+      await putConfig.mutateAsync({ maxmind: { ...maxmind } });
       setJustSaved(true);
       requestAnimationFrame(() => setJustSaved(false));
       setAccountId("");
@@ -64,9 +64,7 @@ export function MaxMindCard({
 
   const handleDelete = async () => {
     try {
-      await putConfig.mutateAsync({
-        maxmind: { autoDownload: false },
-      });
+      await putConfig.mutateAsync({ maxmind: { autoDownload: false } });
       setVisible(false);
       setAutoDownload(false);
       setAccountId("");

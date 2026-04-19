@@ -50,8 +50,18 @@ service SystemService {
   // GetSettings returns system settings (auth, query, scheduler, TLS, lookup).
   rpc GetSettings(GetSettingsRequest) returns (GetSettingsResponse);
 
-  // PutSettings updates system settings. Only fields explicitly set are updated.
-  rpc PutSettings(PutSettingsRequest) returns (PutSettingsResponse);
+  // PutServiceSettings updates auth, query, scheduler, TLS, and cluster settings.
+  // Only fields explicitly set in the request are merged.
+  rpc PutServiceSettings(PutServiceSettingsRequest) returns (PutServiceSettingsResponse);
+
+  // PutLookupSettings updates HTTP/JSON/YAML/MMDB/CSV/static lookup tables.
+  rpc PutLookupSettings(PutLookupSettingsRequest) returns (PutLookupSettingsResponse);
+
+  // PutMaxMindSettings updates MaxMind auto-download configuration.
+  rpc PutMaxMindSettings(PutMaxMindSettingsRequest) returns (PutMaxMindSettingsResponse);
+
+  // PutSetupSettings updates setup-wizard dismissal state.
+  rpc PutSetupSettings(PutSetupSettingsRequest) returns (PutSetupSettingsResponse);
 
   // RegenerateJwtSecret generates a new random JWT signing secret, replacing the
   // existing one. All active sessions are immediately invalidated cluster-wide.
@@ -520,7 +530,7 @@ message GetSettingsResponse {
   MaxMindSettings maxmind = 10;
 }
 
-// Sub-messages for PutSettingsRequest (optional fields for merge semantics).
+// Sub-messages for Put*Settings requests (optional fields for merge semantics).
 
 message PutPasswordPolicySettings {
   optional int32 min_length = 1;
@@ -562,7 +572,7 @@ message PutMaxMindSettings {
 }
 
 message PutLookupSettings {
-  reserved 1, 2, 3;  // 1: geoip_db_path, 2: asn_db_path, 3: maxmind (moved to PutSettingsRequest)
+  reserved 1, 2, 3;  // 1: geoip_db_path, 2: asn_db_path, 3: maxmind (moved to PutMaxMindSettingsRequest)
   repeated HTTPLookupEntry http_lookups = 4; // replaces the full list when present
   repeated JSONFileLookupEntry json_file_lookups = 5; // replaces the full list when present
   repeated MMDBLookupEntry mmdb_lookups = 6; // replaces the full list when present
@@ -575,21 +585,33 @@ message PutClusterSettings {
   optional string broadcast_interval = 1;
 }
 
-message PutSettingsRequest {
+message PutServiceSettingsRequest {
   PutAuthSettings auth = 1;
   PutQuerySettings query = 2;
   PutSchedulerSettings scheduler = 3;
   PutTLSSettings tls = 4;
-  PutLookupSettings lookup = 5;
-  optional bool setup_wizard_dismissed = 6;
-  PutClusterSettings cluster = 7;
-  PutMaxMindSettings maxmind = 8;
+  PutClusterSettings cluster = 5;
 }
 
-message PutSettingsResponse {
-  MmdbValidation geoip_validation = 1; // Populated when geoip_db_path was set.
-  MmdbValidation asn_validation = 2;   // Populated when asn_db_path was set.
+message PutServiceSettingsResponse {}
+
+message PutLookupSettingsRequest {
+  PutLookupSettings lookup = 1;
 }
+
+message PutLookupSettingsResponse {}
+
+message PutMaxMindSettingsRequest {
+  PutMaxMindSettings maxmind = 1;
+}
+
+message PutMaxMindSettingsResponse {}
+
+message PutSetupSettingsRequest {
+  optional bool setup_wizard_dismissed = 1;
+}
+
+message PutSetupSettingsResponse {}
 
 message RegenerateJwtSecretRequest {}
 message RegenerateJwtSecretResponse {}

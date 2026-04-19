@@ -445,10 +445,11 @@ func (s *Server) runMaxMindUpdate(registry lookup.Registry) {
 	s.registerMMDBLookups(ss.Lookup, registry)
 
 	// Update the last-update timestamp.
-	saveCtx, saveCancel := context.WithTimeout(ctx, systemLoadTimeout)
+	timeoutCtx, saveCancel := context.WithTimeout(ctx, systemLoadTimeout)
 	defer saveCancel()
 	ss.MaxMind.LastUpdate = time.Now()
-	if err := s.cfgStore.SaveServerSettings(saveCtx, ss); err != nil {
+	persistCtx := system.WithSaveServerSettingsNotifyKey(timeoutCtx, system.NotifyKeyMaxMindSettings)
+	if err := s.cfgStore.SaveServerSettings(persistCtx, ss); err != nil {
 		s.logger.Warn("maxmind update: save timestamp failed", "error", err)
 	}
 }

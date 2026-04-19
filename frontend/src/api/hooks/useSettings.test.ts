@@ -5,11 +5,11 @@ import { createTestQueryClient, wrapper } from "../../../test/render";
 
 const mocks = installMockClients();
 
-import { useSettings, usePutSettings } from "./useSettings";
+import { useSettings, usePutServiceSettings } from "./useSettings";
 
 beforeEach(() => {
   m(mocks.systemClient, "getSettings").mockClear();
-  m(mocks.systemClient, "putSettings").mockClear();
+  m(mocks.systemClient, "putServiceSettings").mockClear();
 });
 
 describe("useSettings", () => {
@@ -26,13 +26,13 @@ describe("useSettings", () => {
   });
 });
 
-describe("usePutSettings", () => {
+describe("usePutServiceSettings", () => {
   test("sends settings and invalidates cache", async () => {
-    m(mocks.systemClient, "putSettings").mockResolvedValueOnce({});
+    m(mocks.systemClient, "putServiceSettings").mockResolvedValueOnce({});
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], { auth: {} });
 
-    const { result } = renderHook(() => usePutSettings(), { wrapper: wrapper(qc) });
+    const { result } = renderHook(() => usePutServiceSettings(), { wrapper: wrapper(qc) });
 
     await act(async () => {
       await result.current.mutateAsync({
@@ -40,7 +40,7 @@ describe("usePutSettings", () => {
       });
     });
 
-    expect(m(mocks.systemClient, "putSettings")).toHaveBeenCalledTimes(1);
+    expect(m(mocks.systemClient, "putServiceSettings")).toHaveBeenCalledTimes(1);
     expect(qc.getQueryState(["settings"])?.isInvalidated).toBe(true);
   });
 });

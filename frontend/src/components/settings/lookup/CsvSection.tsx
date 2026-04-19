@@ -1,7 +1,7 @@
 import { encode } from "../../../api/glid";
 import { useState, useEffect } from "react";
 import { useThemeClass } from "../../../hooks/useThemeClass";
-import { usePutSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
+import { usePutLookupSettings, usePreviewCSVLookup } from "../../../api/hooks/useSettings";
 import { useExpandedCards } from "../../../hooks/useExpandedCards";
 import { useLookupCrud } from "./useLookupCrud";
 import { FormField, TextInput, SelectInput } from "../FormField";
@@ -212,7 +212,7 @@ export function CsvAddForm({
   existingLookups: CSVLookupDraft[];
   namePlaceholder: string;
 }) {
-  const putConfig = usePutSettings();
+  const putConfig = usePutLookupSettings();
   const [draft, setDraft] = useState<CSVLookupDraft>(() => emptyCsvDraft());
 
   const handleCreate = async () => {
@@ -220,7 +220,7 @@ export function CsvAddForm({
     if (!final.name) return;
     const updated = [...existingLookups, final];
     try {
-      await putConfig.mutateAsync({ lookup: { csvLookups: serializeCsvLookups(updated) } });
+      await putConfig.mutateAsync({ csvLookups: serializeCsvLookups(updated) });
       onCreated(final);
       addToast(`CSV lookup "${final.name}" created`, "info");
     } catch (err: unknown) {

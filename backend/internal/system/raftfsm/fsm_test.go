@@ -205,7 +205,7 @@ func TestApplyPutServerSettings(t *testing.T) {
 	cmd, err := command.NewPutServerSettings(system.ServerSettings{
 		Auth:      system.AuthConfig{JWTSecret: "test-secret"},
 		Scheduler: system.SchedulerConfig{MaxConcurrentJobs: 4},
-	})
+	}, "")
 	if err != nil {
 		t.Fatalf("NewPutServerSettings: %v", err)
 	}
@@ -705,7 +705,7 @@ func TestSnapshotRestore(t *testing.T) {
 		Params: map[string]string{"port": "514"},
 	}))
 
-	settingsCmd, err := command.NewPutServerSettings(system.ServerSettings{})
+	settingsCmd, err := command.NewPutServerSettings(system.ServerSettings{}, "")
 	if err != nil {
 		t.Fatalf("NewPutServerSettings: %v", err)
 	}

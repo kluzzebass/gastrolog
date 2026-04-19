@@ -188,13 +188,11 @@ func importEntities(ctx context.Context, client *server.Client, doc *exportDoc) 
 		_, _ = fmt.Fprintf(os.Stderr, "Warning: skipping user %q — cannot create without password\n", u.Username)
 	}
 
-	if req := buildSettingsRequest(doc); req != nil {
-		_, err := client.System.PutSettings(ctx, connect.NewRequest(req))
-		if err != nil {
-			return imported, fmt.Errorf("import server config: %w", err)
-		}
-		imported++
+	n, err := importServerSettings(ctx, client, doc)
+	if err != nil {
+		return imported, err
 	}
+	imported += n
 
 	return imported, nil
 }
@@ -266,13 +264,39 @@ func deleteAll(ctx context.Context, client *server.Client) error {
 	return nil
 }
 
-// buildSettingsRequest converts the hierarchical export fields into a PutSettingsRequest.
-// Returns nil when no server settings are present.
-func buildSettingsRequest(doc *exportDoc) *v1.PutSettingsRequest {
-	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil && doc.MaxMind == nil && !doc.SetupWizardDismissed {
+// importServerSettings applies hierarchical export fields via the split
+// settings RPCs. Returns how many RPCs ran.
+func importServerSettings(ctx context.Context, client *server.Client, doc *exportDoc) (int, error) {
+	n := 0
+	if svc := buildPutServiceSettingsRequest(doc); svc != nil {
+		if _, err := client.System.PutServiceSettings(ctx, connect.NewRequest(svc)); err != nil {
+			return n, fmt.Errorf("import server config (service): %w", err)
+		}
+		n++
+	}
+	if mm := buildPutMaxMindSettingsRequest(doc); mm != nil {
+		if _, err := client.System.PutMaxMindSettings(ctx, connect.NewRequest(mm)); err != nil {
+			return n, fmt.Errorf("import server config (maxmind): %w", err)
+		}
+		n++
+	}
+	if doc.SetupWizardDismissed {
+		dismiss := true
+		if _, err := client.System.PutSetupSettings(ctx, connect.NewRequest(&v1.PutSetupSettingsRequest{
+			SetupWizardDismissed: &dismiss,
+		})); err != nil {
+			return n, fmt.Errorf("import server config (setup): %w", err)
+		}
+		n++
+	}
+	return n, nil
+}
+
+func buildPutServiceSettingsRequest(doc *exportDoc) *v1.PutServiceSettingsRequest {
+	if doc.Auth == nil && doc.Query == nil && doc.Scheduler == nil && doc.TLS == nil {
 		return nil
 	}
-	req := &v1.PutSettingsRequest{}
+	req := &v1.PutServiceSettingsRequest{}
 	if doc.Auth != nil {
 		req.Auth = buildAuthSettings(doc.Auth)
 	}
@@ -285,13 +309,14 @@ func buildSettingsRequest(doc *exportDoc) *v1.PutSettingsRequest {
 	if doc.TLS != nil {
 		req.Tls = buildTLSSettings(doc.TLS)
 	}
-	if doc.MaxMind != nil {
-		req.Maxmind = buildMaxMindSettings(doc.MaxMind)
-	}
-	if doc.SetupWizardDismissed {
-		req.SetupWizardDismissed = &doc.SetupWizardDismissed
-	}
 	return req
+}
+
+func buildPutMaxMindSettingsRequest(doc *exportDoc) *v1.PutMaxMindSettingsRequest {
+	if doc.MaxMind == nil {
+		return nil
+	}
+	return &v1.PutMaxMindSettingsRequest{Maxmind: buildMaxMindSettings(doc.MaxMind)}
 }
 
 func buildAuthSettings(a *authExport) *v1.PutAuthSettings {

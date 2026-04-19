@@ -437,7 +437,10 @@ func (d *configDispatcher) handleIngesterDeleted(n raftfsm.Notification) {
 }
 
 func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
-	if key != "server" {
+	switch key {
+	case system.NotifyKeyServerSettingsRaftLegacy, system.NotifyKeyServiceSettings:
+		// These paths may change scheduler limits.
+	default:
 		return
 	}
 
@@ -446,9 +449,9 @@ func (d *configDispatcher) handleSettingPut(ctx context.Context, key string) {
 		d.logger.Error("dispatch: load server settings", "error", err)
 		return
 	}
-	// Only rebuild when MaxConcurrentJobs actually changed. PutSettings is
-	// also used for lookups, TLS, auth, etc., all of which fire this same
-	// NotifySettingPut("server") — rebuilding the scheduler on every one of
+	// Only rebuild when MaxConcurrentJobs actually changed. Legacy
+	// NotifySettingPut("server") and service saves share this path;
+	// lookup-only saves use a different key — rebuilding the scheduler on every one of
 	// those calls shuts down the whole scheduler and waits for in-flight
 	// jobs, which causes gocron Shutdown timeouts on busy nodes.
 	if ss.Scheduler.MaxConcurrentJobs > 0 && ss.Scheduler.MaxConcurrentJobs != d.orch.MaxConcurrentJobs() {
