@@ -4,10 +4,10 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"iter"
 	"log/slog"
 	"regexp"
@@ -21,7 +21,6 @@ import (
 	"gastrolog/internal/logging"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
-
 )
 
 // OrderBy specifies which timestamp field to use for ordering search results.

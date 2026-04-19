@@ -1,9 +1,9 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"iter"
 	"maps"
 	"slices"
@@ -14,7 +14,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/lookup"
 	"gastrolog/internal/querylang"
-
 )
 
 // runTimechart executes a timechart pipeline operator. It counts records by
@@ -382,7 +381,7 @@ func timechartChunkGroups(
 		bStart := start.Add(bucketWidth * time.Duration(b))
 		bEnd := start.Add(bucketWidth * time.Duration(b+1))
 
-		startPos, startOK := findIngestPos(cm, im, meta.ID,bStart)
+		startPos, startOK := findIngestPos(cm, im, meta.ID, bStart)
 		if !startOK {
 			continue
 		}
@@ -390,7 +389,7 @@ func timechartChunkGroups(
 		var endPos uint64
 		if !meta.IngestEnd.IsZero() && !bEnd.Before(meta.IngestEnd) {
 			endPos = uint64(meta.RecordCount) //nolint:gosec // G115: RecordCount is always non-negative
-		} else if pos, ok := findIngestPos(cm, im, meta.ID,bEnd); ok {
+		} else if pos, ok := findIngestPos(cm, im, meta.ID, bEnd); ok {
 			endPos = pos
 		}
 
@@ -651,4 +650,3 @@ func timechartChunkByIndex(
 		}
 	}
 }
-

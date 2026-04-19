@@ -1,10 +1,9 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"gastrolog/internal/chunk"
+	"gastrolog/internal/glid"
 	"gastrolog/internal/index"
-
 )
 
 // VaultRegistry provides access to all vaults' chunk and index managers.

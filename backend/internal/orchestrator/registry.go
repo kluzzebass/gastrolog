@@ -1,15 +1,14 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"bytes"
 	"fmt"
+	"gastrolog/internal/glid"
 	"slices"
 
 	"gastrolog/internal/chunk"
 	"gastrolog/internal/index"
 	"gastrolog/internal/query"
-
 )
 
 // RegisterVault adds a vault to the registry.

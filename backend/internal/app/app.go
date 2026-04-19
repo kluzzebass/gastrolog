@@ -197,7 +197,7 @@ func Run(ctx context.Context, logger *slog.Logger, cfg RunConfig) error {
 
 	groupMgr, tierWAL, nodeAddrResolver := setupMultiRaft(clusterSrv, rawStore, nodeID, homeDir, logger)
 
-	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver)
+	factories := buildFactories(logger, homeDir, vaultsDir, cfgStore, orch, certMgr, cfg.SlogCapture, cfg.SlogCaptureHandler, alertCollector, groupMgr, nodeAddrResolver, nodeID)
 	if clusterSrv != nil {
 		factories.PeerConns = clusterSrv.PeerConns()
 	}
@@ -1085,7 +1085,7 @@ func setupMultiRaft(clusterSrv *cluster.Server, rawStore system.Store, nodeID, h
 	return groupMgr, wal, resolver
 }
 
-func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool)) orchestrator.Factories {
+func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore system.Store, orch *orchestrator.Orchestrator, certMgr *cert.Manager, slogCh <-chan logging.CapturedRecord, slogCapture *logging.CaptureHandler, alertCollector *alert.Collector, groupMgr *raftgroup.GroupManager, nodeAddrResolver func(string) (string, bool), nodeID string) orchestrator.Factories {
 	reg := func(factory orchestrator.IngesterFactory, defaults func() map[string]string, tester orchestrator.ConnectionTester) orchestrator.IngesterRegistration {
 		return orchestrator.IngesterRegistration{Factory: factory, Defaults: defaults, Tester: tester}
 	}
@@ -1102,7 +1102,7 @@ func buildFactories(logger *slog.Logger, homeDir, vaultsDir string, cfgStore sys
 	//   listeners                — OS-level port coordination, concept doesn't apply
 	ingesterTypes := map[string]orchestrator.IngesterRegistration{
 		"chatterbox": regHA(chatterbox.NewIngester, chatterbox.ParamDefaults, nil),
-		"scatterbox": regHA(scatterbox.NewIngester, scatterbox.ParamDefaults, nil),
+		"scatterbox": regHA(scatterbox.NewFactory(nodeID), scatterbox.ParamDefaults, nil),
 		"docker": reg(ingestdocker.NewFactory(cfgStore), ingestdocker.ParamDefaults,
 			func(ctx context.Context, params map[string]string) (string, error) {
 				return ingestdocker.TestConnection(ctx, params, cfgStore)

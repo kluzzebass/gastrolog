@@ -1,10 +1,10 @@
 package query
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
 	"fmt"
+	"gastrolog/internal/glid"
 	"strings"
 	"time"
 
@@ -12,7 +12,6 @@ import (
 	"gastrolog/internal/index"
 	"gastrolog/internal/querylang"
 	"gastrolog/internal/tokenizer"
-
 )
 
 // QueryPlan describes how a query will be executed across chunks.
@@ -123,8 +122,8 @@ func (e *Engine) buildChunkPlan(ctx context.Context, q Query, meta chunk.ChunkMe
 		ChunkID:       meta.ID,
 		Sealed:        meta.Sealed,
 		RecordCount:   int(meta.RecordCount),
-		WriteStart:       meta.WriteStart,
-		WriteEnd:         meta.WriteEnd,
+		WriteStart:    meta.WriteStart,
+		WriteEnd:      meta.WriteEnd,
 		RuntimeFilter: "none",
 	}
 
@@ -485,10 +484,10 @@ func (e *Engine) buildTokenStep(pipeline *[]PipelineStep, tokens []string, meta 
 
 // tokenLookupResult holds the result of looking up tokens in the token index.
 type tokenLookupResult struct {
-	positions        []uint64
-	allFound         bool
-	missingToken     string
-	missingReason    string
+	positions         []uint64
+	allFound          bool
+	missingToken      string
+	missingReason     string
 	missingDefinitive bool
 }
 
@@ -502,8 +501,8 @@ func (e *Engine) lookupTokenPositions(tokens []string, meta chunk.ChunkMeta, tok
 		if !found {
 			reason, definitive := classifyTokenMiss(tok)
 			return tokenLookupResult{
-				missingToken:     tok,
-				missingReason:    reason,
+				missingToken:      tok,
+				missingReason:     reason,
 				missingDefinitive: definitive,
 			}
 		}
@@ -664,12 +663,12 @@ type kvLookupResult struct {
 
 // kvIndexes holds all opened KV-related indexes for a chunk.
 type kvIndexes struct {
-	attrKV     *index.Index[index.AttrKVIndexEntry]
-	attrKVErr  error
-	attrKey    *index.Index[index.AttrKeyIndexEntry]
-	attrKeyErr error
-	attrVal    *index.Index[index.AttrValueIndexEntry]
-	attrValErr error
+	attrKV      *index.Index[index.AttrKVIndexEntry]
+	attrKVErr   error
+	attrKey     *index.Index[index.AttrKeyIndexEntry]
+	attrKeyErr  error
+	attrVal     *index.Index[index.AttrValueIndexEntry]
+	attrValErr  error
 	kv          *index.Index[index.KVIndexEntry]
 	kvStatus    index.KVIndexStatus
 	kvErr       error
