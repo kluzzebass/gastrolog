@@ -30,7 +30,13 @@ export function useCrudHandlers<TEdit, TSaveArgs, TDeleteArgs = string>({
     try {
       const args = onSaveTransform(id, edit);
       await mutation.mutateAsync(args);
-      clearEdit?.(id);
+      // Do not eagerly clear edit state on success. Some backend mutations
+      // acknowledge before the returned system snapshot advances; if we clear
+      // immediately, fields can snap back to stale defaults and then forward
+      // again once WatchSystem/GetSystem catches up.
+      //
+      // useEditState will naturally drop stale edits when defaults change,
+      // so keeping the edit here avoids visible bounce without long-lived drift.
       addToast(`${label} "${id}" updated`, "info");
     } catch (err: unknown) {
       addToast(err instanceof Error ? err.message : `Failed to update ${label.toLowerCase()}`, "error");

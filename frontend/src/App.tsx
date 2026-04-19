@@ -2,16 +2,10 @@ import { Outlet } from "@tanstack/react-router";
 import { useThemeSync } from "./hooks/useThemeSync";
 import { useThemeClass } from "./hooks/useThemeClass";
 import { ToastProvider } from "./components/Toast";
-import { useWatchSystem } from "./api/hooks/useWatchSystem";
-import { useWatchChunks } from "./api/hooks/useWatchChunks";
-import { useWatchSystemStatus } from "./api/hooks/useWatchSystemStatus";
 
 export function App() {
   const { dark } = useThemeSync();
   const c = useThemeClass(dark);
-  useWatchSystem();
-  useWatchChunks();
-  useWatchSystemStatus();
 
   return (
     <ToastProvider dark={dark}>

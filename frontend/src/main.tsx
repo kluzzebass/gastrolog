@@ -5,6 +5,7 @@ import { ReactQueryDevtools } from "@tanstack/react-query-devtools";
 import { RouterProvider } from "@tanstack/react-router";
 import { router } from "./router";
 import { toastError } from "./components/Toast";
+import { WatchStreamsHost } from "./WatchStreamsHost";
 import "./styles/main.css";
 
 const queryClient = new QueryClient({
@@ -20,10 +21,11 @@ const queryClient = new QueryClient({
 });
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
+  <QueryClientProvider client={queryClient}>
+    <WatchStreamsHost />
+    <React.StrictMode>
       <RouterProvider router={router} />
       <ReactQueryDevtools buttonPosition="bottom-left" />
-    </QueryClientProvider>
-  </React.StrictMode>,
+    </React.StrictMode>
+  </QueryClientProvider>,
 );

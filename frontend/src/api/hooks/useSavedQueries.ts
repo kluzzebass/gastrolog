@@ -15,11 +15,13 @@ export function usePutSavedQuery() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (args: { name: string; query: string }) => {
-      await systemClient.putSavedQuery({
+      return systemClient.putSavedQuery({
         query: { name: args.name, query: args.query },
       });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["savedQueries"] }),
+    onSuccess: (res) => {
+      qc.setQueryData(["savedQueries"], res.savedQueries?.queries ?? []);
+    },
   });
 }
 
@@ -27,8 +29,10 @@ export function useDeleteSavedQuery() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (name: string) => {
-      await systemClient.deleteSavedQuery({ name });
+      return systemClient.deleteSavedQuery({ name });
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["savedQueries"] }),
+    onSuccess: (res) => {
+      qc.setQueryData(["savedQueries"], res.savedQueries?.queries ?? []);
+    },
   });
 }

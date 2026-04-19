@@ -174,9 +174,9 @@ message GetSystemResponse {
   repeated RetentionPolicyConfig retention_policies = 5;
   repeated NodeConfig node_configs = 6;
   repeated RouteConfig routes = 7;
-  // Monotonically increasing version derived from the Raft log index.
-  // Used by the frontend to avoid regressing the cache with stale reads.
-  uint64 system_version = 9;
+  // Committed log index on the system Raft group (monotonic). Used by clients
+  // to avoid regressing cached replicated state with stale reads.
+  uint64 system_raft_index = 9;
   repeated ManagedFileInfo managed_files = 8;
   repeated CloudService cloud_services = 10;
   repeated NodeStorageConfig node_storage_configs = 11;
@@ -593,28 +593,46 @@ message PutServiceSettingsRequest {
   PutClusterSettings cluster = 5;
 }
 
-message PutServiceSettingsResponse {}
+// SettingsMutationEcho is returned after successful server-settings mutations so
+// clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
+// GetSystemResponse.system_raft_index for cache coherence.
+message SettingsMutationEcho {
+  GetSettingsResponse settings = 1;
+  uint64 system_raft_index = 2;
+}
+
+message PutServiceSettingsResponse {
+  SettingsMutationEcho echo = 1;
+}
 
 message PutLookupSettingsRequest {
   PutLookupSettings lookup = 1;
 }
 
-message PutLookupSettingsResponse {}
+message PutLookupSettingsResponse {
+  SettingsMutationEcho echo = 1;
+}
 
 message PutMaxMindSettingsRequest {
   PutMaxMindSettings maxmind = 1;
 }
 
-message PutMaxMindSettingsResponse {}
+message PutMaxMindSettingsResponse {
+  SettingsMutationEcho echo = 1;
+}
 
 message PutSetupSettingsRequest {
   optional bool setup_wizard_dismissed = 1;
 }
 
-message PutSetupSettingsResponse {}
+message PutSetupSettingsResponse {
+  SettingsMutationEcho echo = 1;
+}
 
 message RegenerateJwtSecretRequest {}
-message RegenerateJwtSecretResponse {}
+message RegenerateJwtSecretResponse {
+  SettingsMutationEcho echo = 1;
+}
 
 // MmdbValidation is the result of probing a MaxMind MMDB file on save.
 message MmdbValidation {
@@ -639,7 +657,9 @@ message PutPreferencesRequest {
   string palette = 3;
 }
 
-message PutPreferencesResponse {}
+message PutPreferencesResponse {
+  GetPreferencesResponse preferences = 1;
+}
 
 message SavedQuery {
   string name = 1;
@@ -656,13 +676,17 @@ message PutSavedQueryRequest {
   SavedQuery query = 1;
 }
 
-message PutSavedQueryResponse {}
+message PutSavedQueryResponse {
+  GetSavedQueriesResponse saved_queries = 1;
+}
 
 message DeleteSavedQueryRequest {
   string name = 1;
 }
 
-message DeleteSavedQueryResponse {}
+message DeleteSavedQueryResponse {
+  GetSavedQueriesResponse saved_queries = 1;
+}
 
 message ListCertificatesRequest {}
 
@@ -829,10 +853,10 @@ message GenerateNameResponse {
 message WatchSystemRequest {}
 
 message WatchSystemResponse {
-  // The config version (Raft log index) that triggered this notification.
-  // Clients should only invalidate their config cache when this version
-  // exceeds the version they already hold from a mutation response.
-  uint64 system_version = 1;
+  // Committed log index on the system Raft group when this notification fired.
+  // Clients should only invalidate or refetch when this index exceeds the
+  // highest system_raft_index they already hold from a fetch or mutation.
+  uint64 system_raft_index = 1;
 }
 
 message GetRouteStatsRequest {}
@@ -1005,4 +1029,6 @@ message DeleteLookupRequest {
   string name = 1; // Lookup name (unique across all types).
 }
 
-message DeleteLookupResponse {}
+message DeleteLookupResponse {
+  SettingsMutationEcho echo = 1;
+}

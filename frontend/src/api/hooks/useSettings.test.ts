@@ -27,8 +27,16 @@ describe("useSettings", () => {
 });
 
 describe("usePutServiceSettings", () => {
-  test("sends settings and invalidates cache", async () => {
-    m(mocks.systemClient, "putServiceSettings").mockResolvedValueOnce({});
+  test("sends settings and applies echo to settings cache", async () => {
+    m(mocks.systemClient, "putServiceSettings").mockResolvedValueOnce({
+      echo: {
+        settings: {
+          auth: {},
+          query: { timeout: "60s", maxFollowDuration: "", maxResultCount: 500 },
+        },
+        systemRaftIndex: 2n,
+      },
+    });
     const qc = createTestQueryClient();
     qc.setQueryData(["settings"], { auth: {} });
 
@@ -41,6 +49,9 @@ describe("usePutServiceSettings", () => {
     });
 
     expect(m(mocks.systemClient, "putServiceSettings")).toHaveBeenCalledTimes(1);
-    expect(qc.getQueryState(["settings"])?.isInvalidated).toBe(true);
+    expect(qc.getQueryState(["settings"])?.isInvalidated).toBeFalsy();
+    const cached = qc.getQueryData<{ query?: { timeout?: string; maxResultCount?: number } }>(["settings"]);
+    expect(cached?.query?.timeout).toBe("60s");
+    expect(cached?.query?.maxResultCount).toBe(500);
   });
 });

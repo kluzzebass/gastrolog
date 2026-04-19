@@ -150,12 +150,12 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
   routes: RouteConfig[] = [];
 
   /**
-   * Monotonically increasing version derived from the Raft log index.
-   * Used by the frontend to avoid regressing the cache with stale reads.
+   * Committed log index on the system Raft group (monotonic). Used by clients
+   * to avoid regressing cached replicated state with stale reads.
    *
-   * @generated from field: uint64 system_version = 9;
+   * @generated from field: uint64 system_raft_index = 9;
    */
-  systemVersion = protoInt64.zero;
+  systemRaftIndex = protoInt64.zero;
 
   /**
    * @generated from field: repeated gastrolog.v1.ManagedFileInfo managed_files = 8;
@@ -192,7 +192,7 @@ export class GetSystemResponse extends Message<GetSystemResponse> {
     { no: 5, name: "retention_policies", kind: "message", T: RetentionPolicyConfig, repeated: true },
     { no: 6, name: "node_configs", kind: "message", T: NodeConfig, repeated: true },
     { no: 7, name: "routes", kind: "message", T: RouteConfig, repeated: true },
-    { no: 9, name: "system_version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 9, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
     { no: 8, name: "managed_files", kind: "message", T: ManagedFileInfo, repeated: true },
     { no: 10, name: "cloud_services", kind: "message", T: CloudService, repeated: true },
     { no: 11, name: "node_storage_configs", kind: "message", T: NodeStorageConfig, repeated: true },
@@ -3466,9 +3466,61 @@ export class PutServiceSettingsRequest extends Message<PutServiceSettingsRequest
 }
 
 /**
+ * SettingsMutationEcho is returned after successful server-settings mutations so
+ * clients can mirror GetSettings without a follow-up RPC. system_raft_index matches
+ * GetSystemResponse.system_raft_index for cache coherence.
+ *
+ * @generated from message gastrolog.v1.SettingsMutationEcho
+ */
+export class SettingsMutationEcho extends Message<SettingsMutationEcho> {
+  /**
+   * @generated from field: gastrolog.v1.GetSettingsResponse settings = 1;
+   */
+  settings?: GetSettingsResponse;
+
+  /**
+   * @generated from field: uint64 system_raft_index = 2;
+   */
+  systemRaftIndex = protoInt64.zero;
+
+  constructor(data?: PartialMessage<SettingsMutationEcho>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "gastrolog.v1.SettingsMutationEcho";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "settings", kind: "message", T: GetSettingsResponse },
+    { no: 2, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SettingsMutationEcho {
+    return new SettingsMutationEcho().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SettingsMutationEcho {
+    return new SettingsMutationEcho().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SettingsMutationEcho {
+    return new SettingsMutationEcho().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: SettingsMutationEcho | PlainMessage<SettingsMutationEcho> | undefined, b: SettingsMutationEcho | PlainMessage<SettingsMutationEcho> | undefined): boolean {
+    return proto3.util.equals(SettingsMutationEcho, a, b);
+  }
+}
+
+/**
  * @generated from message gastrolog.v1.PutServiceSettingsResponse
  */
 export class PutServiceSettingsResponse extends Message<PutServiceSettingsResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
   constructor(data?: PartialMessage<PutServiceSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3477,6 +3529,7 @@ export class PutServiceSettingsResponse extends Message<PutServiceSettingsRespon
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutServiceSettingsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutServiceSettingsResponse {
@@ -3537,6 +3590,11 @@ export class PutLookupSettingsRequest extends Message<PutLookupSettingsRequest> 
  * @generated from message gastrolog.v1.PutLookupSettingsResponse
  */
 export class PutLookupSettingsResponse extends Message<PutLookupSettingsResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
   constructor(data?: PartialMessage<PutLookupSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3545,6 +3603,7 @@ export class PutLookupSettingsResponse extends Message<PutLookupSettingsResponse
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutLookupSettingsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutLookupSettingsResponse {
@@ -3605,6 +3664,11 @@ export class PutMaxMindSettingsRequest extends Message<PutMaxMindSettingsRequest
  * @generated from message gastrolog.v1.PutMaxMindSettingsResponse
  */
 export class PutMaxMindSettingsResponse extends Message<PutMaxMindSettingsResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
   constructor(data?: PartialMessage<PutMaxMindSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3613,6 +3677,7 @@ export class PutMaxMindSettingsResponse extends Message<PutMaxMindSettingsRespon
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutMaxMindSettingsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutMaxMindSettingsResponse {
@@ -3673,6 +3738,11 @@ export class PutSetupSettingsRequest extends Message<PutSetupSettingsRequest> {
  * @generated from message gastrolog.v1.PutSetupSettingsResponse
  */
 export class PutSetupSettingsResponse extends Message<PutSetupSettingsResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
   constructor(data?: PartialMessage<PutSetupSettingsResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3681,6 +3751,7 @@ export class PutSetupSettingsResponse extends Message<PutSetupSettingsResponse> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutSetupSettingsResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSetupSettingsResponse {
@@ -3735,6 +3806,11 @@ export class RegenerateJwtSecretRequest extends Message<RegenerateJwtSecretReque
  * @generated from message gastrolog.v1.RegenerateJwtSecretResponse
  */
 export class RegenerateJwtSecretResponse extends Message<RegenerateJwtSecretResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
   constructor(data?: PartialMessage<RegenerateJwtSecretResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3743,6 +3819,7 @@ export class RegenerateJwtSecretResponse extends Message<RegenerateJwtSecretResp
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.RegenerateJwtSecretResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RegenerateJwtSecretResponse {
@@ -3966,6 +4043,11 @@ export class PutPreferencesRequest extends Message<PutPreferencesRequest> {
  * @generated from message gastrolog.v1.PutPreferencesResponse
  */
 export class PutPreferencesResponse extends Message<PutPreferencesResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetPreferencesResponse preferences = 1;
+   */
+  preferences?: GetPreferencesResponse;
+
   constructor(data?: PartialMessage<PutPreferencesResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -3974,6 +4056,7 @@ export class PutPreferencesResponse extends Message<PutPreferencesResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutPreferencesResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "preferences", kind: "message", T: GetPreferencesResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutPreferencesResponse {
@@ -4145,6 +4228,11 @@ export class PutSavedQueryRequest extends Message<PutSavedQueryRequest> {
  * @generated from message gastrolog.v1.PutSavedQueryResponse
  */
 export class PutSavedQueryResponse extends Message<PutSavedQueryResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetSavedQueriesResponse saved_queries = 1;
+   */
+  savedQueries?: GetSavedQueriesResponse;
+
   constructor(data?: PartialMessage<PutSavedQueryResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4153,6 +4241,7 @@ export class PutSavedQueryResponse extends Message<PutSavedQueryResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.PutSavedQueryResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "saved_queries", kind: "message", T: GetSavedQueriesResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): PutSavedQueryResponse {
@@ -4213,6 +4302,11 @@ export class DeleteSavedQueryRequest extends Message<DeleteSavedQueryRequest> {
  * @generated from message gastrolog.v1.DeleteSavedQueryResponse
  */
 export class DeleteSavedQueryResponse extends Message<DeleteSavedQueryResponse> {
+  /**
+   * @generated from field: gastrolog.v1.GetSavedQueriesResponse saved_queries = 1;
+   */
+  savedQueries?: GetSavedQueriesResponse;
+
   constructor(data?: PartialMessage<DeleteSavedQueryResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -4221,6 +4315,7 @@ export class DeleteSavedQueryResponse extends Message<DeleteSavedQueryResponse> 
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteSavedQueryResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "saved_queries", kind: "message", T: GetSavedQueriesResponse },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteSavedQueryResponse {
@@ -5588,13 +5683,13 @@ export class WatchSystemRequest extends Message<WatchSystemRequest> {
  */
 export class WatchSystemResponse extends Message<WatchSystemResponse> {
   /**
-   * The config version (Raft log index) that triggered this notification.
-   * Clients should only invalidate their config cache when this version
-   * exceeds the version they already hold from a mutation response.
+   * Committed log index on the system Raft group when this notification fired.
+   * Clients should only invalidate or refetch when this index exceeds the
+   * highest system_raft_index they already hold from a fetch or mutation.
    *
-   * @generated from field: uint64 system_version = 1;
+   * @generated from field: uint64 system_raft_index = 1;
    */
-  systemVersion = protoInt64.zero;
+  systemRaftIndex = protoInt64.zero;
 
   constructor(data?: PartialMessage<WatchSystemResponse>) {
     super();
@@ -5604,7 +5699,7 @@ export class WatchSystemResponse extends Message<WatchSystemResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.WatchSystemResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
-    { no: 1, name: "system_version", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
+    { no: 1, name: "system_raft_index", kind: "scalar", T: 4 /* ScalarType.UINT64 */ },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchSystemResponse {
@@ -7080,6 +7175,11 @@ export class DeleteLookupRequest extends Message<DeleteLookupRequest> {
  * @generated from message gastrolog.v1.DeleteLookupResponse
  */
 export class DeleteLookupResponse extends Message<DeleteLookupResponse> {
+  /**
+   * @generated from field: gastrolog.v1.SettingsMutationEcho echo = 1;
+   */
+  echo?: SettingsMutationEcho;
+
   constructor(data?: PartialMessage<DeleteLookupResponse>) {
     super();
     proto3.util.initPartial(data, this);
@@ -7088,6 +7188,7 @@ export class DeleteLookupResponse extends Message<DeleteLookupResponse> {
   static readonly runtime: typeof proto3 = proto3;
   static readonly typeName = "gastrolog.v1.DeleteLookupResponse";
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "echo", kind: "message", T: SettingsMutationEcho },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DeleteLookupResponse {
