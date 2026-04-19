@@ -1,10 +1,11 @@
 package orchestrator
 
 import (
-	"gastrolog/internal/glid"
 	"context"
 	"errors"
+	"gastrolog/internal/glid"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -12,11 +13,11 @@ import (
 	"os"
 
 	"gastrolog/internal/chunk"
+	chunkfile "gastrolog/internal/chunk/file"
 	chunkmem "gastrolog/internal/chunk/memory"
-	"gastrolog/internal/system"
 	indexmem "gastrolog/internal/index/memory"
 	"gastrolog/internal/query"
-
+	"gastrolog/internal/system"
 )
 
 // ---------- fake forwarder ----------
@@ -59,6 +60,7 @@ func (m *replicationFakeReplicator) ImportSealedChunk(_ context.Context, _ strin
 func (m *replicationFakeReplicator) DeleteChunk(_ context.Context, _ string, _, _ glid.GLID, _ chunk.ChunkID) error {
 	return nil
 }
+
 // ---------- helpers ----------
 
 func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.ReplicationTarget, isFollower bool, leaderNodeID string) *TierInstance {
@@ -72,11 +74,11 @@ func newReplicationTier(t *testing.T, tierID glid.GLID, followers []system.Repli
 		t.Fatal(err)
 	}
 	return &TierInstance{
-		TierID:           tierID,
-		Type:             "memory",
-		Chunks:           cm,
-		Indexes:          im,
-		Query:            query.New(cm, im, nil),
+		TierID:          tierID,
+		Type:            "memory",
+		Chunks:          cm,
+		Indexes:         im,
+		Query:           query.New(cm, im, nil),
 		IsFollower:      isFollower,
 		LeaderNodeID:    leaderNodeID,
 		FollowerTargets: followers,
@@ -474,6 +476,94 @@ func TestClusterReplicationSealedChunksArriveOnFollowers(t *testing.T) {
 			t.Errorf("follower %s: no chunk directories on disk after replication", fid)
 		}
 		t.Logf("follower %s: %d chunk directories on disk", fid, chunkDirs)
+	}
+}
+
+// TestClusterReplicationSealedIdxWriteTSMatchesLeader verifies that after
+// sealed-chunk replication, follower idx.log entries match the leader for
+// WriteTS and IngestTS (offline read — same contract as tier ImportSealed).
+func TestClusterReplicationSealedIdxWriteTSMatchesLeader(t *testing.T) {
+	t.Parallel()
+	h := setupCluster(t, []string{"leader", "f1", "f2"}, 1, 100)
+
+	leaderNode := h.nodes["leader"]
+	leaderTier := leaderNode.tiers[0]
+
+	// Fewer records than rotation threshold → single active chunk, then one
+	// sealed chunk after explicit Seal().
+	const totalRecords = 50
+	t0 := time.Date(2025, 7, 1, 12, 0, 0, 0, time.UTC)
+	for i := range totalRecords {
+		ts := t0.Add(time.Duration(i) * time.Microsecond)
+		if err := leaderNode.orch.AppendToTier(h.vaultID, h.tierIDs[0], chunk.ChunkID{}, chunk.Record{
+			IngestTS: ts,
+			WriteTS:  ts,
+			Raw:      fmt.Appendf(nil, "idxcmp-%d", i),
+		}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	if active := leaderTier.Chunks.Active(); active != nil && active.RecordCount > 0 {
+		if err := leaderTier.Chunks.Seal(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	metas, err := leaderTier.Chunks.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sealedID chunk.ChunkID
+	for _, m := range metas {
+		if m.Sealed && m.RecordCount == totalRecords {
+			sealedID = m.ID
+			break
+		}
+	}
+	if sealedID == (chunk.ChunkID{}) {
+		t.Fatalf("no sealed chunk with %d records", totalRecords)
+	}
+
+	processor, ok := leaderTier.Chunks.(chunk.ChunkPostSealProcessor)
+	if !ok {
+		t.Fatal("leader tier chunks must implement ChunkPostSealProcessor")
+	}
+	if err := processor.PostSealProcess(context.Background(), sealedID); err != nil {
+		t.Fatalf("PostSealProcess: %v", err)
+	}
+
+	ctx := context.Background()
+	leaderNode.orch.replicateSealedChunk(ctx, h.vaultID, h.tierIDs[0], sealedID, leaderTier.FollowerTargets)
+
+	leaderIdx := filepath.Join(leaderNode.tierDirs[0], sealedID.String(), "idx.log")
+	leaderEntries, err := chunkfile.ReadIdxLogEntries(leaderIdx)
+	if err != nil {
+		t.Fatalf("read leader idx: %v", err)
+	}
+	if len(leaderEntries) != totalRecords {
+		t.Fatalf("leader idx entries: want %d got %d", totalRecords, len(leaderEntries))
+	}
+
+	for _, fid := range []string{"f1", "f2"} {
+		followIdx := filepath.Join(h.nodes[fid].tierDirs[0], sealedID.String(), "idx.log")
+		got, err := chunkfile.ReadIdxLogEntries(followIdx)
+		if err != nil {
+			t.Fatalf("follower %s read idx: %v", fid, err)
+		}
+		if len(got) != len(leaderEntries) {
+			t.Fatalf("follower %s: idx len %d, leader %d", fid, len(got), len(leaderEntries))
+		}
+		for i := range leaderEntries {
+			if !got[i].WriteTS.Equal(leaderEntries[i].WriteTS) {
+				t.Errorf("follower %s pos %d WriteTS: leader=%s follower=%s",
+					fid, i, leaderEntries[i].WriteTS.UTC(), got[i].WriteTS.UTC())
+			}
+			if !got[i].IngestTS.Equal(leaderEntries[i].IngestTS) {
+				t.Errorf("follower %s pos %d IngestTS: leader=%s follower=%s",
+					fid, i, leaderEntries[i].IngestTS.UTC(), got[i].IngestTS.UTC())
+			}
+		}
 	}
 }
 
